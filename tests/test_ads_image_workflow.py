@@ -74,6 +74,7 @@ def instant_experience_ad_notes():
     for concept_index, concept in enumerate(ads_page.INSTANT_EXPERIENCE_CONCEPTS):
         variations = []
         for index in range(1, 4):
+            description_variant = ads_page._instant_experience_description_variant(index)
             cta = ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS[
                 (concept_index + index - 1)
                 % len(ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
@@ -82,6 +83,8 @@ def instant_experience_ad_notes():
                 cta = ads_page.INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS[concept["id"]]
             variations.append(
                 {
+                    "description_key": description_variant["key"],
+                    "description_label": description_variant["label"],
                     "primary_text": (
                         f"{concept['display_name']} primary {index}\n\nSecond paragraph. "
                         f"{ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]}"
@@ -103,9 +106,9 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
-                "Framed Greatness Scarcity Cover",
-                "Pure Limited-Release Scarcity Cover",
-                "Numbered Collector Proof Scarcity Cover",
+                "Premium Scarcity — Right Angle Cover",
+                "Premium Scarcity — Straight On Cover",
+                "Premium Scarcity — Left Angle Cover",
             ],
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
@@ -114,24 +117,31 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [concept["folder"] for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS],
             [
-                "01_framed_greatness_scarcity_hybrid",
-                "02_pure_limited_release_scarcity",
-                "03_collector_proof_scarcity",
+                "01-premium-scarcity-right",
+                "02-premium-scarcity-front",
+                "03-premium-scarcity-left",
             ],
         )
         self.assertEqual(
             [concept["filename_prefix"] for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS],
             [
-                "framed_greatness_scarcity_hybrid_cover_original",
-                "pure_limited_release_scarcity_cover_original",
-                "collector_proof_scarcity_cover_original",
+                "premium_scarcity_right_cover_original",
+                "premium_scarcity_front_cover_original",
+                "premium_scarcity_left_cover_original",
             ],
         )
         emitted = "\n".join(
             concept["folder"]
             for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS
         )
-        for obsolete in ("01-nostalgia", "02-ownership", "03-scarcity"):
+        for obsolete in (
+            "01-nostalgia",
+            "02-ownership",
+            "03-scarcity",
+            "01_framed_greatness_scarcity_hybrid",
+            "02_pure_limited_release_scarcity",
+            "03_collector_proof_scarcity",
+        ):
             self.assertNotIn(obsolete, emitted)
 
     def test_instant_experience_originals_are_inspected_without_reencoding(self):
@@ -139,7 +149,7 @@ class AdsImageProcessingTests(unittest.TestCase):
 
         details = ads_image_workflow.inspect_instant_experience_original(
             source,
-            original_name="nostalgia.png",
+            original_name="premium-scarcity-right.png",
         )
 
         self.assertEqual(details["source_width"], 1024)
@@ -191,14 +201,15 @@ class AdsImageProcessingTests(unittest.TestCase):
                     self.assertEqual(len(output.getexif()), 0)
 
     def test_instant_experience_target_export_is_verified_srgb_1024_png(self):
+        source = image_bytes("WEBP")
         first = ads_image_workflow.optimize_meta_image(
-            image_bytes("WEBP"),
+            source,
             original_name="instant.webp",
             output_edge=ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
             output_format="PNG",
         )
         second = ads_image_workflow.optimize_meta_image(
-            image_bytes("WEBP"),
+            source,
             original_name="instant.webp",
             output_edge=ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
             output_format="PNG",
@@ -634,12 +645,12 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [item["relative_path"] for item in upload_batch.call_args.args[2]],
             [
-                "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png",
-                "01_framed_greatness_scarcity_hybrid/ad-copy.txt",
-                "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png",
-                "02_pure_limited_release_scarcity/ad-copy.txt",
-                "03_collector_proof_scarcity/collector_proof_scarcity_cover_original.png",
-                "03_collector_proof_scarcity/ad-copy.txt",
+                "01-premium-scarcity-right/premium_scarcity_right_cover_original.png",
+                "01-premium-scarcity-right/ad-copy.txt",
+                "02-premium-scarcity-front/premium_scarcity_front_cover_original.png",
+                "02-premium-scarcity-front/ad-copy.txt",
+                "03-premium-scarcity-left/premium_scarcity_left_cover_original.png",
+                "03-premium-scarcity-left/ad-copy.txt",
             ],
         )
         self.assertEqual(outcomes["_instant_experience_package"]["status"], "saved")
@@ -654,13 +665,15 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         result, workflow = self.build_result_and_workflow("Instant Experience")
         long_primary = (
             "Opening line\n\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing. "
-            "Secure your edition."
+            "Claim your edition."
         )
         workflow["ad_notes"] = instant_experience_ad_notes()
-        workflow["ad_notes"]["instant_experience_concepts"]["nostalgia"][0] = {
+        workflow["ad_notes"]["instant_experience_concepts"]["premium_scarcity_right"][0] = {
+            "description_key": "legacy_standard",
+            "description_label": "Description 1 — Legacy Standard",
             "primary_text": long_primary,
             "headline": "Remember The Kid",
-            "cta": "Secure Your Edition",
+            "cta": "Claim Your Edition",
         }
 
         def upload_success(_token, destination, items, **_kwargs):
@@ -687,24 +700,25 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         notes_item = next(
             item
             for item in upload_batch.call_args.args[2]
-            if item["relative_path"] == "01_framed_greatness_scarcity_hybrid/ad-copy.txt"
+            if item["relative_path"] == "01-premium-scarcity-right/ad-copy.txt"
         )
         notes_text = notes_item["data"].decode("utf-8")
         self.assertEqual(
             notes_item["relative_path"],
-            "01_framed_greatness_scarcity_hybrid/ad-copy.txt",
+            "01-premium-scarcity-right/ad-copy.txt",
         )
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE", notes_text)
-        self.assertIn("CONCEPT:\r\nFramed Greatness Scarcity", notes_text)
+        self.assertIn("ROUTE:\r\nPremium Scarcity", notes_text)
         self.assertIn(
-            "VARIATION 1\r\n\r\nPRIMARY TEXT:\r\n"
+            "Description 1 — Legacy Standard\r\n\r\nDESCRIPTION KEY:\r\n"
+            "legacy_standard\r\n\r\nDESCRIPTION COPY:\r\n"
             "Opening line\r\n\r\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing. "
-            "Secure your edition.",
+            "Claim your edition.",
             notes_text,
         )
         self.assertIn("HEADLINE:\r\nRemember The Kid", notes_text)
-        self.assertIn("CTA:\r\nSecure Your Edition", notes_text)
-        self.assertIn("VARIATION 3", notes_text)
+        self.assertIn("CTA:\r\nClaim Your Edition", notes_text)
+        self.assertIn("Description 3 — Choose a Side", notes_text)
         self.assertNotIn("VARIATION 4", notes_text)
         self.assertNotIn("DESCRIPTIONS", notes_text)
         self.assertNotIn("CAROUSEL CARDS / AD SETUP", notes_text)
@@ -719,7 +733,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
         original_hash = hashlib.sha256(
-            workflow["slots"]["instant-experience-nostalgia"]["data"]
+            workflow["slots"]["instant-experience-premium-scarcity-right"]["data"]
         ).hexdigest()
         progress_events = []
 
@@ -755,21 +769,24 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         )
 
         self.assertEqual(upload_batch.call_count, 1)
-        nostalgia_item = next(
+        right_item = next(
             item
             for item in upload_batch.call_args.args[2]
             if item["relative_path"]
-            == "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png"
+            == "01-premium-scarcity-right/premium_scarcity_right_cover_original.png"
         )
-        self.assertEqual(hashlib.sha256(nostalgia_item["data"]).hexdigest(), original_hash)
-        self.assertEqual(outcomes["instant-experience-nostalgia"]["status"], "saved")
-        self.assertEqual(
-            outcomes["instant-experience-nostalgia"]["concept"],
-            "Framed Greatness Scarcity",
+        self.assertEqual(hashlib.sha256(right_item["data"]).hexdigest(), original_hash)
+        self.assertEqual(outcomes["instant-experience-premium-scarcity-right"]["status"], "saved")
+        self.assertIn(
+            "Right Angle",
+            outcomes["instant-experience-premium-scarcity-right"]["concept"],
         )
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
-            [(1, 6, "Framed Greatness Scarcity Cover"), (1, 6, "Framed Greatness Scarcity Cover")],
+            [
+                (1, 6, "Premium Scarcity — Right Angle Cover"),
+                (1, 6, "Premium Scarcity — Right Angle Cover"),
+            ],
         )
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
@@ -813,9 +830,9 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             filenames,
             [
-                "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png",
-                "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png",
-                "03_collector_proof_scarcity/collector_proof_scarcity_cover_original.png",
+                "01-premium-scarcity-right/premium_scarcity_right_cover_original.png",
+                "02-premium-scarcity-front/premium_scarcity_front_cover_original.png",
+                "03-premium-scarcity-left/premium_scarcity_left_cover_original.png",
             ],
         )
         self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
@@ -835,7 +852,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             failures = []
             for item in items:
                 filename = item["relative_path"]
-                if filename == "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png":
+                if filename == "02-premium-scarcity-front/premium_scarcity_front_cover_original.png":
                     failures.append({"relative_path": filename, "error": "rate limited"})
                 else:
                     successes.append(
@@ -866,8 +883,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             ),
             2,
         )
-        self.assertEqual(outcomes["instant-experience-ownership"]["status"], "failed")
-        self.assertIn("rate limited", outcomes["instant-experience-ownership"]["error"])
+        self.assertEqual(outcomes["instant-experience-premium-scarcity-front"]["status"], "failed")
+        self.assertIn("rate limited", outcomes["instant-experience-premium-scarcity-front"]["error"])
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")

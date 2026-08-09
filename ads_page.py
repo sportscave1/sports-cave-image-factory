@@ -4,6 +4,7 @@ import html
 import io
 import json
 import logging
+import random
 import re
 import secrets
 import time
@@ -106,9 +107,9 @@ ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
-ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V6"
+ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V6"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -415,15 +416,32 @@ IMAGE_ORDER = [
 
 INSTANT_EXPERIENCE_CONCEPTS = ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS
 INSTANT_EXPERIENCE_COPY_FIELDS = (
-    ("primary_text", "Primary Text"),
+    ("primary_text", "Description"),
     ("headline", "Headline"),
     ("cta", "CTA"),
 )
-INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = 3
+INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS = (
+    {
+        "key": "legacy_standard",
+        "label": "Description 1 — Legacy Standard",
+        "style": "Legacy Standard",
+    },
+    {
+        "key": "framed_greatness",
+        "label": "Description 2 — Framed Greatness",
+        "style": "Framed Greatness",
+    },
+    {
+        "key": "choose_a_side",
+        "label": "Description 3 — Choose a Side",
+        "style": "Choose a Side",
+    },
+)
+INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = len(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS)
 INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
-INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "1"
+INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "2"
 INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE = "instant_experience"
-INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_concepts"
+INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_descriptions"
 INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
     "schema_version",
     "campaign_type",
@@ -431,6 +449,8 @@ INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
     "route_key",
     "route_label",
     "variation",
+    "description_key",
+    "description_label",
     "primary_text",
     "headline",
     "cta",
@@ -446,14 +466,18 @@ INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS = {
     "Own This Edition": "Own this edition.",
 }
 INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS = {
+    "premium_scarcity_right": "Claim Your Edition",
+    "premium_scarcity_front": "Claim Your Edition",
+    "premium_scarcity_left": "Claim Your Edition",
     "nostalgia": "Secure Your Edition",
     "ownership": "Claim Your Edition",
     "scarcity": "Own This Edition",
 }
 INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
     "If a Sports Cave Instant Experience copy CSV template is attached in this conversation, "
-    "transfer the matching copy into the primary_text, headline and cta columns. Match by "
-    "route_key and variation. Preserve all headers, schema fields, row order and identity "
+    "transfer the matching Description Copy into the primary_text column and complete the "
+    "headline and cta columns. Match by route_key, variation and description_key. Preserve "
+    "all headers, schema fields, row order and identity "
     "columns exactly. Return the completed CSV as a downloadable .csv file. Do not place "
     "image-prompt wording inside the copy columns."
 )
@@ -987,6 +1011,55 @@ def _edition_ops_product_page_url_from_row(row):
         if clean_url and is_valid_product_page_url(clean_url):
             return clean_url
     return ""
+
+
+def _positive_int_or_none(value):
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _edition_ops_product_collections_from_row(row):
+    if not isinstance(row, dict):
+        return []
+    raw = row.get("collections") or row.get("Collections") or row.get("collection_titles")
+    if isinstance(raw, str):
+        values = re.split(r"[,;|]", raw)
+    elif isinstance(raw, (list, tuple, set)):
+        values = list(raw)
+    else:
+        values = []
+    return [
+        _normalise_option_label(
+            value.get("title") if isinstance(value, dict) else value
+        )
+        for value in values
+        if _normalise_option_label(value.get("title") if isinstance(value, dict) else value)
+    ][:12]
+
+
+def instant_experience_product_metadata_from_selection(selection, *, category=""):
+    row = dict(selection.get("row") or {}) if isinstance(selection, dict) else {}
+    edition_limit = _positive_int_or_none(
+        row.get("edition_limit")
+        or row.get("edition_total")
+        or row.get("Edition limit")
+        or row.get("Edition total")
+    )
+    edition_limit_source = _normalise_option_label(
+        row.get("edition_limit_source")
+        or row.get("edition_total_source")
+        or ("Edition Ops product ledger" if edition_limit else "")
+    )
+    return {
+        "product_sport": _normalise_option_label(category),
+        "product_type": _normalise_option_label(row.get("product_type") or row.get("Product type")),
+        "collections": _edition_ops_product_collections_from_row(row),
+        "edition_limit": edition_limit,
+        "edition_limit_source": edition_limit_source,
+    }
 
 
 def _edition_ops_product_option_label(row, duplicate_titles=None):
@@ -1642,14 +1715,14 @@ def build_campaign_moment_copy_relevance_block(
 The selected moment may influence headlines and call-to-action button-label choices only when it improves relevance, sounds natural and does not replace the product identity or scarcity message across the entire set.
 
 For Instant Experience campaigns:
-- Preserve exactly five Primary Text options.
-- Preserve exactly five Headlines.
-- Preserve exactly five Call To Action button-label options.
-- Do not create or request Description fields.
+- Preserve exactly three ordered description options per route.
+- Preserve exactly three Headlines per route.
+- Preserve exactly three Call To Action button-label options per route.
+- Do not create or request Meta link-description or Meta Ad Description fields.
 - Do not force the event into every option.
-- Use the Campaign Moment in no more than one primary-text option unless the user selects Campaign-led.
+- Use the Campaign Moment only when it safely improves one of the three product-aware description archetypes.
 - Even when Campaign-led is selected, retain product identity and edition scarcity across the set.
-- Use valid Meta-style CTA button labels rather than sentence-style buttons."""
+- Use valid Instant Experience creative CTA labels in the CTA field rather than sentence-style buttons."""
     else:
         field_rules = f"""HEADLINE AND DESCRIPTION RULES
 
@@ -3172,7 +3245,7 @@ LIGHTING, GLASS AND MOUNTING PHYSICS
 
 - Use one identifiable primary light source and no more than one secondary practical light source unless an explicit selected variable requires more.
 - All wall shadows, frame shadows, highlights and reflections must agree with those light sources.
-- Mount the frame with believable separation approximately 8-15 mm from the wall.
+- Mount the frame with believable separation approximately 6-10 mm from the wall.
 - Cast a natural soft shadow behind and slightly below or away from the frame according to the primary light direction.
 - Framed products require transparent protective glass with enough restrained reflection to feel physically real and premium.
 - Glass reflections must originate from visible or physically plausible room light sources, remain confined to the glass surface and never continue across the timber frame or wall.
@@ -3189,38 +3262,38 @@ ANTI-AI INTERIOR CONTROL
 
 
 SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2 = """SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2
-INSTANT EXPERIENCE CORE FACEBOOK COPY QUALITY - MANDATORY
+INSTANT EXPERIENCE CORE FACEBOOK COPY QUALITY - PREMIUM ROOM SYSTEM V4
 
-Preserve the approved three-group response structure, the current three variations per concept, the existing fields and the shared setup block.
+Preserve the approved three-group response structure, the current three description options per route, the existing long-copy, Headline and CTA fields and the shared setup block.
 
 Every copy option must:
 - sound written by a knowledgeable human sports fan
 - be product-specific and match the selected sport and market
 - use only verified facts from the product name, supplied facts, visible artwork or an approved claim path
-- lead with an emotional or collector-relevant hook
-- give a clear reason to own the product
-- use short, natural, mobile-readable sentences
-- end with a concise route-matched CTA
-- use a distinct opening and a materially different idea rather than synonym-swapping another option
+- give a clear reason to own the selected Sports Cave product
+- use short, natural, mobile-readable lines with intentional blank-line breaks
+- keep the description ending required by its archetype
+- keep the CTA field separate from the long description copy
 - preserve exact user-provided wording character-for-character when supplied
 
-Never invent history, achievements, product facts or sporting events.
+The three V4 routes are:
+- Premium Scarcity — Right Angle
+- Premium Scarcity — Straight On
+- Premium Scarcity — Left Angle
 
-Framed Greatness Scarcity Hybrid must begin every Primary Text with exactly "Greatness doesn’t fade. It gets framed." Follow it with one short product-specific, fact-supported nostalgia sentence, then pivot immediately into the verified edition limit and supported permanent retirement. Scarcity remains the dominant sales message.
+All three routes share the same on-image headline and CTA system. Description 1 for every route must use CTA field Claim Your Edition so the copy table and image CTA remain aligned, but the long description text must follow its archetype ending.
 
-Pure Limited-Release Scarcity must begin with verified scarcity immediately. It must not open with nostalgia, identity, ownership, room transformation or emotional display language. State the verified 100-edition limit, supported no-second-run or permanent-retirement finality, and a direct edition-acquisition CTA.
+Never invent history, achievements, product facts, athlete names, teams, rivalries, edition limits, remaining quantities, sales velocity, certificates, offers, delivery claims, discounts, restocks or availability.
 
-Collector Proof Scarcity must use one brief product-specific, fact-supported nostalgia sentence, then pivot immediately into the finite collector release and a genuine supplied certificate, visible edition plate, badge, plaque or other verified collector detail. Never invent a certificate, numbering, edition number, signature, remaining quantity or proof claim when the product data does not verify it. If a certificate is unavailable, use only the strongest existing visible proof detail and change or omit the certificate line.
+When verified edition limit data is available, use it exactly. When it is not available, use evidence-gated non-numeric collector wording rather than fabricating 100 or a no-second-run claim.
 
-All three routes are scarcity-first. Never invent memories, rivalries, records, venues, championships, dates, relationships, remaining quantities, sales velocity, certificates, edition limits, offers or product facts. Premium retirement language such as "Once sold out, it retires for good" may be used only when compatible with the verified product rules and exact approved wording.
+The three route copy tables must use the same ordered product-aware description set: Description 1 — Legacy Standard, Description 2 — Framed Greatness and Description 3 — Choose a Side. The descriptions are driven by the selected product, not by camera angle or room background.
 
-Primary Text must contain approximately 3-5 short sentences. Headlines must be concise, natural, emotionally clear on first read, product-specific where possible and no longer than the approved 4-6 word limit. Creative CTAs must follow the central Instant Experience CTA contract. Do not rewrite an exact user-provided Headline unless factual correction is required.
+Each Description must preserve its required line-break structure, remain approximately 35-65 words and avoid dense paragraph blocks. Headlines must be concise, natural, emotionally clear on first read, product-specific where possible and no longer than the approved 4-6 word limit. Creative CTAs must follow the central Instant Experience CTA contract.
 
 Reject generic AI retail language including: Elevate your space; Transform your room; Perfect addition; Ultimate tribute; Stunning masterpiece; Must-have; Wall worthy; Your wall deserves this; Don't miss this one; Another print; Once gone it stays gone; unleash; conversation starter; bring your walls to life; celebrate in style.
 
-Do not describe Sports Cave wall art as "another print". Do not use awkward grammar, merge two names into one person, exaggerate claims or repeat the same supporting language, Headline or CTA across all three routes.
-
-Before returning the response, silently compare the nine copy combinations. Rewrite any option that is generic, repetitive, fact-unsafe, weak on mobile or mismatched to its concept. Do not print candidates, scores or reasoning."""
+Before returning the response, silently compare the three description options. Rewrite any option that is generic, repetitive, fact-unsafe, weak on mobile, missing line breaks or mismatched to the product. Do not print candidates, scores or reasoning."""
 
 
 SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1 = "SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1"
@@ -3233,49 +3306,35 @@ def build_instant_experience_creative_cta_rules(concept_id=None):
         for cta, ending in INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS.items()
     )
     shared_rules = f"""{SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1}
-INSTANT EXPERIENCE CREATIVE CTA AND PRIMARY-TEXT ENDING CONTRACT - MANDATORY
+INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
 
 - Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
-- The rule applies to every copy-table CTA, every Primary Text close, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
-- Do not generate a softer or indirect CTA. Every creative CTA must use one approved direct edition-acquisition phrase exactly.
-- The CTA field and the final sentence of its matching Primary Text must agree exactly: {approved_endings}
-- Preserve CTA capitalisation by location: title case in the CTA field and sentence case in Primary Text; render the on-image CTA in uppercase.
+- The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
+- For the V4 Premium Scarcity room system, Description 1 in all three routes must use CTA field Claim Your Edition.
+- The long description text does not have to end with the CTA field; it must end according to its description archetype.
+- Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
 - The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
 - Headlines remain route-specific and emotional; do not force CTA wording into every Headline.
-- Silently correct any CTA or Primary Text ending outside this contract before returning the response. Do not expose rejected wording or reasoning."""
+- Silently correct any CTA outside this contract before returning the response. Do not expose rejected wording or reasoning."""
 
-    if concept_id == "nostalgia":
-        route_rules = """FRAMED GREATNESS SCARCITY HYBRID CTA APPLICATION
+    if concept_id in {
+        "premium_scarcity_right",
+        "premium_scarcity_front",
+        "premium_scarcity_left",
+    }:
+        route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
 
-- Every Primary Text begins with exactly: Greatness doesn’t fade. It gets framed.
-- Sentence 2 is one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
-- Pivot immediately into the verified edition limit and supported permanent retirement; scarcity remains dominant.
-- Copy Variation 1 must use CTA field Secure Your Edition and end with "Secure your edition." so its on-image CTA is exact.
-- Never invent achievements, venues, rivalries, statistics, dates or historical details."""
-    elif concept_id == "ownership":
-        route_rules = """PURE LIMITED-RELEASE SCARCITY CTA APPLICATION
-
-- Begin every Primary Text with verified scarcity immediately; do not open with nostalgia, identity, ownership, room transformation or emotional display language.
-- State the verified 100-edition limit and supported no-second-run or permanent-retirement finality.
-- Copy Variation 1 must use CTA field Claim Your Edition and end with "Claim your edition." so it matches the fixed bottom strip.
-- Never invent a remaining quantity, sales velocity, offer or edition fact."""
-    elif concept_id == "scarcity":
-        route_rules = """COLLECTOR PROOF SCARCITY CTA APPLICATION
-
-- Sentence 1 is one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information. Do not use the Framed Greatness opener.
-- Pivot immediately into the verified finite collector release and only a genuine supplied certificate, visible plate, badge, plaque or approved edition proof.
-- Copy Variation 1 must use CTA field Own This Edition and end with "Own this edition." so it matches the fixed proof-cover CTA.
-- Never invent a certificate, edition number, remaining quantity, achievement, venue, rivalry, statistic, date or subject relationship."""
+- All three Instant Experience image routes use one consistent on-image CTA: CLAIM YOUR EDITION.
+- Description 1 for every route must use CTA field Claim Your Edition so the copy table and image CTA remain aligned.
+- Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
+- Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
     else:
         route_rules = """COPY-SET APPLICATION
 
-- Generate only Framed Greatness Scarcity Hybrid, Pure Limited-Release Scarcity and Collector Proof Scarcity.
-- Framed Greatness Scarcity Hybrid always uses its exact opener, one factual nostalgia sentence and then dominant verified scarcity.
-- Pure Limited-Release begins with scarcity immediately and uses no nostalgia or ownership opening.
-- Collector Proof uses one factual nostalgia sentence, then verified finite-release and evidence-gated proof scarcity.
-- Copy Variation 1 uses the route's fixed approved CTA so its image wording and Primary Text ending agree.
-- Validate all completed rows before returning them. If a CTA or matching final sentence is non-compliant, correct that route and variation only."""
-
+- Generate only Premium Scarcity Right Angle, Premium Scarcity Straight On and Premium Scarcity Left Angle.
+- The three routes share one CTA and scarcity headline system while varying camera, room profile, wall colour, cues and FOMO supporting line.
+- Description 1 uses Claim Your Edition so its image wording and CTA field agree.
+- Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
     return f"{shared_rules}\n\n{route_rules}"
 
 
@@ -3288,26 +3347,28 @@ MANDATORY FINAL CORRECTION AND 10/10 QUALITY GATE
 
 Inspect and correct the composed image before returning it. Reject and regenerate or correct the result when:
 - the artwork or frame changed, looks regenerated or loses any outside frame edge
-- the frame is warped, incorrectly proportioned, missing realistic depth or not rigid
-- the product misses this route's exact prominence band or resolved position
+- the frame is warped, incorrectly proportioned, missing black timber depth or not rigid
+- the product misses the required approximately 82-88% canvas width or complete-frame visibility
 - the room does not match every resolved scene variable or looks like generic AI staging
 - architecture, furniture, lighting direction, shadows or reflections are physically inconsistent
 - glass is absent, crosses onto the frame or wall, or obscures product details
 - the frame floats, intersects objects, sits flush without believable mounting depth or looks digitally pasted on
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
-- the creative CTA is not exactly Claim Your Edition, Secure Your Edition or Own This Edition in the capitalisation required by its location
-- a Primary Text close and its corresponding CTA field do not use the matching approved wording
+- the on-image CTA is not exactly CLAIM YOUR EDITION
+- a CTA field is outside the approved direct edition-acquisition family
 - another route's Headline, CTA or supporting wording appears
-- typography looks painted, engraved, embossed, glowing or physically attached to the wall
+- typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as deterministic flat overlay
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
 - essential wording is not immediately readable in an approximately 256 x 256 preview
 - any essential wording sits within 64 pixels of a canvas edge or touches the product, furniture or an architectural line
 - scarcity quantity, numbering, certificate inclusion or another proof claim is not verified by supplied product data or a visible immutable source detail
 - a secondary prop competes with the product
-- Framed Greatness Scarcity Hybrid uses loose disconnected floating text or Pure Limited-Release's full-width bottom strip
-- Pure Limited-Release gains Framed Greatness Scarcity Hybrid's large top headline
-- Collector Proof becomes a wide room shot or shows a fake, blank, anonymous or meaningless certificate, paper card or envelope
-- the three routes are merely colour variations of one layout rather than clearly different compositions
+- the gold underline floats away from the edition number or becomes an arbitrary decorative dash
+- the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
+- the lower conversion panel exceeds 25% of the canvas or differs from the required 24%
+- the three routes use the same camera angle, identical wall colour, identical cue or effectively identical room composition
+- the left route is merely a mirrored version of the right route
+- the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
 - the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
 
 If native generation returns another square size, resize the approved square composition deterministically to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image; regenerate or correct its square composition first.
@@ -3315,121 +3376,173 @@ If native generation returns another square size, resize the approved square com
 Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Revise every hard failure and anything below the intended production-ready 10/10 standard. Do not print the score, checklist result or reasoning. The workflow must correct failures, not merely claim the checks passed."""
 
 
-INSTANT_EXPERIENCE_STANDARD_VISUALS = (
+
+INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
     {
-        "concept_id": "nostalgia",
-        "group_heading": "GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID",
+        "concept_id": "premium_scarcity_right",
+        "route_key": "premium_scarcity_right",
+        "group_heading": "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Framed Greatness Scarcity Hybrid",
-        "supporting_label": "Headline-Led Collector Hybrid",
-        "copy_row": "Framed Greatness Scarcity Hybrid Copy Variation 1",
-        "purpose": "Use one fact-supported sporting memory to create desire, then make the verified finite release and permanent retirement the dominant sales message.",
-        "room_type": "quiet premium sport-specific collector interior",
-        "wall_colour": "deep mineral charcoal",
-        "wall_material": "fine mineral plaster with a single restrained dark-oak ledge",
-        "camera_side": "near-front interior-photography position with a restrained right three-quarter relationship",
-        "camera_height": "eye level",
-        "shot_distance": "headline-led hybrid product view, with the complete product occupying approximately 72-82% of usable canvas width",
-        "lens": "65mm natural interior-photography character",
-        "lighting": "soft warm side light from camera-left with one restrained picture light as the secondary practical",
-        "time_of_day": "early evening",
-        "overlay_position": "connected top headline area above the product and integrated lower scarcity area beneath it",
-        "product_position": "centred and dominant between the connected upper and lower copy regions",
-        "architectural_cue": "one quiet dark architectural recess supporting the lower copy with no more than one subtle verified collector object",
-        "composition": "one continuous premium room photograph with an approximately 16-20% top headline region, 56-62% central product region and 18-22% integrated lower scarcity and CTA region; these are hierarchy targets, never three crude boxes",
-        "overlay_rule": "Use only the exact two-line Framed Greatness headline and the resolved verified three-line lower scarcity treatment. Do not place the full Primary Text on the image. The top headline, central product and lower scarcity message must read as one connected advertisement.",
-        "fixed_headline_lines": (
-            "GREATNESS DOESN’T FADE.",
-            "IT GETS FRAMED.",
-        ),
-        "numeric_overlay_lines": (
-            "LIMITED TO 100 WORLDWIDE",
-            "ONCE IT’S GONE, IT RETIRES FOREVER",
-            "SECURE YOUR EDITION",
-        ),
-        "fallback_overlay_lines": (
-            "LIMITED COLLECTOR RELEASE",
-            "ONCE SOLD OUT, IT RETIRES FOREVER",
-            "SECURE YOUR EDITION",
-        ),
-        "fixed_overlay_lines": (),
-        "typography_mode": "headline_hybrid",
-        "extra_rules": (
-            "- Preserve a deliberate top-to-bottom reading sequence: emotional headline, dominant product, verified scarcity, decisive CTA.\n"
-            "- Do not create loose disconnected floating text, a bulky floating card, an oversized black box, a discount badge or the full-width matte-black strip used by Pure Limited-Release.\n"
-            "- Create lower-copy readability through negative space, a naturally dark architectural area or a restrained tonal transition integrated into the photograph.\n"
-            "- Do not add a tiny eyebrow above the headline. Keep lamps, shelves, frame edges and architectural lines away from every word.\n"
-            "- Use no competing wall art and no more than one subtle supplied or fact-supported collector object; no prop may become a secondary hero."
-        ),
+        "route": "Premium Scarcity — Right Angle",
+        "supporting_label": "Slight right-angle product photograph",
+        "copy_row": "Premium Scarcity — Right Angle Copy Variation 1",
+        "purpose": "Create a premium scarcity hero from a slight right-angle residential product photograph while preserving the exact supplied framed artwork.",
+        "camera_role": "right",
+        "camera_side": "camera 4-6 degrees to the viewer's right of centre, looking back naturally toward the product",
+        "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's right of centre. Look back naturally toward the product. Show a restrained amount of the frame's right-hand timber return and mounting depth. Keep verticals straight. Preserve the product's proportions. No fisheye effect, dramatic perspective or noticeably larger artwork side. The angle must look like a genuine room photograph, not a stylised product render.",
+        "fomo_line": "Once they're claimed, this edition retires forever.",
+        "default_room_profile": "refined masculine collector lounge",
+        "room_type": "refined masculine collector lounge",
+        "wall_colour": "warm mushroom mineral plaster",
+        "wall_material": "fine seamless mineral plaster",
+        "primary_cue": "architectural doorway",
+        "secondary_cue": "cropped dark leather chair",
+        "camera_height": "eye level with the centre of the frame",
+        "shot_distance": "large framed-product dominance, with the product approximately 82-88% of canvas width",
+        "lens": "70mm natural interior-photography character",
+        "lighting": "soft side daylight from camera-left with restrained ambient fill",
+        "time_of_day": "quiet late morning",
+        "overlay_position": "lower 24% conversion panel only",
+        "product_position": "dominant and centred in the upper 76% room scene",
+        "architectural_cue": "architectural doorway near the outer scene edge",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "typography_mode": "premium_room_panel",
     },
     {
-        "concept_id": "ownership",
-        "group_heading": "GROUP 2 — PURE LIMITED-RELEASE SCARCITY",
+        "concept_id": "premium_scarcity_front",
+        "route_key": "premium_scarcity_front",
+        "group_heading": "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Pure Limited-Release Scarcity",
-        "supporting_label": "Limited Release Wall",
-        "copy_row": "Pure Limited-Release Scarcity Copy Variation 1",
-        "purpose": "Lead immediately with the verified finite release and permanent sell-out finality, without nostalgia, identity or ownership framing.",
-        "room_type": "restrained premium gallery wall",
-        "wall_colour": "warm off-white",
-        "wall_material": "fine textured plaster",
-        "camera_side": "near-front interior-photography position with only mild natural perspective and correct rigid frame geometry",
-        "camera_height": "eye level",
-        "shot_distance": "product-dominant limited-release cover, frame occupying approximately 74-82% of usable canvas width inside the upper image region and targeting the upper end of that range when composition permits",
-        "lens": "70mm natural interior-photography character without wide-angle distortion",
-        "lighting": "soft diffused window light from camera-right with no secondary practical light",
-        "time_of_day": "bright overcast morning",
-        "overlay_position": "full-width bottom matte-black scarcity strip only",
-        "product_position": "centred within the full-width upper image region",
-        "architectural_cue": "one quiet vertical wall recess at the far right edge",
-        "composition": "Limited Release Wall with a full-width upper lifestyle/product image across approximately 76-78% of the square canvas and a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%",
-        "overlay_rule": "Use only the exact three approved bottom-strip lines: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION. Do not use the copy-table Headline or another CTA as replacement overlay text.",
-        "fixed_overlay_lines": BASEBALL_INSTANT_EXPERIENCE_COVER_LINES,
-        "fallback_overlay_lines": (
-            "LIMITED COLLECTOR RELEASE",
-            "Once sold out, it retires forever.",
-            "CLAIM YOUR EDITION",
-        ),
-        "typography_mode": "bottom_strip",
-        "extra_rules": (
-            "- Add a thin restrained metallic-gold divider across the top edge of the black strip.\n"
-            "- All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.\n"
-            "- No left/right split, no right sidebar and no vertical scarcity panel.\n"
-            "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."
-        ),
+        "route": "Premium Scarcity — Straight On",
+        "supporting_label": "Straight-on product photograph",
+        "copy_row": "Premium Scarcity — Straight On Copy Variation 1",
+        "purpose": "Create the clearest and most direct scarcity hero from a predominantly straight-on residential product photograph.",
+        "camera_role": "front",
+        "camera_side": "predominantly straight-on camera with maximum 0-2 degree natural offset",
+        "camera_instruction": "Use a predominantly straight-on view with a maximum natural offset of 0-2 degrees. Keep the complete product geometrically balanced. Avoid artificial showroom symmetry by placing the room cue primarily toward one outer edge. This must be the clearest and most direct scarcity hero of the three.",
+        "fomo_line": "When the final one is claimed, it's gone for good.",
+        "default_room_profile": "refined masculine collector lounge",
+        "room_type": "refined masculine collector lounge",
+        "wall_colour": "refined warm taupe matte plaster",
+        "wall_material": "premium seamless matte-painted plaster",
+        "primary_cue": "partial bookcase",
+        "secondary_cue": "timber console",
+        "camera_height": "eye level and geometrically balanced",
+        "shot_distance": "large framed-product dominance, with the product approximately 82-88% of canvas width",
+        "lens": "75mm natural interior-photography character",
+        "lighting": "soft daylight from camera-right with slightly brighter room falloff",
+        "time_of_day": "clean midday daylight",
+        "overlay_position": "lower 24% conversion panel only",
+        "product_position": "dominant and centred in the upper 76% room scene",
+        "architectural_cue": "partial bookcase near one outer edge",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "typography_mode": "premium_room_panel",
     },
     {
-        "concept_id": "scarcity",
-        "group_heading": "GROUP 3 — COLLECTOR PROOF SCARCITY",
+        "concept_id": "premium_scarcity_left",
+        "route_key": "premium_scarcity_left",
+        "group_heading": "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Collector Proof Scarcity",
-        "supporting_label": "Close Product & Verified Proof",
-        "copy_row": "Collector Proof Scarcity Copy Variation 1",
-        "purpose": "Use one fact-supported sporting memory, then convert through the verified finite release and the strongest genuine supplied collector proof.",
-        "room_type": "close collector product-and-proof setting",
-        "wall_colour": "muted forest green with controlled black proof-panel contrast",
-        "wall_material": "fine textured plaster with a narrow matte-stone proof surface",
-        "camera_side": "close left three-quarter product angle that reveals rigid frame depth without distorting the artwork",
-        "camera_height": "level with the frame centre and slightly above the verified proof plane",
-        "shot_distance": "tight craftsmanship and proof composition, with the complete product occupying approximately 78-86% of usable width and the proof detail at least twice its former visual prominence",
-        "lens": "85mm natural compressed product-photography character",
-        "lighting": "controlled gallery light from camera-left with one soft daylight fill from camera-right",
-        "time_of_day": "midday",
-        "overlay_position": "contained matte-black collector-proof panel with generous padding beside the coherent product-and-proof focal area",
-        "product_position": "dominant within one close coherent focal area with the verified proof detail visibly connected beneath it",
-        "architectural_cue": "one narrow matte-stone proof surface physically connecting the product to one genuine supplied proof detail",
-        "composition": "close Collector Proof product-and-evidence composition with increased product prominence, a proof detail at least twice as prominent and one contained matte-black collector-proof panel; never a wide lifestyle room",
-        "overlay_rule": "Use one strong scarcity headline, one short verified proof line and one approved aggressive CTA inside the contained collector-proof panel. Keep all wording separate from the immutable artwork and genuine proof detail.",
-        "fixed_overlay_lines": COLLECTOR_PROOF_COVER_LINES,
-        "typography_mode": "collector_proof",
-        "extra_rules": (
-            "- Use only a confirmed supplied certificate, visible edition plate, badge, plaque or genuine collector detail. Never create a blank envelope, anonymous paper card or meaningless document.\n"
-            "- If no certificate source is available, use a close view of the strongest existing plaque, badge or edition detail and change or omit the certificate proof line.\n"
-            "- Never invent a specific edition number, numbering claim, certificate, signature or remaining quantity, and never place fake proof wording inside the original artwork.\n"
-            "- Keep the product and proof detail within the same coherent focal area. Do not consume most of the canvas with empty wall, dark timber or furniture.\n"
-            "- No full-width bottom strip, headline-above-product composition, tiny explanatory paragraph, edge-hugging CTA or crowded memorabilia display."
-        ),
+        "route": "Premium Scarcity — Left Angle",
+        "supporting_label": "Slight left-angle product photograph",
+        "copy_row": "Premium Scarcity — Left Angle Copy Variation 1",
+        "purpose": "Create a complementary scarcity hero from a slight left-angle residential product photograph without mirroring the right-angle route.",
+        "camera_role": "left",
+        "camera_side": "camera 4-6 degrees to the viewer's left of centre, looking back naturally toward the product",
+        "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's left of centre. Look back naturally toward the product. Show a restrained amount of the frame's left-hand timber return and mounting depth. Keep verticals straight. Preserve the product's original dimensions and proportions. The angle must complement Route 1 without appearing artificially mirrored.",
+        "fomo_line": "Released once. When they're gone, they stay gone.",
+        "default_room_profile": "refined masculine collector lounge",
+        "room_type": "refined masculine collector lounge",
+        "wall_colour": "soft greige limewash",
+        "wall_material": "subtle seamless limewash",
+        "primary_cue": "window edge with natural curtains",
+        "secondary_cue": "partial lounge chair",
+        "camera_height": "eye level with a natural residential viewpoint",
+        "shot_distance": "large framed-product dominance, with the product approximately 82-88% of canvas width",
+        "lens": "70mm natural interior-photography character",
+        "lighting": "soft daylight from camera-right with quieter peripheral furniture",
+        "time_of_day": "soft afternoon daylight",
+        "overlay_position": "lower 24% conversion panel only",
+        "product_position": "dominant and centred in the upper 76% room scene",
+        "architectural_cue": "window edge with natural curtains near the outer scene edge",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "typography_mode": "premium_room_panel",
     },
+)
+
+INSTANT_EXPERIENCE_STANDARD_VISUALS = INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4
+
+INSTANT_EXPERIENCE_ROOM_PROFILES_V4 = {
+    "collector_lounge": {
+        "label": "refined masculine collector lounge or media room",
+        "room_type": "refined masculine collector lounge",
+        "materials": "black timber, dark leather, restrained stone and quiet architectural detailing",
+        "baseline_weight": 50,
+    },
+    "heritage_study": {
+        "label": "warm vintage study or heritage collector room",
+        "room_type": "warm vintage study",
+        "materials": "walnut timber, cognac leather, muted antique-stone details and quiet side lighting",
+        "baseline_weight": 25,
+    },
+    "neutral_living": {
+        "label": "premium neutral living room",
+        "room_type": "premium neutral living room",
+        "materials": "warm timber, natural curtains, soft greige plaster and welcoming daylight",
+        "baseline_weight": 15,
+    },
+    "modern_man_cave": {
+        "label": "tasteful modern man cave",
+        "room_type": "tasteful modern man cave",
+        "materials": "deep warm charcoal, partial leather seating, black timber and controlled residential contrast",
+        "baseline_weight": 10,
+    },
+}
+
+INSTANT_EXPERIENCE_WALL_PALETTES_V4 = {
+    "default": (
+        ("fine seamless mineral plaster", "warm mushroom mineral plaster"),
+        ("premium seamless matte-painted plaster", "refined warm taupe matte plaster"),
+        ("subtle seamless limewash", "soft greige limewash"),
+    ),
+    "dark": (
+        ("premium seamless matte-painted plaster", "restrained warm charcoal"),
+        ("smooth seamless stone-toned render", "muted stone grey"),
+        ("fine seamless mineral plaster", "dark mushroom"),
+    ),
+    "heritage": (
+        ("fine seamless mineral plaster", "muted olive-grey"),
+        ("smooth seamless stone-toned render", "antique-stone taupe"),
+        ("subtle seamless limewash", "warm greige limewash"),
+    ),
+    "neutral": (
+        ("smooth seamless stone-toned render", "light greige"),
+        ("fine seamless mineral plaster", "warm stone"),
+        ("subtle seamless limewash", "soft taupe limewash"),
+    ),
+}
+
+INSTANT_EXPERIENCE_PRIMARY_CUES_V4 = (
+    "architectural doorway",
+    "cropped room corner",
+    "window edge with natural curtains",
+    "partial bookcase",
+    "low media cabinet",
+    "open-plan room opening",
+    "restrained collector cabinet",
+    "partial timber shelving",
+)
+
+INSTANT_EXPERIENCE_SECONDARY_CUES_V4 = (
+    "cropped leather sofa",
+    "partial lounge chair",
+    "timber console",
+    "desk edge",
+    "restrained lamp",
+    "curtain edge",
+    "low shelf",
+    "small rug section",
+    "softly blurred furniture edge",
 )
 
 
@@ -3442,7 +3555,931 @@ INSTANT_EXPERIENCE_DIFFERENTIATION_FIELDS = (
     "lighting",
     "overlay_position",
     "architectural_cue",
+    "primary_cue",
+    "secondary_cue",
 )
+
+
+def _contains_any_word(text, words):
+    haystack = str(text or "").casefold()
+    for word in words:
+        needle = str(word or "").strip().casefold()
+        if not needle:
+            continue
+        if needle.isdigit():
+            if needle in haystack:
+                return True
+            continue
+        if re.search(r"[^a-z0-9]", needle):
+            if needle in haystack:
+                return True
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack):
+            return True
+    return False
+
+
+def _instant_experience_seed(*parts):
+    source = "|".join(str(part or "") for part in parts)
+    return int(hashlib.sha256(source.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _verified_edition_limit_from_text(product_name):
+    text = str(product_name or "")
+    patterns = (
+        r"\bonly\s+(\d{1,4})\s+(?:will\s+ever\s+exist|exist|made|editions|worldwide)\b",
+        r"\blimited\s+to\s+(\d{1,4})\s+(?:editions|worldwide|made)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _positive_int_or_none(match.group(1))
+    return None
+
+
+def resolve_instant_experience_product_context(
+    product_name,
+    category,
+    *,
+    product_metadata=None,
+    campaign_moment=None,
+):
+    metadata = dict(product_metadata or {})
+    collections = [
+        _normalise_option_label(value)
+        for value in metadata.get("collections", [])
+        if _normalise_option_label(value)
+    ]
+    product_sport = (
+        _normalise_option_label(metadata.get("product_sport"))
+        or _normalise_option_label(category)
+        or "safe universal fallback"
+    )
+    if product_sport.casefold() in {"select category", "other"}:
+        product_sport = "safe universal fallback"
+    combined = " ".join(
+        [
+            str(product_name or ""),
+            str(product_sport or ""),
+            str(metadata.get("product_type") or ""),
+            " ".join(collections),
+        ]
+    )
+    era = "current"
+    if _contains_any_word(
+        combined,
+        (
+            "historic",
+            "history",
+            "heritage",
+            "legend",
+            "legacy",
+            "classic",
+            "vintage",
+            "retro",
+            "nostalgic",
+            "nostalgia",
+            "retired",
+            "farewell",
+            "tribute",
+            "197",
+            "198",
+            "199",
+        ),
+    ):
+        era = "historic"
+    elif _contains_any_word(combined, ("modern", "current", "contemporary", "rookie", "2024", "2025", "2026")):
+        era = "modern"
+
+    mood = "clean"
+    if _contains_any_word(combined, ("rivalry", "rival", " vs ", "versus", "dark", "aggressive", "battle", "duel")):
+        mood = "rivalry"
+    elif _contains_any_word(combined, ("celebration", "champion", "title", "trophy", "win", "victory")):
+        mood = "celebratory"
+    elif _contains_any_word(combined, ("heritage", "legacy", "legend", "nostalgic", "nostalgia")):
+        mood = "heritage"
+    elif _contains_any_word(combined, ("energy", "energetic", "dynamic", "modern")):
+        mood = "energetic"
+
+    moment = normalize_campaign_moment(campaign_moment)
+    context_hint = "standard collector campaign"
+    if campaign_moment_is_active(moment):
+        context_hint = _normalise_option_label(moment.get("type") or moment.get("name")) or context_hint
+    if _contains_any_word(combined + " " + context_hint, ("gift", "gifting", "father", "mother", "christmas")):
+        context_hint = "gifting"
+
+    edition_limit = _positive_int_or_none(metadata.get("edition_limit"))
+    edition_limit_source = _normalise_option_label(metadata.get("edition_limit_source"))
+    if edition_limit is None:
+        edition_limit = _verified_edition_limit_from_text(product_name)
+        if edition_limit:
+            edition_limit_source = "explicit product title"
+    if edition_limit is None and product_sport == "Baseball":
+        edition_limit = 100
+        edition_limit_source = "approved Baseball Instant Experience claim path"
+
+    return {
+        "product_sport": product_sport,
+        "product_era": era,
+        "artwork_mood": mood,
+        "campaign_context": context_hint,
+        "edition_limit": edition_limit,
+        "edition_limit_source": edition_limit_source if edition_limit else "",
+        "collections": collections,
+    }
+
+
+def _metadata_bool(metadata, *keys):
+    for key in keys:
+        if key not in metadata:
+            continue
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        clean = str(value or "").strip().casefold()
+        if clean in {"1", "true", "yes", "y", "verified", "included", "numbered"}:
+            return True
+        if clean in {"0", "false", "no", "n", "not verified", "unknown"}:
+            return False
+    return False
+
+
+def _metadata_text(metadata, *keys):
+    for key in keys:
+        value = _normalise_option_label(metadata.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _metadata_list(metadata, *keys):
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            parts = re.split(r"\s*(?:,|;|\||/|\band\b|\bvs\.?\b|\bversus\b)\s*", value, flags=re.IGNORECASE)
+        elif isinstance(value, (list, tuple, set)):
+            parts = list(value)
+        else:
+            parts = []
+        cleaned = [
+            _normalise_option_label(item.get("name") if isinstance(item, dict) else item)
+            for item in parts
+        ]
+        cleaned = [item for item in cleaned if item]
+        if cleaned:
+            return cleaned[:4]
+    return []
+
+
+def _title_side_candidates(product_name):
+    title = str(product_name or "")
+    for separator in (" vs ", " vs. ", " versus ", " v "):
+        if separator in title.casefold():
+            parts = re.split(separator, title, maxsplit=1, flags=re.IGNORECASE)
+            return [_normalise_option_label(part) for part in parts if _normalise_option_label(part)][:2]
+    if " & " in title:
+        parts = title.split(" & ", 1)
+        return [_normalise_option_label(part) for part in parts if _normalise_option_label(part)][:2]
+    return []
+
+
+def _single_word_name(name):
+    clean = _normalise_option_label(name)
+    if not clean:
+        return ""
+    words = clean.replace("—", " ").replace("-", " ").split()
+    return words[-1] if len(words) > 1 else clean
+
+
+def _classified_description_value(value, allowed, fallback):
+    clean = _normalise_option_label(value)
+    for allowed_value in allowed:
+        if clean.casefold() == allowed_value.casefold():
+            return allowed_value
+    return fallback
+
+
+INSTANT_EXPERIENCE_ARTWORK_TYPES = (
+    "Single athlete",
+    "Two connected legends",
+    "Direct rivalry",
+    "Two-team rivalry",
+    "Teammates or partnership",
+    "Multi-athlete legacy",
+    "Team or championship",
+    "Historic sporting moment",
+    "Motorsport rivalry",
+    "Generic sport or collector artwork",
+)
+
+INSTANT_EXPERIENCE_RELATIONSHIP_TYPES = (
+    "Inspiration or succession",
+    "Shared standard",
+    "Teammates",
+    "Rivals",
+    "Opposing teams",
+    "Same-era legends",
+    "Different-era legends",
+    "Shared achievement",
+    "Single-subject",
+    "Unknown",
+)
+
+
+def resolve_instant_experience_description_context(
+    product_name,
+    category,
+    *,
+    product_metadata=None,
+    campaign_moment=None,
+    country="",
+):
+    metadata = dict(product_metadata or {})
+    base_context = resolve_instant_experience_product_context(
+        product_name,
+        category,
+        product_metadata=metadata,
+        campaign_moment=campaign_moment,
+    )
+    athletes = _metadata_list(
+        metadata,
+        "athlete_names",
+        "athletes",
+        "featured_athletes",
+        "player_names",
+        "drivers",
+    )
+    teams = _metadata_list(
+        metadata,
+        "team_names",
+        "teams",
+        "featured_teams",
+        "clubs",
+    )
+    title_sides = _title_side_candidates(product_name)
+    side_a = _metadata_text(metadata, "side_a", "athlete_a", "team_a")
+    side_b = _metadata_text(metadata, "side_b", "athlete_b", "team_b")
+    if not side_a and title_sides:
+        side_a = title_sides[0]
+    if not side_b and len(title_sides) > 1:
+        side_b = title_sides[1]
+    if not athletes and side_a and side_b and not teams:
+        athletes = [side_a, side_b]
+
+    featured_moment = _metadata_text(
+        metadata,
+        "featured_moment",
+        "moment",
+        "historic_moment",
+        "achievement",
+        "event",
+    )
+    explicit_artwork_type = metadata.get("artwork_type")
+    explicit_relationship = metadata.get("relationship_type")
+    relationship = _classified_description_value(
+        explicit_relationship,
+        INSTANT_EXPERIENCE_RELATIONSHIP_TYPES,
+        "",
+    )
+    if not relationship:
+        combined = " ".join(
+            [
+                str(product_name or ""),
+                " ".join(base_context.get("collections") or []),
+                str(metadata.get("creative_brief") or ""),
+                str(metadata.get("relationship") or ""),
+            ]
+        )
+        if _contains_any_word(combined, ("rivalry", "rivals", "opposing", "vs", "versus", "derby")):
+            relationship = "Opposing teams" if len(teams) >= 2 else "Rivals"
+        elif _contains_any_word(combined, ("teammates", "partnership", "duo", "together")):
+            relationship = "Teammates"
+        elif _contains_any_word(combined, ("succession", "inspired", "inspiration", "carried forward")):
+            relationship = "Inspiration or succession"
+        elif len(athletes) == 1:
+            relationship = "Single-subject"
+        elif len(athletes) >= 2:
+            relationship = "Shared standard"
+        else:
+            relationship = "Unknown"
+
+    artwork_type = _classified_description_value(
+        explicit_artwork_type,
+        INSTANT_EXPERIENCE_ARTWORK_TYPES,
+        "",
+    )
+    sport_lower = str(base_context.get("product_sport") or "").casefold()
+    if not artwork_type:
+        if ("motorsport" in sport_lower or "v8" in sport_lower or "f1" in sport_lower) and relationship in {"Rivals", "Opposing teams"}:
+            artwork_type = "Motorsport rivalry"
+        elif relationship == "Rivals":
+            artwork_type = "Direct rivalry"
+        elif relationship == "Opposing teams":
+            artwork_type = "Two-team rivalry"
+        elif relationship == "Teammates":
+            artwork_type = "Teammates or partnership"
+        elif relationship in {"Inspiration or succession", "Shared standard", "Same-era legends", "Different-era legends"} and len(athletes) >= 2:
+            artwork_type = "Two connected legends"
+        elif len(athletes) == 1:
+            artwork_type = "Single athlete"
+        elif len(athletes) > 2:
+            artwork_type = "Multi-athlete legacy"
+        elif teams:
+            artwork_type = "Team or championship"
+        elif featured_moment or base_context.get("product_era") == "historic":
+            artwork_type = "Historic sporting moment"
+        else:
+            artwork_type = "Generic sport or collector artwork"
+
+    pronoun_mode = _metadata_text(metadata, "pronoun_mode", "pronouns", "gender").casefold()
+    if pronoun_mode in {"male", "man", "he", "he/his", "his"}:
+        pronoun_mode = "male"
+    elif pronoun_mode in {"female", "woman", "she", "she/her", "her"}:
+        pronoun_mode = "female"
+    elif len(athletes) != 1 or artwork_type not in {"Single athlete"}:
+        pronoun_mode = "plural_or_neutral"
+    else:
+        pronoun_mode = "neutral"
+
+    is_numbered = _metadata_bool(
+        metadata,
+        "is_numbered",
+        "numbered",
+        "numbering_verified",
+        "hand_numbered",
+        "numbered_certificate",
+    )
+    retires_when_sold_out = _metadata_bool(
+        metadata,
+        "retires_when_sold_out",
+        "retirement_verified",
+        "permanent_retirement_verified",
+        "sold_out_retires",
+    )
+    no_reprint_verified = _metadata_bool(
+        metadata,
+        "no_reprint_verified",
+        "no_reprint",
+        "no_second_run_verified",
+        "no_second_run",
+    )
+    return {
+        "PRODUCT_NAME": _clean_product_name(product_name),
+        "SPORT": base_context.get("product_sport") or _normalise_option_label(category),
+        "ATHLETE_NAMES": athletes,
+        "TEAM_NAMES": teams,
+        "SIDE_A": side_a or (teams[0] if teams else athletes[0] if athletes else ""),
+        "SIDE_B": side_b or (teams[1] if len(teams) > 1 else athletes[1] if len(athletes) > 1 else ""),
+        "FEATURED_MOMENT": featured_moment,
+        "ERA": _metadata_text(metadata, "era") or base_context.get("product_era") or "Unknown",
+        "ARTWORK_TYPE": artwork_type,
+        "RELATIONSHIP_TYPE": relationship,
+        "PRONOUN_MODE": pronoun_mode,
+        "EDITION_LIMIT": base_context.get("edition_limit"),
+        "IS_NUMBERED": bool(is_numbered),
+        "RETIRES_WHEN_SOLD_OUT": bool(retires_when_sold_out),
+        "NO_REPRINT_VERIFIED": bool(no_reprint_verified),
+        "CAMPAIGN_MARKET": _normalise_option_label(country),
+        "SCARCITY_VERIFIED": bool(base_context.get("edition_limit")),
+        "EDITION_LIMIT_SOURCE": base_context.get("edition_limit_source") or "",
+    }
+
+
+def _edition_exists_line(context):
+    limit = _positive_int_or_none(context.get("EDITION_LIMIT"))
+    if limit:
+        noun = "exists" if limit == 1 else "exist"
+        return f"Only {limit} {noun}."
+    return "A limited collector release."
+
+
+def _edition_limited_line(context):
+    limit = _positive_int_or_none(context.get("EDITION_LIMIT"))
+    if limit:
+        return f"Limited to {limit} worldwide."
+    return "A limited collector release."
+
+
+def _scarcity_second_line(context):
+    if context.get("RETIRES_WHEN_SOLD_OUT") or context.get("NO_REPRINT_VERIFIED"):
+        return "When they're gone, they're gone."
+    return "Made for fans who know why it matters."
+
+
+def _representation_line(context):
+    artwork_type = context.get("ARTWORK_TYPE")
+    relationship = context.get("RELATIONSHIP_TYPE")
+    sport = str(context.get("SPORT") or "").casefold()
+    if "motorsport" in sport or artwork_type == "Motorsport rivalry":
+        return "It's a reminder of what real racing felt like."
+    if artwork_type in {"Direct rivalry", "Two-team rivalry"} or relationship in {"Rivals", "Opposing teams"}:
+        return "It's a reminder of why the rivalry still matters."
+    if artwork_type == "Historic sporting moment":
+        return "It's a reminder of the night everything changed."
+    if context.get("ERA") == "historic":
+        return "It's a reminder of what that era meant."
+    if relationship in {"Inspiration or succession", "Shared standard", "Different-era legends"}:
+        return "It's a reminder of the standard they left behind."
+    return "It's a reminder of what greatness looks like."
+
+
+def _legacy_standard_opening(context):
+    artwork_type = context.get("ARTWORK_TYPE")
+    relationship = context.get("RELATIONSHIP_TYPE")
+    sport = str(context.get("SPORT") or "").casefold()
+    athlete = (context.get("ATHLETE_NAMES") or [""])[0]
+    team = (context.get("TEAM_NAMES") or [""])[0]
+    moment = context.get("FEATURED_MOMENT")
+    if artwork_type == "Single athlete":
+        if context.get("PRONOUN_MODE") == "male":
+            return ["He didn't follow the standard.", "He set it.", "Then raised it again.", "That's why they still remember."]
+        if context.get("PRONOUN_MODE") == "female":
+            return ["She didn't follow the standard.", "She set it.", "Then raised it again.", "That's why they still remember."]
+        subject = _single_word_name(athlete) or athlete or "The name"
+        return [f"{subject} didn't follow the standard.", f"{subject} set it.", "Then raised it again.", "That's why they still remember."]
+    if "motorsport" in sport or artwork_type == "Motorsport rivalry":
+        return ["They didn't race for second.", "They raced to be remembered.", "One corner.", "One rivalry that still lives."]
+    if artwork_type in {"Direct rivalry", "Two-team rivalry"} or relationship in {"Rivals", "Opposing teams"}:
+        return ["They didn't connect.", "They collided.", "One drew the line.", "The other refused to step back."]
+    if artwork_type == "Teammates or partnership" or relationship == "Teammates":
+        return ["They didn't just share the field.", "They lifted the standard.", "One created the opening.", "The other made it count."]
+    if artwork_type == "Team or championship":
+        return ["They didn't wait for history.", "They took it.", "One team.", "One moment that never left the fans."]
+    if artwork_type == "Historic sporting moment" or moment:
+        return ["It wasn't just another game.", "It became the moment.", "The crowd remembers.", "The sport never forgot."]
+    if relationship in {"Inspiration or succession", "Different-era legends"}:
+        return ["Different eras.", "The same standard.", "One showed what was possible.", "The other kept pushing it."]
+    return ["They weren't defined by rivalry.", "They were connected by the standard.", "One set it.", "One refused to lower it."]
+
+
+def _framed_greatness_hook(context):
+    artwork_type = context.get("ARTWORK_TYPE")
+    relationship = context.get("RELATIONSHIP_TYPE")
+    sport = str(context.get("SPORT") or "").casefold()
+    if "motorsport" in sport or artwork_type == "Motorsport rivalry":
+        return "The race ended. The rivalry never did."
+    if artwork_type in {"Direct rivalry", "Two-team rivalry"} or relationship in {"Rivals", "Opposing teams"}:
+        return "Rivalries don't disappear. They get framed."
+    if artwork_type == "Historic sporting moment":
+        return "Some moments never leave you. This one gets framed."
+    return "Greatness doesn't fade. It gets framed."
+
+
+def _collector_identity_lines(context):
+    if context.get("IS_NUMBERED"):
+        first = "A numbered collector drop."
+    else:
+        first = "A limited collector release."
+    artwork_type = context.get("ARTWORK_TYPE")
+    relationship = context.get("RELATIONSHIP_TYPE")
+    sport = str(context.get("SPORT") or "").casefold()
+    if "motorsport" in sport or artwork_type == "Motorsport rivalry":
+        second = "Made for the fans who remember what real racing felt like."
+    elif artwork_type in {"Direct rivalry", "Two-team rivalry"} or relationship in {"Rivals", "Opposing teams"}:
+        second = "Made for the fans who never stopped choosing a side."
+    elif context.get("FEATURED_MOMENT"):
+        second = "Made for the fans who know what this moment means."
+    else:
+        second = "Made for the fans who know why this name still matters."
+    return [first, second]
+
+
+def _framed_scarcity_lines(context):
+    if context.get("RETIRES_WHEN_SOLD_OUT") or context.get("NO_REPRINT_VERIFIED"):
+        lines = ["Once this edition sells out, it's gone."]
+        if context.get("NO_REPRINT_VERIFIED"):
+            lines.extend(["No reprint.", "No second run."])
+        else:
+            lines.extend(["Made for serious collectors.", "Built for the fans who know why it matters."])
+        return lines
+    if context.get("EDITION_LIMIT"):
+        return [_edition_limited_line(context), "Made for serious collectors.", "Built for the fans who know why it matters."]
+    return ["A limited collector release.", "Made for serious collectors.", "Built for the fans who know why it matters."]
+
+
+def _choose_a_side_copy(context):
+    athlete_names = context.get("ATHLETE_NAMES") or []
+    team_names = context.get("TEAM_NAMES") or []
+    side_a = context.get("SIDE_A") or (team_names[0] if team_names else athlete_names[0] if athlete_names else "")
+    side_b = context.get("SIDE_B") or (team_names[1] if len(team_names) > 1 else athlete_names[1] if len(athlete_names) > 1 else "")
+    athlete_a = _single_word_name(athlete_names[0]) if athlete_names else side_a
+    athlete_b = _single_word_name(athlete_names[1]) if len(athlete_names) > 1 else side_b
+    moment = context.get("FEATURED_MOMENT")
+    artwork_type = context.get("ARTWORK_TYPE")
+    relationship = context.get("RELATIONSHIP_TYPE")
+    sport = str(context.get("SPORT") or "").casefold()
+    scarcity = _edition_exists_line(context)
+    ownership_action = "Choose it…" if relationship in {"Rivals", "Opposing teams"} else "Claim it…"
+    if "motorsport" in sport or artwork_type == "Motorsport rivalry":
+        if side_a and side_b:
+            return "\n\n".join(
+                [
+                    f"{side_a} or {side_b}?",
+                    "No middle ground.",
+                    "One mountain.\nTwo names that still divide the fans.",
+                    scarcity,
+                    "Choose it…\nor watch it end up on someone else's wall.",
+                ]
+            )
+        return "\n\n".join(
+            [
+                "Remember when racing felt like this?",
+                "You do.",
+                "Raw speed.\nNo second chances.",
+                scarcity,
+                "Claim it…\nor watch it end up on someone else's wall.",
+            ]
+        )
+    if artwork_type in {"Direct rivalry", "Two-team rivalry"} or relationship in {"Rivals", "Opposing teams"}:
+        first_question = f"{side_a} or {side_b}?" if side_a and side_b else "Which side are you on?"
+        second_question = f"{athlete_a}… or {athlete_b}?" if athlete_a and athlete_b else "You know the rivalry."
+        return "\n\n".join(
+            [
+                first_question,
+                "No middle ground.",
+                second_question,
+                "You already picked a side.",
+                scarcity,
+                f"{ownership_action}\nor watch it end up on someone else's wall.",
+            ]
+        )
+    if relationship in {"Inspiration or succession", "Shared standard", "Same-era legends", "Different-era legends"} and len(athlete_names) >= 2:
+        return "\n\n".join(
+            [
+                f"{_single_word_name(athlete_names[0])} or {_single_word_name(athlete_names[1])}?",
+                "Wrong question.",
+                "One set the standard.\nThe other carried it forward.",
+                "You know what they meant.",
+                scarcity,
+                "Claim it…\nor watch it end up on someone else's wall.",
+            ]
+        )
+    if artwork_type == "Single athlete":
+        subject = _single_word_name(athlete_names[0]) if athlete_names else _clean_product_name(context.get("PRODUCT_NAME"))
+        if moment:
+            moment_block = f"{moment}?\n\nNo explanation needed."
+        else:
+            moment_block = "You know the standard.\n\nNo explanation needed."
+        return "\n\n".join(
+            [
+                f"{subject}?",
+                "You remember." if moment else "You know the name.",
+                moment_block,
+                scarcity,
+                "Claim it…\nor watch it end up on someone else's wall.",
+            ]
+        )
+    if artwork_type == "Team or championship":
+        subject = team_names[0] if team_names else side_a or _clean_product_name(context.get("PRODUCT_NAME"))
+        moment_line = moment or str(context.get("ERA") or "That era")
+        return "\n\n".join(
+            [
+                f"{subject}?",
+                "You never stopped believing.",
+                f"{moment_line}?",
+                "You still remember where you were.",
+                scarcity,
+                "Claim it…\nor watch it end up on someone else's wall.",
+            ]
+        )
+    if artwork_type == "Historic sporting moment":
+        moment_line = moment or "That moment"
+        return "\n\n".join(
+            [
+                "Remember where you were?",
+                "You do.",
+                f"{moment_line}?",
+                "Some moments never leave.",
+                scarcity,
+                "Claim it…\nor watch it end up on someone else's wall.",
+            ]
+        )
+    return "\n\n".join(
+        [
+            "You know why it matters?",
+            "You do.",
+            "The product tells the story.",
+            "No explanation needed.",
+            scarcity,
+            "Claim it…\nor watch it end up on someone else's wall.",
+        ]
+    )
+
+
+def build_instant_experience_description_variants(description_context):
+    context = dict(description_context or {})
+    legacy_copy = "\n".join(_legacy_standard_opening(context))
+    legacy_copy = "\n\n".join(
+        [
+            legacy_copy,
+            "This isn't wall art.\n" + _representation_line(context),
+            _edition_limited_line(context) + "\n" + _scarcity_second_line(context),
+            "Secure yours.",
+        ]
+    )
+    collector_lines = _collector_identity_lines(context)
+    framed_copy = "\n\n".join(
+        [
+            _framed_greatness_hook(context),
+            "\n".join(collector_lines),
+            "\n".join(_framed_scarcity_lines(context)),
+            "Secure yours.",
+        ]
+    )
+    choose_copy = _choose_a_side_copy(context)
+    copies = (legacy_copy, framed_copy, choose_copy)
+    return {
+        "description_variants": [
+            {
+                "key": variant["key"],
+                "label": variant["label"],
+                "copy": copies[index],
+            }
+            for index, variant in enumerate(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS)
+        ]
+    }
+
+
+def validate_instant_experience_description_variants(payload):
+    variants = list((payload or {}).get("description_variants") or [])
+    if len(variants) != len(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS):
+        return False
+    copies = []
+    for expected, variant in zip(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS, variants):
+        if variant.get("key") != expected["key"]:
+            return False
+        if variant.get("label") != expected["label"]:
+            return False
+        copy = _preserve_multiline_text(variant.get("copy"))
+        if not copy.strip() or re.search(r"\{\{[^}]+\}\}", copy):
+            return False
+        copies.append(copy.strip())
+    return len(set(copies)) == len(copies)
+
+
+def build_instant_experience_description_generation_prompt(description_context):
+    context = dict(description_context or {})
+    preview = build_instant_experience_description_variants(context)
+    context_json = json.dumps(context, ensure_ascii=False, indent=2)
+    schema_json = json.dumps(
+        {
+            "description_variants": [
+                {"key": item["key"], "label": item["label"], "copy": "..."}
+                for item in INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS
+            ]
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    fallback_json = json.dumps(preview, ensure_ascii=False, indent=2)
+    return f"""INSTANT EXPERIENCE DESCRIPTION COPY SYSTEM V1
+
+Generate the long advertising description copy once for the selected product, then associate the same three ordered descriptions with all three Instant Experience image routes. These descriptions are not the short image FOMO line, image headline, image CTA, Meta headline field or Meta link-description field.
+
+Resolved product context:
+{context_json}
+
+Return exactly three ordered description options:
+1. Description 1 — Legacy Standard (`legacy_standard`)
+2. Description 2 — Framed Greatness (`framed_greatness`)
+3. Description 3 — Choose a Side (`choose_a_side`)
+
+Use this response schema:
+{schema_json}
+
+Shared rules:
+- Product data, supplied creative brief and structured metadata are the source of truth.
+- Do not invent edition limits, remaining quantities, numbering, certificates, no-reprint policies, no-second-run policies, availability, achievements, rivalries, relationships, team affiliations, nicknames, dates, scores or championships.
+- If the verified edition limit is 100, use either "Limited to 100 worldwide." or "Only 100 exist."
+- If the exact edition limit is unavailable, use "A limited collector release."
+- Use "A numbered collector drop." only when IS_NUMBERED is true.
+- Use "No reprint." and "No second run." only when NO_REPRINT_VERIFIED is true.
+- Use "When they're gone, they're gone" or permanent retirement language only when RETIRES_WHEN_SOLD_OUT or NO_REPRINT_VERIFIED is true.
+- Use the ellipsis character "…" rather than three periods.
+- Preserve intentional blank lines.
+- Keep each option human, raw, collector-driven and approximately 35-65 words.
+- Never use: Elevate, Transform, Ultimate, Stunning, Breathtaking, Must-have, Perfect addition, Take your space to the next level, emojis, hashtags, fake quotes, prices, discounts or generic interior-design language.
+
+Description 1 — Legacy Standard:
+- Four short opening lines establishing the safe relationship or product meaning.
+- Blank line.
+- "This isn't wall art."
+- One short representation line.
+- Blank line.
+- Verified scarcity in two short lines.
+- Blank line.
+- "Secure yours."
+- Do not use "They didn't compete" for real rivals.
+- Use singular language for a single athlete. Use female pronouns only when verified.
+
+Description 2 — Framed Greatness:
+- One short greatness/framed hook.
+- Blank line.
+- Two collector-identity lines.
+- Blank line.
+- Three short scarcity lines.
+- Blank line.
+- "Secure yours."
+- Prefer "Greatness doesn't fade. It gets framed." unless a rivalry, historic moment or motorsport hook is more product-accurate.
+
+Description 3 — Choose a Side:
+- A short question or fan-identity challenge.
+- Blank line.
+- One sharp response.
+- Blank line.
+- A second athlete, team, moment or identity question.
+- Blank line.
+- A line showing the fan already knows their answer.
+- Blank line.
+- Verified scarcity.
+- Blank line.
+- A two-line ownership challenge.
+- Use rivalry framing only when ARTWORK_TYPE or RELATIONSHIP_TYPE verifies rivalry/opposition.
+
+If model output fails validation, use this safe deterministic fallback and adapt only verified names/facts:
+{fallback_json}"""
+
+
+def _instant_experience_room_weights(context):
+    weights = {
+        key: profile["baseline_weight"]
+        for key, profile in INSTANT_EXPERIENCE_ROOM_PROFILES_V4.items()
+    }
+    sport = str(context.get("product_sport") or "").casefold()
+    era = context.get("product_era")
+    mood = context.get("artwork_mood")
+    campaign_context = str(context.get("campaign_context") or "").casefold()
+
+    if sport in {"nba", "basketball", "nfl"} and era != "historic":
+        weights["collector_lounge"] += 20
+        weights["modern_man_cave"] += 5
+    if sport in {"baseball", "boxing", "combat"} or era == "historic":
+        weights["heritage_study"] += 30
+        weights["collector_lounge"] += 5
+    if "motorsport" in sport or "v8" in sport or "f1" in sport:
+        if era == "modern":
+            weights["collector_lounge"] += 20
+        else:
+            weights["heritage_study"] += 20
+    if sport in {"soccer", "afl", "football", "rugby", "rugby union", "cricket"}:
+        weights["collector_lounge"] += 14
+        weights["heritage_study"] += 8
+    if sport in {"horse racing", "golf", "tennis"}:
+        weights["neutral_living"] += 18
+        weights["heritage_study"] += 10
+    if "women" in sport or "womens" in sport or "gifting" in campaign_context:
+        weights["neutral_living"] += 22
+        weights["collector_lounge"] += 8
+    if mood == "rivalry":
+        weights["modern_man_cave"] += 18
+        weights["collector_lounge"] += 10
+    return {key: max(1, int(value)) for key, value in weights.items()}
+
+
+def _weighted_room_profile_key(weights, rng):
+    total = sum(weights.values())
+    cursor = rng.uniform(0, total)
+    running = 0
+    for key, weight in weights.items():
+        running += weight
+        if cursor <= running:
+            return key
+    return "collector_lounge"
+
+
+def _preferred_room_profile_key(context):
+    sport = str(context.get("product_sport") or "").casefold()
+    era = context.get("product_era")
+    mood = context.get("artwork_mood")
+    campaign_context = str(context.get("campaign_context") or "").casefold()
+    if "gifting" in campaign_context or sport in {"horse racing", "golf", "tennis"}:
+        return "neutral_living"
+    if era == "historic" or sport in {"baseball", "boxing", "combat"}:
+        return "heritage_study"
+    if mood == "rivalry":
+        return "modern_man_cave"
+    return "collector_lounge"
+
+
+def _wall_palette_key(context):
+    if context.get("artwork_mood") == "rivalry":
+        return "dark"
+    if context.get("product_era") == "historic" or context.get("artwork_mood") == "heritage":
+        return "heritage"
+    sport = str(context.get("product_sport") or "").casefold()
+    if sport in {"horse racing", "golf", "tennis"} or "gifting" in str(context.get("campaign_context") or "").casefold():
+        return "neutral"
+    return "default"
+
+
+def _resolved_overlay_copy(context, route):
+    edition_limit = context.get("edition_limit")
+    if edition_limit:
+        return {
+            "headline_text": f"ONLY {edition_limit} WILL EVER EXIST",
+            "supporting_line": route["fomo_line"],
+            "cta_text": "CLAIM YOUR EDITION",
+            "edition_limit_used": str(edition_limit),
+            "edition_limit_source": context.get("edition_limit_source") or "verified product metadata",
+            "scarcity_verified": True,
+        }
+    return {
+        "headline_text": "SPORTS CAVE COLLECTOR RELEASE",
+        "supporting_line": "Premium collector-home presentation for the selected product.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "edition_limit_used": "not verified",
+        "edition_limit_source": "safe evidence-gated fallback",
+        "scarcity_verified": False,
+    }
+
+
+def resolve_standard_instant_experience_visuals(
+    *,
+    product_name="",
+    category="",
+    product_metadata=None,
+    campaign_moment=None,
+    variation_token="",
+):
+    context = resolve_instant_experience_product_context(
+        product_name,
+        category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+    )
+    seed = _instant_experience_seed(
+        product_name,
+        category,
+        context.get("product_era"),
+        context.get("artwork_mood"),
+        variation_token or "standard",
+    )
+    rng = random.Random(seed)
+    weights = _instant_experience_room_weights(context)
+    preferred_key = _preferred_room_profile_key(context)
+    palette = INSTANT_EXPERIENCE_WALL_PALETTES_V4[_wall_palette_key(context)]
+    primary_cues = list(INSTANT_EXPERIENCE_PRIMARY_CUES_V4)
+    secondary_cues = list(INSTANT_EXPERIENCE_SECONDARY_CUES_V4)
+    rng.shuffle(primary_cues)
+    rng.shuffle(secondary_cues)
+    resolved = []
+    for index, route in enumerate(INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4):
+        visual = dict(route)
+        profile_key = preferred_key if index == 0 else _weighted_room_profile_key(weights, rng)
+        profile = INSTANT_EXPERIENCE_ROOM_PROFILES_V4[profile_key]
+        wall_material, wall_colour = palette[index % len(palette)]
+        primary_cue = primary_cues[index % len(primary_cues)]
+        secondary_cue = secondary_cues[index % len(secondary_cues)]
+        if context["product_sport"] == "safe universal fallback" and index == 0:
+            profile_key = "collector_lounge"
+            profile = INSTANT_EXPERIENCE_ROOM_PROFILES_V4[profile_key]
+            wall_material = "fine seamless mineral plaster"
+            wall_colour = "warm taupe seamless mineral-plaster wall"
+            primary_cue = "partial doorway"
+            secondary_cue = "cropped dark leather chair"
+        overlay_copy = _resolved_overlay_copy(context, route)
+        visual.update(
+            {
+                "product_sport": context["product_sport"],
+                "product_era": context["product_era"],
+                "artwork_mood": context["artwork_mood"],
+                "campaign_context": context["campaign_context"],
+                "room_profile_key": profile_key,
+                "room_profile": profile["label"],
+                "room_type": profile["room_type"],
+                "room_materials": profile["materials"],
+                "wall_material": wall_material,
+                "wall_colour": wall_colour,
+                "wall_finish": wall_material,
+                "primary_cue": primary_cue,
+                "secondary_cue": secondary_cue,
+                "architectural_cue": primary_cue,
+                "resolved_seed": seed,
+                **overlay_copy,
+            }
+        )
+        resolved.append(visual)
+    sibling_summaries = [
+        {
+            "route": visual["route"],
+            "camera_side": visual["camera_side"],
+            "room_profile": visual["room_profile"],
+            "wall_colour": visual["wall_colour"],
+            "wall_material": visual["wall_material"],
+            "primary_cue": visual["primary_cue"],
+            "secondary_cue": visual["secondary_cue"],
+            "lighting": visual["lighting"],
+            "supporting_line": visual["supporting_line"],
+        }
+        for visual in resolved
+    ]
+    for visual in resolved:
+        visual["sibling_summaries"] = [
+            summary
+            for summary in sibling_summaries
+            if summary["route"] != visual["route"]
+        ]
+    return tuple(resolved)
 
 
 def _instant_experience_pairwise_difference_count(first, second):
@@ -3463,169 +4500,12 @@ def validate_instant_experience_set_differentiation(visuals=None):
             )
             if difference_count < 5:
                 raise ValueError(
-                    "Instant Experience concepts must differ across at least five "
+                    "Instant Experience routes must differ across at least five "
                     f"resolved visual dimensions: {first['route']} and {second['route']} "
                     f"differ across {difference_count}."
                 )
     return True
 
-
-def build_instant_experience_typography_quality_rules(visual):
-    if visual.get("typography_mode") == "headline_hybrid":
-        route_rules = """APPROVED HEADLINE-LED SCARCITY HYBRID TYPOGRAPHY
-
-- Place GREATNESS DOESN’T FADE. / IT GETS FRAMED. as one exact two-line headline clearly above the product. Use Montserrat ExtraBold or Bold, high-contrast warm ivory, white or restrained gold and no tiny eyebrow line.
-- Keep the headline immediately readable at mobile-feed size with generous safe margins and no lamp, shelf, product edge or architectural line interfering with it.
-- Build one connected top-to-bottom hierarchy: headline, dominant product, compact verified scarcity line, clear finality line and SECURE YOUR EDITION.
-- Keep the lower copy integrated into photographic negative space or a naturally dark architectural area. Never use loose disconnected floating text, a bulky card, an oversized black box or the full-width bottom strip used by Pure Limited-Release.
-- Treat the first lower line as a compact scarcity label, keep the finality line clearly readable and make SECURE YOUR EDITION the strongest lower action line.
-- The lower CTA is flat premium typography, never a fake button, and every word stays outside the immutable product."""
-    elif visual.get("typography_mode") == "bottom_strip":
-        route_rules = """APPROVED SCARCITY STRIP TYPOGRAPHY
-
-- Preserve the current full-width horizontal bottom strip, current upper product-region proportions and thin gold divider.
-- Keep all advertising wording inside the strip. Never create a side panel, vertical panel or narrow copy column.
-- Use a spacious centred hierarchy across the full strip width.
-- Keep LIMITED TO 100 WORLDWIDE as one unified single-line Headline; never isolate or disproportionately enlarge 100.
-- Set Once it sells out, it’s gone. beneath it in smaller warm ivory text.
-- Set CLAIM YOUR EDITION beneath that as controlled muted-gold typography, not a fake button.
-- Never squeeze, stretch, condense, split or break words."""
-    elif visual.get("typography_mode") == "collector_proof":
-        route_rules = """APPROVED COLLECTOR PROOF TYPOGRAPHY
-
-- Place one strong scarcity headline, one short verified proof line and one aggressive CTA in a contained matte-black collector-proof panel with generous internal padding.
-- Use Montserrat Bold for the Headline, Montserrat Medium or SemiBold for the verified proof line and Montserrat Bold for the CTA.
-- Use ONLY 100 WILL EVER EXIST / COLLECTOR CERTIFICATE INCLUDED / OWN THIS EDITION only when both the quantity and certificate inclusion are verified. Otherwise change or omit the proof line and use only supported wording.
-- Keep every advertising word outside the product, artwork, frame, glass and genuine supplied proof detail.
-- Keep the CTA well away from the canvas edge. Do not use a tiny explanatory paragraph, a full-width bottom strip, a headline-above-product layout, a fake button, bevel, glow or metallic extrusion.
-- Do not paint wording onto the wall, certificate, plaque, badge or artwork."""
-    else:
-        route_rules = """APPROVED FLOATING LIFESTYLE TYPOGRAPHY
-
-- Add the exact wording as a crisp, flat, post-production-style graphic overlay only after the room and product are composed.
-- Use Montserrat SemiBold for the Headline and Montserrat Medium or SemiBold for the CTA where compatible with current Sports Cave branding.
-- Use warm ivory for the Headline and controlled muted gold for the CTA unless exact user-provided wording or an approved route colour requires otherwise.
-- Keep the Headline to a maximum of two lines and the CTA on one line.
-- The CTA must use exactly the same approved words as Claim Your Edition, Secure Your Edition or Own This Edition from the concept's Copy Variation 1, rendered in uppercase on-image.
-- Maintain at least a 7% safe margin from every canvas edge.
-- Keep every advertising word outside the product and away from faces, artwork text, logos, signatures, badges, plaques and edition details.
-- Preserve clean natural negative space around the wording.
-- Do not use a drop shadow, bevel, glow, fake metallic extrusion, fake interface button or typography painted, embossed, engraved, illuminated or physically attached to the wall."""
-    return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
-INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - MANDATORY
-
-- Use Montserrat only for generated advertising wording.
-- At 1024 x 1024, target 50-64 px Bold or ExtraBold for the main Headline, 28-34 px Medium or SemiBold for a supporting or proof line and 38-46 px Bold for the CTA. No essential copy may be visually smaller than 28 px.
-- Maintain a minimum 64 px outer safe margin and prefer 64-72 px wherever the approved route composition permits.
-- Use only white, warm ivory and restrained Sports Cave gold with strong immediate-background contrast. Never place a gold CTA on a similar warm or mid-tone surface.
-- Use moderate premium letter spacing; never scatter words or use excessively wide tracking.
-- Require immediate readability at an approximately 256 x 256 preview size.
-
-{route_rules}
-
-Any misspelling, missing word, duplicated word, changed punctuation, CTA outside the approved direct edition-acquisition family, extra generated text or weak mobile readability is a hard failure. Preserve exact user-supplied wording character-for-character when it already complies with the mandatory CTA contract."""
-
-
-def _instant_experience_route_wording_rules(visual):
-    fixed_overlay_lines = tuple(visual.get("fixed_overlay_lines") or ())
-    typography_mode = visual.get("typography_mode")
-    if typography_mode == "headline_hybrid":
-        headline_lines = " / ".join(visual["fixed_headline_lines"])
-        numeric_lines = " / ".join(visual["numeric_overlay_lines"])
-        fallback_lines = " / ".join(visual["fallback_overlay_lines"])
-        own_wording = f"""- Exact permitted top Headline: {headline_lines}
-- When the verified quantity is 100, exact permitted lower wording: {numeric_lines}
-- For another verified quantity, substitute only that verified quantity in the first lower line.
-- When numeric scarcity is unavailable, exact permitted lower wording: {fallback_lines}
-- Resolve and print one complete verified lower wording set before returning this standalone prompt. Never present alternatives to the image generator."""
-    elif typography_mode == "bottom_strip":
-        fallback_lines = " / ".join(visual["fallback_overlay_lines"])
-        own_wording = f"""- When the verified quantity is 100, exact permitted strip wording: {' / '.join(fixed_overlay_lines)}
-- For another verified quantity, substitute only that verified quantity in the first strip line.
-- When numeric scarcity is unavailable, exact permitted strip wording: {fallback_lines}
-- Resolve and print one complete verified strip wording set before returning this standalone prompt. Never present alternatives to the image generator."""
-    elif typography_mode == "collector_proof":
-        own_wording = f"""- When the quantity is verified as 100 and certificate inclusion is independently verified, exact permitted panel wording: {' / '.join(fixed_overlay_lines)}
-- If certificate inclusion is not verified, change or omit the proof line and use only a genuine supplied visible plaque, badge, edition plate or other verified collector detail.
-- If numeric scarcity is unavailable, use a truthful non-numeric scarcity Headline. Never infer numbering from a limited release.
-- Resolve and print one complete evidence-supported Headline, proof line if supported, and approved uppercase CTA before returning this standalone prompt. Never present alternatives to the image generator."""
-    elif fixed_overlay_lines:
-        own_wording = "\n".join(
-            (
-                f"- Exact permitted on-image Headline: {fixed_overlay_lines[0]}",
-                f"- Exact permitted supporting line: {fixed_overlay_lines[1]}",
-                f"- Exact permitted on-image CTA: {fixed_overlay_lines[2]}",
-            )
-        )
-    else:
-        own_wording = f"""- Exact permitted on-image Headline: copy the complete finished Headline from {visual['copy_row']} character-for-character.
-- Exact permitted supporting line: none.
-- Exact permitted on-image CTA: use the complete approved CTA words from {visual['copy_row']} and render them in uppercase without changing the words."""
-
-    forbidden_sources = []
-    for other in INSTANT_EXPERIENCE_STANDARD_VISUALS:
-        if other["concept_id"] == visual["concept_id"]:
-            continue
-        other_fixed_lines = tuple(other.get("fixed_overlay_lines") or ())
-        if other.get("typography_mode") == "headline_hybrid":
-            forbidden_sources.append(
-                f"{other['route']}: {' / '.join(other['fixed_headline_lines'])} and its resolved lower scarcity wording"
-            )
-        elif other_fixed_lines:
-            forbidden_sources.append(
-                f"{other['route']}: {' / '.join(other_fixed_lines)}"
-            )
-        else:
-            forbidden_sources.append(
-                f"{other['route']}: the exact finished Headline and CTA from {other['copy_row']}"
-            )
-    forbidden_text = "\n".join(f"  - {source}" for source in forbidden_sources)
-    return f"""ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING
-
-Route identity: {visual['route']} - {visual['supporting_label']}
-{own_wording}
-
-These are the only permitted advertising words for this cover. Never place Primary Text on the image.
-
-Forbidden other-route wording:
-{forbidden_text}
-
-Before printing the final standalone image prompt, replace every copy-row source reference above with the actual finished Headline and the uppercase on-image form of the CTA generated for that row. Print the exact permitted and forbidden strings inside the standalone prompt. Do not leave brackets, placeholders or unresolved source references. Reject and regenerate if any other route's wording appears."""
-
-
-def build_instant_experience_set_differentiation_rules(visual):
-    sibling_lines = []
-    for sibling in INSTANT_EXPERIENCE_STANDARD_VISUALS:
-        if sibling["concept_id"] == visual["concept_id"]:
-            continue
-        sibling_lines.append(
-            "- {route}: room={room}; wall={colour}; material={material}; "
-            "camera={camera}; prominence={prominence}; lighting={lighting}; "
-            "text={text}; architecture={architecture}.".format(
-                route=sibling["route"],
-                room=sibling["room_type"],
-                colour=sibling["wall_colour"],
-                material=sibling["wall_material"],
-                camera=sibling["camera_side"],
-                prominence=sibling["shot_distance"],
-                lighting=sibling["lighting"],
-                text=sibling["overlay_position"],
-                architecture=sibling["architectural_cue"],
-            )
-        )
-    return f"""{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
-INSTANT EXPERIENCE SET DIFFERENTIATION - MANDATORY
-
-This cover's emotional advertising job is {visual['purpose']}
-
-Resolved sibling fingerprints supplied for comparison:
-{chr(10).join(sibling_lines)}
-
-Keep this route's resolved scene and approved layout. Across every pair in the three-cover set, at least five of these attributes must differ: room type, wall colour, wall material, camera side or angle, product prominence or position, lighting condition, text position, supporting architectural element.
-
-Do not repeat the same desk, shelves, plant, wall palette, camera relationship, lighting and typography composition with cosmetic changes. If an explicit user selection matches another route, preserve it and create differentiation through the remaining automatic attributes. Framed Greatness Scarcity Hybrid remains the connected headline-product-scarcity advertisement; Pure Limited-Release remains the clean wall with the approved bottom strip; Collector Proof remains the close product-and-evidence composition with its contained proof panel. Never force the bottom strip or headline-hybrid hierarchy onto another route.
-
-{_instant_experience_route_wording_rules(visual)}"""
 
 
 def build_instant_experience_image_quality_contract(visual):
@@ -3641,6 +4521,86 @@ def build_instant_experience_image_quality_contract(visual):
     )
 
 
+def build_instant_experience_typography_quality_rules(visual):
+    return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
+INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
+
+- Add promotional typography as a deterministic post-production overlay using real fonts after the room/product photograph is composed. Do not rely on the image model to invent text organically inside the room.
+- Lower conversion panel is exactly 24% of the 1024 x 1024 canvas, deep matte charcoal near #101112 or #121314 with an extremely subtle premium paper or fine-grain texture.
+- Separate the 76% room scene and 24% panel with one 1-pixel muted-gold boundary line. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
+- Use a premium Sports Cave editorial serif for the headline, Montserrat Regular or Medium for the supporting line and Montserrat SemiBold or Bold for the CTA.
+- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
+- Exact resolved headline: {visual.get("headline_text")}.
+- Exact resolved supporting line: {visual.get("supporting_line")}.
+- Exact resolved CTA: {visual.get("cta_text")}.
+- Keep the headline on one clean line wherever technically possible and maintain 64-72 px safe margins.
+- Ensure all essential wording is clearly readable in a 256 x 256 preview.
+
+MEANINGFUL SPORTS CAVE GOLD UNDERLINE
+
+- If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
+- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 5-7 px. Thickness is 2 px. Colour is close to #C7A15A.
+- Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
+- The underline must move automatically when the edition limit changes.
+- If exact number-level positioning cannot be guaranteed, underline approximately 96-100% of the complete measured headline. Never place an arbitrary decorative line beneath empty space.
+- No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
+
+
+def _instant_experience_route_wording_rules(visual):
+    return f"""ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING
+
+Route identity: {visual["route"]}
+Route key: {visual["route_key"]}
+
+Permitted on-image words for this cover:
+- Headline: {visual.get("headline_text")}
+- Supporting line: {visual.get("supporting_line")}
+- CTA: {visual.get("cta_text")}
+
+These are the only permitted advertising words for this cover. Never place Primary Text on the image.
+
+If edition limit used is "not verified", the supporting FOMO line for this route must not be used. Use the resolved safe fallback line above. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
+
+
+def build_instant_experience_set_differentiation_rules(visual):
+    sibling_lines = []
+    for sibling in visual.get("sibling_summaries", ()):
+        sibling_lines.append(
+            "- {route}: camera={camera}; room={room}; wall={wall}; finish={finish}; "
+            "primary cue={primary}; secondary cue={secondary}; light={light}; FOMO={fomo}.".format(
+                route=sibling["route"],
+                camera=sibling["camera_side"],
+                room=sibling["room_profile"],
+                wall=sibling["wall_colour"],
+                finish=sibling["wall_material"],
+                primary=sibling["primary_cue"],
+                secondary=sibling["secondary_cue"],
+                light=sibling["lighting"],
+                fomo=sibling["supporting_line"],
+            )
+        )
+    return f"""{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
+INSTANT EXPERIENCE SET DIFFERENTIATION - PREMIUM ROOM SYSTEM V4
+
+This route's advertising job is: {visual["purpose"]}
+
+Resolved sibling fingerprints supplied for comparison:
+{chr(10).join(sibling_lines)}
+
+Within one three-image package:
+- Every route keeps the same exact product, Sports Cave identity, 76% room scene, 24% conversion panel, product dominance, black timber frame, realistic glazing and one CTA.
+- The three routes must differ in camera angle, room profile, wall colour, environmental cue, furniture crop and natural light direction or intensity.
+- Never use the same exact wall colour twice.
+- Never use the same primary environmental cue twice.
+- Never use the same furniture arrangement twice.
+- Never reuse an identical room composition.
+- Never simply mirror the right route to create the left route.
+- A broad room category may repeat only when wall colour, cue, furniture crop and lighting clearly change.
+- Use exactly one primary cue and no more than one secondary cue.
+
+{_instant_experience_route_wording_rules(visual)}"""
+
+
 def _standard_instant_experience_exact_offer(campaign_moment=None):
     moment = normalize_campaign_moment(campaign_moment)
     return moment.get("promotion") or ""
@@ -3649,45 +4609,75 @@ def _standard_instant_experience_exact_offer(campaign_moment=None):
 def standard_instant_experience_fingerprint(index, visual, *, category=""):
     return {
         "route": visual["route"],
+        "route_key": visual.get("route_key") or visual.get("concept_id"),
         "sub_angle": visual["copy_row"],
         "hook_family": visual["purpose"],
         "cover_layout": visual["composition"],
-        "urgency_placement": (
-            "bottom scarcity strip only"
-            if visual.get("typography_mode") == "bottom_strip"
-            else "integrated scarcity typography"
-        ),
+        "urgency_placement": "lower 24% conversion panel",
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
+        "room_profile": visual.get("room_profile", visual["room_type"]),
         "wall_colour_family": visual["wall_colour"],
         "wall_material": visual["wall_material"],
+        "wall_finish": visual.get("wall_finish", visual["wall_material"]),
         "camera_family": visual["camera_side"],
+        "camera_angle": visual["camera_side"],
         "shot_distance": visual["shot_distance"],
         "lighting_direction": visual["lighting"],
         "time_of_day": visual["time_of_day"],
         "overlay_position": visual["overlay_position"],
         "product_position": visual["product_position"],
         "architectural_cue": visual["architectural_cue"],
+        "primary_cue": visual.get("primary_cue") or visual["architectural_cue"],
+        "secondary_cue": visual.get("secondary_cue") or "",
         "cover_composition": visual["composition"],
-        "sport_family": resolved_instant_experience_sport_atmosphere(category),
+        "product_sport": visual.get("product_sport") or category,
+        "product_era_or_mood": f"{visual.get('product_era', 'current')} / {visual.get('artwork_mood', 'clean')}",
+        "fomo_line": visual.get("supporting_line") or visual.get("fomo_line"),
+        "edition_limit_used": visual.get("edition_limit_used", "not verified"),
+        "sport_family": resolved_instant_experience_sport_atmosphere(visual.get("product_sport") or category),
         "prompt_number": index,
     }
 
 
-def build_standard_instant_experience_fingerprints(*, category=""):
+def build_standard_instant_experience_fingerprints(
+    *,
+    product_name="",
+    category="",
+    product_metadata=None,
+    campaign_moment=None,
+    variation_token="",
+):
     validate_instant_experience_set_differentiation()
+    visuals = resolve_standard_instant_experience_visuals(
+        product_name=product_name,
+        category=category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+        variation_token=variation_token,
+    )
     return [
         standard_instant_experience_fingerprint(index, visual, category=category)
-        for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1)
+        for index, visual in enumerate(visuals, start=1)
     ]
 
 
 def build_standard_instant_experience_freshness_block(
     *,
+    product_name="",
     category="",
+    product_metadata=None,
+    campaign_moment=None,
+    variation_token="",
     recent_fingerprints=None,
 ):
-    current_fingerprints = build_standard_instant_experience_fingerprints(category=category)
+    current_fingerprints = build_standard_instant_experience_fingerprints(
+        product_name=product_name,
+        category=category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+        variation_token=variation_token,
+    )
     return f"""STRUCTURED INSTANT EXPERIENCE VISUAL FRESHNESS
 
 Current automatic cover fingerprints:
@@ -3696,12 +4686,13 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size. They must differ in composition, room type, wall colour/material, camera angle, product prominence, lighting/time of day and typography placement.
+Resolve three covers that visibly differ at thumbnail size. They must differ in camera angle, room profile, wall colour/material, primary cue, secondary cue, furniture crop, lighting/time of day and FOMO supporting line while preserving the same premium Sports Cave campaign.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
 
-def build_standard_instant_experience_image_prompt(
+
+def build_instant_experience_canonical_prompt_v4(
     index,
     visual,
     *,
@@ -3710,7 +4701,6 @@ def build_standard_instant_experience_image_prompt(
     country,
     product_url="",
     campaign_moment=None,
-    recent_fingerprints=None,
 ):
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
@@ -3732,126 +4722,199 @@ def build_standard_instant_experience_image_prompt(
         visual,
         category=category,
     )
-    fixed_overlay_lines = tuple(visual.get("fixed_overlay_lines") or ())
-    fixed_overlay_text = "\n".join(fixed_overlay_lines)
-    typography_mode = visual.get("typography_mode")
-    if typography_mode == "headline_hybrid":
-        headline_text = "\n".join(visual["fixed_headline_lines"])
-        numeric_overlay_text = "\n".join(visual["numeric_overlay_lines"])
-        fallback_overlay_text = "\n".join(visual["fallback_overlay_lines"])
-        on_image_wording_source = (
-            "- On-image wording source: use the exact fixed two-line Framed Greatness Headline and one resolved verified lower scarcity set below. "
-            "Copy Variation 1 must use CTA Secure Your Edition and end its Primary Text with Secure your edition. "
-            "Do not use the copy-table Headline as replacement artwork wording."
+    resolved_json = json.dumps(fingerprint, ensure_ascii=False, indent=2)
+    scarcity_note = (
+        "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
+        if visual.get("scarcity_verified")
+        else (
+            "No verified edition limit is available in the supplied metadata. Use the resolved safe fallback headline "
+            "and supporting line exactly. Do not use the route FOMO line or invent a number."
         )
-        collector_control_block = f"""FRAMED GREATNESS SCARCITY HYBRID WORDING
-
-Use this exact top Headline:
-
-{headline_text}
-
-When the verified edition quantity is 100, use this exact lower wording:
-
-{numeric_overlay_text}
-
-For another verified quantity, substitute only that verified quantity in the first lower line. If numeric scarcity is unavailable, use this exact truthful fallback:
-
-{fallback_overlay_text}
-
-Resolve one evidence-supported lower wording set before returning this standalone prompt. The image generator must receive one exact set, never alternatives. Do not add, remove, rewrite, localise or reorder the selected words."""
-    elif typography_mode == "bottom_strip":
-        on_image_wording_source = (
-            "- On-image wording source: use the exact approved three-line bottom scarcity strip copy. "
-            "Pure Limited-Release Scarcity Copy Variation 1 must use CTA Claim Your Edition and end its Primary Text with "
-            "Claim your edition. Do not replace the strip with the copy-table Headline or another CTA."
-        )
-        fallback_overlay_text = "\n".join(visual["fallback_overlay_lines"])
-        collector_control_block = f"""BOTTOM SCARCITY STRIP COPY
-
-Use these exact three lines inside the bottom strip only when the 100-edition limit is verified:
-
-{fixed_overlay_text}
-
-For another verified quantity, substitute only that verified quantity in the first line. If numeric scarcity is unavailable, use this exact truthful fallback:
-
-{fallback_overlay_text}
-
-Resolve one evidence-supported strip set before returning this standalone prompt. Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
-    elif typography_mode == "collector_proof":
-        on_image_wording_source = (
-            "- On-image wording source: use one evidence-supported Collector Proof Headline, one short verified proof line and the approved CTA. "
-            "Collector Proof Scarcity Copy Variation 1 must use CTA Own This Edition and end its Primary Text with "
-            "Own this edition. Keep the wording separate from the artwork and genuine supplied proof detail."
-        )
-        collector_control_block = f"""COLLECTOR PROOF COPY
-
-Use these exact three lines only when the 100-edition limit and certificate inclusion are both independently verified:
-
-{fixed_overlay_text}
-
-If certificate inclusion is not verified, change or omit the proof line and show only a genuine supplied visible edition plate, badge, plaque or other collector detail. If numeric scarcity is unavailable, use a truthful non-numeric scarcity Headline. Resolve one complete evidence-supported panel set before returning this standalone prompt. Never infer numbering from a limited release or invent a certificate, signature, edition number, remaining quantity, price, discount or shipping claim."""
-    else:
-        on_image_wording_source = (
-            f"- On-image wording source: use the exact Headline and the same CTA words from {visual['copy_row']}. "
-            "The CTA field must be Claim Your Edition, Secure Your Edition or Own This Edition; render its on-image form in uppercase. "
-            "Print the exact finished Headline and uppercase CTA inside this standalone prompt before the composition notes. Do not leave placeholders."
-        )
-        collector_control_block = """SCARCITY PRESENTATION RULE
-
-Do not use the Pure Limited-Release bottom strip in this route.
-
-Use the resolved integrated premium scarcity typography area. Do not add a price, discount or unverified offer."""
+    )
     return f"""{visual["prompt_heading"]}
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
 
 Do not generate the image automatically from this Ads-planning response.
 
-PRODUCT AND CAMPAIGN
+SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4
+
+PRODUCT AND VERIFIED METADATA
 
 - Product name: {product_name}
 - Sport/category: {category}
 - Country/market: {country}
 - Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
-- Creative concept: {visual["route"]} — {visual["supporting_label"]}
-- Copy source row: {visual["copy_row"]}
-{on_image_wording_source}
+- Route key: {visual["route_key"]}
+- Route name: {visual["route"]}
+- Camera role: {visual["camera_role"]}
+- Product sport used for room selection: {visual.get("product_sport")}
+- Product era/mood classification: {visual.get("product_era")} / {visual.get("artwork_mood")}
+- Edition limit used: {visual.get("edition_limit_used")}
+- Edition limit source: {visual.get("edition_limit_source")}
 
-PSYCHOLOGICAL PURPOSE
+{scarcity_note}
 
-{visual["purpose"]}
+RESOLVED ROUTE VARIABLES — FOLLOW EXACTLY
 
-RESOLVED AUTOMATIC SCENE FINGERPRINT — FOLLOW EXACTLY
-
+- Camera angle: {visual["camera_side"]}
+- Camera instruction: {visual["camera_instruction"]}
+- Room profile: {visual["room_profile"]}
 - Room type: {visual["room_type"]}
-- Wall colour family: {visual["wall_colour"]}
-- Wall material/finish: {visual["wall_material"]}
-- Camera side and angle: {visual["camera_side"]}
-- Camera height: {visual["camera_height"]}
-- Shot distance/product prominence: {visual["shot_distance"]}
-- Lens character: {visual["lens"]}
-- Lighting direction: {visual["lighting"]}
+- Room materials: {visual["room_materials"]}
+- Wall finish: {visual["wall_finish"]}
+- Wall colour: {visual["wall_colour"]}
+- Primary cue: {visual["primary_cue"]}
+- Secondary cue: {visual["secondary_cue"]}
+- Natural light: {visual["lighting"]}
 - Time of day: {visual["time_of_day"]}
-- Overlay position: {visual["overlay_position"]}
-- Product position: {visual["product_position"]}
-- Primary architectural cue: {visual["architectural_cue"]}
-- Cover composition: {visual["composition"]}
-- Resolved sport atmosphere for language and subtle material character only: {resolved_instant_experience_sport_atmosphere(category)}
-- The sport atmosphere guide must not replace or broaden any resolved room, wall, camera, product-position, lighting or time-of-day value above.
+- Product dominance: {visual["shot_distance"]}
+- Lens character: {visual["lens"]}
+- Conversion panel: {visual["overlay_position"]}
 
-Fingerprint for this cover:
-{json.dumps(fingerprint, ensure_ascii=False, indent=2)}
+Resolved prompt metadata:
+{resolved_json}
 
-COMPOSITION AND OVERLAY
+CANONICAL SPORTS CAVE MASTER PROMPT
 
-- Build a premium photorealistic 1024 x 1024 square Meta Instant Experience cover.
-- The framed Sports Cave product must be the visual hero and remain large enough to understand on mobile.
-- {visual["overlay_rule"]}
-{visual["extra_rules"]}
-- Keep overlay text short, premium and mobile-readable.
-- Do not put overlay text, CTA text or design elements across faces, typography, logos, signatures, plaque, edition plate or important artwork details.
+Create one ultra-realistic 1024 x 1024 Meta Instant Experience cover for Sports Cave.
 
-{collector_control_block}
+The final image must be:
+- exactly 1024 x 1024 pixels
+- true 1:1 square
+- sRGB
+- designed for mobile viewing
+- clear and readable at a 256 x 256 preview
+
+Composition is locked:
+- Upper photographed residential room scene: exactly 76% of the canvas.
+- Lower conversion panel: exactly 24% of the canvas.
+- Framed product width: approximately 82-88% of the canvas.
+- Complete frame visible with no cropped outer frame edges.
+- Safe margins: 64-72 pixels.
+- The supplied framed product is the largest and most important visual element.
+
+The three-image package must produce:
+1. Slight right-angle product photograph.
+2. Straight-on product photograph.
+3. Slight left-angle product photograph.
+
+This route must deliver only its assigned camera role: {visual["route"]}.
+
+PRODUCT LOCK — ABSOLUTE
+
+The selected product and artwork are protected assets. Use original supplied product pixels wherever the current pipeline supports compositing.
+
+Preserve exactly:
+- athletes and facial features
+- bodies, hands, hairstyles, uniforms and poses
+- all existing words, numbers and signatures
+- existing badges and logos
+- artwork colours and contrast
+- artwork composition
+- frame proportions
+- complete product boundaries
+
+Never recreate, redraw, mirror, crop, extend, stretch, warp, blur, recolour or replace the artwork. Never place promotional copy inside the supplied artwork. Never add competing sports artwork to the room.
+
+ROOM SELECTION AND ENVIRONMENT
+
+Use the resolved room profile because it was selected from the product's available sport, era, artwork mood, palette and campaign context. The product supplies the sport. The room supplies the lifestyle.
+
+Room direction:
+- {visual["room_profile"]}
+- {visual["room_materials"]}
+- Primary cue: {visual["primary_cue"]}
+- Secondary cue: {visual["secondary_cue"]}
+
+Use exactly one primary cue and no more than one secondary cue. Do not add team flags, jerseys, additional athlete pictures, readable televisions, sport-specific logos, neon signs, alcohol displays, pool tables, excessive trophies or memorabilia.
+
+MANDATORY SEAMLESS WALL SYSTEM
+
+Every wall must be seamless, residential, premium, matte, realistically textured, visually quiet and free from unexplained lines.
+
+Approved wall finish for this route: {visual["wall_finish"]}.
+Resolved wall colour for this route: {visual["wall_colour"]}.
+
+Include extremely subtle natural microtexture, gentle organic tonal variation, realistic light falloff, soft brightness variation and approximately 2-4% visible mottling. No obvious repeated pattern.
+
+Never generate horizontal wall lines, vertical wall lines, tile lines, grout, stone-slab divisions, concrete formwork divisions, panel joins, timber slats, decorative panels, geometric grooves, repeated seams, wainscoting, moulding behind the artwork, brick outlines, wallpaper stripes, rectangular wall sections, artificial shadow bands, lines passing behind the frame, commercial hotel-lobby walls, office walls or property-showroom walls.
+
+A genuine doorway, window edge or room corner is allowed only near the outer part of the scene. It must follow correct perspective and must not pass behind or visually divide the framed product. Reject an otherwise strong generation if an unexplained line appears anywhere on the wall.
+
+FRAME, GLASS AND MOUNTING REALISM
+
+Frame:
+- slim-to-medium black timber moulding
+- approximately 18-22 mm visible front face
+- approximately 28-34 mm wall projection
+- sharp 45-degree mitred corners
+- restrained satin-black finish
+- subtle irregular timber grain
+- physically consistent construction
+- natural frame depth appropriate to the selected camera angle
+
+Mounting:
+- believable 6-10 mm mounting gap
+- narrow contact shadow
+- softer secondary shadow
+- slightly more shadow beneath the frame
+- shadow direction consistent with room lighting
+- no black halo, uniform digital drop shadow or floating product
+
+Glass:
+- clear gallery-style glazing
+- approximately 8-15% partial reflection coverage
+- approximately 3-6% reflection opacity
+- one believable room or window reflection
+- reflection stops at the inner frame edge
+- artwork remains crisp
+- no plastic film, wrinkles, full-surface haze or glare over important faces, text or signatures
+
+LIGHTING
+
+Use one physically consistent source of soft daylight with restrained interior ambient light.
+- Approximate temperature: 4000-4700K.
+- Match lighting across wall, furniture, frame and glass.
+- Use realistic falloff.
+- Keep peripheral room elements slightly softer than the product.
+- Do not darken or recolour the protected artwork.
+
+Never use a spotlight directly above the frame, glowing outlines, rim lighting, fog, smoke, light rays, heavy vignettes, conflicting light directions or excessive golden lighting.
+
+CONVERSION PANEL AND DETERMINISTIC OVERLAY
+
+Use the same exact 24% lower panel in all three routes:
+- deep matte charcoal near #101112 or #121314
+- extremely subtle premium paper or fine-grain texture
+- one 1-pixel muted-gold boundary line across the scene transition
+- no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
+
+Add all promotional typography as a deterministic flat overlay using real fonts after the room/product photograph is composed. Do not rely on the image-generation model to organically render copy in the photographed scene.
+
+Resolved on-image copy:
+HEADLINE: {visual.get("headline_text")}
+SUPPORTING LINE: {visual.get("supporting_line")}
+CTA: {visual.get("cta_text")}
+
+Use the headline and CTA consistently across the package. The supporting line is route-specific and must be the resolved line above.
+
+Typography:
+- Headline: premium Sports Cave editorial serif, warm ivory.
+- Supporting line: Montserrat Regular or Medium, warm off-white.
+- CTA: Montserrat SemiBold or Bold, muted antique gold.
+- No fake button, price, discount, arrow or second CTA.
+
+Meaningful gold underline:
+- If the headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number.
+- Width: visible number width plus approximately 4-8 pixels.
+- Gap beneath the number: approximately 5-7 pixels.
+- Thickness: 2 pixels.
+- Colour close to #C7A15A.
+- Use clean or subtly tapered ends.
+- No floating centred dash, bright yellow, orange, glitter, metallic gradient or strong glow.
+- The underline must move automatically when the edition limit changes.
+- If exact number-level positioning cannot be guaranteed, underline approximately 96-100% of the complete measured headline. Never place an arbitrary decorative line beneath empty space.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
@@ -3863,11 +4926,38 @@ AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
 
 {build_sport_country_visual_adaptation(category, country)}{campaign_moment_visual_block}
 
-ROUTE-SPECIFIC FINAL CONDITIONS
+FINAL ROUTE CHECK
 
-- Product facts, athlete identity, team identity, manufacturing origin and edition details must not change because of the selected country.
-- No fake memorabilia, no extra artwork, no unofficial branding, no platform watermark, no fake UI button and no generated sporting props.
-- Return only after the mandatory V2 correction gate and the authoritative app-wide realism lock both pass."""
+- Right, front and left camera directions are distinct across the package.
+- This route uses its exact camera role and is not a mirrored duplicate of another route.
+- Wall colour and cues differ from the other routes.
+- Room variation remains subtle and product-led.
+- The room never becomes a themed sports bar.
+- The lower panel remains exactly 24%.
+- No unresolved placeholders remain.
+- No unverified quantity or scarcity fact is introduced."""
+
+
+def build_standard_instant_experience_image_prompt(
+    index,
+    visual,
+    *,
+    product_name,
+    category,
+    country,
+    product_url="",
+    campaign_moment=None,
+    recent_fingerprints=None,
+):
+    return build_instant_experience_canonical_prompt_v4(
+        index,
+        visual,
+        product_name=product_name,
+        category=category,
+        country=country,
+        product_url=product_url,
+        campaign_moment=campaign_moment,
+    )
 
 
 def build_standard_instant_experience_visual_prompts(
@@ -3877,8 +4967,17 @@ def build_standard_instant_experience_visual_prompts(
     country,
     product_url="",
     campaign_moment=None,
+    product_metadata=None,
+    variation_token="",
     recent_fingerprints=None,
 ):
+    visuals = resolve_standard_instant_experience_visuals(
+        product_name=product_name,
+        category=category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+        variation_token=variation_token,
+    )
     prompts = [
         build_standard_instant_experience_image_prompt(
             index,
@@ -3890,19 +4989,19 @@ def build_standard_instant_experience_visual_prompts(
             campaign_moment=campaign_moment,
             recent_fingerprints=recent_fingerprints,
         )
-        for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1)
+        for index, visual in enumerate(visuals, start=1)
     ]
     return "\n\n".join(prompts)
 
 
-def build_instant_experience_copy_variation_table_contract(concept_name):
+def build_instant_experience_copy_variation_table_contract(route_name):
     return f"""COPY VARIATIONS
 
-| Variation | Primary Text | Headline | CTA |
-| --------- | ------------ | -------- | --- |
-| 1 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |
-| 2 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |
-| 3 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |"""
+| Description | Description Key | Description Label | Description Copy | Headline | CTA |
+| ----------- | --------------- | ----------------- | ---------------- | -------- | --- |
+| 1 | legacy_standard | Description 1 — Legacy Standard | Complete {route_name} Legacy Standard description copy | Complete {route_name} headline | Complete {route_name} CTA |
+| 2 | framed_greatness | Description 2 — Framed Greatness | Complete {route_name} Framed Greatness description copy | Complete {route_name} headline | Complete {route_name} CTA |
+| 3 | choose_a_side | Description 3 — Choose a Side | Complete {route_name} Choose a Side description copy | Complete {route_name} headline | Complete {route_name} CTA |"""
 
 
 def build_standard_instant_experience_group_output_contract(
@@ -3912,10 +5011,19 @@ def build_standard_instant_experience_group_output_contract(
     country,
     product_url="",
     campaign_moment=None,
+    product_metadata=None,
+    variation_token="",
     recent_fingerprints=None,
 ):
     group_sections = []
-    for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1):
+    visuals = resolve_standard_instant_experience_visuals(
+        product_name=product_name,
+        category=category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+        variation_token=variation_token,
+    )
+    for index, visual in enumerate(visuals, start=1):
         image_prompt = build_standard_instant_experience_image_prompt(
             index,
             visual,
@@ -4379,7 +5487,7 @@ SEPARATE CTA TYPES
 - Emotional angle: controlled by the active route.
 - On-image creative CTA: generated under CREATIVE CTA.
 - Meta/Instant Experience fixed-button CTA: generated under FIXED BUTTON CTA.
-- Primary-text close: must match the active route.
+- Description archetype: must match the ordered product-aware description system.
 - Offer: may be used only when the active route supports it and the exact offer is supplied.
 - Destination: use the exact product or collection destination supplied in this prompt.
 
@@ -4395,7 +5503,7 @@ COPY DIVERSITY RULES
 - Each option must have one dominant psychological job.
 - No shared opening sentence.
 - No duplicated headline.
-- Every creative CTA must use the approved This Edition family and match its Primary Text ending.
+- Every creative CTA must use the approved This Edition family.
 - Only ACT may use the black-and-gold bottom scarcity strip.
 - Only one option may use "Greatness doesn't fade."
 - FEEL must not sound like ACT with urgency lines removed.
@@ -4415,8 +5523,8 @@ ROUTE OUTPUT CONTRACTS
 FINAL QUALITY CHECK
 
 - The output count matches the selected Creative output mode.
-- Every option contains exactly one Primary Text, one Headline, one Meta Ad Description, one Creative CTA, one Fixed Button CTA, one Campaign Strategy, one Instant Experience Setup block and one complete standalone cover prompt.
-- No Description section is used except the clearly labelled META AD DESCRIPTION field.
+- Every route contains exactly one image-generation prompt and one three-row table with Description Key, Description Label, Description Copy, Headline and CTA.
+- No separate Meta link-description or Meta Ad Description field is used.
 - product.name is used as the catalogue product headline.
 - Limited Edition is used as the catalogue product description.
 - The exact supplied destination URL is used: {product_url or "[selected product URL]"}.
@@ -4433,6 +5541,8 @@ def build_instant_experience_visual_output_requirements(
     country="",
     product_url="",
     campaign_moment=None,
+    product_metadata=None,
+    variation_token="",
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -4449,7 +5559,7 @@ def build_instant_experience_visual_output_requirements(
     )
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-Return exactly three complete grouped Instant Experience concepts in the standard order: Framed Greatness Scarcity Hybrid, Pure Limited-Release Scarcity, then Collector Proof Scarcity.
+Return exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Right Angle, Premium Scarcity — Straight On, then Premium Scarcity — Left Angle.
 
 Do not output a fourth prompt.
 Do not output one shared prompt with variations.
@@ -4460,12 +5570,19 @@ Do not generate images.
 
 Each standalone prompt must contain the shared Sports Cave product/realism lock exactly once and remain fully copyable into a fresh ChatGPT conversation.
 
-The three covers must visibly differ in composition, room type, wall colour/material, camera angle, product prominence, lighting/time of day and typography placement.
+The three covers must visibly differ in camera angle, room profile, wall colour/material, environmental cue, furniture crop, light direction or intensity and FOMO supporting line while preserving one premium Sports Cave campaign.
 
-{build_standard_instant_experience_freshness_block(category=category, recent_fingerprints=recent_instant_experience_fingerprints)}
+{build_standard_instant_experience_freshness_block(
+    product_name=product_name,
+    category=category,
+    product_metadata=product_metadata,
+    campaign_moment=campaign_moment,
+    variation_token=variation_token,
+    recent_fingerprints=recent_instant_experience_fingerprints,
+)}
 {campaign_moment_visual_block}
 
-GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE CONCEPT AT A TIME
+GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME
 
 {build_standard_instant_experience_group_output_contract(
     product_name=product_name,
@@ -4473,6 +5590,8 @@ GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE CONCEPT AT A TIME
     country=country,
     product_url=product_url,
     campaign_moment=campaign_moment,
+    product_metadata=product_metadata,
+    variation_token=variation_token,
     recent_fingerprints=recent_instant_experience_fingerprints,
 )}
 
@@ -4480,10 +5599,10 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
-- Framed Greatness Scarcity Hybrid begins every Primary Text with the exact approved opener, uses one fact-supported nostalgia sentence, then becomes scarcity-dominant.
-- Pure Limited-Release begins with scarcity immediately and uses the full-width upper product image and full-width bottom black-and-gold collector strip treatment.
-- Collector Proof uses one brief fact-supported nostalgia line, then a visibly different close product-and-genuine-proof composition.
-- Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping from Copy Variation 1, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
+- Premium Scarcity — Right Angle uses the slight right-angle camera role and its route FOMO line when edition-limit data is verified.
+- Premium Scarcity — Straight On uses the straight-on camera role and its route FOMO line when edition-limit data is verified.
+- Premium Scarcity — Left Angle uses the slight left-angle camera role and its route FOMO line when edition-limit data is verified.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, exact 76/24 layout, deterministic overlay wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -4669,10 +5788,10 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
     elif campaign_type == "Instant Experience":
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include exactly one easy-to-copy "
-            "grouped package for Nostalgia, Ownership and Scarcity. Each group must contain one complete standalone "
-            "cover image prompt followed by a three-row Markdown table for Primary Text, Headline and CTA. The response "
+            "grouped package for Premium Scarcity Right Angle, Premium Scarcity Straight On and Premium Scarcity Left Angle. Each group must contain one complete standalone "
+            "cover image prompt followed by a three-row Markdown table for Description Key, Description Label, Description Copy, Headline and CTA. The response "
             "must contain nine total ad-copy combinations and one shared Instant Experience setup block after the groups. "
-            "Do not include Description fields, Meta Ad Description fields, "
+            "Do not include Meta link-description fields, Meta Ad Description fields, "
             "Campaign Strategy essays, route-selection packages, rejected alternatives or follow-up generation questions."
         )
     elif campaign_type == "Single Image / Video":
@@ -4689,14 +5808,14 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-2. GROUP 2 — PURE LIMITED-RELEASE SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-3. GROUP 3 — COLLECTOR PROOF SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-4. Exactly nine complete ad-copy combinations total.
+        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+4. Exactly nine complete ad-copy combinations total using the ordered description keys legacy_standard, framed_greatness and choose_a_side.
 5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
 
-No Description or Meta Ad Description field is allowed."""
+No separate Meta link-description or Meta Ad Description field is allowed."""
     else:
         ad_package_items = """1. Campaign objective and funnel stage.
 2. Target market and audience.
@@ -4714,7 +5833,7 @@ No Description or Meta Ad Description field is allowed."""
     approval_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         completion_instruction = (
-            "After GROUP 3 — COLLECTOR PROOF SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
+            "After GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
             "Do not ask which cover to generate and do not ask a follow-up generation question."
         )
     else:
@@ -4724,7 +5843,7 @@ No Description or Meta Ad Description field is allowed."""
             f'"{approval_question}"'
         )
     direct_instruction_examples = (
-        '"generate the image now", "generate the Framed Greatness Scarcity Cover" or "generate the Numbered Collector Proof Scarcity Cover"'
+        '"generate the image now", "generate the Premium Scarcity Right Angle cover" or "generate the Premium Scarcity Left Angle cover"'
         if campaign_type == "Instant Experience"
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
@@ -4759,6 +5878,7 @@ def build_campaign_visual_output_contract(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -4780,6 +5900,8 @@ def build_campaign_visual_output_contract(
             country=country,
             product_url=product_url,
             campaign_moment=campaign_moment,
+            product_metadata=product_metadata,
+            variation_token=variation_token,
             instant_experience_settings=instant_experience_settings,
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
         )
@@ -4793,11 +5915,11 @@ def build_campaign_visual_output_contract(
     contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
-            "Return the finished standard Instant Experience output in this order: GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID, "
-            "GROUP 2 — PURE LIMITED-RELEASE SCARCITY, GROUP 3 — COLLECTOR PROOF SCARCITY, then one shared INSTANT EXPERIENCE SETUP block. "
+            "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, "
+            "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE, then one shared INSTANT EXPERIENCE SETUP block. "
             "Each group must contain one standalone image-generation prompt followed by three matching "
-            "Primary Text, Headline and CTA variations. Preserve every setup instruction, destination rule and URL parameter. "
-            "Do not add Description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
+            "Description Copy, Headline and CTA rows in the ordered keys legacy_standard, framed_greatness and choose_a_side. Preserve every setup instruction, destination rule and URL parameter. "
+            "Do not add Meta link-description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
             f"{INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION}"
         )
     else:
@@ -4808,13 +5930,13 @@ def build_campaign_visual_output_contract(
         )
     if campaign_type == "Instant Experience":
         visual_section_intro = (
-            "Use the campaign-specific grouped concept section below as the single final Instant Experience output. "
-            "It already contains the standalone image-generation prompt and three matching copy variations for each concept. "
+            "Use the campaign-specific grouped route section below as the single final Instant Experience output. "
+            "It already contains the standalone image-generation prompt and three matching ordered description rows for each route. "
             "Do not output a separate duplicate copy package before or after it."
         )
         final_output_instruction = (
             "Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives "
-            "or give general creative advice. Return only the three grouped concept sections and the shared setup block."
+            "or give general creative advice. Return only the three grouped route sections and the shared setup block."
         )
     else:
         visual_section_intro = "Directly beneath that complete existing output, return the campaign-specific visual section required below."
@@ -4841,8 +5963,8 @@ def build_campaign_visual_output_contract(
         final_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         final_response_termination = (
-            "Only after GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID, GROUP 2 — PURE LIMITED-RELEASE SCARCITY, "
-            "GROUP 3 — COLLECTOR PROOF SCARCITY "
+            "Only after GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, "
+            "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE "
             "and the shared INSTANT EXPERIENCE SETUP block have been printed, stop. "
             "Do not ask a follow-up question and do not generate images."
         )
@@ -4903,6 +6025,7 @@ def apply_campaign_visual_output_contract(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -4925,6 +6048,7 @@ def apply_campaign_visual_output_contract(
         template_key=template_key,
         variation_token=variation_token,
         campaign_moment=campaign_moment,
+        product_metadata=product_metadata,
         instant_experience_settings=instant_experience_settings,
         recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
@@ -5396,35 +6520,41 @@ def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_s
     if campaign_type == "Instant Experience":
         return f"""{META_WINNER_COPY_BLOCK_VERSION}
 
-This block strengthens the standard Instant Experience grouped concept output only. Preserve the approved output order, three concept groups, three copy variations per concept, CTA column, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
+This block strengthens the standard Instant Experience grouped route output only. Preserve the approved output order, three route groups, three ordered description options per route, Headline and CTA columns, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
 
 {SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2}
 
 {build_instant_experience_creative_cta_rules()}
 
-STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY
+STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY
 
-- Return exactly three grouped concepts: GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID, GROUP 2 — PURE LIMITED-RELEASE SCARCITY and GROUP 3 — COLLECTOR PROOF SCARCITY.
-- Each concept must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
-- Each concept table must contain exactly three completed rows.
-- Each row must contain one complete Primary Text, one Headline and one CTA.
+- Return exactly three grouped routes: GROUP 1 - PREMIUM SCARCITY - RIGHT ANGLE, GROUP 2 - PREMIUM SCARCITY - STRAIGHT ON and GROUP 3 - PREMIUM SCARCITY - LEFT ANGLE.
+- Each route must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
+- Each route table must contain exactly three completed description rows in this order: legacy_standard, framed_greatness, choose_a_side.
+- Each row must contain one complete Description Copy, one Headline and one CTA.
 - The full response must contain exactly nine complete ad-copy combinations.
-- No Description or Meta Ad Description field is allowed.
+- No separate Meta link-description or Meta Ad Description field is allowed.
 - No row may be placeholder copy.
-- Route 1 must use its exact fixed opener in all three of its own variations; Routes 2 and 3 must not use that opener.
+- The same three product-aware Description Copy values must be associated with all three image routes; do not rewrite the long description merely because the camera angle changes.
+- All three routes share the same premium Sports Cave scarcity headline system and CTA while using different camera angles, room details, environmental cues and supporting FOMO lines.
+- Route 1 must resolve the Slight Right Angle cover with the supporting FOMO line: Once they're claimed, this edition retires forever.
+- Route 2 must resolve the Straight On cover with the supporting FOMO line: When the final one is claimed, it's gone for good.
+- Route 3 must resolve the Slight Left Angle cover with the supporting FOMO line: Released once. When they're gone, they stay gone.
 - No duplicated headline.
-- Every CTA and matching Primary Text ending must pass the central Instant Experience creative CTA contract.
-- All three concepts must remain scarcity-first while using materially different supporting structures and scene compositions.
-- Framed Greatness Scarcity Hybrid uses its exact opener, one factual nostalgia sentence and then dominant verified scarcity.
-- Pure Limited-Release begins with scarcity immediately and contains no nostalgia, identity or ownership opening.
-- Collector Proof uses one factual nostalgia sentence, then verified finite-release and evidence-gated proof scarcity.
+- Every CTA must be one approved direct edition-acquisition CTA. Description 1 in each route must use CTA field Claim Your Edition.
+- All three routes must remain scarcity-first while using the same ordered product-aware description archetypes and materially different image scene compositions.
+- Description 1 must follow Legacy Standard.
+- Description 2 must follow Framed Greatness.
+- Description 3 must follow Choose a Side.
+- The on-image headline must be ONLY {{verified edition limit}} WILL EVER EXIST only when the edition limit is verified by supplied product data or an approved claim path.
+- When the verified limit is 100, the headline must resolve exactly to ONLY 100 WILL EVER EXIST.
+- If a verified edition limit is unavailable, use the existing safe evidence-gated fallback instead of inventing a quantity or finality claim.
 - A supplied offer may be used only when exact, fact-safe and permitted by the existing campaign contract; never let it replace the edition scarcity.
 - Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
 - Use natural selected-country English.
-- Framed Greatness Scarcity Hybrid uses its exact two-line top Headline and evidence-gated lower wording. Pure Limited-Release keeps its evidence-gated three-line strip. Collector Proof uses one evidence-gated Headline, proof line and CTA.
-- Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other concepts. Do not expose this working order or change the approved response order."""
+- Generate the three description variants once from product context, then reuse the same ordered description set for the right, front and left route tables. Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other routes. Do not expose this working order or change the approved response order."""
     single_primary_rule = (
-        "Instant Experience must always preserve exactly three concept groups with three Primary Text, "
+        "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
         if campaign_type == "Instant Experience"
         else (
@@ -5459,15 +6589,15 @@ Variation 2 - Framed Greatness
 
 Use this exact two-line opening once:
 
-Greatness doesn’t fade.
+Greatness doesn't fade.
 It gets framed.
 
 - Do not repeat greatness in the middle or closing.
 - Write one compact product-specific paragraph using the supplied product name, supported people, team, vehicle, event or moment, selected sport, selected country, fan emotion and any verified era, rivalry, mentality or memory.
 - Follow with one short emotional paragraph about collector ownership or display appeal.
-- Close with: Limited to {{authentic edition limit}} worldwide. Secure your edition before it’s gone.
+- Close with: Limited to {{authentic edition limit}} worldwide. Secure your edition before it's gone.
 - Replace {{authentic edition limit}} with the confirmed edition quantity from the approved claim path, supplied product information or visible artwork. Never leave the placeholder in final copy.
-- When the confirmed edition limit is 100, write exactly: Limited to 100 worldwide. Secure your edition before it’s gone.
+- When the confirmed edition limit is 100, write exactly: Limited to 100 worldwide. Secure your edition before it's gone.
 - When no edition quantity is confirmed, use the strongest truthful scarcity already permitted by the campaign instead. Never fabricate 100, a numbered edition or a no-second-run claim.
 
 Variation 3 - Nostalgia And Remembered Moment
@@ -5503,12 +6633,7 @@ UNIVERSAL PRIMARY-TEXT QUALITY
 - Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter and bring your walls to life.
 - Do not name unsupported athletes, teams, records, years, trophies, events, numbers or achievements.
 - Do not claim licensing, signatures or authenticity unless supplied.
-- Do not use discount language unless the campaign variables explicitly support it.
-- The five variations must feel like five distinct human selling angles rather than rewrites of one message.
-
-SILENT COPY SELECTION
-
-Before returning the campaign, privately compare several product-specific candidates for each required angle. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the current approved output format. Do not expose candidates, scoring notes, research or reasoning."""
+- Never invent edition quantities, remaining inventory, certificates, signatures, manufacturing claims, sport details, milestones, rivalry details, discounts or product facts."""
 
 
 def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type, instant_experience_settings=None):
@@ -5531,6 +6656,7 @@ def compose_final_ads_prompt(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -5566,6 +6692,7 @@ def compose_final_ads_prompt(
             template_key=template_key,
             variation_token=variation_token,
             campaign_moment=campaign_moment,
+            product_metadata=product_metadata,
             instant_experience_settings=instant_experience_settings,
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
         )
@@ -6268,7 +7395,7 @@ CALL TO ACTION
 
 Generate exactly five creative CTA options using only Claim Your Edition, Secure Your Edition or Own This Edition.
 
-The matching Primary Text must end with the corresponding sentence-case CTA. Keep Meta's native fixed button as Shop Now.
+The Description Copy must follow its assigned archetype ending. Keep Meta's native fixed button as Shop Now.
 
 INSTANT EXPERIENCE SETUP GUIDE
 
@@ -6358,7 +7485,7 @@ Before returning the output, confirm:
 - Exactly 5 Primary Text options are provided.
 - Exactly 5 Headlines are provided.
 - Exactly 5 Call To Action button-label options are provided.
-- No Description section or Description fields are present.
+- No separate Meta link-description or Meta Ad Description field is present.
 - Instant Experience setup instructions are included.
 - The generated Instant Experience cover upload step is specified.
 - Shopify Product Catalog is specified.
@@ -6507,6 +7634,8 @@ def build_standard_instant_experience_prompt(
     *,
     specific_pattern=False,
     campaign_moment=None,
+    product_metadata=None,
+    variation_token="",
 ):
     product_name = _clean_product_name(product_name)
     product_url = _clean_product_url(product_url)
@@ -6525,6 +7654,25 @@ def build_standard_instant_experience_prompt(
     )
     category_block = build_category_winner_angle_block(category, campaign_type, country)
     exact_offer = _standard_instant_experience_exact_offer(campaign_moment)
+    product_context = resolve_instant_experience_product_context(
+        product_name,
+        category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+    )
+    description_context = resolve_instant_experience_description_context(
+        product_name,
+        category,
+        product_metadata=product_metadata,
+        campaign_moment=campaign_moment,
+        country=country,
+    )
+    edition_context_line = (
+        f"Verified edition limit: {product_context['edition_limit']} "
+        f"({product_context['edition_limit_source']})."
+        if product_context.get("edition_limit")
+        else "Verified edition limit: not supplied; use evidence-gated non-numeric fallback wording."
+    )
     claim_block = (
         build_baseball_instant_experience_claim_block()
         if category == "Baseball"
@@ -6570,30 +7718,42 @@ APPROVED CLAIM PATH
 
 {claim_block}
 
+PRODUCT-AWARE ROOM AND SCARCITY METADATA
+
+- Product sport used for room matching: {product_context['product_sport']}
+- Product era classification: {product_context['product_era']}
+- Artwork mood classification: {product_context['artwork_mood']}
+- Campaign or gifting context: {product_context['campaign_context']}
+- {edition_context_line}
+
+PRODUCT-AWARE DESCRIPTION SYSTEM
+
+{build_instant_experience_description_generation_prompt(description_context)}
+
 PROMOTION OR OFFER
 
 Exact Promotion or Offer entered: {exact_offer or "None supplied"}
 
-Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly. Use it only in Pure Limited-Release Scarcity Variation 3 when the product facts and campaign context support an offer-led collector test. Never let it replace the verified edition scarcity. Never invent, rewrite, improve or expand the offer.
+Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly in copy only when the product facts and campaign context support it. Never place an offer in the on-image prompt, never let it replace verified edition scarcity and never invent, rewrite, improve or expand the offer.
 
 OBJECTIVE
 
-Create one standard Meta Instant Experience package grouped into three clear concepts:
+Create one standard Meta Instant Experience package grouped into three clear routes:
 
-1. FRAMED GREATNESS SCARCITY HYBRID
-2. PURE LIMITED-RELEASE SCARCITY
-3. COLLECTOR PROOF SCARCITY
+1. PREMIUM SCARCITY — RIGHT ANGLE
+2. PREMIUM SCARCITY — STRAIGHT ON
+3. PREMIUM SCARCITY — LEFT ANGLE
 
 Return exactly these sections in this order:
 
-1. GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID
-2. GROUP 2 — PURE LIMITED-RELEASE SCARCITY
-3. GROUP 3 — COLLECTOR PROOF SCARCITY
+1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE
+2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON
+3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE
 4. INSTANT EXPERIENCE SETUP
 
 Do not output five global copy variations.
 Do not output one global copy table disconnected from the images.
-Do not output Campaign Strategy essays, rejected alternatives, placeholder copy, Meta Ad Description fields, Description fields, separate creative/fixed CTA fields, FEEL/BELONG/ACT packages, route selectors, multi-route mode language, old control-mode labels or collection-page routing.
+Do not output Campaign Strategy essays, rejected alternatives, placeholder copy, Meta link-description fields, Meta Ad Description fields, separate creative/fixed CTA fields, FEEL/BELONG/ACT packages, route selectors, multi-route mode language, old control-mode labels or collection-page routing.
 Do not ask which image to generate.
 Do not generate images.
 
@@ -6601,74 +7761,67 @@ GROUP OUTPUT CONTRACT
 
 For each group, output exactly this structure:
 
-GROUP [number] — [CONCEPT]
+GROUP [number] — [ROUTE]
 
 IMAGE GENERATION PROMPT
 
-[one complete standalone image-generation prompt for this concept]
+[one complete standalone image-generation prompt for this route]
 
 COPY VARIATIONS
 
-| Variation | Primary Text | Headline | CTA |
-| --------- | ------------ | -------- | --- |
-| 1 | Complete copy | Complete headline | Complete CTA |
-| 2 | Complete copy | Complete headline | Complete CTA |
-| 3 | Complete copy | Complete headline | Complete CTA |
+| Description | Description Key | Description Label | Description Copy | Headline | CTA |
+| ----------- | --------------- | ----------------- | ---------------- | -------- | --- |
+| 1 | legacy_standard | Description 1 — Legacy Standard | Complete Legacy Standard description copy | Complete headline | Complete CTA |
+| 2 | framed_greatness | Description 2 — Framed Greatness | Complete Framed Greatness description copy | Complete headline | Complete CTA |
+| 3 | choose_a_side | Description 3 — Choose a Side | Complete Choose a Side description copy | Complete headline | Complete CTA |
 
-Every group table must contain exactly three completed rows. Across all groups, output exactly nine complete ad-copy combinations.
+Every group table must contain exactly three completed rows in the fixed description order. Across all groups, output exactly nine complete ad-copy combinations.
 
 Table rules:
-- Keep each table cell on one line so Nathan can copy and paste into the matching concept section in the app.
+- Keep each table cell on one line so Nathan can copy and paste into the matching route section in the app.
 - Escape any vertical-bar characters that would break the Markdown table.
-- Never leave placeholders such as Primary text option 2, Headline option 3, Shop Now repeated, Add copy here, Complete copy or To be generated in the returned answer.
-- Copy Variation 1 in each concept supplies the exact on-image Headline and CTA for that concept's image prompt.
-- Copy Variations 2 and 3 are alternative Meta copy combinations for testing with the same concept image.
-- Do not put the full Primary Text on any image.
+- Preserve paragraph breaks inside each Description Copy cell where the platform supports multiline cells, or use visible line breaks that can be pasted into the matching description field.
+- Never leave placeholders such as Description copy option 2, Headline option 3, Shop Now repeated, Add copy here, Complete copy or To be generated in the returned answer.
+- Description 1 in each route supplies copy aligned with that route's exact on-image CTA field.
+- Descriptions 2 and 3 are alternative product-aware description options for testing with the same route image.
+- The three Description Copy values must be the same ordered product-aware set in every route table.
+- Do not put the full Description Copy on any image.
 
-CONCEPT-SPECIFIC COPY RULES
+ROUTE-SPECIFIC COPY RULES
 
-FRAMED GREATNESS SCARCITY HYBRID — Headline-Led Collector Hybrid:
-- Purpose: create desire with one factual sporting memory, then sell the finite collector release.
-- The first sentence of every Primary Text must be exactly: Greatness doesn’t fade. It gets framed.
-- Sentence 2 must be one short, product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
-- Pivot immediately into authentic scarcity: only 100 editions worldwide and permanent retirement once sold out, only when those claims are approved.
-- Keep nostalgia brief and scarcity dominant. Use three materially different supported nostalgia lines after the fixed opener.
-- Never invent achievements, venues, rivalries, statistics, dates, opponents or historical details.
-- Every Headline must be scarcity-led and contain no more than 4-6 words.
-- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Secure Your Edition and end with Secure your edition.
+PREMIUM SCARCITY — RIGHT ANGLE:
+- Purpose: convert through a slight right-angle product photograph, a premium collector-home setting and verified scarcity when available.
+- Camera-supporting line: Once they're claimed, this edition retires forever.
+- Use the route FOMO line only when a verified finite edition limit exists.
+- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
+- Description 1 must use CTA field Claim Your Edition.
 
-PURE LIMITED-RELEASE SCARCITY — Limited Release Wall:
-- Purpose: make the verified finite release and permanent sell-out finality the immediate reason to act.
-- Begin every Primary Text with scarcity immediately.
-- Do not begin with nostalgia, identity, ownership, room transformation or emotional display language.
-- State that only 100 editions are available worldwide and that the artwork retires permanently once sold out, only when those claims are approved.
-- Use three different direct scarcity hooks and sentence structures.
-- Never invent a remaining quantity, sales velocity, restock promise, offer or product fact.
-- Every Headline must be pure scarcity and contain no more than 4-6 words.
-- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Claim Your Edition and end with Claim your edition.
+PREMIUM SCARCITY — STRAIGHT ON:
+- Purpose: deliver the clearest direct scarcity hero, using the most balanced and readable front-facing product photograph.
+- Camera-supporting line: When the final one is claimed, it's gone for good.
+- Use the route FOMO line only when a verified finite edition limit exists.
+- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
+- Description 1 must use CTA field Claim Your Edition.
 
-COLLECTOR PROOF SCARCITY — Close Product & Verified Proof:
-- Purpose: convert through the finite collector release and the strongest genuine supplied collector proof.
-- Begin every Primary Text with one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
-- Do not use Greatness doesn’t fade. It gets framed. in this route.
-- Pivot immediately into the verified finite release and only a genuine supplied certificate, visible edition plate, badge, plaque or approved limited-edition proof.
-- When a certificate is not verified, do not claim or depict one; use a close presentation of an existing supplied badge, plaque or edition detail and change or omit the proof line.
-- Never invent a certificate, edition number, remaining quantity, achievement, venue, rivalry, statistic, date or subject relationship.
-- Every Headline must be scarcity-led and contain no more than 4-6 words.
-- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Own This Edition and end with Own this edition.
+PREMIUM SCARCITY — LEFT ANGLE:
+- Purpose: complete the package with a complementary left-angle product photograph that is not a mirrored duplicate of the right-angle route.
+- Camera-supporting line: Released once. When they're gone, they stay gone.
+- Use the route FOMO line only when a verified finite edition limit exists.
+- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
+- Description 1 must use CTA field Claim Your Edition.
 
 COPY FIELD FORMAT RULES
 
-- Every Primary Text must contain 3-5 short, mobile-readable sentences.
+- Every Description Copy must follow its assigned archetype structure and preserve intentional blank lines.
 - Every Headline must contain no more than 4-6 words. 4 to 6 words max.
 - Every CTA must use one exact approved direct edition-acquisition phrase from the central contract.
-- Every CTA and matching Primary Text ending must pass the central Instant Experience creative CTA contract.
+- Every CTA must pass the central Instant Experience creative CTA contract.
 - Keep the fixed Meta/Instant Experience button as: Shop Now.
-- Preserve the current Primary Text, Headline and CTA columns and all existing row counts.
+- Preserve the current Headline and CTA columns and all existing row counts. The long copy column is the Instant Experience Description Copy, stored internally as the existing primary_text field for compatibility.
 
 INSTANT EXPERIENCE SETUP
 
-After the three grouped concept packages, output one shared setup block only.
+After the three grouped route packages, output one shared setup block only.
 
 The setup block must include:
 - Use the Meta Instant Experience Product template.
@@ -6686,17 +7839,18 @@ The setup block must include:
 
 FINAL COPY CHECK
 
-- The output contains exactly three grouped concept sections.
-- Each concept contains one image-generation prompt and one three-row copy-variation table.
+- The output contains exactly three grouped route sections.
+- Each route contains one image-generation prompt and one three-row description table.
 - The output contains exactly nine complete ad-copy combinations.
-- No Description or Meta Ad Description field is present.
+- No separate Meta link-description or Meta Ad Description field is present.
 - No placeholder copy remains.
-- All three groups are scarcity-led and use materially different supporting structures.
-- Framed Greatness Scarcity Hybrid begins with its exact fixed opener, then one fact-supported nostalgia sentence before dominant verified scarcity.
-- Pure Limited-Release begins with scarcity immediately and uses the approved full-width bottom strip.
-- Collector Proof begins with one brief fact-supported nostalgia line, then verified finite-release and evidence-gated proof scarcity.
-- Every creative CTA belongs to the approved direct edition-acquisition family and agrees with the final sentence of its matching Primary Text.
-- Pure Limited-Release Copy Variation 1 and its fixed strip use Claim Your Edition; Collector Proof Copy Variation 1 uses Own This Edition.
+- All three groups are premium scarcity-led routes with distinct camera roles, room variables and supporting FOMO lines.
+- Premium Scarcity — Right Angle uses the slight right-angle camera role.
+- Premium Scarcity — Straight On uses the clear straight-on camera role.
+- Premium Scarcity — Left Angle uses the slight left-angle camera role and is not a mirror of the right route.
+- Every creative CTA belongs to the approved direct edition-acquisition family.
+- Description 1 for all three routes uses Claim Your Edition.
+- The ordered description keys are legacy_standard, framed_greatness and choose_a_side in every route.
 - Promotion or Offer has been preserved exactly when used.
 - Product URL and UTM parameters remain exact."""
 
@@ -6718,159 +7872,6 @@ def build_generic_instant_experience_prompt(
         product_url=product_url,
         specific_pattern=specific_pattern,
     )
-    product_name = _clean_product_name(product_name)
-    if specific_pattern:
-        pattern_heading = f"SPORTS CAVE {str(category or '').upper()} INSTANT EXPERIENCE WINNER PATTERN"
-    else:
-        pattern_heading = "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN"
-    fallback_note = (
-        ""
-        if specific_pattern
-        else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
-    )
-    football_block = ""
-    if category == "Football":
-        football_block = f"""
-FOOTBALL INSTANT EXPERIENCE DIRECTION
-
-- Lead with {product_name} as the hero, framed as premium football collector wall art.
-- Adapt the copy to the selected product title, moment, player, team, rivalry, final, farewell or event.
-- If the product is about a country or team, use that as the emotional hook while keeping wider appeal around football legacy, World Cup nights, iconic moments and serious collectors.
-- Output must work for World Cup, national teams, Ronaldo, Messi, Mbappe, Beckham, Arsenal, rivalries, finals, farewells and iconic football moments without inventing facts.
-"""
-    category_block = build_category_winner_angle_block(category, campaign_type, country)
-    default_cover_prompt = build_default_instant_experience_cover_prompt_requirements(
-        product_name,
-        category,
-        country,
-    )
-
-    return f"""{pattern_heading}
-
-PRODUCT
-Product name: {product_name}
-Category: {category}
-Market: {country}
-Campaign type: {campaign_type}
-Destination guidance: {build_product_url_instruction(product_url)}
-{fallback_note}
-I have attached the exact Sports Cave product image being advertised.
-
-Analyse the attached image and product title before writing.
-
-Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy or rivalry solely from the image.
-
-{build_country_campaign_localisation_note(category, country, campaign_type="Instant Experience")}
-
-{build_universal_sports_cave_rules(category)}
-
-{category_block}
-{football_block}
-OBJECTIVE
-
-Create a premium Meta Instant Experience ad package for the selected Sports Cave product.
-
-Generate exactly these sections:
-
-1. Primary Text
-2. Headline
-3. Call To Action
-4. Instant Experience Cover Prompt
-5. Instant Experience Setup
-
-PRIMARY TEXT
-
-Create exactly 5 strong options.
-
-Rules:
-- Each variant must be short, emotional and collector-driven.
-- Use nostalgia, identity, scarcity and ownership.
-- Mention limited editions naturally.
-- Adapt each variant to the selected product title, moment, player, team, rivalry, event or visual identity.
-- Make the five options genuinely different angles, not minor rewrites.
-- Do not use generic AI phrases such as elevate your space, ultimate tribute or perfect addition.
-- Do not over-explain.
-
-HEADLINES
-
-Create exactly 5 headline options.
-
-Rules:
-- 4 to 6 words max.
-- Urgent and specific to the selected category.
-- For Football, use football-specific urgency.
-- Strong style examples: Football Glory Framed; Only 100 Made; For Real Football Fans; Legends Belong Framed.
-
-CALL TO ACTION
-
-Create exactly 5 creative CTA options.
-
-Rules:
-- Use only Claim Your Edition, Secure Your Edition or Own This Edition.
-- End each matching Primary Text with the corresponding sentence-case CTA.
-- Keep Meta's native fixed button as Shop Now.
-
-INSTANT EXPERIENCE COVER PROMPT
-
-Create one image prompt for the selected product.
-
-The image prompt must use this upgraded default Instant Experience cover prompt:
-
-{default_cover_prompt}
-
-INSTANT EXPERIENCE SETUP
-
-Create one concise setup guide for Meta Instant Experience using the Product template, the selected product-page URL and the generated cover prompt. Do not add Description fields.
-
-Catalogue/cards below the Instant Experience should feel like a connected collector range, not one isolated product.
-
-OUTPUT THE AD-COPY PORTION IN THIS FORMAT
-
-PRIMARY TEXT
-
-1. [complete primary text]
-2. [complete primary text]
-3. [complete primary text]
-4. [complete primary text]
-5. [complete primary text]
-
-HEADLINES
-
-1. [headline]
-2. [headline]
-3. [headline]
-4. [headline]
-5. [headline]
-
-CALL TO ACTION
-
-1. [Meta CTA label]
-2. [Meta CTA label]
-3. [Meta CTA label]
-4. [Meta CTA label]
-5. [Meta CTA label]
-
-INSTANT EXPERIENCE COVER PROMPT
-
-[one image prompt]
-
-INSTANT EXPERIENCE SETUP
-
-[the required setup instructions]
-
-FINAL QUALITY CHECK
-
-- Exactly 5 Primary Text options are present.
-- Exactly 5 Headlines are present.
-- Exactly 5 Call To Action button-label options are present.
-- No Description section or Description fields are present.
-- Instant Experience Cover Prompt is present.
-- Instant Experience Setup is present.
-- The cover prompt uses top 60-68% hero artwork and bottom 32-40% black/gold CTA panel.
-- The cover prompt includes CLAIM YOUR EDITION and uses LIMITED TO 100 WORLDWIDE only when the quantity is verified.
-- The cover prompt may use Once it sells out, it's gone. only when it matches the approved generated copy.
-- Country wording is localised naturally.
-- No unsupported facts are invented."""
 
 
 def build_generic_carousel_prompt(product_name, category, country, campaign_type, *, specific_pattern=False):
@@ -7164,6 +8165,7 @@ def build_ads_prompt(
     *,
     variation_token="",
     campaign_moment=None,
+    product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -7178,6 +8180,8 @@ def build_ads_prompt(
             product_url=product_url,
             specific_pattern=bool(template_key),
             campaign_moment=campaign_moment,
+            product_metadata=product_metadata,
+            variation_token=variation_token,
         )
     elif template_key == "motorsport_carousel":
         prompt = build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
@@ -7204,6 +8208,7 @@ def build_ads_prompt(
         template_key=template_key,
         variation_token=variation_token,
         campaign_moment=campaign_moment,
+        product_metadata=product_metadata,
         instant_experience_settings=settings,
         recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
@@ -7386,6 +8391,7 @@ def ads_result_context_key(
     campaign_type,
     campaign_moment=None,
     instant_experience_settings=None,
+    product_metadata=None,
 ):
     payload_data = {
         "product_id": str(product_id or ""),
@@ -7400,6 +8406,13 @@ def ads_result_context_key(
     )
     if moment_key:
         payload_data["campaign_moment"] = moment_key
+    if campaign_type == "Instant Experience" and isinstance(product_metadata, dict):
+        payload_data["instant_experience_product_metadata"] = {
+            "edition_limit": product_metadata.get("edition_limit"),
+            "edition_limit_source": product_metadata.get("edition_limit_source"),
+            "collections": product_metadata.get("collections"),
+            "product_type": product_metadata.get("product_type"),
+        }
     payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
@@ -7414,6 +8427,7 @@ def build_ads_result_record(
     product_url="",
     variation_token="",
     campaign_moment=None,
+    product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
 ):
@@ -7424,9 +8438,20 @@ def build_ads_result_record(
         campaign_moment,
         selected_country=country,
     )
+    clean_product_metadata = (
+        dict(product_metadata)
+        if isinstance(product_metadata, dict)
+        else {"product_sport": _normalise_option_label(category)}
+    )
     clean_instant_experience_settings = None
     instant_experience_fingerprints = (
-        build_standard_instant_experience_fingerprints(category=category)
+        build_standard_instant_experience_fingerprints(
+            product_name=clean_product_name,
+            category=category,
+            product_metadata=clean_product_metadata,
+            campaign_moment=clean_campaign_moment,
+            variation_token=clean_variation_token,
+        )
         if campaign_type == "Instant Experience"
         else []
     )
@@ -7438,6 +8463,7 @@ def build_ads_result_record(
         product_url=product_url,
         variation_token=clean_variation_token,
         campaign_moment=clean_campaign_moment,
+        product_metadata=clean_product_metadata,
         instant_experience_settings=clean_instant_experience_settings,
         recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
@@ -7449,6 +8475,7 @@ def build_ads_result_record(
             country,
             campaign_type,
             clean_campaign_moment,
+            product_metadata=clean_product_metadata,
         ),
         "product_id": clean_product_id,
         "product_name": clean_product_name,
@@ -7458,6 +8485,7 @@ def build_ads_result_record(
         "product_url": _clean_product_url(product_url),
         "variation_token": clean_variation_token,
         "campaign_moment": clean_campaign_moment,
+        "product_metadata": clean_product_metadata,
         "instant_experience_fingerprints": instant_experience_fingerprints,
         "recent_instant_experience_fingerprints": (
             list(recent_instant_experience_fingerprints or [])
@@ -7497,6 +8525,7 @@ def ensure_current_ads_result_prompt(result):
         product_url=result.get("product_url"),
         variation_token=result.get("variation_token"),
         campaign_moment=result.get("campaign_moment"),
+        product_metadata=result.get("product_metadata"),
         instant_experience_settings=result.get("instant_experience_settings"),
         recent_instant_experience_fingerprints=result.get("recent_instant_experience_fingerprints", []),
     )
@@ -7554,15 +8583,27 @@ INSTANT_EXPERIENCE_LEGACY_SLOT_IDS = (
     "instant-experience-01",
     "instant-experience-02",
     "instant-experience-03",
+    "instant-experience-nostalgia",
+    "instant-experience-ownership",
+    "instant-experience-scarcity",
 )
 
 INSTANT_EXPERIENCE_LEGACY_SLOT_MAP = {
-    "instant-experience": "instant-experience-nostalgia",
-    "instant_experience": "instant-experience-nostalgia",
-    "instant_experience_image": "instant-experience-nostalgia",
-    "instant-experience-01": "instant-experience-nostalgia",
-    "instant-experience-02": "instant-experience-ownership",
-    "instant-experience-03": "instant-experience-scarcity",
+    "instant-experience": "instant-experience-premium-scarcity-right",
+    "instant_experience": "instant-experience-premium-scarcity-right",
+    "instant_experience_image": "instant-experience-premium-scarcity-right",
+    "instant-experience-01": "instant-experience-premium-scarcity-right",
+    "instant-experience-02": "instant-experience-premium-scarcity-front",
+    "instant-experience-03": "instant-experience-premium-scarcity-left",
+    "instant-experience-nostalgia": "instant-experience-premium-scarcity-right",
+    "instant-experience-ownership": "instant-experience-premium-scarcity-front",
+    "instant-experience-scarcity": "instant-experience-premium-scarcity-left",
+}
+
+INSTANT_EXPERIENCE_LEGACY_CONCEPT_ID_MAP = {
+    "nostalgia": "premium_scarcity_right",
+    "ownership": "premium_scarcity_front",
+    "scarcity": "premium_scarcity_left",
 }
 
 
@@ -7895,13 +8936,36 @@ def _human_file_size(size):
 
 def _blank_instant_experience_variations():
     return [
-        {field_key: "" for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS}
-        for _index in range(INSTANT_EXPERIENCE_COPY_VARIATION_COUNT)
+        _with_instant_experience_description_metadata(
+            {field_key: "" for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS},
+            variation_number,
+        )
+        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1)
     ]
 
 
 class InstantExperienceCopyCSVError(ValueError):
     pass
+
+
+def _instant_experience_description_variant(variation_number):
+    try:
+        index = int(variation_number) - 1
+    except (TypeError, ValueError):
+        index = 0
+    if 0 <= index < len(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS):
+        return INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS[index]
+    return INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS[0]
+
+
+def _with_instant_experience_description_metadata(variation, variation_number):
+    variant = _instant_experience_description_variant(variation_number)
+    clean = dict(variation or {})
+    clean["description_key"] = variant["key"]
+    clean["description_label"] = variant["label"]
+    for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS:
+        clean[field_key] = _preserve_multiline_text(clean.get(field_key))
+    return clean
 
 
 def _instant_experience_copy_variation_error(
@@ -7911,9 +8975,19 @@ def _instant_experience_copy_variation_error(
     variation_number=0,
 ):
     variation = variation or {}
+    expected_variant = _instant_experience_description_variant(variation_number)
+    supplied_key = str(variation.get("description_key") or expected_variant["key"]).strip()
+    supplied_label = str(variation.get("description_label") or expected_variant["label"]).strip()
+    if supplied_key != expected_variant["key"]:
+        return f'Description key must be "{expected_variant["key"]}".'
+    if supplied_label != expected_variant["label"]:
+        return f'Description label must be "{expected_variant["label"]}".'
+
     for field_key, label in INSTANT_EXPERIENCE_COPY_FIELDS:
         if not str(variation.get(field_key) or "").strip():
             return f"{label} is required."
+        if re.search(r"\{\{[^}]+\}\}", str(variation.get(field_key) or "")):
+            return f"{label} contains an unresolved template variable."
 
     cta = str(variation.get("cta") or "").strip()
     if cta not in INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS:
@@ -7930,13 +9004,6 @@ def _instant_experience_copy_variation_error(
         return (
             f"CTA must be {expected_primary_image_cta} so it matches the fixed "
             f"{display_name} cover."
-        )
-
-    expected_ending = INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]
-    primary_text = str(variation.get("primary_text") or "").rstrip()
-    if not primary_text.endswith(expected_ending):
-        return (
-            f'Primary Text must end with "{expected_ending}" to match CTA "{cta}".'
         )
     return ""
 
@@ -7997,7 +9064,10 @@ def _instant_experience_copy_notes_with_widget_state(result, workflow):
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         variations = merged[concept["id"]]
         for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
-            variation = variations[variation_number - 1]
+            variation = _with_instant_experience_description_metadata(
+                variations[variation_number - 1],
+                variation_number,
+            )
             for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS:
                 widget_key = _instant_experience_copy_widget_key(
                     context_key,
@@ -8009,6 +9079,7 @@ def _instant_experience_copy_notes_with_widget_state(result, workflow):
                     variation[field_key] = _preserve_multiline_text(
                         st.session_state.get(widget_key)
                     )
+            variations[variation_number - 1] = variation
     return merged
 
 
@@ -8049,6 +9120,8 @@ def build_instant_experience_copy_csv(
                     "route_key": concept["id"],
                     "route_label": _instant_experience_copy_csv_route_label(concept),
                     "variation": str(variation_number),
+                    "description_key": _instant_experience_description_variant(variation_number)["key"],
+                    "description_label": _instant_experience_description_variant(variation_number)["label"],
                     "primary_text": "" if blank else _preserve_multiline_text(variation.get("primary_text")),
                     "headline": "" if blank else _preserve_multiline_text(variation.get("headline")),
                     "cta": "" if blank else _preserve_multiline_text(variation.get("cta")),
@@ -8067,6 +9140,8 @@ def _instant_experience_copy_csv_expected_rows(result):
             "route_key": concept["id"],
             "route_label": _instant_experience_copy_csv_route_label(concept),
             "variation": str(variation_number),
+            "description_key": _instant_experience_description_variant(variation_number)["key"],
+            "description_label": _instant_experience_description_variant(variation_number)["label"],
         }
         for concept in INSTANT_EXPERIENCE_CONCEPTS
         for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1)
@@ -8090,7 +9165,16 @@ def parse_instant_experience_copy_csv(data, result):
         headers = list(reader.fieldnames or ())
         if len(headers) != len(set(headers)):
             raise InstantExperienceCopyCSVError("The copy CSV contains duplicate column headers.")
-        if set(headers) != set(INSTANT_EXPERIENCE_COPY_CSV_HEADERS):
+        legacy_headers = tuple(
+            header
+            for header in INSTANT_EXPERIENCE_COPY_CSV_HEADERS
+            if header not in {"description_key", "description_label"}
+        )
+        supported_header_sets = {
+            frozenset(INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+            frozenset(legacy_headers),
+        }
+        if frozenset(headers) not in supported_header_sets:
             required = ", ".join(INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
             raise InstantExperienceCopyCSVError(
                 f"Use the Instant Experience CSV headers exactly: {required}."
@@ -8121,15 +9205,27 @@ def parse_instant_experience_copy_csv(data, result):
             raise InstantExperienceCopyCSVError(
                 f"CSV row {row_number} has an unexpected or missing value."
             )
-        for field in (
+        identity_fields = [
             "schema_version",
             "campaign_type",
             "output_mode",
             "route_key",
             "route_label",
             "variation",
-        ):
-            if str(row.get(field) or "").strip() != expected[field]:
+        ]
+        if "description_key" in headers:
+            identity_fields.append("description_key")
+        if "description_label" in headers:
+            identity_fields.append("description_label")
+        for field in identity_fields:
+            row_value = str(row.get(field) or "").strip()
+            if (
+                field == "schema_version"
+                and row_value == "1"
+                and frozenset(headers) == frozenset(legacy_headers)
+            ):
+                continue
+            if row_value != expected[field]:
                 raise InstantExperienceCopyCSVError(
                     f"CSV row {row_number} has an incompatible {field}. Download a fresh template."
                 )
@@ -8143,6 +9239,10 @@ def parse_instant_experience_copy_csv(data, result):
             field_key: _preserve_multiline_text(row.get(field_key))
             for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
         }
+        variation = _with_instant_experience_description_metadata(
+            variation,
+            row_key[1],
+        )
         validation_error = _instant_experience_copy_variation_error(
             variation,
             concept_id=expected["route_key"],
@@ -8201,7 +9301,7 @@ def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file)
         status = {
             "ok": True,
             "message": (
-                f"Imported {imported['variation_count']} copy variations into "
+                f"Imported {imported['variation_count']} description options into "
                 f"{imported['field_count']} fields."
             ),
         }
@@ -8224,13 +9324,10 @@ def _instant_experience_current_copy_csv_filename(result):
 def _normalise_instant_experience_variations(raw_variations):
     variations = []
     if isinstance(raw_variations, (list, tuple)):
-        for raw in raw_variations:
+        for index, raw in enumerate(raw_variations, start=1):
             if isinstance(raw, dict):
                 variations.append(
-                    {
-                        field_key: _preserve_multiline_text(raw.get(field_key))
-                        for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
-                    }
+                    _with_instant_experience_description_metadata(raw, index)
                 )
     variations.extend(_blank_instant_experience_variations())
     return variations[:INSTANT_EXPERIENCE_COPY_VARIATION_COUNT]
@@ -8265,12 +9362,22 @@ def _instant_experience_concept_copy_notes_from_workflow(workflow):
     notes = dict((workflow or {}).get("ad_notes") or {})
     concept_notes = notes.get("instant_experience_concepts")
     if isinstance(concept_notes, dict):
-        return {
-            concept["id"]: _normalise_instant_experience_variations(
-                concept_notes.get(concept["id"])
-            )
-            for concept in INSTANT_EXPERIENCE_CONCEPTS
-        }
+        mapped_notes = {}
+        for concept in INSTANT_EXPERIENCE_CONCEPTS:
+            concept_id = concept["id"]
+            raw_variations = concept_notes.get(concept_id)
+            if raw_variations is None:
+                legacy_ids = [
+                    legacy_id
+                    for legacy_id, mapped_id in INSTANT_EXPERIENCE_LEGACY_CONCEPT_ID_MAP.items()
+                    if mapped_id == concept_id
+                ]
+                for legacy_id in legacy_ids:
+                    if legacy_id in concept_notes:
+                        raw_variations = concept_notes.get(legacy_id)
+                        break
+            mapped_notes[concept_id] = _normalise_instant_experience_variations(raw_variations)
+        return mapped_notes
 
     legacy = _legacy_instant_experience_copy_notes(workflow)
     primary = legacy.get("primary_text") or []
@@ -8281,15 +9388,17 @@ def _instant_experience_concept_copy_notes_from_workflow(workflow):
         for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
     legacy_rows = {
-        "nostalgia": [0],
-        "ownership": [1, 2],
-        "scarcity": [4],
+        "premium_scarcity_right": [0],
+        "premium_scarcity_front": [1, 2],
+        "premium_scarcity_left": [4],
     }
     for concept_id, source_indexes in legacy_rows.items():
         for target_index, source_index in enumerate(source_indexes):
             if target_index >= INSTANT_EXPERIENCE_COPY_VARIATION_COUNT:
                 break
             mapped[concept_id][target_index] = {
+                "description_key": _instant_experience_description_variant(target_index + 1)["key"],
+                "description_label": _instant_experience_description_variant(target_index + 1)["label"],
                 "primary_text": _preserve_multiline_text(
                     primary[source_index] if source_index < len(primary) else ""
                 ),
@@ -8354,16 +9463,20 @@ def _instant_experience_concept_ad_copy_text(result, workflow, concept):
         "PRODUCT:",
         str(result.get("product_name") or ""),
         "",
-        "CONCEPT:",
+        "ROUTE:",
         str(concept.get("display_name") or ""),
         "",
     ]
     for index, variation in enumerate(variations, start=1):
+        variant = _instant_experience_description_variant(index)
         lines.extend(
             [
-                f"VARIATION {index}",
+                variant["label"],
                 "",
-                "PRIMARY TEXT:",
+                "DESCRIPTION KEY:",
+                variant["key"],
+                "",
+                "DESCRIPTION COPY:",
                 _preserve_multiline_text(variation.get("primary_text")),
                 "",
                 "HEADLINE:",
@@ -8388,10 +9501,13 @@ def _instant_experience_copy_export_lines(workflow):
             ]
         )
         for index, variation in enumerate(notes.get(concept["id"], []), start=1):
+            variant = _instant_experience_description_variant(index)
             lines.extend(
                 [
-                    f"VARIATION {index}",
-                    "PRIMARY TEXT:",
+                    variant["label"],
+                    "DESCRIPTION KEY:",
+                    variant["key"],
+                    "DESCRIPTION COPY:",
                     _preserve_multiline_text(variation.get("primary_text")),
                     "HEADLINE:",
                     _preserve_multiline_text(variation.get("headline")),
@@ -8843,7 +9959,7 @@ def _render_instant_experience_concepts(result, workflow):
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     _render_instant_experience_copy_csv_control(result, workflow)
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
-    st.caption("Upload one cover for each Instant Experience concept, then paste the three matching copy variations beneath it.")
+    st.caption("Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
 
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         concept_id = concept["id"]
@@ -8918,13 +10034,16 @@ def _render_instant_experience_concepts(result, workflow):
                         _remove_ads_image_slot(result, slot["id"])
                         st.rerun()
                 else:
-                    st.caption("Upload the finished full-resolution cover for this concept.")
+                    st.caption("Upload the finished full-resolution cover for this route.")
 
             with copy_column:
                 variations = concept_notes.get(concept_id) or _blank_instant_experience_variations()
                 for index in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
-                    variation = variations[index - 1]
-                    st.markdown(f"**Copy Variation {index}**")
+                    variation = _with_instant_experience_description_metadata(
+                        variations[index - 1],
+                        index,
+                    )
+                    st.markdown(f"**{variation['description_label']}**")
                     field_columns = st.columns([2, 1, 1])
                     for field_column, (field_key, field_label) in zip(
                         field_columns,
@@ -8939,7 +10058,7 @@ def _render_instant_experience_concepts(result, workflow):
                             )
                             widget_args = {
                                 "placeholder": (
-                                    f"Primary text option {index}"
+                                    f"Description option {index}"
                                     if field_key == "primary_text"
                                     else f"Headline option {index}"
                                     if field_key == "headline"
@@ -8953,6 +10072,13 @@ def _render_instant_experience_concepts(result, workflow):
                                     variation.get(field_key)
                                 )
                             variation[field_key] = st.text_area(field_label, **widget_args)
+                            if field_key == "primary_text":
+                                render_prompt_copy_button(
+                                    _preserve_multiline_text(variation[field_key]),
+                                    key=f"{widget_key}::copy",
+                                    label="Copy Description",
+                                    success_label="Description copied",
+                                )
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
                 complete_count = sum(
@@ -8971,7 +10097,7 @@ def _render_instant_experience_concepts(result, workflow):
                 st.caption(
                     f"{concept['display_name']}: "
                     f"{'Image ready' if image_ready else 'Image needed'} · "
-                    f"{complete_count} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} copy variations complete"
+                    f"{complete_count} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} description options complete"
                 )
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -9408,7 +10534,7 @@ def _render_instant_experience_package_save(result, workflow):
         st.caption(
             f"{concept['display_name']}: "
             f"{'Image ready' if row['image_ready'] else 'Image needed'} · "
-            f"{row['copy_complete_count']} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} copy variations complete"
+            f"{row['copy_complete_count']} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} description options complete"
         )
 
     package_ready = instant_experience_package_ready(result, workflow)
@@ -9422,7 +10548,7 @@ def _render_instant_experience_package_save(result, workflow):
             and package_outcome.get("signature") == package_signature
         )
     if not package_ready:
-        st.caption("Complete all three covers and all nine copy variations before saving the package.")
+        st.caption("Complete all three covers and all nine description options before saving the package.")
 
     if st.button(
         "Save Instant Experience Package",
@@ -10504,6 +11630,10 @@ def render_page():
             render_insufficient_winner_data()
         else:
             product_id = product_url_state.get("product_id") or ""
+            product_metadata = instant_experience_product_metadata_from_selection(
+                product_selection,
+                category=category,
+            )
             context_key = ads_result_context_key(
                 product_id,
                 product_name,
@@ -10511,6 +11641,7 @@ def render_page():
                 country,
                 campaign_type,
                 campaign_moment,
+                product_metadata=product_metadata,
             )
             existing_result = result if isinstance(result, dict) else {}
             if existing_result.get("context_key") == context_key:
@@ -10534,6 +11665,7 @@ def render_page():
                         product_url=product_url,
                         variation_token=existing_result.get("variation_token"),
                         campaign_moment=campaign_moment,
+                        product_metadata=product_metadata,
                         recent_instant_experience_fingerprints=st.session_state.get(
                             ADS_IE_RECENT_FINGERPRINTS_KEY,
                             [],
@@ -10551,6 +11683,7 @@ def render_page():
                     product_url=product_url,
                     variation_token=build_visual_variation_token(),
                     campaign_moment=campaign_moment,
+                    product_metadata=product_metadata,
                     recent_instant_experience_fingerprints=st.session_state.get(
                         ADS_IE_RECENT_FINGERPRINTS_KEY,
                         [],

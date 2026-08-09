@@ -2,6 +2,7 @@ import csv
 import importlib
 import io
 import json
+import re
 from datetime import date
 from pathlib import Path
 import tempfile
@@ -119,6 +120,7 @@ def instant_experience_csv_notes():
     for concept_index, concept in enumerate(ads_page.INSTANT_EXPERIENCE_CONCEPTS):
         variations = []
         for variation in range(1, ads_page.INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
+            description_variant = ads_page._instant_experience_description_variant(variation)
             cta = ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS[
                 (concept_index + variation - 1)
                 % len(ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
@@ -127,6 +129,8 @@ def instant_experience_csv_notes():
                 cta = ads_page.INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS[concept["id"]]
             variations.append(
                 {
+                    "description_key": description_variant["key"],
+                    "description_label": description_variant["label"],
                     "primary_text": (
                         f"{concept['display_name']} variation {variation}, first line.\n"
                         "Second line with \"quotes\", apostrophe’s, ampersand & emoji 🏁. "
@@ -138,6 +142,27 @@ def instant_experience_csv_notes():
             )
         notes[concept["id"]] = variations
     return notes
+
+
+def instant_experience_description_payload(
+    product_name,
+    category,
+    *,
+    metadata=None,
+    country="USA",
+):
+    context = ads_page.resolve_instant_experience_description_context(
+        product_name,
+        category,
+        product_metadata=metadata or {},
+        country=country,
+    )
+    payload = ads_page.build_instant_experience_description_variants(context)
+    copies = {
+        variant["key"]: variant["copy"]
+        for variant in payload["description_variants"]
+    }
+    return context, payload, copies
 
 
 def csv_bytes_from_rows(rows, headers=None):
@@ -474,7 +499,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("FINAL PRIMARY-TEXT QUALITY CHECK", primary_text_section)
         self.assertNotIn("PRIMARY-TEXT RULES", primary_text_section)
 
-    def test_baseball_instant_experience_prompt_outputs_three_grouped_concepts(self):
+    def test_baseball_instant_experience_prompt_outputs_three_grouped_routes(self):
         prompt = ads_page.build_ads_prompt(
             "Shohei Ohtani 50/50 Season",
             "Baseball",
@@ -487,19 +512,20 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Product name: Shohei Ohtani 50/50 Season", prompt)
         self.assertIn("Destination guidance: Use this selected product page URL", prompt)
         self.assertIn("https://sportscave.com.au/products/ohtani-50-50", prompt)
-        for heading in (
-            "GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID",
-            "GROUP 2 — PURE LIMITED-RELEASE SCARCITY",
-            "GROUP 3 — COLLECTOR PROOF SCARCITY",
+        for route_key in (
+            "premium_scarcity_right",
+            "premium_scarcity_front",
+            "premium_scarcity_left",
         ):
-            self.assertIn(heading, prompt)
-        self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
-        self.assertIn("Every group table must contain exactly three completed rows.", prompt)
+            self.assertIn(f"Route key: {route_key}", prompt)
+        self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
+        self.assertIn("legacy_standard", prompt)
+        self.assertIn("framed_greatness", prompt)
+        self.assertIn("choose_a_side", prompt)
+        self.assertIn("Every group table must contain exactly three completed rows in the fixed description order.", prompt)
         self.assertIn("Across all groups, output exactly nine complete ad-copy combinations.", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
-        self.assertEqual(prompt.count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(prompt.count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(prompt.count("Creative concept: Collector Proof Scarcity"), 1)
+        self.assertEqual(prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"), 3)
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
         self.assertNotIn("Return one final primary text only.", prompt)
@@ -520,12 +546,12 @@ class AdsPageTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/the-titans",
         )
 
-        self.assertIn("FRAMED GREATNESS SCARCITY HYBRID — Headline-Led Collector Hybrid", prompt)
-        self.assertIn("PURE LIMITED-RELEASE SCARCITY — Limited Release Wall", prompt)
-        self.assertIn("COLLECTOR PROOF SCARCITY — Close Product & Verified Proof", prompt)
-        self.assertIn("The first sentence of every Primary Text must be exactly", prompt)
-        self.assertIn("Begin every Primary Text with scarcity immediately", prompt)
-        self.assertIn("genuine supplied certificate, visible edition plate, badge, plaque", prompt)
+        self.assertIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", prompt)
+        self.assertIn("Route 1 must resolve the Slight Right Angle cover", prompt)
+        self.assertIn("Route 2 must resolve the Straight On cover", prompt)
+        self.assertIn("Route 3 must resolve the Slight Left Angle cover", prompt)
+        self.assertIn("Every CTA must be one approved direct edition-acquisition CTA.", prompt)
+        self.assertIn("Description 1 for all three routes uses Claim Your Edition.", prompt)
         self.assertIn("ballpark memory", prompt)
         self.assertIn("generations", prompt)
         self.assertIn("swing and legacy", prompt)
@@ -550,7 +576,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("These claim lines are supplied through the approved Baseball Instant Experience claim path.", prompt)
         self.assertIn("Do not replace Made in the USA with another manufacturing country", prompt)
         self.assertIn("Do not identify or guess a person", prompt)
-        self.assertIn("Never invent history, achievements, product facts or sporting events.", prompt)
+        self.assertIn("Never invent history, achievements, product facts", prompt)
 
     def test_baseball_instant_experience_setup_uses_required_meta_instructions(self):
         prompt = ads_page.build_ads_prompt(
@@ -619,20 +645,16 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
                 self.assertIn(f"Market: {country}", prompt)
                 self.assertIn(expected_terms[country], prompt)
-                self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", prompt)
-                self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", prompt)
-                self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", prompt)
-                self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
+                self.assertIn("Route key: premium_scarcity_right", prompt)
+                self.assertIn("Route key: premium_scarcity_front", prompt)
+                self.assertIn("Route key: premium_scarcity_left", prompt)
+                self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
                 self.assertIn("COPY VARIATIONS", prompt)
                 self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                self.assertIn("Creative concept: Framed Greatness Scarcity Hybrid", prompt)
-                self.assertIn("Creative concept: Pure Limited-Release Scarcity", prompt)
-                self.assertIn("Creative concept: Collector Proof Scarcity", prompt)
-                self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-                self.assertIn("Once it sells out", prompt)
+                self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
-                self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
-                self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
+                self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
+                self.assertIn("Lower conversion panel: exactly 24%", prompt)
                 self.assertIn("META URL PARAMETERS", prompt)
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
@@ -701,19 +723,14 @@ class AdsPageTests(unittest.TestCase):
                             prompt,
                         )
                         self.assertIn("CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE", prompt)
-                        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", prompt)
-                        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", prompt)
-                        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", prompt)
-                        self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
+                        self.assertIn("Route key: premium_scarcity_right", prompt)
+                        self.assertIn("Route key: premium_scarcity_front", prompt)
+                        self.assertIn("Route key: premium_scarcity_left", prompt)
+                        self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
                         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                        self.assertIn("Creative concept: Framed Greatness Scarcity Hybrid", prompt)
-                        self.assertIn("Creative concept: Pure Limited-Release Scarcity", prompt)
-                        self.assertIn("Creative concept: Collector Proof Scarcity", prompt)
-                        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-                        self.assertIn("Once it sells out", prompt)
-                        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
-                        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
-                        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt)
+                        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
+                        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
+                        self.assertIn("Lower conversion panel: exactly 24%", prompt)
                         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
@@ -736,14 +753,11 @@ class AdsPageTests(unittest.TestCase):
 
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", prompt)
-        self.assertIn("Creative concept: Collector Proof Scarcity", prompt)
-        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
-        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
-        self.assertIn("thin restrained metallic-gold divider across the top edge of the black strip", prompt)
-        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-        self.assertIn("Once it sells out", prompt)
+        self.assertIn("Route key: premium_scarcity_left", prompt)
+        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
+        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
+        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_added_categories_have_specific_outputs_for_all_campaign_sections(self):
@@ -1038,11 +1052,11 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Use the product title and supplied artwork as the factual source of truth.", carousel_prompt)
 
         self.assertEqual(instant_prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", instant_prompt)
-        self.assertIn("Each concept table must contain exactly three completed rows.", instant_prompt)
+        self.assertIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", instant_prompt)
+        self.assertIn("Each route table must contain exactly three completed description rows", instant_prompt)
         self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", instant_prompt)
-        self.assertIn("No Description or Meta Ad Description field is allowed.", instant_prompt)
-        self.assertIn("All three concepts must remain scarcity-first", instant_prompt)
+        self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", instant_prompt)
+        self.assertIn("All three routes must remain scarcity-first", instant_prompt)
 
         self.assertNotIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, single_prompt)
 
@@ -1177,9 +1191,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", once)
+        self.assertNotIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", once)
         self.assertIn(
-            "STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY",
+            "STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY",
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -1197,8 +1211,8 @@ class AdsPageTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", prompt)
-        self.assertIn("Each concept table must contain exactly three completed rows.", prompt)
+        self.assertIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", prompt)
+        self.assertIn("Each route table must contain exactly three completed description rows", prompt)
         self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", prompt)
         self.assertIn("No row may be placeholder copy.", prompt)
         self.assertNotIn("PRIMARY TEXT VARIATIONS\n\nVariation 1:", prompt)
@@ -2778,13 +2792,32 @@ PRIMARY TEXT VARIATIONS
 
         self.assertIn("Campaign type: Instant Experience", instant_notes)
         self.assertIn("INSTANT EXPERIENCE AD COPY", instant_notes)
-        self.assertIn("FRAMED GREATNESS SCARCITY — Collector Shrine", instant_notes)
-        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 1", instant_notes)
-        self.assertIn("PURE LIMITED-RELEASE SCARCITY — Limited Release Wall", instant_notes)
-        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 2\r\nwith preserved second line", instant_notes)
-        self.assertIn("VARIATION 2\r\nPRIMARY TEXT:\r\nPrimary option 3", instant_notes)
-        self.assertIn("NUMBERED COLLECTOR PROOF SCARCITY — Numbered Collector Proof", instant_notes)
-        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 5", instant_notes)
+        self.assertIn("PREMIUM SCARCITY — RIGHT ANGLE", instant_notes)
+        self.assertIn("Slight right-angle product photograph", instant_notes)
+        self.assertIn(
+            "Description 1 — Legacy Standard\r\nDESCRIPTION KEY:\r\n"
+            "legacy_standard\r\nDESCRIPTION COPY:\r\nPrimary option 1",
+            instant_notes,
+        )
+        self.assertIn("PREMIUM SCARCITY — STRAIGHT ON", instant_notes)
+        self.assertIn("Straight-on product photograph", instant_notes)
+        self.assertIn(
+            "Description 1 — Legacy Standard\r\nDESCRIPTION KEY:\r\n"
+            "legacy_standard\r\nDESCRIPTION COPY:\r\nPrimary option 2\r\nwith preserved second line",
+            instant_notes,
+        )
+        self.assertIn(
+            "Description 2 — Framed Greatness\r\nDESCRIPTION KEY:\r\n"
+            "framed_greatness\r\nDESCRIPTION COPY:\r\nPrimary option 3",
+            instant_notes,
+        )
+        self.assertIn("PREMIUM SCARCITY — LEFT ANGLE", instant_notes)
+        self.assertIn("Slight left-angle product photograph", instant_notes)
+        self.assertIn(
+            "Description 1 — Legacy Standard\r\nDESCRIPTION KEY:\r\n"
+            "legacy_standard\r\nDESCRIPTION COPY:\r\nPrimary option 5",
+            instant_notes,
+        )
         self.assertNotIn("DESCRIPTIONS", instant_notes)
         self.assertNotIn("CAROUSEL CARDS / AD SETUP", instant_notes)
         self.assertNotIn("Use exactly 5 carousel cards", instant_notes)
@@ -3057,7 +3090,7 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("must not be treated as permission to create an image automatically", contract)
                 self.assertIn("Any imperative wording inside an image-prompt block is copy", contract)
                 if campaign_type == "Instant Experience":
-                    self.assertIn("After GROUP 3 — COLLECTOR PROOF SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop.", contract)
+                    self.assertIn("After GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE and the shared INSTANT EXPERIENCE SETUP block are complete, stop.", contract)
                     self.assertNotIn("Would you like me", contract)
                 else:
                     self.assertIn('"Would you like me to generate Card 1?"', contract)
@@ -3125,675 +3158,6 @@ PRIMARY TEXT VARIATIONS
             "The complete text-only package must end with the generation approval question.",
         )
 
-    def test_instant_experience_text_first_contract_uses_grouped_concepts_no_description(self):
-        contract = visual_contract(
-            ads_page.build_ads_prompt(
-                "Collector Test Product",
-                "Cricket",
-                "UK",
-                "Instant Experience",
-                variation_token="instant-text-first-test",
-            )
-        )
-
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
-        self.assertIn("Exactly nine complete ad-copy combinations total.", contract)
-        self.assertIn("Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.", contract)
-        self.assertIn("No Description or Meta Ad Description field is allowed.", contract)
-        self.assertNotIn("6. Description lines.", contract)
-
-    def test_old_cached_result_is_refreshed_to_current_full_visual_prompt_contract(self):
-        current = ads_page.build_ads_result_record(
-            "Six Laps Ahead",
-            "Motorsport",
-            "Australia",
-            "Carousel",
-            product_id="product-123",
-            product_url="https://sportscave.com.au/products/six-laps-ahead",
-            variation_token="cached-result-test",
-        )
-        legacy = {
-            **current,
-            "master_prompt": (
-                "OLD CAROUSEL PROMPT\n\nMASTER RESPONSE AND VISUAL OUTPUT CONTRACT\n\n"
-                "Card 1 - Product Identity\nCreative direction: Use the framed artwork."
-            ),
-            "generated_ad_output": (
-                "OLD CAROUSEL PROMPT\n\nMASTER RESPONSE AND VISUAL OUTPUT CONTRACT\n\n"
-                "Card 1 - Product Identity\nCreative direction: Use the framed artwork."
-            ),
-        }
-        legacy.pop("prompt_contract_version")
-
-        refreshed = ads_page.ensure_current_ads_result_prompt(legacy)
-
-        self.assertEqual(
-            refreshed["prompt_contract_version"],
-            ads_page.ADS_PROMPT_CONTRACT_VERSION,
-        )
-        self.assertEqual(refreshed["product_id"], "product-123")
-        self.assertEqual(refreshed["variation_token"], "cached-result-test")
-        self.assertNotIn("OLD CAROUSEL PROMPT", refreshed["master_prompt"])
-        self.assertIn(
-            "IMAGE GENERATION PROMPTS — COPY ONE AT A TIME",
-            refreshed["master_prompt"],
-        )
-        for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1):
-            self.assertIn(
-                f"CARD {index} IMAGE GENERATION PROMPT",
-                refreshed["master_prompt"],
-            )
-
-    def test_old_instant_experience_cached_result_refreshes_to_v6_contract(self):
-        current = ads_page.build_ads_result_record(
-            "Final Whistle Glory",
-            "Football",
-            "UK",
-            "Instant Experience",
-            product_id="product-999",
-            product_url="https://sportscave.com.au/products/final-whistle-glory",
-            variation_token="cached-ie-result-test",
-        )
-        legacy = {
-            **current,
-            "prompt_contract_version": current["prompt_contract_version"].replace(
-                "ADS INSTANT EXPERIENCE STANDARD V6",
-                "ADS INSTANT EXPERIENCE STANDARD V4",
-            ),
-            "master_prompt": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
-            "generated_ad_output": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
-        }
-
-        refreshed = ads_page.ensure_current_ads_result_prompt(legacy)
-
-        self.assertEqual(
-            refreshed["prompt_contract_version"],
-            ads_page.ads_prompt_contract_version_for_campaign("Instant Experience"),
-        )
-        self.assertEqual(refreshed["product_id"], "product-999")
-        self.assertEqual(refreshed["variation_token"], "cached-ie-result-test")
-        self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", refreshed["master_prompt"])
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", refreshed["master_prompt"])
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", refreshed["master_prompt"])
-        self.assertIn("| Variation | Primary Text | Headline | CTA |", refreshed["master_prompt"])
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V6", refreshed["master_prompt"])
-        self.assertIn("SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2", refreshed["master_prompt"])
-        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Collector Proof Scarcity"), 1)
-        self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
-
-    def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
-        for campaign_type, expected in (
-            ("Instant Experience", "one complete standalone cover image prompt followed by a three-row Markdown table"),
-            ("Single Image / Video", "one complete, separately copyable, production-ready creative prompt"),
-        ):
-            with self.subTest(campaign_type=campaign_type):
-                contract = visual_contract(
-                    ads_page.build_ads_prompt(
-                        "Collector Test Product",
-                        "Cricket",
-                        "UK",
-                        campaign_type,
-                        variation_token="non-carousel-text-first",
-                    )
-                )
-
-                self.assertIn(expected, contract)
-                if campaign_type == "Instant Experience":
-                    self.assertIn("After GROUP 3 — COLLECTOR PROOF SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop.", contract)
-                else:
-                    self.assertIn("before asking for approval to generate anything", contract)
-                self.assertNotIn("CARD 1 IMAGE GENERATION PROMPT", contract)
-
-    def test_instant_experience_visual_contract_returns_three_grouped_concept_prompts(self):
-        prompt = ads_page.build_ads_prompt(
-            "fg",
-            "AFL",
-            "Australia",
-            "Instant Experience",
-            variation_token="instant-test",
-        )
-        contract = visual_contract(prompt)
-
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", contract)
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", contract)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", contract)
-        self.assertEqual(contract.count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(contract.count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(contract.count("Creative concept: Collector Proof Scarcity"), 1)
-        self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE CONCEPT AT A TIME", contract)
-        self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
-        self.assertIn("Return exactly three complete grouped Instant Experience concepts", contract)
-        self.assertIn("Product name: fg", contract)
-        self.assertIn("Sport/category: AFL", contract)
-        self.assertIn("Country/market: Australia", contract)
-        self.assertIn("1024 x 1024 square Meta Instant Experience cover", contract)
-        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", contract)
-        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", contract)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
-        self.assertIn("Once it sells out", contract)
-        self.assertIn("CLAIM YOUR EDITION", contract)
-        self.assertIn("Selected product name: fg", contract)
-        self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
-        for concept_line in (
-            "Creative concept: Framed Greatness Scarcity Hybrid",
-            "Creative concept: Pure Limited-Release Scarcity",
-            "Creative concept: Collector Proof Scarcity",
-        ):
-            cover = contract[contract.index(concept_line) :]
-            self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", cover)
-            self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", cover)
-        self.assertNotIn("Social Media Reels", contract)
-        self.assertNotIn("Six Laps Ahead", contract)
-
-    def test_instant_experience_v2_quality_contracts_are_centralized_and_once_per_cover(self):
-        prompt = ads_page.build_ads_prompt(
-            "Final Whistle Glory",
-            "Football",
-            "UK",
-            "Instant Experience",
-            product_url="https://sportscave.com.au/products/final-whistle-glory",
-            variation_token="ie-quality-v2",
-        )
-        contract = visual_contract(prompt)
-        image_markers = (
-            ads_page.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0],
-            ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1,
-            ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2,
-            ads_page.SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2,
-            ads_page.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0],
-            SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
-        )
-
-        self.assertEqual(
-            prompt.count(
-                ads_page.SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2.splitlines()[0]
-            ),
-            1,
-        )
-        for marker in image_markers:
-            self.assertEqual(contract.count(marker), 3, marker)
-
-        group_starts = (
-            "GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID\n\nIMAGE GENERATION PROMPT",
-            "GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT",
-            "GROUP 3 — COLLECTOR PROOF SCARCITY\n\nIMAGE GENERATION PROMPT",
-        )
-        for group_start in group_starts:
-            start = contract.index(group_start)
-            cover_prompt = contract[start : contract.index("COPY VARIATIONS", start)]
-            for marker in image_markers:
-                self.assertEqual(cover_prompt.count(marker), 1, (group_start, marker))
-
-        self.assertEqual(
-            contract.count("| Variation | Primary Text | Headline | CTA |"),
-            3,
-        )
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V6", contract)
-
-    def test_instant_experience_v2_image_contract_strengthens_source_and_room_physics(self):
-        prompt = ads_page.build_ads_prompt(
-            "Collector Test Product",
-            "Baseball",
-            "USA",
-            "Instant Experience",
-            variation_token="ie-physics-v2",
-        )
-
-        for expected in (
-            "one immutable photographic source asset",
-            "Isolate the complete product from its original surrounding wall",
-            "Retain the uploaded product pixels wherever technically possible",
-            "Keep all four outside frame edges visible",
-            "one rigid rectangular object",
-            "approximately 8-15 mm from the wall",
-            "one identifiable primary light source",
-            "no more than one secondary practical light source",
-            "remain confined to the glass surface",
-            "generic AI luxury-room formula",
-            "Use no more than two secondary decorative objects",
-            "must not resemble a showroom, furniture catalogue or AI staging template",
-        ):
-            self.assertIn(expected, prompt)
-
-        self.assertIn("If native generation returns another square size", prompt)
-        self.assertIn("exactly 1024 x 1024 pixels", prompt)
-        self.assertIn("The workflow must correct failures", prompt)
-
-    def test_instant_experience_auto_scenes_are_specific_and_pairwise_distinct(self):
-        exact_scene_fields = (
-            "room_type",
-            "wall_colour",
-            "wall_material",
-            "camera_side",
-            "camera_height",
-            "lens",
-            "lighting",
-            "time_of_day",
-            "overlay_position",
-            "product_position",
-            "architectural_cue",
-        )
-        visuals = ads_page.INSTANT_EXPERIENCE_STANDARD_VISUALS
-        self.assertTrue(ads_page.validate_instant_experience_set_differentiation())
-        for visual in visuals:
-            for field in exact_scene_fields:
-                self.assertNotRegex(
-                    visual[field].casefold(),
-                    r"\b(?:or)\b",
-                    (visual["route"], field, visual[field]),
-                )
-        for index, first in enumerate(visuals):
-            for second in visuals[index + 1 :]:
-                self.assertGreaterEqual(
-                    ads_page._instant_experience_pairwise_difference_count(first, second),
-                    5,
-                )
-
-        prompt = ads_page.build_ads_prompt(
-            "Sunday at the Crease",
-            "Cricket",
-            "Australia",
-            "Instant Experience",
-            variation_token="resolved-scenes-v2",
-        )
-        for visual in visuals:
-            for field in exact_scene_fields:
-                self.assertIn(visual[field], prompt)
-
-    def test_instant_experience_route_wording_and_typography_are_route_specific(self):
-        contract = visual_contract(
-            ads_page.build_ads_prompt(
-                "The Final Lap",
-                "Motorsport",
-                "Canada",
-                "Instant Experience",
-                variation_token="route-wording-v2",
-            )
-        )
-        nostalgia_start = contract.index("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID\n\nIMAGE GENERATION PROMPT")
-        ownership_start = contract.index("GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT")
-        scarcity_start = contract.index("GROUP 3 — COLLECTOR PROOF SCARCITY\n\nIMAGE GENERATION PROMPT")
-        nostalgia = contract[nostalgia_start : contract.index("COPY VARIATIONS", nostalgia_start)]
-        ownership = contract[ownership_start : contract.index("COPY VARIATIONS", ownership_start)]
-        scarcity = contract[scarcity_start : contract.index("COPY VARIATIONS", scarcity_start)]
-
-        for cover in (nostalgia, ownership, scarcity):
-            self.assertIn("ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING", cover)
-            self.assertIn("These are the only permitted advertising words", cover)
-            self.assertIn("Forbidden other-route wording:", cover)
-            self.assertIn("Never place Primary Text on the image.", cover)
-
-        self.assertIn("APPROVED HEADLINE-LED SCARCITY HYBRID TYPOGRAPHY", nostalgia)
-        self.assertIn("Montserrat ExtraBold or Bold", nostalgia)
-        self.assertIn("minimum 64 px outer safe margin", nostalgia)
-        self.assertNotIn("APPROVED SCARCITY STRIP TYPOGRAPHY", nostalgia)
-        self.assertIn("APPROVED SCARCITY STRIP TYPOGRAPHY", ownership)
-        self.assertNotIn("APPROVED HEADLINE-LED SCARCITY HYBRID TYPOGRAPHY", ownership)
-        for line in ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES:
-            self.assertIn(line, ownership)
-        self.assertIn("APPROVED COLLECTOR PROOF TYPOGRAPHY", scarcity)
-        self.assertNotIn("APPROVED FLOATING LIFESTYLE TYPOGRAPHY", scarcity)
-        self.assertNotIn("APPROVED SCARCITY STRIP TYPOGRAPHY", scarcity)
-        for line in ads_page.COLLECTOR_PROOF_COVER_LINES:
-            self.assertIn(line, scarcity)
-
-    def test_instant_experience_quality_is_dynamic_and_does_not_leak_to_other_prompt_systems(self):
-        cases = (
-            ("Ballpark Night", "Baseball", "USA"),
-            ("Summer at the Crease", "Cricket", "Australia"),
-        )
-        for product_name, sport, market in cases:
-            with self.subTest(product_name=product_name, sport=sport, market=market):
-                prompt = ads_page.build_ads_prompt(
-                    product_name,
-                    sport,
-                    market,
-                    "Instant Experience",
-                    variation_token="dynamic-quality-v2",
-                )
-                self.assertIn(f"Product name: {product_name}", prompt)
-                self.assertIn(f"Sport/category: {sport}", prompt)
-                self.assertIn(f"Country/market: {market}", prompt)
-
-        quality_contracts = "\n".join(
-            (
-                ads_page.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
-                ads_page.SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2,
-                ads_page.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2,
-            )
-        )
-        self.assertNotIn("Brock", quality_contracts)
-        self.assertNotIn("Moffat", quality_contracts)
-
-        carousel = ads_page.build_ads_prompt(
-            "The Final Lap",
-            "Motorsport",
-            "Canada",
-            "Carousel",
-            variation_token="route-isolation-v2",
-        )
-        for marker in (
-            "SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2",
-            "SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2",
-            "SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1",
-            "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2",
-            "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2",
-            "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2",
-        ):
-            self.assertNotIn(marker, carousel)
-
-    def test_instant_experience_creative_cta_contract_is_central_and_route_scoped(self):
-        prompt = ads_page.build_ads_prompt(
-            "Pressure at the Final Whistle",
-            "Football",
-            "Australia",
-            "Instant Experience",
-            variation_token="ie-edition-cta-contract",
-        )
-        marker = ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
-        contract = visual_contract(prompt)
-
-        self.assertEqual(prompt.count(marker), 4)
-        self.assertEqual(contract.count(marker), 3)
-        self.assertIn(
-            "Every customer-facing Instant Experience creative CTA must be exactly one of: "
-            "Claim Your Edition, Secure Your Edition, Own This Edition.",
-            prompt,
-        )
-        self.assertIn("The native Meta/Instant Experience platform button remains Shop Now.", prompt)
-        self.assertIn("render the on-image CTA in uppercase", prompt)
-        self.assertIn("Fixed button label remains: Shop Now.", prompt)
-        self.assertIn("ADS INSTANT EXPERIENCE COPY V6", prompt)
-
-        group_starts = (
-            "GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID\n\nIMAGE GENERATION PROMPT",
-            "GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT",
-            "GROUP 3 — COLLECTOR PROOF SCARCITY\n\nIMAGE GENERATION PROMPT",
-        )
-        for group_start in group_starts:
-            start = contract.index(group_start)
-            cover = contract[start : contract.index("COPY VARIATIONS", start)]
-            self.assertEqual(cover.count(marker), 1)
-            for soft_cta in (
-                "Feel It Again",
-                "Return To Race Day",
-                "See It Framed",
-                "Make It Yours",
-                "Own The Feeling",
-            ):
-                self.assertNotIn(soft_cta, cover)
-
-        carousel = ads_page.build_ads_prompt(
-            "Pressure at the Final Whistle",
-            "Football",
-            "Australia",
-            "Carousel",
-            variation_token="carousel-cta-isolation",
-        )
-        single = ads_page.build_ads_prompt(
-            "Pressure at the Final Whistle",
-            "Football",
-            "Australia",
-            "Single Image / Video",
-            variation_token="single-cta-isolation",
-        )
-        self.assertNotIn(marker, carousel)
-        self.assertNotIn(marker, single)
-        self.assertIn("Claim Your Edition", carousel)
-        self.assertIn("Claim Your Edition", single)
-
-    def test_instant_experience_primary_text_and_cta_validation_agree(self):
-        for cta, ending in ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS.items():
-            with self.subTest(cta=cta):
-                variation = {
-                    "primary_text": f"A supported fan feeling opens this route. {ending}",
-                    "headline": "A Supported Headline",
-                    "cta": cta,
-                }
-                self.assertEqual(
-                    ads_page._instant_experience_copy_variation_error(variation),
-                    "",
-                )
-
-                mismatch = dict(variation, primary_text="A supported fan feeling. Claim your edition.")
-                if cta != "Claim Your Edition":
-                    self.assertIn(
-                        "Primary Text must end with",
-                        ads_page._instant_experience_copy_variation_error(mismatch),
-                    )
-
-        self.assertIn(
-            "CTA must be exactly one of",
-            ads_page._instant_experience_copy_variation_error(
-                {
-                    "primary_text": "A supported fan feeling. Feel it again.",
-                    "headline": "A Supported Headline",
-                    "cta": "Feel It Again",
-                }
-            ),
-        )
-
-    def test_instant_experience_three_scarcity_copy_structures_are_distinct(self):
-        prompt = ads_page.build_ads_prompt(
-            "The Last Lap Collector Edition",
-            "Motorsport",
-            "UK",
-            "Instant Experience",
-            variation_token="scarcity-emotion-balance",
-        )
-
-        self.assertIn("Greatness doesn’t fade. It gets framed.", prompt)
-        self.assertIn("Sentence 2 must be one short, product-specific nostalgia line", prompt)
-        self.assertIn("Begin every Primary Text with scarcity immediately", prompt)
-        self.assertIn("Do not begin with nostalgia, identity, ownership", prompt)
-        self.assertIn("Begin every Primary Text with one short product-specific nostalgia line", prompt)
-        self.assertIn("genuine supplied certificate, visible edition plate, badge, plaque", prompt)
-        self.assertIn("All three routes are scarcity-first.", prompt)
-        self.assertIn("Never invent achievements, venues, rivalries, statistics, dates", prompt)
-        self.assertEqual(
-            ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES[2],
-            "CLAIM YOUR EDITION",
-        )
-        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-        self.assertIn("Once it sells out, it’s gone.", prompt)
-        self.assertIn("CLAIM YOUR EDITION", prompt)
-
-        active_routes = tuple(
-            visual["route"] for visual in ads_page.INSTANT_EXPERIENCE_STANDARD_VISUALS
-        )
-        self.assertEqual(
-            active_routes,
-            (
-                "Framed Greatness Scarcity Hybrid",
-                "Pure Limited-Release Scarcity",
-                "Collector Proof Scarcity",
-            ),
-        )
-        for obsolete_heading in (
-            "GROUP 1 — NOSTALGIA",
-            "GROUP 2 — OWNERSHIP",
-            "Creative concept: Nostalgia",
-            "Creative concept: Ownership",
-        ):
-            self.assertNotIn(obsolete_heading, prompt)
-
-        for visual in ads_page.INSTANT_EXPERIENCE_STANDARD_VISUALS:
-            self.assertIn("Scarcity", visual["route"])
-            self.assertIn("scarcity-led", prompt.casefold())
-
-    def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):
-        prompt = ads_page.build_ads_prompt(
-            "Collector Test Product",
-            "Baseball",
-            "USA",
-            "Instant Experience",
-            variation_token="scarcity-bottom-strip-test",
-        )
-        contract = visual_contract(prompt)
-        scarcity_start = contract.index("GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT")
-        scarcity_prompt = contract[
-            scarcity_start : contract.index("COPY VARIATIONS", scarcity_start)
-        ]
-
-        self.assertIn(
-            "full-width upper lifestyle/product image across approximately 76-78%",
-            scarcity_prompt,
-        )
-        self.assertIn(
-            "full-width matte-black scarcity strip across the bottom approximately 22-24%",
-            scarcity_prompt,
-        )
-        self.assertIn(
-            "thin restrained metallic-gold divider across the top edge of the black strip",
-            scarcity_prompt,
-        )
-        self.assertIn(
-            "frame occupying approximately 74-82% of usable canvas width inside the upper image region",
-            scarcity_prompt,
-        )
-        self.assertIn(
-            "All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.",
-            scarcity_prompt,
-        )
-        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", scarcity_prompt)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", scarcity_prompt)
-        self.assertIn("Once it sells out, it’s gone.", scarcity_prompt)
-        self.assertIn("CLAIM YOUR EDITION", scarcity_prompt)
-        self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", scarcity_prompt)
-        self.assertIn("FRAME REALISM:", scarcity_prompt)
-        self.assertIn("GLASS REALISM:", scarcity_prompt)
-        self.assertIn(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER, scarcity_prompt)
-        self.assertNotIn("64-68% lifestyle", scarcity_prompt)
-        self.assertNotIn("32-36% deep matte-black collector panel", scarcity_prompt)
-        self.assertNotIn("right-side black panel", scarcity_prompt)
-        self.assertNotIn("lifestyle/panel division remains", scarcity_prompt)
-
-    def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
-        prompt = ads_page.compose_final_ads_prompt(
-            "SAVED INSTANT EXPERIENCE PROMPT\n\nINSTANT EXPERIENCE COVER PROMPT\n\n[old saved cover prompt]",
-            category="Golf",
-            country="Canada",
-            campaign_type="Instant Experience",
-            product_name="Masters Sunday Frame",
-            variation_token="saved-compatible",
-        )
-        contract = visual_contract(prompt)
-
-        self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", contract)
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", contract)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", contract)
-        self.assertEqual(contract.count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(contract.count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(contract.count("Creative concept: Collector Proof Scarcity"), 1)
-        self.assertIn("Product name: Masters Sunday Frame", contract)
-        self.assertIn("Sport/category: Golf", contract)
-        self.assertIn("Country/market: Canada", contract)
-        self.assertIn(
-            "The final campaign-specific visual heading, exact headings and prompt count below are authoritative.",
-            contract,
-        )
-        self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
-        self.assertIn("Once it sells out, it’s gone.", contract)
-        self.assertNotIn("Social Media Reels", contract)
-
-    def test_baseball_instant_experience_uses_master_cover_prompt_and_claim_path(self):
-        prompt = ads_page.build_ads_prompt(
-            "Shohei Ohtani 50/50 Season",
-            "Baseball",
-            "USA",
-            "Instant Experience",
-            product_url="https://sportscave.com.au/products/ohtani-50-50",
-            variation_token="baseball-cover-test",
-        )
-        contract = visual_contract(prompt)
-
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", contract)
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", contract)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", contract)
-        self.assertEqual(contract.count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(contract.count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(contract.count("Creative concept: Collector Proof Scarcity"), 1)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
-        self.assertNotIn("Mockups ZIP", prompt)
-        self.assertNotIn("Social Media Reels", prompt)
-        self.assertNotIn("Create a square 1024 x 1024", contract)
-        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
-        self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
-
-    def test_instant_experience_ignores_obsolete_route_settings_and_uses_standard_output(self):
-        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_SMART)
-        prompt = ads_page.build_ads_prompt(
-            "Shohei Ohtani 50/50 Season",
-            "Baseball",
-            "USA",
-            "Instant Experience",
-            product_url="https://sportscave.com.au/products/ohtani-50-50",
-            variation_token="standard-route-ignore-test",
-            instant_experience_settings=settings,
-        )
-
-        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
-        self.assertIn("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID", prompt)
-        self.assertIn("GROUP 2 — PURE LIMITED-RELEASE SCARCITY", prompt)
-        self.assertIn("GROUP 3 — COLLECTOR PROOF SCARCITY", prompt)
-        self.assertEqual(prompt.count("Creative concept: Framed Greatness Scarcity Hybrid"), 1)
-        self.assertEqual(prompt.count("Creative concept: Pure Limited-Release Scarcity"), 1)
-        self.assertEqual(prompt.count("Creative concept: Collector Proof Scarcity"), 1)
-        self.assertNotIn("OPTION A", prompt)
-        self.assertNotIn("OUTPUT EXACTLY FOR THIS OPTION", prompt)
-        self.assertNotIn("META AD DESCRIPTION\n", prompt)
-        self.assertNotIn("Which Instant Experience cover", prompt)
-        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
-
-    def test_instant_experience_scarcity_routes_use_distinct_compositions(self):
-        prompt = ads_page.build_ads_prompt(
-            "Final Whistle Glory",
-            "Football",
-            "UK",
-            "Instant Experience",
-            product_url="https://sportscave.com.au/products/final-whistle-glory",
-            variation_token="standard-angle-test",
-        )
-        prompt_one = prompt[
-            prompt.index("GROUP 1 — FRAMED GREATNESS SCARCITY HYBRID\n\nIMAGE GENERATION PROMPT") :
-            prompt.index("GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT")
-        ]
-        prompt_two = prompt[
-            prompt.index("GROUP 2 — PURE LIMITED-RELEASE SCARCITY\n\nIMAGE GENERATION PROMPT") :
-            prompt.index("GROUP 3 — COLLECTOR PROOF SCARCITY\n\nIMAGE GENERATION PROMPT")
-        ]
-        prompt_three = prompt[prompt.index("GROUP 3 — COLLECTOR PROOF SCARCITY\n\nIMAGE GENERATION PROMPT") :]
-
-        self.assertIn("approximately 16-20% top headline region", prompt_one)
-        self.assertIn("56-62% central product region", prompt_one)
-        self.assertIn("18-22% integrated lower scarcity and CTA region", prompt_one)
-        self.assertIn("GREATNESS DOESN’T FADE.\nIT GETS FRAMED.", prompt_one)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt_one)
-        self.assertIn("ONCE IT’S GONE, IT RETIRES FOREVER", prompt_one)
-        self.assertIn("SECURE YOUR EDITION", prompt_one)
-        self.assertIn("Do not create loose disconnected floating text", prompt_one)
-        self.assertNotIn("full-width matte-black scarcity strip across the bottom", prompt_one)
-        self.assertNotIn("APPROVED SCARCITY STRIP TYPOGRAPHY", prompt_one)
-        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt_two)
-        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt_two)
-        for line in ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES:
-            self.assertIn(line, prompt_two)
-        self.assertIn("close Collector Proof product-and-evidence composition", prompt_three)
-        self.assertIn("genuine supplied proof detail", prompt_three)
-        self.assertIn("approximately 78-86% of usable width", prompt_three)
-        self.assertIn("proof detail at least twice", prompt_three)
-        self.assertIn("contained matte-black collector-proof panel", prompt_three)
-        self.assertIn("Never create a blank envelope, anonymous paper card", prompt_three)
-        self.assertNotIn("full-width matte-black scarcity strip across the bottom", prompt_three)
-        for line in ads_page.COLLECTOR_PROOF_COVER_LINES:
-            self.assertIn(line, prompt_three)
-
     def test_instant_experience_offer_serializes_without_moment_type(self):
         prompt = ads_page.build_ads_prompt(
             "Collector Pair",
@@ -3808,7 +3172,408 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("PROMOTION OR OFFER", prompt)
         self.assertIn("Exact Promotion or Offer entered: 15% off 2+ editions", prompt)
         self.assertIn("Serialize this field independently of Moment Type.", prompt)
-        self.assertIn("Use it only in Pure Limited-Release Scarcity Variation 3", prompt)
+        self.assertIn("Never place an offer in the on-image prompt", prompt)
+        self.assertNotIn("Pure Limited-Release Scarcity", prompt)
+
+    def test_instant_experience_v4_prompt_resolves_three_premium_room_routes(self):
+        prompt = ads_page.build_ads_prompt(
+            "Historic Baseball Legend Only 100 Will Ever Exist",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            variation_token="premium-room-v4",
+            product_metadata={
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "product_sport": "Baseball",
+                "collections": ["Historic legends"],
+            },
+        )
+        contract = visual_contract(prompt)
+        route_keys = (
+            "premium_scarcity_right",
+            "premium_scarcity_front",
+            "premium_scarcity_left",
+        )
+
+        for route_key in route_keys:
+            self.assertIn(f"Route key: {route_key}", contract)
+        self.assertNotIn("FRAMED GREATNESS SCARCITY HYBRID", contract)
+        self.assertNotIn("PURE LIMITED-RELEASE SCARCITY", contract)
+        self.assertNotIn("COLLECTOR PROOF SCARCITY", contract)
+        self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT", contract)
+        self.assertIn("COPY ONE ROUTE AT A TIME", contract)
+        self.assertIn("Return exactly three complete grouped Instant Experience routes", contract)
+        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", contract)
+        self.assertEqual(contract.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"), 3)
+        self.assertEqual(contract.count("MANDATORY SEAMLESS WALL SYSTEM"), 3)
+        self.assertEqual(contract.count("Upper photographed residential room scene: exactly 76%"), 3)
+        self.assertEqual(contract.count("Lower conversion panel: exactly 24%"), 3)
+        self.assertIn("camera 4-6 degrees to the viewer's right of centre", contract)
+        self.assertIn("predominantly straight-on camera with maximum 0-2 degree natural offset", contract)
+        self.assertIn("camera 4-6 degrees to the viewer's left of centre", contract)
+        self.assertIn("Once they're claimed, this edition retires forever.", contract)
+        self.assertIn("When the final one is claimed, it's gone for good.", contract)
+        self.assertIn("Released once. When they're gone, they stay gone.", contract)
+        self.assertIn("ONLY 100 WILL EVER EXIST", contract)
+        self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
+        self.assertIn("horizontal wall lines", contract)
+        self.assertIn("Do not rely on the image model to invent text organically inside the room.", contract)
+        allowed_meta_macros = {
+            "{{campaign.name}}",
+            "{{ad.name}}",
+            "{{adset.name}}",
+            "{{placement}}",
+        }
+        raw_placeholders = set(re.findall(r"\{\{[^}]+\}\}", prompt)) - allowed_meta_macros
+        self.assertEqual(raw_placeholders, set())
+
+    def test_instant_experience_v4_product_aware_room_selection_and_fallback(self):
+        historic = ads_page.resolve_standard_instant_experience_visuals(
+            product_name="Historic Baseball Legend Only 100 Will Ever Exist",
+            category="Baseball",
+            product_metadata={
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "product_sport": "Baseball",
+                "collections": ["Historic legends"],
+            },
+            variation_token="historic-room-test",
+        )
+        modern = ads_page.resolve_standard_instant_experience_visuals(
+            product_name="Current Modern Basketball Energy Only 100 Will Ever Exist",
+            category="Basketball",
+            product_metadata={
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "product_sport": "Basketball",
+                "collections": ["Current Stars"],
+            },
+            variation_token="modern-room-test",
+        )
+        missing = ads_page.resolve_standard_instant_experience_visuals(
+            product_name="Untitled Collector Release",
+            category="Other",
+            product_metadata={},
+            variation_token="missing-room-test",
+        )
+
+        self.assertEqual(historic[0]["product_era"], "historic")
+        self.assertEqual(historic[0]["room_profile_key"], "heritage_study")
+        self.assertIn("walnut timber", historic[0]["room_materials"])
+        self.assertEqual(modern[0]["room_profile_key"], "collector_lounge")
+        self.assertIn(modern[0]["room_profile_key"], {"collector_lounge", "modern_man_cave"})
+        self.assertEqual(missing[0]["product_sport"], "safe universal fallback")
+        self.assertEqual(missing[0]["artwork_mood"], "clean")
+        self.assertEqual(missing[0]["headline_text"], "SPORTS CAVE COLLECTOR RELEASE")
+        self.assertEqual(missing[0]["edition_limit_used"], "not verified")
+        self.assertEqual(missing[0]["room_profile_key"], "collector_lounge")
+        self.assertEqual(missing[0]["wall_colour"], "warm taupe seamless mineral-plaster wall")
+        self.assertEqual(missing[0]["primary_cue"], "partial doorway")
+        self.assertEqual(missing[0]["secondary_cue"], "cropped dark leather chair")
+        for visuals in (historic, modern, missing):
+            self.assertEqual(
+                [visual["route_key"] for visual in visuals],
+                [
+                    "premium_scarcity_right",
+                    "premium_scarcity_front",
+                    "premium_scarcity_left",
+                ],
+            )
+            self.assertEqual(len({visual["wall_colour"] for visual in visuals}), 3)
+            self.assertEqual(len({visual["primary_cue"] for visual in visuals}), 3)
+
+    def test_instant_experience_v4_seeded_room_refresh_changes_allowed_details(self):
+        common = {
+            "product_name": "Current Modern Basketball Energy Only 100 Will Ever Exist",
+            "category": "Basketball",
+            "product_metadata": {
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "product_sport": "Basketball",
+                "collections": ["Current Stars"],
+            },
+        }
+        first = ads_page.resolve_standard_instant_experience_visuals(
+            **common,
+            variation_token="seed-a",
+        )
+        second = ads_page.resolve_standard_instant_experience_visuals(
+            **common,
+            variation_token="seed-b",
+        )
+
+        self.assertEqual(
+            [visual["route_key"] for visual in first],
+            [visual["route_key"] for visual in second],
+        )
+        self.assertNotEqual(
+            [(visual["primary_cue"], visual["secondary_cue"], visual["room_profile_key"]) for visual in first],
+            [(visual["primary_cue"], visual["secondary_cue"], visual["room_profile_key"]) for visual in second],
+        )
+        self.assertEqual(
+            [visual["camera_role"] for visual in first],
+            ["right", "front", "left"],
+        )
+
+    def test_instant_experience_description_schema_order_and_connected_legends(self):
+        context, payload, copies = instant_experience_description_payload(
+            "Jordan and Bryant Legacy Only 100 Will Ever Exist",
+            "Basketball",
+            metadata={
+                "athlete_names": ["Michael Jordan", "Kobe Bryant"],
+                "relationship_type": "Inspiration or succession",
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "is_numbered": True,
+                "no_reprint_verified": True,
+                "retires_when_sold_out": True,
+            },
+        )
+
+        self.assertTrue(ads_page.validate_instant_experience_description_variants(payload))
+        self.assertEqual(
+            [variant["key"] for variant in payload["description_variants"]],
+            ["legacy_standard", "framed_greatness", "choose_a_side"],
+        )
+        self.assertEqual(context["ARTWORK_TYPE"], "Two connected legends")
+        self.assertEqual(context["RELATIONSHIP_TYPE"], "Inspiration or succession")
+        self.assertIn("The same standard.", copies["legacy_standard"])
+        self.assertIn("This isn't wall art.", copies["legacy_standard"])
+        self.assertIn("Limited to 100 worldwide.", copies["legacy_standard"])
+        self.assertIn("When they're gone, they're gone.", copies["legacy_standard"])
+        self.assertIn("A numbered collector drop.", copies["framed_greatness"])
+        self.assertIn("No reprint.", copies["framed_greatness"])
+        self.assertIn("No second run.", copies["framed_greatness"])
+        self.assertIn("Wrong question.", copies["choose_a_side"])
+        self.assertIn("Only 100 exist.", copies["choose_a_side"])
+        self.assertNotIn("No middle ground.", copies["choose_a_side"])
+        self.assertNotRegex("\n".join(copies.values()), r"\{\{[^}]+\}\}")
+
+    def test_instant_experience_description_rivalry_single_team_historic_and_motorsport_cases(self):
+        cases = [
+            (
+                "direct rivalry",
+                "Magic vs Bird Only 100 Will Ever Exist",
+                "Basketball",
+                {
+                    "athlete_names": ["Magic Johnson", "Larry Bird"],
+                    "side_a": "Magic",
+                    "side_b": "Bird",
+                    "relationship_type": "Rivals",
+                    "artwork_type": "Direct rivalry",
+                    "edition_limit": 100,
+                },
+                {
+                    "legacy_standard": ["They didn't connect.", "They collided."],
+                    "choose_a_side": ["Magic or Bird?", "Johnson… or Bird?", "No middle ground."],
+                    "not": ["They didn't compete"],
+                },
+            ),
+            (
+                "two-team rivalry",
+                "Yankees vs Red Sox Only 100 Will Ever Exist",
+                "Baseball",
+                {
+                    "team_names": ["Yankees", "Red Sox"],
+                    "athlete_names": ["Derek Jeter", "David Ortiz"],
+                    "side_a": "Yankees",
+                    "side_b": "Red Sox",
+                    "relationship_type": "Opposing teams",
+                    "artwork_type": "Two-team rivalry",
+                    "edition_limit": 100,
+                },
+                {
+                    "choose_a_side": ["Yankees or Red Sox?", "Jeter… or Ortiz?", "You already picked a side."],
+                    "not": ["Wrong question."],
+                },
+            ),
+            (
+                "single male athlete",
+                "Lionel Messi Collector Release",
+                "Football",
+                {
+                    "athlete_names": ["Lionel Messi"],
+                    "artwork_type": "Single athlete",
+                    "pronoun_mode": "male",
+                    "edition_limit": 100,
+                },
+                {
+                    "legacy_standard": ["He didn't follow the standard.", "He set it."],
+                    "choose_a_side": ["Messi?", "No explanation needed."],
+                    "not": ["They lifted the standard.", "She didn't follow"],
+                },
+            ),
+            (
+                "single female athlete",
+                "Serena Williams Collector Release",
+                "Tennis",
+                {
+                    "athlete_names": ["Serena Williams"],
+                    "artwork_type": "Single athlete",
+                    "pronoun_mode": "female",
+                },
+                {
+                    "legacy_standard": ["She didn't follow the standard.", "She set it."],
+                    "choose_a_side": ["Williams?", "A limited collector release."],
+                    "not": ["He didn't follow"],
+                },
+            ),
+            (
+                "historic sporting moment",
+                "Miracle Final Night Only 100 Will Ever Exist",
+                "Football",
+                {
+                    "artwork_type": "Historic sporting moment",
+                    "featured_moment": "Miracle Final Night",
+                    "edition_limit": 100,
+                },
+                {
+                    "legacy_standard": ["It wasn't just another game.", "It became the moment."],
+                    "choose_a_side": ["Remember where you were?", "Some moments never leave."],
+                },
+            ),
+            (
+                "team championship",
+                "Boston Championship Legacy Only 100 Will Ever Exist",
+                "Basketball",
+                {
+                    "team_names": ["Boston"],
+                    "artwork_type": "Team or championship",
+                    "featured_moment": "Championship night",
+                    "edition_limit": 100,
+                },
+                {
+                    "legacy_standard": ["They didn't wait for history.", "One team."],
+                    "choose_a_side": ["Boston?", "You never stopped believing.", "Championship night?"],
+                },
+            ),
+            (
+                "motorsport rivalry",
+                "Ford vs Holden Bathurst Only 100 Will Ever Exist",
+                "Motorsport",
+                {
+                    "side_a": "Ford",
+                    "side_b": "Holden",
+                    "relationship_type": "Rivals",
+                    "artwork_type": "Motorsport rivalry",
+                    "edition_limit": 100,
+                },
+                {
+                    "legacy_standard": ["They didn't race for second.", "It's a reminder of what real racing felt like."],
+                    "framed_greatness": ["The race ended. The rivalry never did."],
+                    "choose_a_side": ["Ford or Holden?", "One mountain.", "Two names that still divide the fans."],
+                },
+            ),
+        ]
+
+        for label, product_name, category, metadata, expected in cases:
+            with self.subTest(label=label):
+                _context, payload, copies = instant_experience_description_payload(
+                    product_name,
+                    category,
+                    metadata=metadata,
+                )
+                self.assertTrue(ads_page.validate_instant_experience_description_variants(payload))
+                for key, snippets in expected.items():
+                    if key == "not":
+                        continue
+                    for snippet in snippets:
+                        self.assertIn(snippet, copies[key])
+                combined = "\n".join(copies.values())
+                for snippet in expected.get("not", []):
+                    self.assertNotIn(snippet, combined)
+                self.assertIn("\n\n", copies["legacy_standard"])
+                self.assertIn("\n\n", copies["framed_greatness"])
+                self.assertIn("\n\n", copies["choose_a_side"])
+
+    def test_instant_experience_description_scarcity_gates_and_missing_metadata(self):
+        _context, _payload, verified = instant_experience_description_payload(
+            "Collector Release Only 100 Will Ever Exist",
+            "Golf",
+            metadata={
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+                "is_numbered": False,
+                "no_reprint_verified": False,
+            },
+        )
+        self.assertIn("Limited to 100 worldwide.", verified["legacy_standard"])
+        self.assertIn("Only 100 exist.", verified["choose_a_side"])
+        self.assertNotIn("A numbered collector drop.", verified["framed_greatness"])
+        self.assertNotIn("No reprint.", verified["framed_greatness"])
+        self.assertNotIn("No second run.", verified["framed_greatness"])
+
+        context, payload, missing = instant_experience_description_payload(
+            "Untitled Collector Release",
+            "Other",
+            metadata={},
+            country="Canada",
+        )
+        self.assertTrue(ads_page.validate_instant_experience_description_variants(payload))
+        self.assertEqual(context["ARTWORK_TYPE"], "Generic sport or collector artwork")
+        self.assertEqual(context["RELATIONSHIP_TYPE"], "Unknown")
+        self.assertEqual(context["CAMPAIGN_MARKET"], "Canada")
+        combined = "\n".join(missing.values())
+        self.assertIn("A limited collector release.", combined)
+        self.assertNotIn("100", combined)
+        self.assertNotIn("A numbered collector drop.", combined)
+        self.assertNotIn("No reprint.", combined)
+        self.assertNotIn("No second run.", combined)
+        self.assertNotRegex(combined, r"\{\{[^}]+\}\}")
+
+    def test_instant_experience_description_prompt_reuses_same_ordered_options_for_all_routes(self):
+        prompt = ads_page.build_ads_prompt(
+            "Ford vs Holden Bathurst Only 100 Will Ever Exist",
+            "Motorsport",
+            "Australia",
+            "Instant Experience",
+            variation_token="description-archetype-routes",
+            product_metadata={
+                "side_a": "Ford",
+                "side_b": "Holden",
+                "relationship_type": "Rivals",
+                "artwork_type": "Motorsport rivalry",
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+            },
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("INSTANT EXPERIENCE DESCRIPTION COPY SYSTEM V1", prompt)
+        self.assertIn("Generate the long advertising description copy once", prompt)
+        self.assertIn("PRODUCT-AWARE DESCRIPTION SYSTEM", prompt)
+        self.assertEqual(contract.count("| 1 | legacy_standard | Description 1"), 3)
+        self.assertEqual(contract.count("| 2 | framed_greatness | Description 2"), 3)
+        self.assertEqual(contract.count("| 3 | choose_a_side | Description 3"), 3)
+        self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", contract)
+        allowed_macro_scrubbed = re.sub(
+            r"\{\{(?:(?:campaign|ad|adset)\.name|placement)\}\}",
+            "",
+            prompt,
+        )
+        self.assertNotRegex(allowed_macro_scrubbed, r"\{\{[^}]+\}\}")
+
+    def test_instant_experience_image_prompts_keep_lower_panel_copy_separate_from_descriptions(self):
+        visual_prompts = ads_page.build_standard_instant_experience_visual_prompts(
+            product_name="Collector Release Only 100 Will Ever Exist",
+            category="Baseball",
+            country="USA",
+            product_metadata={
+                "edition_limit": 100,
+                "edition_limit_source": "unit test",
+            },
+            variation_token="description-image-separation",
+        )
+
+        self.assertEqual(visual_prompts.count("- Headline: ONLY 100 WILL EVER EXIST"), 3)
+        self.assertEqual(visual_prompts.count("- CTA: CLAIM YOUR EDITION"), 3)
+        self.assertIn("Once they're claimed, this edition retires forever.", visual_prompts)
+        self.assertIn("When the final one is claimed, it's gone for good.", visual_prompts)
+        self.assertIn("Released once. When they're gone, they stay gone.", visual_prompts)
+        self.assertNotIn("This isn't wall art.", visual_prompts)
+        self.assertNotIn("Greatness doesn't fade. It gets framed.", visual_prompts)
+        self.assertNotIn("No middle ground.", visual_prompts)
 
     def test_instant_experience_does_not_use_obsolete_collection_destination(self):
         settings = instant_experience_settings(
@@ -4017,6 +3782,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("ads-ie-concept-copy-field::", source)
         self.assertIn("height: 50px", source)
         self.assertIn("overflow-y: auto", source)
+        self.assertIn('label="Copy Description"', source)
+        self.assertIn("Description copied", source)
 
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
@@ -4040,8 +3807,8 @@ PRIMARY TEXT VARIATIONS
 
         note_labels = [text_area.label for text_area in app_test.text_area]
         self.assertEqual(
-            [label for label in note_labels if label == "Primary Text"],
-            ["Primary Text"] * 9,
+            [label for label in note_labels if label == "Description"],
+            ["Description"] * 9,
         )
         self.assertEqual(
             [label for label in note_labels if label == "Headline"],
@@ -4180,6 +3947,10 @@ PRIMARY TEXT VARIATIONS
         wrong_schema[0]["schema_version"] = "999"
         invalid_cases["wrong schema"] = csv_bytes_from_rows(wrong_schema)
 
+        wrong_description_key = [dict(row) for row in valid_rows]
+        wrong_description_key[0]["description_key"] = "choose_a_side"
+        invalid_cases["wrong description key"] = csv_bytes_from_rows(wrong_description_key)
+
         missing_header_rows = [
             {key: value for key, value in row.items() if key != "cta"}
             for row in valid_rows
@@ -4202,91 +3973,6 @@ PRIMARY TEXT VARIATIONS
                 with self.assertRaises(ads_page.InstantExperienceCopyCSVError):
                     ads_page.parse_instant_experience_copy_csv(data, result)
 
-    def test_instant_experience_copy_csv_rejects_non_compliant_ctas_transactionally(self):
-        result = instant_experience_csv_result()
-        valid_data = ads_page.build_instant_experience_copy_csv(
-            result,
-            concept_notes=instant_experience_csv_notes(),
-        )
-        valid_rows = list(
-            csv.DictReader(io.StringIO(valid_data.decode("utf-8-sig"), newline=""))
-        )
-
-        invalid_cta_rows = [dict(row) for row in valid_rows]
-        invalid_cta_rows[0]["cta"] = "Feel It Again"
-        invalid_cta_rows[0]["primary_text"] = "A supported memory opens this ad. Feel it again."
-        with self.assertRaisesRegex(
-            ads_page.InstantExperienceCopyCSVError,
-            "Framed Greatness Scarcity variation 1: CTA must be exactly one of",
-        ):
-            ads_page.parse_instant_experience_copy_csv(
-                csv_bytes_from_rows(invalid_cta_rows),
-                result,
-            )
-
-        mismatched_rows = [dict(row) for row in valid_rows]
-        ownership_row = next(
-            row
-            for row in mismatched_rows
-            if row["route_key"] == "ownership" and row["variation"] == "2"
-        )
-        ownership_row["cta"] = "Secure Your Edition"
-        ownership_row["primary_text"] = "Picture the exact artwork on your wall. Claim your edition."
-        with self.assertRaisesRegex(
-            ads_page.InstantExperienceCopyCSVError,
-            "Pure Limited-Release Scarcity variation 2: Primary Text must end with",
-        ):
-            ads_page.parse_instant_experience_copy_csv(
-                csv_bytes_from_rows(mismatched_rows),
-                result,
-            )
-
-        scarcity_rows = [dict(row) for row in valid_rows]
-        scarcity_first = next(
-            row
-            for row in scarcity_rows
-            if row["route_key"] == "scarcity" and row["variation"] == "1"
-        )
-        scarcity_first["cta"] = "Secure Your Edition"
-        scarcity_first["primary_text"] = "A supported memory opens this ad. Secure your edition."
-        invalid_data = csv_bytes_from_rows(scarcity_rows)
-        widget_key = ads_page._instant_experience_copy_widget_key(
-            result["context_key"],
-            "scarcity",
-            "cta",
-            1,
-        )
-        session_state = {widget_key: "Keep existing CTA"}
-        workflow = {"ad_notes": {"keep": "existing notes"}}
-        with patch.object(ads_page.st, "session_state", session_state):
-            with self.assertRaisesRegex(
-                ads_page.InstantExperienceCopyCSVError,
-                "Numbered Collector Proof Scarcity variation 1: CTA must be Own This Edition",
-            ):
-                ads_page.apply_instant_experience_copy_csv(
-                    result,
-                    workflow,
-                    invalid_data,
-                )
-        self.assertEqual(session_state, {widget_key: "Keep existing CTA"})
-        self.assertEqual(workflow, {"ad_notes": {"keep": "existing notes"}})
-
-    def test_instant_experience_package_readiness_rejects_manual_soft_cta(self):
-        notes = instant_experience_csv_notes()
-        workflow = {"ad_notes": {"instant_experience_concepts": notes}}
-        self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
-
-        notes["ownership"][0] = {
-            "primary_text": "This belongs with the fans who understand it. Make it yours.",
-            "headline": "This Belongs With Fans",
-            "cta": "Make It Yours",
-        }
-        self.assertFalse(ads_page.instant_experience_copy_complete(workflow))
-        self.assertEqual(
-            ads_page._instant_experience_concept_complete_count(workflow, "ownership"),
-            2,
-        )
-
     def test_instant_experience_copy_csv_import_is_transactional_and_not_replayed(self):
         result = instant_experience_csv_result()
         expected = instant_experience_csv_notes()
@@ -4301,7 +3987,7 @@ PRIMARY TEXT VARIATIONS
         invalid_data = csv_bytes_from_rows(invalid_rows)
         first_key = ads_page._instant_experience_copy_widget_key(
             result["context_key"],
-            "nostalgia",
+            "premium_scarcity_right",
             "primary_text",
             1,
         )
@@ -4324,7 +4010,7 @@ PRIMARY TEXT VARIATIONS
                 io.BytesIO(valid_data),
             )
             self.assertTrue(status["ok"])
-            self.assertEqual(status["message"], "Imported 9 copy variations into 27 fields.")
+            self.assertEqual(status["message"], "Imported 9 description options into 27 fields.")
             self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
             for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
                 self.assertEqual(
@@ -4366,7 +4052,7 @@ PRIMARY TEXT VARIATIONS
         primary_values = [
             text_area.value
             for text_area in app_test.text_area
-            if text_area.label == "Primary Text"
+            if text_area.label == "Description"
         ]
         headline_values = [
             text_area.value
@@ -4379,15 +4065,15 @@ PRIMARY TEXT VARIATIONS
             if text_area.label == "CTA"
         ]
         self.assertEqual(len(primary_values), 9)
-        self.assertEqual(primary_values[0], expected["nostalgia"][0]["primary_text"])
-        self.assertEqual(primary_values[-1], expected["scarcity"][2]["primary_text"])
-        self.assertEqual(headline_values[4], expected["ownership"][1]["headline"])
-        self.assertEqual(cta_values[8], expected["scarcity"][2]["cta"])
+        self.assertEqual(primary_values[0], expected["premium_scarcity_right"][0]["primary_text"])
+        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][2]["primary_text"])
+        self.assertEqual(headline_values[4], expected["premium_scarcity_front"][1]["headline"])
+        self.assertEqual(cta_values[8], expected["premium_scarcity_left"][2]["cta"])
         self.assertTrue(
             all(
                 any(
                     f"{concept['display_name']}: " in caption.value
-                    and "3 of 3 copy variations complete" in caption.value
+                    and "3 of 3 description options complete" in caption.value
                     for caption in app_test.caption
                 )
                 for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
@@ -4533,46 +4219,6 @@ PRIMARY TEXT VARIATIONS
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_instant_experience_renders_three_required_cover_slots_immediately(self):
-        app_test = run_ads_page()
-        set_product_name(app_test, "Final Whistle Glory")
-        select_option(app_test, "Category", "Football")
-        select_option(app_test, "Country", "UK")
-        select_option(app_test, "Campaign type", "Instant Experience")
-        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
-        button_by_label(app_test, "Submit").click().run(timeout=20)
-
-        self.assertEqual(
-            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
-            [
-                "Framed Greatness Scarcity Cover",
-                "Pure Limited-Release Scarcity Cover",
-                "Numbered Collector Proof Scarcity Cover",
-            ],
-        )
-        button_labels = [button.label for button in app_test.button]
-        self.assertEqual(button_labels.count("Save Instant Experience Package"), 1)
-        self.assertNotIn("Download Instant Experience Package", button_labels)
-        self.assertNotIn("Save Images", button_labels)
-        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
-        self.assertTrue(any("0 of 3 images ready." in caption.value for caption in app_test.caption))
-        for index in range(1, 4):
-            instant_experience_cover_uploaders(app_test)[index - 1].set_value(
-                [(f"instant-{index}.png", square_png_bytes(color=(40 + index, 70, 110)), "image/png")]
-            )
-            app_test.run(timeout=30)
-            self.assertEqual(
-                [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
-                [
-                    "Framed Greatness Scarcity Cover",
-                    "Pure Limited-Release Scarcity Cover",
-                    "Numbered Collector Proof Scarcity Cover",
-                ],
-            )
-            self.assertTrue(any(f"{index} of 3 images ready." in caption.value for caption in app_test.caption))
-            self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
-        self.assertEqual(len(app_test.exception), 0)
-
     def test_instant_experience_save_package_button_opens_existing_destination_workflow(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Final Whistle Glory")
@@ -4625,7 +4271,7 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_instant_experience_preview_remove_replace_and_rerun_persistence(self):
+    def test_invalid_generated_image_shows_inline_error_and_keeps_save_disabled(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Final Whistle Glory")
         select_option(app_test, "Category", "Football")
@@ -4635,43 +4281,354 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         instant_experience_cover_uploaders(app_test)[0].set_value(
+            [("broken.png", b"not an image", "image/png")]
+        )
+        app_test.run(timeout=20)
+
+        self.assertTrue(any("corrupt" in error.value for error in app_test.error))
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def assert_instant_experience_v4_routes(self, prompt):
+        for route_key in (
+            "premium_scarcity_right",
+            "premium_scarcity_front",
+            "premium_scarcity_left",
+        ):
+            self.assertIn(f"Route key: {route_key}", prompt)
+        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
+        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
+        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("CLAIM YOUR EDITION", prompt)
+        self.assertNotIn("FRAMED GREATNESS SCARCITY HYBRID", prompt)
+        self.assertNotIn("PURE LIMITED-RELEASE SCARCITY", prompt)
+        self.assertNotIn("COLLECTOR PROOF SCARCITY", prompt)
+
+    def test_ads_setup_notes_text_matches_campaign_type_and_pasted_copy(self):
+        result = ads_page.build_ads_result_record(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+        )
+        workflow = {
+            "ad_notes": {
+                "instant_experience_concepts": instant_experience_csv_notes(),
+            }
+        }
+
+        notes = ads_page.build_ads_setup_notes_text(result, workflow)
+
+        self.assertIn("Sports Cave Ad Setup Notes", notes)
+        self.assertIn("Campaign type: Instant Experience", notes)
+        self.assertIn("Premium Scarcity", notes)
+        self.assertIn("DESCRIPTION COPY", notes)
+        self.assertIn("DESCRIPTION KEY", notes)
+        self.assertIn("legacy_standard", notes)
+        self.assertNotIn("Carousel cards / ad setup", notes)
+
+    def test_baseball_instant_experience_approved_claims_are_injected_through_claim_helper(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+        )
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("def build_baseball_instant_experience_claim_block", source)
+        self.assertIn("BASEBALL_INSTANT_EXPERIENCE_APPROVED_CLAIMS", source)
+        self.assertIn("Only 100 editions.", prompt)
+        self.assertIn("Numbered C.O.A. included.", prompt)
+        self.assertIn("Made in the USA.", prompt)
+        self.assertIn("Rated 4.9 / 5 by thousands of collectors.", prompt)
+        self.assertIn("These claim lines are supplied through the approved Baseball Instant Experience claim path.", prompt)
+        self.assertIn("Never invent history, achievements, product facts", prompt)
+
+    def test_baseball_instant_experience_uses_master_cover_prompt_and_claim_path(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+            variation_token="baseball-cover-test",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
+        self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
+        self.assertIn("ONLY 100 WILL EVER EXIST", contract)
+        self.assertEqual(contract.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"), 3)
+        self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
+        self.assertNotIn("Mockups ZIP", prompt)
+        self.assertNotIn("Social Media Reels", prompt)
+
+    def test_dedicated_baseball_instant_experience_keeps_grouped_copy_schema(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+        )
+
+        self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
+        self.assertIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", prompt)
+        self.assertIn("Each route table must contain exactly three completed description rows", prompt)
+        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", prompt)
+        self.assertGreaterEqual(prompt.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
+        self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
+
+    def test_every_ads_prompt_requires_text_first_no_automatic_image_generation(self):
+        for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Football",
+                        "Australia",
+                        campaign_type,
+                        variation_token="text-first-test",
+                    )
+                )
+
+                self.assertIn("TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY", contract)
+                self.assertIn("Your first response must be text and planning only.", contract)
+                self.assertIn("Do not call, invoke, open or use any image-generation tool", contract)
+                if campaign_type == "Instant Experience":
+                    self.assertIn("PREMIUM SCARCITY", contract)
+                    self.assertIn("shared INSTANT EXPERIENCE SETUP block", contract)
+                    self.assertNotIn("Would you like me", contract)
+                else:
+                    self.assertIn('"Would you like me to generate Card 1?"', contract)
+                self.assertIn("Then wait for explicit approval before generating anything.", contract)
+
+    def test_every_category_returns_instant_experience_output_for_every_supported_country(self):
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            for country in ads_page.COUNTRY_OPTIONS[1:]:
+                with self.subTest(category=category, country=country):
+                    prompt = ads_page.build_ads_prompt(
+                        f"{category} Collector Moment",
+                        category,
+                        country,
+                        "Instant Experience",
+                    )
+                    self.assertNotEqual(prompt, "")
+                    self.assertNotIn("Insufficient winner data", prompt)
+                    self.assertIn(f"Market: {country}", prompt)
+                    self.assertIn("META URL PARAMETERS", prompt)
+                    self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+                    self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
+                    self.assertIn("Route key: premium_scarcity_right", prompt)
+                    self.assertIn("Route key: premium_scarcity_front", prompt)
+                    self.assertIn("Route key: premium_scarcity_left", prompt)
+                    self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
+                    self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
+
+    def test_football_instant_experience_works_for_every_supported_country(self):
+        expected_terms = {
+            "Australia": "football or soccer depending on the product context",
+            "UK": "use football, supporters, wall, home bar, collection",
+            "USA": "use soccer, fans, collector wall art, sports room",
+            "Canada": "use football or soccer depending on the product context",
+            "New Zealand": "use football or soccer depending on the product context",
+        }
+
+        for country in ads_page.COUNTRY_OPTIONS[1:]:
+            with self.subTest(country=country):
+                prompt = ads_page.build_ads_prompt(
+                    "Messi World Cup Night",
+                    "Football",
+                    country,
+                    "Instant Experience",
+                )
+                self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
+                self.assertIn(f"Market: {country}", prompt)
+                self.assertIn(expected_terms[country], prompt)
+                self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
+                self.assertIn("Route key: premium_scarcity_right", prompt)
+                self.assertIn("Route key: premium_scarcity_front", prompt)
+                self.assertIn("Route key: premium_scarcity_left", prompt)
+
+    def test_football_instant_experience_uses_bottom_strip_and_collector_framing(self):
+        prompt = ads_page.build_ads_prompt("Messi World Cup Night", "Football", "USA", "Instant Experience")
+
+        self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
+        self.assertIn("Football collector wall art", prompt)
+        self.assertIn("Route key: premium_scarcity_left", prompt)
+        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
+        self.assertIn("CLAIM YOUR EDITION", prompt)
+
+    def test_instant_experience_auto_scenes_are_specific_and_pairwise_distinct(self):
+        visuals = ads_page.resolve_standard_instant_experience_visuals(
+            product_name="Sunday at the Crease",
+            category="Cricket",
+            product_metadata={"edition_limit": 100, "edition_limit_source": "unit test"},
+            variation_token="scene-specificity",
+        )
+
+        self.assertTrue(ads_page.validate_instant_experience_set_differentiation(visuals))
+        self.assertEqual(len({visual["camera_side"] for visual in visuals}), 3)
+        self.assertEqual(len({visual["wall_colour"] for visual in visuals}), 3)
+        self.assertEqual(len({visual["primary_cue"] for visual in visuals}), 3)
+
+    def test_instant_experience_copy_csv_validates_cta_field_without_forcing_description_ending(self):
+        result = instant_experience_csv_result()
+        valid_data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=instant_experience_csv_notes(),
+        )
+        valid_rows = list(
+            csv.DictReader(io.StringIO(valid_data.decode("utf-8-sig"), newline=""))
+        )
+
+        invalid_cta_rows = [dict(row) for row in valid_rows]
+        invalid_cta_rows[0]["cta"] = "Feel It Again"
+        invalid_cta_rows[0]["primary_text"] = "A supported memory opens this ad. Feel it again."
+        with self.assertRaisesRegex(
+            ads_page.InstantExperienceCopyCSVError,
+            "Premium Scarcity.*CTA must be exactly one of",
+        ):
+            ads_page.parse_instant_experience_copy_csv(
+                csv_bytes_from_rows(invalid_cta_rows),
+                result,
+            )
+
+        archetype_ending_rows = [dict(row) for row in valid_rows]
+        front_row = next(
+            row
+            for row in archetype_ending_rows
+            if row["route_key"] == "premium_scarcity_front" and row["variation"] == "2"
+        )
+        front_row["cta"] = "Secure Your Edition"
+        front_row["primary_text"] = (
+            "Greatness doesn't fade. It gets framed.\n\n"
+            "A limited collector release.\n"
+            "Made for the fans who know what this moment means.\n\n"
+            "Limited to 100 worldwide.\n"
+            "Made for serious collectors.\n"
+            "Built for the fans who know why it matters.\n\n"
+            "Secure yours."
+        )
+
+        parsed = ads_page.parse_instant_experience_copy_csv(
+            csv_bytes_from_rows(archetype_ending_rows),
+            result,
+        )
+
+        self.assertEqual(
+            parsed["premium_scarcity_front"][1]["primary_text"],
+            front_row["primary_text"],
+        )
+        self.assertEqual(parsed["premium_scarcity_front"][1]["cta"], "Secure Your Edition")
+
+    def test_instant_experience_creative_cta_contract_is_central_and_route_scoped(self):
+        prompt = ads_page.build_ads_prompt(
+            "Pressure at the Final Whistle",
+            "Football",
+            "Australia",
+            "Instant Experience",
+            variation_token="ie-edition-cta-contract",
+        )
+        marker = ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
+        contract = visual_contract(prompt)
+
+        self.assertEqual(prompt.count(marker), 4)
+        self.assertEqual(contract.count(marker), 3)
+        self.assertIn("Description 1 in all three routes must use CTA field Claim Your Edition.", prompt)
+        self.assertIn("The native Meta/Instant Experience platform button remains Shop Now.", prompt)
+        self.assertIn("ADS INSTANT EXPERIENCE COPY V7", prompt)
+
+    def test_instant_experience_ignores_obsolete_route_settings_and_uses_standard_output(self):
+        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_SMART)
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+            variation_token="standard-route-ignore-test",
+            instant_experience_settings=settings,
+        )
+
+        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
+        self.assertIn("Route key: premium_scarcity_right", prompt)
+        self.assertIn("Route key: premium_scarcity_front", prompt)
+        self.assertIn("Route key: premium_scarcity_left", prompt)
+        self.assertNotIn("OPTION A", prompt)
+        self.assertNotIn("OUTPUT EXACTLY FOR THIS OPTION", prompt)
+        self.assertNotIn("META AD DESCRIPTION\n", prompt)
+        self.assertNotIn("Which Instant Experience cover", prompt)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
+
+    def test_instant_experience_renders_three_required_cover_slots_immediately(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        expected_labels = [
+            f"{concept['display_name']} Cover"
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+        ]
+        self.assertEqual(
+            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
+            expected_labels,
+        )
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
+        self.assertTrue(any("0 of 3 images ready." in caption.value for caption in app_test.caption))
+        for index in range(1, 4):
+            instant_experience_cover_uploaders(app_test)[index - 1].set_value(
+                [(f"instant-{index}.png", square_png_bytes(color=(40 + index, 70, 110)), "image/png")]
+            )
+            app_test.run(timeout=30)
+            self.assertTrue(any(f"{index} of 3 images ready." in caption.value for caption in app_test.caption))
+            self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_instant_experience_preview_remove_replace_and_rerun_persistence(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        slot_id = "instant-experience-premium-scarcity-right"
+        instant_experience_cover_uploaders(app_test)[0].set_value(
             [("uploaded-filename.png", square_png_bytes(), "image/png")]
         )
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertTrue(workflow["slots"]["instant-experience-nostalgia"]["valid"])
-        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "uploaded-filename.png")
-        self.assertTrue(any("Original: 96 x 96 px" in caption.value for caption in app_test.caption))
+        self.assertTrue(workflow["slots"][slot_id]["valid"])
+        self.assertEqual(workflow["slots"][slot_id]["original_name"], "uploaded-filename.png")
         result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
         filename = ads_page._meta_output_filename(
             result,
             workflow,
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
-        self.assertEqual(
-            filename,
-            "framed_greatness_scarcity_hybrid_cover_original.png",
-        )
-        self.assertTrue(filename.endswith(".png"))
-        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
-
+        self.assertEqual(filename, "premium_scarcity_right_cover_original.png")
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertIn("instant-experience-nostalgia", workflow["slots"])
-        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "uploaded-filename.png")
-
+        self.assertIn(slot_id, workflow["slots"])
         button_by_label(app_test, "Remove").click().run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(workflow["slots"], {})
-        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
-
         instant_experience_cover_uploaders(app_test)[0].set_value(
             [("replacement.webp", square_png_bytes(color=(90, 120, 150)), "image/webp")]
         )
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "replacement.webp")
-        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
+        self.assertEqual(workflow["slots"][slot_id]["original_name"], "replacement.webp")
 
     def test_instant_experience_remove_middle_cover_preserves_route_slots(self):
         app_test = run_ads_page()
@@ -4692,70 +4649,118 @@ PRIMARY TEXT VARIATIONS
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(
             list(workflow["slots"].keys()),
-            ["instant-experience-nostalgia", "instant-experience-scarcity"],
+            [
+                "instant-experience-premium-scarcity-right",
+                "instant-experience-premium-scarcity-left",
+            ],
         )
         self.assertEqual(
-            workflow["slots"]["instant-experience-scarcity"]["original_name"],
+            workflow["slots"]["instant-experience-premium-scarcity-left"]["original_name"],
             "variation-3.png",
         )
+
+    def test_instant_experience_sport_country_and_fingerprints_are_automatic(self):
+        baseball = ads_page.instant_experience_sport_direction("Baseball")
+        basketball = ads_page.instant_experience_sport_direction("NBA")
+        self.assertIn("ballpark memory", baseball)
+        self.assertIn("charcoal limewash", basketball)
+        self.assertNotIn("vehicles", baseball)
+
+        fingerprints = ads_page.build_standard_instant_experience_fingerprints(
+            product_name="Historic Baseball Legend Only 100 Will Ever Exist",
+            category="Baseball",
+            product_metadata={"edition_limit": 100, "edition_limit_source": "unit test"},
+        )
+        self.assertEqual(len(fingerprints), 3)
         self.assertEqual(
-            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
-            [
-                "Framed Greatness Scarcity Cover",
-                "Pure Limited-Release Scarcity Cover",
-                "Numbered Collector Proof Scarcity Cover",
-            ],
+            {fingerprint["route_key"] for fingerprint in fingerprints},
+            {
+                "premium_scarcity_right",
+                "premium_scarcity_front",
+                "premium_scarcity_left",
+            },
+        )
+        self.assertEqual(len({fingerprint["camera_family"] for fingerprint in fingerprints}), 3)
+        self.assertEqual(len({fingerprint["wall_colour_family"] for fingerprint in fingerprints}), 3)
+
+    def test_instant_experience_text_first_contract_uses_grouped_description_schema(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Collector Test Product",
+                "Cricket",
+                "UK",
+                "Instant Experience",
+                variation_token="instant-text-first-test",
+            )
         )
 
-    def test_invalid_generated_image_shows_inline_error_and_keeps_save_disabled(self):
-        app_test = run_ads_page()
-        set_product_name(app_test, "Final Whistle Glory")
-        select_option(app_test, "Category", "Football")
-        select_option(app_test, "Country", "UK")
-        select_option(app_test, "Campaign type", "Instant Experience")
-        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
-        button_by_label(app_test, "Submit").click().run(timeout=20)
+        self.assertIn("PREMIUM SCARCITY", contract)
+        self.assertIn("Exactly nine complete ad-copy combinations total", contract)
+        self.assertIn("Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.", contract)
+        self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", contract)
+        self.assertNotIn("6. Description lines.", contract)
 
-        instant_experience_cover_uploaders(app_test)[0].set_value(
-            [("broken.png", b"not an image", "image/png")]
+    def test_instant_experience_three_scarcity_copy_structures_are_distinct(self):
+        prompt = ads_page.build_ads_prompt(
+            "The Last Lap Collector Edition",
+            "Motorsport",
+            "UK",
+            "Instant Experience",
+            variation_token="scarcity-emotion-balance",
         )
-        app_test.run(timeout=20)
 
-        self.assertTrue(any("corrupt" in error.value for error in app_test.error))
-        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
-        self.assertEqual(len(app_test.exception), 0)
+        self.assertIn("All three routes must remain scarcity-first", prompt)
+        self.assertIn("Route 1 must resolve the Slight Right Angle cover", prompt)
+        self.assertIn("Route 2 must resolve the Straight On cover", prompt)
+        self.assertIn("Route 3 must resolve the Slight Left Angle cover", prompt)
+        self.assertIn("Never invent history, achievements, product facts", prompt)
+        self.assertIn("CLAIM YOUR EDITION", prompt)
 
-    def test_new_campaign_submit_resets_only_incompatible_ads_upload_state(self):
-        app_test = run_ads_page()
-        set_product_name(app_test, "Six Laps Ahead")
-        select_option(app_test, "Category", "Motorsport")
-        select_option(app_test, "Country", "Australia")
-        select_option(app_test, "Campaign type", "Carousel")
-        set_product_url(app_test)
-        button_by_label(app_test, "Submit").click().run(timeout=20)
-        app_test.file_uploader[0].set_value(
-            [("carousel-one.png", square_png_bytes(), "image/png")]
+    def test_instant_experience_v2_image_contract_strengthens_source_and_room_physics(self):
+        prompt = ads_page.build_ads_prompt(
+            "Collector Test Product",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            variation_token="ie-physics-v2",
         )
-        app_test.run(timeout=30)
-        old_context = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["context_key"]
 
-        select_option(app_test, "Campaign type", "Instant Experience")
-        set_product_url(app_test)
-        button_by_label(app_test, "Submit").click().run(timeout=20)
+        for expected in (
+            "one immutable photographic source asset",
+            "Retain the uploaded product pixels wherever technically possible",
+            "Keep all four outside frame edges visible",
+            "one rigid rectangular object",
+            "believable 6-10 mm mounting gap",
+            "one physically consistent source of soft daylight",
+            "remain confined to the glass surface",
+            "generic AI luxury-room formula",
+        ):
+            self.assertIn(expected, prompt)
+        self.assertIn("exactly 1024 x 1024 pixels", prompt)
+        self.assertIn("The workflow must correct failures", prompt)
 
-        new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
-        new_workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertNotEqual(new_result["context_key"], old_context)
-        self.assertEqual(new_workflow["context_key"], new_result["context_key"])
-        self.assertEqual(new_workflow["slots"], {})
-        self.assertEqual(
-            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
-            [
-                "Framed Greatness Scarcity Cover",
-                "Pure Limited-Release Scarcity Cover",
-                "Numbered Collector Proof Scarcity Cover",
-            ],
+    def test_instant_experience_visual_contract_returns_three_grouped_concept_prompts(self):
+        prompt = ads_page.build_ads_prompt(
+            "fg",
+            "AFL",
+            "Australia",
+            "Instant Experience",
+            variation_token="instant-test",
         )
+        contract = visual_contract(prompt)
+
+        self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT", contract)
+        self.assertIn("COPY ONE ROUTE AT A TIME", contract)
+        self.assertIn("Return exactly three complete grouped Instant Experience routes", contract)
+        self.assertIn("Product name: fg", contract)
+        self.assertIn("Sport/category: AFL", contract)
+        self.assertIn("Country/market: Australia", contract)
+        self.assertIn("1024 x 1024", contract)
+        self.assertIn("Upper photographed residential room scene: exactly 76%", contract)
+        self.assertIn("Lower conversion panel: exactly 24%", contract)
+        self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
+        self.assertNotIn("Social Media Reels", contract)
+        self.assertNotIn("Six Laps Ahead", contract)
 
     def test_legacy_single_instant_experience_slot_loads_as_variation_one(self):
         result = ads_page.build_ads_result_record(
@@ -4786,9 +4791,337 @@ PRIMARY TEXT VARIATIONS
         }
 
         self.assertFalse(ads_page.ads_images_ready(result, workflow))
-        self.assertEqual(list(workflow["slots"].keys()), ["instant-experience-nostalgia"])
-        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "legacy.png")
-        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["label"], "Framed Greatness Scarcity Cover")
+        slot_id = "instant-experience-premium-scarcity-right"
+        self.assertEqual(list(workflow["slots"].keys()), [slot_id])
+        self.assertEqual(workflow["slots"][slot_id]["original_name"], "legacy.png")
+        self.assertIn("Right Angle", workflow["slots"][slot_id]["label"])
+
+    def test_new_campaign_submit_resets_only_incompatible_ads_upload_state(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        app_test.file_uploader[0].set_value(
+            [("carousel-one.png", square_png_bytes(), "image/png")]
+        )
+        app_test.run(timeout=30)
+        old_context = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["context_key"]
+
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
+        new_workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertNotEqual(new_result["context_key"], old_context)
+        self.assertEqual(new_workflow["context_key"], new_result["context_key"])
+        self.assertEqual(new_workflow["slots"], {})
+        self.assertEqual(
+            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
+            [
+                f"{concept['display_name']} Cover"
+                for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+            ],
+        )
+
+    def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
+        for campaign_type, expected in (
+            ("Instant Experience", "one complete standalone cover image prompt followed by a three-row Markdown table"),
+            ("Single Image / Video", "one complete, separately copyable, production-ready creative prompt"),
+        ):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Cricket",
+                        "UK",
+                        campaign_type,
+                        variation_token="non-carousel-text-first",
+                    )
+                )
+
+                self.assertIn(expected, contract)
+                if campaign_type == "Instant Experience":
+                    self.assertIn("PREMIUM SCARCITY", contract)
+                    self.assertIn("shared INSTANT EXPERIENCE SETUP block", contract)
+                else:
+                    self.assertIn("before asking for approval to generate anything", contract)
+                self.assertNotIn("CARD 1 IMAGE GENERATION PROMPT", contract)
+
+    def test_old_instant_experience_cached_result_refreshes_to_v6_contract(self):
+        current = ads_page.build_ads_result_record(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_id="product-999",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="cached-ie-result-test",
+        )
+        legacy = {
+            **current,
+            "prompt_contract_version": "ADS INSTANT EXPERIENCE STANDARD V4",
+            "master_prompt": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
+            "generated_ad_output": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
+        }
+
+        refreshed = ads_page.ensure_current_ads_result_prompt(legacy)
+
+        self.assertEqual(
+            refreshed["prompt_contract_version"],
+            ads_page.ads_prompt_contract_version_for_campaign("Instant Experience"),
+        )
+        self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
+        self.assertIn("Route key: premium_scarcity_right", refreshed["master_prompt"])
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4", refreshed["master_prompt"])
+        self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
+
+    def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
+        prompt = ads_page.compose_final_ads_prompt(
+            "SAVED INSTANT EXPERIENCE PROMPT\n\nINSTANT EXPERIENCE COVER PROMPT\n\n[old saved cover prompt]",
+            category="Golf",
+            country="Canada",
+            campaign_type="Instant Experience",
+            product_name="Masters Sunday Frame",
+            variation_token="saved-compatible",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
+        self.assertIn("Route key: premium_scarcity_right", contract)
+        self.assertIn("Route key: premium_scarcity_front", contract)
+        self.assertIn("Route key: premium_scarcity_left", contract)
+        self.assertIn("Product name: Masters Sunday Frame", contract)
+        self.assertIn("Sport/category: Golf", contract)
+        self.assertIn("Country/market: Canada", contract)
+        self.assertNotIn("Social Media Reels", contract)
+
+    def test_shared_winner_copy_upgrade_is_idempotent_and_preserves_custom_text(self):
+        custom_prompt = "CUSTOM SAVED INSTRUCTION\nKeep this exact specialist direction."
+
+        once = ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Carousel")
+        twice = ads_page.apply_shared_meta_winner_copy_upgrade(once, "Carousel")
+
+        self.assertEqual(once, twice)
+        self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
+        self.assertIn(custom_prompt, once)
+        self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
+        self.assertNotIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", once)
+        self.assertIn(
+            "STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY",
+            ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
+        )
+        self.assertEqual(
+            ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Single Image / Video"),
+            custom_prompt,
+        )
+
+    def test_shared_winner_copy_upgrade_reaches_carousel_and_instant_experience(self):
+        carousel = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Carousel",
+            variation_token="winner-copy-carousel",
+        )
+        instant = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            variation_token="winner-copy-instant",
+        )
+
+        self.assertIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, carousel)
+        self.assertIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, instant)
+        self.assertIn("PRIMARY-TEXT ANGLE BALANCE", carousel)
+        self.assertIn("STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY", instant)
+
+    def test_staccato_and_framed_greatness_rules_are_reusable_and_fact_safe(self):
+        rules = ads_page.build_shared_meta_winner_copy_upgrade()
+        opening = "Greatness doesn't fade.\nIt gets framed."
+
+        self.assertEqual(rules.count(opening), 1)
+        self.assertIn("Begin with two to four short sharp lines.", rules)
+        self.assertIn("Do not mechanically force they or a rivalry structure", rules)
+        self.assertIn("single athlete, team, car, horse, event or championship product", rules)
+        self.assertIn("Close with: Limited to {authentic edition limit} worldwide.", rules)
+        self.assertIn(
+            "When the confirmed edition limit is 100, write exactly: "
+            "Limited to 100 worldwide. Secure your edition before it's gone.",
+            rules,
+        )
+        self.assertIn("When no edition quantity is confirmed", rules)
+        self.assertNotIn("Kobe", rules)
+        self.assertNotIn("Jordan", rules)
+
+    def test_instant_experience_v2_quality_contracts_are_centralized_and_once_per_cover(self):
+        prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="ie-quality-v2",
+        )
+        contract = visual_contract(prompt)
+        image_markers = (
+            ads_page.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0],
+            ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1,
+            ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2,
+            ads_page.SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2,
+            ads_page.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0],
+            SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
+        )
+
+        self.assertEqual(
+            prompt.count(ads_page.SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2.splitlines()[0]),
+            1,
+        )
+        for marker in image_markers:
+            self.assertEqual(contract.count(marker), 3, marker)
+        self.assertEqual(contract.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4", contract)
+
+    def test_instant_experience_route_wording_and_typography_are_route_specific(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            variation_token="route-wording-v4",
+        )
+        contract = visual_contract(prompt)
+        route_starts = [
+            contract.index("Route key: premium_scarcity_right"),
+            contract.index("Route key: premium_scarcity_front"),
+            contract.index("Route key: premium_scarcity_left"),
+        ]
+        sections = [
+            contract[route_starts[0] : route_starts[1]],
+            contract[route_starts[1] : route_starts[2]],
+            contract[route_starts[2] :],
+        ]
+
+        expected = (
+            ("premium_scarcity_right", "Once they're claimed, this edition retires forever."),
+            ("premium_scarcity_front", "When the final one is claimed, it's gone for good."),
+            ("premium_scarcity_left", "Released once. When they're gone, they stay gone."),
+        )
+        for section, (route_key, fomo) in zip(sections, expected):
+            self.assertIn(f"Route key: {route_key}", section)
+            self.assertIn(fomo, section)
+            self.assertIn("ONLY 100 WILL EVER EXIST", section)
+            self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
+            self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
+            self.assertIn("Never place Primary Text on the image.", section)
+
+    def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):
+        prompt = ads_page.build_ads_prompt(
+            "Collector Test Product",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            variation_token="scarcity-bottom-strip-test",
+        )
+        contract = visual_contract(prompt)
+        front_start = contract.index("Route key: premium_scarcity_front")
+        left_start = contract.index("Route key: premium_scarcity_left")
+        front_prompt = contract[front_start:left_start]
+
+        self.assertIn("Upper photographed residential room scene: exactly 76%", front_prompt)
+        self.assertIn("Lower conversion panel: exactly 24%", front_prompt)
+        self.assertIn("one 1-pixel muted-gold boundary line", front_prompt)
+        self.assertIn("approximately 82-88% of the canvas", front_prompt)
+        self.assertIn("ONLY 100 WILL EVER EXIST", front_prompt)
+        self.assertIn("When the final one is claimed, it's gone for good.", front_prompt)
+        self.assertIn("CLAIM YOUR EDITION", front_prompt)
+        self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", front_prompt)
+        self.assertIn("FRAME REALISM:", front_prompt)
+        self.assertIn("GLASS REALISM:", front_prompt)
+        self.assertIn(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER, front_prompt)
+
+    def test_instant_experience_scarcity_routes_use_distinct_compositions(self):
+        prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="standard-angle-test",
+        )
+
+        self.assertIn("camera 4-6 degrees to the viewer's right of centre", prompt)
+        self.assertIn("predominantly straight-on camera with maximum 0-2 degree natural offset", prompt)
+        self.assertIn("camera 4-6 degrees to the viewer's left of centre", prompt)
+        self.assertIn("Never simply mirror the right route to create the left route.", prompt)
+        self.assertIn("Never use the same exact wall colour twice.", prompt)
+        self.assertIn("Never use the same primary environmental cue twice.", prompt)
+        self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
+
+    def test_instant_experience_package_readiness_rejects_manual_soft_cta(self):
+        notes = instant_experience_csv_notes()
+        workflow = {"ad_notes": {"instant_experience_concepts": notes}}
+        self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
+
+        notes["premium_scarcity_front"][0] = {
+            "primary_text": "This belongs with the fans who understand it. Make it yours.",
+            "headline": "This Belongs With Fans",
+            "cta": "Make It Yours",
+        }
+        self.assertFalse(ads_page.instant_experience_copy_complete(workflow))
+        self.assertEqual(
+            ads_page._instant_experience_concept_complete_count(
+                workflow,
+                "premium_scarcity_front",
+            ),
+            2,
+        )
+
+    def test_rendered_instant_experience_csv_import_populates_existing_fields(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        expected = instant_experience_csv_notes()
+        data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=expected,
+        )
+
+        uploader_by_label(app_test, "Import completed CSV").set_value(
+            [("instant-experience-copy.csv", data, "text/csv")]
+        )
+        app_test.run(timeout=30)
+
+        primary_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "Description"
+        ]
+        headline_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "Headline"
+        ]
+        cta_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "CTA"
+        ]
+        self.assertEqual(len(primary_values), 9)
+        self.assertEqual(primary_values[0], expected["premium_scarcity_right"][0]["primary_text"])
+        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][2]["primary_text"])
+        self.assertEqual(headline_values[4], expected["premium_scarcity_front"][1]["headline"])
+        self.assertEqual(cta_values[8], expected["premium_scarcity_left"][2]["cta"])
+        self.assertEqual(len(app_test.exception), 0)
 
     def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):
         for category in ads_page.SUPPORTED_AD_CATEGORIES:
