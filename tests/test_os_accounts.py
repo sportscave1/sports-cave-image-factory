@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import time
 import unittest
@@ -8,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 import dropbox_integration
 import os_accounts
 import sc_auth
+import shared_credentials
 import sports_cave_dashboard
 import supabase_backend
 
@@ -30,7 +32,18 @@ class FakeAccountStore:
     def first_admin(self):
         return next((dict(user) for user in self.users if user.get("role") == "admin"), {})
 
-    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=(), country=""):
+    def create_user(
+        self,
+        *,
+        username,
+        email,
+        display_name,
+        password_hash,
+        role,
+        page_keys=(),
+        country="",
+        allow_credential_permissions=False,
+    ):
         clean_country = os_accounts.normalise_country(country, role=role)
         self.created_count += 1
         user = {
@@ -80,6 +93,7 @@ class FakeAccountStore:
         page_keys,
         password_hash="",
         country="",
+        allow_credential_permissions=False,
     ):
         for user in self.users:
             if user["id"] == user_id and user["role"] == "worker":
@@ -285,6 +299,324 @@ class AccountAccessTests(unittest.TestCase):
                 for _, parameters in cursor.calls
             )
         )
+
+    def test_credential_capability_requires_explicit_storage_allowance(self):
+        class RecordingCursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, parameters):
+                self.calls.append((sql, parameters))
+
+        with self.assertRaises(PermissionError):
+            os_accounts.PostgresAccountStore._replace_permissions(
+                RecordingCursor(),
+                "worker-1",
+                ["dashboard", "credential_prodigi"],
+            )
+
+        cursor = RecordingCursor()
+        selected = os_accounts.PostgresAccountStore._replace_permissions(
+            cursor,
+            "worker-1",
+            ["dashboard", "credential_prodigi", "not-a-permission"],
+            allow_credential_permissions=True,
+        )
+
+        self.assertEqual(selected, ["credential_prodigi", "dashboard"])
+        self.assertTrue(
+            any(
+                parameters == ("worker-1", "credential_prodigi")
+                for _, parameters in cursor.calls
+            )
+        )
+
+    def test_admin_can_access_all_shared_credentials(self):
+        admin = {"id": "admin-1", "role": "admin", "is_active": True, "page_permissions": []}
+
+        self.assertEqual(
+            [spec.key for spec in shared_credentials.accessible_credential_specs(admin)],
+            ["prodigi", "adobe", "chatgpt"],
+        )
+        self.assertTrue(
+            all(
+                shared_credentials.can_access_credential(admin, spec.key)
+                for spec in shared_credentials.credential_specs()
+            )
+        )
+
+    def test_permitted_worker_accesses_only_selected_credentials(self):
+        worker = {
+            "id": "worker-1",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["credential_prodigi", "credential_chatgpt"],
+        }
+        store = FakeAccountStore()
+        store.users.append(worker)
+
+        with patch("activity_log.record_activity_log"):
+            self.assertEqual(
+                shared_credentials.read_credential_for_action(
+                    worker,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_COPIED,
+                    environ={"PRODIGI_PASSWORD": "fake-prodigi-password"},
+                    store=store,
+                ),
+                "fake-prodigi-password",
+            )
+            with self.assertRaises(shared_credentials.CredentialAccessDenied):
+                shared_credentials.read_credential_for_action(
+                    worker,
+                    "adobe",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_COPIED,
+                    environ={"ADOBE_PASSWORD": "fake-adobe-password"},
+                    store=store,
+                )
+
+        self.assertEqual(
+            [spec.key for spec in shared_credentials.accessible_credential_specs(worker)],
+            ["prodigi", "chatgpt"],
+        )
+
+    def test_unpermitted_worker_cannot_reveal_or_copy_credentials(self):
+        worker = {
+            "id": "worker-1",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        store = FakeAccountStore()
+        store.users.append(worker)
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            for action in (
+                shared_credentials.ACTION_PASSWORD_REVEALED,
+                shared_credentials.ACTION_PASSWORD_COPIED,
+            ):
+                with self.subTest(action=action):
+                    with self.assertRaises(shared_credentials.CredentialAccessDenied):
+                        shared_credentials.read_credential_for_action(
+                            worker,
+                            "prodigi",
+                            shared_credentials.FIELD_PASSWORD,
+                            action,
+                            environ={"PRODIGI_PASSWORD": "fake-prodigi-password"},
+                            store=store,
+                        )
+
+        self.assertTrue(audit_log.called)
+        self.assertTrue(
+            all(call.args[0] == shared_credentials.ACTION_ACCESS_DENIED for call in audit_log.call_args_list)
+        )
+
+    def test_credential_permissions_default_off_for_workers(self):
+        store = FakeAccountStore()
+        worker = os_accounts.create_worker_account(
+            username="worker",
+            display_name="Worker",
+            password="Worker password 26!",
+            page_keys=("dashboard",),
+            store=store,
+        )
+
+        self.assertEqual(shared_credentials.credential_permission_keys(worker["page_permissions"]), ())
+        self.assertEqual(shared_credentials.accessible_credential_specs(worker), ())
+
+    def test_revoked_credential_access_is_denied_on_fresh_check(self):
+        worker = {
+            "id": "worker-1",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["credential_prodigi"],
+        }
+        store = FakeAccountStore()
+        store.users.append(dict(worker))
+
+        with patch("activity_log.record_activity_log"):
+            self.assertEqual(
+                shared_credentials.read_credential_for_action(
+                    worker,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_REVEALED,
+                    environ={"PRODIGI_PASSWORD": "fake-prodigi-password"},
+                    store=store,
+                ),
+                "fake-prodigi-password",
+            )
+            store.users[0]["page_permissions"] = []
+            with self.assertRaises(shared_credentials.CredentialAccessDenied):
+                shared_credentials.read_credential_for_action(
+                    worker,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_REVEALED,
+                    environ={"PRODIGI_PASSWORD": "fake-prodigi-password"},
+                    store=store,
+                )
+
+    def test_missing_render_variables_fail_safely(self):
+        admin = {"id": "admin-1", "role": "admin", "is_active": True, "page_permissions": []}
+        store = FakeAccountStore()
+        store.users.append(admin)
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            self.assertFalse(
+                shared_credentials.credential_field_is_configured(
+                    admin,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    environ={},
+                    store=store,
+                )
+            )
+            self.assertEqual(
+                shared_credentials.read_credential_for_action(
+                    admin,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_REVEALED,
+                    environ={},
+                    store=store,
+                ),
+                "",
+            )
+
+        audit_log.assert_not_called()
+
+    def test_credential_values_never_enter_audit_payloads(self):
+        admin = {
+            "id": "admin-1",
+            "email": "admin@sportscave.test",
+            "display_name": "Nathan",
+            "role": "admin",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        store = FakeAccountStore()
+        store.users.append(admin)
+        credential_username = "shared-login@example.test"
+        credential_password = "unit-test-credential-password-value"
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            self.assertEqual(
+                shared_credentials.read_credential_for_action(
+                    admin,
+                    "prodigi",
+                    shared_credentials.FIELD_USERNAME,
+                    shared_credentials.ACTION_USERNAME_COPIED,
+                    environ={"PRODIGI_USERNAME": credential_username},
+                    store=store,
+                ),
+                credential_username,
+            )
+            self.assertEqual(
+                shared_credentials.read_credential_for_action(
+                    admin,
+                    "prodigi",
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_COPIED,
+                    environ={"PRODIGI_PASSWORD": credential_password},
+                    store=store,
+                ),
+                credential_password,
+            )
+
+        payload = json.dumps(
+            [
+                {"args": call.args, "kwargs": call.kwargs}
+                for call in audit_log.call_args_list
+            ],
+            default=str,
+        )
+        self.assertNotIn(credential_username, payload)
+        self.assertNotIn(credential_password, payload)
+
+    def test_credential_permission_changes_require_admin_actor(self):
+        store = FakeAccountStore()
+        worker_actor = {
+            "id": "worker-actor",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["accounts_access"],
+        }
+        admin_actor = {
+            "id": "admin-1",
+            "role": "admin",
+            "is_active": True,
+            "page_permissions": [],
+        }
+
+        with self.assertRaises(PermissionError):
+            os_accounts.create_worker_account(
+                username="credential-worker",
+                display_name="Credential Worker",
+                password="Worker password 26!",
+                page_keys=("credential_prodigi",),
+                store=store,
+            )
+        with self.assertRaises(PermissionError):
+            os_accounts.create_worker_account(
+                username="credential-worker",
+                display_name="Credential Worker",
+                password="Worker password 26!",
+                page_keys=("credential_prodigi",),
+                store=store,
+                actor=worker_actor,
+            )
+
+        worker = os_accounts.create_worker_account(
+            username="credential-worker",
+            display_name="Credential Worker",
+            password="Worker password 26!",
+            page_keys=("credential_prodigi",),
+            store=store,
+            actor=admin_actor,
+        )
+        self.assertIn("credential_prodigi", worker["page_permissions"])
+
+        with self.assertRaises(PermissionError):
+            os_accounts.update_worker_account(
+                worker["id"],
+                username="credential-worker",
+                display_name="Credential Worker",
+                is_active=True,
+                page_keys=("credential_adobe",),
+                store=store,
+                actor=worker_actor,
+            )
+        updated = os_accounts.update_worker_account(
+            worker["id"],
+            username="credential-worker",
+            display_name="Credential Worker",
+            is_active=True,
+            page_keys=("credential_adobe",),
+            store=store,
+            actor=admin_actor,
+        )
+        self.assertEqual(updated["page_permissions"], ["credential_adobe"])
+
+    def test_revealed_credential_state_expires_without_storing_value(self):
+        worker = {
+            "id": "worker-1",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["credential_prodigi"],
+        }
+        state = {}
+
+        shared_credentials.mark_credential_revealed(state, worker, "prodigi", now=100.0)
+
+        self.assertTrue(shared_credentials.credential_is_revealed(state, worker, "prodigi", now=101.0))
+        self.assertNotIn("fake-prodigi-password", json.dumps(state))
+        self.assertFalse(shared_credentials.credential_is_revealed(state, worker, "prodigi", now=121.0))
+        self.assertNotIn(shared_credentials.REVEAL_STATE_KEY, state)
 
     def test_first_admin_bootstrap_does_not_duplicate_user(self):
         store = FakeAccountStore()
@@ -1605,6 +1937,100 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("os_accounts.EDIT_PROMPTS_CAPABILITY", permission_source)
         self.assertIn("create-worker-permission", source)
         self.assertIn("edit-worker-permission", source)
+
+    def test_accounts_access_exposes_password_access_permission_ticks(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        registry_source = (ROOT / "shared_credentials.py").read_text(encoding="utf-8")
+        password_source = source[
+            source.index("def _credential_permission_fields") :
+            source.index("\n\ndef _country_select")
+        ]
+
+        self.assertIn("Password Access", source)
+        self.assertIn("credential_prodigi", registry_source)
+        self.assertIn("credential_adobe", registry_source)
+        self.assertIn("credential_chatgpt", registry_source)
+        self.assertIn("create-worker-credential-permission", source)
+        self.assertIn("edit-worker-credential-permission", source)
+        self.assertIn("actor=user", source)
+        self.assertIn("spec.permission_key", password_source)
+
+    def test_passwords_render_masks_before_authorised_reveal(self):
+        worker = {
+            "id": "worker-credentials",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["credential_prodigi"],
+        }
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = worker
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Accounts & Access"
+
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker), patch.dict(
+            "os.environ",
+            {
+                "PRODIGI_USERNAME": "shared-prodigi-login@example.test",
+                "PRODIGI_PASSWORD": "unit-test-prodigi-password-value",
+                "ADOBE_USERNAME": "shared-adobe-login@example.test",
+                "ADOBE_PASSWORD": "unit-test-adobe-password-value",
+                "CHATGPT_USERNAME": "shared-chatgpt-login@example.test",
+                "CHATGPT_PASSWORD": "unit-test-chatgpt-password-value",
+            },
+            clear=False,
+        ):
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Passwords", text)
+        self.assertIn("Prodigi", text)
+        self.assertIn("shared-prodigi-login@example.test", text)
+        self.assertIn(shared_credentials.MASKED_PASSWORD, text)
+        self.assertNotIn("unit-test-prodigi-password-value", text)
+        self.assertNotIn("Adobe", text)
+        self.assertNotIn("ChatGPT", text)
+
+    def test_worker_without_password_permissions_sees_empty_state_only(self):
+        worker = {
+            "id": "worker-no-credentials",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = worker
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Accounts & Access"
+
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker), patch.dict(
+            "os.environ",
+            {
+                "PRODIGI_USERNAME": "shared-prodigi-login@example.test",
+                "PRODIGI_PASSWORD": "unit-test-prodigi-password-value",
+                "ADOBE_USERNAME": "shared-adobe-login@example.test",
+                "ADOBE_PASSWORD": "unit-test-adobe-password-value",
+                "CHATGPT_USERNAME": "shared-chatgpt-login@example.test",
+                "CHATGPT_PASSWORD": "unit-test-chatgpt-password-value",
+            },
+            clear=False,
+        ):
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("No shared password access has been assigned.", text)
+        self.assertNotIn("Prodigi", text)
+        self.assertNotIn("Adobe", text)
+        self.assertNotIn("ChatGPT", text)
+        self.assertNotIn("shared-prodigi-login@example.test", text)
+        self.assertNotIn("unit-test-prodigi-password-value", text)
 
     def test_prompt_edit_surfaces_use_account_permission_without_developer_passwords(self):
         sources = {

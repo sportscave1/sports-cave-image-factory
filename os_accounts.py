@@ -3,6 +3,7 @@ import threading
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
+from shared_credentials import CREDENTIAL_PERMISSION_KEYS
 import social_media
 
 
@@ -319,6 +320,27 @@ def can_edit_prompts(user):
     return EDIT_PROMPTS_CAPABILITY in permission_keys(user)
 
 
+def can_manage_credential_permissions(actor):
+    """Return whether the account may grant or revoke shared credential access."""
+    return bool(actor and bool(actor.get("is_active", True)) and is_admin(actor))
+
+
+def credential_permission_keys(page_keys):
+    selected = permission_keys({"page_permissions": page_keys or ()})
+    return tuple(key for key in CREDENTIAL_PERMISSION_KEYS if key in selected)
+
+
+def _credential_permissions_requested(page_keys):
+    return set(credential_permission_keys(page_keys))
+
+
+def _credential_permission_write_allowed(actor, page_keys):
+    requested = _credential_permissions_requested(page_keys)
+    if requested and not can_manage_credential_permissions(actor):
+        raise PermissionError("Password access can only be changed by an administrator.")
+    return bool(requested)
+
+
 def allowed_navigation_routes(user):
     return tuple(
         page["route"]
@@ -488,6 +510,10 @@ class PostgresAccountStore:
                             "CREATE INDEX IF NOT EXISTS idx_os_user_permissions_user "
                             "ON os_user_page_permissions (user_id, can_access)"
                         )
+                        cur.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_os_user_permissions_page_key "
+                            "ON os_user_page_permissions (page_key, can_access)"
+                        )
                     conn.commit()
             except AccountStorageError:
                 raise
@@ -559,18 +585,21 @@ class PostgresAccountStore:
                 return rows
 
     @staticmethod
-    def _replace_permissions(cur, user_id, page_keys):
+    def _replace_permissions(cur, user_id, page_keys, *, allow_credential_permissions=False):
         valid_keys = {page["key"] for page in worker_assignable_pages()}
         valid_keys.add(FILES_DELETE_CAPABILITY)
         valid_keys.add(ACTIVITY_LOG_CAPABILITY)
         valid_keys.add(EDIT_PROMPTS_CAPABILITY)
-        selected = sorted(
-            {
-                normalise_page_key(key)
-                for key in page_keys or ()
-                if normalise_page_key(key) in valid_keys
-            }
-        )
+        if allow_credential_permissions:
+            valid_keys.update(CREDENTIAL_PERMISSION_KEYS)
+        normalised_keys = {
+            normalise_page_key(key)
+            for key in page_keys or ()
+            if normalise_page_key(key)
+        }
+        if normalised_keys.intersection(CREDENTIAL_PERMISSION_KEYS) and not allow_credential_permissions:
+            raise PermissionError("Password access can only be changed by an administrator.")
+        selected = sorted(key for key in normalised_keys if key in valid_keys)
         cur.execute("DELETE FROM os_user_page_permissions WHERE user_id=%s", (str(user_id),))
         for page_key in selected:
             cur.execute(
@@ -582,7 +611,18 @@ class PostgresAccountStore:
             )
         return selected
 
-    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=(), country=""):
+    def create_user(
+        self,
+        *,
+        username,
+        email,
+        display_name,
+        password_hash,
+        role,
+        page_keys=(),
+        country="",
+        allow_credential_permissions=False,
+    ):
         self.ensure_schema()
         clean_role = str(role or ROLE_WORKER).casefold()
         if clean_role not in VALID_ROLES:
@@ -609,7 +649,16 @@ class PostgresAccountStore:
                         ),
                     )
                     row = cur.fetchone() or {}
-                    selected = self._replace_permissions(cur, row.get("id"), page_keys) if clean_role == ROLE_WORKER else []
+                    selected = (
+                        self._replace_permissions(
+                            cur,
+                            row.get("id"),
+                            page_keys,
+                            allow_credential_permissions=allow_credential_permissions,
+                        )
+                        if clean_role == ROLE_WORKER
+                        else []
+                    )
                 conn.commit()
             return _clean_user(row, selected)
         except Exception as error:
@@ -628,6 +677,7 @@ class PostgresAccountStore:
         page_keys,
         password_hash="",
         country="",
+        allow_credential_permissions=False,
     ):
         self.ensure_schema()
         clean_country = normalise_country(country, role=ROLE_WORKER)
@@ -672,7 +722,12 @@ class PostgresAccountStore:
                     row = cur.fetchone()
                     if not row:
                         raise ValueError("Worker account was not found.")
-                    selected = self._replace_permissions(cur, user_id, page_keys)
+                    selected = self._replace_permissions(
+                        cur,
+                        user_id,
+                        page_keys,
+                        allow_credential_permissions=allow_credential_permissions,
+                    )
                 conn.commit()
             return _clean_user(row, selected)
         except Exception as error:
@@ -872,12 +927,21 @@ def authenticate_user(login, password, *, store=None):
 
 
 def create_worker_account(
-    *, username, email="", display_name, password, page_keys=(), country=COUNTRY_PHILIPPINES, store=None
+    *,
+    username,
+    email="",
+    display_name,
+    password,
+    page_keys=(),
+    country=COUNTRY_PHILIPPINES,
+    store=None,
+    actor=None,
 ):
     clean_username = str(username or "").strip()
     clean_name = str(display_name or "").strip()
     if not clean_username or not clean_name or not password:
         raise ValueError("Username, display name and password are required.")
+    allow_credential_permissions = _credential_permission_write_allowed(actor, page_keys)
     return (store or DEFAULT_STORE).create_user(
         username=clean_username,
         email=str(email or "").strip(),
@@ -886,6 +950,7 @@ def create_worker_account(
         role=ROLE_WORKER,
         page_keys=page_keys,
         country=country,
+        allow_credential_permissions=allow_credential_permissions,
     )
 
 
@@ -900,12 +965,14 @@ def update_worker_account(
     new_password="",
     country=COUNTRY_PHILIPPINES,
     store=None,
+    actor=None,
 ):
     clean_username = str(username or "").strip()
     clean_name = str(display_name or "").strip()
     if not clean_username or not clean_name:
         raise ValueError("Username and display name are required.")
     password_hash = hash_password(new_password) if new_password else ""
+    allow_credential_permissions = _credential_permission_write_allowed(actor, page_keys)
     return (store or DEFAULT_STORE).update_worker(
         user_id,
         username=clean_username,
@@ -915,6 +982,7 @@ def update_worker_account(
         page_keys=page_keys,
         password_hash=password_hash,
         country=country,
+        allow_credential_permissions=allow_credential_permissions,
     )
 
 

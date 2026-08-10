@@ -44,6 +44,7 @@ import mockup_storage
 import os_accounts
 import prompt_store
 import sc_auth
+import shared_credentials
 import social_media
 import sports_cave_dashboard
 import sports_cave_pricing
@@ -9828,6 +9829,354 @@ def _account_permission_fields(prefix, selected=()):
     return chosen
 
 
+def _credential_permission_fields(prefix, selected=()):
+    selected = set(shared_credentials.credential_permission_keys(selected or ()))
+    chosen = []
+    columns = st.columns(3)
+    for index, spec in enumerate(shared_credentials.credential_specs()):
+        with columns[index % 3]:
+            if st.checkbox(
+                spec.display_name,
+                value=spec.permission_key in selected,
+                key=f"{prefix}::{spec.permission_key}",
+                help=f"Allow access to the shared {spec.display_name} username and password.",
+            ):
+                chosen.append(spec.permission_key)
+    return chosen
+
+
+def _combine_permission_keys(*groups):
+    combined = []
+    for group in groups:
+        for key in group or ():
+            if key not in combined:
+                combined.append(key)
+    return combined
+
+
+def _credential_value_box(value, *, muted=False):
+    color = "#66615A" if muted else "#0B0B0D"
+    background = "#FFFFFF" if muted else "#FAF8F1"
+    st.markdown(
+        (
+            f'<div style="min-height:34px;display:flex;align-items:center;'
+            f'border:1px solid #E5E1D8;border-radius:7px;background:{background};'
+            f'padding:6px 8px;color:{color};font-family:ui-monospace,SFMono-Regular,'
+            f'Menlo,Consolas,monospace;font-size:0.88rem;overflow-wrap:anywhere;">'
+            f'{html.escape(str(value or ""))}</div>'
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_secure_clipboard_button(text, key, *, label, success_label):
+    text_json = json.dumps(str(text or ""))
+    safe_label = html.escape(label)
+    safe_success_label = html.escape(success_label)
+    button_id = f"credential-copy-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    status_id = f"{button_id}-status"
+    clear_ms = shared_credentials.REVEAL_SECONDS * 1000
+    get_components_module().html(
+        f"""
+        <div id="{button_id}-wrap" style="padding-top:4px;">
+          <button
+            id="{button_id}"
+            type="button"
+            aria-label="{safe_label}"
+            aria-describedby="{status_id}"
+            style="width:100%;border:1px solid rgba(212,165,76,0.72);border-radius:7px;padding:9px 10px;background:#D4A54C;color:#0B0B0D;font-weight:800;font-size:0.88rem;cursor:pointer;box-sizing:border-box;"
+          >{safe_label}</button>
+          <div id="{status_id}" role="status" aria-live="polite" style="margin-top:5px;min-height:17px;color:#5C4309;font-size:0.78rem;"></div>
+        </div>
+        <script>
+        (() => {{
+          const wrap = document.getElementById("{button_id}-wrap");
+          const button = document.getElementById("{button_id}");
+          const status = document.getElementById("{status_id}");
+          const originalLabel = button.innerText;
+          let copyText = {text_json};
+
+          async function copyValue(event) {{
+            if (event) {{
+              event.preventDefault();
+            }}
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(copyText);
+              }} else {{
+                const textarea = document.createElement("textarea");
+                textarea.value = copyText;
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand("copy");
+                textarea.value = "";
+                document.body.removeChild(textarea);
+              }}
+              button.innerText = "{safe_success_label}";
+              status.innerText = "{safe_success_label}";
+            }} catch (error) {{
+              button.innerText = "Copy failed";
+              status.innerText = "Copy failed";
+            }}
+            setTimeout(() => {{
+              button.innerText = originalLabel;
+              status.innerText = "";
+            }}, 1400);
+          }}
+
+          button.addEventListener("click", copyValue);
+          setTimeout(() => {{
+            copyText = "";
+            if (wrap && wrap.parentNode) {{
+              wrap.parentNode.removeChild(wrap);
+            }}
+          }}, {clear_ms});
+        }})();
+        </script>
+        """,
+        height=64,
+    )
+
+
+def _render_revealed_password_value(password_value, key, remaining_seconds):
+    value_json = json.dumps(str(password_value or ""))
+    mask_json = json.dumps(shared_credentials.MASKED_PASSWORD)
+    value_id = f"credential-reveal-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    remaining_ms = max(1000, int(max(1, remaining_seconds) * 1000))
+    get_components_module().html(
+        f"""
+        <div id="{value_id}-wrap" style="min-height:34px;display:flex;align-items:center;gap:8px;border:1px solid #D4A54C;border-radius:7px;background:#FFF9EA;padding:6px 8px;box-sizing:border-box;">
+          <span id="{value_id}" style="color:#0B0B0D;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.88rem;overflow-wrap:anywhere;"></span>
+          <span id="{value_id}-status" role="status" aria-live="polite" style="margin-left:auto;color:#5C4309;font-size:0.72rem;white-space:nowrap;"></span>
+        </div>
+        <script>
+        (() => {{
+          const valueNode = document.getElementById("{value_id}");
+          const statusNode = document.getElementById("{value_id}-status");
+          const mask = {mask_json};
+          let secret = {value_json};
+          valueNode.innerText = secret;
+          statusNode.innerText = "Hides soon";
+          setTimeout(() => {{
+            secret = "";
+            valueNode.innerText = mask;
+            statusNode.innerText = "Hidden";
+          }}, {remaining_ms});
+        }})();
+        </script>
+        """,
+        height=46,
+    )
+
+
+def _credential_checked_user_for_display(user):
+    if (user or {}).get("legacy"):
+        return user
+    return shared_credentials.resolve_user_for_permission_check(user)
+
+
+def _render_credential_card(session_user, checked_user, spec):
+    shared_credentials.expire_revealed_credentials(st.session_state, checked_user)
+    try:
+        username_value = shared_credentials.read_credential_value(
+            checked_user,
+            spec.key,
+            shared_credentials.FIELD_USERNAME,
+            fresh=False,
+        )
+        password_configured = shared_credentials.credential_field_is_configured(
+            checked_user,
+            spec.key,
+            shared_credentials.FIELD_PASSWORD,
+            fresh=False,
+        )
+    except shared_credentials.CredentialAccessDenied:
+        st.warning("Password access is not approved for this account.")
+        shared_credentials.clear_revealed_credential(st.session_state, spec.key)
+        return
+
+    with st.container(border=True, key=f"credential-card-{spec.key}"):
+        st.markdown(f"**{spec.display_name}**")
+        username_cols = st.columns([4, 1.35], gap="small")
+        with username_cols[0]:
+            st.caption("Username")
+            if username_value:
+                _credential_value_box(username_value)
+            else:
+                st.warning("Not configured in Render")
+        with username_cols[1]:
+            copy_username = st.button(
+                "Copy username",
+                icon=":material/content_copy:",
+                key=f"credential-copy-username::{spec.key}",
+                help=f"Copy the {spec.display_name} username",
+                disabled=not bool(username_value),
+                use_container_width=True,
+            )
+
+        if copy_username:
+            try:
+                copy_value = shared_credentials.read_credential_for_action(
+                    session_user,
+                    spec.key,
+                    shared_credentials.FIELD_USERNAME,
+                    shared_credentials.ACTION_USERNAME_COPIED,
+                )
+            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
+                st.warning("Password access is not approved for this account.")
+                copy_value = ""
+            if copy_value:
+                st.success("Username copied")
+                _render_secure_clipboard_button(
+                    copy_value,
+                    f"{spec.key}:username",
+                    label="Copy username",
+                    success_label="Username copied",
+                )
+            else:
+                st.warning("Not configured in Render")
+
+        password_revealed = shared_credentials.credential_is_revealed(
+            st.session_state,
+            checked_user,
+            spec.key,
+        )
+        password_cols = st.columns([4, 1.05, 1.35], gap="small")
+        with password_cols[1]:
+            reveal_clicked = st.button(
+                "Hide" if password_revealed else "Reveal",
+                icon=":material/visibility_off:" if password_revealed else ":material/visibility:",
+                key=f"credential-reveal::{spec.key}",
+                help=f"{'Hide' if password_revealed else 'Reveal'} the {spec.display_name} password",
+                disabled=not password_configured,
+                use_container_width=True,
+            )
+        with password_cols[2]:
+            copy_password = st.button(
+                "Copy password",
+                icon=":material/content_copy:",
+                key=f"credential-copy-password::{spec.key}",
+                help=f"Copy the {spec.display_name} password",
+                disabled=not password_configured,
+                use_container_width=True,
+            )
+
+        if reveal_clicked and password_revealed:
+            shared_credentials.clear_revealed_credential(st.session_state, spec.key)
+            password_revealed = False
+        elif reveal_clicked:
+            try:
+                password_value = shared_credentials.read_credential_for_action(
+                    session_user,
+                    spec.key,
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_REVEALED,
+                )
+            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
+                st.warning("Password access is not approved for this account.")
+                password_value = ""
+            if password_value:
+                shared_credentials.mark_credential_revealed(st.session_state, checked_user, spec.key)
+                password_revealed = True
+            else:
+                st.warning("Not configured in Render")
+
+        if copy_password:
+            try:
+                copy_value = shared_credentials.read_credential_for_action(
+                    session_user,
+                    spec.key,
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_COPIED,
+                )
+            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
+                st.warning("Password access is not approved for this account.")
+                copy_value = ""
+            if copy_value:
+                st.success("Password copied")
+                _render_secure_clipboard_button(
+                    copy_value,
+                    f"{spec.key}:password",
+                    label="Copy password",
+                    success_label="Password copied",
+                )
+            else:
+                st.warning("Not configured in Render")
+
+        with password_cols[0]:
+            st.caption("Password")
+            if not password_configured:
+                st.warning("Not configured in Render")
+            elif password_revealed:
+                try:
+                    password_value = shared_credentials.read_credential_value(
+                        checked_user,
+                        spec.key,
+                        shared_credentials.FIELD_PASSWORD,
+                        fresh=False,
+                    )
+                except shared_credentials.CredentialAccessDenied:
+                    shared_credentials.clear_revealed_credential(st.session_state, spec.key)
+                    st.warning("Password access is not approved for this account.")
+                else:
+                    remaining = shared_credentials.reveal_remaining_seconds(
+                        st.session_state,
+                        checked_user,
+                        spec.key,
+                    )
+                    _render_revealed_password_value(
+                        password_value,
+                        f"{spec.key}:reveal",
+                        remaining,
+                    )
+            else:
+                _credential_value_box(shared_credentials.MASKED_PASSWORD, muted=True)
+
+
+def _record_credential_permission_changes(actor, before_user, after_user):
+    before = set(shared_credentials.credential_permission_keys((before_user or {}).get("page_permissions") or ()))
+    after = set(shared_credentials.credential_permission_keys((after_user or {}).get("page_permissions") or ()))
+    for spec in shared_credentials.credential_specs():
+        if spec.permission_key in after - before:
+            shared_credentials.record_credential_audit(
+                shared_credentials.ACTION_PERMISSION_GRANTED,
+                actor,
+                spec.key,
+                allowed=True,
+                target_user=after_user,
+            )
+        elif spec.permission_key in before - after:
+            shared_credentials.record_credential_audit(
+                shared_credentials.ACTION_PERMISSION_REVOKED,
+                actor,
+                spec.key,
+                allowed=True,
+                target_user=after_user or before_user,
+            )
+
+
+def render_passwords_section(user):
+    st.markdown("### Passwords")
+    try:
+        checked_user = _credential_checked_user_for_display(user)
+        specs = shared_credentials.accessible_credential_specs(checked_user, fresh=False)
+    except shared_credentials.CredentialAccessUnavailable:
+        st.info("Password access could not be verified right now.")
+        return
+    if os_accounts.is_admin(checked_user):
+        st.caption("Shared credentials should be rotated when a staff member’s access is removed.")
+    if not specs:
+        st.info("No shared password access has been assigned.")
+        return
+    columns = st.columns(min(3, len(specs)))
+    for index, spec in enumerate(specs):
+        with columns[index % len(columns)]:
+            _render_credential_card(user, checked_user, spec)
+
+
 def _country_select(label, *, value="", key="account-country"):
     clean_country = os_accounts.normalise_country(value, role=(current_os_user() or {}).get("role"))
     options = os_accounts.COUNTRY_OPTIONS
@@ -10015,6 +10364,7 @@ def render_accounts_access_page():
     user = current_os_user()
     st.title("Accounts & Access")
     render_my_profile_section(user)
+    render_passwords_section(user)
     render_reporting_permission_section(user)
     if not os_accounts.is_admin(user):
         st.caption("Your profile is available here. Admin account controls are not available for your account.")
@@ -10063,6 +10413,10 @@ def render_accounts_access_page():
             )
             st.markdown("**Page access**")
             create_permissions = _account_permission_fields("create-worker-permission")
+            st.markdown("**Password Access**")
+            create_credential_permissions = _credential_permission_fields(
+                "create-worker-credential-permission"
+            )
             create_submitted = st.form_submit_button(
                 "Create account",
                 type="primary",
@@ -10076,10 +10430,16 @@ def render_accounts_access_page():
                     display_name=worker_name,
                     password=worker_password,
                     country=worker_country,
-                    page_keys=create_permissions,
+                    page_keys=_combine_permission_keys(
+                        create_permissions,
+                        create_credential_permissions,
+                    ),
+                    actor=user,
                 )
             except ValueError as error:
                 st.warning(str(error))
+            except PermissionError:
+                st.warning("Password access can only be changed by an administrator.")
             except Exception:
                 st.warning("The account could not be saved right now. Please try again.")
             else:
@@ -10096,6 +10456,7 @@ def render_accounts_access_page():
                         "timezone": created.get("timezone") or "",
                     },
                 )
+                _record_credential_permission_changes(user, {}, created)
                 st.success("Worker account created.")
                 st.rerun()
 
@@ -10151,6 +10512,11 @@ def render_accounts_access_page():
             f"edit-worker-permission::{selected_worker_id}",
             selected_worker.get("page_permissions") or (),
         )
+        st.markdown("**Password Access**")
+        edit_credential_permissions = _credential_permission_fields(
+            f"edit-worker-credential-permission::{selected_worker_id}",
+            selected_worker.get("page_permissions") or (),
+        )
         edit_submitted = st.form_submit_button(
             "Save account",
             type="primary",
@@ -10165,12 +10531,19 @@ def render_accounts_access_page():
             email=edit_email,
             display_name=edit_name,
             is_active=edit_active,
-            page_keys=edit_permissions,
+            page_keys=_combine_permission_keys(
+                edit_permissions,
+                edit_credential_permissions,
+            ),
             new_password=edit_password,
             country=edit_country,
+            actor=user,
         )
     except ValueError as error:
         st.warning(str(error))
+        return
+    except PermissionError:
+        st.warning("Password access can only be changed by an administrator.")
         return
     except Exception:
         st.warning("The account could not be saved right now. Please try again.")
@@ -10195,8 +10568,15 @@ def render_accounts_access_page():
         f"Page access updated: {label}",
         entity_type="os_user",
         entity_id=updated.get("id") or "",
-        metadata={"page_keys": updated.get("page_permissions") or []},
+        metadata={
+            "page_keys": [
+                key
+                for key in updated.get("page_permissions") or []
+                if key not in shared_credentials.CREDENTIAL_PERMISSION_KEYS
+            ]
+        },
     )
+    _record_credential_permission_changes(user, selected_worker, updated)
     st.success("Account access saved.")
     st.rerun()
 
