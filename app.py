@@ -8643,6 +8643,10 @@ def _legacy_admin_account():
         "country": os_accounts.COUNTRY_AUSTRALIA,
         "timezone": os_accounts.ADMIN_TIMEZONE,
         "is_active": True,
+        "session_version": 1,
+        "account_status": os_accounts.ACCOUNT_STATUS_ACTIVE,
+        "removed_at": None,
+        "removed_by": "",
         "page_permissions": [],
         "legacy": True,
     }
@@ -8699,6 +8703,57 @@ def _set_authenticated_user(user, *, legacy=False):
     set_activity_actor(_activity_actor_for_user(clean_user), _activity_actor_metadata_for_user(clean_user))
 
 
+def _session_version(value):
+    try:
+        return max(1, int(value or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _session_user_matches_refreshed_user(session_user, refreshed_user):
+    session_user = dict(session_user or {})
+    refreshed_user = dict(refreshed_user or {})
+    return bool(
+        refreshed_user
+        and os_accounts.account_is_active(refreshed_user)
+        and str(session_user.get("id") or "") == str(refreshed_user.get("id") or "")
+        and _session_version(session_user.get("session_version")) == _session_version(refreshed_user.get("session_version"))
+    )
+
+
+def _auth_payload_matches_user(payload, user):
+    payload = dict(payload or {})
+    user = dict(user or {})
+    return bool(
+        user
+        and os_accounts.account_is_active(user)
+        and str(payload.get("sub") or "") == str(user.get("id") or "")
+        and _session_version(payload.get("sv")) == _session_version(user.get("session_version"))
+    )
+
+
+def _clear_authenticated_session_state(message=""):
+    st.session_state["sports_cave_authenticated"] = False
+    for key in (
+        "sports_cave_current_user",
+        "sports_cave_auth_checked_at",
+        "sports_cave_admin_setup_required",
+        "files_access_token",
+        "files_connection_status",
+        "files_directory_cache",
+        "files_browser_path",
+        "files_team_root",
+        "files_preview_path",
+        "dropbox_oauth_state",
+        "mockups_dropbox_link_cache",
+    ):
+        st.session_state.pop(key, None)
+    shared_credentials.clear_revealed_credential(st.session_state)
+    clear_activity_actor()
+    if message:
+        st.session_state["sports_cave_auth_notice"] = message
+
+
 def _account_system_status():
     try:
         status = dict(os_accounts.prepare_account_system())
@@ -8711,8 +8766,11 @@ def _account_system_status():
         return status
 
 
-def _refresh_session_account_if_due(user, *, max_age_seconds=30):
+def _refresh_session_account_if_due(user, *, max_age_seconds=0):
     if not user or user.get("legacy"):
+        return user
+    status = _account_system_status()
+    if not status.get("available"):
         return user
     checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
     if time.monotonic() - checked_at < max_age_seconds:
@@ -8720,12 +8778,13 @@ def _refresh_session_account_if_due(user, *, max_age_seconds=30):
     try:
         refreshed = os_accounts.DEFAULT_STORE.get_user(user.get("id"))
     except Exception:
-        return user
+        _clear_authenticated_session_state("This account could not be verified. Please sign in again.")
+        clear_auth_cookie()
+        return {}
     st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-    if not refreshed or not refreshed.get("is_active"):
-        st.session_state["sports_cave_authenticated"] = False
-        st.session_state.pop("sports_cave_current_user", None)
-        clear_activity_actor()
+    if not _session_user_matches_refreshed_user(user, refreshed):
+        _clear_authenticated_session_state("This account no longer has access. Please contact an administrator.")
+        clear_auth_cookie()
         return {}
     refreshed = _public_account(refreshed)
     st.session_state["sports_cave_current_user"] = refreshed
@@ -8784,10 +8843,11 @@ def current_auth_cookie():
 
 def is_app_authenticated():
     if st.session_state.get("sports_cave_authenticated"):
-        user = _refresh_session_account_if_due(current_os_user())
+        user = _refresh_session_account_if_due(current_os_user(), max_age_seconds=0)
         if user:
             set_activity_actor(_activity_actor_for_user(user))
             return True
+        return False
 
     token = current_auth_cookie()
     status = _account_system_status()
@@ -8801,9 +8861,12 @@ def is_app_authenticated():
             user = os_accounts.DEFAULT_STORE.get_user(payload.get("sub"))
         except Exception:
             user = {}
-        if user and user.get("is_active"):
+        if _auth_payload_matches_user(payload, user):
             _set_authenticated_user(user)
             return True
+        _clear_authenticated_session_state("This account no longer has access. Please contact an administrator.")
+        clear_auth_cookie()
+        return False
 
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
         token,
@@ -8812,12 +8875,17 @@ def is_app_authenticated():
     )
     if legacy_valid:
         admin = status.get("admin") or {}
-        if admin and admin.get("is_active"):
+        if admin and os_accounts.account_is_active(admin) and not status.get("available"):
             _set_authenticated_user(admin)
-        else:
+        elif not status.get("available"):
             _set_authenticated_user(_legacy_admin_account(), legacy=True)
-            if status.get("available"):
-                st.session_state["sports_cave_admin_setup_required"] = True
+        elif not admin:
+            _set_authenticated_user(_legacy_admin_account(), legacy=True)
+            st.session_state["sports_cave_admin_setup_required"] = True
+        else:
+            _clear_authenticated_session_state("Please sign in with your Sports Cave account.")
+            clear_auth_cookie()
+            return False
         return True
     return False
 
@@ -8835,6 +8903,9 @@ def render_login_gate():
             """,
             unsafe_allow_html=True,
         )
+        auth_notice = str(st.session_state.pop("sports_cave_auth_notice", "") or "").strip()
+        if auth_notice:
+            st.warning(auth_notice)
         with st.form("sports-cave-login-form"):
             login = st.text_input(
                 "Username or email",
@@ -8875,6 +8946,7 @@ def render_login_gate():
             user["id"],
             password=get_app_password(),
             extra_secret=get_auth_extra_secret(),
+            session_version=user.get("session_version") or 1,
         )
         record_activity_log(
             "login",
@@ -8951,6 +9023,7 @@ def render_admin_account_setup():
         user["id"],
         password=get_app_password(),
         extra_secret=get_auth_extra_secret(),
+        session_version=user.get("session_version") or 1,
     )
     record_activity_log(
         "account_created",
@@ -8971,15 +9044,8 @@ def render_admin_account_setup():
 
 def logout_app():
     record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
-    st.session_state["sports_cave_authenticated"] = False
     set_current_page("Dashboard", source="logout")
-    st.session_state.pop("sports_cave_current_user", None)
-    st.session_state.pop("sports_cave_admin_setup_required", None)
-    st.session_state.pop("files_access_token", None)
-    st.session_state.pop("files_connection_status", None)
-    st.session_state.pop("files_directory_cache", None)
-    st.session_state.pop("files_browser_path", None)
-    clear_activity_actor()
+    _clear_authenticated_session_state()
     clear_auth_cookie()
     st.stop()
 
@@ -9869,37 +9935,55 @@ def _credential_value_box(value, *, muted=False):
     )
 
 
-def _render_secure_clipboard_button(text, key, *, label, success_label):
-    text_json = json.dumps(str(text or ""))
-    safe_label = html.escape(label)
-    safe_success_label = html.escape(success_label)
-    button_id = f"credential-copy-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
-    status_id = f"{button_id}-status"
-    clear_ms = shared_credentials.REVEAL_SECONDS * 1000
+def _show_credential_toast(message):
+    if hasattr(st, "toast"):
+        st.toast(message)
+        return
+    toast_id = f"credential-toast-{hashlib.sha1(str(message).encode('utf-8')).hexdigest()[:12]}"
     get_components_module().html(
         f"""
-        <div id="{button_id}-wrap" style="padding-top:4px;">
-          <button
-            id="{button_id}"
-            type="button"
-            aria-label="{safe_label}"
-            aria-describedby="{status_id}"
-            style="width:100%;border:1px solid rgba(212,165,76,0.72);border-radius:7px;padding:9px 10px;background:#D4A54C;color:#0B0B0D;font-weight:800;font-size:0.88rem;cursor:pointer;box-sizing:border-box;"
-          >{safe_label}</button>
-          <div id="{status_id}" role="status" aria-live="polite" style="margin-top:5px;min-height:17px;color:#5C4309;font-size:0.78rem;"></div>
+        <div id="{toast_id}" role="status" aria-live="polite" style="position:fixed;right:22px;bottom:22px;z-index:999999;background:#F5F2EA;color:#0B0B0D;border:1px solid rgba(212,165,76,0.85);border-radius:999px;padding:10px 14px;font-size:0.88rem;font-weight:800;box-shadow:0 12px 32px rgba(11,11,13,0.16);">
+          {html.escape(str(message or ""))}
         </div>
         <script>
         (() => {{
-          const wrap = document.getElementById("{button_id}-wrap");
-          const button = document.getElementById("{button_id}");
-          const status = document.getElementById("{status_id}");
-          const originalLabel = button.innerText;
+          const toast = document.getElementById("{toast_id}");
+          setTimeout(() => {{
+            if (toast && toast.parentNode) {{
+              toast.parentNode.removeChild(toast);
+            }}
+          }}, 1800);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _render_secure_clipboard_write(text, key):
+    text_json = json.dumps(str(text or ""))
+    bridge_id = f"credential-copy-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    get_components_module().html(
+        f"""
+        <div id="{bridge_id}" aria-hidden="true" style="display:none;"></div>
+        <script>
+        (() => {{
+          const bridge = document.getElementById("{bridge_id}");
           let copyText = {text_json};
 
-          async function copyValue(event) {{
-            if (event) {{
-              event.preventDefault();
+          function clearBridge() {{
+            copyText = "";
+            if (bridge && bridge.parentNode) {{
+              bridge.parentNode.removeChild(bridge);
             }}
+            setTimeout(() => {{
+              try {{
+                document.body.textContent = "";
+              }} catch (error) {{}}
+            }}, 50);
+          }}
+
+          async function copyValue() {{
             try {{
               if (navigator.clipboard && window.isSecureContext) {{
                 await navigator.clipboard.writeText(copyText);
@@ -9915,29 +9999,28 @@ def _render_secure_clipboard_button(text, key, *, label, success_label):
                 textarea.value = "";
                 document.body.removeChild(textarea);
               }}
-              button.innerText = "{safe_success_label}";
-              status.innerText = "{safe_success_label}";
             }} catch (error) {{
-              button.innerText = "Copy failed";
-              status.innerText = "Copy failed";
+              const textarea = document.createElement("textarea");
+              textarea.value = copyText;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              document.execCommand("copy");
+              textarea.value = "";
+              document.body.removeChild(textarea);
+            }} finally {{
+              clearBridge();
             }}
-            setTimeout(() => {{
-              button.innerText = originalLabel;
-              status.innerText = "";
-            }}, 1400);
           }}
 
-          button.addEventListener("click", copyValue);
-          setTimeout(() => {{
-            copyText = "";
-            if (wrap && wrap.parentNode) {{
-              wrap.parentNode.removeChild(wrap);
-            }}
-          }}, {clear_ms});
+          copyValue();
+          setTimeout(clearBridge, 1600);
         }})();
         </script>
         """,
-        height=64,
+        height=0,
     )
 
 
@@ -10000,66 +10083,26 @@ def _render_credential_card(session_user, checked_user, spec):
 
     with st.container(border=True, key=f"credential-card-{spec.key}"):
         st.markdown(f"**{spec.display_name}**")
-        username_cols = st.columns([4, 1.35], gap="small")
-        with username_cols[0]:
-            st.caption("Username")
-            if username_value:
-                _credential_value_box(username_value)
-            else:
-                st.warning("Not configured in Render")
-        with username_cols[1]:
-            copy_username = st.button(
-                "Copy username",
-                icon=":material/content_copy:",
-                key=f"credential-copy-username::{spec.key}",
-                help=f"Copy the {spec.display_name} username",
-                disabled=not bool(username_value),
-                use_container_width=True,
-            )
-
-        if copy_username:
-            try:
-                copy_value = shared_credentials.read_credential_for_action(
-                    session_user,
-                    spec.key,
-                    shared_credentials.FIELD_USERNAME,
-                    shared_credentials.ACTION_USERNAME_COPIED,
-                )
-            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
-                st.warning("Password access is not approved for this account.")
-                copy_value = ""
-            if copy_value:
-                st.success("Username copied")
-                _render_secure_clipboard_button(
-                    copy_value,
-                    f"{spec.key}:username",
-                    label="Copy username",
-                    success_label="Username copied",
-                )
-            else:
-                st.warning("Not configured in Render")
+        st.caption("Username")
+        if username_value:
+            _credential_value_box(username_value)
+        else:
+            st.warning("Not configured in Render")
 
         password_revealed = shared_credentials.credential_is_revealed(
             st.session_state,
             checked_user,
             spec.key,
         )
-        password_cols = st.columns([4, 1.05, 1.35], gap="small")
+        st.caption("Password")
+        password_cols = st.columns([4, 0.62], gap="small")
         with password_cols[1]:
+            reveal_label = "Hide" if password_revealed else "Reveal"
             reveal_clicked = st.button(
-                "Hide" if password_revealed else "Reveal",
+                " ",
                 icon=":material/visibility_off:" if password_revealed else ":material/visibility:",
                 key=f"credential-reveal::{spec.key}",
-                help=f"{'Hide' if password_revealed else 'Reveal'} the {spec.display_name} password",
-                disabled=not password_configured,
-                use_container_width=True,
-            )
-        with password_cols[2]:
-            copy_password = st.button(
-                "Copy password",
-                icon=":material/content_copy:",
-                key=f"credential-copy-password::{spec.key}",
-                help=f"Copy the {spec.display_name} password",
+                help=f"{reveal_label} the {spec.display_name} password",
                 disabled=not password_configured,
                 use_container_width=True,
             )
@@ -10084,30 +10127,7 @@ def _render_credential_card(session_user, checked_user, spec):
             else:
                 st.warning("Not configured in Render")
 
-        if copy_password:
-            try:
-                copy_value = shared_credentials.read_credential_for_action(
-                    session_user,
-                    spec.key,
-                    shared_credentials.FIELD_PASSWORD,
-                    shared_credentials.ACTION_PASSWORD_COPIED,
-                )
-            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
-                st.warning("Password access is not approved for this account.")
-                copy_value = ""
-            if copy_value:
-                st.success("Password copied")
-                _render_secure_clipboard_button(
-                    copy_value,
-                    f"{spec.key}:password",
-                    label="Copy password",
-                    success_label="Password copied",
-                )
-            else:
-                st.warning("Not configured in Render")
-
         with password_cols[0]:
-            st.caption("Password")
             if not password_configured:
                 st.warning("Not configured in Render")
             elif password_revealed:
@@ -10135,6 +10155,60 @@ def _render_credential_card(session_user, checked_user, spec):
             else:
                 _credential_value_box(shared_credentials.MASKED_PASSWORD, muted=True)
 
+        copy_cols = st.columns(2, gap="small")
+        with copy_cols[0]:
+            copy_username = st.button(
+                "Copy username",
+                icon=":material/content_copy:",
+                key=f"credential-copy-username::{spec.key}",
+                help=f"Copy the {spec.display_name} username",
+                disabled=not bool(username_value),
+                use_container_width=True,
+            )
+        with copy_cols[1]:
+            copy_password = st.button(
+                "Copy password",
+                icon=":material/content_copy:",
+                key=f"credential-copy-password::{spec.key}",
+                help=f"Copy the {spec.display_name} password",
+                disabled=not password_configured,
+                use_container_width=True,
+            )
+
+        if copy_username:
+            try:
+                copy_value = shared_credentials.read_credential_for_action(
+                    session_user,
+                    spec.key,
+                    shared_credentials.FIELD_USERNAME,
+                    shared_credentials.ACTION_USERNAME_COPIED,
+                )
+            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
+                st.warning("Password access is not approved for this account.")
+                copy_value = ""
+            if copy_value:
+                _render_secure_clipboard_write(copy_value, f"{spec.key}:username")
+                _show_credential_toast("Username copied to clipboard")
+            else:
+                st.warning("Not configured in Render")
+
+        if copy_password:
+            try:
+                copy_value = shared_credentials.read_credential_for_action(
+                    session_user,
+                    spec.key,
+                    shared_credentials.FIELD_PASSWORD,
+                    shared_credentials.ACTION_PASSWORD_COPIED,
+                )
+            except (shared_credentials.CredentialAccessDenied, shared_credentials.CredentialAccessUnavailable):
+                st.warning("Password access is not approved for this account.")
+                copy_value = ""
+            if copy_value:
+                _render_secure_clipboard_write(copy_value, f"{spec.key}:password")
+                _show_credential_toast("Password copied to clipboard")
+            else:
+                st.warning("Not configured in Render")
+
 
 def _record_credential_permission_changes(actor, before_user, after_user):
     before = set(shared_credentials.credential_permission_keys((before_user or {}).get("page_permissions") or ()))
@@ -10156,6 +10230,169 @@ def _record_credential_permission_changes(actor, before_user, after_user):
                 allowed=True,
                 target_user=after_user or before_user,
             )
+
+
+ACCOUNT_ACCESS_DIALOG_KEY = "account_access_dialog"
+
+
+def _account_identifier_for_display(account):
+    return os_accounts.safe_account_identifier(account)
+
+
+def _account_access_target_name(account):
+    return os_accounts.safe_account_label(account)
+
+
+def _set_accounts_admin_notice(message):
+    st.session_state["accounts_admin_notice"] = str(message or "").strip()
+
+
+def _pop_accounts_admin_notice():
+    notice = str(st.session_state.pop("accounts_admin_notice", "") or "").strip()
+    if notice:
+        st.success(notice)
+
+
+def _clear_account_access_dialog():
+    st.session_state.pop(ACCOUNT_ACCESS_DIALOG_KEY, None)
+
+
+def _perform_remote_logout(actor, target):
+    try:
+        result = os_accounts.remote_logout_user(actor, target.get("id"))
+    except PermissionError:
+        st.warning("Only Nathan/admin can use account access controls.")
+        return False
+    except Exception:
+        st.warning("The user could not be logged out right now. Please try again.")
+        return False
+    if result.get("reason") == "target_not_found":
+        st.warning("That account is no longer available.")
+        return False
+    if result.get("reason") == "already_removed":
+        st.info("That account has already been removed.")
+        return False
+    _set_accounts_admin_notice(f"{_account_access_target_name(target)} has been logged out.")
+    _clear_account_access_dialog()
+    st.rerun()
+    return True
+
+
+def _perform_account_removal(actor, target):
+    try:
+        result = os_accounts.remove_user_account(actor, target.get("id"))
+    except PermissionError as error:
+        st.warning(str(error))
+        return False
+    except Exception:
+        st.warning("The account could not be removed right now. Please try again.")
+        return False
+    if result.get("changed"):
+        _set_accounts_admin_notice(
+            "Account removed. The user has been logged out and can no longer access Sports Cave OS."
+        )
+        _clear_account_access_dialog()
+        st.rerun()
+        return True
+    if result.get("reason") == "already_removed":
+        st.info("That account has already been removed.")
+    else:
+        st.warning("That account is no longer available.")
+    return False
+
+
+def _render_account_access_dialog(actor, target):
+    dialog_state = dict(st.session_state.get(ACCOUNT_ACCESS_DIALOG_KEY) or {})
+    if dialog_state.get("target_id") != target.get("id"):
+        return
+    action = dialog_state.get("action")
+    if action not in {"logout", "remove"}:
+        return
+
+    def render_logout_body():
+        target_name = _account_access_target_name(target)
+        st.markdown(f"Log out **{target_name}** from every active browser and device?")
+        st.caption("Their account, permissions, work logs, tasks and history will not be changed.")
+        cols = st.columns([1, 1])
+        if cols[0].button("Log Out User", key=f"confirm-logout-user::{target.get('id')}", use_container_width=True):
+            _perform_remote_logout(actor, target)
+        if cols[1].button("Cancel", key=f"cancel-logout-user::{target.get('id')}", use_container_width=True):
+            _clear_account_access_dialog()
+            st.rerun()
+
+    def render_remove_body():
+        target_name = _account_access_target_name(target)
+        target_identifier = _account_identifier_for_display(target)
+        st.markdown(f"**{target_name}**")
+        st.caption(target_identifier)
+        st.warning("Access will be removed immediately.")
+        st.caption("This action cannot be reversed through the app.")
+        st.caption("Historical work records will remain.")
+        confirmation = st.text_input(
+            "Type REMOVE to confirm",
+            key=f"remove-account-confirmation::{target.get('id')}",
+        )
+        cols = st.columns([1, 1])
+        if cols[0].button(
+            "Remove Account",
+            key=f"confirm-remove-account::{target.get('id')}",
+            type="primary",
+            disabled=confirmation != "REMOVE",
+            use_container_width=True,
+        ):
+            _perform_account_removal(actor, target)
+        if cols[1].button("Cancel", key=f"cancel-remove-account::{target.get('id')}", use_container_width=True):
+            _clear_account_access_dialog()
+            st.rerun()
+
+    title = "Log Out User" if action == "logout" else "Remove Account"
+    if hasattr(st, "dialog"):
+        @st.dialog(title)
+        def account_access_dialog():
+            if action == "logout":
+                render_logout_body()
+            else:
+                render_remove_body()
+
+        account_access_dialog()
+        return
+
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        if action == "logout":
+            render_logout_body()
+        else:
+            render_remove_body()
+
+
+def render_account_access_section(actor, target):
+    if not os_accounts.is_admin(actor):
+        return
+    st.markdown("**Account Access**")
+    st.caption("Log out active sessions or permanently remove this account.")
+    cols = st.columns([1, 1])
+    if cols[0].button(
+        "Log Out User",
+        key=f"account-access-logout::{target.get('id')}",
+        help=f"Log out {_account_access_target_name(target)} on every browser and device.",
+        use_container_width=True,
+    ):
+        st.session_state[ACCOUNT_ACCESS_DIALOG_KEY] = {
+            "action": "logout",
+            "target_id": target.get("id"),
+        }
+    if cols[1].button(
+        "Remove Account",
+        key=f"account-access-remove::{target.get('id')}",
+        help=f"Permanently remove {_account_access_target_name(target)} from Sports Cave OS.",
+        type="secondary",
+        use_container_width=True,
+    ):
+        st.session_state[ACCOUNT_ACCESS_DIALOG_KEY] = {
+            "action": "remove",
+            "target_id": target.get("id"),
+        }
+    _render_account_access_dialog(actor, target)
 
 
 def render_passwords_section(user):
@@ -10372,6 +10609,7 @@ def render_accounts_access_page():
 
     st.divider()
     st.markdown("### Admin Controls")
+    _pop_accounts_admin_notice()
     try:
         users = os_accounts.DEFAULT_STORE.list_users()
     except Exception:
@@ -10497,11 +10735,6 @@ def render_accounts_access_page():
             type="password",
             key=f"edit-worker-password::{selected_worker_id}",
         )
-        edit_active = st.checkbox(
-            "Account active",
-            value=bool(selected_worker.get("is_active")),
-            key=f"edit-worker-active::{selected_worker_id}",
-        )
         edit_country = _country_select(
             "Country",
             value=selected_worker.get("country") or os_accounts.COUNTRY_PHILIPPINES,
@@ -10522,6 +10755,7 @@ def render_accounts_access_page():
             type="primary",
             use_container_width=True,
         )
+    render_account_access_section(user, selected_worker)
     if not edit_submitted:
         return
     try:
@@ -10530,7 +10764,7 @@ def render_accounts_access_page():
             username=edit_username,
             email=edit_email,
             display_name=edit_name,
-            is_active=edit_active,
+            is_active=bool(selected_worker.get("is_active", True)),
             page_keys=_combine_permission_keys(
                 edit_permissions,
                 edit_credential_permissions,

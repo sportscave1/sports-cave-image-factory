@@ -56,6 +56,10 @@ class FakeAccountStore:
             "country": clean_country,
             "timezone": os_accounts.timezone_for_country(clean_country) or os_accounts.default_timezone_for_role(role),
             "is_active": True,
+            "session_version": 1,
+            "account_status": os_accounts.ACCOUNT_STATUS_ACTIVE,
+            "removed_at": None,
+            "removed_by": "",
             "page_permissions": sorted(page_keys),
             "last_login_at": None,
         }
@@ -65,6 +69,8 @@ class FakeAccountStore:
     def find_user_by_login(self, login):
         clean = str(login or "").strip().casefold()
         for user in self.users:
+            if os_accounts.account_is_removed(user):
+                continue
             if clean in {
                 str(user.get("username") or "").casefold(),
                 str(user.get("email") or "").casefold(),
@@ -75,12 +81,20 @@ class FakeAccountStore:
     def update_last_login(self, user_id):
         for user in self.users:
             if user["id"] == user_id:
+                if not os_accounts.account_is_active(user):
+                    return {}
                 user["last_login_at"] = "2026-07-22T00:00:00+00:00"
                 return dict(user)
         return {}
 
-    def get_user(self, user_id):
-        return next((dict(user) for user in self.users if user["id"] == user_id), {})
+    def get_user(self, user_id, *, include_removed=False):
+        for user in self.users:
+            if user["id"] == user_id and (include_removed or not os_accounts.account_is_removed(user)):
+                return dict(user)
+        return {}
+
+    def list_users(self):
+        return [dict(user) for user in self.users if not os_accounts.account_is_removed(user)]
 
     def update_worker(
         self,
@@ -96,13 +110,12 @@ class FakeAccountStore:
         allow_credential_permissions=False,
     ):
         for user in self.users:
-            if user["id"] == user_id and user["role"] == "worker":
+            if user["id"] == user_id and user["role"] == "worker" and not os_accounts.account_is_removed(user):
                 clean_country = os_accounts.normalise_country(country, role=user.get("role"))
                 user.update(
                     username=username,
                     email=email,
                     display_name=display_name,
-                    is_active=is_active,
                     country=clean_country,
                     timezone=os_accounts.timezone_for_country(clean_country),
                     page_permissions=sorted(page_keys),
@@ -111,6 +124,104 @@ class FakeAccountStore:
                     user["password_hash"] = password_hash
                 return dict(user)
         raise ValueError("Worker account was not found.")
+
+    def _fresh_admin(self, actor):
+        fresh = self.get_user((actor or {}).get("id"))
+        if not os_accounts.is_admin(fresh):
+            raise PermissionError("Only an active administrator can perform this account action.")
+        return fresh
+
+    def remote_logout_user(self, actor, target_user_id):
+        clean_actor = self._fresh_admin(actor)
+        target = self.get_user(target_user_id, include_removed=True)
+        if not target:
+            return {
+                "changed": False,
+                "actor": clean_actor,
+                "target": {"id": str(target_user_id or "")},
+                "reason": "target_not_found",
+            }
+        if os_accounts.account_is_removed(target):
+            return {
+                "changed": False,
+                "actor": clean_actor,
+                "target": target,
+                "reason": "already_removed",
+            }
+        for user in self.users:
+            if user["id"] == target["id"]:
+                user["session_version"] = int(user.get("session_version") or 1) + 1
+                return {
+                    "changed": True,
+                    "actor": clean_actor,
+                    "target": dict(user),
+                    "reason": "logged_out",
+                }
+        return {
+            "changed": False,
+            "actor": clean_actor,
+            "target": target,
+            "reason": "target_not_found",
+        }
+
+    def remove_account(self, actor, target_user_id):
+        clean_actor = self._fresh_admin(actor)
+        target = self.get_user(target_user_id, include_removed=True)
+        if not target:
+            return {
+                "changed": False,
+                "actor": clean_actor,
+                "target": {"id": str(target_user_id or "")},
+                "reason": "target_not_found",
+            }
+        if os_accounts.account_is_removed(target):
+            for user in self.users:
+                if user["id"] == target["id"]:
+                    user["page_permissions"] = []
+                    target = dict(user)
+            return {
+                "changed": False,
+                "actor": clean_actor,
+                "target": target,
+                "reason": "already_removed",
+            }
+        if clean_actor["id"] == target["id"]:
+            raise PermissionError("You cannot remove your own active account.")
+        if target.get("role") == os_accounts.ROLE_ADMIN:
+            remaining_admins = [
+                user
+                for user in self.users
+                if user["id"] != target["id"] and os_accounts.is_admin(user)
+            ]
+            if not remaining_admins:
+                raise PermissionError("The final active administrator account cannot be removed.")
+        for user in self.users:
+            if user["id"] == target["id"]:
+                previous = dict(user)
+                user.update(
+                    username=f"removed-{user['id']}",
+                    email="",
+                    password_hash="removed-account",
+                    is_active=False,
+                    account_status=os_accounts.ACCOUNT_STATUS_REMOVED,
+                    removed_at="2026-08-10T00:00:00+00:00",
+                    removed_by=clean_actor["id"],
+                    session_version=int(user.get("session_version") or 1) + 1,
+                    page_permissions=[],
+                )
+                return {
+                    "changed": True,
+                    "actor": clean_actor,
+                    "target": dict(user),
+                    "previous_target": previous,
+                    "reason": "removed",
+                }
+        return {
+            "changed": False,
+            "actor": clean_actor,
+            "target": target,
+            "reason": "target_not_found",
+        }
 
     def update_profile(self, user_id, *, display_name, country):
         for user in self.users:
@@ -145,8 +256,14 @@ class PasswordSecurityTests(unittest.TestCase):
         self.assertFalse(os_accounts.verify_password("wrong password", stored))
         self.assertNotIn("Strong password 26!", stored)
 
-    def test_account_cookie_carries_signed_user_identity_and_expires(self):
-        token = sc_auth.create_user_auth_token("user-1", password="master", now=100, days=30)
+    def test_account_cookie_carries_signed_user_identity_session_version_and_expires(self):
+        token = sc_auth.create_user_auth_token(
+            "user-1",
+            password="master",
+            now=100,
+            days=30,
+            session_version=7,
+        )
 
         valid, reason, payload = sc_auth.validate_user_auth_token(
             token,
@@ -156,6 +273,7 @@ class PasswordSecurityTests(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(reason, "ok")
         self.assertEqual(payload["sub"], "user-1")
+        self.assertEqual(payload["sv"], 7)
         self.assertEqual(
             sc_auth.validate_user_auth_token(token, password="master", now=100 + sc_auth.auth_cookie_max_age())[:2],
             (False, "expired"),
@@ -163,6 +281,36 @@ class PasswordSecurityTests(unittest.TestCase):
 
 
 class AccountAccessTests(unittest.TestCase):
+    def _create_admin(self, store, *, username="nathan", email="nathan@sportscave.test"):
+        return store.create_user(
+            username=username,
+            email=email,
+            display_name="Nathan",
+            password_hash=os_accounts.hash_password("Admin password 26!"),
+            role=os_accounts.ROLE_ADMIN,
+            country=os_accounts.COUNTRY_AUSTRALIA,
+        )
+
+    def _create_worker(
+        self,
+        store,
+        *,
+        username="worker",
+        email="worker@sportscave.test",
+        page_keys=("dashboard",),
+        password="Worker password 26!",
+        actor=None,
+    ):
+        return os_accounts.create_worker_account(
+            username=username,
+            email=email,
+            display_name="Worker",
+            password=password,
+            page_keys=page_keys,
+            store=store,
+            actor=actor,
+        )
+
     def test_files_delete_capability_defaults_off_for_workers_and_on_for_admin(self):
         admin = {"role": "admin", "is_active": True, "page_permissions": []}
         worker = {
@@ -461,6 +609,205 @@ class AccountAccessTests(unittest.TestCase):
                     store=store,
                 )
 
+    def test_admin_can_remotely_logout_another_user_without_changing_account(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(
+            store,
+            page_keys=("dashboard", "credential_prodigi"),
+            actor=admin,
+        )
+        original_permissions = list(worker["page_permissions"])
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            result = os_accounts.remote_logout_user(admin, worker["id"], store=store)
+
+        refreshed = store.get_user(worker["id"])
+        self.assertTrue(result["changed"])
+        self.assertEqual(refreshed["session_version"], worker["session_version"] + 1)
+        self.assertTrue(refreshed["is_active"])
+        self.assertEqual(refreshed["page_permissions"], original_permissions)
+        self.assertTrue(audit_log.called)
+
+    def test_remote_logout_invalidates_old_sessions_but_user_can_sign_in_again(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(store, password="Worker password 26!")
+        old_session_version = worker["session_version"]
+
+        with patch("activity_log.record_activity_log"):
+            os_accounts.remote_logout_user(admin, worker["id"], store=store)
+
+        refreshed = store.get_user(worker["id"])
+        self.assertNotEqual(old_session_version, refreshed["session_version"])
+        authenticated, reason = os_accounts.authenticate_user(
+            "worker",
+            "Worker password 26!",
+            store=store,
+        )
+        self.assertEqual(reason, "ok")
+        self.assertEqual(authenticated["id"], worker["id"])
+        self.assertEqual(authenticated["session_version"], refreshed["session_version"])
+
+    def test_permanent_removal_invalidates_sessions_revokes_credentials_and_blocks_login(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(
+            store,
+            page_keys=("dashboard", "credential_prodigi"),
+            password="Worker password 26!",
+            actor=admin,
+        )
+        old_session_version = worker["session_version"]
+        history = {
+            "work_logs": [{"user_id": worker["id"], "summary": "Packed orders"}],
+            "tasks": [{"completed_by": worker["display_name"]}],
+            "audit": [{"actor": worker["display_name"]}],
+            "reports": [{"staff_id": worker["id"]}],
+        }
+
+        with patch("activity_log.record_activity_log"):
+            result = os_accounts.remove_user_account(admin, worker["id"], store=store)
+
+        removed = store.get_user(worker["id"], include_removed=True)
+        self.assertTrue(result["changed"])
+        self.assertFalse(os_accounts.account_is_active(removed))
+        self.assertEqual(removed["account_status"], os_accounts.ACCOUNT_STATUS_REMOVED)
+        self.assertGreater(removed["session_version"], old_session_version)
+        self.assertEqual(removed["page_permissions"], [])
+        self.assertEqual(store.get_user(worker["id"]), {})
+        self.assertNotIn(worker["id"], [account["id"] for account in store.list_users()])
+        self.assertEqual(os_accounts.authenticate_user("worker", "Worker password 26!", store=store)[1], "invalid")
+        self.assertEqual(history["work_logs"][0]["user_id"], worker["id"])
+        self.assertEqual(history["tasks"][0]["completed_by"], "Worker")
+        with self.assertRaises(shared_credentials.CredentialAccessDenied):
+            shared_credentials.read_credential_for_action(
+                worker,
+                "prodigi",
+                shared_credentials.FIELD_PASSWORD,
+                shared_credentials.ACTION_PASSWORD_COPIED,
+                environ={"PRODIGI_PASSWORD": "removed-user-password"},
+                store=store,
+            )
+
+    def test_removed_account_email_can_be_recreated_without_inheriting_permissions_or_sessions(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        old_worker = self._create_worker(
+            store,
+            username="reina",
+            email="reina@sportscave.test",
+            page_keys=("dashboard", "credential_prodigi"),
+            actor=admin,
+        )
+
+        with patch("activity_log.record_activity_log"):
+            os_accounts.remove_user_account(admin, old_worker["id"], store=store)
+
+        new_worker = self._create_worker(
+            store,
+            username="reina",
+            email="reina@sportscave.test",
+            page_keys=(),
+        )
+        self.assertNotEqual(new_worker["id"], old_worker["id"])
+        self.assertEqual(new_worker["session_version"], 1)
+        self.assertEqual(new_worker["page_permissions"], [])
+        self.assertNotIn("credential_prodigi", new_worker["page_permissions"])
+
+    def test_account_actions_require_admin_and_block_self_removal(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(store)
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            with self.assertRaises(PermissionError):
+                os_accounts.remote_logout_user(worker, admin["id"], store=store)
+            with self.assertRaises(PermissionError):
+                os_accounts.remove_user_account(worker, admin["id"], store=store)
+            with self.assertRaises(PermissionError):
+                os_accounts.remove_user_account(admin, admin["id"], store=store)
+
+        self.assertTrue(audit_log.called)
+        self.assertTrue(
+            any(call.args[0] == os_accounts.ACTION_ADMIN_ACCOUNT_ACTION_DENIED for call in audit_log.call_args_list)
+        )
+
+    def test_repeated_logout_and_removal_fail_safely(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(store)
+
+        with patch("activity_log.record_activity_log"):
+            first_logout = os_accounts.remote_logout_user(admin, worker["id"], store=store)
+            second_logout = os_accounts.remote_logout_user(admin, worker["id"], store=store)
+            first_remove = os_accounts.remove_user_account(admin, worker["id"], store=store)
+            second_remove = os_accounts.remove_user_account(admin, worker["id"], store=store)
+
+        self.assertTrue(first_logout["changed"])
+        self.assertTrue(second_logout["changed"])
+        self.assertTrue(first_remove["changed"])
+        self.assertFalse(second_remove["changed"])
+        self.assertEqual(second_remove["reason"], "already_removed")
+
+    def test_account_removal_audit_payloads_do_not_contain_secrets_or_tokens(self):
+        store = FakeAccountStore()
+        admin = self._create_admin(store)
+        worker = self._create_worker(
+            store,
+            username="secret-worker",
+            email="secret-worker@sportscave.test",
+            password="Secret worker password 26!",
+            page_keys=("credential_prodigi",),
+            actor=admin,
+        )
+        secret_values = ("Secret worker password 26!", "session-token-value", "credential-secret-value")
+
+        with patch("activity_log.record_activity_log") as audit_log:
+            os_accounts.remove_user_account(admin, worker["id"], store=store)
+
+        payload = json.dumps(
+            [{"args": call.args, "kwargs": call.kwargs} for call in audit_log.call_args_list],
+            default=str,
+        )
+        for secret in secret_values:
+            self.assertNotIn(secret, payload)
+        self.assertNotIn("password_hash", payload)
+        self.assertNotIn("session-token-value", payload)
+
+    def test_account_access_ui_has_only_logout_and_remove_controls(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        account_source = source[
+            source.index("def render_account_access_section") :
+            source.index("\n\ndef render_passwords_section")
+        ]
+
+        self.assertIn("**Account Access**", account_source)
+        self.assertIn('"Log Out User"', account_source)
+        self.assertIn('"Remove Account"', account_source)
+        self.assertIn("if not os_accounts.is_admin(actor):", account_source)
+        self.assertNotIn("Account active", source)
+        for forbidden in ("Deactivate Account", "Reactivate Account", "Restore Account", "reactivate"):
+            self.assertNotIn(forbidden, source)
+
+    def test_account_action_source_uses_session_version_tombstone_and_no_history_deletes(self):
+        account_source = (ROOT / "os_accounts.py").read_text(encoding="utf-8")
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        migration_source = (ROOT / "migrations" / "20260810_account_access_controls.sql").read_text(encoding="utf-8")
+
+        self.assertIn("session_version", account_source)
+        self.assertIn("account_status='removed'", account_source)
+        self.assertIn("DELETE FROM os_user_page_permissions", account_source)
+        self.assertIn("_active_admin_count", account_source)
+        self.assertIn("The final active administrator account cannot be removed.", account_source)
+        self.assertIn("_session_user_matches_refreshed_user", app_source)
+        self.assertIn("_auth_payload_matches_user", app_source)
+        self.assertIn("clear_revealed_credential", app_source)
+        self.assertIn("Existing users remain active", migration_source)
+        for forbidden_delete in ("DELETE FROM audit_logs", "DELETE FROM dashboard_tasks", "DELETE FROM daily_execution_sheets"):
+            self.assertNotIn(forbidden_delete, account_source)
+            self.assertNotIn(forbidden_delete, migration_source)
+
     def test_missing_render_variables_fail_safely(self):
         admin = {"id": "admin-1", "role": "admin", "is_active": True, "page_permissions": []}
         store = FakeAccountStore()
@@ -734,6 +1081,30 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(updated["display_name"], "VA One")
         self.assertEqual(updated["email"], "worker@sportscave.test")
 
+    def test_worker_profile_update_does_not_reactivate_inactive_account(self):
+        store = FakeAccountStore()
+        worker = os_accounts.create_worker_account(
+            username="worker",
+            display_name="Worker",
+            password="Worker password 26!",
+            page_keys=("dashboard",),
+            store=store,
+        )
+        store.users[0]["is_active"] = False
+
+        updated = os_accounts.update_worker_account(
+            worker["id"],
+            username="worker",
+            email="worker@sportscave.test",
+            display_name="VA One",
+            is_active=True,
+            page_keys=("orders",),
+            store=store,
+        )
+
+        self.assertFalse(updated["is_active"])
+        self.assertEqual(store.get_user(worker["id"])["is_active"], False)
+
     def test_prompt_editing_approval_is_saved_for_new_and_existing_workers(self):
         store = FakeAccountStore()
         worker = os_accounts.create_worker_account(
@@ -828,6 +1199,9 @@ class AccountAccessTests(unittest.TestCase):
 
     def test_account_migration_contains_both_required_tables(self):
         sql = (ROOT / "migrations" / "20260722_os_accounts_access.sql").read_text(encoding="utf-8")
+        account_controls_sql = (ROOT / "migrations" / "20260810_account_access_controls.sql").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("CREATE TABLE IF NOT EXISTS os_users", sql)
         self.assertIn("country TEXT NOT NULL DEFAULT 'Philippines'", sql)
@@ -838,6 +1212,11 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("Asia/Manila", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS os_user_page_permissions", sql)
         self.assertIn("REFERENCES os_users(id) ON DELETE CASCADE", sql)
+        self.assertIn("session_version INTEGER DEFAULT 1", account_controls_sql)
+        self.assertIn("account_status TEXT DEFAULT 'active'", account_controls_sql)
+        self.assertIn("removed_at TIMESTAMPTZ", account_controls_sql)
+        self.assertIn("removed_by UUID", account_controls_sql)
+        self.assertIn("Existing users remain active", account_controls_sql)
 
     def test_app_checks_access_before_local_database_or_page_render(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -1993,6 +2372,29 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("unit-test-prodigi-password-value", text)
         self.assertNotIn("Adobe", text)
         self.assertNotIn("ChatGPT", text)
+
+    def test_credential_cards_keep_single_copy_row_and_toast_notifications(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        card_source = source[
+            source.index("def _render_credential_card") :
+            source.index("\n\ndef _record_credential_permission_changes")
+        ]
+        clipboard_source = source[
+            source.index("def _render_secure_clipboard_write") :
+            source.index("\n\ndef _render_revealed_password_value")
+        ]
+
+        self.assertIn("copy_cols = st.columns(2", card_source)
+        self.assertEqual(card_source.count('"Copy username"'), 1)
+        self.assertEqual(card_source.count('"Copy password"'), 1)
+        self.assertIn('_show_credential_toast("Username copied to clipboard")', card_source)
+        self.assertIn('_show_credential_toast("Password copied to clipboard")', card_source)
+        self.assertNotIn("st.success", card_source)
+        self.assertIn('reveal_clicked = st.button(\n                " "', card_source)
+        self.assertNotIn('"Hide" if password_revealed else "Reveal",', card_source)
+        self.assertNotIn("<button", clipboard_source)
+        self.assertIn("navigator.clipboard.writeText(copyText)", clipboard_source)
+        self.assertIn("height=0", clipboard_source)
 
     def test_worker_without_password_permissions_sees_empty_state_only(self):
         worker = {

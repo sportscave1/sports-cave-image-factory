@@ -64,6 +64,13 @@ def _b64_decode(value):
     return base64.urlsafe_b64decode(padded.encode("ascii"))
 
 
+def _session_version(value):
+    try:
+        return max(1, int(value or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def create_auth_token(
     *,
     password=DEFAULT_APP_PASSWORD,
@@ -97,6 +104,7 @@ def create_user_auth_token(
     extra_secret="",
     now=None,
     days=DEFAULT_AUTH_DAYS,
+    session_version=1,
 ):
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id:
@@ -106,6 +114,7 @@ def create_user_auth_token(
     payload = {
         "v": USER_TOKEN_VERSION,
         "sub": clean_user_id,
+        "sv": _session_version(session_version),
         "iat": issued_at,
         "exp": expires_at,
         "nonce": secrets.token_urlsafe(16),

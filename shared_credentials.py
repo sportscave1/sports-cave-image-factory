@@ -108,7 +108,14 @@ def _stable_user_id(user):
 
 
 def _active_user(user):
-    return bool(user and bool((user or {}).get("is_active", True)))
+    user = user or {}
+    account_status = str(user.get("account_status") or "active").strip().casefold()
+    return bool(
+        user
+        and bool(user.get("is_active", True))
+        and account_status != "removed"
+        and not user.get("removed_at")
+    )
 
 
 def resolve_user_for_permission_check(user, *, store=None):

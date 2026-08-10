@@ -1300,6 +1300,11 @@ def _ensure_schema_uncached():
                         CHECK (role IN ('admin', 'worker')),
                     timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    session_version INTEGER NOT NULL DEFAULT 1,
+                    account_status TEXT NOT NULL DEFAULT 'active'
+                        CHECK (account_status IN ('active', 'removed')),
+                    removed_at TIMESTAMPTZ,
+                    removed_by UUID,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     last_login_at TIMESTAMPTZ
@@ -1307,6 +1312,25 @@ def _ensure_schema_uncached():
                 """
             )
             cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT")
+            cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 1")
+            cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS account_status TEXT DEFAULT 'active'")
+            cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS removed_by UUID")
+            cur.execute(
+                """
+                UPDATE os_users
+                SET session_version = 1
+                WHERE session_version IS NULL OR session_version < 1
+                """
+            )
+            cur.execute(
+                """
+                UPDATE os_users
+                SET account_status = 'active'
+                WHERE account_status IS NULL
+                   OR account_status NOT IN ('active', 'removed')
+                """
+            )
             cur.execute(
                 """
                 UPDATE os_users
@@ -1319,6 +1343,21 @@ def _ensure_schema_uncached():
             )
             cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila'")
             cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL")
+            cur.execute("ALTER TABLE os_users ALTER COLUMN session_version SET DEFAULT 1")
+            cur.execute("ALTER TABLE os_users ALTER COLUMN session_version SET NOT NULL")
+            cur.execute("ALTER TABLE os_users ALTER COLUMN account_status SET DEFAULT 'active'")
+            cur.execute("ALTER TABLE os_users ALTER COLUMN account_status SET NOT NULL")
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE os_users
+                    ADD CONSTRAINT os_users_account_status_check
+                    CHECK (account_status IN ('active', 'removed'));
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS os_user_page_permissions (
@@ -1346,6 +1385,10 @@ def _ensure_schema_uncached():
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_os_user_permissions_user "
                 "ON os_user_page_permissions (user_id, can_access)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_os_users_active_accounts "
+                "ON os_users (account_status, is_active, role)"
             )
             cur.execute(
                 """

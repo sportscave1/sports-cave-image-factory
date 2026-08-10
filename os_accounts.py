@@ -1,5 +1,6 @@
 import os
 import threading
+import uuid
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
@@ -10,6 +11,9 @@ import social_media
 ROLE_ADMIN = "admin"
 ROLE_WORKER = "worker"
 VALID_ROLES = {ROLE_ADMIN, ROLE_WORKER}
+ACCOUNT_STATUS_ACTIVE = "active"
+ACCOUNT_STATUS_REMOVED = "removed"
+VALID_ACCOUNT_STATUSES = {ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_REMOVED}
 ADMIN_TIMEZONE = "Australia/Sydney"
 WORKER_TIMEZONE = "Asia/Manila"
 COUNTRY_AUSTRALIA = "Australia"
@@ -23,6 +27,10 @@ FILES_DELETE_CAPABILITY = "delete_files"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 EDIT_PROMPTS_CAPABILITY = "edit_prompts"
 REPORTING_PAGE_KEY = "reporting"
+ACTION_USER_REMOTE_LOGOUT = "account_remote_logout"
+ACTION_ACCOUNT_PERMANENTLY_REMOVED = "account_permanently_removed"
+ACTION_ADMIN_ACCOUNT_ACTION_DENIED = "account_admin_action_denied"
+ACTION_ACCOUNT_REMOVAL_FAILED = "account_removal_failed"
 REPORTING_OWNER_ENV_KEYS = (
     "SPORTS_CAVE_REPORTING_OWNER_EMAIL",
     "SPORTS_CAVE_ADMIN_EMAIL",
@@ -135,6 +143,14 @@ class AccountStorageError(RuntimeError):
     pass
 
 
+class AccountActionError(RuntimeError):
+    pass
+
+
+class AccountActionDenied(PermissionError):
+    pass
+
+
 def hash_password(password):
     return sc_auth.hash_password(password)
 
@@ -221,8 +237,22 @@ def permission_keys(user):
     }
 
 
+def account_status(user):
+    clean_status = str((user or {}).get("account_status") or ACCOUNT_STATUS_ACTIVE).strip().casefold()
+    return clean_status if clean_status in VALID_ACCOUNT_STATUSES else ACCOUNT_STATUS_ACTIVE
+
+
+def account_is_removed(user):
+    user = user or {}
+    return bool(account_status(user) == ACCOUNT_STATUS_REMOVED or user.get("removed_at"))
+
+
+def account_is_active(user):
+    return bool(user and bool((user or {}).get("is_active", True)) and not account_is_removed(user))
+
+
 def is_admin(user):
-    return str((user or {}).get("role") or "").strip().casefold() == ROLE_ADMIN
+    return bool(account_is_active(user) and str((user or {}).get("role") or "").strip().casefold() == ROLE_ADMIN)
 
 
 def reporting_owner_email(environ=None):
@@ -239,7 +269,7 @@ def is_reporting_owner(user, *, environ=None):
     owner_email = reporting_owner_email(environ)
     return bool(
         owner_email
-        and user.get("is_active", True)
+        and account_is_active(user)
         and is_admin(user)
         and normalise_login(user.get("email")) == owner_email
     )
@@ -264,7 +294,7 @@ def can_access_reporting(user):
 
 
 def can_access_page(user, route_or_key):
-    if not user or not bool(user.get("is_active", True)):
+    if not account_is_active(user):
         return False
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
@@ -289,7 +319,7 @@ def can_access_page(user, route_or_key):
 
 def can_delete_files(user):
     """Return whether the account may remove items from the shared Files root."""
-    if not user or not bool(user.get("is_active", True)):
+    if not account_is_active(user):
         return False
     if is_admin(user):
         return True
@@ -301,7 +331,7 @@ def can_delete_files(user):
 
 def can_view_activity_log(user):
     """Return whether the account may view the Home page activity log."""
-    if not user or not bool(user.get("is_active", True)):
+    if not account_is_active(user):
         return False
     if is_admin(user):
         return True
@@ -313,7 +343,7 @@ def can_view_activity_log(user):
 
 def can_edit_prompts(user):
     """Return whether the signed-in account may edit persistent prompts."""
-    if not user or not bool(user.get("is_active", True)):
+    if not account_is_active(user):
         return False
     if is_admin(user):
         return True
@@ -322,7 +352,7 @@ def can_edit_prompts(user):
 
 def can_manage_credential_permissions(actor):
     """Return whether the account may grant or revoke shared credential access."""
-    return bool(actor and bool(actor.get("is_active", True)) and is_admin(actor))
+    return bool(account_is_active(actor) and is_admin(actor))
 
 
 def credential_permission_keys(page_keys):
@@ -339,6 +369,83 @@ def _credential_permission_write_allowed(actor, page_keys):
     if requested and not can_manage_credential_permissions(actor):
         raise PermissionError("Password access can only be changed by an administrator.")
     return bool(requested)
+
+
+def safe_account_label(user):
+    user = user or {}
+    return (
+        str(user.get("display_name") or "").strip()
+        or str(user.get("email") or "").strip()
+        or str(user.get("username") or "").strip()
+        or str(user.get("id") or "").strip()
+        or "Account"
+    )
+
+
+def safe_account_identifier(user):
+    user = user or {}
+    return (
+        str(user.get("email") or "").strip()
+        or str(user.get("username") or "").strip()
+        or str(user.get("id") or "").strip()
+        or "unknown"
+    )
+
+
+def _safe_reason(reason):
+    return (
+        str(reason or "")
+        .strip()
+        .casefold()
+        .replace(" ", "_")
+        .replace(".", "")
+        .replace(",", "")
+    )[:120]
+
+
+def _account_action_message(action_type, target_user):
+    target_label = safe_account_label(target_user)
+    if action_type == ACTION_USER_REMOTE_LOGOUT:
+        return f"User remotely logged out: {target_label}"
+    if action_type == ACTION_ACCOUNT_PERMANENTLY_REMOVED:
+        return f"Account permanently removed: {target_label}"
+    if action_type == ACTION_ADMIN_ACCOUNT_ACTION_DENIED:
+        return f"Denied account action: {target_label}"
+    if action_type == ACTION_ACCOUNT_REMOVAL_FAILED:
+        return f"Failed removal attempt: {target_label}"
+    return f"Account action: {target_label}"
+
+
+def record_account_access_audit(action_type, actor, target_user=None, *, result, reason=""):
+    actor = dict(actor or {})
+    target_user = dict(target_user or {})
+    metadata = {
+        "actor_id": actor.get("id") or "",
+        "actor_email": actor.get("email") or "",
+        "actor_role": actor.get("role") or "",
+        "target_account_id": target_user.get("id") or "",
+        "target_account_display": target_user.get("display_name") or "",
+        "target_account_identifier": safe_account_identifier(target_user),
+        "account_action": str(action_type or "").strip(),
+        "result": str(result or "").strip(),
+        "safe_reason": _safe_reason(reason),
+        "status": str(result or "").strip() or "unknown",
+    }
+    metadata = {key: value for key, value in metadata.items() if value not in ("", None)}
+    try:
+        from activity_log import record_activity_log
+
+        record_activity_log(
+            str(action_type or "").strip() or "account_action",
+            "Accounts & Access",
+            _account_action_message(action_type, target_user),
+            entity_type="os_user",
+            entity_id=target_user.get("id") or "",
+            metadata=metadata,
+            actor=safe_account_label(actor),
+        )
+    except Exception:
+        pass
 
 
 def allowed_navigation_routes(user):
@@ -369,7 +476,14 @@ def _clean_user(row, permissions=None):
     row["timezone"] = str(
         row.get("timezone") or timezone_for_country(row["country"]) or default_timezone_for_role(row["role"])
     ).strip()
-    row["is_active"] = bool(row.get("is_active", True))
+    try:
+        row["session_version"] = max(1, int(row.get("session_version") or 1))
+    except (TypeError, ValueError):
+        row["session_version"] = 1
+    row["account_status"] = account_status(row)
+    row["removed_by"] = str(row.get("removed_by") or "")
+    row["removed_at"] = row.get("removed_at")
+    row["is_active"] = bool(row.get("is_active", True)) and not account_is_removed(row)
     if permissions is not None:
         row["page_permissions"] = sorted(set(permissions))
     else:
@@ -438,6 +552,11 @@ class PostgresAccountStore:
                                 country TEXT NOT NULL DEFAULT 'Philippines',
                                 timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
                                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                                session_version INTEGER NOT NULL DEFAULT 1,
+                                account_status TEXT NOT NULL DEFAULT 'active'
+                                    CHECK (account_status IN ('active', 'removed')),
+                                removed_at TIMESTAMPTZ,
+                                removed_by UUID,
                                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                                 last_login_at TIMESTAMPTZ
@@ -459,6 +578,25 @@ class PostgresAccountStore:
                         )
                         cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS country TEXT")
                         cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT")
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 1")
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS account_status TEXT DEFAULT 'active'")
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ")
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS removed_by UUID")
+                        cur.execute(
+                            """
+                            UPDATE os_users
+                            SET session_version = 1
+                            WHERE session_version IS NULL OR session_version < 1
+                            """
+                        )
+                        cur.execute(
+                            """
+                            UPDATE os_users
+                            SET account_status = 'active'
+                            WHERE account_status IS NULL
+                               OR account_status NOT IN ('active', 'removed')
+                            """
+                        )
                         cur.execute(
                             """
                             UPDATE os_users
@@ -494,6 +632,21 @@ class PostgresAccountStore:
                         cur.execute("ALTER TABLE os_users ALTER COLUMN country SET NOT NULL")
                         cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila'")
                         cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN session_version SET DEFAULT 1")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN session_version SET NOT NULL")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN account_status SET DEFAULT 'active'")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN account_status SET NOT NULL")
+                        cur.execute(
+                            """
+                            DO $$
+                            BEGIN
+                                ALTER TABLE os_users
+                                ADD CONSTRAINT os_users_account_status_check
+                                CHECK (account_status IN ('active', 'removed'));
+                            EXCEPTION WHEN duplicate_object THEN NULL;
+                            END $$;
+                            """
+                        )
                         cur.execute(
                             "CREATE UNIQUE INDEX IF NOT EXISTS idx_os_users_username_unique "
                             "ON os_users (lower(username))"
@@ -513,6 +666,10 @@ class PostgresAccountStore:
                         cur.execute(
                             "CREATE INDEX IF NOT EXISTS idx_os_user_permissions_page_key "
                             "ON os_user_page_permissions (page_key, can_access)"
+                        )
+                        cur.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_os_users_active_accounts "
+                            "ON os_users (account_status, is_active, role)"
                         )
                     conn.commit()
             except AccountStorageError:
@@ -538,15 +695,35 @@ class PostgresAccountStore:
         self.ensure_schema()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM os_users WHERE role='admin' ORDER BY created_at LIMIT 1")
+                cur.execute(
+                    """
+                    SELECT * FROM os_users
+                    WHERE role='admin'
+                      AND is_active IS TRUE
+                      AND account_status <> 'removed'
+                    ORDER BY created_at
+                    LIMIT 1
+                    """
+                )
                 row = cur.fetchone()
                 return _clean_user(row, self._permissions(cur, row["id"]) if row else ())
 
-    def get_user(self, user_id):
+    def get_user(self, user_id, *, include_removed=False):
         self.ensure_schema()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                if include_removed:
+                    cur.execute("SELECT * FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                else:
+                    cur.execute(
+                        """
+                        SELECT * FROM os_users
+                        WHERE id=%s
+                          AND account_status <> 'removed'
+                        LIMIT 1
+                        """,
+                        (str(user_id),),
+                    )
                 row = cur.fetchone()
                 return _clean_user(row, self._permissions(cur, row["id"]) if row else ())
 
@@ -558,7 +735,8 @@ class PostgresAccountStore:
                 cur.execute(
                     """
                     SELECT * FROM os_users
-                    WHERE lower(username)=%s OR lower(COALESCE(email, ''))=%s
+                    WHERE (lower(username)=%s OR lower(COALESCE(email, ''))=%s)
+                      AND account_status <> 'removed'
                     ORDER BY created_at
                     LIMIT 1
                     """,
@@ -574,8 +752,10 @@ class PostgresAccountStore:
                 cur.execute(
                     """
                     SELECT id, username, email, display_name, role, country, timezone, is_active,
+                           session_version, account_status, removed_at, removed_by,
                            created_at, updated_at, last_login_at
                     FROM os_users
+                    WHERE account_status <> 'removed'
                     ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, display_name, username
                     """
                 )
@@ -691,7 +871,6 @@ class PostgresAccountStore:
                             str(username or "").strip(),
                             str(email or "").strip() or None,
                             str(display_name or "").strip(),
-                            bool(is_active),
                             clean_country,
                             timezone_name,
                             str(password_hash),
@@ -703,7 +882,6 @@ class PostgresAccountStore:
                             str(username or "").strip(),
                             str(email or "").strip() or None,
                             str(display_name or "").strip(),
-                            bool(is_active),
                             clean_country,
                             timezone_name,
                             str(user_id),
@@ -711,10 +889,12 @@ class PostgresAccountStore:
                     cur.execute(
                         f"""
                         UPDATE os_users
-                        SET username=%s, email=%s, display_name=%s, is_active=%s,
+                        SET username=%s, email=%s, display_name=%s,
                             country=%s, timezone=%s,
                             updated_at=now(){password_sql}
-                        WHERE id=%s AND role='worker'
+                        WHERE id=%s
+                          AND role='worker'
+                          AND account_status <> 'removed'
                         RETURNING *
                         """,
                         params,
@@ -742,7 +922,15 @@ class PostgresAccountStore:
             raise ValueError("Display name is required.")
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT role FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                cur.execute(
+                    """
+                    SELECT role FROM os_users
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    LIMIT 1
+                    """,
+                    (str(user_id),),
+                )
                 current = cur.fetchone() or {}
                 if not current:
                     raise ValueError("Account was not found.")
@@ -754,6 +942,7 @@ class PostgresAccountStore:
                     UPDATE os_users
                     SET display_name=%s, country=%s, timezone=%s, updated_at=now()
                     WHERE id=%s
+                      AND account_status <> 'removed'
                     RETURNING *
                     """,
                     (clean_name, clean_country, timezone_name, str(user_id)),
@@ -770,14 +959,28 @@ class PostgresAccountStore:
             raise ValueError(strength_error)
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                cur.execute(
+                    """
+                    SELECT * FROM os_users
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    LIMIT 1
+                    """,
+                    (str(user_id),),
+                )
                 row = cur.fetchone()
                 if not row:
                     raise ValueError("Account was not found.")
                 if not verify_password(current_password, row.get("password_hash")):
                     raise ValueError("Current password is incorrect.")
                 cur.execute(
-                    "UPDATE os_users SET password_hash=%s, updated_at=now() WHERE id=%s RETURNING *",
+                    """
+                    UPDATE os_users
+                    SET password_hash=%s, updated_at=now()
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    RETURNING *
+                    """,
                     (hash_password(new_password), str(user_id)),
                 )
                 updated = cur.fetchone()
@@ -790,13 +993,192 @@ class PostgresAccountStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE os_users SET last_login_at=now(), updated_at=now() WHERE id=%s RETURNING *",
+                    """
+                    UPDATE os_users
+                    SET last_login_at=now(), updated_at=now()
+                    WHERE id=%s
+                      AND is_active IS TRUE
+                      AND account_status <> 'removed'
+                    RETURNING *
+                    """,
                     (str(user_id),),
                 )
                 row = cur.fetchone()
                 permissions = self._permissions(cur, user_id) if row else ()
             conn.commit()
         return _clean_user(row, permissions)
+
+    @staticmethod
+    def _clean_uuid(value):
+        try:
+            return str(uuid.UUID(str(value or "").strip()))
+        except (TypeError, ValueError, AttributeError):
+            return ""
+
+    @staticmethod
+    def _active_admin_count(cur, *, exclude_user_id=""):
+        params = []
+        exclude_clause = ""
+        clean_exclude = PostgresAccountStore._clean_uuid(exclude_user_id)
+        if clean_exclude:
+            exclude_clause = "AND id <> %s"
+            params.append(clean_exclude)
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM os_users
+            WHERE role='admin'
+              AND is_active IS TRUE
+              AND account_status <> 'removed'
+              {exclude_clause}
+            """,
+            tuple(params),
+        )
+        return int((cur.fetchone() or {}).get("count") or 0)
+
+    @staticmethod
+    def _fetch_action_actor(cur, actor):
+        clean_actor_id = PostgresAccountStore._clean_uuid((actor or {}).get("id"))
+        if not clean_actor_id:
+            raise AccountActionDenied("Only an active administrator can perform this account action.")
+        cur.execute(
+            """
+            SELECT *
+            FROM os_users
+            WHERE id=%s
+              AND is_active IS TRUE
+              AND account_status <> 'removed'
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (clean_actor_id,),
+        )
+        row = cur.fetchone()
+        clean_actor = _clean_user(row, PostgresAccountStore._permissions(cur, clean_actor_id) if row else ())
+        if not is_admin(clean_actor):
+            raise AccountActionDenied("Only an active administrator can perform this account action.")
+        return clean_actor
+
+    @staticmethod
+    def _fetch_action_target(cur, target_user_id):
+        clean_target_id = PostgresAccountStore._clean_uuid(target_user_id)
+        if not clean_target_id:
+            return clean_target_id, {}
+        cur.execute(
+            """
+            SELECT *
+            FROM os_users
+            WHERE id=%s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (clean_target_id,),
+        )
+        row = cur.fetchone()
+        permissions = PostgresAccountStore._permissions(cur, clean_target_id) if row else ()
+        return clean_target_id, _clean_user(row, permissions)
+
+    def remote_logout_user(self, actor, target_user_id):
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                clean_actor = self._fetch_action_actor(cur, actor)
+                clean_target_id, target = self._fetch_action_target(cur, target_user_id)
+                if not target:
+                    conn.commit()
+                    return {
+                        "changed": False,
+                        "actor": clean_actor,
+                        "target": {"id": clean_target_id or str(target_user_id or "")},
+                        "reason": "target_not_found",
+                    }
+                if account_is_removed(target):
+                    conn.commit()
+                    return {
+                        "changed": False,
+                        "actor": clean_actor,
+                        "target": target,
+                        "reason": "already_removed",
+                    }
+                cur.execute(
+                    """
+                    UPDATE os_users
+                    SET session_version = GREATEST(COALESCE(session_version, 1), 1) + 1,
+                        updated_at = now()
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    RETURNING *
+                    """,
+                    (clean_target_id,),
+                )
+                row = cur.fetchone()
+                permissions = self._permissions(cur, clean_target_id) if row else ()
+            conn.commit()
+        return {
+            "changed": bool(row),
+            "actor": clean_actor,
+            "target": _clean_user(row, permissions) if row else target,
+            "reason": "logged_out" if row else "target_not_found",
+        }
+
+    def remove_account(self, actor, target_user_id):
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                clean_actor = self._fetch_action_actor(cur, actor)
+                clean_target_id, target = self._fetch_action_target(cur, target_user_id)
+                if not target:
+                    conn.commit()
+                    return {
+                        "changed": False,
+                        "actor": clean_actor,
+                        "target": {"id": clean_target_id or str(target_user_id or "")},
+                        "reason": "target_not_found",
+                    }
+                if account_is_removed(target):
+                    cur.execute("DELETE FROM os_user_page_permissions WHERE user_id=%s", (clean_target_id,))
+                    conn.commit()
+                    return {
+                        "changed": False,
+                        "actor": clean_actor,
+                        "target": {**target, "page_permissions": []},
+                        "reason": "already_removed",
+                    }
+                if str(clean_actor.get("id") or "") == str(target.get("id") or ""):
+                    raise AccountActionDenied("You cannot remove your own active account.")
+                if str(target.get("role") or "").casefold() == ROLE_ADMIN and self._active_admin_count(
+                    cur,
+                    exclude_user_id=clean_target_id,
+                ) < 1:
+                    raise AccountActionDenied("The final active administrator account cannot be removed.")
+                tombstone_username = f"removed-{clean_target_id}"
+                cur.execute("DELETE FROM os_user_page_permissions WHERE user_id=%s", (clean_target_id,))
+                cur.execute(
+                    """
+                    UPDATE os_users
+                    SET username=%s,
+                        email=NULL,
+                        password_hash='removed-account',
+                        is_active=FALSE,
+                        account_status='removed',
+                        removed_at=COALESCE(removed_at, now()),
+                        removed_by=%s,
+                        session_version = GREATEST(COALESCE(session_version, 1), 1) + 1,
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (tombstone_username, clean_actor.get("id"), clean_target_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return {
+            "changed": bool(row),
+            "actor": clean_actor,
+            "target": _clean_user(row, ()) if row else target,
+            "previous_target": target,
+            "reason": "removed" if row else "target_not_found",
+        }
 
     def set_reporting_permission(self, actor, target_user_id, enabled):
         actor = _clean_user(actor)
@@ -807,7 +1189,13 @@ class PostgresAccountStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM os_users WHERE id=%s LIMIT 1 FOR UPDATE",
+                    """
+                    SELECT * FROM os_users
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
                     (clean_target_id,),
                 )
                 target = cur.fetchone()
@@ -919,11 +1307,14 @@ def authenticate_user(login, password, *, store=None):
     user = store.find_user_by_login(login)
     if not user:
         return None, "invalid"
-    if not user.get("is_active"):
+    if not account_is_active(user):
         return None, "inactive"
     if not verify_password(password, user.get("password_hash")):
         return None, "invalid"
-    return store.update_last_login(user["id"]), "ok"
+    updated = store.update_last_login(user["id"])
+    if not account_is_active(updated):
+        return None, "inactive"
+    return updated, "ok"
 
 
 def create_worker_account(
@@ -1009,6 +1400,81 @@ def update_reporting_permission(actor, *, enabled, store=None):
         actor.get("id"),
         bool(enabled),
     )
+
+
+def remote_logout_user(actor, target_user_id, *, store=None):
+    store = store or DEFAULT_STORE
+    try:
+        result = store.remote_logout_user(actor or {}, target_user_id)
+    except PermissionError as error:
+        record_account_access_audit(
+            ACTION_ADMIN_ACCOUNT_ACTION_DENIED,
+            actor or {},
+            {"id": str(target_user_id or "")},
+            result="denied",
+            reason=str(error),
+        )
+        raise
+    except Exception:
+        record_account_access_audit(
+            ACTION_USER_REMOTE_LOGOUT,
+            actor or {},
+            {"id": str(target_user_id or "")},
+            result="failed",
+            reason="account_action_unavailable",
+        )
+        raise
+    target = result.get("target") or {"id": str(target_user_id or "")}
+    record_account_access_audit(
+        ACTION_USER_REMOTE_LOGOUT,
+        result.get("actor") or actor or {},
+        target,
+        result="success" if result.get("changed") else result.get("reason") or "unchanged",
+        reason=result.get("reason") or "",
+    )
+    return result
+
+
+def remove_user_account(actor, target_user_id, *, store=None):
+    store = store or DEFAULT_STORE
+    try:
+        result = store.remove_account(actor or {}, target_user_id)
+    except PermissionError as error:
+        record_account_access_audit(
+            ACTION_ADMIN_ACCOUNT_ACTION_DENIED,
+            actor or {},
+            {"id": str(target_user_id or "")},
+            result="denied",
+            reason=str(error),
+        )
+        raise
+    except Exception:
+        record_account_access_audit(
+            ACTION_ACCOUNT_REMOVAL_FAILED,
+            actor or {},
+            {"id": str(target_user_id or "")},
+            result="failed",
+            reason="account_action_unavailable",
+        )
+        raise
+    target = result.get("previous_target") or result.get("target") or {"id": str(target_user_id or "")}
+    if result.get("changed"):
+        record_account_access_audit(
+            ACTION_ACCOUNT_PERMANENTLY_REMOVED,
+            result.get("actor") or actor or {},
+            target,
+            result="success",
+            reason=result.get("reason") or "removed",
+        )
+    else:
+        record_account_access_audit(
+            ACTION_ACCOUNT_REMOVAL_FAILED,
+            result.get("actor") or actor or {},
+            target,
+            result=result.get("reason") or "failed",
+            reason=result.get("reason") or "failed",
+        )
+    return result
 
 
 def reset_account_cache():
