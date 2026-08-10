@@ -485,9 +485,9 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             app_test.run(timeout=20)
 
         design_cards = [
-            str(item.value)
-            for item in app_test.markdown
-            if '<div class="sc-task-card sc-design-task-card">' in str(item.value)
+            str(item.proto.body)
+            for item in app_test.get("html")
+            if '<div class="sc-task-card sc-design-task-card">' in str(item.proto.body)
         ]
         self.assertFalse(app_test.exception)
         self.assertEqual(len(design_cards), 3)
@@ -502,6 +502,71 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Fourth design four extra preview...", rendered)
         self.assertIn("Newest design five extra preview...", rendered)
+
+    def test_task_cards_render_metadata_normally_and_escape_dynamic_content(self):
+        backend = FakeDashboardBackend()
+        backend.tasks = [
+            {
+                "id": "manual-1",
+                "title": "Nathan's A&B \"Drop\", <script>alert(1)</script>",
+                "section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "status": "open",
+                "created_at": "2026-08-05T02:57:00+00:00",
+                "metadata": {},
+            },
+            {
+                "id": "import-1",
+                "title": "Serena Williams — The Final Serve",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "created_at": "2026-08-05T02:57:00+00:00",
+                "metadata": {
+                    sports_cave_dashboard.TASK_IMPORT_METADATA_KEY: {
+                        "task_title": "Serena Williams — The Final Serve",
+                        "sport": "Tennis & Finals",
+                        "league_or_competition": 'US "Open"',
+                        "team_or_athlete": "<script>alert(2)</script>",
+                        "design_title": "The Final Serve",
+                        "design_description": "Commas, apostrophes, ampersands & <b>tags</b> stay text.",
+                    }
+                },
+            },
+        ]
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(
+            sports_cave_dashboard,
+            "get_supabase_backend",
+            return_value=backend,
+        ):
+            app_test.run(timeout=20)
+
+        task_cards = [
+            str(item.proto.body)
+            for item in app_test.get("html")
+            if "sc-task-card" in str(item.proto.body)
+        ]
+        combined = "\n".join(task_cards)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual(len(task_cards), 2)
+        self.assertTrue(all(card.startswith('<div class="sc-task-card') for card in task_cards))
+        self.assertIn('<span class="sc-small-meta">Added 5 Aug, 12:57 PM</span>', combined)
+        self.assertNotIn('&lt;span class="sc-small-meta"&gt;', combined)
+        self.assertNotIn("\n                <div", combined)
+        self.assertIn("Nathan&#x27;s A&amp;B &quot;Drop&quot;, &lt;script&gt;alert(1)&lt;/script&gt;", combined)
+        self.assertIn("Tennis &amp; Finals", combined)
+        self.assertIn("&lt;script&gt;alert(2)&lt;/script&gt;", combined)
+        self.assertNotIn("<script>", combined)
+        self.assertEqual(
+            len([button for button in app_test.button if button.label == "Complete"]),
+            2,
+        )
+        self.assertGreaterEqual(len(app_test.get("popover")), 1)
 
     def test_task_complete_marks_complete_and_writes_activity_log(self):
         backend = FakeDashboardBackend()
@@ -2327,6 +2392,10 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("def render_task_group") :
             source.index("\n\ndef render_dashboard_tasks")
         ]
+        helper_source = source[
+            source.index("def dashboard_task_card_html") :
+            source.index("\n\ndef render_task_import_details")
+        ]
 
         self.assertIn("ordered_task_group(tasks, group)", render_source)
         self.assertIn("DESIGN_TASK_VISIBLE_LIMIT", render_source)
@@ -2334,7 +2403,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn('with st.popover(f"+{len(overflow_tasks)} more")', render_source)
         self.assertIn("compact_design_task_preview", render_source)
         self.assertIn("sc-design-overflow-list", render_source)
-        self.assertIn("sc-design-task-card", render_source)
+        self.assertIn("sc-design-task-card", helper_source)
 
     def test_task_csv_controls_are_inline_and_details_are_compact(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -2356,6 +2425,9 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn("task_import_summary(task)", render_source)
         self.assertIn('with st.popover("View details")', render_source)
         self.assertIn("task_import_details_html(task)", render_source)
+        self.assertIn("dashboard_task_card_html(", render_source)
+        self.assertIn("st.html(", render_source)
+        self.assertNotIn("sc-small-meta\">Added {html.escape", render_source)
 
     def test_dashboard_render_path_avoids_heavy_page_imports(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

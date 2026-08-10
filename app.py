@@ -11461,12 +11461,32 @@ def task_import_details_html(task):
     return f'<div class="sc-task-detail-popover">{"".join(rows)}</div>'
 
 
+def dashboard_task_card_html(task_text, task_summary, created_label, *, is_design_group=False):
+    card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
+    safe_title = html.escape(str(task_text or ""))
+    safe_title_attr = html.escape(str(task_text or ""), quote=True)
+    summary = str(task_summary or "")
+    summary_html = (
+        f'<span class="sc-task-summary" title="{html.escape(summary, quote=True)}">'
+        f"{html.escape(summary)}</span>"
+        if summary
+        else ""
+    )
+    return (
+        f'<div class="{card_class}">'
+        f'<strong title="{safe_title_attr}">{safe_title}</strong>'
+        f"{summary_html}"
+        f'<span class="sc-small-meta">Added {html.escape(str(created_label or ""))}</span>'
+        "</div>"
+    )
+
+
 def render_task_import_details(task):
     details_html = task_import_details_html(task)
     if not details_html:
         st.caption("No imported details saved for this task.")
         return
-    st.markdown(details_html, unsafe_allow_html=True)
+    st.html(details_html)
 
 
 def render_task_group(group, tasks):
@@ -11498,22 +11518,13 @@ def render_task_group(group, tasks):
         task_details = sports_cave_dashboard.task_import_details(task)
         row = st.columns([4.5, 0.95, 1.15]) if task_details else st.columns([5, 1.25])
         with row[0]:
-            card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
-            summary_html = (
-                f'<span class="sc-task-summary" title="{html.escape(task_summary, quote=True)}">'
-                f"{html.escape(task_summary)}</span>"
-                if task_summary
-                else ""
-            )
-            st.markdown(
-                f"""
-                <div class="{card_class}">
-                    <strong title="{html.escape(task_text, quote=True)}">{html.escape(task_text)}</strong>
-                    {summary_html}
-                    <span class="sc-small-meta">Added {html.escape(format_dashboard_timestamp(task.get("created_at")))}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            st.html(
+                dashboard_task_card_html(
+                    task_text,
+                    task_summary,
+                    format_dashboard_timestamp(task.get("created_at")),
+                    is_design_group=is_design_group,
+                )
             )
         if task_details:
             with row[1]:
