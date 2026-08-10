@@ -1,5 +1,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 from collections import Counter
+import csv
+import io
 import json
 from pathlib import Path
 import re
@@ -28,6 +30,34 @@ TASK_GROUPS = (
 )
 DESIGN_TASK_VISIBLE_LIMIT = 3
 DESIGN_TASK_PREVIEW_WORD_LIMIT = 5
+TASK_IMPORT_TEMPLATE_FILENAME = "sports-cave-task-import-template.csv"
+TASK_IMPORT_SCHEMA_VERSION = "sports_cave_task_import_v1"
+TASK_IMPORT_MAX_BYTES = 2 * 1024 * 1024
+TASK_IMPORT_METADATA_KEY = "task_import"
+TASK_IMPORT_CSV_COLUMNS = (
+    "task_section",
+    "task_title",
+    "sport",
+    "league_or_competition",
+    "team_or_athlete",
+    "design_title",
+    "moment_or_theme",
+    "design_description",
+    "priority",
+    "due_date",
+    "notes",
+)
+TASK_IMPORT_DETAIL_FIELDS = (
+    ("sport", "Sport"),
+    ("league_or_competition", "League or competition"),
+    ("team_or_athlete", "Team or athlete"),
+    ("design_title", "Design title"),
+    ("moment_or_theme", "Moment or theme"),
+    ("design_description", "Design description"),
+    ("priority", "Priority"),
+    ("due_date", "Due date"),
+    ("notes", "Notes"),
+)
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
 TASK_CACHE_TTL_SECONDS = 15
@@ -78,6 +108,10 @@ _DAILY_EXECUTION_CACHE = {}
 
 
 class DashboardStorageError(RuntimeError):
+    pass
+
+
+class TaskCSVImportError(ValueError):
     pass
 
 
@@ -234,11 +268,420 @@ def compact_design_task_preview(value, word_limit=DESIGN_TASK_PREVIEW_WORD_LIMIT
     return f"{preview}..." if len(words) > safe_limit else preview
 
 
+def _task_section_alias_key(value):
+    text = str(value or "").strip().casefold()
+    text = text.replace("\u2013", " ").replace("\u2014", " ").replace("\ufffd", " ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return "_".join(text.split())
+
+
+def _task_section_aliases():
+    aliases = {
+        COLLECTIONS_TASK_GROUP: (
+            "collection",
+            "collections",
+            "collection_update",
+            "collection_updates",
+            "collections_to_update",
+        ),
+        DESIGN_TASK_GROUP: (
+            "design",
+            "designs",
+            "new_design",
+            "new_designs",
+            "new_design_tasks",
+            "new_designs_to_complete",
+            "designs_to_complete",
+        ),
+        UPLOAD_TASK_GROUP: (
+            "upload",
+            "uploads",
+            "product_upload",
+            "product_uploads",
+            "new_product_upload",
+            "new_product_uploads",
+            "new_products",
+            "products_to_upload",
+            "new_products_to_be_uploaded",
+            "new_products_to_be_uploaded_in_designs_offline_not_uploaded_folder",
+            "offline_uploads",
+            "offline_not_uploaded",
+        ),
+        VARIANTS_TASK_GROUP: (
+            "variant",
+            "variants",
+            "product_variant",
+            "product_variants",
+            "variants_working",
+            "existing_product_update",
+            "existing_product_updated",
+            "existing_product_updated_variants_working",
+        ),
+    }
+    lookup = {}
+    for section, section_aliases in aliases.items():
+        lookup[_task_section_alias_key(section)] = section
+        for alias in section_aliases:
+            lookup[_task_section_alias_key(alias)] = section
+    for legacy in LEGACY_UPLOAD_TASK_GROUPS:
+        lookup[_task_section_alias_key(legacy)] = UPLOAD_TASK_GROUP
+    return lookup
+
+
 def normalize_task_category(category):
     category = str(category or "").strip()
     if category in LEGACY_UPLOAD_TASK_GROUPS:
         return UPLOAD_TASK_GROUP
     return category if category in TASK_GROUPS else TASK_GROUPS[0]
+
+
+def normalize_task_import_section(section):
+    clean = str(section or "").strip()
+    if not clean:
+        return ""
+    return _task_section_aliases().get(_task_section_alias_key(clean), "")
+
+
+def _clean_task_csv_field(value):
+    if value is None:
+        return ""
+    return str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def build_task_import_template_csv():
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=TASK_IMPORT_CSV_COLUMNS)
+    writer.writeheader()
+    for section in TASK_GROUPS:
+        writer.writerow({"task_section": section})
+    return output.getvalue().encode("utf-8")
+
+
+def _decode_task_import_csv(data, filename=""):
+    if filename and not str(filename).casefold().endswith(".csv"):
+        raise TaskCSVImportError("Choose a .csv file exported from the task template.")
+    if isinstance(data, str):
+        text = data
+        byte_length = len(text.encode("utf-8"))
+    else:
+        try:
+            raw = bytes(data or b"")
+        except TypeError as error:
+            raise TaskCSVImportError("Choose a valid CSV file.") from error
+        byte_length = len(raw)
+        if not raw:
+            raise TaskCSVImportError("Choose a completed task CSV file.")
+        if byte_length > TASK_IMPORT_MAX_BYTES:
+            raise TaskCSVImportError("The task CSV must be smaller than 2 MB.")
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise TaskCSVImportError("Save the task CSV as UTF-8 and try again.") from error
+    if byte_length > TASK_IMPORT_MAX_BYTES:
+        raise TaskCSVImportError("The task CSV must be smaller than 2 MB.")
+    if "\x00" in text[:2048]:
+        raise TaskCSVImportError("Choose a valid text CSV file, not a binary file.")
+    if not text.strip():
+        raise TaskCSVImportError("Choose a completed task CSV file.")
+    return text
+
+
+def _normalise_duplicate_part(value):
+    text = str(value or "").replace("\u2019", "'").replace("\u2018", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    return " ".join(text.split()).casefold()
+
+
+def task_import_duplicate_key(section, task_title="", design_title="", team_or_athlete=""):
+    return (
+        _task_section_alias_key(section),
+        _normalise_duplicate_part(task_title),
+        _normalise_duplicate_part(design_title),
+        _normalise_duplicate_part(team_or_athlete),
+    )
+
+
+def task_import_details(task):
+    metadata = (task or {}).get("metadata") if isinstance(task, dict) else task
+    if not isinstance(metadata, dict):
+        return {}
+    details = metadata.get(TASK_IMPORT_METADATA_KEY)
+    if not isinstance(details, dict):
+        details = metadata.get("design_brief")
+    if not isinstance(details, dict):
+        details = metadata if any(key in metadata for key, _label in TASK_IMPORT_DETAIL_FIELDS) else {}
+    if not isinstance(details, dict):
+        return {}
+    fields = {
+        key: _clean_task_csv_field(details.get(key))
+        for key in TASK_IMPORT_CSV_COLUMNS
+        if key != "task_section"
+    }
+    if not any(fields.values()):
+        return {}
+    return fields
+
+
+def task_import_summary(task):
+    details = task_import_details(task)
+    if not details:
+        return ""
+    preferred = (
+        details.get("sport"),
+        details.get("team_or_athlete"),
+        details.get("league_or_competition"),
+    )
+    parts = [part for part in preferred if part]
+    if not parts:
+        parts = [details.get("priority"), details.get("due_date"), details.get("moment_or_theme")]
+        parts = [part for part in parts if part]
+    return " · ".join(parts[:3])
+
+
+def _task_existing_duplicate_key(task):
+    task = _normalise_task(task)
+    details = task_import_details(task)
+    task_title = details.get("task_title") if details else ""
+    if task_title is None or task_title == "":
+        task_title = task.get("title") or task.get("text") or ""
+    return task_import_duplicate_key(
+        task.get("section") or task.get("category") or "",
+        task_title,
+        details.get("design_title") if details else "",
+        details.get("team_or_athlete") if details else "",
+    )
+
+
+def _task_csv_row_is_blank(row):
+    values = []
+    for key, value in (row or {}).items():
+        if key is None and isinstance(value, (list, tuple)):
+            values.extend(value)
+            continue
+        values.append(value)
+    return not any(_clean_task_csv_field(value) for value in values)
+
+
+def _task_import_metadata(values, *, section, title, row_number, filename=""):
+    metadata = {
+        "source": "task_csv_import",
+        TASK_IMPORT_METADATA_KEY: {
+            "schema_version": TASK_IMPORT_SCHEMA_VERSION,
+            "row_number": row_number,
+            "task_section": values.get("task_section") or section,
+            "section": section,
+            "visible_title": title,
+            **{
+                column: values.get(column, "")
+                for column in TASK_IMPORT_CSV_COLUMNS
+                if column != "task_section"
+            },
+        },
+    }
+    if filename:
+        metadata[TASK_IMPORT_METADATA_KEY]["filename"] = str(filename)[:250]
+    return metadata
+
+
+def preview_task_csv_import(data, filename="", existing_tasks=None):
+    text = _decode_task_import_csv(data, filename)
+    try:
+        reader = csv.DictReader(io.StringIO(text, newline=""))
+        raw_fieldnames = reader.fieldnames or []
+        fieldnames = [_clean_task_csv_field(name) for name in raw_fieldnames]
+        if not fieldnames:
+            raise TaskCSVImportError("The task CSV is missing a header row.")
+        duplicated_headers = sorted(
+            header
+            for header, count in Counter(fieldnames).items()
+            if header and count > 1
+        )
+        if duplicated_headers:
+            raise TaskCSVImportError(
+                f"The task CSV has duplicate column headers: {', '.join(duplicated_headers)}."
+            )
+        missing = [column for column in TASK_IMPORT_CSV_COLUMNS if column not in fieldnames]
+        if missing:
+            raise TaskCSVImportError(
+                f"The task CSV is missing required columns: {', '.join(missing)}."
+            )
+        header_map = {clean: raw for clean, raw in zip(fieldnames, raw_fieldnames)}
+        rows = list(reader)
+    except TaskCSVImportError:
+        raise
+    except csv.Error as error:
+        raise TaskCSVImportError(
+            "The task CSV could not be read. Check its quoting and line breaks."
+        ) from error
+
+    existing_keys = {
+        _task_existing_duplicate_key(task)
+        for task in (existing_tasks or [])
+        if task
+    }
+    seen_keys = set(existing_keys)
+    candidates = []
+    errors = []
+    duplicates = []
+    blank_count = 0
+    section_counts = Counter()
+
+    for offset, row in enumerate(rows, start=2):
+        if _task_csv_row_is_blank(row):
+            blank_count += 1
+            continue
+        values = {
+            column: _clean_task_csv_field(row.get(header_map[column]))
+            for column in TASK_IMPORT_CSV_COLUMNS
+        }
+        section = normalize_task_import_section(values.get("task_section"))
+        row_errors = []
+        if not section:
+            row_errors.append(
+                "task_section must match an existing task section or a supported short key."
+            )
+        title = values.get("task_title") or values.get("design_title")
+        if not title:
+            row_errors.append("task_title or design_title is required.")
+        if row_errors:
+            errors.append({"row_number": offset, "errors": row_errors})
+            continue
+        duplicate_key = task_import_duplicate_key(
+            section,
+            values.get("task_title"),
+            values.get("design_title"),
+            values.get("team_or_athlete"),
+        )
+        if duplicate_key in seen_keys:
+            duplicates.append(
+                {
+                    "row_number": offset,
+                    "section": section,
+                    "title": title,
+                    "duplicate_key": duplicate_key,
+                }
+            )
+            continue
+        seen_keys.add(duplicate_key)
+        section_counts[section] += 1
+        candidates.append(
+            {
+                "row_number": offset,
+                "section": section,
+                "title": title,
+                "metadata": _task_import_metadata(
+                    values,
+                    section=section,
+                    title=title,
+                    row_number=offset,
+                    filename=filename,
+                ),
+                "duplicate_key": duplicate_key,
+            }
+        )
+
+    return {
+        "filename": str(filename or ""),
+        "valid_count": len(candidates),
+        "blank_count": blank_count,
+        "invalid_count": len(errors),
+        "skipped_count": blank_count + len(errors),
+        "duplicate_count": len(duplicates),
+        "section_counts": dict(section_counts),
+        "tasks": candidates,
+        "errors": errors,
+        "duplicates": duplicates,
+    }
+
+
+def _task_import_section_counts_text(section_counts):
+    parts = []
+    for section in TASK_GROUPS:
+        count = int((section_counts or {}).get(section) or 0)
+        if count:
+            parts.append(f"{count} {section.casefold()}")
+    return "; ".join(parts)
+
+
+def format_task_import_result_message(result):
+    imported_count = int((result or {}).get("imported_count") or 0)
+    task_word = "task" if imported_count == 1 else "tasks"
+    counts_text = _task_import_section_counts_text((result or {}).get("section_counts") or {})
+    if counts_text:
+        return f"{imported_count} {task_word} imported: {counts_text}."
+    return f"{imported_count} {task_word} imported."
+
+
+def import_task_csv_preview(preview):
+    candidates = [dict(task) for task in (preview or {}).get("tasks") or []]
+    try:
+        existing_keys = {
+            _task_existing_duplicate_key(task)
+            for task in list_tasks(status="all")
+            if task
+        }
+        seen_keys = set(existing_keys)
+        imported = []
+        duplicates = []
+        section_counts = Counter()
+        for candidate in candidates:
+            section = (
+                normalize_task_import_section(candidate.get("section"))
+                or normalize_task_category(candidate.get("section"))
+            )
+            details = ((candidate.get("metadata") or {}).get(TASK_IMPORT_METADATA_KEY) or {})
+            duplicate_key = candidate.get("duplicate_key") or task_import_duplicate_key(
+                section,
+                details.get("task_title"),
+                details.get("design_title"),
+                details.get("team_or_athlete"),
+            )
+            if duplicate_key in seen_keys:
+                duplicates.append(candidate)
+                continue
+            created = add_task(
+                candidate.get("title") or "Task",
+                section,
+                metadata=candidate.get("metadata") or {},
+            )
+            imported.append(created)
+            section_counts[section] += 1
+            seen_keys.add(duplicate_key)
+        result = {
+            "imported_count": len(imported),
+            "imported_tasks": imported,
+            "section_counts": dict(section_counts),
+            "duplicate_count": int((preview or {}).get("duplicate_count") or 0) + len(duplicates),
+            "skipped_count": int((preview or {}).get("skipped_count") or 0)
+            + int((preview or {}).get("duplicate_count") or 0)
+            + len(duplicates),
+            "filename": str((preview or {}).get("filename") or ""),
+        }
+        if imported:
+            try:
+                from activity_log import get_activity_actor, record_activity_log
+
+                record_activity_log(
+                    "task_csv_imported",
+                    "Dashboard",
+                    format_task_import_result_message(result),
+                    entity_type="dashboard_task_import",
+                    metadata={
+                        "filename": result["filename"],
+                        "imported_count": result["imported_count"],
+                        "skipped_count": result["skipped_count"],
+                        "section_counts": result["section_counts"],
+                    },
+                    actor=get_activity_actor(),
+                )
+                clear_activity_cache()
+            except Exception:
+                pass
+        return result
+    except DashboardStorageError:
+        raise
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
 
 
 def normalize_mockup_scope(value):

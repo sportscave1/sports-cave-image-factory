@@ -1,4 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
+import csv
+import io
 from pathlib import Path
 import time as wall_time
 import unittest
@@ -28,6 +30,15 @@ def owner_user():
         "is_active": True,
         "page_permissions": [],
     }
+
+
+def task_csv_bytes(rows):
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({column: row.get(column, "") for column in sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS})
+    return output.getvalue().encode("utf-8")
 
 
 class FakeDashboardBackend:
@@ -543,6 +554,192 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             self.assertEqual(sports_cave_dashboard.list_tasks(), [])
 
         self.assertEqual(len(backend.task_status_calls), 3)
+
+    def test_task_csv_export_template_has_exact_headers_and_section_rows(self):
+        template = sports_cave_dashboard.build_task_import_template_csv()
+        decoded = template.decode("utf-8")
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        rows = list(reader)
+
+        self.assertEqual(reader.fieldnames, list(sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS))
+        self.assertEqual(
+            [row["task_section"] for row in rows],
+            list(sports_cave_dashboard.TASK_GROUPS),
+        )
+        for row in rows:
+            for column in sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS:
+                if column == "task_section":
+                    self.assertTrue(row[column])
+                else:
+                    self.assertEqual(row[column], "")
+
+    def test_task_csv_preview_preserves_structured_design_fields_and_aliases(self):
+        description = (
+            'Premium cinematic Sports Cave artwork featuring Serena, commas, "quotes", '
+            "apostrophes and line breaks.\nUse restrained US Open lighting."
+        )
+        csv_data = b"\xef\xbb\xbf" + task_csv_bytes(
+            [
+                {
+                    "task_section": "  new_designs_to_complete  ",
+                    "sport": "Tennis",
+                    "league_or_competition": "US Open",
+                    "team_or_athlete": "Serena Williams",
+                    "design_title": "The Final Serve",
+                    "moment_or_theme": "Career legacy and final US Open appearance",
+                    "design_description": description,
+                    "priority": "High",
+                    "notes": "GOAT collection candidate",
+                }
+            ]
+        )
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            csv_data,
+            "ideas.csv",
+            existing_tasks=[],
+        )
+        task = preview["tasks"][0]
+        details = sports_cave_dashboard.task_import_details({"metadata": task["metadata"]})
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(task["section"], sports_cave_dashboard.DESIGN_TASK_GROUP)
+        self.assertEqual(task["title"], "The Final Serve")
+        self.assertEqual(details["sport"], "Tennis")
+        self.assertEqual(details["team_or_athlete"], "Serena Williams")
+        self.assertEqual(details["design_description"], description)
+        self.assertEqual(
+            sports_cave_dashboard.task_import_summary({"metadata": task["metadata"]}),
+            "Tennis · Serena Williams · US Open",
+        )
+
+    def test_task_csv_validation_reports_blank_invalid_and_duplicate_rows(self):
+        existing_tasks = [
+            {
+                "id": "existing",
+                "title": "Refresh NFL collection",
+                "section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "status": "open",
+                "metadata": {},
+            }
+        ]
+        csv_data = task_csv_bytes(
+            [
+                {
+                    "task_section": "Collections",
+                    "task_title": "Refresh NASCAR collection",
+                },
+                {
+                    "task_section": "collections_to_update",
+                    "task_title": "Refresh NASCAR collection",
+                },
+                {
+                    "task_section": "Collections to update",
+                    "task_title": "Refresh NFL collection",
+                },
+                {
+                    "task_section": "Unknown bucket",
+                    "task_title": "Valid title but bad section",
+                },
+                {
+                    "task_section": "designs",
+                },
+                {},
+            ]
+        )
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            csv_data,
+            "tasks.csv",
+            existing_tasks=existing_tasks,
+        )
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(preview["duplicate_count"], 2)
+        self.assertEqual(preview["invalid_count"], 2)
+        self.assertEqual(preview["blank_count"], 1)
+        self.assertEqual(
+            preview["section_counts"],
+            {sports_cave_dashboard.COLLECTIONS_TASK_GROUP: 1},
+        )
+        self.assertEqual([error["row_number"] for error in preview["errors"]], [5, 6])
+        self.assertIn("task_section", preview["errors"][0]["errors"][0])
+        self.assertIn("task_title or design_title", preview["errors"][1]["errors"][0])
+
+    def test_task_csv_rejects_unsupported_files_safely(self):
+        with self.assertRaisesRegex(sports_cave_dashboard.TaskCSVImportError, ".csv"):
+            sports_cave_dashboard.preview_task_csv_import(b"not,csv\n", "tasks.xlsx")
+
+        with self.assertRaisesRegex(sports_cave_dashboard.TaskCSVImportError, "UTF-8"):
+            sports_cave_dashboard.preview_task_csv_import(b"\xff\xfe\x00\x00", "tasks.csv")
+
+    def test_task_csv_import_appends_persists_metadata_and_skips_second_import(self):
+        backend = FakeDashboardBackend()
+        rows = [
+            {
+                "task_section": "new_designs",
+                "task_title": f"Design idea {index}",
+                "sport": "Tennis",
+                "league_or_competition": "US Open",
+                "team_or_athlete": f"Athlete {index}",
+                "design_title": f"Design idea {index}",
+                "moment_or_theme": "Finals moment",
+                "design_description": f"Structured brief {index}",
+                "priority": "High",
+            }
+            for index in range(1, 16)
+        ]
+        csv_data = task_csv_bytes(rows)
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.record_activity_log"
+        ) as record_activity:
+            preview = sports_cave_dashboard.preview_task_csv_import(
+                csv_data,
+                "designs.csv",
+                existing_tasks=sports_cave_dashboard.list_tasks(status="all"),
+            )
+            result = sports_cave_dashboard.import_task_csv_preview(preview)
+            state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
+            second_preview = sports_cave_dashboard.preview_task_csv_import(
+                csv_data,
+                "designs.csv",
+                existing_tasks=sports_cave_dashboard.list_tasks(status="all"),
+            )
+            second_result = sports_cave_dashboard.import_task_csv_preview(second_preview)
+
+        self.assertEqual(result["imported_count"], 15)
+        self.assertEqual(
+            result["section_counts"],
+            {sports_cave_dashboard.DESIGN_TASK_GROUP: 15},
+        )
+        self.assertEqual(len(backend.tasks), 15)
+        self.assertEqual(len(state["tasks"]), 15)
+        self.assertTrue(
+            all(task["section"] == sports_cave_dashboard.DESIGN_TASK_GROUP for task in state["tasks"])
+        )
+        details = sports_cave_dashboard.task_import_details(state["tasks"][0])
+        self.assertEqual(details["sport"], "Tennis")
+        self.assertTrue(details["design_description"].startswith("Structured brief"))
+        self.assertEqual(second_preview["valid_count"], 0)
+        self.assertEqual(second_preview["duplicate_count"], 15)
+        self.assertEqual(second_result["imported_count"], 0)
+        self.assertEqual(len(backend.tasks), 15)
+        record_activity.assert_called_once()
+        self.assertEqual(record_activity.call_args.kwargs["metadata"]["filename"], "designs.csv")
+        self.assertEqual(record_activity.call_args.kwargs["metadata"]["imported_count"], 15)
+        self.assertEqual(record_activity.call_args.kwargs["metadata"]["skipped_count"], 0)
+
+    def test_task_import_details_are_empty_for_legacy_simple_tasks(self):
+        simple_task = {
+            "id": "legacy",
+            "title": "Manual task",
+            "section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+            "metadata": {},
+        }
+
+        self.assertEqual(sports_cave_dashboard.task_import_details(simple_task), {})
+        self.assertEqual(sports_cave_dashboard.task_import_summary(simple_task), "")
 
     def test_activity_log_queries_use_view_date_bounds_without_pagination_limits(self):
         backend = FakeDashboardBackend()
@@ -2138,6 +2335,27 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn("compact_design_task_preview", render_source)
         self.assertIn("sc-design-overflow-list", render_source)
         self.assertIn("sc-design-task-card", render_source)
+
+    def test_task_csv_controls_are_inline_and_details_are_compact(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        header_source = source[
+            source.index("def render_dashboard_task_header") :
+            source.index("\n\ndef task_import_details_html")
+        ]
+        render_source = source[
+            source.index("def render_task_group") :
+            source.index("\n\ndef render_dashboard_tasks")
+        ]
+
+        self.assertIn("st.columns([1, 0.13, 0.13]", header_source)
+        self.assertIn('"Import CSV"', header_source)
+        self.assertIn('"Export CSV"', header_source)
+        self.assertIn("st.download_button(", header_source)
+        self.assertIn("TASK_IMPORT_TEMPLATE_FILENAME", header_source)
+        self.assertIn('st.dialog("Import Tasks CSV")', source)
+        self.assertIn("task_import_summary(task)", render_source)
+        self.assertIn('with st.popover("View details")', render_source)
+        self.assertIn("task_import_details_html(task)", render_source)
 
     def test_dashboard_render_path_avoids_heavy_page_imports(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

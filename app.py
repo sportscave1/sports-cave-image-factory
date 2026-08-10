@@ -3158,6 +3158,50 @@ def inject_styles():
             margin-top: 0.12rem;
         }
 
+        .sc-task-summary {
+            color: #4F4A41 !important;
+            display: block;
+            font-size: 0.7rem;
+            line-height: 1.15;
+            margin-top: 0.14rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sc-task-detail-popover {
+            max-height: 22rem;
+            max-width: 28rem;
+            overflow-y: auto;
+            padding-right: 0.15rem;
+        }
+
+        .sc-task-detail-row {
+            border-bottom: 1px solid #EEE7DA;
+            padding: 0.42rem 0;
+        }
+
+        .sc-task-detail-row:last-child {
+            border-bottom: 0;
+        }
+
+        .sc-task-detail-row span {
+            color: #6C665D !important;
+            display: block;
+            font-size: 0.66rem;
+            font-weight: 760;
+            line-height: 1.15;
+            text-transform: uppercase;
+        }
+
+        .sc-task-detail-row p {
+            color: #1D1B17 !important;
+            font-size: 0.78rem;
+            line-height: 1.32;
+            margin: 0.12rem 0 0;
+            white-space: normal;
+        }
+
         div[data-testid="stHorizontalBlock"]:has(.sc-design-task-card) {
             align-items: center;
             gap: 0.45rem;
@@ -3167,6 +3211,53 @@ def inject_styles():
             min-height: 2.25rem;
             padding-bottom: 0.32rem;
             padding-top: 0.32rem;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) {
+            align-items: center;
+            gap: 0.45rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .sc-task-toolbar-title.sc-section-title {
+            margin: 0 !important;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stButton > button,
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stDownloadButton > button {
+            background: #FFFFFF !important;
+            border: 1px solid #D7C49D !important;
+            border-radius: 5px !important;
+            color: #1D1B17 !important;
+            font-size: 0.76rem !important;
+            font-weight: 680 !important;
+            height: 2rem !important;
+            line-height: 1 !important;
+            min-height: 2rem !important;
+            padding: 0 0.65rem !important;
+            white-space: nowrap !important;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stButton > button:hover,
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stDownloadButton > button:hover {
+            background: #FBF8F0 !important;
+            border-color: #D4A54C !important;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) [data-testid="stColumn"] {
+            min-width: 0;
+        }
+
+        @media (max-width: 720px) {
+            div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) {
+                gap: 0.25rem;
+            }
+
+            div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stButton > button,
+            div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) .stDownloadButton > button {
+                font-size: 0.7rem !important;
+                padding: 0 0.45rem !important;
+            }
         }
 
         .sc-design-overflow-list {
@@ -3186,6 +3277,18 @@ def inject_styles():
 
         .sc-design-overflow-item:last-child {
             border-bottom: 0;
+        }
+
+        .sc-design-overflow-details summary {
+            color: #8A651D !important;
+            cursor: default;
+            font-size: 0.68rem;
+            font-weight: 700;
+            margin-top: 0.2rem;
+        }
+
+        .sc-design-overflow-details .sc-task-detail-row {
+            padding: 0.3rem 0;
         }
 
         .sc-task-card strong,
@@ -11177,6 +11280,195 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     return True
 
 
+DASHBOARD_TASK_CSV_IMPORT_OPEN_KEY = "dashboard_task_csv_import_open"
+DASHBOARD_TASK_CSV_IMPORT_PREVIEW_KEY = "dashboard_task_csv_import_preview"
+DASHBOARD_TASK_CSV_IMPORT_NONCE_KEY = "dashboard_task_csv_import_nonce"
+DASHBOARD_TASK_CSV_IMPORT_TOAST_KEY = "dashboard_task_csv_import_toast"
+
+
+def _reset_dashboard_task_csv_import(*, keep_open=False):
+    st.session_state[DASHBOARD_TASK_CSV_IMPORT_OPEN_KEY] = bool(keep_open)
+    st.session_state.pop(DASHBOARD_TASK_CSV_IMPORT_PREVIEW_KEY, None)
+    st.session_state[DASHBOARD_TASK_CSV_IMPORT_NONCE_KEY] = (
+        int(st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_NONCE_KEY, 0)) + 1
+    )
+
+
+def _dashboard_task_csv_existing_tasks(fallback_tasks):
+    try:
+        return sports_cave_dashboard.list_tasks(status="all")
+    except sports_cave_dashboard.DashboardStorageError:
+        return list(fallback_tasks or [])
+
+
+def _task_csv_section_counts_text(section_counts):
+    parts = []
+    for section in sports_cave_dashboard.TASK_GROUPS:
+        count = int((section_counts or {}).get(section) or 0)
+        if count:
+            parts.append(f"{count} {section.casefold()}")
+    return " · ".join(parts) if parts else "No new tasks will be imported."
+
+
+def _render_dashboard_task_csv_preview(preview):
+    valid_count = int(preview.get("valid_count") or 0)
+    skipped_count = int(preview.get("skipped_count") or 0)
+    duplicate_count = int(preview.get("duplicate_count") or 0)
+    st.markdown(
+        (
+            f"**{valid_count}** valid tasks · "
+            f"**{skipped_count}** invalid/skipped rows · "
+            f"**{duplicate_count}** duplicates"
+        )
+    )
+    st.caption(_task_csv_section_counts_text(preview.get("section_counts") or {}))
+
+    if preview.get("errors"):
+        st.markdown("**Rows to fix**")
+        for error in preview.get("errors", [])[:12]:
+            row_number = error.get("row_number")
+            message = "; ".join(error.get("errors") or [])
+            st.caption(f"Row {row_number}: {message}")
+        if len(preview.get("errors") or []) > 12:
+            st.caption(f"Plus {len(preview.get('errors') or []) - 12} more rows with errors.")
+
+    if preview.get("duplicates"):
+        duplicate_rows = ", ".join(
+            f"row {item.get('row_number')}" for item in preview.get("duplicates", [])[:12]
+        )
+        if len(preview.get("duplicates") or []) > 12:
+            duplicate_rows += f", plus {len(preview.get('duplicates') or []) - 12} more"
+        st.caption(f"Duplicates skipped: {duplicate_rows}.")
+
+
+def render_dashboard_task_csv_import_dialog(state):
+    if not st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_OPEN_KEY):
+        return
+
+    @st.dialog("Import Tasks CSV")
+    def import_dialog():
+        upload_key = (
+            "dashboard-task-csv-upload::"
+            f"{int(st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_NONCE_KEY, 0))}"
+        )
+        uploaded_file = st.file_uploader(
+            "Completed task CSV",
+            type=["csv"],
+            accept_multiple_files=False,
+            key=upload_key,
+        )
+
+        preview = None
+        if uploaded_file is not None:
+            source_bytes = uploaded_file.getvalue()
+            digest = hashlib.sha256(source_bytes).hexdigest()
+            cached = st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_PREVIEW_KEY) or {}
+            if cached.get("digest") != digest or cached.get("filename") != uploaded_file.name:
+                try:
+                    preview = sports_cave_dashboard.preview_task_csv_import(
+                        source_bytes,
+                        uploaded_file.name,
+                        existing_tasks=_dashboard_task_csv_existing_tasks(state.get("tasks") or []),
+                    )
+                except sports_cave_dashboard.TaskCSVImportError as error:
+                    st.warning(str(error))
+                else:
+                    st.session_state[DASHBOARD_TASK_CSV_IMPORT_PREVIEW_KEY] = {
+                        "digest": digest,
+                        "filename": uploaded_file.name,
+                        "preview": preview,
+                    }
+            else:
+                preview = cached.get("preview")
+
+        if preview:
+            _render_dashboard_task_csv_preview(preview)
+
+        action_cols = st.columns([1, 1])
+        if action_cols[0].button("Cancel", key="dashboard-task-csv-cancel", use_container_width=True):
+            _reset_dashboard_task_csv_import()
+            st.rerun()
+
+        confirm_disabled = not preview or int(preview.get("valid_count") or 0) <= 0
+        if action_cols[1].button(
+            "Confirm Import",
+            key="dashboard-task-csv-confirm",
+            type="primary",
+            disabled=confirm_disabled,
+            use_container_width=True,
+        ):
+            try:
+                result = sports_cave_dashboard.import_task_csv_preview(preview)
+            except sports_cave_dashboard.DashboardStorageError:
+                st.warning("Could not import the task CSV right now. Please try again.")
+                return
+            st.session_state[DASHBOARD_TASK_CSV_IMPORT_TOAST_KEY] = (
+                sports_cave_dashboard.format_task_import_result_message(result)
+            )
+            _reset_dashboard_task_csv_import()
+            st.rerun()
+
+    import_dialog()
+
+
+def render_dashboard_task_header(state):
+    header_cols = st.columns([1, 0.13, 0.13], gap="small")
+    with header_cols[0]:
+        st.markdown(
+            '<div class="sc-section-title sc-task-toolbar-title">Tasks</div>',
+            unsafe_allow_html=True,
+        )
+    with header_cols[1]:
+        if st.button("Import CSV", key="dashboard-task-csv-open", use_container_width=True):
+            _reset_dashboard_task_csv_import(keep_open=True)
+            st.rerun()
+    with header_cols[2]:
+        st.download_button(
+            "Export CSV",
+            data=sports_cave_dashboard.build_task_import_template_csv(),
+            file_name=sports_cave_dashboard.TASK_IMPORT_TEMPLATE_FILENAME,
+            mime="text/csv",
+            key="dashboard-task-csv-export",
+            use_container_width=True,
+        )
+
+    toast_message = st.session_state.pop(DASHBOARD_TASK_CSV_IMPORT_TOAST_KEY, "")
+    if toast_message:
+        if hasattr(st, "toast"):
+            st.toast(toast_message)
+        else:
+            st.success(toast_message)
+
+    render_dashboard_task_csv_import_dialog(state)
+
+
+def task_import_details_html(task):
+    details = sports_cave_dashboard.task_import_details(task)
+    if not details:
+        return ""
+    rows = []
+    for key, label in sports_cave_dashboard.TASK_IMPORT_DETAIL_FIELDS:
+        value = details.get(key)
+        if not value:
+            continue
+        escaped_value = html.escape(value).replace("\n", "<br>")
+        rows.append(
+            '<div class="sc-task-detail-row">'
+            f"<span>{html.escape(label)}</span>"
+            f"<p>{escaped_value}</p>"
+            "</div>"
+        )
+    return f'<div class="sc-task-detail-popover">{"".join(rows)}</div>'
+
+
+def render_task_import_details(task):
+    details_html = task_import_details_html(task)
+    if not details_html:
+        st.caption("No imported details saved for this task.")
+        return
+    st.markdown(details_html, unsafe_allow_html=True)
+
+
 def render_task_group(group, tasks):
     st.markdown(f"**{html.escape(group)}**")
     group_tasks = sports_cave_dashboard.ordered_task_group(tasks, group)
@@ -11202,19 +11494,34 @@ def render_task_group(group, tasks):
     for task in visible_tasks:
         task_id = task.get("id") or ""
         task_text = task.get("text") or ""
-        row = st.columns([5, 1.25])
+        task_summary = sports_cave_dashboard.task_import_summary(task)
+        task_details = sports_cave_dashboard.task_import_details(task)
+        row = st.columns([4.5, 0.95, 1.15]) if task_details else st.columns([5, 1.25])
         with row[0]:
             card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
+            summary_html = (
+                f'<span class="sc-task-summary" title="{html.escape(task_summary, quote=True)}">'
+                f"{html.escape(task_summary)}</span>"
+                if task_summary
+                else ""
+            )
             st.markdown(
                 f"""
                 <div class="{card_class}">
                     <strong title="{html.escape(task_text, quote=True)}">{html.escape(task_text)}</strong>
+                    {summary_html}
                     <span class="sc-small-meta">Added {html.escape(format_dashboard_timestamp(task.get("created_at")))}</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-        with row[1]:
+        if task_details:
+            with row[1]:
+                with st.popover("View details"):
+                    render_task_import_details(task)
+
+        complete_column = row[2] if task_details else row[1]
+        with complete_column:
             if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
                 if group == sports_cave_dashboard.DESIGN_TASK_GROUP:
                     st.session_state["dashboard_pending_design_complete_task_id"] = task_id
@@ -11268,23 +11575,41 @@ def render_task_group(group, tasks):
 
     if overflow_tasks:
         with st.popover(f"+{len(overflow_tasks)} more"):
-            preview_rows = "".join(
-                (
+            preview_rows = []
+            for task in overflow_tasks:
+                task_title = str(task.get("text") or "")
+                task_summary = sports_cave_dashboard.task_import_summary(task)
+                details_html = task_import_details_html(task)
+                summary_html = (
+                    f'<span class="sc-task-summary" title="{html.escape(task_summary, quote=True)}">'
+                    f"{html.escape(task_summary)}</span>"
+                    if task_summary
+                    else ""
+                )
+                details_block = (
+                    '<details class="sc-design-overflow-details">'
+                    "<summary>View details</summary>"
+                    f"{details_html}"
+                    "</details>"
+                    if details_html
+                    else ""
+                )
+                preview_rows.append(
                     '<div class="sc-design-overflow-item" '
-                    f'title="{html.escape(str(task.get("text") or ""), quote=True)}">'
-                    f'{html.escape(sports_cave_dashboard.compact_design_task_preview(task.get("text")))}'
+                    f'title="{html.escape(task_title, quote=True)}">'
+                    f'{html.escape(sports_cave_dashboard.compact_design_task_preview(task_title))}'
+                    f"{summary_html}"
+                    f"{details_block}"
                     "</div>"
                 )
-                for task in overflow_tasks
-            )
             st.markdown(
-                f'<div class="sc-design-overflow-list">{preview_rows}</div>',
+                f'<div class="sc-design-overflow-list">{"".join(preview_rows)}</div>',
                 unsafe_allow_html=True,
             )
 
 
 def render_dashboard_tasks(state):
-    render_html_section_title("Tasks")
+    render_dashboard_task_header(state)
     if state.get("task_error"):
         st.warning("Tasks could not load right now. Please try again shortly.")
     with st.form("dashboard-add-task", clear_on_submit=True):
