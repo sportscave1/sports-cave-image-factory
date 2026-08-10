@@ -66,11 +66,15 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         )
         self.assertIn("TASK:\nBathurst Brock tribute", prompt)
         self.assertIn("Bathurst Brock tribute", prompt)
-        self.assertIn("Use the selected hero image as the main subject reference.", prompt)
+        self.assertIn("Hero image: immutable principal subject asset", prompt)
+        self.assertIn("Composite the original supplied subject unchanged into the generated Sports Cave environment.", prompt)
+        self.assertIn("Background/support image: atmosphere, venue and story reference", prompt)
+        self.assertIn("Detail references: factual accuracy references only", prompt)
+        self.assertIn("Limited-edition plaque: exact supplied graphic asset to composite, not regenerate.", prompt)
         self.assertIn("Use the Sports Cave limited-edition plaque attached to this project", prompt)
         self.assertIn("This must feel like premium limited-edition sports wall art", prompt)
         self.assertIn("Realism and reference accuracy lock:", prompt)
-        self.assertIn("Use the selected images as strict visual references.", prompt)
+        self.assertIn("Use the selected images as strict source assets and factual references according to their roles above.", prompt)
         self.assertIn("Do not redesign the athlete, driver, car, uniform, trophy, venue, or moment.", prompt)
         self.assertIn("Do not mirror images if it reverses numbers, logos, sponsor text, or kit details.", prompt)
         self.assertIn("legend + moment + nostalgia + darkness + subtle gold + framed collector energy", prompt)
@@ -86,6 +90,80 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertNotIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
         self.assertNotIn("Continue with this Sports Cave design system:", prompt)
         self.assertNotIn("Sports Cave Master Design System Prompt", prompt)
+
+    def test_new_design_step_three_includes_subject_lock_once_before_creative_direction(self):
+        prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
+        marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+
+        self.assertTrue(prompt.startswith(marker))
+        self.assertEqual(prompt.count(marker), 1)
+        self.assertLess(prompt.index(marker), prompt.index("TASK:\nBathurst Brock tribute"))
+        self.assertLess(prompt.index(marker), prompt.index("Reference roles:"))
+        self.assertLess(prompt.index(marker), prompt.index("Create the artwork in landscape 4:3 ratio."))
+        self.assertLess(prompt.index(marker), prompt.index("Sports Cave collector style:"))
+        self.assertIn("USE THE ORIGINAL SUPPLIED SUBJECT IMAGE ITSELF.", prompt)
+        self.assertIn("Do not face-swap the subject.", prompt)
+        self.assertIn("The background and design will adapt to the subject.", prompt)
+
+    def test_design_studio_regeneration_and_refinement_prompts_include_subject_lock_once(self):
+        marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        generation_names = (
+            "Upgrade Existing Design Prompt",
+            "Expired Edition / Next Chapter Design Prompt",
+            "Create Sports Cave Style Artwork Prompt",
+        )
+
+        for prompt_name in generation_names:
+            with self.subTest(prompt_name=prompt_name):
+                default_prompt, key = design_studio_page.PROMPT_BOXES[prompt_name]
+                self.assertIn(key, design_studio_page.DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS)
+                prompt = design_studio_page.build_design_studio_image_generation_prompt(default_prompt)
+
+                self.assertTrue(prompt.startswith(marker))
+                self.assertEqual(prompt.count(marker), 1)
+                self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+                self.assertIn("4:3 landscape", prompt)
+                self.assertIn("collector artwork", prompt)
+                self.assertIn("Sports Cave", prompt)
+
+    def test_unrelated_design_studio_prompts_do_not_receive_subject_lock(self):
+        marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        unrelated_prompts = [
+            design_studio_page.build_design_research_prompt("Michael Jordan final shot"),
+            design_studio_page.build_design_image_carousel_prompt("Michael Jordan final shot", ""),
+            design_studio_page.FIND_THE_MOMENT_PROMPT,
+            design_studio_page.HARSH_REVIEW_PROMPT,
+        ]
+
+        for prompt in unrelated_prompts:
+            with self.subTest(prompt=prompt[:40]):
+                self.assertNotIn(marker, prompt)
+
+    def test_subject_lock_composition_is_idempotent_and_preserves_prompt_details(self):
+        marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        once = design_studio_page.build_design_studio_image_generation_prompt(
+            design_studio_page.CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT
+        )
+        twice = design_studio_page.build_design_studio_image_generation_prompt(once)
+
+        self.assertEqual(once, twice)
+        self.assertEqual(twice.count(marker), 1)
+        self.assertEqual(twice.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertIn("[PASTE SELECTED MOMENT]", twice)
+        self.assertIn("[PASTE HERO IMAGE DIRECTION]", twice)
+        self.assertIn("[PASTE BACKGROUND IMAGE DIRECTION]", twice)
+        self.assertIn("Use the Sports Cave limited-edition plaque attached to this project", twice)
+
+    def test_rendered_design_studio_image_prompt_boxes_use_shared_subject_lock_helper(self):
+        source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
+        renderer = source[
+            source.index("def render_copy_prompt_box") :
+            source.index("\n\ndef render_generated_prompt_box")
+        ]
+
+        self.assertIn("DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS", renderer)
+        self.assertIn("build_design_studio_image_generation_prompt(effective_prompt)", renderer)
+        self.assertNotIn("DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK +", renderer)
 
     def test_new_design_task_titles_use_open_new_design_tasks_only(self):
         tasks = [

@@ -18,6 +18,146 @@ EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH = (
 )
 NEW_DESIGN_TASK_CATEGORY = "New designs to complete"
 MANUAL_NEW_DESIGN_TASK_OPTION = "Enter task manually"
+DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER = "HIGHEST-PRIORITY SOURCE SUBJECT LOCK — MANDATORY"
+
+
+DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK = f"""
+{DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER}
+
+Treat every supplied hero, player, athlete, person, team, rivalry subject, car, motorcycle, jersey, uniform, trophy, or other principal sporting subject as an immutable source asset.
+
+This is an image-editing and compositing task, not a request to regenerate, redraw, reinterpret, restyle, or create a similar version of the supplied subject.
+
+USE THE ORIGINAL SUPPLIED SUBJECT IMAGE ITSELF.
+
+Extract, isolate, mask, and composite the real subject from the supplied source image into the Sports Cave artwork. Preserve the source subject's authentic photographic identity and visible details. The finished subject must continue to look like the same real photograph, not an AI-generated replacement based on it.
+
+DO NOT CHANGE THE SUBJECT
+
+Do not change, reconstruct, enhance, beautify, stylise, repaint, redraw, reinterpret, or regenerate any supplied principal subject.
+
+For every supplied person or athlete, preserve exactly:
+
+* Facial identity
+* Facial structure and proportions
+* Eyes, eye direction, eyebrows, nose, mouth, ears and jaw
+* Skin texture, age, expression and natural asymmetry
+* Hair, hairline and facial hair
+* Head size and the natural connection between head, neck and body
+* Body shape, body proportions and muscle structure
+* Pose, stance, movement and orientation
+* Arms, hands, fingers, legs and feet
+* Clothing, uniform, jersey, numbers, colours, stitching and equipment
+* Camera angle, perspective and recognisable photographic characteristics
+
+Do not face-swap the subject. Do not reconstruct the face. Do not create an approximate likeness. Do not "improve" facial symmetry. Do not smooth away real skin texture. Do not change the expression or eye direction. Do not replace the original head, body, hands, uniform or equipment with generated substitutes.
+
+For teams, groups and rivalries, preserve every person separately. Do not merge identities, exchange facial features, duplicate people, remove people, change poses, change body types, or generate replacement team members.
+
+For cars, motorcycles and other vehicles, preserve exactly:
+
+* Original body shape and proportions
+* Livery, paintwork, colours and sponsor placement
+* Numbers, lettering, badges and visible markings
+* Wheels, tyres, wings, aero surfaces, cockpit and mechanical details
+* Camera angle, perspective, reflections and recognisable era-specific details
+
+Do not redesign, modernise, simplify, reshape, reliver, repaint, or generate an approximate version of the supplied vehicle.
+
+For jerseys, uniforms, trophies and sporting equipment, preserve the real object's shape, colours, numbers, text, logos, materials, stitching, wear, reflections and era-specific details. Do not invent or replace details.
+
+BACKGROUND-FIRST ADAPTATION
+
+Build and adapt the artwork around the preserved original subject.
+
+The background, atmosphere, colour grading, smoke, stadium, arena, track, lighting, shadows, typography, border and collector elements must accommodate the original subject. Never alter the subject to make it fit the background or design.
+
+Match the new environment to the subject's existing:
+
+* Pose
+* Camera angle
+* Perspective
+* Crop
+* Direction of movement
+* Light direction
+* Contrast
+* Era
+* Sport
+* Team colours
+* Venue or historical setting
+
+Place the preserved subject naturally into a realistic Sports Cave environment. Adjust the background lighting, environmental shadows, depth, haze and colour around the subject so the composite feels believable.
+
+Do not repaint the subject to match the scene. Use restrained, non-destructive edge integration and global colour treatment only where necessary. Preserve natural skin tones, original facial detail, uniform colours, vehicle livery and photographic texture.
+
+The result must look like a premium professional photographic composite made from the supplied real images, not an AI illustration.
+
+SOURCE LIMITATIONS
+
+Do not invent missing body parts, hidden faces, unseen vehicle sections, obscured jersey details or cropped equipment unless the requested composition absolutely requires it.
+
+Prefer a composition that respects the original crop. If the source image does not contain a required detail, adapt the background and layout around the available real subject instead of hallucinating a replacement.
+
+Do not use a background or composition that requires the subject to be rotated, reposed, mirrored, anatomically reconstructed or substantially regenerated.
+
+Mirroring is prohibited when it would reverse jersey numbers, text, logos, vehicle liveries, handedness or historically important details.
+
+REALISM FAILURE CONDITIONS
+
+The output fails and must not be accepted if any supplied principal subject appears:
+
+* AI-generated
+* Illustrated, painted, plastic, waxy or over-smoothed
+* Face-swapped or only approximately similar
+* Younger, older or differently proportioned
+* Cross-eyed or altered in eye direction
+* Warped, stretched, duplicated or anatomically incorrect
+* Detached at the head, neck, shoulders or limbs
+* Given generated hands, fingers, teeth, ears or facial features
+* Given a different pose, expression, hairstyle, uniform or body type
+* Blended with another person
+* Replaced by a newly generated interpretation
+* Given incorrect jersey numbers, lettering, logos or equipment
+* Placed under lighting that destroys identity or photographic realism
+* Rendered with fake skin, fake fabric, fake reflections or synthetic detail
+* Shown as a redesigned or inaccurate vehicle, jersey, trophy or sporting object
+
+If creative styling conflicts with subject accuracy, reduce the styling. Subject authenticity and photographic realism always take priority.
+
+SPORTS CAVE DESIGN APPLICATION
+
+Once the original subjects are safely preserved, place them within the requested premium Sports Cave limited-edition collector design.
+
+The design may transform or generate:
+
+* Background
+* Stadium, arena, track, court, field, tunnel or environmental setting
+* Atmospheric lighting
+* Smoke, dust, haze and depth
+* Supporting textures
+* Negative space
+* Typography
+* Thin Sports Cave border
+* Collector details
+* Subtle gold accents
+* The attached limited-edition plaque
+
+These generated design elements must support the real subject and never overlap, obscure, reshape or alter important facial, bodily, uniform, vehicle or equipment details.
+
+Use the supplied Sports Cave limited-edition plaque as an exact visual asset wherever it is requested. Composite the supplied plaque naturally into the artwork. Do not recreate, redraw, restyle, retype or approximate the plaque, its emblem, lettering, proportions or edition number.
+
+FINAL PRE-GENERATION CHECK
+
+Before generating, verify internally:
+
+1. Every principal subject will use the supplied source image itself.
+2. No face, body, pose, uniform, vehicle, jersey or equipment will be regenerated.
+3. The background and design will adapt to the subject.
+4. No composition instruction requires anatomical reconstruction.
+5. The finished work will look like a real photographic composite.
+6. The Sports Cave styling will enhance the collector atmosphere without modifying the authentic subject.
+7. If any instruction conflicts with these rules, ignore the conflicting instruction and preserve the source subject.
+"""
 
 
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
@@ -103,12 +243,13 @@ The car, race, jersey, kit, uniform, gloves, trophy, stadium, arena, track, or s
 The correct era and visual details
 Any authentic signature references if appropriate
 
-Use the searched images as realism and accuracy references.
+Use the searched images as factual realism and accuracy references for the surrounding design, background, era, venue, lighting and details.
+If a real subject image has been supplied, do not use references to replace, redraw, re-pose, face-swap or reinterpret that subject.
 
 Do not blindly copy a random photo.
-Use the best references to improve likeness, lighting, pose accuracy, jersey accuracy, car accuracy, facial realism, and emotional authenticity.
+Use the best references to improve background believability, lighting integration, jersey or vehicle factual accuracy, era detail, venue accuracy, and emotional authenticity without changing any supplied principal subject.
 
-If the uploaded design already has a strong subject pose, keep the same general pose and emotion, but rebuild it with more realistic detail.
+If the uploaded design already has a strong supplied real subject pose, preserve that subject, pose and emotion, then rebuild only the generated Sports Cave environment and collector design elements around it.
 
 STEP 3 - FIND THE EMOTIONAL HOOK
 
@@ -460,9 +601,9 @@ FINAL OUTPUT STANDARD
 
 Create a premium 4:3 landscape Sports Cave collector artwork.
 
-Use the uploaded design as the core reference, but rebuild it into a darker, more cinematic, more realistic, more emotional, more premium limited-edition collector piece.
+Use the uploaded design as the core reference, preserve every supplied principal subject unchanged, and rebuild the surrounding Sports Cave collector environment into a darker, more cinematic, more realistic, more emotional, more premium limited-edition piece.
 
-Use better realistic source references from web/image search where needed.
+Use factual reference images from web/image search only for background adaptation, lighting, era detail, venue accuracy and collector atmosphere where needed.
 
 Make the subject heroic.
 Make the background atmospheric.
@@ -669,9 +810,13 @@ From the research and images above, create a premium Sports Cave limited-edition
 TASK:
 [PASTED TASK]
 
-Use the selected hero image as the main subject reference.
-Use the selected background/support image as the atmosphere and story reference.
-Use the selected detail references only where they improve realism, nostalgia, or collector value.
+Reference roles:
+- Hero image: immutable principal subject asset to isolate and composite unchanged. Composite the original supplied subject unchanged into the generated Sports Cave environment.
+- Additional subject images: immutable subject assets only when they are meant to appear in the final artwork.
+- Background/support image: atmosphere, venue and story reference that may be adapted or regenerated around the preserved subject.
+- Detail references: factual accuracy references only unless specifically selected as visible subjects.
+- Limited-edition plaque: exact supplied graphic asset to composite, not regenerate.
+
 Use the Sports Cave limited-edition plaque attached to this project and integrate it naturally.
 
 Create the artwork in landscape 4:3 ratio.
@@ -703,8 +848,8 @@ What memory does it unlock?
 Why would a real fan proudly hang this?
 
 Realism and reference accuracy lock:
-Use the selected images as strict visual references.
-Preserve accurate facial features, age, expression, body shape, pose, kit, jersey, car body, livery, colours, trophy shape, equipment, stadium, track, era, and lighting direction.
+Use the selected images as strict source assets and factual references according to their roles above.
+Preserve supplied principal subjects exactly: facial features, age, expression, body shape, pose, kit, jersey, car body, livery, colours, trophy shape, equipment, stadium, track, era, and lighting direction.
 Do not redesign the athlete, driver, car, uniform, trophy, venue, or moment.
 Do not make the subject look AI-generated, plastic, cartoon, generic, over-smoothed, or fake.
 Do not warp faces, hands, limbs, bodies, wheels, cars, numbers, text, plaques, logos, or uniforms.
@@ -1289,8 +1434,10 @@ The winning design starts with the right moment.
 CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT = """
 Use the images above found and uploaded to create a premium Sports Cave style limited-edition collector artwork.
 
-Use the selected hero image as the main subject reference.
-Use the selected background/support image as the atmosphere and story reference.
+Use the selected hero image as the immutable principal subject asset. Composite the original supplied subject unchanged into the generated Sports Cave environment.
+Use additional subject images as immutable subject assets only when they are meant to appear in the final artwork.
+Use the selected background/support image as the atmosphere and story reference that may be adapted or regenerated around the preserved subject.
+Use detail references only as factual accuracy references unless specifically selected as visible subjects.
 Use the Sports Cave limited-edition plaque attached to this project and place it in the best possible location in the design.
 
 Create the artwork in landscape 4:3 ratio.
@@ -1457,15 +1604,36 @@ PROMPT_BOXES = {
     ),
 }
 
-ORIGINAL_ARTWORK_REALISM_PROMPT_KEYS = {
+DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS = {
     "upgrade-existing-design",
     "expired-edition-next-chapter",
     "create-sports-cave-style-artwork",
 }
+ORIGINAL_ARTWORK_REALISM_PROMPT_KEYS = DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS
 
 
 def _clean_prompt(prompt):
     return textwrap.dedent(prompt).strip()
+
+
+def design_studio_prompt_has_subject_preservation_lock(prompt_text: str) -> bool:
+    return DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:
+    prompt = _clean_prompt(prompt_text)
+    if design_studio_prompt_has_subject_preservation_lock(prompt):
+        return prompt
+    lock = _clean_prompt(DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK)
+    return f"{lock}\n\n{prompt}" if prompt else lock
+
+
+def build_design_studio_image_generation_prompt(prompt_text: str) -> str:
+    prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
+    return append_sports_cave_image_realism_rules(
+        prompt,
+        include_product_lock=False,
+    )
 
 
 def _task_or_placeholder(task_text: str) -> str:
@@ -1519,10 +1687,7 @@ def build_design_generation_prompt(task_text: str) -> str:
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
     )
-    return append_sports_cave_image_realism_rules(
-        prompt,
-        include_product_lock=False,
-    )
+    return build_design_studio_image_generation_prompt(prompt)
 
 
 def _design_studio_prompt_id(key: str) -> str:
@@ -1703,11 +1868,8 @@ def render_copy_prompt_box(
 ):
     prompt_id = _design_studio_prompt_id(key)
     effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
-    if key in ORIGINAL_ARTWORK_REALISM_PROMPT_KEYS:
-        effective_prompt = append_sports_cave_image_realism_rules(
-            effective_prompt,
-            include_product_lock=False,
-        )
+    if key in DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS:
+        effective_prompt = build_design_studio_image_generation_prompt(effective_prompt)
     source_record = prompt_store.get_prompt_source(
         prompt_id,
         _clean_prompt(default_prompt_text),

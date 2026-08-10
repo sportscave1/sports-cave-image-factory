@@ -128,7 +128,7 @@ Change enough major elements that the new artwork feels like a fresh release.
 At minimum, upgrade or change several of these:
 
 Title
-Hero image or pose
+Hero image or pose, only when a different supplied hero image is intentionally selected
 Jersey, kit, uniform, gloves, car livery, or era
 Background scene
 Lighting direction
@@ -140,8 +140,8 @@ Secondary story detail
 Colour balance
 Signature treatment
 Mood
-Camera angle
-Crop
+Camera angle, as long as it does not require rotating or reconstructing a supplied subject
+Crop, as long as it respects the supplied subject image
 Supporting imagery
 Era reference
 
@@ -304,12 +304,12 @@ This direction should feel like:
 
 STEP 4 — RESEARCH BETTER REFERENCES
 
-Use web/image search to identify stronger realistic references for the new edition.
+Use web/image search to identify stronger realistic references for the new edition's surrounding design, background, era, venue, lighting and factual details.
 
 Search for:
 
 Better athlete images
-Better facial likeness references
+Better facial likeness references, for factual checking only and never for replacing a supplied face
 Better celebration images
 Better jersey or kit references
 Better car/race references
@@ -321,12 +321,13 @@ Better current-era imagery if the new edition should feel modern
 Better throwback imagery if the new edition should feel nostalgic
 
 Do not blindly copy a random image.
+If a real subject image has been supplied, do not use references to replace, redraw, re-pose, face-swap or reinterpret that subject.
 
-Use references to improve:
+Use references to improve the surrounding Sports Cave design and factual accuracy:
 
 Realism
-Facial accuracy
-Pose accuracy
+Facial accuracy checking without reconstructing supplied faces
+Pose accuracy checking without changing supplied poses
 Lighting
 Jersey accuracy
 Era accuracy
@@ -335,7 +336,7 @@ Emotion
 Fan recognition
 Wall-art potential
 
-If the old design has a strong pose, you may keep the same general emotional energy, but rebuild it with a new crop, new angle, new lighting, better realism, or a more premium background.
+If the old design has a strong supplied real subject pose, preserve that subject, pose and emotional energy, then rebuild only the generated Sports Cave environment and collector design elements around it.
 
 STEP 5 — FIND THE NEW EMOTIONAL HOOK
 
@@ -777,8 +778,8 @@ Use the old design as the proven foundation, but do not recreate it.
 Keep the core emotional hook.
 Upgrade the title.
 Upgrade the image direction.
-Use better references.
-Consider a new jersey, new era, new moment, new pose, new atmosphere, or new chapter if it makes the design stronger.
+Use factual references only for background adaptation, lighting, era detail, venue accuracy and collector atmosphere.
+Consider a new jersey, new era, new moment, new atmosphere, or new chapter if it makes the design stronger, but never alter a supplied jersey, uniform, vehicle livery, subject pose or principal subject.
 Make the subject heroic.
 Make the background cinematic.
 Make the plaque integrated and premium.
