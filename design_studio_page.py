@@ -624,7 +624,70 @@ SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_V1 = f"""
 
 MANDATORY FOR NAMED HUMAN SPORTING SUBJECTS
 
-In addition to the required hero, action, venue, equipment, trophy and atmosphere references, find an authentic signature or autograph image for every named principal human subject intended to appear in the artwork.
+This block controls the balance and ordering of every Sports Cave Design Studio Find Images carousel.
+
+REFERENCE PRIORITY - APPLY IN THIS EXACT ORDER
+
+1. FEATURED PLAYER / HERO REFERENCES - HIGHEST PRIORITY
+2. VENUE / BACKGROUND REFERENCES - SECOND PRIORITY
+3. EQUIPMENT / TROPHY / HISTORICAL DETAIL REFERENCES - THIRD PRIORITY
+4. SIGNATURE REFERENCES - SUPPORTING REFERENCES ONLY AND ALWAYS LAST
+
+Use the available image capacity in that order. The clear majority of all non-signature results must be useful, high-quality player or hero photographs. Player/hero and venue/background references together must dominate the complete carousel.
+
+Never remove a useful player, hero or venue image to make room for extra autograph or signed-memorabilia material.
+
+FEATURED PLAYER / HERO REFERENCES - HIGHEST PRIORITY
+
+Player and hero photographs must dominate the results.
+
+For every featured player, athlete, driver, rider, fighter, team or other principal hero, prioritise multiple different high-quality photographic references showing:
+
+* A clear, realistic and unobstructed face when the subject is human
+* Front-facing and three-quarter facial angles
+* Authentic action poses
+* Full-body or three-quarter-body views showing the uniform and equipment
+* The correct team, season, era, jersey, helmet, livery and colours
+* Strong hero compositions suitable for premium collector artwork
+* The best available resolution and photographic realism
+
+For multiple-player or rivalry designs, provide balanced coverage of every featured hero. Do not return many images of one hero while neglecting another.
+
+Do not use these as normal player or hero references:
+
+* Autographed or signed photographs
+* Trading cards
+* Signed balls, helmets, jerseys or other memorabilia
+* Memorabilia listings or display cases
+* Framed products
+* Posters or existing artwork
+* Collages
+* AI-generated images
+* Heavily altered faces
+* Low-resolution thumbnails
+* Images where the face is obscured
+* Repeated copies or alternate crops of the same photograph
+
+VENUE / BACKGROUND REFERENCES - SECOND PRIORITY
+
+After the player or hero references, find the strongest accurate background material for the design:
+
+* The correct stadium, arena, circuit, field, court or sporting location
+* Era-appropriate venue photography where relevant
+* Wide establishing views
+* Medium views showing recognisable architecture or atmosphere
+* Historically accurate crowd, lighting, tunnel, scoreboard, skyline or environmental details
+* The location most emotionally connected to the featured player, rivalry or sporting moment
+
+Background references must support a premium, realistic Sports Cave composition. Never classify memorabilia-product photography as a background reference.
+
+EQUIPMENT / TROPHY / HISTORICAL DETAILS - THIRD PRIORITY
+
+Only after strong hero and background coverage, use remaining non-signature capacity for essential uniform, equipment, car, motorcycle, trophy or historical-detail references that improve factual accuracy.
+
+STRICT SIGNATURE LIMIT - EXACTLY ONE SLOT PER DISTINCT FEATURED PERSON
+
+In addition to the required hero, venue and factual-detail references, find one and only one authentic signature or autograph image for every distinct named principal human subject intended to appear in the artwork.
 
 This includes:
 
@@ -646,12 +709,24 @@ For each principal named subject:
 
 * Search using the person's complete name.
 * Include their sport or team when needed to prevent mistaken identity.
-* Find one strongest, clearest and most usable authentic signature reference.
-* Include a second option only when it is genuinely useful and equally credible.
+* Find exactly one strongest, clearest and most usable authentic signature reference.
+* Never return a second signature example for the same person.
 * Prefer an isolated signature on a transparent, white or plain background.
 * Prefer high-resolution signature marks with complete, readable strokes.
 * Prefer authoritative or reputable sources with credible attribution.
 * Ensure the signature belongs to the exact intended athlete.
+
+One featured person means exactly one signature image total.
+
+Two featured people mean a maximum of two signature images total: one for each person.
+
+Three featured people mean a maximum of three signature images total: one for each person.
+
+The maximum number of signature images in the carousel always equals the number of distinct named principal human subjects. Never fill unused carousel positions with additional signature or autograph material.
+
+A signed player photograph, including a signed action photograph, consumes that person's one signature slot. It must be classified only as a signature_asset and must not also count as a player, hero or action reference.
+
+A signed ball, trading card, photograph, helmet, jersey or memorabilia display also consumes that person's one signature slot and is normally inferior to a clean isolated specimen. Never return several such items for the same person.
 
 Prioritise:
 
@@ -678,6 +753,15 @@ Avoid:
 CAROUSEL OUTPUT
 
 Place the strongest signature reference for each named subject directly in the same image carousel as the other retrieved reference images.
+
+Signature references must appear at the very end of the carousel, after all player/hero, venue/background, and equipment/trophy/historical-detail references.
+
+When the existing output format supports labels or internal roles, organise the carousel in this exact order:
+
+1. PLAYER / HERO REFERENCES
+2. VENUE / BACKGROUND REFERENCES
+3. EQUIPMENT / TROPHY / HISTORICAL DETAILS
+4. SIGNATURE REFERENCES - ONE PER PLAYER ONLY
 
 Do not place signature references in a separate written section.
 
@@ -715,7 +799,7 @@ Never merge several signatures into one generated graphic.
 
 Never assign one player's signature to another player.
 
-If no sufficiently reliable signature can be found for a subject, do not fabricate or approximate one. Continue with the other valid reference images and mark that signature asset as unavailable in internal workflow metadata.
+If no sufficiently reliable signature can be found for a subject, state or mark that signature asset as unavailable using the existing internal workflow metadata or unavailable state. Do not fabricate or approximate one, do not return several uncertain examples, and do not replace it with signed merchandise. Continue with the other valid player, venue and factual-detail reference images.
 """
 
 
@@ -2969,10 +3053,23 @@ def build_signature_image_search_context(task_text: str, *, design_context=None)
     if task:
         lines.extend(["", f"Task context: {task}"])
     if records:
-        lines.extend(["", "Signature assets to retrieve in the same image carousel:"])
+        signature_limit = len(records)
+        lines.extend(
+            [
+                "",
+                f"Distinct named principal human subjects: {signature_limit}",
+                f"Maximum signature images permitted in the entire carousel: {signature_limit}",
+                "Each listed subject has exactly one signature slot. Never return a second signature or signed-memorabilia image for that subject.",
+                "",
+                "Signature assets to retrieve at the end of the same image carousel:",
+            ]
+        )
         for record in records:
             name = record["name"]
-            lines.append(f"* {name} -> authentic signature image; role: signature_asset; subject_name: {name}")
+            lines.append(
+                f"* {name} -> authentic signature image; role: signature_asset; "
+                f"subject_name: {name}; signature_slot_limit: 1"
+            )
     else:
         lines.extend(
             [
