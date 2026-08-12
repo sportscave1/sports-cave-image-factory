@@ -1,4 +1,5 @@
 from contextlib import suppress
+import base64
 import calendar
 import csv
 from datetime import date, datetime, timedelta, timezone
@@ -68,7 +69,8 @@ pillow_modules = None
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-APP_FAVICON_PATH = Path(__file__).resolve().parent / "assets" / "sports-cave-sc-gold-favicon.svg"
+APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "sports-cave-os-app-icon.webp"
+APP_FAVICON_PATH = APP_ICON_PATH
 
 
 def log_startup_stage(stage, extra=""):
@@ -218,6 +220,17 @@ def get_components_module():
     if components_module is None:
         components_module = importlib.import_module("streamlit.components.v1")
     return components_module
+
+
+@lru_cache(maxsize=16)
+def asset_data_uri(path_text):
+    path = Path(path_text)
+    if not path.is_file():
+        return ""
+    suffix = path.suffix.lower().lstrip(".") or "octet-stream"
+    mime_type = "image/svg+xml" if suffix == "svg" else f"image/{suffix}"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def get_pillow_modules():
@@ -1339,20 +1352,35 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-brand {
-            padding: 0.05rem 0.15rem 0.6rem;
+            align-items: center;
+            display: flex;
+            gap: 0.7rem;
+            padding: 0.1rem 0.15rem 0.85rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-logo {
+            display: block;
+            flex: 0 0 auto;
+            height: 2.65rem;
+            object-fit: contain;
+            width: 2.65rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-brand-copy {
+            min-width: 0;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-title {
             color: #1F1F21;
-            font-size: 1rem;
+            font-size: 0.86rem;
             font-weight: 750;
-            line-height: 1.2;
+            line-height: 1.1;
             margin: 0;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-subtitle {
             color: #6E6E73 !important;
-            font-size: 0.76rem;
+            font-size: 0.63rem;
             line-height: 1.25;
             margin-top: 0.15rem;
         }
@@ -8003,11 +8031,15 @@ def render_recent_runs_sidebar():
 def render_sidebar():
     user = current_os_user()
     current_page = get_current_page()
+    app_icon_src = html.escape(asset_data_uri(str(APP_ICON_PATH)), quote=True)
     st.sidebar.markdown(
         f"""
         <div class="sc-sidebar-brand">
-            <div class="sc-sidebar-title">Sports Cave</div>
-            <div class="sc-sidebar-subtitle">Dashboard</div>
+            <img class="sc-sidebar-logo" src="{app_icon_src}" alt="Sports Cave OS icon">
+            <div class="sc-sidebar-brand-copy">
+                <div class="sc-sidebar-title">SPORTS CAVE OS</div>
+                <div class="sc-sidebar-subtitle">OPERATIONS SYSTEM</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
