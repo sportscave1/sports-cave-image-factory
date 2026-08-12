@@ -59,6 +59,8 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
     def test_design_generation_prompt_uses_research_context_and_design_system(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
+        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
+        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER
 
         self.assertIn(
             "From the research and images above, create a premium Sports Cave limited-edition collector artwork",
@@ -83,6 +85,19 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("It must never overpower the subject.", prompt)
         self.assertIn("If motorsport: realistic race cars", prompt)
         self.assertIn("Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.", prompt)
+        self.assertEqual(prompt.count(hero_marker), 1)
+        self.assertEqual(prompt.count(border_marker), 1)
+        self.assertEqual(
+            prompt.count(design_studio_page._clean_prompt(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)),
+            1,
+        )
+        self.assertIn("Use only the supplied main heroes.", prompt)
+        self.assertIn("Do not invent, generate, duplicate, reconstruct, or add any additional athletes", prompt)
+        self.assertIn("AI-generated background players", prompt)
+        self.assertIn("recognisable individual people, faces, bodies or AI-generated players", prompt)
+        self.assertIn("The supplied main heroes must carry the emotional and visual weight", prompt)
+        self.assertIn("Keep the background minimal, cinematic, relevant and controlled.", prompt)
+        self.assertIn("Every finished collector artwork must include a clean, precise and premium Sports Cave border", prompt)
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
         self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", prompt)
         self.assertIn("ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION", prompt)
@@ -94,9 +109,15 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
     def test_new_design_step_three_includes_subject_lock_once_before_creative_direction(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
 
         self.assertTrue(prompt.startswith(marker))
         self.assertEqual(prompt.count(marker), 1)
+        self.assertLess(
+            prompt.index("7. If any instruction conflicts with these rules"),
+            prompt.index(hero_marker),
+        )
+        self.assertLess(prompt.index(hero_marker), prompt.index("TASK:\nBathurst Brock tribute"))
         self.assertLess(prompt.index(marker), prompt.index("TASK:\nBathurst Brock tribute"))
         self.assertLess(prompt.index(marker), prompt.index("Reference roles:"))
         self.assertLess(prompt.index(marker), prompt.index("Create the artwork in landscape 4:3 ratio."))
@@ -121,13 +142,20 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
                 self.assertTrue(prompt.startswith(marker))
                 self.assertEqual(prompt.count(marker), 1)
+                self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER), 1)
+                self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER), 1)
                 self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+                self.assertIn("Never generate extra supporting players.", prompt)
+                self.assertIn("Any crowd treatment must remain distant, abstract, blurred and textural.", prompt)
+                self.assertIn("The border must remain:", prompt)
                 self.assertIn("4:3 landscape", prompt)
                 self.assertIn("collector artwork", prompt)
                 self.assertIn("Sports Cave", prompt)
 
     def test_unrelated_design_studio_prompts_do_not_receive_subject_lock(self):
         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
+        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER
         unrelated_prompts = [
             design_studio_page.build_design_research_prompt("Michael Jordan final shot"),
             design_studio_page.build_design_image_carousel_prompt("Michael Jordan final shot", ""),
@@ -138,9 +166,13 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         for prompt in unrelated_prompts:
             with self.subTest(prompt=prompt[:40]):
                 self.assertNotIn(marker, prompt)
+                self.assertNotIn(hero_marker, prompt)
+                self.assertNotIn(border_marker, prompt)
 
     def test_subject_lock_composition_is_idempotent_and_preserves_prompt_details(self):
         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
+        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
+        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER
         once = design_studio_page.build_design_studio_image_generation_prompt(
             design_studio_page.CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT
         )
@@ -148,6 +180,12 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertEqual(once, twice)
         self.assertEqual(twice.count(marker), 1)
+        self.assertEqual(twice.count(hero_marker), 1)
+        self.assertEqual(twice.count(border_marker), 1)
+        self.assertEqual(
+            twice.count(design_studio_page._clean_prompt(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)),
+            1,
+        )
         self.assertEqual(twice.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
         self.assertIn("[PASTE SELECTED MOMENT]", twice)
         self.assertIn("[PASTE HERO IMAGE DIRECTION]", twice)

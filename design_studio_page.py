@@ -160,6 +160,104 @@ Before generating, verify internally:
 """
 
 
+DESIGN_STUDIO_HERO_DOMINANCE_MARKER = "PRIMARY HERO DOMINANCE AND MINIMAL BACKGROUND — MANDATORY"
+DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER = "SPORTS CAVE LIMITED-EDITION BORDER — MANDATORY"
+
+
+DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK = f"""
+{DESIGN_STUDIO_HERO_DOMINANCE_MARKER}
+
+The supplied and approved main hero subjects must dominate the finished artwork. These may include an athlete, driver, team, rivalry pair, vehicle, motorcycle, jersey, trophy, or another specifically supplied principal subject.
+
+Use only the supplied main heroes. Do not invent, generate, duplicate, reconstruct, or add any additional athletes, players, drivers, teammates, opponents, coaches, spectators, or human figures.
+
+ABSOLUTELY DO NOT ADD:
+
+* AI-generated background players
+* Faceless or poorly formed people
+* Headless or partially visible bodies
+* Anonymous athletes or teammates
+* Fake crowd members with recognisable bodies or faces
+* Player silhouettes that compete with the main heroes
+* Ghosted or duplicated versions of the hero
+* Random helmets, limbs, faces, uniforms, or human shapes
+* Additional people merely to fill empty space
+
+If multiple supplied heroes are required for a team or rivalry design, preserve and use those supplied heroes only. Never generate extra supporting players.
+
+The supplied main heroes must carry the emotional and visual weight of the composition. Their faces, bodies, vehicles, uniforms, or defining details must remain clearly visible and immediately recognisable.
+
+Keep the background minimal, cinematic, relevant and controlled. Build atmosphere with elements such as:
+
+* Stadium or circuit architecture
+* Empty stands or indistinct crowd texture
+* Lighting, shadows and subtle spotlights
+* Smoke, haze, dust, rain or sparks
+* Track, turf, court or arena textures
+* Scoreboards, goal structures or venue landmarks
+* Restrained team colours and subtle historical details
+
+Any crowd treatment must remain distant, abstract, blurred and textural. It must not contain recognisable individual people, faces, bodies or AI-generated players.
+
+Do not overcrowd the composition. Do not fill negative space with unnecessary subjects. Negative space is intentional and should make the main heroes feel larger, stronger and more premium.
+
+The final hierarchy must always be:
+
+1. Supplied main heroes
+2. Title and essential collector storytelling
+3. Sports Cave limited-edition plaque or collector details
+4. Restrained venue atmosphere
+5. Minimal supporting effects
+
+{DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER}
+
+Every finished collector artwork must include a clean, precise and premium Sports Cave border inside the artwork canvas.
+
+The border must feel custom-designed for an expensive limited-edition sports collectible—not like a generic poster outline, picture frame, television graphic or template.
+
+Create a refined Sports Cave border using:
+
+* Deep black, charcoal or near-black foundations
+* Fine warm-gold or muted-metallic pinlines
+* Clean layered keylines
+* Precise symmetrical spacing
+* Restrained geometric corner detailing
+* Subtle plaque-inspired collector accents
+* Consistent thickness on every edge
+* Clear separation between the artwork and its outer boundary
+* Safe internal margins suitable for professional printing and framing
+
+The border should be detailed enough to signal “limited edition” but restrained enough to remain masculine, timeless and premium. It should frame the story without competing with the heroes.
+
+The border must remain:
+
+* Perfectly straight
+* Symmetrical
+* Crisp and uninterrupted
+* Consistent on all four sides
+* Fully contained inside the canvas
+* Free from warping, broken corners or uneven thickness
+* Compatible with the required landscape 4:3 composition
+
+DO NOT USE:
+
+* Thick generic borders
+* Cheap gold gradients
+* Bright yellow gold
+* Neon effects
+* Ornate Victorian decoration
+* Excessive filigree
+* Busy sports-broadcast graphics
+* Random corner shapes
+* Uneven or misaligned lines
+* Fake external frames or wall mockups
+* Borders that crop or cover the supplied heroes
+* Decorative elements that overpower the artwork
+
+The border, plaque and artwork must feel like one cohesive Sports Cave collector product.
+"""
+
+
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
     "https://cdn.shopify.com/videos/c/o/v/67bad26ad6f24cca9527772f226b5320.mp4"
 )
@@ -1620,6 +1718,14 @@ def design_studio_prompt_has_subject_preservation_lock(prompt_text: str) -> bool
     return DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER.casefold() in str(prompt_text or "").casefold()
 
 
+def design_studio_prompt_has_hero_dominance_and_border_lock(prompt_text: str) -> bool:
+    prompt = str(prompt_text or "").casefold()
+    return (
+        DESIGN_STUDIO_HERO_DOMINANCE_MARKER.casefold() in prompt
+        and DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER.casefold() in prompt
+    )
+
+
 def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:
     prompt = _clean_prompt(prompt_text)
     if design_studio_prompt_has_subject_preservation_lock(prompt):
@@ -1628,8 +1734,25 @@ def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:
     return f"{lock}\n\n{prompt}" if prompt else lock
 
 
-def build_design_studio_image_generation_prompt(prompt_text: str) -> str:
+def prepend_design_studio_mandatory_artwork_rules(prompt_text: str) -> str:
     prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
+    if design_studio_prompt_has_hero_dominance_and_border_lock(prompt):
+        return prompt
+
+    subject_lock = _clean_prompt(DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK)
+    artwork_lock = _clean_prompt(DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)
+    if prompt.startswith(subject_lock):
+        remaining_prompt = prompt[len(subject_lock) :].lstrip()
+        return (
+            f"{subject_lock}\n\n{artwork_lock}\n\n{remaining_prompt}"
+            if remaining_prompt
+            else f"{subject_lock}\n\n{artwork_lock}"
+        )
+    return f"{artwork_lock}\n\n{prompt}" if prompt else artwork_lock
+
+
+def build_design_studio_image_generation_prompt(prompt_text: str) -> str:
+    prompt = prepend_design_studio_mandatory_artwork_rules(prompt_text)
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=False,
