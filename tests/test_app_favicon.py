@@ -19,9 +19,14 @@ class AppFaviconTests(unittest.TestCase):
         self.assertIn('page_title="Sports Cave OS"', source)
         self.assertIn("page_icon=str(APP_FAVICON_PATH)", source)
         self.assertIn("asset_data_uri(str(APP_ICON_PATH))", source)
-        self.assertIn('class="sc-sidebar-logo"', source)
-        self.assertIn("SPORTS CAVE OS", source)
-        self.assertIn("OPERATIONS SYSTEM", source)
+        self.assertIn("top_bar.render_top_bar(", source)
+
+        component = (
+            ROOT / "components" / "sports_cave_top_bar" / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Sports Cave OS monogram", component)
+        self.assertIn("sc-os-topbar-logo", component)
+        self.assertNotIn('class="sc-sidebar-logo"', source)
 
 
 if __name__ == "__main__":

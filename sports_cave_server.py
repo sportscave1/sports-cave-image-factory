@@ -6,11 +6,16 @@ from streamlit.web.server.starlette import App
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
+from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 
 
 routes = [
     Route(path, endpoint, methods=list(methods))
-    for path, endpoint, methods in (*FILES_UPLOAD_ROUTES, *COLLECTOR_VAULT_ROUTES)
+    for path, endpoint, methods in (
+        *FILES_UPLOAD_ROUTES,
+        *COLLECTOR_VAULT_ROUTES,
+        *TOP_BAR_ROUTE_HANDLERS,
+    )
 ]
 app = App("app.py", routes=routes)
 

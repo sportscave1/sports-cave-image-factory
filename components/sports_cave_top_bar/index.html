@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sports Cave OS top bar</title>
+</head>
+<body>
+<script>
+(() => {
+  const config = __SPORTS_CAVE_TOP_BAR_CONFIG__;
+  const parentWindow = window.parent || window;
+  const doc = parentWindow.document;
+  const STYLE_ID = "sports-cave-os-top-bar-styles";
+  const ROOT_ID = "sports-cave-os-top-bar";
+
+  const icon = (name) => {
+    const paths = {
+      search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>',
+      bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
+      user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
+      settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>',
+      print: '<path d="M6 9V3h12v6"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="7"></rect>',
+      record: '<rect x="3" y="5" width="14" height="14" rx="2"></rect><path d="m17 10 4-2v8l-4-2"></path>',
+      chevron: '<path d="m9 18 6-6-6-6"></path>',
+      warning: '<path d="M10.3 3.4 2.2 18a2 2 0 0 0 1.8 3h16a2 2 0 0 0 1.8-3L13.7 3.4a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>'
+    };
+    return `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ""}</svg>`;
+  };
+
+  const css = `
+    :root {
+      --sc-topbar-height: 64px;
+      --sc-sidebar-width: 300px;
+    }
+    header[data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"] {
+      display: none !important;
+      height: 0 !important;
+      min-height: 0 !important;
+      pointer-events: none !important;
+    }
+    #${ROOT_ID} {
+      align-items: center;
+      background: #0b0b0b;
+      border-bottom: 1px solid #2b2925;
+      box-sizing: border-box;
+      color: #fff;
+      display: grid;
+      font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      grid-template-columns: var(--sc-sidebar-width) minmax(260px, 1fr) auto;
+      height: var(--sc-topbar-height);
+      left: 0;
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 100%;
+      z-index: 999999;
+    }
+    #${ROOT_ID} * { box-sizing: border-box; }
+    #${ROOT_ID} svg { height: 19px; width: 19px; }
+    .sc-os-topbar-brand {
+      align-items: center;
+      color: #fff;
+      display: flex;
+      gap: 10px;
+      height: 100%;
+      min-width: 0;
+      padding: 0 18px 0 20px;
+    }
+    .sc-os-topbar-logo {
+      display: block;
+      filter: grayscale(1) brightness(5);
+      flex: 0 0 auto;
+      height: 34px;
+      object-fit: contain;
+      width: 34px;
+    }
+    .sc-os-topbar-brand-copy { min-width: 0; }
+    .sc-os-topbar-name {
+      color: #fff;
+      font-size: 14px;
+      font-weight: 760;
+      line-height: 1.05;
+      white-space: nowrap;
+    }
+    .sc-os-topbar-subtitle {
+      color: #aaa8a3;
+      font-size: 10px;
+      line-height: 1.2;
+      margin-top: 3px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .sc-os-topbar-search-wrap {
+      justify-self: center;
+      max-width: 680px;
+      padding: 0 24px;
+      position: relative;
+      width: 100%;
+    }
+    .sc-os-topbar-search-shell {
+      align-items: center;
+      background: #252525;
+      border: 1px solid #3b3b3b;
+      border-radius: 8px;
+      display: flex;
+      height: 40px;
+      padding: 0 10px 0 12px;
+      transition: border-color 130ms ease, box-shadow 130ms ease, background 130ms ease;
+    }
+    .sc-os-topbar-search-shell:focus-within {
+      background: #2b2b2b;
+      border-color: #c9a24f;
+      box-shadow: 0 0 0 2px rgba(212, 165, 76, .22);
+    }
+    .sc-os-topbar-search-shell > svg {
+      color: #e7e7e5;
+      flex: 0 0 auto;
+      margin-right: 9px;
+    }
+    #sc-os-global-search {
+      appearance: none;
+      background: transparent !important;
+      border: 0;
+      color: #fff !important;
+      flex: 1 1 auto;
+      font: inherit;
+      font-size: 14px;
+      height: 100%;
+      min-width: 0;
+      outline: 0;
+      padding: 0;
+      -webkit-text-fill-color: #fff !important;
+    }
+    #sc-os-global-search::placeholder {
+      color: #b9b8b4 !important;
+      opacity: 1;
+      -webkit-text-fill-color: #b9b8b4 !important;
+    }
+    .sc-os-topbar-shortcut {
+      align-items: center;
+      background: #333;
+      border: 1px solid #454545;
+      border-radius: 4px;
+      color: #c9c8c4;
+      display: inline-flex;
+      flex: 0 0 auto;
+      font-size: 10px;
+      font-weight: 700;
+      gap: 4px;
+      height: 23px;
+      padding: 0 6px;
+    }
+    .sc-os-topbar-actions {
+      align-items: center;
+      display: flex;
+      gap: 2px;
+      height: 100%;
+      padding: 0 16px 0 8px;
+      position: relative;
+    }
+    .sc-os-topbar-icon-button {
+      align-items: center;
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      height: 38px;
+      justify-content: center;
+      padding: 0;
+      transition: background-color 130ms ease;
+      width: 38px;
+    }
+    .sc-os-topbar-icon-button:hover,
+    .sc-os-topbar-icon-button[aria-expanded="true"] { background: #292929; }
+    .sc-os-topbar-icon-button:focus-visible,
+    .sc-os-topbar-result:focus-visible,
+    .sc-os-topbar-action:focus-visible,
+    .sc-os-theme-option:focus-visible {
+      outline: 2px solid #d4a54c;
+      outline-offset: 2px;
+    }
+    .sc-os-topbar-panel {
+      background: #fff;
+      border: 1px solid #d9d6ce;
+      border-radius: 7px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
+      color: #171717;
+      overflow: hidden;
+      position: absolute;
+      top: calc(100% + 8px);
+      z-index: 1000000;
+    }
+    .sc-os-topbar-panel[hidden] { display: none !important; }
+    #sc-os-search-results {
+      left: 24px;
+      max-height: min(460px, calc(100dvh - var(--sc-topbar-height) - 24px));
+      overflow-y: auto;
+      right: 24px;
+    }
+    #sc-os-notifications-panel,
+    #sc-os-settings-panel {
+      right: 16px;
+      width: min(360px, calc(100vw - 24px));
+    }
+    .sc-os-topbar-panel-title {
+      color: #181817;
+      font-size: 13px;
+      font-weight: 760;
+      padding: 13px 14px 9px;
+    }
+    .sc-os-topbar-state {
+      color: #706d66;
+      font-size: 13px;
+      padding: 18px 14px;
+      text-align: center;
+    }
+    .sc-os-result-group {
+      color: #77736b;
+      font-size: 10px;
+      font-weight: 780;
+      letter-spacing: .08em;
+      padding: 10px 14px 5px;
+      text-transform: uppercase;
+    }
+    .sc-os-topbar-result,
+    .sc-os-notification-item,
+    .sc-os-topbar-action,
+    .sc-os-theme-option {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      color: #1d1c19;
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      text-align: left;
+      width: 100%;
+    }
+    .sc-os-topbar-result,
+    .sc-os-notification-item {
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 8px 12px 8px 14px;
+    }
+    .sc-os-topbar-result:hover,
+    .sc-os-topbar-result[aria-selected="true"],
+    .sc-os-notification-item:hover,
+    .sc-os-topbar-action:hover,
+    .sc-os-theme-option:hover { background: #f3f1ec; }
+    .sc-os-result-copy,
+    .sc-os-notification-copy { flex: 1 1 auto; min-width: 0; }
+    .sc-os-result-title,
+    .sc-os-notification-title {
+      color: #1a1917;
+      display: block;
+      font-size: 13px;
+      font-weight: 680;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sc-os-result-subtitle,
+    .sc-os-notification-subtitle {
+      color: #706d66;
+      display: block;
+      font-size: 11px;
+      line-height: 1.3;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sc-os-result-chevron { color: #8a867e; flex: 0 0 auto; }
+    .sc-os-result-chevron svg { height: 15px !important; width: 15px !important; }
+    .sc-os-notification-item { border-top: 1px solid #ece9e2; }
+    .sc-os-notification-icon {
+      align-items: center;
+      background: #f6eedc;
+      border-radius: 5px;
+      color: #8a661e;
+      display: flex;
+      flex: 0 0 auto;
+      height: 30px;
+      justify-content: center;
+      width: 30px;
+    }
+    .sc-os-notification-icon svg { height: 16px !important; width: 16px !important; }
+    .sc-os-theme-row {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 4px 10px 12px;
+    }
+    .sc-os-theme-option {
+      align-items: center;
+      border: 1px solid #dedbd3;
+      border-radius: 5px;
+      font-size: 12px;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 7px;
+    }
+    .sc-os-theme-option[aria-pressed="true"] {
+      background: #eeeae1;
+      border-color: #b99448;
+      box-shadow: inset 0 0 0 1px #b99448;
+      font-weight: 720;
+    }
+    .sc-os-settings-divider { border-top: 1px solid #e8e4dc; }
+    .sc-os-topbar-action {
+      align-items: center;
+      gap: 10px;
+      min-height: 42px;
+      padding: 0 14px;
+    }
+    .sc-os-topbar-action svg { height: 17px !important; width: 17px !important; }
+    @media (max-width: 960px) {
+      #${ROOT_ID} { grid-template-columns: var(--sc-sidebar-width) minmax(220px, 1fr) auto; }
+      .sc-os-topbar-search-wrap { padding-left: 12px; padding-right: 12px; }
+      #sc-os-search-results { left: 12px; right: 12px; }
+      .sc-os-topbar-shortcut { display: none; }
+    }
+    @media (max-width: 760px) {
+      .sc-os-topbar-subtitle { display: none; }
+      .sc-os-topbar-brand { padding-left: 14px; }
+      .sc-os-topbar-logo { height: 30px; width: 30px; }
+      .sc-os-topbar-name { font-size: 12px; }
+    }
+  `;
+
+  let style = doc.getElementById(STYLE_ID);
+  if (!style) {
+    style = doc.createElement("style");
+    style.id = STYLE_ID;
+    doc.head.appendChild(style);
+  }
+  style.textContent = css;
+
+  const markup = `
+    <div class="sc-os-topbar-brand" aria-label="Sports Cave OS">
+      <img class="sc-os-topbar-logo" src="" alt="Sports Cave OS monogram">
+      <div class="sc-os-topbar-brand-copy">
+        <div class="sc-os-topbar-name"></div>
+        <div class="sc-os-topbar-subtitle"></div>
+      </div>
+    </div>
+    <div class="sc-os-topbar-search-wrap">
+      <div class="sc-os-topbar-search-shell">
+        ${icon("search")}
+        <label for="sc-os-global-search" hidden>Search Sports Cave OS</label>
+        <input id="sc-os-global-search" type="search" autocomplete="off" placeholder="Search Sports Cave OS" aria-controls="sc-os-search-results" aria-expanded="false">
+        <span class="sc-os-topbar-shortcut" aria-hidden="true"><span>Ctrl</span><span>K</span></span>
+      </div>
+      <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
+    </div>
+    <div class="sc-os-topbar-actions">
+      <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
+      <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Accounts and Access" title="Accounts and Access">${icon("user")}</button>
+      <button id="sc-os-settings" class="sc-os-topbar-icon-button" type="button" aria-label="Open settings" aria-controls="sc-os-settings-panel" aria-expanded="false" title="Settings">${icon("settings")}</button>
+      <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
+      <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
+    </div>
+  `;
+
+  const createController = () => {
+    let root = doc.getElementById(ROOT_ID);
+    if (!root) {
+      root = doc.createElement("header");
+      root.id = ROOT_ID;
+      root.setAttribute("role", "banner");
+      root.innerHTML = markup;
+      doc.body.insertBefore(root, doc.body.firstChild);
+    }
+    const listenerController = new parentWindow.AbortController();
+    const listenerOptions = {signal: listenerController.signal};
+    const timers = [];
+    const later = (callback, delay) => {
+      const timer = parentWindow.setTimeout(callback, delay);
+      timers.push(timer);
+      return timer;
+    };
+    const state = {
+      config: {},
+      searchIndex: null,
+      searchPromise: null,
+      notifications: null,
+      highlighted: -1,
+      visibleResults: [],
+      activePanel: "",
+      recorder: null,
+      recordingStream: null,
+      recordingChunks: [],
+    };
+    const searchInput = root.querySelector("#sc-os-global-search");
+    const searchPanel = root.querySelector("#sc-os-search-results");
+    const notificationsButton = root.querySelector("#sc-os-notifications");
+    const notificationsPanel = root.querySelector("#sc-os-notifications-panel");
+    const profileButton = root.querySelector("#sc-os-profile");
+    const settingsButton = root.querySelector("#sc-os-settings");
+    const settingsPanel = root.querySelector("#sc-os-settings-panel");
+
+    const routeUrl = (routeKey, query, includeQuery = true) => {
+      const url = new URL(parentWindow.location.href);
+      url.searchParams.set("page", routeKey);
+      if (includeQuery && query) url.searchParams.set("global_search", query);
+      else url.searchParams.delete("global_search");
+      return url.toString();
+    };
+    const navigateDocument = (url) => {
+      const link = doc.createElement("a");
+      link.href = url;
+      link.target = "_self";
+      link.hidden = true;
+      doc.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+    const navigate = (result) => {
+      if (!result || !result.route_key) return;
+      navigateDocument(
+        routeUrl(result.route_key, result.query, result.group !== "Pages"),
+      );
+    };
+    const setExpanded = (button, expanded) => {
+      if (button) button.setAttribute("aria-expanded", expanded ? "true" : "false");
+    };
+    const closePanels = (returnFocus = false) => {
+      searchPanel.hidden = true;
+      notificationsPanel.hidden = true;
+      settingsPanel.hidden = true;
+      setExpanded(searchInput, false);
+      setExpanded(notificationsButton, false);
+      setExpanded(settingsButton, false);
+      const trigger = state.activePanel === "notifications"
+        ? notificationsButton
+        : state.activePanel === "settings"
+          ? settingsButton
+          : searchInput;
+      state.activePanel = "";
+      if (returnFocus && trigger) trigger.focus({preventScroll: true});
+    };
+    const openPanel = (name) => {
+      const alreadyOpen = state.activePanel === name;
+      closePanels(false);
+      if (alreadyOpen) return false;
+      state.activePanel = name;
+      if (name === "search") {
+        searchPanel.hidden = false;
+        setExpanded(searchInput, true);
+      } else if (name === "notifications") {
+        notificationsPanel.hidden = false;
+        setExpanded(notificationsButton, true);
+      } else if (name === "settings") {
+        settingsPanel.hidden = false;
+        setExpanded(settingsButton, true);
+      }
+      return true;
+    };
+    const requestJson = async (url) => {
+      const response = await parentWindow.fetch(url, {
+        credentials: "same-origin",
+        headers: {Authorization: `Bearer ${state.config.authToken || ""}`},
+      });
+      if (!response.ok) throw new Error("Request failed");
+      return response.json();
+    };
+    const loadSearchIndex = async () => {
+      if (state.searchIndex) return state.searchIndex;
+      if (!state.searchPromise) {
+        state.searchPromise = requestJson(state.config.searchUrl)
+          .then((payload) => {
+            state.searchIndex = Array.isArray(payload.results) ? payload.results : [];
+            return state.searchIndex;
+          })
+          .catch(() => {
+            state.searchIndex = [];
+            return state.searchIndex;
+          });
+      }
+      return state.searchPromise;
+    };
+    const normalise = (value) => String(value || "").toLocaleLowerCase().trim();
+    const scoreResult = (result, query) => {
+      const title = normalise(result.title);
+      const subtitle = normalise(result.subtitle);
+      const keywords = (result.keywords || []).map(normalise).join(" ");
+      if (!query) return result.group === "Pages" ? 0 : 20;
+      if (title === query) return 0;
+      if (title.startsWith(query)) return 2;
+      if (title.includes(query)) return 5;
+      if (subtitle.includes(query)) return 9;
+      if (keywords.includes(query)) return 12;
+      return Number.POSITIVE_INFINITY;
+    };
+    const renderSearchResults = () => {
+      const query = normalise(searchInput.value);
+      const ranked = (state.searchIndex || [])
+        .map((result, order) => ({result, order, score: scoreResult(result, query)}))
+        .filter((entry) => Number.isFinite(entry.score))
+        .sort((a, b) => a.score - b.score || a.order - b.order)
+        .slice(0, 10)
+        .map((entry) => entry.result);
+      state.visibleResults = ranked;
+      state.highlighted = ranked.length ? Math.min(Math.max(state.highlighted, 0), ranked.length - 1) : -1;
+      if (!ranked.length) {
+        searchPanel.innerHTML = '<div class="sc-os-topbar-state">No results found</div>';
+        return;
+      }
+      let currentGroup = "";
+      searchPanel.innerHTML = ranked.map((result, index) => {
+        const heading = result.group !== currentGroup
+          ? `<div class="sc-os-result-group">${escapeHtml(result.group)}</div>`
+          : "";
+        currentGroup = result.group;
+        return `${heading}<button type="button" class="sc-os-topbar-result" role="option" aria-selected="${index === state.highlighted}" data-index="${index}"><span class="sc-os-result-copy"><span class="sc-os-result-title">${escapeHtml(result.title)}</span><span class="sc-os-result-subtitle">${escapeHtml(result.subtitle || result.group)}</span></span><span class="sc-os-result-chevron">${icon("chevron")}</span></button>`;
+      }).join("");
+      searchPanel.querySelectorAll(".sc-os-topbar-result").forEach((button) => {
+        button.addEventListener("click", () => navigate(ranked[Number(button.dataset.index)]));
+        button.addEventListener("mousemove", () => {
+          state.highlighted = Number(button.dataset.index);
+          updateHighlight();
+        });
+      });
+    };
+    const updateHighlight = () => {
+      searchPanel.querySelectorAll(".sc-os-topbar-result").forEach((button, index) => {
+        button.setAttribute("aria-selected", index === state.highlighted ? "true" : "false");
+      });
+    };
+    const escapeHtml = (value) => String(value || "").replace(/[&<>'"]/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+    })[character]);
+    const openSearch = async () => {
+      openPanel("search");
+      searchPanel.innerHTML = '<div class="sc-os-topbar-state">Searching...</div>';
+      await loadSearchIndex();
+      if (state.activePanel === "search") renderSearchResults();
+    };
+    const renderNotifications = (items) => {
+      notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
+      if (!items.length) {
+        notificationsPanel.innerHTML += '<div class="sc-os-topbar-state">No new notifications</div>';
+        return;
+      }
+      notificationsPanel.innerHTML += items.map((item, index) => `
+        <button type="button" class="sc-os-notification-item" data-index="${index}">
+          <span class="sc-os-notification-icon">${icon("warning")}</span>
+          <span class="sc-os-notification-copy">
+            <span class="sc-os-notification-title">${escapeHtml(item.title)}</span>
+            <span class="sc-os-notification-subtitle">${escapeHtml(item.subtitle || "Activity Log")}</span>
+          </span>
+        </button>
+      `).join("");
+      notificationsPanel.querySelectorAll(".sc-os-notification-item").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = items[Number(button.dataset.index)];
+          navigate({route_key: item.route_key || "dashboard", group: "Pages"});
+        });
+      });
+    };
+    const loadNotifications = async () => {
+      if (!state.notifications) {
+        try {
+          const payload = await requestJson(state.config.notificationsUrl);
+          state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+        } catch (_error) {
+          state.notifications = [];
+        }
+      }
+      return state.notifications;
+    };
+    const currentTheme = () => {
+      const key = `stActiveTheme-${parentWindow.location.pathname}-v2`;
+      try {
+        const value = JSON.parse(parentWindow.localStorage.getItem(key));
+        return ["System", "Light", "Dark"].includes(value) ? value : "System";
+      } catch (_error) {
+        return "System";
+      }
+    };
+    const setTheme = (theme) => {
+      const key = `stActiveTheme-${parentWindow.location.pathname}-v2`;
+      parentWindow.localStorage.setItem(key, JSON.stringify(theme));
+      navigateDocument(parentWindow.location.href);
+    };
+    const stopRecording = () => {
+      if (state.recorder && state.recorder.state !== "inactive") state.recorder.stop();
+      if (state.recordingStream) {
+        state.recordingStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+    const startRecording = async () => {
+      if (state.recorder && state.recorder.state === "recording") {
+        stopRecording();
+        return;
+      }
+      if (!parentWindow.navigator.mediaDevices?.getDisplayMedia || !parentWindow.MediaRecorder) {
+        parentWindow.alert("Screen recording is not supported in this browser.");
+        return;
+      }
+      try {
+        const stream = await parentWindow.navigator.mediaDevices.getDisplayMedia({video: true, audio: true});
+        const recorder = new parentWindow.MediaRecorder(stream);
+        state.recorder = recorder;
+        state.recordingStream = stream;
+        state.recordingChunks = [];
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data && event.data.size) state.recordingChunks.push(event.data);
+        });
+        recorder.addEventListener("stop", () => {
+          const blob = new Blob(state.recordingChunks, {type: recorder.mimeType || "video/webm"});
+          if (blob.size) {
+            const url = parentWindow.URL.createObjectURL(blob);
+            const link = doc.createElement("a");
+            link.href = url;
+            link.download = `sports-cave-os-recording-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
+            doc.body.appendChild(link);
+            link.click();
+            link.remove();
+            parentWindow.setTimeout(() => parentWindow.URL.revokeObjectURL(url), 1000);
+          }
+          state.recorder = null;
+          state.recordingStream = null;
+          renderSettings();
+        });
+        stream.getVideoTracks()[0]?.addEventListener("ended", stopRecording, {once: true});
+        recorder.start();
+        renderSettings();
+      } catch (_error) {
+        renderSettings();
+      }
+    };
+    const renderSettings = () => {
+      const selected = currentTheme();
+      const recording = state.recorder && state.recorder.state === "recording";
+      settingsPanel.innerHTML = `
+        <div class="sc-os-topbar-panel-title">Theme</div>
+        <div class="sc-os-theme-row">
+          ${["System", "Light", "Dark"].map((theme) => `<button type="button" class="sc-os-theme-option" data-theme="${theme}" aria-pressed="${selected === theme}">${theme}</button>`).join("")}
+        </div>
+        <div class="sc-os-settings-divider"></div>
+        <button type="button" class="sc-os-topbar-action" data-action="print">${icon("print")}<span>Print</span></button>
+        <button type="button" class="sc-os-topbar-action" data-action="record">${icon("record")}<span>${recording ? "Stop recording" : "Record screen"}</span></button>
+      `;
+      settingsPanel.querySelectorAll("[data-theme]").forEach((button) => {
+        button.addEventListener("click", () => setTheme(button.dataset.theme));
+      });
+      settingsPanel.querySelector('[data-action="print"]').addEventListener("click", () => parentWindow.print());
+      settingsPanel.querySelector('[data-action="record"]').addEventListener("click", startRecording);
+    };
+    const updateSidebarWidth = () => {
+      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+      const width = sidebar ? Math.round(sidebar.getBoundingClientRect().width) : 300;
+      doc.documentElement.style.setProperty("--sc-sidebar-width", `${Math.max(width, 240)}px`);
+    };
+    const resetInitialSidebarScroll = () => {
+      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+      if (!sidebar?.querySelector('[class*="st-key-sidebar-row-dashboard"]')) return false;
+      sidebar.querySelectorAll("div").forEach((element) => {
+        if (element.scrollHeight > element.clientHeight + 2) element.scrollTop = 0;
+      });
+      return true;
+    };
+
+    searchInput.addEventListener("focus", openSearch, listenerOptions);
+    searchInput.addEventListener("input", () => {
+      if (state.activePanel !== "search") openPanel("search");
+      renderSearchResults();
+    }, listenerOptions);
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" && state.visibleResults.length) {
+        event.preventDefault();
+        state.highlighted = (state.highlighted + 1) % state.visibleResults.length;
+        updateHighlight();
+      } else if (event.key === "ArrowUp" && state.visibleResults.length) {
+        event.preventDefault();
+        state.highlighted = (state.highlighted - 1 + state.visibleResults.length) % state.visibleResults.length;
+        updateHighlight();
+      } else if (event.key === "Enter" && state.highlighted >= 0) {
+        event.preventDefault();
+        navigate(state.visibleResults[state.highlighted]);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closePanels(true);
+      }
+    }, listenerOptions);
+    notificationsButton.addEventListener("click", async () => {
+      if (!openPanel("notifications")) return;
+      notificationsPanel.innerHTML = '<div class="sc-os-topbar-state">Loading notifications...</div>';
+      renderNotifications(await loadNotifications());
+      notificationsPanel.querySelector("button")?.focus({preventScroll: true});
+    }, listenerOptions);
+    profileButton.addEventListener("click", () => {
+      navigateDocument(routeUrl(state.config.accountsRouteKey, "", false));
+    }, listenerOptions);
+    settingsButton.addEventListener("click", () => {
+      if (!openPanel("settings")) return;
+      renderSettings();
+      settingsPanel.querySelector("button")?.focus({preventScroll: true});
+    }, listenerOptions);
+    doc.addEventListener("keydown", (event) => {
+      const target = event.target;
+      const editable = target && (
+        target.matches?.("input, textarea, select") || target.isContentEditable
+      );
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+        if (editable && target !== searchInput) return;
+        event.preventDefault();
+        searchInput.focus({preventScroll: true});
+        openSearch();
+      } else if (event.key === "Escape" && state.activePanel) {
+        event.preventDefault();
+        closePanels(true);
+      }
+    }, listenerOptions);
+    doc.addEventListener("pointerdown", (event) => {
+      if (state.activePanel && !root.contains(event.target)) closePanels(false);
+    }, listenerOptions);
+    parentWindow.addEventListener(
+      "resize",
+      updateSidebarWidth,
+      {passive: true, signal: listenerController.signal},
+    );
+    updateSidebarWidth();
+    later(updateSidebarWidth, 250);
+    later(updateSidebarWidth, 1000);
+    [0, 120, 420, 900, 1800, 3200].forEach((delay) => {
+      later(resetInitialSidebarScroll, delay);
+    });
+    return {
+      install(nextConfig) {
+        const revisionChanged = state.config.revision !== nextConfig.revision;
+        state.config = {...nextConfig};
+        root.querySelector(".sc-os-topbar-logo").src = state.config.logoSrc || "";
+        root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
+        root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
+        if (revisionChanged) {
+          state.searchIndex = null;
+          state.searchPromise = null;
+          state.notifications = null;
+        }
+        updateSidebarWidth();
+      },
+      destroy() {
+        listenerController.abort();
+        timers.forEach((timer) => parentWindow.clearTimeout(timer));
+        if (state.recorder?.state && state.recorder.state !== "inactive") {
+          state.recorder.stop();
+        }
+        state.recordingStream?.getTracks().forEach((track) => track.stop());
+        root.remove();
+      }
+    };
+  };
+
+  parentWindow.SportsCaveTopBar?.destroy?.();
+  parentWindow.SportsCaveTopBar = createController();
+  parentWindow.SportsCaveTopBar.install(config);
+})();
+</script>
+</body>
+</html>

@@ -1106,9 +1106,14 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertNotIn("fallbackTimer", self.launcher)
         self.assertNotIn("window.setTimeout", self.launcher)
         self.assertNotIn("Sports Cave Desktop did not open", self.launcher)
-        branch = self.app[self.app.index('if page == "Files":') : self.app.index("if st.sidebar.button(", self.app.index('if page == "Files":'))]
+        start = self.app.index('if "Files" in allowed_routes:')
+        branch = self.app[
+            start : self.app.index(
+                '_sidebar_route_button("Reporting"',
+                start,
+            )
+        ]
         self.assertIn("_files_window_launcher_component", branch)
-        self.assertIn("continue", branch)
         self.assertNotIn("set_current_page", branch)
 
     def test_one_click_open_multi_select_and_keyboard_navigation_have_no_checkboxes(self):

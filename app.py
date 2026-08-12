@@ -53,6 +53,7 @@ import seo_navigation as seo_nav
 import sports_cave_dashboard
 import sports_cave_pricing
 import sports_sales_calendar
+import top_bar
 
 db = None
 image_factory = None
@@ -286,6 +287,8 @@ HIDDEN_PAGE_OPTIONS = [
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 PAGE_QUERY_PARAM = "page"
+GLOBAL_SEARCH_QUERY_PARAM = "global_search"
+GLOBAL_SEARCH_CONSUMED_STATE_KEY = "global_search_consumed"
 CURRENT_PAGE_STATE_KEY = "current_page"
 LEGACY_PAGE_STATE_KEY = "selected_page"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
@@ -1284,6 +1287,7 @@ def inject_styles():
         <style>
         /* Sports Cave OS light theme: colour-only update. Do not change layout here. */
         :root {
+            --sc-topbar-height: 64px;
             --sc-bg: #FFFFFF;
             --sc-panel: #FFFFFF;
             --sc-panel-soft: #FAF8F1;
@@ -1355,6 +1359,8 @@ def inject_styles():
         [data-testid="stSidebar"] {
             background: #F1F1EF !important;
             border-right: 1px solid #D9D9D4;
+            height: calc(100dvh - var(--sc-topbar-height)) !important;
+            top: var(--sc-topbar-height) !important;
         }
 
         [data-testid="stSidebar"] * {
@@ -1362,58 +1368,31 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] > div {
+            height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
             padding-top: 0.75rem;
         }
 
-        section[data-testid="stSidebar"] .sc-sidebar-brand {
-            align-items: center;
-            display: flex;
-            gap: 0.7rem;
-            padding: 0.1rem 0.15rem 0.85rem;
+        section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
         }
 
-        section[data-testid="stSidebar"] .sc-sidebar-logo {
-            display: block;
-            flex: 0 0 auto;
-            height: 2.65rem;
-            object-fit: contain;
-            width: 2.65rem;
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div,
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] .block-container {
+            min-height: 100%;
         }
 
-        section[data-testid="stSidebar"] .sc-sidebar-brand-copy {
-            min-width: 0;
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] .block-container > [data-testid="stVerticalBlock"] {
+            gap: 0.125rem !important;
+            min-height: 100%;
         }
 
-        section[data-testid="stSidebar"] .sc-sidebar-title {
-            color: #1F1F21;
-            font-size: 0.86rem;
-            font-weight: 750;
-            line-height: 1.1;
-            margin: 0;
-        }
-
-        section[data-testid="stSidebar"] .sc-sidebar-subtitle {
-            color: #6E6E73 !important;
-            font-size: 0.63rem;
-            line-height: 1.25;
-            margin-top: 0.15rem;
-        }
-
-        section[data-testid="stSidebar"] .sc-sidebar-version {
-            color: #777770 !important;
-            font-size: 0.68rem;
-            line-height: 1.25;
-            margin-top: 0.35rem;
-        }
-
-        section[data-testid="stSidebar"] .sc-sidebar-section-label {
-            color: #77736B !important;
-            font-size: 0.66rem;
-            font-weight: 720;
-            letter-spacing: 0.11em;
-            margin: 0.9rem 0 0.28rem;
-            padding: 0 0.62rem;
-            text-transform: uppercase;
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 0.125rem !important;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-a11y {
@@ -1437,7 +1416,7 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] div[data-testid="stButton"] {
-            margin: 0.02rem 0;
+            margin: 0.03rem 0;
         }
 
         section[data-testid="stSidebar"] div[data-testid="stButton"] button {
@@ -1451,8 +1430,8 @@ def inject_styles():
             display: flex;
             font-weight: 520 !important;
             justify-content: flex-start;
-            min-height: 2.68rem;
-            padding: 0.48rem 0.68rem !important;
+            min-height: 2.25rem;
+            padding: 0.32rem 0.78rem !important;
             text-align: left;
             transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
             width: 100%;
@@ -2280,7 +2259,8 @@ def inject_styles():
         }
 
         div[data-testid="stAppViewContainer"]:has(.st-key-files-explorer) .block-container {
-            height: 100dvh;
+            height: calc(100dvh - var(--sc-topbar-height));
+            margin-top: var(--sc-topbar-height);
             min-height: 0;
             overflow: hidden;
             padding-bottom: 0.45rem !important;
@@ -3181,7 +3161,7 @@ def inject_styles():
 
         .sc-design-task-card strong {
             display: -webkit-box;
-            font-size: 0.84rem;
+            font-size: 0.875rem;
             line-height: 1.25;
             overflow: hidden;
             -webkit-box-orient: vertical;
@@ -3202,6 +3182,21 @@ def inject_styles():
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button [data-testid="stIconMaterial"] {
+            font-size: 1.125rem !important;
+            height: 1.125rem !important;
+            line-height: 1.125rem !important;
+            width: 1.125rem !important;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-row-orders,
+        section[data-testid="stSidebar"] .st-key-sidebar-row-mockups,
+        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-seo"],
+        section[data-testid="stSidebar"] .st-key-sidebar-row-va_training,
+        section[data-testid="stSidebar"] .st-key-sidebar-row-accounts_access {
+            margin-top: 0.5rem;
         }
 
         section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] {
@@ -3246,14 +3241,17 @@ def inject_styles():
         section[data-testid="stSidebar"] .st-key-sidebar-social-children,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children {
             border-left: 1px solid #C8A85F;
+            box-sizing: border-box;
             margin: 0.08rem 0 0.18rem 1.15rem;
+            max-width: calc(100% - 1.15rem);
             padding: 0.08rem 0 0.08rem 0.55rem;
+            width: calc(100% - 1.15rem);
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-social-children div[data-testid="stButton"] button,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button {
-            min-height: 2.35rem;
-            padding: 0.42rem 0.56rem !important;
+            min-height: 2rem;
+            padding: 0.3rem 0.52rem !important;
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button p,
@@ -3284,9 +3282,14 @@ def inject_styles():
         section[data-testid="stSidebar"] .st-key-sidebar-profile-footer {
             background: #F1F1EF;
             bottom: 0;
+            margin-top: auto;
             padding-bottom: 0.35rem;
             position: sticky;
             z-index: 5;
+        }
+
+        div[data-testid="stAppViewContainer"] > .main .block-container {
+            padding-top: calc(var(--sc-topbar-height) + 1.45rem);
         }
 
         .sc-task-detail-popover {
@@ -3771,6 +3774,39 @@ def sync_current_page_to_query_params(page):
 def sync_current_page_query_param(page):
     """Backward-compatible alias for older callers and tests."""
     sync_current_page_to_query_params(page)
+
+
+GLOBAL_SEARCH_WIDGET_BY_ROUTE = {
+    "Dashboard": "dashboard-activity-search",
+    "Orders": "orders_search_text",
+    "Prodigi": "prodigi-dispatch-order-search",
+    "Products": "supabase-products-search",
+    seo_nav.SEO_CITATIONS_ROUTE: "seo-citation-search",
+    seo_nav.SEO_BLOG_ROUTE: "seo-blog-search",
+    seo_nav.SEO_BACKLINKS_ROUTE: "seo-outreach-search",
+    seo_nav.SEO_KEYWORDS_ROUTE: "seo-keyword-search",
+}
+
+
+def apply_global_search_context(current_page):
+    """Seed an existing page filter after a top-bar record navigation."""
+    try:
+        value = st.query_params.get(GLOBAL_SEARCH_QUERY_PARAM, "")
+    except Exception:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    clean_value = str(value or "").strip()[:180]
+    widget_key = GLOBAL_SEARCH_WIDGET_BY_ROUTE.get(current_page)
+    signature = f"{current_page}|{clean_value}"
+    if (
+        clean_value
+        and widget_key
+        and st.session_state.get(GLOBAL_SEARCH_CONSUMED_STATE_KEY) != signature
+    ):
+        st.session_state[widget_key] = clean_value
+        st.session_state[GLOBAL_SEARCH_CONSUMED_STATE_KEY] = signature
+    return clean_value
 
 
 def _store_current_page(route, *, source="restore"):
@@ -8138,13 +8174,6 @@ SIDEBAR_ICON_BY_ROUTE = {
 }
 
 
-def _sidebar_section_label(label, *, root=None):
-    (root or st.sidebar).markdown(
-        f'<div class="sc-sidebar-section-label">{html.escape(label)}</div>',
-        unsafe_allow_html=True,
-    )
-
-
 def _sidebar_route_button(
     route,
     current_page,
@@ -8234,7 +8263,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             set_current_page(route, source="sidebar")
             st.rerun(scope="app")
 
-    _sidebar_section_label("CREATE", root=st)
     _sidebar_route_button("Mockups", current_page, allowed_routes, root=st)
     if social_media.SOCIAL_MEDIA_ROUTE in allowed_routes:
         social_active = current_page in {
@@ -8259,7 +8287,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
     for route in ("Product Uploads", "Design Studio", "Ads"):
         _sidebar_route_button(route, current_page, allowed_routes, root=st)
 
-    _sidebar_section_label("GROWTH", root=st)
     if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:
         if disclosure(
             "seo",
@@ -8285,33 +8312,17 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
 def render_sidebar():
     user = current_os_user()
     current_page = get_current_page()
-    app_icon_src = html.escape(asset_data_uri(str(APP_ICON_PATH)), quote=True)
-    st.sidebar.markdown(
-        f"""
-        <div class="sc-sidebar-brand">
-            <img class="sc-sidebar-logo" src="{app_icon_src}" alt="Sports Cave OS icon">
-            <div class="sc-sidebar-brand-copy">
-                <div class="sc-sidebar-title">SPORTS CAVE OS</div>
-                <div class="sc-sidebar-subtitle">OPERATIONS SYSTEM</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     allowed_routes = tuple(
         page for page in MENU_OPTIONS if os_accounts.can_access_page(user, page)
     )
 
-    _sidebar_section_label("MAIN")
     _sidebar_route_button("Dashboard", current_page, allowed_routes)
-    _sidebar_section_label("OPERATIONS")
     for route in ("Orders", "Prodigi", "Edition Ops"):
         _sidebar_route_button(route, current_page, allowed_routes)
 
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes)
 
-    _sidebar_section_label("MANAGE")
     _sidebar_route_button("VA Training", current_page, allowed_routes)
     if "Files" in allowed_routes:
         st.sidebar.markdown(
@@ -8322,7 +8333,6 @@ def render_sidebar():
             _files_window_launcher_component()(key="files-window-launcher", default=None)
     _sidebar_route_button("Reporting", current_page, allowed_routes)
 
-    _sidebar_section_label("ADMIN")
     _sidebar_route_button(
         "Accounts & Access",
         current_page,
@@ -14337,12 +14347,21 @@ def main():
     ):
         set_current_page("Files", source="oauth")
 
+    current_page = get_current_page()
+    top_bar.render_top_bar(
+        get_components_module(),
+        current_os_user(),
+        logo_src=asset_data_uri(str(APP_ICON_PATH)),
+        current_route=current_page,
+    )
+
     log_startup_stage("SIDEBAR START")
     render_sidebar()
     log_startup_stage("SIDEBAR DONE")
 
     log_startup_stage("ROUTER START")
     current_page = get_current_page()
+    apply_global_search_context(current_page)
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")
 

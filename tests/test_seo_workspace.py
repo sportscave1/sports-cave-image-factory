@@ -48,21 +48,22 @@ class SEONavigationTests(unittest.TestCase):
             self.assertFalse(os_accounts.can_access_page(denied, route))
         self.assertFalse(os_accounts.can_access_page(approved, "Orders"))
 
-    def test_navigation_source_contains_growth_expansion_children_and_disabled_email(self):
+    def test_navigation_source_keeps_seo_children_and_disabled_email_without_headings(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn('_sidebar_section_label("GROWTH", root=st)', source)
         self.assertIn('SIDEBAR_OPEN_GROUP_KEY = "sidebar-open-group"', source)
         self.assertIn('key=f"sidebar-disclosure::{group}"', source)
         self.assertIn('key="sidebar-nav::Email::soon"', source)
         self.assertIn('disabled=True', source)
         self.assertIn('help="Coming later"', source)
+        self.assertNotIn("def _sidebar_section_label", source)
+        self.assertNotIn("sc-sidebar-section-label", source)
         self.assertLess(
-            source.index('_sidebar_section_label("CREATE", root=st)'),
-            source.index('_sidebar_section_label("GROWTH", root=st)'),
+            source.index('_sidebar_route_button("Mockups"'),
+            source.index('if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:'),
         )
         self.assertLess(
-            source.index('_sidebar_section_label("GROWTH", root=st)'),
-            source.index('_sidebar_section_label("MANAGE")'),
+            source.index('key="sidebar-nav::Email::soon"'),
+            source.index('_sidebar_route_button("VA Training"'),
         )
         for label in seo.SEO_NAV_LABELS.values():
             self.assertIn(f'"{label}"', (ROOT / "seo_navigation.py").read_text(encoding="utf-8"))
