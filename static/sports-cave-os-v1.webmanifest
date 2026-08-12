@@ -1,0 +1,31 @@
+{
+  "id": "/sports-cave-os",
+  "name": "Sports Cave OS",
+  "short_name": "Sports Cave OS",
+  "description": "Sports Cave operations system",
+  "start_url": "/?page=dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#171510",
+  "background_color": "#FAF8F1",
+  "icons": [
+    {
+      "src": "/app/static/branding/sports-cave-os-icon-192-v1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/branding/sports-cave-os-icon-512-v1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/branding/sports-cave-os-icon-maskable-512-v1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 import streamlit as st
 
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
+import app_branding
 import dropbox_integration
 import mockup_storage
 import navigation_runtime
@@ -1268,11 +1269,12 @@ Return the product link and full validation results.
 
 
 st.set_page_config(
-    page_title="Sports Cave",
+    page_title="Sports Cave OS",
     page_icon=str(APP_FAVICON_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
 )
+app_branding.render_install_metadata(get_components_module())
 log_startup_stage("SET PAGE CONFIG DONE")
 
 

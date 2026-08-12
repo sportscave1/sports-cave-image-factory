@@ -16,6 +16,7 @@ class AppFaviconTests(unittest.TestCase):
         self.assertIn("APP_FAVICON_PATH", source)
         self.assertIn('"assets" / "sports-cave-os-app-icon.webp"', source)
         self.assertIn("APP_FAVICON_PATH = APP_ICON_PATH", source)
+        self.assertIn('page_title="Sports Cave OS"', source)
         self.assertIn("page_icon=str(APP_FAVICON_PATH)", source)
         self.assertIn("asset_data_uri(str(APP_ICON_PATH))", source)
         self.assertIn('class="sc-sidebar-logo"', source)
