@@ -1,6 +1,7 @@
 import hashlib
 import html
 import json
+import re
 import textwrap
 from pathlib import Path
 
@@ -162,6 +163,7 @@ Before generating, verify internally:
 
 DESIGN_STUDIO_HERO_DOMINANCE_MARKER = "PRIMARY HERO DOMINANCE AND MINIMAL BACKGROUND — MANDATORY"
 DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER = "SPORTS CAVE LIMITED-EDITION BORDER — MANDATORY"
+DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER = "STRICT BORDER CONTAINMENT AND SAFE ZONE — MANDATORY"
 
 
 DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK = f"""
@@ -255,7 +257,879 @@ DO NOT USE:
 * Decorative elements that overpower the artwork
 
 The border, plaque and artwork must feel like one cohesive Sports Cave collector product.
+
+{DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER}
+
+The Sports Cave branded border is a hard containment boundary for the entire composition.
+
+Every visual element must remain completely inside the inner edge of the border, including:
+
+* Main heroes and all supplied subjects
+* Heads, hair, helmets, hands, feet and equipment
+* Cars, motorcycles, jerseys and trophies
+* Titles, names, dates, statistics and supporting text
+* Signatures, logos, flags and collector details
+* Sports Cave plaque and edition information
+* Stadiums, tracks and venue elements
+* Smoke, sparks, rain, dust, haze and lighting effects
+* Shadows, glows, textures and decorative graphics
+
+Nothing may overlap, sit over, pass through, hide or extend beyond the border. No element may be placed between the border lines or outside the bordered artwork area.
+
+Maintain a clean internal safety gap between important content and the border. Keep heroes, faces, typography, signatures, plaques and essential details comfortably inset from all four edges.
+
+If a hero, vehicle, title or other element does not fit safely inside the border:
+
+1. Reduce its scale.
+2. Reposition it inward.
+3. Adjust the composition around it.
+
+Never crop the element against the border or allow it to break through the border.
+
+The border must always render as the uninterrupted topmost structural layer. All four sides and all four corners must remain fully visible, perfectly straight, symmetrical and free from obstruction.
+
+The background artwork may fill the interior area up to the border, but it must stop cleanly at the border. Outside the border, allow only a clean, uniform deep-black or near-black outer margin. Do not continue scenery, lighting, smoke, people, vehicles, typography or decorative effects outside the border.
+
+ABSOLUTELY DO NOT ALLOW:
+
+* Heroes breaking through the border
+* Heads, helmets or hair crossing a border line
+* Vehicles or equipment extending outside the border
+* Titles or signatures sitting over the border
+* Plaques attached across the border
+* Smoke, sparks, glow or lighting spilling beyond it
+* Background scenery continuing outside it
+* Border lines hidden behind artwork
+* Cropped or missing border sections
+* Broken, warped or uneven corners
+* Any intentional “pop-out” or layered-over-border effect
+
+The finished design must look like one precisely contained, professionally printed Sports Cave limited-edition collector artwork. Nothing inside the composition may escape its branded border.
 """
+
+
+SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER = "SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1"
+SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1 = f"""
+{SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER}
+
+MANDATORY WHEN THE DESIGN IS A RIVALRY, VERSUS, FACE-OFF OR TWO-LEGEND CONCEPT
+
+This is a premium minimalist rivalry collector artwork.
+
+The rivalry must be understood instantly, even at Shopify-thumbnail size.
+
+The two opposing principal subjects are the only visual heroes. Give them equal status, comparable scale and balanced visual weight unless the user explicitly requests otherwise.
+
+Never add anonymous players, generated athletes, faceless figures, extra team members, ghost portraits, duplicated subjects or small action images behind the two heroes.
+
+SOURCE-PHOTO REALISM — ABSOLUTE PRIORITY
+
+Use the actual supplied source photographs of both principal subjects.
+
+Each supplied subject is an immutable photographic asset. Isolate, mask and composite the real source image itself.
+
+Do not:
+
+* Regenerate either person
+* Reconstruct or enhance either face
+* Face-swap
+* Approximate a likeness
+* Alter facial features or expression
+* Change eye direction
+* Change age, skin texture or natural asymmetry
+* Change head size or head-to-body connection
+* Change body type, pose or orientation
+* Generate replacement hands, limbs, uniforms or equipment
+* Mirror a source if it reverses text, numbers, logos, handedness or historical details
+* Invent body parts outside the available source crop
+* Turn a front-facing subject into a profile
+* Turn a rear-facing subject toward the camera
+* Force the subjects to face one another by rebuilding their faces or bodies
+
+Adapt the entire composition around the real supplied subjects.
+
+If a supplied image is too blurred or small to support a clear hero face, do not manufacture a sharper AI face. Use a clearer authentic supplied reference if available. If no usable authentic source exists, flag that a better image is required.
+
+COMPOSITION MODE SELECTION
+
+Choose the strongest of these two modes according to the supplied real photographs.
+
+MODE A — MINIMAL FACE-OFF RIVALRY
+
+This is the default rivalry format when the supplied source images naturally support it.
+
+Use:
+
+* One authentic subject on the left
+* One authentic subject on the right
+* Both subjects naturally oriented inward where their original poses allow
+* Equal or near-equal head size
+* Equal or near-equal visual weight
+* Large head-and-shoulders, chest-up or waist-up presentation
+* Clear, recognisable and unobscured faces
+* Controlled negative space between them
+* A visually charged central meeting point
+* Subtle opposing team colours or light treatment on their respective sides
+
+Target a powerful face-to-face confrontation similar in structural strength to the attached minimalist face-off bestseller, but built from the current authentic source photographs.
+
+Do not mirror, rotate, repose or reconstruct either person to achieve the face-off.
+
+If the supplied photographs do not naturally look inward, select other authentic supplied images that do. If none are suitable, preserve their real orientations and create rivalry tension through placement, central lighting and environmental separation.
+
+The two heads should generally be within approximately 10% of each other in scale. Neither subject should accidentally overpower the other.
+
+MODE B — LEGENDS JERSEY-BACK COMPOSITION
+
+Use this mode when:
+
+* The user specifically requests a jersey-back design
+* The supplied authentic images show recognisable rear jersey views
+* The names and numbers carry the strongest identity and nostalgia
+* A legacy or generational concept is stronger than a facial confrontation
+
+Use:
+
+* Two real rear-view subjects
+* Side-by-side placement
+* Equal scale and visual importance
+* Authentic jersey names, numbers, colours and stitching
+* Natural spacing between the subjects
+* Strong silhouettes against a restrained dark background
+* Subtle light behind each subject to separate the real cutouts from the environment
+
+Never create a generated jersey-back replacement.
+
+Do not invent, repair, retype or redesign jersey names or numbers. Preserve the real lettering and numbers contained in the supplied source photographs.
+
+Do not generate faces, profile views or missing body parts for rear-facing subjects.
+
+This mode should evoke the emotional strength of the attached minimalist jersey-back bestseller without copying that artwork.
+
+MODE SELECTION PRIORITY
+
+1. Follow an explicit user-selected format.
+2. Use Face-Off Mode when two authentic clear facial images naturally support opposing placement.
+3. Use Jersey-Back Mode when authentic rear-view jersey images create the stronger legacy concept.
+4. Never force either format by altering, mirroring or regenerating a supplied subject.
+5. If neither format is supported perfectly, use a clean two-sided rivalry composition that preserves both original photographs unchanged.
+
+MINIMALIST BACKGROUND SYSTEM
+
+The background must support the rivalry without competing with it.
+
+Use only:
+
+* One restrained, era-appropriate stadium, arena, field, court, circuit, ring or environmental layer
+* Deep black or charcoal foundation
+* Subtle atmospheric smoke, haze, turf, court, asphalt or venue texture
+* Controlled central light or shadow divide
+* Restrained team-colour atmosphere on each subject’s side
+* Subtle gold only for collector emphasis
+
+Do not include:
+
+* Background players
+* Faceless generated athletes
+* Crowded action montages
+* Duplicate versions of either hero
+* Floating heads
+* Multiple stadium scenes
+* Unnecessary game-action strips
+* Giant team logos
+* Fake trophies
+* Fireworks
+* Excessive smoke
+* Cheap glows
+* Random sparks or particles
+* Heavy effects across faces or uniforms
+* Social-media-poster styling
+
+The venue should remain dark and understated. It may be recognisable, but it must never become a third hero.
+
+LAYOUT
+
+Maintain a clean landscape 4:3 collector composition.
+
+Recommended hierarchy:
+
+1. Short cinematic collector title at the top
+2. Two opposing co-equal heroes
+3. Optional restrained names or “NAME VS NAME” line
+4. Exact Sports Cave limited-edition plaque near the bottom
+5. Thin internal Sports Cave border
+
+Leave deliberate negative space around faces, title, uniforms and plaque.
+
+Keep all important elements safely inside the canvas.
+
+Do not place a room, wall or physical picture frame into the final artwork unless the user explicitly requests a mockup.
+
+TITLE AND TEXT
+
+Use minimal typography.
+
+The title should:
+
+* Be short
+* Feel cinematic
+* Express rivalry, legacy or generational tension
+* Sit above the matchup
+* Use controlled premium serif or uppercase typography
+* Remain readable at thumbnail size
+
+Optional supporting text may identify the matchup, such as:
+
+NAME VS NAME
+
+Do not add paragraphs, excessive statistics, fake quotes, invented dates or unnecessary descriptive copy.
+
+Do not generate fake signatures. Include signatures only when authentic signature assets are supplied and explicitly intended for use.
+
+SPORTS CAVE BORDER
+
+Use a clean, thin, premium internal border inspired by the attached bestsellers.
+
+The border should:
+
+* Use restrained gold and black
+* Be symmetrical and accurately aligned
+* Remain thin and sophisticated
+* Sit inside a safe canvas margin
+* Support the title and collector presentation
+* Never resemble a thick decorative picture frame
+* Never cross a face, body, jersey, name, number or plaque
+
+Avoid ornate clutter, uneven corners, warped lines and oversized gold decoration.
+
+LIMITED-EDITION PLAQUE
+
+Use the exact supplied Sports Cave limited-edition plaque asset.
+
+Do not recreate, redraw, retype or approximate it.
+
+Position it subtly near the bottom centre or within suitable dark negative space.
+
+The plaque must:
+
+* Retain its exact proportions
+* Remain sharp and readable
+* Be smaller than the principal subjects
+* Never become the focal point
+* Never be stretched, cropped or regenerated
+* Feel integrated like a genuine collector plate
+
+FINAL RIVALRY FAILURE CONDITIONS
+
+Reject and regenerate the result if:
+
+* Any additional player appears in the background
+* More subjects appear than the user supplied or requested
+* Either face looks AI-generated, altered, painted, waxy or approximate
+* Either subject has been mirrored, reposed or anatomically reconstructed
+* One hero accidentally dominates a supposedly equal rivalry
+* The subjects look away without intentional visual tension
+* Facial detail is hidden by smoke, darkness, text or effects
+* Jersey names, numbers, uniforms, helmets or equipment are inaccurate
+* The background becomes crowded
+* The artwork resembles a collage or social-media poster
+* The plaque is oversized or inaccurate
+* The border is thick, distorted or cheap-looking
+* The design loses the clean, premium Sports Cave bestseller character
+
+FINAL INTERNAL CHECK
+
+Before generating a rivalry artwork, verify:
+
+1. Only the requested principal rivals will appear.
+2. Both will use their actual supplied source photographs.
+3. Both faces, bodies, poses, uniforms and equipment remain unchanged.
+4. The selected mode is supported by the real source orientations.
+5. No mirroring or anatomical reconstruction is required.
+6. Both heroes have balanced visual weight.
+7. The background is minimal and contains no generated players.
+8. The rivalry reads instantly.
+9. The border is thin, clean and premium.
+10. The exact supplied plaque is subtle and correctly proportioned.
+11. The final result feels like premium framed collector art—not a poster.
+"""
+
+
+RIVALRY_STRUCTURED_CONTEXT_KEYS = (
+    "design_type",
+    "artwork_type",
+    "concept_type",
+    "composition_type",
+    "composition_mode",
+    "design_mode",
+    "format",
+    "template",
+)
+RIVALRY_STRUCTURED_CONTEXT_VALUES = (
+    "rivalry",
+    "rivalries",
+    "vs",
+    "versus",
+    "face_off",
+    "face-off",
+    "face off",
+    "faceoff",
+    "head_to_head",
+    "head-to-head",
+    "head to head",
+    "great_debate",
+    "great-debate",
+    "great debate",
+    "two_legend",
+    "two-legends",
+    "two legends",
+    "two_legend_concept",
+    "two-legend concept",
+    "two legend concept",
+    "jersey_back",
+    "jersey-back",
+    "jersey back",
+    "two famous jersey backs",
+    "legacy_rivalry",
+    "legacy rivalry",
+)
+RIVALRY_TEXT_PATTERNS = (
+    r"\bvs\.?\b",
+    r"\bv\.\b",
+    r"\bversus\b",
+    r"\bface[\s-]?off\b",
+    r"\bhead[\s-]?to[\s-]?head\b",
+    r"\bgreat\s+debate\b",
+    r"\btwo[\s-]+legend(?:s)?\b",
+    r"\btwo\s+opposing\b",
+    r"\bopposing\s+(?:athletes|drivers|fighters|teams|icons|legends)\b",
+    r"\bjersey[\s-]?back\b",
+    r"\btwo\s+famous\s+jersey\s+backs\b",
+)
+RIVALRY_CONTEXT_TEXT_KEYS = (
+    "task",
+    "task_text",
+    "title",
+    "design_title",
+    "brief",
+    "description",
+    "prompt",
+    "text",
+)
+
+
+SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER = "SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_V1"
+SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_V1 = f"""
+{SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER}
+
+MANDATORY FOR NAMED HUMAN SPORTING SUBJECTS
+
+In addition to the required hero, action, venue, equipment, trophy and atmosphere references, find an authentic signature or autograph image for every named principal human subject intended to appear in the artwork.
+
+This includes:
+
+* Players
+* Athletes
+* Drivers
+* Riders
+* Fighters
+* Golfers
+* Tennis players
+* Jockeys
+* Cricketers
+* Coaches or managers when they are principal subjects
+* Every named hero in a rivalry or multi-legend design
+
+SIGNATURE SEARCH REQUIREMENTS
+
+For each principal named subject:
+
+* Search using the person's complete name.
+* Include their sport or team when needed to prevent mistaken identity.
+* Find one strongest, clearest and most usable authentic signature reference.
+* Include a second option only when it is genuinely useful and equally credible.
+* Prefer an isolated signature on a transparent, white or plain background.
+* Prefer high-resolution signature marks with complete, readable strokes.
+* Prefer authoritative or reputable sources with credible attribution.
+* Ensure the signature belongs to the exact intended athlete.
+
+Prioritise:
+
+* Official athlete, team or foundation sources
+* Hall of Fame or recognised sporting archives
+* Wikimedia or established archival sources
+* Reputable authenticated-autograph references
+* Clean scans of known autograph specimens
+
+Avoid:
+
+* AI-generated signatures
+* Typed script fonts
+* Fan-made approximations
+* Unverified marketplace listings
+* Forged or suspicious autograph examples
+* Watermarked previews
+* Signatures obscured by merchandise, cards or photographs
+* Low-resolution thumbnails
+* Incomplete or cropped autograph strokes
+* Prebuilt artwork containing unrelated graphics
+* Signatures belonging to another person with the same or a similar name
+
+CAROUSEL OUTPUT
+
+Place the strongest signature reference for each named subject directly in the same image carousel as the other retrieved reference images.
+
+Do not place signature references in a separate written section.
+
+Preserve the existing image-only output contract. Do not add research, analysis, recommendations or creative direction around the carousel.
+
+Use descriptive internal metadata or image alt text that clearly identifies:
+
+* The athlete's exact full name
+* That the image is a signature asset
+* The corresponding subject identifier where supported
+
+Example internal role:
+
+signature_asset:
+subject_name: [Exact athlete full name]
+subject_id: [stable_subject_identifier]
+
+A signature must never be classified as:
+
+* Hero image
+* Player image
+* Background image
+* Venue reference
+* General atmosphere reference
+
+It is a separate exact graphic asset intended for collector detailing.
+
+MULTI-SUBJECT REQUIREMENT
+
+For a two-player rivalry, retrieve one authentic signature for each rival.
+
+For a multi-player design, retrieve one authentic signature for every principal named player intended to appear.
+
+Never merge several signatures into one generated graphic.
+
+Never assign one player's signature to another player.
+
+If no sufficiently reliable signature can be found for a subject, do not fabricate or approximate one. Continue with the other valid reference images and mark that signature asset as unavailable in internal workflow metadata.
+"""
+
+
+SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER = "SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_V1"
+SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_V1 = f"""
+{SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER}
+
+MANDATORY WHEN VALID SIGNATURE ASSETS ARE SUPPLIED OR SELECTED
+
+Use the actual supplied or retrieved signature image as an exact collector graphic asset.
+
+The signature is not loose inspiration.
+
+Composite the original signature mark itself into the Sports Cave artwork.
+
+Never:
+
+* Generate a new signature
+* Imitate the athlete's handwriting
+* Trace or redraw the signature
+* Reconstruct missing strokes
+* Repair it with generated lettering
+* Convert the athlete's name into a script font
+* Change the handwriting
+* Combine parts from different autograph references
+* Assign the wrong signature to a player
+* Add a signature for a person without a valid source asset
+* Add more than one signature for the same athlete unless explicitly requested
+
+PRESERVE THE AUTHENTIC SIGNATURE
+
+Preserve exactly:
+
+* Stroke paths
+* Letter shapes
+* Slant
+* Spacing
+* Proportions
+* Flourishes
+* Line intersections
+* Natural handwriting irregularities
+* Recognisable autograph characteristics
+
+Permitted non-destructive preparation:
+
+* Remove only the external white, plain or transparent background
+* Isolate the genuine ink strokes
+* Scale the complete signature proportionally
+* Apply one restrained uniform colour to the existing strokes
+* Use subtle opacity or blending adjustments
+* Add a minimal natural shadow or glow only when required for legibility
+
+Do not thicken, smooth, simplify, stretch, warp, crop or regenerate the handwriting.
+
+COLLECTOR PLACEMENT
+
+The signature must feel like a refined memorabilia detail, not decoration or advertising.
+
+Use:
+
+* Warm off-white
+* Restrained champagne gold
+* Muted metallic gold
+* Subtle silver where appropriate to the design
+* The signature's original colour when it already suits the artwork
+
+Place it within clean negative space:
+
+* Near the corresponding player
+* Beneath or beside the player's shoulder
+* Near the title when sufficient space exists
+* Above the collector plaque with clear separation
+* In a dark stadium, arena, sky or environmental area
+* Beneath the corresponding jersey in jersey-back artwork
+
+The signature must:
+
+* Remain fully recognisable
+* Be sharp at print resolution
+* Stay secondary to the player and title
+* Remain safely inside the Sports Cave border
+* Avoid faces, hands, jersey names, numbers and important equipment
+* Avoid touching the plaque or title
+* Never become a giant focal point
+* Never resemble a promotional watermark
+
+A typical signature should occupy approximately 10-18% of the canvas width, adjusted according to its natural proportions and the available negative space.
+
+SINGLE-HERO ARTWORK
+
+Use one authentic signature belonging to the hero.
+
+Position it subtly near the hero in clean negative space.
+
+Do not add signatures belonging to coaches, teammates or supporting figures unless those people are also intended principal subjects.
+
+RIVALRY AND FACE-OFF ARTWORK
+
+Use one authentic signature for each principal rival.
+
+* Place each signature on its corresponding player's side.
+* Keep both signatures comparable in visual importance.
+* Preserve each signature's natural proportions.
+* Do not force them to be identical in width.
+* Do not cross the signatures through the central rivalry divide.
+* Do not let either signature overpower its corresponding player.
+* Never swap the left and right player-signature associations.
+
+For rivalry artwork:
+
+* Left hero -> left hero's authentic signature
+* Right hero -> right hero's authentic signature
+
+LEGENDS JERSEY-BACK ARTWORK
+
+Place each authentic signature beneath or near its corresponding rear-view subject.
+
+Never place the autograph over:
+
+* Jersey surname
+* Jersey number
+* Team markings
+* Important stitching
+* The athlete's silhouette
+
+MULTI-PLAYER ARTWORK
+
+Use one authentic signature per principal named subject.
+
+Arrange the signatures carefully near their corresponding subjects or within one restrained signature area.
+
+Keep the composition clean. Reduce signature scale and decorative effects before allowing the artwork to become cluttered.
+
+APPROVED EXISTING ARTWORK
+
+For an existing approved design:
+
+* Preserve every existing signature exactly unless the user requests a change.
+* Do not add new signatures during an unrelated edit.
+* Do not remove, replace, duplicate or reposition existing signatures unless requested.
+* If the user specifically asks to add signatures, use only valid supplied or retrieved signature assets.
+
+MISSING SIGNATURE FALLBACK
+
+If an authentic signature asset is unavailable:
+
+* Do not generate one.
+* Do not use a script font.
+* Do not approximate the athlete's autograph.
+* Do not block the rest of the artwork from being generated.
+* Omit only the unavailable signature.
+
+For a rivalry, never duplicate the available rival's signature to create artificial symmetry.
+
+COMMERCIAL ACCURACY
+
+The visual signature is a printed collector-art detail.
+
+Do not add claims such as:
+
+* Hand-signed
+* Personally signed
+* Authenticated autograph
+* Autographed edition
+* Signed by the player
+
+unless the product is genuinely hand-signed and the user explicitly supplies proof and requests that wording.
+
+FINAL SIGNATURE FAILURE CONDITIONS
+
+Reject and regenerate the result if:
+
+* A signature was invented
+* A signature looks like a typed font
+* The handwriting differs from the supplied asset
+* The wrong signature appears beside a player
+* A player's signature is duplicated
+* Strokes are missing, rewritten or malformed
+* The signature is stretched or disproportionately scaled
+* It covers a face, jersey number, title or plaque
+* It is too large or visually dominant
+* It looks like a watermark
+* It makes the artwork cluttered
+* It falsely implies the physical product is hand-signed
+* An existing approved signature was changed without permission
+
+DATA AND ASSET HANDOFF
+
+Ensure every selected signature asset is carried from Find Images into the final generation workflow with its athlete association intact.
+
+The final generation prompt must contain an explicit mapping of each principal subject to the selected signature image reference.
+
+Do not rely only on carousel order.
+
+Do not allow a signature asset to become detached from its subject name during image selection, prompt assembly or regeneration.
+"""
+
+
+SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER = "AUTHENTIC SIGNATURE PRESERVATION AND PREMIUM TREATMENT — MANDATORY"
+SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_RULES = f"""
+{SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER}
+
+Only use the supplied, selected or reliably sourced authentic signature belonging to the featured person.
+
+The signature is an identity-locked reference. Preserve its genuine handwritten structure exactly, including:
+
+* Letter shapes
+* Initials and recognisable marks
+* Natural slant and baseline
+* Stroke direction and connections
+* Loops, crossings and overlaps
+* Spacing and proportions
+* Flourish shapes and lengths
+* Beginning and ending strokes
+* Natural pressure and line-weight variation
+* Overall width-to-height ratio
+
+Do not redraw, reinterpret, simplify, correct, beautify or replace the authentic signature.
+
+Do not generate an approximate signature from the person’s name. Do not use a script font, invented handwriting or generic autograph styling.
+
+If no reliable signature reference is supplied or found, omit the signature. Never fabricate one.
+
+PREMIUM VISUAL TREATMENT
+
+Present the authentic signature as a thin, elegant and restrained collector detail.
+
+The signature should feel:
+
+* Refined
+* Handwritten
+* Authentic
+* Lightly weighted
+* Clean and precise
+* Understated
+* Premium
+* Integrated into the artwork
+
+Use a clean single-colour treatment such as restrained warm gold, champagne gold, muted silver, soft ivory or subtle off-white—whichever best suits the artwork.
+
+Keep the signature’s scale modest. It should reward closer viewing without competing with the main hero, title, plaque or central story.
+
+Where the source signature contains scan noise, a heavy background, compression or an artificial halo, clean only those unwanted artefacts. Preserve the actual handwritten stroke paths and natural pressure variation.
+
+Where technically possible, use the supplied signature as a preserved composited asset instead of asking the image model to recreate it.
+
+Do not force a naturally bold section of an authentic signature into an artificial hairline. Preserve genuine stroke variation while ensuring the overall presentation remains visually light through restrained scale, clean colour and minimal effects.
+
+ABSOLUTELY DO NOT USE:
+
+* Thick or chunky signature rendering
+* Artificially bold strokes
+* Generic cursive fonts
+* Invented or approximate autographs
+* Redesigned letter shapes
+* Calligraphy-style reinterpretations
+* Heavy outlines
+* Multiple stacked strokes
+* Drop shadows
+* Strong glows
+* Bevelled or embossed effects
+* Bright yellow-gold colouring
+* Thick metallic foil effects
+* Oversized signatures
+* Repeated or duplicated signatures
+* Signatures used as background texture
+* Signatures crossing a face, body or vehicle
+* Signatures touching or covering the border
+* Signatures placed outside the Sports Cave border
+
+PLACEMENT AND CONTAINMENT
+
+Place the signature once only, in a clean area of negative space where it complements the composition.
+
+The signature must:
+
+* Remain fully inside the Sports Cave branded border
+* Maintain a comfortable safety gap from the border
+* Remain completely legible
+* Avoid covering faces, hands, uniforms, vehicles or important details
+* Avoid competing with the title or collector plaque
+* Sit naturally within the composition
+* Look intentionally placed rather than pasted on
+* Remain smaller and visually quieter than the main title
+
+If the signature does not fit cleanly, scale it down proportionally or move it inward. Never crop, stretch, squash, warp or wrap it.
+
+SIGNATURE PRIORITY
+
+The visual hierarchy must remain:
+
+1. Supplied main hero or heroes
+2. Title and defining sporting story
+3. Sports Cave plaque and collector information
+4. Authentic signature
+5. Minimal atmospheric details
+
+The signature adds authenticity and collector value. It must never become the dominant visual element.
+"""
+
+
+SIGNATURE_SUBJECT_CONTEXT_KEYS = (
+    "principal_subjects",
+    "principal_athletes",
+    "principal_players",
+    "principal_human_subjects",
+    "signature_subjects",
+    "signature_assets",
+    "heroes",
+    "athletes",
+    "players",
+    "drivers",
+    "fighters",
+    "subjects",
+)
+SIGNATURE_SUBJECT_NAME_KEYS = (
+    "name",
+    "full_name",
+    "subject_name",
+    "athlete_name",
+    "player_name",
+    "driver_name",
+    "fighter_name",
+    "label",
+)
+SIGNATURE_ASSET_REFERENCE_KEYS = (
+    "asset_reference",
+    "image_reference",
+    "reference",
+    "source",
+    "url",
+    "file",
+    "path",
+    "id",
+)
+SIGNATURE_VERIFIED_ASSET_CONTEXT_KEYS = (
+    "signature_assets",
+    "selected_signature_assets",
+    "supplied_signature_assets",
+    "authentic_signature_assets",
+    "signature_references",
+    "signatures",
+)
+SIGNATURE_ASSET_ROLE_KEYS = (
+    "role",
+    "asset_role",
+    "image_role",
+    "type",
+    "image_type",
+    "classification",
+    "category",
+)
+SIGNATURE_ASSET_ROLE_VALUES = {
+    "signature",
+    "signature_asset",
+    "signature asset",
+    "autograph",
+    "autograph_asset",
+    "autograph asset",
+}
+SIGNATURE_CONTEXT_TEXT_KEYS = (
+    "task",
+    "task_text",
+    "title",
+    "design_title",
+    "brief",
+    "description",
+    "prompt",
+    "text",
+)
+SIGNATURE_TEXT_SUBJECT_STOPWORDS = {
+    "AFL",
+    "AI",
+    "Archive Edition",
+    "Artwork",
+    "Bathurst",
+    "Championship Edition",
+    "Collector",
+    "Collector Artwork",
+    "Collector Design",
+    "Collector Piece",
+    "Create",
+    "Create New",
+    "Design",
+    "Edition",
+    "Existing",
+    "Final",
+    "Find Images",
+    "Hero",
+    "Legacy Edition",
+    "Limited Edition",
+    "Logo",
+    "Man Cave",
+    "Minimalist",
+    "Motorsport",
+    "Mount Panorama",
+    "NBA",
+    "NFL",
+    "New",
+    "New Design",
+    "Next Chapter",
+    "Premium",
+    "Rivalry",
+    "Sports Cave",
+    "Step",
+    "The",
+    "Ultimate Moment",
+    "VS",
+    "Wall Art",
+}
+SIGNATURE_VEHICLE_OR_VENUE_ONLY_PATTERN = re.compile(
+    r"\b(?:vehicle|car|race\s*car|motorcycle|bike|jersey|trophy|venue|stadium|arena|circuit|track|course|room|mockup)[\s-]*only\b",
+    re.IGNORECASE,
+)
 
 
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
@@ -586,9 +1460,9 @@ The border should feel sleek, tasteful, and purpose-built for a premium limited-
 
 STEP 10 - SIGNATURE SYSTEM
 
-Where appropriate, include a subtle signature-style graphic.
+Where appropriate, include only a valid authentic signature asset supplied by the user or retrieved through the Find Images workflow.
 
-Only use a signature if it improves the memorabilia feeling.
+Only use an authentic supplied or selected signature asset if it improves the memorabilia feeling.
 
 Place it naturally in:
 
@@ -599,11 +1473,12 @@ Near the subject
 Near the collector plaque
 Empty negative space
 
-The signature should feel authentic, subtle, and premium.
+The authentic signature asset should feel subtle and premium.
 
 Do not make it oversized.
 Do not put it in a box unless it looks like part of a premium memorabilia plate.
-Do not use fake-looking random scribbles that distract from the design.
+Do not invent, imitate, redraw, trace, font-set or regenerate a signature.
+If no valid authentic signature asset is available, omit signatures entirely.
 
 STEP 11 - REALISM RULES
 
@@ -1283,11 +2158,11 @@ The plaque must never overpower the artwork.
 
 It should feel like a gallery stamp or memorabilia detail.
 
-Signature and Memorabilia Feel
+Authentic Signature and Memorabilia Feel
 
-Where suitable, include a subtle signature-style graphic.
+Where suitable, include only a valid authentic signature asset supplied by the user or retrieved through the Find Images workflow.
 
-The signature should feel like memorabilia, not decoration.
+The authentic signature asset should feel like memorabilia, not decoration.
 
 Place it in a natural empty area:
 
@@ -1297,6 +2172,8 @@ near the subject
 near the title
 
 Do not make it too large or distracting.
+Do not invent, imitate, redraw, trace, font-set or regenerate a signature.
+If no valid authentic signature asset is available, omit signatures entirely.
 
 Background Rules
 
@@ -1726,6 +2603,480 @@ def design_studio_prompt_has_hero_dominance_and_border_lock(prompt_text: str) ->
     )
 
 
+def design_studio_prompt_has_rivalry_composition_rules(prompt_text: str) -> bool:
+    return SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def design_studio_prompt_has_signature_image_search_rules(prompt_text: str) -> bool:
+    return SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def design_studio_prompt_has_signature_application_rules(prompt_text: str) -> bool:
+    return SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def design_studio_prompt_has_signature_premium_treatment_rules(prompt_text: str) -> bool:
+    return SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def _normalise_rivalry_detection_text(value) -> str:
+    text = str(value or "").casefold()
+    text = text.replace("\u2013", "-").replace("\u2014", "-")
+    text = text.replace("\ufffd", " ")
+    return " ".join(text.split())
+
+
+def _rivalry_structured_value_matches(value) -> bool:
+    normalised = _normalise_rivalry_detection_text(value).replace("_", " ")
+    structured_values = {
+        _normalise_rivalry_detection_text(item).replace("_", " ")
+        for item in RIVALRY_STRUCTURED_CONTEXT_VALUES
+    }
+    return normalised in structured_values
+
+
+def _rivalry_structured_context_status(value) -> tuple[bool, bool]:
+    if isinstance(value, dict):
+        has_structured_context = False
+        for key, nested_value in value.items():
+            if str(key or "") in RIVALRY_STRUCTURED_CONTEXT_KEYS:
+                has_structured_context = True
+                if _rivalry_structured_value_matches(nested_value):
+                    return True, True
+            if isinstance(nested_value, (dict, list, tuple, set)):
+                nested_has_context, nested_matches = _rivalry_structured_context_status(nested_value)
+                has_structured_context = has_structured_context or nested_has_context
+                if nested_matches:
+                    return True, True
+        return has_structured_context, False
+    if isinstance(value, (list, tuple, set)):
+        has_structured_context = False
+        for item in value:
+            nested_has_context, nested_matches = _rivalry_structured_context_status(item)
+            has_structured_context = has_structured_context or nested_has_context
+            if nested_matches:
+                return True, True
+        return has_structured_context, False
+    return False, False
+
+
+def _iter_rivalry_context_text_values(value):
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            key_text = str(key or "")
+            if key_text in RIVALRY_CONTEXT_TEXT_KEYS:
+                yield nested_value
+            elif isinstance(nested_value, (dict, list, tuple, set)):
+                yield from _iter_rivalry_context_text_values(nested_value)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _iter_rivalry_context_text_values(item)
+    elif value is not None:
+        yield value
+
+
+def _rivalry_text_matches(value, *, allow_generic_rivalry_word: bool = False) -> bool:
+    text = _normalise_rivalry_detection_text(value)
+    if not text:
+        return False
+    if any(re.search(pattern, text) for pattern in RIVALRY_TEXT_PATTERNS):
+        return True
+    if not allow_generic_rivalry_word:
+        return False
+    return bool(
+        re.search(r"\brivalr(?:y|ies)\b", text)
+        or
+        re.search(
+            r"\brivalr(?:y|ies)\b.{0,64}\b(?:design|artwork|collector|piece|concept|matchup|between|pair)\b",
+            text,
+        )
+        or re.search(
+            r"\b(?:design|artwork|collector|piece|concept|matchup|between|pair)\b.{0,64}\brivalr(?:y|ies)\b",
+            text,
+        )
+    )
+
+
+def design_studio_context_is_rivalry(design_context=None, *, fallback_text: str = "") -> bool:
+    if isinstance(design_context, dict):
+        has_structured_context, structured_matches = _rivalry_structured_context_status(
+            design_context
+        )
+        if structured_matches:
+            return True
+        if has_structured_context:
+            return False
+        context_text = "\n".join(
+            str(value) for value in _iter_rivalry_context_text_values(design_context)
+        )
+        return _rivalry_text_matches(context_text, allow_generic_rivalry_word=True)
+
+    if design_context is not None:
+        return _rivalry_text_matches(design_context, allow_generic_rivalry_word=True)
+
+    return _rivalry_text_matches(fallback_text, allow_generic_rivalry_word=False)
+
+
+def _normalise_signature_subject_name(value) -> str:
+    text = " ".join(str(value or "").replace("\u2013", "-").replace("\u2014", "-").split())
+    text = text.strip(" \t\r\n-–—:;,.()[]{}")
+    text = re.sub(
+        r"^(?:create|make|design|build|find|generate|new|premium|minimalist|collector|sports cave)\s+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = re.sub(
+        r"\s+(?:collector|artwork|design|piece|poster|wall art|tribute|edition|signature|asset|reference|prompt|task)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not text:
+        return ""
+    if text.casefold() in {item.casefold() for item in SIGNATURE_TEXT_SUBJECT_STOPWORDS}:
+        return ""
+    return text
+
+
+def _signature_subject_record(name, *, reference: str = "") -> dict:
+    clean_name = _normalise_signature_subject_name(name)
+    if not clean_name:
+        return {}
+    return {
+        "name": clean_name,
+        "reference": str(reference or "").strip(),
+    }
+
+
+def _signature_asset_reference_from_context(value) -> str:
+    if not isinstance(value, dict):
+        return ""
+    for key in SIGNATURE_ASSET_REFERENCE_KEYS:
+        candidate = value.get(key)
+        if candidate:
+            return str(candidate).strip()
+    return ""
+
+
+def _signature_subject_name_from_context(value) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    for key in SIGNATURE_SUBJECT_NAME_KEYS:
+        candidate = value.get(key)
+        if candidate:
+            return str(candidate).strip()
+    return ""
+
+
+def _collect_signature_subject_records_from_context(value) -> list[dict]:
+    records = []
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            key_text = str(key or "")
+            if key_text in SIGNATURE_SUBJECT_CONTEXT_KEYS:
+                if isinstance(nested_value, dict):
+                    name = _signature_subject_name_from_context(nested_value)
+                    record = _signature_subject_record(
+                        name,
+                        reference=_signature_asset_reference_from_context(nested_value),
+                    )
+                    if record:
+                        records.append(record)
+                    else:
+                        records.extend(
+                            _collect_signature_subject_records_from_context(
+                                list(nested_value.values())
+                            )
+                        )
+                elif isinstance(nested_value, (list, tuple, set)):
+                    for item in nested_value:
+                        if isinstance(item, dict):
+                            records.append(
+                                _signature_subject_record(
+                                    _signature_subject_name_from_context(item),
+                                    reference=_signature_asset_reference_from_context(item),
+                                )
+                            )
+                        else:
+                            records.append(_signature_subject_record(item))
+                else:
+                    records.append(_signature_subject_record(nested_value))
+            elif isinstance(nested_value, (dict, list, tuple, set)):
+                records.extend(_collect_signature_subject_records_from_context(nested_value))
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            records.extend(_collect_signature_subject_records_from_context(item))
+    return [record for record in records if record]
+
+
+def _iter_signature_context_text_values(value):
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            key_text = str(key or "")
+            if key_text in SIGNATURE_CONTEXT_TEXT_KEYS:
+                yield nested_value
+            elif isinstance(nested_value, (dict, list, tuple, set)):
+                yield from _iter_signature_context_text_values(nested_value)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _iter_signature_context_text_values(item)
+    elif value is not None:
+        yield value
+
+
+def _signature_text_is_vehicle_or_venue_only(text: str) -> bool:
+    return bool(SIGNATURE_VEHICLE_OR_VENUE_ONLY_PATTERN.search(str(text or "")))
+
+
+def _signature_subject_records_from_text(text: str) -> list[dict]:
+    raw_text = str(text or "")
+    if not raw_text.strip() or _signature_text_is_vehicle_or_venue_only(raw_text):
+        return []
+    candidates = []
+    name_pattern = r"[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,3}"
+    for match in re.finditer(
+        rf"({name_pattern})\s+(?:vs\.?|versus)\s+({name_pattern})",
+        raw_text,
+    ):
+        candidates.extend(match.groups())
+    for match in re.finditer(
+        rf"\bbetween\s+({name_pattern})\s+and\s+({name_pattern})",
+        raw_text,
+        flags=re.IGNORECASE,
+    ):
+        candidates.extend(match.groups())
+    if not candidates:
+        candidates.extend(
+            match.group(1)
+            for match in re.finditer(
+                r"\b([A-Z][a-z'’.-]+(?:\s+[A-Z][a-z'’.-]+){1,2})\b",
+                raw_text,
+            )
+        )
+    return [_signature_subject_record(candidate) for candidate in candidates]
+
+
+def signature_subject_records_from_context(design_context=None, *, fallback_text: str = "") -> list[dict]:
+    records = _collect_signature_subject_records_from_context(design_context)
+    if not records and isinstance(design_context, dict):
+        records = _signature_subject_records_from_text(
+            "\n".join(str(value) for value in _iter_signature_context_text_values(design_context))
+        )
+    if not records and design_context is not None and not isinstance(design_context, dict):
+        records = _signature_subject_records_from_text(str(design_context))
+    if not records:
+        records = _signature_subject_records_from_text(fallback_text)
+
+    deduped = []
+    seen = {}
+    for record in records:
+        name = _normalise_signature_subject_name(record.get("name"))
+        if not name:
+            continue
+        key = name.casefold()
+        reference = str(record.get("reference") or "").strip()
+        if key in seen:
+            existing = deduped[seen[key]]
+            if reference and not existing.get("reference"):
+                existing["reference"] = reference
+            continue
+        seen[key] = len(deduped)
+        deduped.append({"name": name, "reference": reference})
+    return deduped
+
+
+def _signature_asset_role_matches(value) -> bool:
+    normalised = " ".join(str(value or "").replace("_", " ").replace("-", " ").casefold().split())
+    return normalised in {
+        " ".join(item.replace("_", " ").replace("-", " ").casefold().split())
+        for item in SIGNATURE_ASSET_ROLE_VALUES
+    }
+
+
+def _context_item_is_signature_asset(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return any(
+        _signature_asset_role_matches(value.get(key))
+        for key in SIGNATURE_ASSET_ROLE_KEYS
+        if key in value
+    )
+
+
+def _collect_signature_asset_records(value) -> list[dict]:
+    records = []
+    if isinstance(value, dict):
+        record = _signature_subject_record(
+            _signature_subject_name_from_context(value),
+            reference=_signature_asset_reference_from_context(value),
+        )
+        if record and record.get("reference"):
+            records.append(record)
+        for nested_value in value.values():
+            if isinstance(nested_value, (dict, list, tuple, set)):
+                records.extend(_collect_signature_asset_records(nested_value))
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            records.extend(_collect_signature_asset_records(item))
+    return records
+
+
+def verified_signature_asset_records_from_context(design_context=None) -> list[dict]:
+    records = []
+    if isinstance(design_context, dict):
+        if _context_item_is_signature_asset(design_context):
+            records.extend(_collect_signature_asset_records(design_context))
+        for key, nested_value in design_context.items():
+            key_text = str(key or "")
+            if key_text in SIGNATURE_VERIFIED_ASSET_CONTEXT_KEYS:
+                records.extend(_collect_signature_asset_records(nested_value))
+            elif isinstance(nested_value, (dict, list, tuple, set)):
+                records.extend(verified_signature_asset_records_from_context(nested_value))
+    elif isinstance(design_context, (list, tuple, set)):
+        for item in design_context:
+            records.extend(verified_signature_asset_records_from_context(item))
+
+    deduped = []
+    seen = {}
+    for record in records:
+        name = _normalise_signature_subject_name(record.get("name"))
+        reference = str(record.get("reference") or "").strip()
+        if not name or not reference:
+            continue
+        key = name.casefold()
+        if key in seen:
+            deduped[seen[key]]["reference"] = reference
+            continue
+        seen[key] = len(deduped)
+        deduped.append({"name": name, "reference": reference})
+    return deduped
+
+
+def build_signature_image_search_context(task_text: str, *, design_context=None) -> str:
+    records = signature_subject_records_from_context(
+        design_context,
+        fallback_text=task_text,
+    )
+    lines = [
+        "SIGNATURE ASSET TARGETS",
+        "",
+        "Use the task, prior research and visible chat context to identify named principal human sporting subjects.",
+    ]
+    task = str(task_text or "").strip()
+    if task:
+        lines.extend(["", f"Task context: {task}"])
+    if records:
+        lines.extend(["", "Signature assets to retrieve in the same image carousel:"])
+        for record in records:
+            name = record["name"]
+            lines.append(f"* {name} -> authentic signature image; role: signature_asset; subject_name: {name}")
+    else:
+        lines.extend(
+            [
+                "",
+                "No named principal human subject was detected from the task text alone.",
+                "If the research/chat context names principal human sporting subjects, retrieve one authentic signature asset for each of them.",
+                "If the task is vehicle-only, venue-only, trophy-only, jersey-only, team-logo-only or otherwise has no named principal human subject, do not request a signature asset.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_signature_asset_mapping_context(prompt_text: str, *, design_context=None) -> str:
+    records = signature_subject_records_from_context(
+        design_context,
+        fallback_text=prompt_text,
+    )
+    verified_records = verified_signature_asset_records_from_context(design_context)
+    verified_reference_by_name = {
+        str(record.get("name") or "").casefold(): str(record.get("reference") or "").strip()
+        for record in verified_records
+        if str(record.get("name") or "").strip() and str(record.get("reference") or "").strip()
+    }
+    for record in records:
+        key = str(record.get("name") or "").casefold()
+        record["reference"] = verified_reference_by_name.get(key, "")
+    if verified_records:
+        record_by_name = {
+            str(record.get("name") or "").casefold(): record
+            for record in records
+            if str(record.get("name") or "").strip()
+        }
+        for verified_record in verified_records:
+            key = str(verified_record.get("name") or "").casefold()
+            if key in record_by_name:
+                record_by_name[key]["reference"] = verified_reference_by_name.get(key, "")
+            else:
+                records.append(verified_record)
+                record_by_name[key] = verified_record
+    lines = [
+        "AUTHENTIC SIGNATURE ASSETS",
+        "",
+        "Use only signature images selected from the Find Images carousel or explicitly supplied by the user.",
+        "Map signature_asset images by subject_name to the matching principal subject. Do not rely only on carousel order.",
+    ]
+    if records:
+        lines.extend(["", "Required subject-to-signature mapping:"])
+        for record in records:
+            name = record["name"]
+            reference = record.get("reference") or f"selected signature image reference for {name}"
+            lines.append(f"* {name} -> {reference}")
+    else:
+        lines.extend(
+            [
+                "",
+                "Required subject-to-signature mapping:",
+                "* [Principal athlete full name] -> selected signature image reference from the Find Images carousel when a valid authentic signature asset is available",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "If a listed subject has no valid authentic signature asset, omit only that signature.",
+            "Never invent, approximate, font-set, trace or regenerate a missing signature.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def signature_context_has_verified_signature_assets(design_context=None, *, prompt_text: str = "") -> bool:
+    if design_studio_prompt_has_signature_premium_treatment_rules(prompt_text):
+        return True
+    records = verified_signature_asset_records_from_context(design_context)
+    return any(str(record.get("reference") or "").strip() for record in records)
+
+
+def insert_signature_premium_treatment_rules(signature_rules: str) -> str:
+    rules = _clean_prompt(signature_rules)
+    if design_studio_prompt_has_signature_premium_treatment_rules(rules):
+        return rules
+    premium_rules = _clean_prompt(SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_RULES)
+    placement_heading = "\n\nCOLLECTOR PLACEMENT"
+    if placement_heading in rules:
+        return rules.replace(placement_heading, f"\n\n{premium_rules}{placement_heading}", 1)
+    return f"{rules}\n\n{premium_rules}" if rules else premium_rules
+
+
+def build_authentic_signature_application_rules(prompt_text: str, *, design_context=None) -> str:
+    signature_rules = _clean_prompt(SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_V1)
+    if signature_context_has_verified_signature_assets(
+        design_context,
+        prompt_text=prompt_text,
+    ):
+        signature_rules = insert_signature_premium_treatment_rules(signature_rules)
+    return "\n\n".join(
+        section
+        for section in (
+            signature_rules,
+            build_signature_asset_mapping_context(prompt_text, design_context=design_context),
+        )
+        if str(section or "").strip()
+    )
+
+
 def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:
     prompt = _clean_prompt(prompt_text)
     if design_studio_prompt_has_subject_preservation_lock(prompt):
@@ -1734,25 +3085,135 @@ def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:
     return f"{lock}\n\n{prompt}" if prompt else lock
 
 
-def prepend_design_studio_mandatory_artwork_rules(prompt_text: str) -> str:
+def insert_design_studio_rule_after_subject_lock(prompt_text: str, rule_text: str) -> str:
     prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
-    if design_studio_prompt_has_hero_dominance_and_border_lock(prompt):
-        return prompt
-
+    rule = _clean_prompt(rule_text)
     subject_lock = _clean_prompt(DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK)
-    artwork_lock = _clean_prompt(DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)
     if prompt.startswith(subject_lock):
         remaining_prompt = prompt[len(subject_lock) :].lstrip()
         return (
-            f"{subject_lock}\n\n{artwork_lock}\n\n{remaining_prompt}"
+            f"{subject_lock}\n\n{rule}\n\n{remaining_prompt}"
             if remaining_prompt
-            else f"{subject_lock}\n\n{artwork_lock}"
+            else f"{subject_lock}\n\n{rule}"
         )
-    return f"{artwork_lock}\n\n{prompt}" if prompt else artwork_lock
+    return f"{rule}\n\n{prompt}" if prompt else rule
 
 
-def build_design_studio_image_generation_prompt(prompt_text: str) -> str:
-    prompt = prepend_design_studio_mandatory_artwork_rules(prompt_text)
+def insert_design_studio_rule_after_rivalry_rules(prompt_text: str, rule_text: str) -> str:
+    prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
+    rule = _clean_prompt(rule_text)
+    rivalry_rules = _clean_prompt(SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1)
+    if rivalry_rules in prompt:
+        before, after = prompt.split(rivalry_rules, 1)
+        remaining_prompt = after.lstrip()
+        return (
+            f"{before}{rivalry_rules}\n\n{rule}\n\n{remaining_prompt}"
+            if remaining_prompt
+            else f"{before}{rivalry_rules}\n\n{rule}"
+        )
+    return insert_design_studio_rule_after_subject_lock(prompt, rule)
+
+
+def adapt_design_studio_prompt_for_rivalry(prompt_text: str) -> str:
+    prompt = _clean_prompt(prompt_text)
+    replacements = {
+        "The subject must always be the hero.": "The two opposing principal subjects must always be co-equal heroes.",
+        "The subject must be the hero.": "The two opposing principal subjects must be co-equal heroes.",
+        "The subject should be the hero.": "The two opposing principal subjects should be co-equal heroes.",
+        "Realistic hero subject": "Realistic co-equal rivalry subjects",
+    }
+    for original, replacement in replacements.items():
+        prompt = prompt.replace(original, replacement)
+    return prompt
+
+
+def adapt_design_studio_prompt_for_authentic_signature_rules(prompt_text: str) -> str:
+    prompt = _clean_prompt(prompt_text)
+    legacy_signature_style = "signature-" + "style graphic"
+    replacements = {
+        f"Where appropriate, include a subtle {legacy_signature_style}.": "If valid authentic signature assets are supplied or selected, composite those exact signature assets subtly. If no valid authentic signature asset is available, omit signatures entirely.",
+        f"Where suitable, include a subtle {legacy_signature_style}.": "Where suitable, use only a valid authentic supplied or selected signature asset. If no valid authentic signature asset is available, omit signatures entirely.",
+        "Only use a signature if it improves the memorabilia feeling.": "Only use an authentic supplied or selected signature asset if it improves the memorabilia feeling.",
+        "The signature should feel authentic, subtle, and premium.": "The authentic signature asset should feel subtle and premium.",
+        "The signature should feel like memorabilia, not decoration.": "The authentic signature asset should feel like memorabilia, not decoration.",
+        "Subtle signature glow": "Subtle glow on an authentic supplied signature asset",
+        "signature detail": "authentic supplied signature detail",
+    }
+    for original, replacement in replacements.items():
+        prompt = prompt.replace(original, replacement)
+    return prompt
+
+
+def insert_design_studio_rule_after_existing_block(prompt_text: str, existing_block: str, rule_text: str) -> str:
+    prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
+    existing = _clean_prompt(existing_block)
+    rule = _clean_prompt(rule_text)
+    if existing and existing in prompt:
+        before, after = prompt.split(existing, 1)
+        remaining_prompt = after.lstrip()
+        return (
+            f"{before}{existing}\n\n{rule}\n\n{remaining_prompt}"
+            if remaining_prompt
+            else f"{before}{existing}\n\n{rule}"
+        )
+    return insert_design_studio_rule_after_subject_lock(prompt, rule)
+
+
+def prepend_design_studio_mandatory_artwork_rules(
+    prompt_text: str,
+    *,
+    include_rivalry_rules: bool = False,
+    design_context=None,
+) -> str:
+    prompt = prepend_design_studio_subject_preservation_lock(prompt_text)
+
+    if include_rivalry_rules and not design_studio_prompt_has_rivalry_composition_rules(prompt):
+        prompt = insert_design_studio_rule_after_subject_lock(
+            prompt,
+            SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1,
+        )
+
+    signature_rules = build_authentic_signature_application_rules(
+        prompt,
+        design_context=design_context,
+    )
+    if not design_studio_prompt_has_signature_application_rules(prompt):
+        prompt = (
+            insert_design_studio_rule_after_rivalry_rules(prompt, signature_rules)
+            if include_rivalry_rules
+            else insert_design_studio_rule_after_subject_lock(prompt, signature_rules)
+        )
+
+    artwork_lock = _clean_prompt(DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)
+    if not design_studio_prompt_has_hero_dominance_and_border_lock(prompt):
+        prompt = (
+            insert_design_studio_rule_after_existing_block(prompt, signature_rules, artwork_lock)
+            if not design_studio_prompt_has_signature_application_rules(prompt_text)
+            else (
+                insert_design_studio_rule_after_rivalry_rules(prompt, artwork_lock)
+                if include_rivalry_rules
+                else insert_design_studio_rule_after_subject_lock(prompt, artwork_lock)
+            )
+        )
+    return prompt
+
+
+def build_design_studio_image_generation_prompt(prompt_text: str, *, design_context=None) -> str:
+    include_rivalry_rules = (
+        design_studio_prompt_has_rivalry_composition_rules(prompt_text)
+        or (
+            design_context is not None
+            and design_studio_context_is_rivalry(design_context)
+        )
+    )
+    base_prompt = adapt_design_studio_prompt_for_authentic_signature_rules(prompt_text)
+    if include_rivalry_rules:
+        base_prompt = adapt_design_studio_prompt_for_rivalry(base_prompt)
+    prompt = prepend_design_studio_mandatory_artwork_rules(
+        base_prompt,
+        include_rivalry_rules=include_rivalry_rules,
+        design_context=design_context,
+    )
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=False,
@@ -1764,7 +3225,7 @@ def _task_or_placeholder(task_text: str) -> str:
     return task if task else "[PASTED TASK]"
 
 
-def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
+def list_new_design_task_records(list_tasks_func=None) -> list[dict]:
     if list_tasks_func is None:
         try:
             from sports_cave_dashboard import list_tasks as list_tasks_func
@@ -1777,7 +3238,7 @@ def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
     except Exception:
         return []
 
-    titles = []
+    task_records = []
     seen = set()
     for task in tasks or []:
         section = str(task.get("section") or task.get("category") or "").strip()
@@ -1790,8 +3251,15 @@ def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
         if normalised_title in seen:
             continue
         seen.add(normalised_title)
-        titles.append(title)
-    return titles
+        task_records.append({**task, "title": title, "text": title})
+    return task_records
+
+
+def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
+    return [
+        task["title"]
+        for task in list_new_design_task_records(list_tasks_func)
+    ]
 
 
 def build_design_research_prompt(task_text: str) -> str:
@@ -1801,16 +3269,31 @@ def build_design_research_prompt(task_text: str) -> str:
     )
 
 
-def build_design_image_carousel_prompt(task_text: str, research_answer: str) -> str:
-    return _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
+def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, design_context=None) -> str:
+    prompt = _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
+    if design_studio_prompt_has_signature_image_search_rules(prompt):
+        return prompt
+    signature_sections = [
+        _clean_prompt(SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_V1),
+        build_signature_image_search_context(task_text, design_context=design_context),
+    ]
+    return "\n\n".join(
+        section
+        for section in (prompt, *signature_sections)
+        if str(section or "").strip()
+    )
 
 
-def build_design_generation_prompt(task_text: str) -> str:
+def build_design_generation_prompt(task_text: str, *, design_context=None) -> str:
     prompt = _clean_prompt(DESIGN_GENERATION_PROMPT_TEMPLATE).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
     )
-    return build_design_studio_image_generation_prompt(prompt)
+    prompt_context = design_context if design_context is not None else {"task_text": task_text}
+    return build_design_studio_image_generation_prompt(
+        prompt,
+        design_context=prompt_context,
+    )
 
 
 def _design_studio_prompt_id(key: str) -> str:
@@ -2068,7 +3551,9 @@ def render_new_design_tab():
         "3. Once the image carousel is shown, run the Design Generation Prompt in the same chat."
     )
     st.markdown("### Step 1 - Research")
-    task_options = list_new_design_task_titles()
+    task_records = list_new_design_task_records()
+    task_options = [task["title"] for task in task_records]
+    selected_task_record = None
     if task_options:
         selected_task = st.selectbox(
             "Choose design task",
@@ -2076,6 +3561,11 @@ def render_new_design_tab():
             key="design-studio-new-design-task-select",
         )
         selected_task_text = "" if selected_task == MANUAL_NEW_DESIGN_TASK_OPTION else selected_task
+        if selected_task_text:
+            selected_task_record = next(
+                (task for task in task_records if task["title"] == selected_task_text),
+                None,
+            )
     else:
         selected_task_text = ""
         st.selectbox(
@@ -2102,7 +3592,11 @@ def render_new_design_tab():
     st.divider()
 
     st.markdown("### Step 2 - Find Images")
-    image_prompt = build_design_image_carousel_prompt(task_text, "")
+    image_prompt = build_design_image_carousel_prompt(
+        task_text,
+        "",
+        design_context=selected_task_record if selected_task_record else None,
+    )
     render_generated_prompt_box(
         "Find Images Prompt",
         image_prompt,
@@ -2113,7 +3607,10 @@ def render_new_design_tab():
     st.divider()
 
     st.markdown("### Step 3 - Generate Design")
-    design_prompt = build_design_generation_prompt(task_text)
+    design_prompt = build_design_generation_prompt(
+        task_text,
+        design_context=selected_task_record if selected_task_record else None,
+    )
     render_generated_prompt_box(
         "Design Generation Prompt",
         design_prompt,

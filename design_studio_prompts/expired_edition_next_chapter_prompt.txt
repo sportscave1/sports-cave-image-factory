@@ -646,9 +646,9 @@ The border should elevate the artwork, not dominate it.
 
 STEP 12 — SIGNATURE / MEMORABILIA SYSTEM
 
-Where appropriate, include a subtle signature-style graphic.
+Where appropriate, include only a valid authentic signature asset supplied by the user or retrieved through the Find Images workflow.
 
-Only use a signature if it improves the memorabilia feeling.
+Only use an authentic supplied or selected signature asset if it improves the memorabilia feeling.
 
 Place it naturally in:
 
@@ -659,12 +659,13 @@ Near the subject
 Near the plaque
 Empty negative space
 
-The signature should feel authentic, subtle, and premium.
+The authentic signature asset should feel subtle and premium.
 
 Do not make it oversized.
 Do not put it in a box unless it feels like part of a premium memorabilia plate.
-Do not use fake-looking random scribbles.
+Do not invent, imitate, redraw, trace, font-set or regenerate a signature.
 Do not let the signature distract from the subject.
+If no valid authentic signature asset is available, omit signatures entirely.
 
 STEP 13 — REALISM RULES
 
