@@ -47,6 +47,7 @@ import prompt_store
 import sc_auth
 import shared_credentials
 import social_media
+import seo_workspace
 import sports_cave_dashboard
 import sports_cave_pricing
 import sports_sales_calendar
@@ -62,6 +63,7 @@ social_media_reels_studio_page_module = None
 social_media_page_module = None
 ads_page_module = None
 reporting_page_module = None
+seo_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -206,6 +208,15 @@ def get_reporting_page():
         reporting_page_module = importlib.import_module("reporting_page")
         log_startup_stage("REPORTING PAGE IMPORT DONE")
     return reporting_page_module
+
+
+def get_seo_page():
+    global seo_page_module
+    if seo_page_module is None:
+        log_startup_stage("SEO PAGE IMPORT START")
+        seo_page_module = importlib.import_module("seo_page")
+        log_startup_stage("SEO PAGE IMPORT DONE")
+    return seo_page_module
 
 
 def get_requests_module():
@@ -1392,6 +1403,32 @@ def inject_styles():
             margin-top: 0.35rem;
         }
 
+        section[data-testid="stSidebar"] .sc-sidebar-section-label {
+            color: #77736B !important;
+            font-size: 0.66rem;
+            font-weight: 720;
+            letter-spacing: 0.11em;
+            margin: 0.9rem 0 0.28rem;
+            padding: 0 0.62rem;
+            text-transform: uppercase;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-a11y {
+            height: 1px;
+            margin: -1px;
+            overflow: hidden;
+            padding: 0;
+            position: absolute;
+            width: 1px;
+            clip: rect(0, 0, 0, 0);
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-role {
+            color: #77736B !important;
+            font-size: 0.72rem;
+            margin: -0.35rem 0 0.45rem;
+        }
+
         section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
             margin-bottom: 0;
         }
@@ -1411,8 +1448,8 @@ def inject_styles():
             display: flex;
             font-weight: 520 !important;
             justify-content: flex-start;
-            min-height: 1.95rem;
-            padding: 0.32rem 0.62rem !important;
+            min-height: 2.68rem;
+            padding: 0.48rem 0.68rem !important;
             text-align: left;
             transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
             width: 100%;
@@ -3125,7 +3162,7 @@ def inject_styles():
 
         .sc-files-preview-note {
             color: #4E5358;
-            font-size: 0.84rem;
+            font-size: 0.88rem;
             padding: 0.45rem 0 0.7rem;
         }
 
@@ -3196,6 +3233,68 @@ def inject_styles():
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-social-media-group,
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-group {
+            background: #EAE7E0;
+            border-radius: 0.55rem;
+            padding: 0.12rem;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-social-media-group [data-testid="stColumn"]:last-child button,
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-group [data-testid="stColumn"]:last-child button {
+            color: #9B7428 !important;
+            justify-content: center;
+            min-width: 2.25rem;
+            padding-left: 0.2rem !important;
+            padding-right: 0.2rem !important;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-social-media-children,
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children {
+            border-left: 1px solid #C8A85F;
+            margin: 0.08rem 0 0.18rem 1.15rem;
+            padding: 0.08rem 0 0.08rem 0.55rem;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-social-media-children div[data-testid="stButton"] button,
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button {
+            min-height: 2.35rem;
+            padding: 0.42rem 0.56rem !important;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button p,
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button span {
+            font-size: 0.79rem;
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-email-soon button {
+            opacity: 0.72 !important;
+            position: relative;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-email-soon button::after {
+            background: #EEE5D1;
+            border: 1px solid #D5BD87;
+            border-radius: 999px;
+            color: #72591E;
+            content: "Soon";
+            font-size: 0.62rem;
+            font-weight: 720;
+            margin-left: auto;
+            padding: 0.1rem 0.38rem;
+        }
+
+        section[data-testid="stSidebar"] .st-key-sidebar-profile-footer {
+            background: #F1F1EF;
+            bottom: 0;
+            padding-bottom: 0.35rem;
+            position: sticky;
+            z-index: 5;
         }
 
         .sc-task-detail-popover {
@@ -8047,82 +8146,179 @@ def render_sidebar():
     allowed_menu_options = [
         page for page in MENU_OPTIONS if os_accounts.can_access_page(user, page)
     ]
-    visible_page = (
-        current_page
-        if current_page in allowed_menu_options
-        else ""
-    )
+    icon_by_route = {
+        "Dashboard": ":material/home:",
+        "Orders": ":material/shopping_cart:",
+        "Prodigi": ":material/inventory_2:",
+        "Edition Ops": ":material/assignment:",
+        "Mockups": ":material/checkroom:",
+        social_media.SOCIAL_MEDIA_ROUTE: ":material/campaign:",
+        social_media.AI_REELS_ROUTE: ":material/movie_edit:",
+        "Product Uploads": ":material/upload_file:",
+        "Design Studio": ":material/palette:",
+        "Ads": ":material/ads_click:",
+        seo_workspace.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
+        "VA Training": ":material/school:",
+        "Reporting": ":material/bar_chart:",
+        "Accounts & Access": ":material/group:",
+    }
+
+    def section_label(label):
+        st.sidebar.markdown(
+            f'<div class="sc-sidebar-section-label">{html.escape(label)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    def page_button(route, *, label=None, key=None, icon=None, child=False):
+        if (
+            route not in allowed_menu_options
+            and route not in seo_workspace.SEO_ROUTES
+            and route != "Accounts & Access"
+        ):
+            return False
+        button_label = label or SIDEBAR_NAV_LABELS.get(route, route)
+        container_key = f"sidebar-child-{os_accounts.page_key_for_route(route) or route}" if child else f"sidebar-row-{os_accounts.page_key_for_route(route) or route}"
+        container = st.sidebar.container(key=container_key)
+        clicked = container.button(
+            button_label,
+            key=key or f"sidebar-nav::{route}",
+            use_container_width=True,
+            type="primary" if current_page == route else "secondary",
+            icon=icon or icon_by_route.get(route),
+        )
+        if clicked and current_page != route:
+            set_current_page(route, source="sidebar")
+            st.rerun()
+        return clicked
+
     social_group_active = current_page in {
         social_media.SOCIAL_MEDIA_ROUTE,
         social_media.AI_REELS_ROUTE,
     }
     if social_group_active:
         st.session_state["social-media-nav-expanded"] = True
-    for page in allowed_menu_options:
-        button_label = SIDEBAR_NAV_LABELS.get(page, page)
-        if page == social_media.SOCIAL_MEDIA_ROUTE:
-            expanded = bool(
-                st.session_state.get("social-media-nav-expanded", social_group_active)
-            )
-            with st.sidebar.container(key="sidebar-social-media-group"):
-                parent_columns = st.columns([5, 1], gap="small")
-                if parent_columns[0].button(
-                    button_label,
-                    key="sidebar-nav::Social Media",
-                    use_container_width=True,
-                    type="primary" if social_group_active else "secondary",
-                ):
-                    st.session_state["social-media-nav-expanded"] = True
-                    if current_page != social_media.SOCIAL_MEDIA_ROUTE:
-                        set_current_page(social_media.SOCIAL_MEDIA_ROUTE, source="sidebar")
-                        st.rerun()
-                if parent_columns[1].button(
-                    "v" if expanded else ">",
-                    key="sidebar-nav::Social Media::toggle",
-                    help="Collapse Social Media" if expanded else "Expand Social Media",
-                    use_container_width=True,
-                ):
-                    st.session_state["social-media-nav-expanded"] = not expanded
+    seo_group_active = current_page in seo_workspace.SEO_ROUTES
+    if seo_group_active:
+        st.session_state["seo-nav-expanded"] = True
+
+    section_label("MAIN")
+    page_button("Dashboard")
+
+    section_label("OPERATIONS")
+    for route in ("Orders", "Prodigi", "Edition Ops"):
+        page_button(route)
+
+    section_label("CREATE")
+    page_button("Mockups")
+    if social_media.SOCIAL_MEDIA_ROUTE in allowed_menu_options:
+        expanded = bool(st.session_state.get("social-media-nav-expanded", social_group_active))
+        with st.sidebar.container(key="sidebar-social-media-group"):
+            parent_columns = st.columns([5, 1], gap="small")
+            if parent_columns[0].button(
+                SIDEBAR_NAV_LABELS.get(social_media.SOCIAL_MEDIA_ROUTE, social_media.SOCIAL_MEDIA_ROUTE),
+                key="sidebar-nav::Social Media",
+                use_container_width=True,
+                type="primary" if social_group_active else "secondary",
+                icon=icon_by_route[social_media.SOCIAL_MEDIA_ROUTE],
+            ):
+                st.session_state["social-media-nav-expanded"] = True
+                if current_page != social_media.SOCIAL_MEDIA_ROUTE:
+                    set_current_page(social_media.SOCIAL_MEDIA_ROUTE, source="sidebar")
                     st.rerun()
-                if expanded:
-                    with st.container(key="sidebar-social-media-child"):
-                        if st.button(
-                            social_media.AI_REELS_ROUTE,
-                            key="sidebar-nav::AI Reels",
-                            use_container_width=True,
-                            type=(
-                                "primary"
-                                if current_page == social_media.AI_REELS_ROUTE
-                                else "secondary"
-                            ),
-                        ):
-                            if current_page != social_media.AI_REELS_ROUTE:
-                                set_current_page(social_media.AI_REELS_ROUTE, source="sidebar")
-                                st.rerun()
-            continue
-        if page == "Files":
-            st.sidebar.markdown(
-                '<span class="sc-files-window-launcher-label">Files</span>',
+            if parent_columns[1].button(
+                "v" if expanded else ">",
+                key="sidebar-nav::Social Media::toggle",
+                help="Collapse Social Media" if expanded else "Expand Social Media",
+                use_container_width=True,
+            ):
+                st.session_state["social-media-nav-expanded"] = not expanded
+                st.rerun()
+            st.markdown(
+                f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}">Social Media navigation</span>',
                 unsafe_allow_html=True,
             )
-            with st.sidebar.container(key="files-window-launcher-slot"):
-                _files_window_launcher_component()(
-                    key="files-window-launcher",
-                    default=None,
-                )
-            continue
-        if st.sidebar.button(
-            button_label,
-            key=f"sidebar-nav::{page}",
-            use_container_width=True,
-            type="primary" if page == visible_page else "secondary",
-        ):
-            if page != visible_page:
-                set_current_page(page, source="sidebar")
+            if expanded:
+                children = st.sidebar.container(key="sidebar-social-media-children")
+                if children.button(
+                    social_media.AI_REELS_ROUTE,
+                    key="sidebar-nav::AI Reels",
+                    use_container_width=True,
+                    type="primary" if current_page == social_media.AI_REELS_ROUTE else "secondary",
+                    icon=icon_by_route[social_media.AI_REELS_ROUTE],
+                ):
+                    if current_page != social_media.AI_REELS_ROUTE:
+                        set_current_page(social_media.AI_REELS_ROUTE, source="sidebar")
+                        st.rerun()
+    for route in ("Product Uploads", "Design Studio", "Ads"):
+        page_button(route)
+
+    section_label("GROWTH")
+    if seo_workspace.SEO_OVERVIEW_ROUTE in allowed_menu_options:
+        expanded = bool(st.session_state.get("seo-nav-expanded", seo_group_active))
+        with st.sidebar.container(key="sidebar-seo-group"):
+            parent_columns = st.columns([5, 1], gap="small")
+            if parent_columns[0].button(
+                "SEO",
+                key="sidebar-nav::SEO",
+                use_container_width=True,
+                type="primary" if seo_group_active else "secondary",
+                icon=icon_by_route[seo_workspace.SEO_OVERVIEW_ROUTE],
+            ):
+                st.session_state["seo-nav-expanded"] = True
+                if current_page != seo_workspace.SEO_OVERVIEW_ROUTE:
+                    set_current_page(seo_workspace.SEO_OVERVIEW_ROUTE, source="sidebar")
+                    st.rerun()
+            if parent_columns[1].button(
+                "v" if expanded else ">",
+                key="sidebar-nav::SEO::toggle",
+                help="Collapse SEO" if expanded else "Expand SEO",
+                use_container_width=True,
+            ):
+                st.session_state["seo-nav-expanded"] = not expanded
                 st.rerun()
+            st.markdown(
+                f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}">SEO navigation</span>',
+                unsafe_allow_html=True,
+            )
+            if expanded:
+                children = st.sidebar.container(key="sidebar-seo-children")
+                for route in seo_workspace.SEO_ROUTES:
+                    if children.button(
+                        seo_workspace.SEO_NAV_LABELS[route],
+                        key=f"sidebar-nav::SEO::{route}",
+                        use_container_width=True,
+                        type="primary" if current_page == route else "secondary",
+                    ):
+                        if current_page != route:
+                            set_current_page(route, source="sidebar")
+                            st.rerun()
+    email_container = st.sidebar.container(key="sidebar-email-soon")
+    email_container.button(
+        "Email",
+        key="sidebar-nav::Email::soon",
+        use_container_width=True,
+        disabled=True,
+        help="Coming later",
+        icon=":material/mail:",
+    )
+
+    section_label("MANAGE")
+    page_button("VA Training")
+    if "Files" in allowed_menu_options:
+        st.sidebar.markdown(
+            '<span class="sc-files-window-launcher-label">Files</span>',
+            unsafe_allow_html=True,
+        )
+        with st.sidebar.container(key="files-window-launcher-slot"):
+            _files_window_launcher_component()(key="files-window-launcher", default=None)
+    page_button("Reporting")
+
+    section_label("ADMIN")
+    page_button("Accounts & Access", icon=icon_by_route["Accounts & Access"])
     if (
         current_page not in MENU_OPTIONS
         and current_page != social_media.AI_REELS_ROUTE
+        and current_page not in seo_workspace.SEO_ROUTES
         and current_page != "Accounts & Access"
         and os_accounts.is_admin(user)
     ):
@@ -8135,21 +8331,13 @@ def render_sidebar():
             set_current_page("Dashboard", source="sidebar")
             st.rerun()
 
-    st.sidebar.divider()
-    if st.sidebar.button(
-        "Accounts & Access",
-        key="sidebar-nav::Accounts & Access",
-        use_container_width=True,
-        type="primary" if current_page == "Accounts & Access" else "secondary",
-    ):
-        set_current_page("Accounts & Access", source="sidebar")
-        st.rerun()
-
-    st.sidebar.divider()
+    profile = st.sidebar.container(key="sidebar-profile-footer")
+    profile.divider()
     display_name = str(user.get("display_name") or user.get("username") or "").strip()
     if display_name:
-        st.sidebar.caption(f"{display_name} :)")
-    if st.sidebar.button("Logout", use_container_width=True):
+        profile.caption(display_name)
+        profile.markdown(f'<div class="sc-sidebar-role">{html.escape(str(user.get("role") or "Account").title())}</div>', unsafe_allow_html=True)
+    if profile.button("Logout", key="sidebar-logout", use_container_width=True, icon=":material/logout:"):
         logout_app()
 
 
@@ -14070,6 +14258,12 @@ def render_selected_page(current_page):
     elif current_page == social_media.AI_REELS_ROUTE:
         get_social_media_reels_studio_page().render_page(
             can_edit_prompts=prompt_editing_allowed()
+        )
+    elif current_page in seo_workspace.SEO_ROUTES:
+        get_seo_page().render_page(
+            current_os_user(),
+            current_page,
+            navigate=lambda route: set_current_page(route, source="seo"),
         )
     elif current_page == "Design Studio":
         get_design_studio_page().render_design_studio_page(

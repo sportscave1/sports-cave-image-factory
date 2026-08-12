@@ -6,6 +6,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import sc_auth
 from shared_credentials import CREDENTIAL_PERMISSION_KEYS
 import social_media
+import seo_workspace
 
 
 ROLE_ADMIN = "admin"
@@ -69,6 +70,23 @@ PAGE_REGISTRY = (
         "worker_assignable": True,
     },
     {"key": "ads", "route": "Ads", "label": "Ads", "worker_assignable": True},
+    {
+        "key": seo_workspace.SEO_PAGE_KEY,
+        "route": seo_workspace.SEO_OVERVIEW_ROUTE,
+        "label": "SEO",
+        "worker_assignable": True,
+    },
+    *(
+        {
+            "key": f"seo_{route.casefold().replace(' & ', '_').replace(' ', '_')}",
+            "route": route,
+            "label": seo_workspace.SEO_NAV_LABELS[route],
+            "worker_assignable": False,
+            "parent_key": seo_workspace.SEO_PAGE_KEY,
+            "navigation_child": True,
+        }
+        for route in seo_workspace.SEO_ROUTES[1:]
+    ),
     {
         "key": "va_training",
         "route": "VA Training",
@@ -308,6 +326,13 @@ def can_access_page(user, route_or_key):
         if is_admin(user):
             return True
         return social_media.SOCIAL_MEDIA_PAGE_KEY in permission_keys(user)
+    if page and (
+        page["key"] == seo_workspace.SEO_PAGE_KEY
+        or page.get("parent_key") == seo_workspace.SEO_PAGE_KEY
+    ):
+        if is_admin(user):
+            return True
+        return seo_workspace.SEO_PAGE_KEY in permission_keys(user)
     if page and page["key"] == "accounts_access":
         return True
     if is_admin(user):
