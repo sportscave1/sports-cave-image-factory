@@ -3,6 +3,7 @@ import os
 from starlette.routing import Route
 from streamlit.web.server.starlette import App
 
+import app_branding
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
@@ -17,7 +18,9 @@ routes = [
         *TOP_BAR_ROUTE_HANDLERS,
     )
 ]
-app = App("app.py", routes=routes)
+routes.extend(app_branding.public_branding_routes())
+streamlit_app = App("app.py", routes=routes)
+app = app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
 
 
 if __name__ == "__main__":
