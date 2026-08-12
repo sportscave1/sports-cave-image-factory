@@ -1,45 +1,38 @@
 from copy import deepcopy
 import csv
 from datetime import date, datetime, timezone
+from functools import lru_cache
 import io
 import json
 import os
 from pathlib import Path
 import re
 import threading
+import time
 import uuid
 from urllib.parse import urlparse, urlunparse
 
-
-SEO_PAGE_KEY = "seo"
-SEO_OVERVIEW_ROUTE = "SEO Overview"
-SEO_CITATIONS_ROUTE = "Citations"
-SEO_BLOG_ROUTE = "Blog Content"
-SEO_INTERNAL_LINKING_ROUTE = "Internal Linking"
-SEO_BACKLINKS_ROUTE = "Backlinks & Outreach"
-SEO_KEYWORDS_ROUTE = "Keyword Research & Mapping"
-SEO_ROUTES = (
-    SEO_OVERVIEW_ROUTE,
-    SEO_CITATIONS_ROUTE,
-    SEO_BLOG_ROUTE,
-    SEO_INTERNAL_LINKING_ROUTE,
+from seo_navigation import (
     SEO_BACKLINKS_ROUTE,
+    SEO_BLOG_ROUTE,
+    SEO_CITATIONS_ROUTE,
+    SEO_INTERNAL_LINKING_ROUTE,
     SEO_KEYWORDS_ROUTE,
+    SEO_NAV_LABELS,
+    SEO_OVERVIEW_ROUTE,
+    SEO_PAGE_KEY,
+    SEO_ROUTES,
 )
-SEO_NAV_LABELS = {
-    SEO_OVERVIEW_ROUTE: "Overview",
-    SEO_CITATIONS_ROUTE: "Citations",
-    SEO_BLOG_ROUTE: "Blog Content",
-    SEO_INTERNAL_LINKING_ROUTE: "Internal Linking",
-    SEO_BACKLINKS_ROUTE: "Backlinks & Outreach",
-    SEO_KEYWORDS_ROUTE: "Keyword Research & Mapping",
-}
 
 SEO_MIGRATION = "20260812_seo_workspace_v1.sql"
-SEO_SCHEMA_VERSION = 1
+SEO_DATA_MIGRATION = "20260812_seo_workspace_v2.sql"
+SEO_SCHEMA_VERSION = 2
 SEO_WORKSPACE_KEY = "sports-cave"
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_STORE_PATH = BASE_DIR / "output" / "_cache" / "seo_workspace.json"
+LEGACY_CITATION_IMPORT_VERSION = "legacy-citation-tracker-v1"
+LEGACY_CITATION_FIXTURE_PATH = BASE_DIR / "data" / "seo_citations_legacy_v1.json"
+SEO_STORE_CACHE_SECONDS = 5.0
 
 BLOG_STATUSES = (
     "Idea",
@@ -265,6 +258,190 @@ def _json_safe(value):
     return str(value)
 
 
+def _unescape_markdown(value):
+    return re.sub(r"\\([\\|_&*\[\]()<>])", r"\1", str(value or "")).strip()
+
+
+def _markdown_link_target(value):
+    clean = str(value or "").strip()
+    match = re.fullmatch(r"\[(?:\\.|[^\]])*\]\((.+)\)", clean)
+    if not match:
+        return _unescape_markdown(clean)
+    target = match.group(1).strip()
+    if target.startswith("<") and target.endswith(">"):
+        target = target[1:-1]
+    quoted_title = re.match(r'^(\S+)\s+["\'].*["\']$', target)
+    return _unescape_markdown(quoted_title.group(1) if quoted_title else target)
+
+
+def _split_markdown_row(line):
+    value = str(line or "").strip()
+    if value.startswith("|"):
+        value = value[1:]
+    if value.endswith("|") and not value.endswith("\\|"):
+        value = value[:-1]
+    cells = []
+    current = []
+    escaped = False
+    for character in value:
+        if escaped:
+            current.extend(("\\", character))
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == "|":
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(character)
+    if escaped:
+        current.append("\\")
+    cells.append("".join(current).strip())
+    return cells
+
+
+def _legacy_tracker_rows(content):
+    text = content.decode("utf-8-sig") if isinstance(content, bytes) else str(content or "").lstrip("\ufeff")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+    if "\t" in lines[0]:
+        return list(csv.DictReader(io.StringIO(text, newline=""), delimiter="\t"))
+    table_lines = [line for line in lines if line.lstrip().startswith("|")]
+    if len(table_lines) < 2:
+        raise SEOValidationError("The citation tracker must be a Markdown table or tab-separated table.")
+    headers = [_unescape_markdown(cell) for cell in _split_markdown_row(table_lines[0])]
+    rows = []
+    for line in table_lines[1:]:
+        cells = _split_markdown_row(line)
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells):
+            continue
+        if len(cells) != len(headers):
+            raise SEOValidationError("A citation tracker row has an unexpected number of columns.")
+        rows.append(dict(zip(headers, cells)))
+    return rows
+
+
+def canonical_profile_url(value):
+    clean = _markdown_link_target(value).strip()
+    if not clean:
+        return ""
+    parsed = urlparse(clean)
+    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
+        return "legacy:" + clean.casefold()
+    scheme = parsed.scheme.casefold()
+    hostname = parsed.hostname.casefold()
+    port = parsed.port
+    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        hostname = f"{hostname}:{port}"
+    path = parsed.path[:-1] if parsed.path.endswith("/") and parsed.path != "/" else parsed.path
+    if path == "/":
+        path = ""
+    return urlunparse((scheme, hostname, path, parsed.params, parsed.query, parsed.fragment))
+
+
+def _normalise_legacy_date(value):
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    for date_format in ("%m-%d-%Y", "%m-%d-%y"):
+        try:
+            return datetime.strptime(clean, date_format).date().isoformat()
+        except ValueError:
+            continue
+    raise SEOValidationError(f"Unsupported citation date: {clean}")
+
+
+def _note_usefulness(value):
+    clean = str(value or "").strip()
+    generic = clean.casefold() in {"profile live", "profile live.", "business profile", "listing live"}
+    return (0 if generic else 1, len(clean))
+
+
+def _merge_legacy_source_rows(current, candidate):
+    current = dict(current or {})
+    candidate = dict(candidate or {})
+    if not current:
+        return candidate
+    current_date = current.get("legacy_source_date") or ""
+    candidate_date = candidate.get("legacy_source_date") or ""
+    newest, older = (candidate, current) if candidate_date >= current_date else (current, candidate)
+    merged = {**older, **{key: value for key, value in newest.items() if value not in (None, "")}}
+    merged["notes"] = max(
+        (current.get("notes") or "", candidate.get("notes") or ""),
+        key=_note_usefulness,
+    )
+    merged["canonical_profile_url"] = current.get("canonical_profile_url") or candidate.get("canonical_profile_url")
+    return merged
+
+
+def parse_legacy_citation_tracker(content):
+    source_rows = _legacy_tracker_rows(content)
+    status_counts = {"Live": 0, "Pending": 0}
+    invalid = []
+    grouped = {}
+    for source_index, source in enumerate(source_rows, start=1):
+        source_status = _unescape_markdown(source.get("Status"))
+        if source_status not in status_counts:
+            invalid.append({"row": source_index, "reason": "Unsupported status"})
+            continue
+        status_counts[source_status] += 1
+        try:
+            source_date = _normalise_legacy_date(source.get("Date Completed"))
+        except SEOValidationError as error:
+            invalid.append({"row": source_index, "reason": str(error)})
+            continue
+        profile_url = _markdown_link_target(source.get("Profile URL"))
+        canonical = canonical_profile_url(profile_url)
+        if not canonical:
+            invalid.append({"row": source_index, "reason": "Profile URL is blank"})
+            continue
+        notes = _unescape_markdown(source.get("Notes"))
+        plain_text = "unclickble link to website" in notes.casefold()
+        if plain_text:
+            notes = "Website displayed as plain text; link is not clickable."
+        link_displayed = _unescape_markdown(source.get("Link Displayed?")).casefold() == "yes"
+        application_status = "Live" if source_status == "Live" else "Pending Verification"
+        record = {
+            "platform": _unescape_markdown(source.get("Platform Name")),
+            "category": "Other",
+            "signup_url": _markdown_link_target(source.get("Signup URL")),
+            "profile_url": profile_url,
+            "canonical_profile_url": canonical,
+            "username_handle": _unescape_markdown(source.get("Username / Handle")),
+            "website_displayed": "Yes" if link_displayed or plain_text else "No",
+            "website_link_type": "Plain Text" if plain_text else "Clickable" if link_displayed else "None",
+            "logo_uploaded": "Yes" if _unescape_markdown(source.get("Logo Uploaded?")).casefold() == "yes" else "No",
+            "publicly_accessible": source_status == "Live",
+            "status": application_status,
+            "owner": "Unassigned",
+            "login_reference": "",
+            "date_started": source_date if source_status == "Pending" else "",
+            "date_completed": source_date if source_status == "Live" else None,
+            "last_checked": source_date,
+            "notes": notes,
+            "verification_basis": "Legacy citation tracker",
+            "legacy_source_date": source_date,
+            "legacy_import_version": LEGACY_CITATION_IMPORT_VERSION,
+        }
+        grouped[canonical] = _merge_legacy_source_rows(grouped.get(canonical), record)
+    records = []
+    for canonical in sorted(grouped):
+        record = grouped[canonical]
+        record["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sports-cave-citation:{canonical}"))
+        records.append(record)
+    return {
+        "import_version": LEGACY_CITATION_IMPORT_VERSION,
+        "source_rows": len(source_rows),
+        "source_live": status_counts["Live"],
+        "source_pending": status_counts["Pending"],
+        "duplicate_rows_merged": max(len(source_rows) - len(records) - len(invalid), 0),
+        "invalid_rows": len(invalid),
+        "invalid": invalid,
+        "records": records,
+    }
+
+
 def _default_target_library():
     return [
         {
@@ -315,6 +492,7 @@ def default_state():
             "weekly_targets": list(WEEKLY_TARGETS),
             "primary_markets": ["Australia", "United States", "United Kingdom"],
             "secondary_markets": ["Canada", "New Zealand"],
+            "data_migrations": {},
         },
         "blog_records": [],
         "link_plans": [],
@@ -346,20 +524,133 @@ def normalise_state(value):
     return state
 
 
+@lru_cache(maxsize=1)
+def load_legacy_citation_fixture():
+    if not LEGACY_CITATION_FIXTURE_PATH.is_file():
+        raise SEOStoreError("The sanitised legacy citation fixture is unavailable.")
+    try:
+        payload = json.loads(LEGACY_CITATION_FIXTURE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise SEOStoreError("The sanitised legacy citation fixture could not be read.") from error
+    if payload.get("import_version") != LEGACY_CITATION_IMPORT_VERSION:
+        raise SEOStoreError("The sanitised legacy citation fixture has an unexpected version.")
+    return payload
+
+
+def apply_legacy_citation_import(state, fixture=None):
+    state = normalise_state(state)
+    migrations = state.setdefault("settings", {}).setdefault("data_migrations", {})
+    if migrations.get(LEGACY_CITATION_IMPORT_VERSION, {}).get("completed"):
+        return state, None
+    fixture = deepcopy(fixture or load_legacy_citation_fixture())
+    existing_rows = [dict(row) for row in state.get("citations", [])]
+    existing_by_canonical = {
+        canonical_profile_url(row.get("canonical_profile_url") or row.get("profile_url")): index
+        for index, row in enumerate(existing_rows)
+        if canonical_profile_url(row.get("canonical_profile_url") or row.get("profile_url"))
+    }
+    created = updated = skipped = 0
+    conflicts = []
+    for imported in fixture.get("records") or []:
+        imported = dict(imported)
+        canonical = canonical_profile_url(imported.get("canonical_profile_url") or imported.get("profile_url"))
+        existing_index = existing_by_canonical.get(canonical)
+        if existing_index is None:
+            now = utc_now()
+            existing_rows.append({**imported, "created_at": now, "updated_at": now, "archived_at": ""})
+            existing_by_canonical[canonical] = len(existing_rows) - 1
+            created += 1
+            continue
+        existing = dict(existing_rows[existing_index])
+        if existing.get("archived_at") or existing.get("status") == "Skipped":
+            skipped += 1
+            conflicts.append(
+                {"canonical_profile_url": canonical, "reason": "Existing record is archived or skipped"}
+            )
+            continue
+        merged = dict(existing)
+        for field, value in imported.items():
+            if field in {
+                "owner",
+                "owner_id",
+                "notes",
+                "login_reference",
+                "reviewed_at",
+                "reviewed_by",
+                "category",
+            } and existing.get(field):
+                continue
+            if value not in (None, ""):
+                merged[field] = value
+        if existing.get("status") == "Live" or imported.get("status") == "Live":
+            merged["status"] = "Live"
+            merged["date_completed"] = existing.get("date_completed") or imported.get("date_completed") or ""
+        merged["id"] = existing.get("id") or imported.get("id")
+        if merged != existing:
+            merged["updated_at"] = utc_now()
+            existing_rows[existing_index] = merged
+            updated += 1
+    state["citations"] = existing_rows
+    summary = {
+        "source_rows_processed": int(fixture.get("source_rows") or 0),
+        "unique_records_in_source": len(fixture.get("records") or []),
+        "records_created": created,
+        "existing_records_updated": updated,
+        "duplicate_rows_merged": int(fixture.get("duplicate_rows_merged") or 0),
+        "live_records_imported": sum(row.get("status") == "Live" for row in fixture.get("records") or []),
+        "pending_records_imported": sum(
+            row.get("status") == "Pending Verification" for row in fixture.get("records") or []
+        ),
+        "records_skipped": skipped,
+        "invalid_rows": int(fixture.get("invalid_rows") or 0),
+        "persisted_live_total": sum(
+            row.get("status") == "Live" and not row.get("archived_at") for row in existing_rows
+        ),
+        "persisted_pending_total": sum(
+            row.get("status") == "Pending Verification" and not row.get("archived_at")
+            for row in existing_rows
+        ),
+        "conflicts": conflicts,
+    }
+    migrations[LEGACY_CITATION_IMPORT_VERSION] = {
+        "completed": True,
+        "completed_at": utc_now(),
+        "summary": summary,
+    }
+    state["schema_version"] = SEO_SCHEMA_VERSION
+    return state, summary
+
+
 class LocalSEOStore:
     def __init__(self, path=LOCAL_STORE_PATH):
         self.path = Path(path)
         self._lock = threading.RLock()
+        self._cached_state = None
+        self._cached_mtime_ns = None
+        self._last_import_summary = None
 
     def load(self):
         with self._lock:
             if not self.path.is_file():
-                return default_state()
+                state, summary = apply_legacy_citation_import(default_state())
+                self._last_import_summary = summary
+                self.save(state, actor_id="legacy-citation-import")
+                return deepcopy(state)
+            mtime_ns = self.path.stat().st_mtime_ns
+            if self._cached_state is not None and self._cached_mtime_ns == mtime_ns:
+                return deepcopy(self._cached_state)
             try:
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 raise SEOStoreError("SEO workspace data could not be read.") from error
-            return normalise_state(payload)
+            state, summary = apply_legacy_citation_import(payload)
+            if summary is not None:
+                self._last_import_summary = summary
+                self.save(state, actor_id="legacy-citation-import")
+            else:
+                self._cached_state = deepcopy(state)
+                self._cached_mtime_ns = mtime_ns
+            return deepcopy(state)
 
     def save(self, state, *, actor_id=""):
         payload = normalise_state(_json_safe(state))
@@ -378,7 +669,14 @@ class LocalSEOStore:
                 except OSError:
                     pass
                 raise SEOStoreError("SEO workspace data could not be saved.") from error
+        self._cached_state = deepcopy(payload)
+        self._cached_mtime_ns = self.path.stat().st_mtime_ns
         return payload
+
+    def consume_import_summary(self):
+        summary = self._last_import_summary
+        self._last_import_summary = None
+        return deepcopy(summary)
 
 
 class PostgresSEOStore:
@@ -386,6 +684,9 @@ class PostgresSEOStore:
         self.backend = backend
         self._schema_ready = False
         self._lock = threading.Lock()
+        self._cached_state = None
+        self._cached_at = 0.0
+        self._last_import_summary = None
 
     def _backend(self):
         if self.backend is not None:
@@ -400,14 +701,17 @@ class PostgresSEOStore:
         with self._lock:
             if self._schema_ready:
                 return
-            migration_path = BASE_DIR / "migrations" / SEO_MIGRATION
-            if not migration_path.is_file():
+            migration_paths = (
+                BASE_DIR / "migrations" / SEO_MIGRATION,
+                BASE_DIR / "migrations" / SEO_DATA_MIGRATION,
+            )
+            if not all(path.is_file() for path in migration_paths):
                 raise SEOStoreError("SEO workspace migration is unavailable.")
-            sql = migration_path.read_text(encoding="utf-8")
             try:
                 with self._backend().connect() as conn:
                     with conn.cursor() as cur:
-                        cur.execute(sql)
+                        for migration_path in migration_paths:
+                            cur.execute(migration_path.read_text(encoding="utf-8"))
                     conn.commit()
             except Exception as error:
                 raise SEOStoreError("SEO workspace storage could not be prepared.") from error
@@ -415,6 +719,8 @@ class PostgresSEOStore:
 
     def load(self):
         self.ensure_schema()
+        if self._cached_state is not None and time.monotonic() - self._cached_at < SEO_STORE_CACHE_SECONDS:
+            return deepcopy(self._cached_state)
         try:
             with self._backend().connect() as conn:
                 with conn.cursor() as cur:
@@ -431,7 +737,14 @@ class PostgresSEOStore:
                 payload = json.loads(payload)
             except (TypeError, ValueError, json.JSONDecodeError):
                 payload = {}
-        return normalise_state(payload)
+        state, summary = apply_legacy_citation_import(payload)
+        if summary is not None:
+            self._last_import_summary = summary
+            self.save(state, actor_id="legacy-citation-import")
+        else:
+            self._cached_state = deepcopy(state)
+            self._cached_at = time.monotonic()
+        return deepcopy(state)
 
     def save(self, state, *, actor_id=""):
         self.ensure_schema()
@@ -461,7 +774,14 @@ class PostgresSEOStore:
                 conn.commit()
         except Exception as error:
             raise SEOStoreError("SEO workspace data could not be saved.") from error
+        self._cached_state = deepcopy(payload)
+        self._cached_at = time.monotonic()
         return payload
+
+    def consume_import_summary(self):
+        summary = self._last_import_summary
+        self._last_import_summary = None
+        return deepcopy(summary)
 
 
 _DEFAULT_STORE = None
@@ -484,6 +804,47 @@ def active_records(state, collection):
     if collection not in SEO_COLLECTIONS:
         raise ValueError(f"Unknown SEO collection: {collection}")
     return [dict(row) for row in state.get(collection, []) if not row.get("archived_at")]
+
+
+def citation_status_counts(state):
+    citations = active_records(state, "citations")
+    return {
+        status: sum(row.get("status") == status for row in citations)
+        for status in CITATION_STATUSES
+    }
+
+
+def filter_citations(records, *, search="", status="All", category="All", owner="All"):
+    search_key = str(search or "").strip().casefold()
+    return [
+        dict(row)
+        for row in records or []
+        if (
+            not search_key
+            or search_key in str(row.get("platform") or "").casefold()
+            or search_key in str(row.get("username_handle") or "").casefold()
+            or search_key in str(row.get("profile_url") or "").casefold()
+        )
+        and (status == "All" or row.get("status") == status)
+        and (category == "All" or row.get("category") == category)
+        and (owner == "All" or row.get("owner") == owner)
+    ]
+
+
+def paginate_records(records, *, page=1, page_size=25):
+    rows = list(records or [])
+    page_size = max(min(int(page_size or 25), 50), 1)
+    page_count = max((len(rows) + page_size - 1) // page_size, 1)
+    page = max(min(int(page or 1), page_count), 1)
+    start = (page - 1) * page_size
+    return {
+        "rows": rows[start:start + page_size],
+        "page": page,
+        "page_size": page_size,
+        "page_count": page_count,
+        "total": len(rows),
+        "start": start,
+    }
 
 
 def upsert_record(state, collection, payload, *, actor=None, record_id=""):

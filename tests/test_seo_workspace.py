@@ -7,6 +7,7 @@ import unittest
 
 import os_accounts
 import run_migrations
+import seo_navigation
 import seo_workspace as seo
 
 
@@ -49,23 +50,29 @@ class SEONavigationTests(unittest.TestCase):
 
     def test_navigation_source_contains_growth_expansion_children_and_disabled_email(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn('section_label("GROWTH")', source)
-        self.assertIn('st.session_state["seo-nav-expanded"] = True', source)
-        self.assertIn('key="sidebar-nav::SEO::toggle"', source)
+        self.assertIn('_sidebar_section_label("GROWTH", root=st)', source)
+        self.assertIn('SIDEBAR_OPEN_GROUP_KEY = "sidebar-open-group"', source)
+        self.assertIn('key=f"sidebar-disclosure::{group}"', source)
         self.assertIn('key="sidebar-nav::Email::soon"', source)
         self.assertIn('disabled=True', source)
         self.assertIn('help="Coming later"', source)
-        self.assertLess(source.index('section_label("CREATE")'), source.index('section_label("GROWTH")'))
-        self.assertLess(source.index('section_label("GROWTH")'), source.index('section_label("MANAGE")'))
+        self.assertLess(
+            source.index('_sidebar_section_label("CREATE", root=st)'),
+            source.index('_sidebar_section_label("GROWTH", root=st)'),
+        )
+        self.assertLess(
+            source.index('_sidebar_section_label("GROWTH", root=st)'),
+            source.index('_sidebar_section_label("MANAGE")'),
+        )
         for label in seo.SEO_NAV_LABELS.values():
-            self.assertIn(f'"{label}"', (ROOT / "seo_workspace.py").read_text(encoding="utf-8"))
+            self.assertIn(f'"{label}"', (ROOT / "seo_navigation.py").read_text(encoding="utf-8"))
         self.assertNotIn('"route": "Email"', source)
 
     def test_router_supports_deep_seo_routes(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn("elif current_page in seo_workspace.SEO_ROUTES:", source)
+        self.assertIn("elif current_page in seo_nav.SEO_ROUTES:", source)
         self.assertIn("get_seo_page().render_page(", source)
-        self.assertIn("current_page not in seo_workspace.SEO_ROUTES", source)
+        self.assertIn("current_page not in seo_nav.SEO_ROUTES", source)
 
 
 class SEOStoreTests(unittest.TestCase):
@@ -77,10 +84,11 @@ class SEOStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_empty_store_initialises_with_defaults_and_no_fake_work(self):
+    def test_empty_store_initialises_with_defaults_and_sanitised_legacy_citations(self):
         state = self.store.load()
         self.assertEqual(state["blog_records"], [])
-        self.assertEqual(state["citations"], [])
+        self.assertEqual(len(state["citations"]), 253)
+        self.assertEqual(sum(row["status"] == "Live" for row in state["citations"]), 251)
         self.assertEqual(state["outreach_records"], [])
         self.assertEqual(state["keywords"], [])
         self.assertEqual(len(state["target_library"]), len(seo.INTERNAL_LINK_TARGETS))
@@ -135,10 +143,13 @@ class SEOStoreTests(unittest.TestCase):
 
     def test_migration_is_non_destructive_and_uses_one_shared_state_table(self):
         sql = (ROOT / "migrations" / seo.SEO_MIGRATION).read_text(encoding="utf-8")
+        data_sql = (ROOT / "migrations" / seo.SEO_DATA_MIGRATION).read_text(encoding="utf-8")
         self.assertTrue(run_migrations.safe_migration_sql(sql))
+        self.assertTrue(run_migrations.safe_migration_sql(data_sql))
         self.assertIn("CREATE TABLE IF NOT EXISTS seo_workspace_state", sql)
         self.assertIn("payload JSONB", sql)
         self.assertIn("ENABLE ROW LEVEL SECURITY", sql)
+        self.assertIn("ALTER COLUMN schema_version SET DEFAULT 2", data_sql)
 
 
 class SEOValidationTests(unittest.TestCase):
@@ -306,8 +317,9 @@ class SEOOverviewAndUIContractTests(unittest.TestCase):
 
     def test_ui_contains_all_pages_future_dashes_and_no_fake_integrations(self):
         source = (ROOT / "seo_page.py").read_text(encoding="utf-8")
-        for route in seo.SEO_ROUTES:
-            self.assertIn(route, PAGE_TEXT := (ROOT / "seo_workspace.py").read_text(encoding="utf-8"))
+        navigation_source = (ROOT / "seo_navigation.py").read_text(encoding="utf-8")
+        for route in seo_navigation.SEO_NAV_LABELS.values():
+            self.assertIn(route, navigation_source)
         self.assertIn('class="sc-seo-future-value">—', source)
         self.assertIn("Not connected", source)
         self.assertIn("GSC Connection — Planned", source)

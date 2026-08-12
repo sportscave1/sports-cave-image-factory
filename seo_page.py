@@ -6,6 +6,7 @@ import re
 import streamlit as st
 
 from activity_log import record_activity_log
+import navigation_runtime
 import os_accounts
 import seo_workspace as seo
 
@@ -62,6 +63,8 @@ def _inject_styles():
         .sc-seo-note strong { color: #242321; }
         .sc-seo-danger { border-left-color: #a74b42; }
         [data-testid="stDataFrame"] { border-radius: 6px !important; overflow: hidden !important; }
+        [data-testid="stSegmentedControl"] { margin-bottom: .7rem; }
+        [data-testid="stSegmentedControl"] button { border-radius: 4px !important; }
         @media (max-width: 900px) {
             .sc-seo-header { align-items: flex-start; flex-direction: column; }
             .sc-seo-rule-grid { grid-template-columns: 1fr; }
@@ -130,6 +133,66 @@ def _table(rows, *, empty, height=360):
         st.info(empty)
         return
     st.dataframe(rows, use_container_width=True, hide_index=True, height=height)
+
+
+def _active_view(options, *, key, default=None):
+    choices = tuple(options)
+    selected = st.segmented_control(
+        "View",
+        choices,
+        default=default or choices[0],
+        key=key,
+        selection_mode="single",
+        label_visibility="collapsed",
+    )
+    return selected or default or choices[0]
+
+
+def _paginated_rows(rows, *, key, default_page_size=25):
+    rows = list(rows or [])
+    controls = st.columns([1, 1, 4])
+    page_size = controls[0].selectbox(
+        "Rows per page",
+        (25, 50),
+        index=0 if default_page_size == 25 else 1,
+        key=f"{key}-page-size",
+    )
+    initial = seo.paginate_records(rows, page=1, page_size=page_size)
+    page_count = initial["page_count"]
+    page = controls[1].number_input(
+        "Page",
+        min_value=1,
+        max_value=page_count,
+        value=min(int(st.session_state.get(f"{key}-page", 1)), page_count),
+        step=1,
+        key=f"{key}-page",
+    )
+    result = seo.paginate_records(rows, page=page, page_size=page_size)
+    start = result["start"]
+    controls[2].caption(
+        f"Showing {start + 1 if rows else 0}-{min(start + page_size, len(rows))} of {len(rows)}"
+    )
+    return result["rows"]
+
+
+def _citation_table_rows(rows):
+    return [
+        {
+            "Platform": row.get("platform"),
+            "Category": row.get("category"),
+            "Signup URL": row.get("signup_url"),
+            "Profile URL": row.get("profile_url"),
+            "Username or Handle": row.get("username_handle"),
+            "Website Displayed": row.get("website_displayed"),
+            "Website Link Type": row.get("website_link_type"),
+            "Logo Uploaded": row.get("logo_uploaded"),
+            "Status": row.get("status"),
+            "Owner": row.get("owner"),
+            "Date Completed": row.get("date_completed"),
+            "Notes": row.get("notes"),
+        }
+        for row in rows
+    ]
 
 
 def _record_selector(records, label, key, *, title_field):
@@ -218,7 +281,7 @@ def _render_overview(state, user, navigate):
     if actions[0].button("Create Blog Brief", icon=":material/edit_note:", use_container_width=True):
         _navigate(navigate, seo.SEO_BLOG_ROUTE)
     if actions[1].button("Import GSC Keywords", icon=":material/upload_file:", use_container_width=True):
-        st.session_state["seo-keyword-default-tab"] = "Import GSC CSV"
+        st.session_state["seo-keyword-view"] = "Import GSC CSV"
         _navigate(navigate, seo.SEO_KEYWORDS_ROUTE)
     if actions[2].button("Add Outreach Prospect", icon=":material/person_add:", use_container_width=True):
         st.session_state["seo-open-outreach-dialog"] = True
@@ -365,7 +428,7 @@ def _citation_dialog(store, state, user, record=None):
 def _render_citations(store, state, user):
     _header(seo.SEO_CITATIONS_ROUTE)
     citations = seo.active_records(state, "citations")
-    statuses = {status: sum(row.get("status") == status for row in citations) for status in seo.CITATION_STATUSES}
+    statuses = seo.citation_status_counts(state)
     columns = st.columns(4)
     columns[0].metric("To Do", statuses["To Do"])
     columns[1].metric("Pending Verification", statuses["Pending Verification"])
@@ -380,8 +443,11 @@ def _render_citations(store, state, user):
     if edit_clicked:
         _citation_dialog(store, state, user, next(row for row in citations if str(row.get("id")) == selected_id))
 
-    tabs = st.tabs(("All Citations", "To Do", "Pending", "Live", "Rules and Business Details"))
-    with tabs[0]:
+    view = _active_view(
+        ("All Citations", "To Do", "Pending", "Live", "Rules and Business Details"),
+        key="seo-citations-view",
+    )
+    if view == "All Citations":
         filters = st.columns(4)
         search = filters[0].text_input("Search platform", key="seo-citation-search")
         status_filter = filters[1].selectbox("Status", ("All", *seo.CITATION_STATUSES), key="seo-citation-status-filter")
@@ -389,24 +455,16 @@ def _render_citations(store, state, user):
         category_filter = filters[2].selectbox("Category", ("All", *category_values), key="seo-citation-category-filter")
         owner_values = sorted({row.get("owner") for row in citations if row.get("owner")})
         owner_filter = filters[3].selectbox("Owner", ("All", *owner_values), key="seo-citation-owner-filter")
-        filtered = [
-            row for row in citations
-            if (not search or search.casefold() in str(row.get("platform") or "").casefold())
-            and (status_filter == "All" or row.get("status") == status_filter)
-            and (category_filter == "All" or row.get("category") == category_filter)
-            and (owner_filter == "All" or row.get("owner") == owner_filter)
-        ]
+        filtered = seo.filter_citations(
+            citations,
+            search=search,
+            status=status_filter,
+            category=category_filter,
+            owner=owner_filter,
+        )
+        visible = _paginated_rows(filtered, key="seo-citations-all")
         _table(
-            [
-                {
-                    "Platform": row.get("platform"), "Category": row.get("category"), "Signup URL": row.get("signup_url"),
-                    "Profile URL": row.get("profile_url"), "Username or Handle": row.get("username_handle"),
-                    "Website Displayed": row.get("website_displayed"), "Logo Uploaded": row.get("logo_uploaded"),
-                    "Status": row.get("status"), "Owner": row.get("owner"), "Date Completed": row.get("date_completed"),
-                    "Notes": row.get("notes"),
-                }
-                for row in filtered
-            ],
+            _citation_table_rows(visible),
             empty="No citations match these filters. Add a reputable profile when work begins.",
         )
         st.download_button(
@@ -416,14 +474,21 @@ def _render_citations(store, state, user):
             mime="text/csv",
             icon=":material/download:",
         )
-    for tab, status_set, empty in (
-        (tabs[1], {"To Do", "In Progress"}, "No citations are waiting to start."),
-        (tabs[2], {"Pending Verification"}, "No citations are pending verification."),
-        (tabs[3], {"Live"}, "No citations are marked Live yet."),
-    ):
-        with tab:
-            _table([row for row in citations if row.get("status") in status_set], empty=empty)
-    with tabs[4]:
+    elif view in {"To Do", "Pending", "Live"}:
+        status_sets = {
+            "To Do": {"To Do", "In Progress"},
+            "Pending": {"Pending Verification"},
+            "Live": {"Live"},
+        }
+        empty_messages = {
+            "To Do": "No citations are waiting to start.",
+            "Pending": "No citations are pending verification.",
+            "Live": "No citations are marked Live yet.",
+        }
+        filtered = [row for row in citations if row.get("status") in status_sets[view]]
+        visible = _paginated_rows(filtered, key=f"seo-citations-{view.casefold().replace(' ', '-')}")
+        _table(_citation_table_rows(visible), empty=empty_messages[view])
+    else:
         details = state.get("settings", {}).get("business_details") or seo.BUSINESS_DETAILS
         for label, key in (("Business name", "business_name"), ("Website", "website"), ("Base description", "base_description")):
             st.markdown(f"**{label}**")
@@ -512,8 +577,11 @@ def _render_blog_builder(store, state, user, blogs):
     by_id = {str(row["id"]): row for row in blogs}
     blog_id = st.selectbox("Blog record", tuple(by_id), format_func=lambda key: by_id[key].get("article_title") or by_id[key].get("primary_keyword") or "Untitled", key="seo-blog-builder-record")
     blog = by_id[blog_id]
-    steps = st.tabs(("1 Brief", "2 Article", "3 SEO and Links", "4 Assets", "5 Review"))
-    with steps[0]:
+    step = _active_view(
+        ("1 Brief", "2 Article", "3 SEO and Links", "4 Assets", "5 Review"),
+        key=f"seo-blog-builder-step::{blog_id}",
+    )
+    if step == "1 Brief":
         with st.form(f"seo-blog-brief::{blog_id}"):
             columns = st.columns(2)
             article_title = columns[0].text_input("Article title", value=blog.get("article_title") or "")
@@ -541,7 +609,7 @@ def _render_blog_builder(store, state, user, blogs):
                     st.warning(warning)
                 else:
                     _save_blog_step(store, state, user, blog, {"article_title": article_title, "sport_topic": sport_topic, "target_market": target_market, "content_angle": content_angle, "search_intent": search_intent, "primary_keyword": primary_keyword, "supporting_keywords": supporting_keywords, "collection_name": collection_name, "collection_url": collection_url, "product_url": product_url, "product_url_omitted": not bool(product_url), "due_date": due_date.isoformat() if due_date else "", "owner": owner, "status": "Brief"}, "Blog brief updated")
-    with steps[1]:
+    elif step == "2 Article":
         with st.form(f"seo-blog-article::{blog_id}"):
             article_draft = st.text_area("Article draft", value=blog.get("article_draft") or "", height=420)
             reviewer_notes = st.text_area("Notes from reviewer", value=blog.get("reviewer_notes") or "", height=100)
@@ -559,7 +627,7 @@ def _render_blog_builder(store, state, user, blogs):
         with st.expander("Article writing prompt", expanded=False):
             template = prompt_by_name.get("Article writing", {}).get("template") or seo.ARTICLE_WRITING_TEMPLATE
             st.code(seo.render_prompt_template(template, {"title": blog.get("article_title"), "search_intent": blog.get("search_intent"), "primary_keyword": blog.get("primary_keyword"), "supporting_keywords": blog.get("supporting_keywords"), "sport_or_player": blog.get("sport_topic"), "market": blog.get("target_market"), "collection_name": blog.get("collection_name"), "collection_url": blog.get("collection_url"), "product_url_or_none": blog.get("product_url") or "None"}), language=None)
-    with steps[2]:
+    elif step == "3 SEO and Links":
         with st.form(f"seo-blog-seo::{blog_id}"):
             seo_title = st.text_input("SEO title", value=blog.get("seo_title") or "", max_chars=80)
             meta_title = st.text_input("Meta title", value=blog.get("meta_title") or "", max_chars=80)
@@ -586,7 +654,7 @@ def _render_blog_builder(store, state, user, blogs):
                 st.warning(str(error))
             else:
                 _save_blog_step(store, state, user, blog, {"seo_title": seo_title, "meta_title": meta_title, "meta_description": meta_description, "url_slug": seo.slugify(url_slug), "excerpt": excerpt, "homepage_url": homepage_url, "collection_url": collection_url, "product_url": product_url, "product_url_omitted": omit_product, "anchor_text": anchor_text, "shopify_tags": shopify_tags}, "Blog SEO and links updated")
-    with steps[3]:
+    elif step == "4 Assets":
         with st.form(f"seo-blog-assets::{blog_id}"):
             asset_columns = st.columns(2)
             hero_status = asset_columns[0].selectbox("Hero image status", ("Not started", "In progress", "Ready"), index=("Not started", "In progress", "Ready").index(blog.get("hero_image_status")) if blog.get("hero_image_status") in ("Not started", "In progress", "Ready") else 0)
@@ -606,7 +674,7 @@ def _render_blog_builder(store, state, user, blogs):
                 st.warning(str(error))
             else:
                 _save_blog_step(store, state, user, blog, {"hero_image_status": hero_status, "hero_image_filename": hero_filename, "hero_image_alt": hero_alt, "supporting_image_status": support_status, "supporting_image_filename": support_filename, "supporting_image_alt": support_alt, "youtube_url": youtube_url, "asset_notes": asset_notes}, "Blog asset plan updated")
-    with steps[4]:
+    else:
         selected = st.multiselect("Review checklist", BLOG_REVIEW_ITEMS, default=blog.get("review_checklist") or [], key=f"seo-blog-review::{blog_id}")
         complete = len(selected) == len(BLOG_REVIEW_ITEMS)
         st.progress(len(selected) / len(BLOG_REVIEW_ITEMS), text=f"{len(selected)} of {len(BLOG_REVIEW_ITEMS)} checks complete")
@@ -645,19 +713,19 @@ def _render_blog(store, state, user):
     selected_id = _record_selector(blogs, "Blog to edit", "seo-blog-edit-select", title_field="article_title") if blogs else ""
     if action_columns[1].button("Edit", icon=":material/edit:", use_container_width=True, disabled=not selected_id):
         _blog_dialog(store, state, user, next(row for row in blogs if str(row.get("id")) == selected_id))
-    tabs = st.tabs(("Pipeline", "Blog Builder", "Templates", "Rules"))
-    with tabs[0]:
+    view = _active_view(("Pipeline", "Blog Builder", "Templates", "Rules"), key="seo-blog-view")
+    if view == "Pipeline":
         filters = st.columns(3)
         search = filters[0].text_input("Search articles", key="seo-blog-search")
         status_filter = filters[1].selectbox("Status", ("All", *seo.BLOG_STATUSES), key="seo-blog-status-filter")
         market_filter = filters[2].selectbox("Target market", ("All", *seo.TARGET_MARKETS), key="seo-blog-market-filter")
         filtered = [row for row in blogs if (not search or search.casefold() in json.dumps(row).casefold()) and (status_filter == "All" or row.get("status") == status_filter) and (market_filter == "All" or row.get("target_market") == market_filter)]
         _table([{"Article Title": row.get("article_title"), "Sport or Topic": row.get("sport_topic"), "Primary Keyword": row.get("primary_keyword"), "Search Intent": row.get("search_intent"), "Target Market": row.get("target_market"), "Target Collection": row.get("target_collection") or row.get("collection_name"), "Status": row.get("status"), "Owner": row.get("owner"), "Due Date": row.get("due_date"), "Last Updated": row.get("updated_at")} for row in filtered], empty="No blog records yet. Create a brief to start the editorial pipeline.")
-    with tabs[1]:
+    elif view == "Blog Builder":
         _render_blog_builder(store, state, user, blogs)
-    with tabs[2]:
+    elif view == "Templates":
         _render_prompt_templates(state)
-    with tabs[3]:
+    else:
         _rule_expander("Fans first", ["Write like a premium sports journal.", "Use human rhythm, emotional storytelling and details real fans recognise.", "Avoid vague claims without explaining why."])
         _rule_expander("Structure", ["Establish the topic within the first 100 words.", "Use one central search intent and meaningful headings.", "Connect naturally to collecting or fan spaces in the final third.", "Finish with a calm, relevant call to action."])
         _rule_expander("Commercial balance", ["The article is a sports story first, never a disguised product page."])
@@ -712,10 +780,13 @@ def _render_internal_linking(store, state, user):
     selected_id = _record_selector(plans, "Plan to edit", "seo-link-plan-select", title_field="source_blog") if plans else ""
     if action_columns[1].button("Edit", icon=":material/edit:", use_container_width=True, disabled=not selected_id):
         _link_plan_dialog(store, state, user, next(row for row in plans if str(row.get("id")) == selected_id))
-    tabs = st.tabs(("Link Plans", "Target Library", "Link Opportunities", "Rules"))
-    with tabs[0]:
+    view = _active_view(
+        ("Link Plans", "Target Library", "Link Opportunities", "Rules"),
+        key="seo-internal-linking-view",
+    )
+    if view == "Link Plans":
         _table([{"Blog Article": row.get("source_blog"), "Sport": row.get("sport"), "Homepage Link": row.get("homepage_url"), "Collection Target": row.get("collection_url"), "Product Target": row.get("product_url") or "No Product Link", "Anchor Text": row.get("collection_anchor_text"), "Placement": row.get("placement"), "Verification Status": row.get("verification_status"), "Last Checked": row.get("last_checked"), "Owner": row.get("owner")} for row in plans], empty="No internal link plans yet. Add one when a blog brief is ready for link planning.")
-    with tabs[1]:
+    elif view == "Target Library":
         targets = seo.active_records(state, "target_library")
         _table([{"Label": row.get("label"), "URL": row.get("url"), "Verification Status": row.get("verification_status")} for row in targets], empty="No internal-link targets are available.")
         st.caption("Seeded targets are deliberately marked Needs Verification until an owner confirms the current live URL.")
@@ -737,9 +808,9 @@ def _render_internal_linking(store, state, user):
                     if _persist(store, state, user, action="internal_target_updated", area="SEO / Internal Linking", message=f"Internal link target updated: {saved.get('label')}", entity_id=saved["id"]):
                         _set_notice("Target library updated.")
                         st.rerun()
-    with tabs[2]:
+    elif view == "Link Opportunities":
         _table(seo.internal_link_opportunities(state), empty="No missing internal-link opportunities are visible from the stored blog records.")
-    with tabs[3]:
+    else:
         _rule_expander("Simplified linking rule", ["Use one natural homepage link.", "Use one relevant sport collection link.", "Use one verified product link only when the article clearly relates to that artwork."])
         _rule_expander("Placement", ["Place the collection link naturally in the first 40% when it fits.", "Place an optional product link in the middle or final third.", "Link the homepage naturally in the conclusion.", "Use descriptive anchor text; never use 'click here'."])
 
@@ -815,8 +886,11 @@ def _render_outreach(store, state, user):
         _outreach_dialog(store, state, user)
     if edit_clicked:
         _outreach_dialog(store, state, user, next(row for row in records if str(row.get("id")) == selected_id))
-    tabs = st.tabs(("Prospects", "Outreach", "Live Links", "Templates", "Rules"))
-    with tabs[0]:
+    view = _active_view(
+        ("Prospects", "Outreach", "Live Links", "Templates", "Rules"),
+        key="seo-outreach-view",
+    )
+    if view == "Prospects":
         filters = st.columns(3)
         search = filters[0].text_input("Search sites or creators", key="seo-outreach-search")
         status_filter = filters[1].selectbox("Status", ("All", *seo.OUTREACH_STATUSES), key="seo-outreach-status-filter")
@@ -824,13 +898,13 @@ def _render_outreach(store, state, user):
         filtered = [row for row in records if (not search or search.casefold() in json.dumps(row).casefold()) and (status_filter == "All" or row.get("status") == status_filter) and (quality_filter == "All" or row.get("quality_result") == quality_filter)]
         _table([{"Site or Creator": row.get("site_creator"), "Website": row.get("website"), "Contact": row.get("contact_name") or row.get("contact_email"), "Niche": row.get("niche"), "Opportunity Type": row.get("opportunity_type"), "Target Page": row.get("target_page"), "Quality Result": row.get("quality_result"), "Status": row.get("status"), "Last Contact": row.get("date_contacted"), "Follow-up Due": row.get("follow_up_due"), "Owner": row.get("owner")} for row in filtered], empty="No outreach prospects yet. Add a relevant, human-run site or creator after research.")
         st.download_button("Export outreach CSV", seo.records_csv_bytes(filtered, ("site_creator", "website", "contact_name", "contact_email", "niche", "opportunity_type", "target_page", "quality_result", "status", "date_contacted", "follow_up_due", "owner", "live_url")), file_name="sports-cave-outreach.csv", mime="text/csv", icon=":material/download:")
-    with tabs[1]:
+    elif view == "Outreach":
         _table([row for row in records if row.get("status") in {"Outreach Draft", "Sent", "Follow-up Due", "Replied"}], empty="No outreach conversations are active.")
-    with tabs[2]:
+    elif view == "Live Links":
         _table([{"Site or Creator": row.get("site_creator"), "Live URL": row.get("live_url"), "Target Page": row.get("target_page"), "Anchor Text": row.get("anchor_text"), "Disclosure": row.get("disclosure"), "Verified": row.get("verification_date")} for row in records if row.get("status") == "Live"], empty="No editorial backlinks are marked Live yet.")
-    with tabs[3]:
+    elif view == "Templates":
         _render_prompt_templates(state)
-    with tabs[4]:
+    else:
         _rule_expander("Allowed opportunities", ["Relevant sports and fan publications", "Man cave, home decor, collectibles and memorabilia sites", "Gift guides, podcasts with show notes, creator collaborations and useful resource articles"])
         _rule_expander("Prohibited practices", ["No gig backlinks, link farms, PBNs or spam directories", "No comment spam, forum signatures or mass-generated guest posts", "No automated blasts, fake personas or repeated copy-paste messages", "Do not pay purely for ranking links"])
         _rule_expander("Paid or gifted collaborations", ["Do not demand a followed SEO link when money, products or another benefit is exchanged.", "Record Sponsored, Nofollow, Editorial with no material exchange, or Unknown/Needs Review."])
@@ -982,20 +1056,74 @@ def _render_keywords(store, state, user):
     st.caption("Use real search data only. This workspace never invents search volume, clicks, impressions, CTR or position.")
     keywords = seo.active_records(state, "keywords")
     tab_names = ("Keyword Library", "Import GSC CSV", "Page Mapping", "Analysis Prompt", "Rules")
-    tabs = st.tabs(tab_names)
-    with tabs[0]:
+    view = _active_view(
+        tab_names,
+        key="seo-keyword-view",
+        default=st.session_state.get("seo-keyword-view") or tab_names[0],
+    )
+    if view == "Keyword Library":
         _render_keyword_library(store, state, user, keywords)
-    with tabs[1]:
+    elif view == "Import GSC CSV":
         _render_gsc_import(store, state, user, keywords)
-    with tabs[2]:
+    elif view == "Page Mapping":
         _render_page_mapping(store, state, user, keywords)
-    with tabs[3]:
+    elif view == "Analysis Prompt":
         template = next((row for row in state.get("prompt_templates", []) if row.get("name") == "Keyword extraction"), {})
         st.code(template.get("template") or seo.KEYWORD_EXTRACTION_TEMPLATE, language=None)
         st.caption("Copy this prompt and supply the real GSC data. The workspace does not fabricate an AI result.")
-    with tabs[4]:
+    else:
         _rule_expander("Core rule", ["Use only real Google Search Console data.", "Keep low-intent terms for human review instead of automatically deleting them."])
         _rule_expander("Mapping", ["Use one primary keyword per target page.", "Warn about likely cannibalisation.", "Do not change live URLs or create pages automatically."])
+
+
+@st.fragment
+def _render_active_route(user, route, store, navigate):
+    try:
+        state = store.load()
+    except seo.SEOStoreError as error:
+        _header(route)
+        st.error(str(error))
+        st.caption("SEO records were not changed. Ask an administrator to check the shared data store.")
+        return
+    consume_summary = getattr(store, "consume_import_summary", None)
+    summary = consume_summary() if callable(consume_summary) else None
+    if summary:
+        record_activity_log(
+            "legacy_citations_imported",
+            "SEO / Citations",
+            (
+                f"Legacy citation tracker imported: {summary['source_rows_processed']} source rows; "
+                f"{summary['records_created']} created; {summary['existing_records_updated']} updated; "
+                f"{summary['duplicate_rows_merged']} duplicates merged; "
+                f"{summary['live_records_imported']} Live; {summary['pending_records_imported']} pending; "
+                f"{summary['records_skipped']} skipped; {len(summary.get('conflicts') or [])} conflicts; "
+                f"{summary['invalid_rows']} invalid."
+            ),
+            entity_type="seo_import",
+            entity_id=seo.LEGACY_CITATION_IMPORT_VERSION,
+            metadata={
+                **{key: value for key, value in summary.items() if key != "conflicts"},
+                "conflict_count": len(summary.get("conflicts") or []),
+            },
+            event_key=f"seo-import:{seo.LEGACY_CITATION_IMPORT_VERSION}",
+            actor=_actor_name(user),
+        )
+        if summary.get("conflicts"):
+            st.warning(
+                f"{len(summary['conflicts'])} archived or intentionally skipped citation records "
+                "were left unchanged. Review the stored migration summary before resolving them."
+            )
+    navigation_runtime.dispatch_selected(
+        route,
+        {
+            seo.SEO_OVERVIEW_ROUTE: lambda: _render_overview(state, user, navigate),
+            seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
+            seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
+            seo.SEO_INTERNAL_LINKING_ROUTE: lambda: _render_internal_linking(store, state, user),
+            seo.SEO_BACKLINKS_ROUTE: lambda: _render_outreach(store, state, user),
+            seo.SEO_KEYWORDS_ROUTE: lambda: _render_keywords(store, state, user),
+        },
+    )
 
 
 def render_page(user, route, *, store=None, navigate=None):
@@ -1004,22 +1132,4 @@ def render_page(user, route, *, store=None, navigate=None):
     _inject_styles()
     _render_notice()
     store = store or seo.default_store()
-    try:
-        state = store.load()
-    except seo.SEOStoreError as error:
-        _header(route)
-        st.error(str(error))
-        st.caption("SEO records were not changed. Ask an administrator to check the shared data store.")
-        return
-    if route == seo.SEO_OVERVIEW_ROUTE:
-        _render_overview(state, user, navigate)
-    elif route == seo.SEO_CITATIONS_ROUTE:
-        _render_citations(store, state, user)
-    elif route == seo.SEO_BLOG_ROUTE:
-        _render_blog(store, state, user)
-    elif route == seo.SEO_INTERNAL_LINKING_ROUTE:
-        _render_internal_linking(store, state, user)
-    elif route == seo.SEO_BACKLINKS_ROUTE:
-        _render_outreach(store, state, user)
-    elif route == seo.SEO_KEYWORDS_ROUTE:
-        _render_keywords(store, state, user)
+    _render_active_route(user, route, store, navigate)

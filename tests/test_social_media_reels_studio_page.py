@@ -65,7 +65,7 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
 
         self.assertIn("social_media.SOCIAL_MEDIA_ROUTE", source)
         self.assertIn("social_media.AI_REELS_ROUTE", source)
-        self.assertIn('key="sidebar-nav::AI Reels"', source)
+        self.assertIn('key=f"sidebar-child::{route}"', source)
         self.assertIn("get_social_media_reels_studio_page().render_page(", source)
         self.assertIn("can_edit_prompts=prompt_editing_allowed()", source)
         self.assertNotIn('elif current_page == "Social Media Reels Studio":', source)

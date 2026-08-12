@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import sc_auth
 from shared_credentials import CREDENTIAL_PERMISSION_KEYS
 import social_media
-import seo_workspace
+import seo_navigation as seo_workspace
 
 
 ROLE_ADMIN = "admin"

@@ -71,12 +71,13 @@ class SocialNavigationTests(unittest.TestCase):
         )
         self.assertIn("return social_media.AI_REELS_ROUTE", app_source)
 
-    def test_sidebar_uses_nested_parent_and_keeps_group_expanded_when_active(self):
+    def test_sidebar_uses_nested_parent_and_session_only_accordion_state(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn("social_group_active = current_page in", source)
-        self.assertIn('st.session_state["social-media-nav-expanded"] = True', source)
-        self.assertIn('key="sidebar-nav::Social Media::toggle"', source)
-        self.assertIn('key="sidebar-nav::AI Reels"', source)
+        self.assertIn("def _active_sidebar_group(route):", source)
+        self.assertIn('SIDEBAR_OPEN_GROUP_KEY = "sidebar-open-group"', source)
+        self.assertIn('key=f"sidebar-disclosure::{group}"', source)
+        self.assertIn('child_button(', source)
+        self.assertIn('social_media.AI_REELS_ROUTE,', source)
         self.assertNotIn('sidebar-nav::Social Media Reels Studio', source)
 
     def test_existing_reels_renderer_and_prompt_path_are_reused(self):
