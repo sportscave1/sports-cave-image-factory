@@ -454,19 +454,7 @@ def _display_variant_label(value):
 
 
 def _display_prodigi_status(value):
-    status = str(value or "").strip()
-    if not status:
-        return "Not started"
-    lowered = status.casefold()
-    if lowered in {"needs review", "hold / issue"} or "issue" in lowered:
-        return "Issue"
-    if lowered in {"ready to send", "submitted"}:
-        return "In progress"
-    if lowered in {"submitted to prodigi", "in production", "awaiting tracking", "shipped"}:
-        return "Sent to Fulfilment"
-    if lowered == "fulfilled in shopify":
-        return "Complete"
-    return status
+    return order_action_state.display_prodigi_status(value)
 
 
 def _developer_mode():
@@ -480,12 +468,7 @@ def _certificate_is_uploaded(row):
 
 
 def _certificate_is_ready(row):
-    status = str(row.get("certificate_status") or "").strip().casefold()
-    if _certificate_is_uploaded(row):
-        return True
-    if "ready" in status or "generated" in status:
-        return True
-    return bool(str(row.get("certificate_pdf_path") or "").strip())
+    return order_action_state.certificate_is_ready_for_fulfilment(row)
 
 
 def _certificate_label(row):
@@ -503,14 +486,7 @@ def _certificate_label(row):
 
 
 def _prodigi_label(row):
-    dispatch_status = _display_prodigi_status(row.get("prodigi_status"))
-    if str(row.get("prodigi_status") or "").strip():
-        return dispatch_status
-    if not _certificate_is_ready(row):
-        return "Needs certificate"
-    if _certificate_is_uploaded(row):
-        return "Ready to dispatch"
-    return "Certificate ready"
+    return order_action_state.final_fulfilment_status(row)
 
 
 def _can_start_prodigi(row):

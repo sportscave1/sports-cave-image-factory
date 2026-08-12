@@ -10,6 +10,7 @@ CERTIFICATE_TERMINAL_STATUSES = frozenset({"uploaded", "complete", "completed"})
 FULFILMENT_TERMINAL_STATUSES = frozenset(
     {"complete", "completed", "fulfilled", "fulfilled in shopify"}
 )
+DISPLAY_COMPLETE_FULFILMENT_STATUSES = frozenset({"complete", "fulfilled in shopify"})
 
 
 def canonical_status(value):
@@ -53,6 +54,53 @@ def certificate_step_is_complete(row):
     ) in CERTIFICATE_TERMINAL_STATUSES
 
 
+def certificate_is_ready_for_fulfilment(row):
+    row = {} if row is None else row
+    status = canonical_status(row.get("certificate_status"))
+    if certificate_step_is_complete(row):
+        return True
+    if "ready" in status or "generated" in status:
+        return True
+    return bool(str(row.get("certificate_pdf_path") or "").strip())
+
+
+def display_prodigi_status(value):
+    status = str(value or "").strip()
+    if not status:
+        return "Not started"
+    lowered = status.casefold()
+    if lowered in {"needs review", "hold / issue"} or "issue" in lowered:
+        return "Issue"
+    if lowered in {"ready to send", "submitted"}:
+        return "In progress"
+    if lowered in {
+        "submitted to prodigi",
+        "in production",
+        "awaiting tracking",
+        "shipped",
+    }:
+        return "Sent to Fulfilment"
+    if lowered in DISPLAY_COMPLETE_FULFILMENT_STATUSES:
+        return "Complete"
+    return status
+
+
+def final_fulfilment_status(row):
+    """Return the exact final value displayed in the Orders Fulfilment column."""
+    row = {} if row is None else row
+    dispatch_status = row.get("prodigi_status")
+    if str(dispatch_status or "").strip():
+        return display_prodigi_status(dispatch_status)
+    displayed_status = str(row.get("prodigi") or "").strip()
+    if displayed_status:
+        return "Complete" if displayed_status.casefold() == "complete" else displayed_status
+    if not certificate_is_ready_for_fulfilment(row):
+        return "Needs certificate"
+    if certificate_step_is_complete(row):
+        return "Ready to dispatch"
+    return "Certificate ready"
+
+
 def fulfilment_step_is_complete(row):
     row = {} if row is None else row
     dispatch_status = row.get("prodigi_status") or row.get("prodigi")
@@ -66,24 +114,7 @@ def row_requires_action(row):
     row = {} if row is None else row
     if not order_is_relevant(row):
         return False
-    try:
-        required_units = max(int(row.get("line_quantity") or 1), 1)
-    except (TypeError, ValueError):
-        required_units = 1
-    try:
-        assigned_units = int(
-            row.get("assignments_count")
-            if row.get("assignments_count") is not None
-            else (1 if row.get("edition_order_id") else 0)
-        )
-    except (TypeError, ValueError):
-        assigned_units = 0
-    if assigned_units < required_units:
-        return True
-    return not (
-        certificate_step_is_complete(row)
-        and fulfilment_step_is_complete(row)
-    )
+    return final_fulfilment_status(row) != "Complete"
 
 
 def order_ids_requiring_action(rows):

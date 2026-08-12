@@ -15105,42 +15105,16 @@ ORDER_ACTION_ROWS_SQL = """
         o.shopify_order_id,
         o.order_name,
         o.financial_status,
-        o.fulfillment_status,
         o.cancelled_at,
         li.shopify_line_item_id,
-        GREATEST(COALESCE(li.quantity, 1), 1) AS line_quantity,
-        eo.id AS edition_order_id,
-        eo.certificate_status,
-        COUNT(eo.id) OVER (
-            PARTITION BY o.shopify_order_id, li.shopify_line_item_id
-        ) AS assignments_count,
-        COALESCE(c.shopify_file_url, c.certificate_file_url, c.certificate_pdf_url, '') AS certificate_pdf_url,
-        COALESCE(c.shopify_pdf_file_id, c.shopify_file_id, eo.shopify_file_id, '') AS certificate_shopify_file_id,
         COALESCE(pd.prodigi_status, '') AS prodigi_status
     FROM shopify_orders o
-    LEFT JOIN shopify_order_lines li
+    JOIN shopify_order_lines li
       ON li.shopify_order_id = o.shopify_order_id
-    LEFT JOIN edition_orders eo
-      ON eo.shopify_line_item_id = li.shopify_line_item_id
-    LEFT JOIN LATERAL (
-        SELECT cert.*
-        FROM certificates cert
-        WHERE COALESCE(
-            cert.related_edition_order_id::text,
-            cert.edition_order_id::text
-        ) = eo.id::text
-        ORDER BY cert.updated_at DESC NULLS LAST, cert.created_at DESC NULLS LAST
-        LIMIT 1
-    ) c ON TRUE
     LEFT JOIN LATERAL (
         SELECT dispatch.prodigi_status
         FROM prodigi_dispatch_rows dispatch
         WHERE dispatch.shopify_line_item_id = li.shopify_line_item_id
-          AND (
-              eo.edition_number IS NULL
-              OR dispatch.edition_number IS NULL
-              OR dispatch.edition_number = eo.edition_number
-          )
         ORDER BY dispatch.updated_at DESC NULLS LAST,
                  dispatch.submitted_at DESC NULLS LAST
         LIMIT 1
@@ -15169,33 +15143,9 @@ def get_order_action_summary():
             )
             SELECT COUNT(DISTINCT shopify_order_id) AS action_required_count
             FROM action_rows
-            WHERE assignments_count < line_quantity
-               OR (
-                    COALESCE(certificate_pdf_url, '') = ''
-                    AND COALESCE(certificate_shopify_file_id, '') = ''
-                    AND NOT (
-                        LOWER(REPLACE(BTRIM(COALESCE(certificate_status, '')), '_', ' ')) = ANY(%s)
-                    )
-               )
-               OR NOT (
-                    LOWER(
-                        REPLACE(
-                            BTRIM(
-                                CASE
-                                    WHEN COALESCE(prodigi_status, '') <> '' THEN prodigi_status
-                                    ELSE COALESCE(fulfillment_status, '')
-                                END
-                            ),
-                            '_',
-                            ' '
-                        )
-                    ) = ANY(%s)
-               )
+            WHERE NOT (LOWER(BTRIM(COALESCE(prodigi_status, ''))) = ANY(%s))
             """,
-            (
-                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
-                sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
-            ),
+            (sorted(order_action_state.DISPLAY_COMPLETE_FULFILMENT_STATUSES),),
         )
         return int((cur.fetchone() or {}).get("action_required_count") or 0)
 

@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 import order_action_state
+import order_allocator
 import supabase_backend
 import top_bar
 import top_bar_api
@@ -42,7 +43,7 @@ class OrderActionStateTests(unittest.TestCase):
         self.assertFalse(order_action_state.row_requires_action(row))
 
     def test_one_unfinished_order_counts_once(self):
-        rows = [action_row("1", certificate_status="Certificate Missing")]
+        rows = [action_row("1", prodigi_status="Needs certificate")]
         self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
 
     def test_fifteen_distinct_unfinished_orders_count_as_fifteen(self):
@@ -59,7 +60,19 @@ class OrderActionStateTests(unittest.TestCase):
             action_row(
                 "10",
                 shopify_line_item_id="line-b",
-                certificate_status="Certificate Missing",
+                prodigi_status="Needs certificate",
+            ),
+        ]
+        self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
+
+    def test_one_incomplete_row_and_two_complete_rows_count_once(self):
+        rows = [
+            action_row("11", shopify_line_item_id="line-a"),
+            action_row("11", shopify_line_item_id="line-b"),
+            action_row(
+                "11",
+                shopify_line_item_id="line-c",
+                prodigi_status="In production",
             ),
         ]
         self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
@@ -80,28 +93,84 @@ class OrderActionStateTests(unittest.TestCase):
         )
         self.assertTrue(order_action_state.row_requires_action(row))
 
-    def test_outstanding_certificate_with_complete_fulfilment_remains_counted(self):
+    def test_complete_fulfilment_ignores_legacy_certificate_fields(self):
         row = action_row(
             "21",
             certificate_status="Needs certificate",
             prodigi_status="Complete",
+            assignments_count=0,
+            edition_order_id="",
+            certificate_pdf_url="",
+            certificate_shopify_file_id="",
         )
-        self.assertTrue(order_action_state.row_requires_action(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
 
     def test_every_required_step_complete_removes_order(self):
-        unfinished = action_row("30", certificate_status="Needs certificate")
+        unfinished = action_row("30", prodigi_status="Needs certificate")
         completed = action_row(
             "30",
-            certificate_status="Uploaded",
-            prodigi_status="Fulfilled",
+            certificate_status="",
+            prodigi_status="Fulfilled in Shopify",
+            assignments_count=0,
+            edition_order_id="",
         )
         self.assertEqual(1, order_action_state.count_orders_requiring_action([unfinished]))
         self.assertEqual(0, order_action_state.count_orders_requiring_action([completed]))
         self.assertEqual("", order_action_state.badge_label(0))
 
-    def test_missing_allocation_unit_remains_action_required(self):
-        row = action_row("31", line_quantity=3, assignments_count=2)
-        self.assertTrue(order_action_state.row_requires_action(row))
+    def test_missing_legacy_allocation_fields_do_not_override_complete(self):
+        row = action_row(
+            "31",
+            line_quantity=3,
+            assignments_count=0,
+            edition_order_id="",
+            certificate_status="",
+            prodigi_status="Complete",
+        )
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_screenshot_state_counts_exactly_one_not_99_plus(self):
+        rows = [
+            action_row(
+                "3000",
+                order_name="#SC3000",
+                prodigi_status="Needs certificate",
+            )
+        ]
+        rows.extend(
+            action_row(
+                str(order_number),
+                order_name=f"#SC{order_number}",
+                prodigi_status="Complete",
+                assignments_count=0,
+                edition_order_id="",
+                certificate_status="",
+            )
+            for order_number in range(2800, 3000)
+        )
+        count = order_action_state.count_orders_requiring_action(rows)
+        self.assertEqual(1, count)
+        self.assertEqual("1", order_action_state.badge_label(count))
+
+    def test_shared_final_status_matches_orders_fulfilment_labels(self):
+        self.assertEqual(
+            "Needs certificate",
+            order_action_state.final_fulfilment_status(
+                action_row("32", prodigi_status="Needs certificate")
+            ),
+        )
+        self.assertEqual(
+            "Complete",
+            order_action_state.final_fulfilment_status(
+                action_row(
+                    "33",
+                    prodigi_status="Complete",
+                    certificate_status="",
+                    assignments_count=0,
+                    edition_order_id="",
+                )
+            ),
+        )
 
     def test_count_is_not_limited_to_latest_fifty_and_caps_badge_at_99_plus(self):
         rows = [
@@ -283,18 +352,18 @@ class OrderStatusUiContractTests(unittest.TestCase):
     def test_backend_selector_uses_shared_rules_and_has_no_latest_fifty_limit(self):
         summary_source = inspect.getsource(supabase_backend.get_order_action_summary)
         query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
-        self.assertIn("order_action_state.CERTIFICATE_TERMINAL_STATUSES", summary_source)
-        self.assertIn("order_action_state.FULFILMENT_TERMINAL_STATUSES", summary_source)
+        self.assertIn("order_action_state.DISPLAY_COMPLETE_FULFILMENT_STATUSES", summary_source)
         self.assertIn("COUNT(DISTINCT shopify_order_id)", summary_source)
         self.assertNotIn("LIMIT 50", query_source)
         self.assertIn("shopify_order_id", query_source)
-        self.assertIn("certificate_status", query_source)
         self.assertIn("prodigi_status", query_source)
+        self.assertNotIn("edition_orders", query_source)
+        self.assertNotIn("certificates", query_source)
+        self.assertNotIn("edition_number", query_source)
 
     def test_orders_page_reuses_shared_certificate_and_fulfilment_helpers(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
-        self.assertIn("order_action_state.certificate_step_is_complete", source)
-        self.assertIn("order_action_state.fulfilment_step_is_complete", source)
+        self.assertIn("order_action_state.final_fulfilment_status", source)
 
     def test_top_bar_status_is_permission_scoped(self):
         with mock.patch.object(top_bar_api, "order_action_state"):
@@ -322,6 +391,30 @@ class OrderStatusUiContractTests(unittest.TestCase):
             )
         self.assertEqual(1, result["action_required_count"])
         self.assertEqual("New order received — #SC3001", result["notification"]["message"])
+
+    def test_status_loader_returns_one_for_screenshot_fulfilment_state(self):
+        rows = [action_row("3000", prodigi_status="Needs certificate")]
+        rows.extend(
+            action_row(
+                str(order_number),
+                prodigi_status="Complete",
+                assignments_count=0,
+                edition_order_id="",
+                certificate_status="",
+            )
+            for order_number in range(2800, 3000)
+        )
+        with mock.patch.object(supabase_backend, "is_configured", return_value=False), mock.patch.object(
+            order_allocator,
+            "load_orders_snapshot",
+            return_value={"rows": rows},
+        ):
+            result = top_bar_api.load_order_status(
+                {"sub": "admin", "allowed_routes": ["Orders"]}
+            )
+        self.assertEqual(1, result["action_required_count"])
+        self.assertEqual("1", result["badge_label"])
+        self.assertEqual({}, result["notification"])
 
     def test_notification_cursor_failure_does_not_discard_badge_count(self):
         with mock.patch.object(supabase_backend, "is_configured", return_value=True), mock.patch.object(
