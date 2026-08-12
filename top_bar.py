@@ -39,6 +39,8 @@ def top_bar_config(user, *, logo_src, current_route):
         "accountsRouteKey": "accounts_access",
         "searchUrl": "/api/os/top-bar/search-index",
         "notificationsUrl": "/api/os/top-bar/notifications",
+        "orderStatusUrl": "/api/os/top-bar/order-status",
+        "ordersEnabled": "Orders" in allowed_routes,
         "authToken": token,
         "revision": str(time.time_ns()),
     }

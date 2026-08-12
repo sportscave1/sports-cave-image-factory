@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import shopify_sync
+import order_action_state
 from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
 from certificate_logging import certificate_stage, certificate_stage_log, set_certificate_log_context
 from services import r2_storage
@@ -37,6 +38,7 @@ LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY = "last_orders_paid_webhook_result"
 LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY = "last_orders_paid_webhook_error"
 LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY = "last_orders_paid_webhook_handle"
 LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY = "last_orders_paid_webhook_mirror_result"
+ORDER_NOTIFICATION_CURSOR_PREFIX = "new_order_popup_cursor_v1"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
@@ -1406,6 +1408,7 @@ def _ensure_schema_uncached():
                     received_at TIMESTAMPTZ DEFAULT now(),
                     processed_at TIMESTAMPTZ,
                     processing_elapsed_ms INTEGER DEFAULT 0,
+                    new_order_inserted BOOLEAN DEFAULT FALSE,
                     payload JSONB DEFAULT '{}'::jsonb,
                     error_message TEXT
                 )
@@ -1780,6 +1783,7 @@ def _ensure_schema_uncached():
                     ("received_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("processed_at", "TIMESTAMPTZ"),
                     ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
+                    ("new_order_inserted", "BOOLEAN DEFAULT FALSE"),
                     ("payload", "JSONB DEFAULT '{}'::jsonb"),
                     ("error_message", "TEXT"),
                 ),
@@ -13573,6 +13577,8 @@ def sync_latest_paid_orders_to_supabase(
     fetched_order_names = _sorted_nonempty(_shopify_order_name(order) for order in fetched_orders)
     fetched_shopify_order_ids = _sorted_nonempty(_shopify_order_id(order) for order in fetched_orders)
     imported_order_names = set()
+    imported_shopify_order_ids = set()
+    successfully_imported_order_ids = set()
     preserved_order_names = set()
     assigned_order_names = set()
     affected_shopify_order_ids = set()
@@ -13668,6 +13674,8 @@ def sync_latest_paid_orders_to_supabase(
             if order_id not in existing_order_ids or has_new_line:
                 imported_order_names.add(order_name)
                 affected_shopify_order_ids.add(order_id)
+            if order_id not in existing_order_ids:
+                imported_shopify_order_ids.add(order_id)
         existing_lines_preserved = max(len(line_item_ids) - imported_lines, 0)
         if existing_orders_preserved or existing_lines_preserved:
             _orders_sync_log(
@@ -13766,6 +13774,9 @@ def sync_latest_paid_orders_to_supabase(
             result_errors = result.get("errors") or []
             errors.extend(result_errors)
             candidate_processing_errors += len(result_errors)
+            order_id = _shopify_order_id(order)
+            if order_id in imported_shopify_order_ids and not result_errors:
+                successfully_imported_order_ids.add(order_id)
         allocation_elapsed_ms = (time.perf_counter() - allocation_started) * 1000
         _sync_perf_log(
             "edition allocation time",
@@ -13960,6 +13971,23 @@ def sync_latest_paid_orders_to_supabase(
             db_write_ms=(time.perf_counter() - db_write_started) * 1000,
         )
         _orders_sync_log("orders_sync_finished", "completed", orders=seen, assignments=assignments, errors=len(errors))
+        notification_events_created = 0
+        if successfully_imported_order_ids:
+            try:
+                notification_events_created = record_new_order_notification_events(
+                    [
+                        order
+                        for order in processable_orders
+                        if _shopify_order_id(order) in successfully_imported_order_ids
+                    ],
+                    source="latest_paid_sync",
+                )
+            except Exception as notification_error:
+                _orders_sync_log(
+                    "new_order_notification_enqueue_failed",
+                    "failed",
+                    error=str(notification_error),
+                )
         return {
             "mode": "latest_paid_sync",
             "orders_seen": seen,
@@ -13995,6 +14023,8 @@ def sync_latest_paid_orders_to_supabase(
             "fetched_order_names": fetched_order_names,
             "fetched_shopify_order_ids": fetched_shopify_order_ids,
             "imported_order_names": _sorted_nonempty(imported_order_names),
+            "imported_shopify_order_ids": _sorted_nonempty(imported_shopify_order_ids),
+            "new_order_notification_events_created": notification_events_created,
             "preserved_order_names": _sorted_nonempty(preserved_order_names),
             "assigned_order_names": _sorted_nonempty(assigned_order_names),
             "affected_order_names": _sorted_nonempty(set(imported_order_names) | set(assigned_order_names)),
@@ -14318,6 +14348,7 @@ def _ensure_webhook_event_table_with_cursor(cur):
             received_at TIMESTAMPTZ DEFAULT now(),
             processed_at TIMESTAMPTZ,
             processing_elapsed_ms INTEGER DEFAULT 0,
+            new_order_inserted BOOLEAN DEFAULT FALSE,
             payload JSONB DEFAULT '{}'::jsonb,
             error_message TEXT
         )
@@ -14336,6 +14367,7 @@ def _ensure_webhook_event_table_with_cursor(cur):
         ("received_at", "TIMESTAMPTZ DEFAULT now()"),
         ("processed_at", "TIMESTAMPTZ"),
         ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
+        ("new_order_inserted", "BOOLEAN DEFAULT FALSE"),
         ("payload", "JSONB DEFAULT '{}'::jsonb"),
         ("error_message", "TEXT"),
     ):
@@ -14491,6 +14523,7 @@ def _update_webhook_event_status(
     skipped_count=0,
     affected_handles_count=0,
     processing_elapsed_ms=0,
+    new_order_inserted=False,
     shopify_order_id="",
     shopify_order_name="",
 ):
@@ -14508,6 +14541,7 @@ def _update_webhook_event_status(
                         skipped_count=%s,
                         affected_handles_count=%s,
                         processing_elapsed_ms=%s,
+                        new_order_inserted=%s,
                         processed_at=CASE WHEN %s IN ('processed', 'processed_with_warnings', 'skipped', 'skipped_duplicate', 'failed') THEN now() ELSE processed_at END,
                         shopify_order_id=COALESCE(NULLIF(%s, ''), shopify_order_id),
                         shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name)
@@ -14520,6 +14554,7 @@ def _update_webhook_event_status(
                         int(skipped_count or 0),
                         int(affected_handles_count or 0),
                         int(processing_elapsed_ms or 0),
+                        bool(new_order_inserted),
                         status,
                         str(shopify_order_id or "").strip(),
                         str(shopify_order_name or "").strip(),
@@ -14863,10 +14898,16 @@ def process_single_paid_shopify_order_for_editions(
             "affected_handles": [],
             "metafields_updated": 0,
             "order_visible_refresh_hint": False,
+            "new_order_inserted": False,
             "errors": [],
         }
     _webhook_log("order_paid_validated", "completed", source=source, order_name=order_name, shopify_order_id=order_id)
 
+    existing_order_ids = list_existing_shopify_order_ids(
+        [order_id],
+        ensure_schema_first=ensure_schema_first,
+    ) if order_id else set()
+    order_was_existing = order_id in existing_order_ids
     line_item_ids = [
         str(line_item.get("shopify_line_item_id") or "").strip()
         for line_item in (order.get("line_items") or [])
@@ -14899,6 +14940,7 @@ def process_single_paid_shopify_order_for_editions(
             "affected_handles": [],
             "metafields_updated": 0,
             "order_visible_refresh_hint": False,
+            "new_order_inserted": False,
             "errors": [],
         }
         _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
@@ -14959,6 +15001,7 @@ def process_single_paid_shopify_order_for_editions(
         "metafields_updated": int(mirror_result.get("synced") or 0),
         "product_metafield_mirror": mirror_result,
         "order_visible_refresh_hint": bool(new_line_ids or allocation_result.get("assignments_created")),
+        "new_order_inserted": bool(order_id and not order_was_existing and new_line_ids),
         "errors": errors,
     }
     _webhook_log("orders_snapshot_invalidated", "completed", source=source, order_name=order_name)
@@ -14985,6 +15028,7 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
             "affected_handles": [],
             "metafields_updated": 0,
             "order_visible_refresh_hint": False,
+            "new_order_inserted": False,
             "errors": [],
         }
     if claim_event:
@@ -15004,6 +15048,7 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
                 "affected_handles": [],
                 "metafields_updated": 0,
                 "order_visible_refresh_hint": False,
+                "new_order_inserted": False,
                 "errors": [],
             }
     _update_webhook_event_status(webhook_id, "processing")
@@ -15025,6 +15070,7 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
             skipped_count=result.get("skipped_existing_lines") or 0,
             affected_handles_count=len(result.get("affected_handles") or []),
             processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+            new_order_inserted=bool(result.get("new_order_inserted")),
             shopify_order_id=result.get("shopify_order_id") or "",
             shopify_order_name=result.get("order_name") or "",
         )
@@ -15052,6 +15098,238 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY, message)
         _webhook_log("webhook_order_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
         raise RuntimeError(message) from error
+
+
+ORDER_ACTION_ROWS_SQL = """
+    SELECT
+        o.shopify_order_id,
+        o.order_name,
+        o.financial_status,
+        o.fulfillment_status,
+        o.cancelled_at,
+        li.shopify_line_item_id,
+        GREATEST(COALESCE(li.quantity, 1), 1) AS line_quantity,
+        eo.id AS edition_order_id,
+        eo.certificate_status,
+        COUNT(eo.id) OVER (
+            PARTITION BY o.shopify_order_id, li.shopify_line_item_id
+        ) AS assignments_count,
+        COALESCE(c.shopify_file_url, c.certificate_file_url, c.certificate_pdf_url, '') AS certificate_pdf_url,
+        COALESCE(c.shopify_pdf_file_id, c.shopify_file_id, eo.shopify_file_id, '') AS certificate_shopify_file_id,
+        COALESCE(pd.prodigi_status, '') AS prodigi_status
+    FROM shopify_orders o
+    LEFT JOIN shopify_order_lines li
+      ON li.shopify_order_id = o.shopify_order_id
+    LEFT JOIN edition_orders eo
+      ON eo.shopify_line_item_id = li.shopify_line_item_id
+    LEFT JOIN LATERAL (
+        SELECT cert.*
+        FROM certificates cert
+        WHERE COALESCE(
+            cert.related_edition_order_id::text,
+            cert.edition_order_id::text
+        ) = eo.id::text
+        ORDER BY cert.updated_at DESC NULLS LAST, cert.created_at DESC NULLS LAST
+        LIMIT 1
+    ) c ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT dispatch.prodigi_status
+        FROM prodigi_dispatch_rows dispatch
+        WHERE dispatch.shopify_line_item_id = li.shopify_line_item_id
+          AND (
+              eo.edition_number IS NULL
+              OR dispatch.edition_number IS NULL
+              OR dispatch.edition_number = eo.edition_number
+          )
+        ORDER BY dispatch.updated_at DESC NULLS LAST,
+                 dispatch.submitted_at DESC NULLS LAST
+        LIMIT 1
+    ) pd ON TRUE
+    WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid')
+      AND o.cancelled_at IS NULL
+"""
+
+
+def list_order_action_rows():
+    """Load local order status rows for diagnostics and rule-level verification."""
+    def load_rows(cur):
+        cur.execute(ORDER_ACTION_ROWS_SQL)
+        return cur.fetchall()
+
+    rows, _diagnostic = _run_read_operation("orders.action_required", load_rows)
+    return [dict(row or {}) for row in rows]
+
+
+def get_order_action_summary():
+    def load_count(cur):
+        cur.execute(
+            f"""
+            WITH action_rows AS (
+                {ORDER_ACTION_ROWS_SQL}
+            )
+            SELECT COUNT(DISTINCT shopify_order_id) AS action_required_count
+            FROM action_rows
+            WHERE assignments_count < line_quantity
+               OR (
+                    COALESCE(certificate_pdf_url, '') = ''
+                    AND COALESCE(certificate_shopify_file_id, '') = ''
+                    AND NOT (
+                        LOWER(REPLACE(BTRIM(COALESCE(certificate_status, '')), '_', ' ')) = ANY(%s)
+                    )
+               )
+               OR NOT (
+                    LOWER(
+                        REPLACE(
+                            BTRIM(
+                                CASE
+                                    WHEN COALESCE(prodigi_status, '') <> '' THEN prodigi_status
+                                    ELSE COALESCE(fulfillment_status, '')
+                                END
+                            ),
+                            '_',
+                            ' '
+                        )
+                    ) = ANY(%s)
+               )
+            """,
+            (
+                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
+                sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
+            ),
+        )
+        return int((cur.fetchone() or {}).get("action_required_count") or 0)
+
+    count, _diagnostic = _run_read_operation("orders.action_required_count", load_count)
+    return {
+        "action_required_count": count,
+        "badge_label": order_action_state.badge_label(count),
+    }
+
+
+def _order_notification_state_key(actor_id):
+    digest = hashlib.sha256(str(actor_id or "anonymous").encode("utf-8")).hexdigest()[:24]
+    return f"{ORDER_NOTIFICATION_CURSOR_PREFIX}:{digest}"
+
+
+def record_new_order_notification_events(orders, *, source="latest_paid_sync"):
+    """Persist one notification-eligible event per newly stored Shopify order."""
+    unique = {}
+    for order in orders or ():
+        order_id = _shopify_order_id(order)
+        if order_id:
+            unique.setdefault(order_id, _shopify_order_name(order))
+    if not unique:
+        return 0
+    inserted = 0
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _ensure_webhook_event_table_with_cursor(cur)
+            for order_id, order_name in unique.items():
+                event_id = "new-order:" + hashlib.sha256(order_id.encode("utf-8")).hexdigest()
+                cur.execute(
+                    """
+                    INSERT INTO webhook_events(
+                        webhook_id, topic, status, shopify_order_id, shopify_order_name,
+                        source, inserted_count, new_order_inserted, received_at, processed_at,
+                        payload, error_message
+                    )
+                    VALUES (%s, 'orders/paid', 'processed', %s, %s, %s, 1, TRUE, now(), now(), '{}'::jsonb, '')
+                    ON CONFLICT (webhook_id) DO NOTHING
+                    RETURNING webhook_id
+                    """,
+                    (event_id, order_id, order_name, source),
+                )
+                if cur.fetchone():
+                    inserted += 1
+        conn.commit()
+    return inserted
+
+
+def consume_new_order_notifications(actor_id):
+    """Atomically consume notification events once for one permission-scoped OS user."""
+    state_key = _order_notification_state_key(actor_id)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (state_key,))
+            cur.execute(
+                "SELECT value, cursor_value FROM app_sync_state WHERE key=%s FOR UPDATE",
+                (state_key,),
+            )
+            state_row = cur.fetchone() or {}
+            state = state_row.get("value") or {}
+            if isinstance(state, str):
+                try:
+                    state = json.loads(state)
+                except ValueError:
+                    state = {}
+            if not isinstance(state, dict):
+                state = {}
+            after_processed_at = str(state.get("processed_at") or "")
+            after_webhook_id = str(state.get("webhook_id") or "")
+            seen_order_ids = list(state.get("seen_order_ids") or [])
+            cur.execute(
+                """
+                SELECT
+                    webhook_id,
+                    shopify_order_id,
+                    shopify_order_name,
+                    processed_at,
+                    received_at,
+                    CASE
+                        WHEN LOWER(COALESCE(to_jsonb(webhook_events)->>'new_order_inserted', 'false')) = 'true'
+                            THEN TRUE
+                        ELSE FALSE
+                    END AS new_order_inserted
+                FROM webhook_events
+                WHERE (topic ILIKE 'orders/paid' OR topic ILIKE 'ORDERS_PAID')
+                  AND status IN ('processed', 'processed_with_warnings', 'skipped_duplicate')
+                  AND processed_at IS NOT NULL
+                  AND LOWER(COALESCE(to_jsonb(webhook_events)->>'new_order_inserted', 'false')) = 'true'
+                  AND (
+                      %s = ''
+                      OR processed_at > %s::timestamptz
+                      OR (processed_at = %s::timestamptz AND webhook_id > %s)
+                  )
+                ORDER BY processed_at ASC, webhook_id ASC
+                LIMIT 1000
+                """,
+                (
+                    after_processed_at,
+                    after_processed_at or None,
+                    after_processed_at or None,
+                    after_webhook_id,
+                ),
+            )
+            events = [dict(row or {}) for row in cur.fetchall()]
+            selected, _newest_marker = order_action_state.select_new_order_events(
+                events,
+                seen_order_ids=seen_order_ids,
+            )
+            if events:
+                newest = events[-1]
+                seen_order_ids.extend(
+                    order_action_state.stable_order_id(event)
+                    for event in selected
+                )
+                state = {
+                    "processed_at": _datetime_to_setting(newest.get("processed_at")),
+                    "webhook_id": str(newest.get("webhook_id") or ""),
+                    "seen_order_ids": list(dict.fromkeys(seen_order_ids)),
+                }
+                cur.execute(
+                    """
+                    INSERT INTO app_sync_state(key, value, cursor_value, status, updated_at)
+                    VALUES (%s, %s::jsonb, %s, 'ready', now())
+                    ON CONFLICT (key) DO UPDATE SET
+                        value=EXCLUDED.value,
+                        cursor_value=EXCLUDED.cursor_value,
+                        status='ready',
+                        updated_at=now()
+                    """,
+                    (state_key, json_dumps(state), order_action_state._event_marker(newest)),
+                )
+        conn.commit()
+    return selected
 
 
 def orders_visibility_marker(*, ensure_schema_first=True):

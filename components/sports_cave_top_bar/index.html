@@ -177,6 +177,69 @@
     }
     .sc-os-topbar-icon-button:hover,
     .sc-os-topbar-icon-button[aria-expanded="true"] { background: #292929; }
+    section[data-testid="stSidebar"] .st-key-sidebar-row-orders button {
+      position: relative;
+    }
+    .sc-orders-action-badge {
+      align-items: center;
+      background: #dededb;
+      border: 1px solid rgba(30, 30, 28, .08);
+      border-radius: 999px;
+      color: #252523 !important;
+      display: inline-flex;
+      font-size: 11px;
+      font-weight: 720;
+      height: 20px;
+      justify-content: center;
+      line-height: 1;
+      min-width: 25px;
+      padding: 0 6px;
+      pointer-events: none;
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    #sc-os-order-toast-region {
+      position: fixed;
+      right: 16px;
+      top: calc(var(--sc-topbar-height) + 12px);
+      width: min(340px, calc(100vw - 32px));
+      z-index: 1000001;
+    }
+    #sc-os-order-toast-region[hidden] { display: none !important; }
+    .sc-os-order-toast {
+      align-items: center;
+      appearance: none;
+      background: #171715;
+      border: 1px solid rgba(212, 165, 76, .62);
+      border-radius: 7px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .26);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 680;
+      gap: 10px;
+      min-height: 46px;
+      padding: 10px 13px;
+      text-align: left;
+      width: 100%;
+    }
+    .sc-os-order-toast::before {
+      background: #d4a54c;
+      border-radius: 999px;
+      content: "";
+      flex: 0 0 auto;
+      height: 8px;
+      width: 8px;
+    }
+    .sc-os-order-toast:hover { background: #22211e; }
+    .sc-os-order-toast:focus-visible {
+      outline: 2px solid #d4a54c;
+      outline-offset: 2px;
+    }
     .sc-os-topbar-icon-button:focus-visible,
     .sc-os-topbar-result:focus-visible,
     .sc-os-topbar-action:focus-visible,
@@ -367,6 +430,7 @@
       <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
       <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
     </div>
+    <div id="sc-os-order-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   `;
 
   const createController = () => {
@@ -397,6 +461,9 @@
       recorder: null,
       recordingStream: null,
       recordingChunks: [],
+      orderStatusStarted: false,
+      orderToastTimer: null,
+      shownOrderIds: new Set(),
     };
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
@@ -405,6 +472,7 @@
     const profileButton = root.querySelector("#sc-os-profile");
     const settingsButton = root.querySelector("#sc-os-settings");
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
+    const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
 
     const routeUrl = (routeKey, query, includeQuery = true) => {
       const url = new URL(parentWindow.location.href);
@@ -470,6 +538,77 @@
       });
       if (!response.ok) throw new Error("Request failed");
       return response.json();
+    };
+    const updateOrdersBadge = (count, label, attempt = 0) => {
+      const row = doc.querySelector('section[data-testid="stSidebar"] .st-key-sidebar-row-orders');
+      const button = row?.querySelector("button");
+      if (!button) {
+        if (Number(count) > 0 && attempt < 20) {
+          later(() => updateOrdersBadge(count, label, attempt + 1), 180);
+        }
+        return;
+      }
+      let badge = button.querySelector(".sc-orders-action-badge");
+      const numericCount = Math.max(Number(count) || 0, 0);
+      if (!numericCount) {
+        badge?.remove();
+        button.removeAttribute("data-action-required-count");
+        button.setAttribute("aria-label", "Orders");
+        return;
+      }
+      if (!badge) {
+        badge = doc.createElement("span");
+        badge.className = "sc-orders-action-badge";
+        badge.setAttribute("aria-hidden", "true");
+        button.appendChild(badge);
+      }
+      badge.textContent = label || (numericCount > 99 ? "99+" : String(numericCount));
+      button.dataset.actionRequiredCount = String(numericCount);
+      button.setAttribute("aria-label", `Orders, ${numericCount} require action`);
+    };
+    const dismissOrderToast = () => {
+      if (state.orderToastTimer) {
+        parentWindow.clearTimeout(state.orderToastTimer);
+        state.orderToastTimer = null;
+      }
+      orderToastRegion.hidden = true;
+      orderToastRegion.replaceChildren();
+    };
+    const showOrderToast = (notification) => {
+      const message = String(notification?.message || "").trim();
+      const orderIds = Array.isArray(notification?.shopify_order_ids)
+        ? notification.shopify_order_ids.map(String).filter(Boolean)
+        : [];
+      if (!message || (orderIds.length && orderIds.every((orderId) => state.shownOrderIds.has(orderId)))) return;
+      orderIds.forEach((orderId) => state.shownOrderIds.add(orderId));
+      dismissOrderToast();
+      const toast = doc.createElement("button");
+      toast.type = "button";
+      toast.className = "sc-os-order-toast";
+      toast.textContent = message;
+      toast.setAttribute("aria-label", `${message}. Open Orders.`);
+      toast.addEventListener("click", () => {
+        dismissOrderToast();
+        navigateDocument(routeUrl("orders", "", false));
+      }, listenerOptions);
+      orderToastRegion.appendChild(toast);
+      orderToastRegion.hidden = false;
+      state.orderToastTimer = later(dismissOrderToast, 7000);
+    };
+    const refreshOrderStatus = async () => {
+      if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
+        updateOrdersBadge(0, "");
+        return;
+      }
+      try {
+        const payload = await requestJson(state.config.orderStatusUrl);
+        updateOrdersBadge(payload.action_required_count, payload.badge_label);
+        showOrderToast(payload.notification);
+      } catch (_error) {
+        // Keep the last visible local state when the lightweight status read is unavailable.
+      } finally {
+        later(refreshOrderStatus, 30000);
+      }
     };
     const loadSearchIndex = async () => {
       if (state.searchIndex) return state.searchIndex;
@@ -747,6 +886,10 @@
           state.notifications = null;
         }
         updateSidebarWidth();
+        if (!state.orderStatusStarted) {
+          state.orderStatusStarted = true;
+          refreshOrderStatus();
+        }
       },
       destroy() {
         listenerController.abort();

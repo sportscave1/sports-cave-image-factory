@@ -5471,7 +5471,11 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             supabase_backend, "finish_sync_run"
         ), patch.object(
             supabase_backend, "_log_order_fetch_timing"
-        ):
+        ), patch.object(
+            supabase_backend,
+            "record_new_order_notification_events",
+            return_value=1,
+        ) as record_notifications:
             result = supabase_backend.sync_latest_paid_orders_to_supabase(config=self.config, limit=50, lookback_days=14)
 
         self.assertEqual(events, ["known_repair", "allocate"])
@@ -5486,6 +5490,12 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["new_lines_inserted"], 1)
         self.assertEqual(result["edition_allocations_created"], 2)
         self.assertEqual(result["known_missing_repairs_applied"], 1)
+        self.assertEqual(result["new_order_notification_events_created"], 1)
+        notified_orders = record_notifications.call_args.args[0]
+        self.assertEqual(
+            ["gid://shopify/Order/3001"],
+            [order["shopify_order_id"] for order in notified_orders],
+        )
 
     def test_sync_latest_paid_orders_to_supabase_skips_unchanged_existing_orders(self):
         payload = {
@@ -5829,6 +5839,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
     @patch.object(supabase_backend, "ensure_schema", side_effect=AssertionError("webhook must not run schema DDL"))
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
     @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
     @patch.object(supabase_backend, "process_shopify_order_for_editions")
     @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
@@ -5837,6 +5848,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         sync_product_edition_metafields_for_handles,
         process_shopify_order_for_editions,
         list_existing_shopify_line_item_ids,
+        _existing_order_ids,
         _fetch_latest_paid_orders,
         _ensure_schema,
     ):
@@ -5894,6 +5906,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
     @patch.object(supabase_backend.shopify_sync, "fetch_orders_by_ids")
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
     @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
     @patch.object(
         supabase_backend,
@@ -5911,6 +5924,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self,
         process_shopify_order_for_editions,
         _existing_line_ids,
+        _existing_order_ids,
         fetch_orders_by_ids,
         _fetch_latest_paid_orders,
     ):
@@ -5937,6 +5951,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
     @patch.object(supabase_backend, "ensure_schema", side_effect=AssertionError("webhook must not run schema DDL"))
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value={"gid://shopify/Order/2879"})
     @patch.object(
         supabase_backend,
         "list_existing_shopify_line_item_ids",
@@ -5949,6 +5964,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         sync_product_edition_metafields_for_handles,
         process_shopify_order_for_editions,
         _existing_line_ids,
+        _existing_order_ids,
         _fetch_latest_paid_orders,
         _ensure_schema,
     ):

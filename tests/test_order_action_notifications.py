@@ -1,0 +1,367 @@
+import inspect
+from pathlib import Path
+import unittest
+from unittest import mock
+
+import order_action_state
+import supabase_backend
+import top_bar
+import top_bar_api
+
+
+ROOT = Path(__file__).resolve().parents[1]
+COMPONENT_PATH = ROOT / "components" / "sports_cave_top_bar" / "index.html"
+
+
+def action_row(order_id, **overrides):
+    row = {
+        "shopify_order_id": order_id,
+        "order_name": f"#SC{order_id}",
+        "financial_status": "paid",
+        "cancelled_at": "",
+        "shopify_line_item_id": f"line-{order_id}",
+        "line_quantity": 1,
+        "assignments_count": 1,
+        "edition_order_id": f"edition-{order_id}",
+        "certificate_status": "Uploaded",
+        "prodigi_status": "Complete",
+    }
+    row.update(overrides)
+    return row
+
+
+class OrderActionStateTests(unittest.TestCase):
+    def test_mapping_rows_are_never_boolean_coerced(self):
+        class AmbiguousRow(dict):
+            def __bool__(self):
+                raise ValueError("ambiguous mapping truth value")
+
+        row = AmbiguousRow(action_row("0"))
+        self.assertTrue(order_action_state.certificate_step_is_complete(row))
+        self.assertTrue(order_action_state.fulfilment_step_is_complete(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_one_unfinished_order_counts_once(self):
+        rows = [action_row("1", certificate_status="Certificate Missing")]
+        self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
+
+    def test_fifteen_distinct_unfinished_orders_count_as_fifteen(self):
+        rows = [
+            action_row(str(index), prodigi_status="In production")
+            for index in range(15)
+        ]
+        self.assertEqual(15, order_action_state.count_orders_requiring_action(rows))
+        self.assertEqual("15", order_action_state.badge_label(15))
+
+    def test_multi_line_order_is_counted_once(self):
+        rows = [
+            action_row("10", shopify_line_item_id="line-a"),
+            action_row(
+                "10",
+                shopify_line_item_id="line-b",
+                certificate_status="Certificate Missing",
+            ),
+        ]
+        self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
+
+    def test_ready_certificate_with_unfinished_fulfilment_remains_counted(self):
+        row = action_row(
+            "20",
+            certificate_status="Uploaded",
+            prodigi_status="Submitted to Prodigi",
+        )
+        self.assertTrue(order_action_state.row_requires_action(row))
+
+    def test_nonterminal_dispatch_is_not_overridden_by_order_fulfilment(self):
+        row = action_row(
+            "201",
+            prodigi_status="In production",
+            fulfillment_status="fulfilled",
+        )
+        self.assertTrue(order_action_state.row_requires_action(row))
+
+    def test_outstanding_certificate_with_complete_fulfilment_remains_counted(self):
+        row = action_row(
+            "21",
+            certificate_status="Needs certificate",
+            prodigi_status="Complete",
+        )
+        self.assertTrue(order_action_state.row_requires_action(row))
+
+    def test_every_required_step_complete_removes_order(self):
+        unfinished = action_row("30", certificate_status="Needs certificate")
+        completed = action_row(
+            "30",
+            certificate_status="Uploaded",
+            prodigi_status="Fulfilled",
+        )
+        self.assertEqual(1, order_action_state.count_orders_requiring_action([unfinished]))
+        self.assertEqual(0, order_action_state.count_orders_requiring_action([completed]))
+        self.assertEqual("", order_action_state.badge_label(0))
+
+    def test_missing_allocation_unit_remains_action_required(self):
+        row = action_row("31", line_quantity=3, assignments_count=2)
+        self.assertTrue(order_action_state.row_requires_action(row))
+
+    def test_count_is_not_limited_to_latest_fifty_and_caps_badge_at_99_plus(self):
+        rows = [
+            action_row(str(index), prodigi_status="Not started")
+            for index in range(120)
+        ]
+        self.assertEqual(120, order_action_state.count_orders_requiring_action(rows))
+        self.assertEqual("99+", order_action_state.badge_label(120))
+
+    def test_cancelled_or_unpaid_orders_do_not_count(self):
+        rows = [
+            action_row("40", financial_status="refunded", prodigi_status="Not started"),
+            action_row("41", cancelled_at="2026-08-12T00:00:00Z", prodigi_status="Not started"),
+        ]
+        self.assertEqual(0, order_action_state.count_orders_requiring_action(rows))
+
+
+class NewOrderEventTests(unittest.TestCase):
+    def event(self, webhook_id, order_id, *, inserted=True, at="2026-08-12T10:00:00Z"):
+        return {
+            "webhook_id": webhook_id,
+            "shopify_order_id": order_id,
+            "shopify_order_name": f"#SC{order_id}",
+            "processed_at": at,
+            "new_order_inserted": inserted,
+        }
+
+    def test_existing_history_is_not_announced_on_initial_baseline(self):
+        events = [self.event("old-1", "3000", inserted=False)]
+        selected, marker = order_action_state.select_new_order_events(events)
+        self.assertEqual([], selected)
+        self.assertEqual("", marker)
+
+    def test_new_order_uses_stable_id_and_duplicate_events_collapse(self):
+        events = [
+            self.event("delivery-1", "3001"),
+            self.event("delivery-2", "3001", at="2026-08-12T10:00:01Z"),
+        ]
+        selected, _marker = order_action_state.select_new_order_events(events)
+        self.assertEqual(["3001"], [event["shopify_order_id"] for event in selected])
+        replay, _marker = order_action_state.select_new_order_events(
+            events,
+            seen_order_ids={"3001"},
+        )
+        self.assertEqual([], replay)
+
+    def test_single_and_batched_notification_copy(self):
+        single = order_action_state.new_order_notification([self.event("one", "3001")])
+        batch = order_action_state.new_order_notification(
+            [self.event("one", "3001"), self.event("two", "3002")]
+        )
+        self.assertEqual("New order received — #SC3001", single["message"])
+        self.assertEqual("2 new orders received", batch["message"])
+        self.assertEqual(["3001", "3002"], batch["shopify_order_ids"])
+
+    def test_sync_event_enqueue_is_idempotent_by_stable_order_id(self):
+        inserted_ids = set()
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, params=None):
+                self.returned = None
+                if "INSERT INTO webhook_events" not in sql:
+                    return
+                event_id = params[0]
+                if event_id not in inserted_ids:
+                    inserted_ids.add(event_id)
+                    self.returned = {"webhook_id": event_id}
+
+            def fetchone(self):
+                return self.returned
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                return None
+
+        orders = [
+            {"shopify_order_id": "gid://shopify/Order/3001", "order_name": "#SC3001"},
+            {"shopify_order_id": "gid://shopify/Order/3002", "order_name": "#SC3002"},
+        ]
+        with mock.patch.object(supabase_backend, "connect", side_effect=lambda: Connection()):
+            self.assertEqual(2, supabase_backend.record_new_order_notification_events(orders))
+            self.assertEqual(0, supabase_backend.record_new_order_notification_events(orders))
+
+    @mock.patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @mock.patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
+    @mock.patch.object(supabase_backend, "sync_product_edition_metafields_for_handles", return_value={"synced": 0, "errors": []})
+    @mock.patch.object(
+        supabase_backend,
+        "process_shopify_order_for_editions",
+        return_value={
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "changed_handles": [],
+            "new_assignment_ids": ["edition-3001"],
+            "errors": [],
+        },
+    )
+    def test_webhook_marks_only_a_new_stable_order_as_inserted(
+        self,
+        _process,
+        _mirror,
+        _line_ids,
+        _order_ids,
+    ):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "order_name": "#SC3001",
+            "financial_status": "PAID",
+            "cancelled_at": "",
+            "line_items": [
+                {"shopify_line_item_id": "gid://shopify/LineItem/30011"}
+            ],
+        }
+        result = supabase_backend.process_single_paid_shopify_order_for_editions(
+            order,
+            config={"configured": True},
+            ensure_schema_first=False,
+        )
+        self.assertTrue(result["new_order_inserted"])
+
+    @mock.patch.object(
+        supabase_backend,
+        "list_existing_shopify_order_ids",
+        return_value={"gid://shopify/Order/3001"},
+    )
+    @mock.patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
+    @mock.patch.object(supabase_backend, "sync_product_edition_metafields_for_handles", return_value={"synced": 0, "errors": []})
+    @mock.patch.object(
+        supabase_backend,
+        "process_shopify_order_for_editions",
+        return_value={
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "changed_handles": [],
+            "new_assignment_ids": ["edition-3001"],
+            "errors": [],
+        },
+    )
+    def test_new_line_on_existing_order_does_not_announce_a_new_order(
+        self,
+        _process,
+        _mirror,
+        _line_ids,
+        _order_ids,
+    ):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "order_name": "#SC3001",
+            "financial_status": "PAID",
+            "cancelled_at": "",
+            "line_items": [
+                {"shopify_line_item_id": "gid://shopify/LineItem/30012"}
+            ],
+        }
+        result = supabase_backend.process_single_paid_shopify_order_for_editions(
+            order,
+            config={"configured": True},
+            ensure_schema_first=False,
+        )
+        self.assertFalse(result["new_order_inserted"])
+
+
+class OrderStatusUiContractTests(unittest.TestCase):
+    def test_backend_selector_uses_shared_rules_and_has_no_latest_fifty_limit(self):
+        summary_source = inspect.getsource(supabase_backend.get_order_action_summary)
+        query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
+        self.assertIn("order_action_state.CERTIFICATE_TERMINAL_STATUSES", summary_source)
+        self.assertIn("order_action_state.FULFILMENT_TERMINAL_STATUSES", summary_source)
+        self.assertIn("COUNT(DISTINCT shopify_order_id)", summary_source)
+        self.assertNotIn("LIMIT 50", query_source)
+        self.assertIn("shopify_order_id", query_source)
+        self.assertIn("certificate_status", query_source)
+        self.assertIn("prodigi_status", query_source)
+
+    def test_orders_page_reuses_shared_certificate_and_fulfilment_helpers(self):
+        source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
+        self.assertIn("order_action_state.certificate_step_is_complete", source)
+        self.assertIn("order_action_state.fulfilment_step_is_complete", source)
+
+    def test_top_bar_status_is_permission_scoped(self):
+        with mock.patch.object(top_bar_api, "order_action_state"):
+            result = top_bar_api.load_order_status({"sub": "worker", "allowed_routes": ["Dashboard"]})
+        self.assertEqual(0, result["action_required_count"])
+        self.assertEqual({}, result["notification"])
+
+    def test_status_loader_combines_real_count_and_new_order_event(self):
+        event = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "shopify_order_name": "#SC3001",
+            "new_order_inserted": True,
+        }
+        with mock.patch.object(supabase_backend, "is_configured", return_value=True), mock.patch.object(
+            supabase_backend,
+            "get_order_action_summary",
+            return_value={"action_required_count": 1, "badge_label": "1"},
+        ), mock.patch.object(
+            supabase_backend,
+            "consume_new_order_notifications",
+            return_value=[event],
+        ):
+            result = top_bar_api.load_order_status(
+                {"sub": "admin", "allowed_routes": ["Orders"]}
+            )
+        self.assertEqual(1, result["action_required_count"])
+        self.assertEqual("New order received — #SC3001", result["notification"]["message"])
+
+    def test_notification_cursor_failure_does_not_discard_badge_count(self):
+        with mock.patch.object(supabase_backend, "is_configured", return_value=True), mock.patch.object(
+            supabase_backend,
+            "get_order_action_summary",
+            return_value={"action_required_count": 15, "badge_label": "15"},
+        ), mock.patch.object(
+            supabase_backend,
+            "consume_new_order_notifications",
+            side_effect=RuntimeError("cursor temporarily unavailable"),
+        ):
+            result = top_bar_api.load_order_status(
+                {"sub": "admin", "allowed_routes": ["Orders"]}
+            )
+        self.assertEqual(15, result["action_required_count"])
+        self.assertEqual({}, result["notification"])
+
+    def test_top_bar_component_has_lightweight_badge_and_single_managed_toast(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+        self.assertIn("sc-orders-action-badge", source)
+        self.assertIn("right: 12px", source)
+        self.assertIn("refreshOrderStatus", source)
+        self.assertIn("later(refreshOrderStatus, 30000)", source)
+        self.assertIn("later(dismissOrderToast, 7000)", source)
+        self.assertIn('button.setAttribute("aria-label", "Orders")', source)
+        self.assertIn("state.orderToastTimer = later", source)
+        self.assertIn("state.shownOrderIds", source)
+        self.assertEqual(1, source.count('id="sc-os-order-toast-region"'))
+        self.assertNotIn("st.rerun", source)
+
+    def test_top_bar_config_exposes_one_same_origin_status_endpoint(self):
+        config = top_bar.top_bar_config(
+            {"id": "admin", "role": "admin", "is_active": True, "page_permissions": []},
+            logo_src="logo",
+            current_route="Dashboard",
+        )
+        self.assertEqual("/api/os/top-bar/order-status", config["orderStatusUrl"])
+        self.assertTrue(config["ordersEnabled"])
+        self.assertEqual(1, [path for path, *_rest in top_bar_api.TOP_BAR_ROUTE_HANDLERS].count(config["orderStatusUrl"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

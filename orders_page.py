@@ -18,6 +18,7 @@ import certificate_engine
 import certificate_job
 import os_accounts
 import order_allocator
+import order_action_state
 import shopify_sync
 from activity_log import record_activity_log
 from certificate_logging import certificate_stage_log
@@ -475,10 +476,7 @@ def _developer_mode():
 
 
 def _certificate_is_uploaded(row):
-    return bool(
-        str(row.get("certificate_pdf_url") or row.get("shopify_file_url") or "").strip()
-        or str(row.get("certificate_shopify_file_id") or "").strip()
-    )
+    return order_action_state.certificate_step_is_complete(row)
 
 
 def _certificate_is_ready(row):
@@ -2074,7 +2072,10 @@ def _display_table_payload(rows):
         return display_rows
     frame = pd.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
     def row_style(row):
-        if row.get("certificate") == "Uploaded" and row.get("prodigi") == "Complete":
+        if (
+            order_action_state.certificate_step_is_complete(row)
+            and order_action_state.fulfilment_step_is_complete(row)
+        ):
             return ["background-color: rgba(47, 158, 68, 0.14); color: #123c24;" for _ in row]
         return ["" for _ in row]
 

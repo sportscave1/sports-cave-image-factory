@@ -1,4 +1,4 @@
-"""Read-only, same-origin APIs for the Sports Cave OS utility bar."""
+"""Permission-scoped, same-origin APIs for the Sports Cave OS utility bar."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import os_accounts
+import order_action_state
 import seo_navigation
 import top_bar_security
 
@@ -21,6 +22,7 @@ LOCAL_SEO_PATH = BASE_DIR / "output" / "_cache" / "seo_workspace.json"
 LOCAL_PRODUCT_DB_PATH = BASE_DIR / "data" / "sports_cave_os.db"
 SEARCH_INDEX_PATH = "/api/os/top-bar/search-index"
 NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
+ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
 _TASK_SEARCH_FIELDS = ("title", "text", "section", "category", "status")
 _TASK_METADATA_FIELDS = (
     "sport",
@@ -764,7 +766,54 @@ async def top_bar_notifications(request: Request):
     )
 
 
+def load_order_status(claims):
+    if "Orders" not in set(claims.get("allowed_routes") or ()):
+        return {"action_required_count": 0, "badge_label": "", "notification": {}}
+    summary = {"action_required_count": 0, "badge_label": ""}
+    notification = {}
+    supabase_configured = False
+    supabase_summary_loaded = False
+    try:
+        import supabase_backend
+
+        supabase_configured = supabase_backend.is_configured()
+        if supabase_configured:
+            summary = supabase_backend.get_order_action_summary()
+            supabase_summary_loaded = True
+    except Exception:
+        pass
+    if supabase_configured:
+        try:
+            events = supabase_backend.consume_new_order_notifications(claims.get("sub") or "")
+            notification = order_action_state.new_order_notification(events)
+        except Exception:
+            pass
+        if supabase_summary_loaded:
+            return {**summary, "notification": notification}
+    try:
+        import order_allocator
+
+        payload = order_allocator.load_orders_snapshot()
+        rows = payload.get("rows") if isinstance(payload, dict) else payload
+        count = order_action_state.count_orders_requiring_action(rows or [])
+        summary = {
+            "action_required_count": count,
+            "badge_label": order_action_state.badge_label(count),
+        }
+    except Exception:
+        pass
+    return {**summary, "notification": notification}
+
+
+async def top_bar_order_status(request: Request):
+    claims = _claims(request)
+    if not claims:
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    return _json({"ok": True, **load_order_status(claims)})
+
+
 TOP_BAR_ROUTE_HANDLERS = (
     (SEARCH_INDEX_PATH, top_bar_search_index, ("GET",)),
     (NOTIFICATIONS_PATH, top_bar_notifications, ("GET",)),
+    (ORDER_STATUS_PATH, top_bar_order_status, ("GET",)),
 )
