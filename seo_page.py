@@ -7,6 +7,7 @@ import streamlit as st
 
 from activity_log import record_activity_log
 import google_seo
+import google_seo_import
 import navigation_runtime
 import os_accounts
 import seo_workspace as seo
@@ -60,6 +61,11 @@ def _inject_styles():
         .sc-seo-badge-attention { background: #f8eadf; border-color: #dfb99c; color: #8a481c; }
         .sc-seo-badge-required { background: #f1f0ed; border-color: #d1cec6; color: #5f5c56; }
         .sc-seo-shopify-health { min-height: 8rem; }
+        .sc-seo-import-status { border-left: 2px solid #c5a45c; min-height: 8rem; padding: .35rem .7rem; }
+        .sc-seo-import-status h4 { font-size: .88rem; margin: 0 0 .45rem; }
+        .sc-seo-import-status dl { display: grid; font-size: .75rem; gap: .25rem .55rem; grid-template-columns: max-content minmax(0, 1fr); margin: 0; }
+        .sc-seo-import-status dt { color: #77736b; }
+        .sc-seo-import-status dd { margin: 0; overflow-wrap: anywhere; }
         .sc-seo-empty-chart { align-items: center; background: #fbfaf7; border: 1px dashed #d7d2c7; border-radius: 8px; color: #6e6b65; display: flex; justify-content: center; min-height: 13rem; padding: 2rem; text-align: center; }
         .sc-seo-future-metric { background: #fff; border: 1px solid #dfdbd1; border-top: 2px solid #c5a45c; border-radius: 8px; min-height: 7rem; padding: .85rem; }
         .sc-seo-future-label { color: #393734; font-size: .78rem; font-weight: 650; line-height: 1.25; min-height: 2rem; }
@@ -334,21 +340,8 @@ def _render_google_controls(user, store, config_status, connection):
         )
         return
 
-    controls = st.columns(3)
+    controls = st.columns(2)
     if controls[0].button(
-        "Sync now",
-        type="primary",
-        icon=":material/sync:",
-        disabled=not (connection.get("gsc_site_url") and connection.get("ga4_property_id")),
-        key="seo-google-sync-now",
-    ):
-        result = google_seo.sync_now(store, user, google_seo.load_config())
-        _set_notice(
-            result.get("message") or "Google connection checked.",
-            success=bool(result.get("ok")),
-        )
-        st.rerun()
-    if controls[1].button(
         "Refresh properties",
         icon=":material/refresh:",
         key="seo-google-refresh-properties",
@@ -360,7 +353,7 @@ def _render_google_controls(user, store, config_status, connection):
         )
         st.rerun()
     if reconnect_required:
-        controls[2].link_button(
+        controls[1].link_button(
             "Reconnect",
             google_seo.GOOGLE_OAUTH_CONNECT_PATH,
             icon=":material/link:",
@@ -433,7 +426,123 @@ def _render_google_controls(user, store, config_status, connection):
             st.rerun()
 
 
-def _render_overview(state, user, navigate, google_store=None):
+def _import_status_card(source, run):
+    status = str(run.get("status") or "not started").replace("_", " ").title()
+    completed_range = " - ".join(
+        value for value in (run.get("completed_start_date"), run.get("completed_end_date")) if value
+    ) or "No completed dates"
+    requested_range = " - ".join(
+        value for value in (run.get("requested_start_date"), run.get("requested_end_date")) if value
+    ) or "Discovering available history"
+    current = run.get("current_date") or run.get("checkpoint_date") or "Not running"
+    error = run.get("error_summary") or "None"
+    return (
+        '<div class="sc-seo-import-status">'
+        f'<h4>{html.escape(source)} import</h4><dl>'
+        f'<dt>Status</dt><dd>{html.escape(status)}</dd>'
+        f'<dt>Requested</dt><dd>{html.escape(str(requested_range))}</dd>'
+        f'<dt>Completed</dt><dd>{html.escape(str(completed_range))}</dd>'
+        f'<dt>Current</dt><dd>{html.escape(str(current))}</dd>'
+        f'<dt>Rows stored</dt><dd>{int(run.get("rows_stored") or 0):,}</dd>'
+        f'<dt>Rows received</dt><dd>{int(run.get("rows_received") or 0):,}</dd>'
+        f'<dt>Latest data</dt><dd>{html.escape(str(run.get("latest_stored_data_date") or "Not imported"))}</dd>'
+        f'<dt>Last completed</dt><dd>{html.escape(str(run.get("completed_at") or "Not completed"))}</dd>'
+        f'<dt>Error</dt><dd>{html.escape(str(error))}</dd>'
+        '</dl></div>'
+    )
+
+
+def _render_historical_import_controls(
+    user,
+    connection,
+    import_store=None,
+    connection_store=None,
+    config_ready=True,
+):
+    if not os_accounts.is_admin(user):
+        return
+    import_store = import_store or google_seo_import.default_import_store()
+    st.subheader("Google data import")
+    try:
+        statuses = import_store.recent_status()
+    except google_seo_import.SEOImportError as error:
+        st.warning(error.public_message)
+        return
+    columns = st.columns(2)
+    for column, source in zip(columns, google_seo_import.SOURCES):
+        column.markdown(
+            _import_status_card(source, statuses.get(source) or {}),
+            unsafe_allow_html=True,
+        )
+
+    can_import = bool(
+        config_ready
+        and connection.get("has_refresh_token")
+        and connection.get("gsc_site_url")
+        and connection.get("ga4_property_id")
+    )
+    actions = st.columns(3)
+    if actions[0].button(
+        "Import historical data",
+        type="primary",
+        icon=":material/history:",
+        disabled=not can_import,
+        key="seo-google-import-history",
+    ):
+        try:
+            google_seo_import.queue_imports(
+                user,
+                "historical",
+                import_store=import_store,
+                connection_store=connection_store,
+            )
+        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice("Historical GSC and GA4 imports queued.")
+        st.rerun()
+    if actions[1].button(
+        "Sync now",
+        icon=":material/sync:",
+        disabled=not can_import,
+        key="seo-google-import-sync-now",
+    ):
+        try:
+            google_seo_import.queue_imports(
+                user,
+                "manual",
+                import_store=import_store,
+                connection_store=connection_store,
+            )
+        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice("GSC and GA4 refresh queued.")
+        st.rerun()
+
+    failed = next(
+        (
+            row for row in statuses.values()
+            if row.get("status") in {"failed", "partial"} and row.get("id")
+        ),
+        None,
+    )
+    if actions[2].button(
+        "Retry failed import",
+        icon=":material/replay:",
+        disabled=not bool(failed),
+        key="seo-google-import-retry",
+    ):
+        try:
+            google_seo_import.retry_import(user, failed["id"], import_store=import_store)
+        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice(f"{failed.get('source') or 'Google'} import queued for retry.")
+        st.rerun()
+
+
+def _render_overview(state, user, navigate, google_store=None, import_store=None):
     _header(seo.SEO_OVERVIEW_ROUTE)
     _consume_google_oauth_notice()
     config_status = google_seo.configuration_status()
@@ -492,6 +601,13 @@ def _render_overview(state, user, navigate, google_store=None):
         unsafe_allow_html=True,
     )
     _render_google_controls(user, google_store, config_status, connection)
+    _render_historical_import_controls(
+        user,
+        connection,
+        import_store,
+        google_store,
+        config_status.get("ready", False),
+    )
 
     st.subheader("Future organic reporting")
     future_metrics = (
@@ -1330,7 +1446,7 @@ def _render_keywords(store, state, user):
 
 
 @st.fragment
-def _render_active_route(user, route, store, navigate, google_store=None):
+def _render_active_route(user, route, store, navigate, google_store=None, import_store=None):
     try:
         state = store.load()
     except seo.SEOStoreError as error:
@@ -1374,6 +1490,7 @@ def _render_active_route(user, route, store, navigate, google_store=None):
                 user,
                 navigate,
                 google_store,
+                import_store,
             ),
             seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
             seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
@@ -1384,10 +1501,18 @@ def _render_active_route(user, route, store, navigate, google_store=None):
     )
 
 
-def render_page(user, route, *, store=None, navigate=None, google_store=None):
+def render_page(
+    user,
+    route,
+    *,
+    store=None,
+    navigate=None,
+    google_store=None,
+    import_store=None,
+):
     if route not in seo.SEO_ROUTES:
         raise ValueError(f"Unknown SEO route: {route}")
     _inject_styles()
     _render_notice()
     store = store or seo.default_store()
-    _render_active_route(user, route, store, navigate, google_store)
+    _render_active_route(user, route, store, navigate, google_store, import_store)

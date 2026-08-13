@@ -747,6 +747,17 @@ class PostgresGoogleSEOStore:
                     SET owner_user_id=%s,
                         gsc_site_url=%s, gsc_property_name=%s,
                         ga4_property_id=%s, ga4_property_name=%s,
+                        gsc_data_through_date=CASE
+                            WHEN gsc_site_url<>%s THEN NULL ELSE gsc_data_through_date
+                        END,
+                        ga4_data_through_date=CASE
+                            WHEN ga4_property_id<>%s THEN NULL ELSE ga4_data_through_date
+                        END,
+                        last_successful_sync_at=CASE
+                            WHEN gsc_site_url<>%s OR ga4_property_id<>%s
+                                THEN NULL
+                            ELSE last_successful_sync_at
+                        END,
                         connection_status='Connected', reconnect_required=FALSE,
                         last_error_code='', last_error_message='', last_error_at=NULL,
                         updated_at=now()
@@ -760,6 +771,10 @@ class PostgresGoogleSEOStore:
                         gsc_property["name"],
                         ga4_property["id"],
                         ga4_property["name"],
+                        gsc_property["id"],
+                        ga4_property["id"],
+                        gsc_property["id"],
+                        ga4_property["id"],
                         GOOGLE_SEO_WORKSPACE_KEY,
                     ),
                 )
@@ -1014,6 +1029,11 @@ def _access_token_for_connection(store, config, *, request_post=requests.post):
     encrypted = str(connection.get("encrypted_refresh_token") or "")
     refresh_token = decrypt_refresh_token(encrypted, config["encryption_key"])
     return refresh_access_token(refresh_token, config, request_post=request_post), connection
+
+
+def access_token_for_connection(store, config, *, request_post=requests.post):
+    """Return a short-lived access token without exposing the stored refresh token."""
+    return _access_token_for_connection(store, config, request_post=request_post)
 
 
 def refresh_properties(

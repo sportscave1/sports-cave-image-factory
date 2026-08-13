@@ -78,6 +78,12 @@ The owner-only Reporting page, Resend delivery, Supabase archive, and manual
 Render Cron setup are documented in
 [`docs/DAILY_STAFF_REPORTING.md`](docs/DAILY_STAFF_REPORTING.md).
 
+## Google SEO Data Import
+
+The persistent GSC and GA4 import migration, durable worker, and Render Cron
+commands are documented in
+[`docs/GOOGLE_SEO_PHASE3.md`](docs/GOOGLE_SEO_PHASE3.md).
+
 ## Social Media
 
 The Social Media hub, nested AI Reels navigation, daily plans, Post Tracker,
