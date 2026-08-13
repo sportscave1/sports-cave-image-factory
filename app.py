@@ -3200,17 +3200,12 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] {
-            background: #EAE7E0;
+            background: transparent;
             border-radius: 0.55rem;
             padding: 0.12rem;
         }
 
-        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] div[data-testid="stButton"] button,
-        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] div[data-testid="stButton"] button[kind="primary"],
-        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] div[data-testid="stButton"] button[data-testid="stBaseButton-primary"] {
-            background: transparent !important;
-            border-color: transparent !important;
-            box-shadow: none !important;
+        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] div[data-testid="stButton"] button {
             padding-right: 1.15rem !important;
             position: relative;
         }
@@ -8228,21 +8223,31 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
         )
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
-    def disclosure(group, label, icon, active):
+    def disclosure(group, label, icon, overview_route):
         expanded = open_group == group
         container = st.container(
             key=f"sidebar-disclosure-{group}-{'open' if expanded else 'closed'}"
         )
-        container.button(
+        clicked = container.button(
             label,
             key=f"sidebar-disclosure::{group}",
             use_container_width=True,
-            type="primary" if active else "secondary",
+            type=(
+                "primary"
+                if navigation_runtime.disclosure_parent_is_active(
+                    current_page,
+                    overview_route,
+                )
+                else "secondary"
+            ),
             icon=icon,
-            help=f"{'Collapse' if expanded else 'Expand'} {label}",
-            on_click=_toggle_sidebar_group,
-            args=(group,),
+            help=f"Open {label}",
         )
+        if clicked:
+            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = group
+            if current_page != overview_route:
+                set_current_page(overview_route, source="sidebar")
+            st.rerun(scope="app")
         container.markdown(
             f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}" '
             f'aria-controls="sidebar-{group}-children">{html.escape(label)} navigation</span>',
@@ -8265,19 +8270,14 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
 
     _sidebar_route_button("Mockups", current_page, allowed_routes, root=st)
     if social_media.SOCIAL_MEDIA_ROUTE in allowed_routes:
-        social_active = current_page in {
-            social_media.SOCIAL_MEDIA_ROUTE,
-            social_media.AI_REELS_ROUTE,
-        }
         if disclosure(
             "social",
             SIDEBAR_NAV_LABELS.get(social_media.SOCIAL_MEDIA_ROUTE, "Social Media"),
             SIDEBAR_ICON_BY_ROUTE[social_media.SOCIAL_MEDIA_ROUTE],
-            social_active,
+            social_media.SOCIAL_MEDIA_ROUTE,
         ):
             children = st.container(key="sidebar-social-children")
             children.markdown('<span id="sidebar-social-children"></span>', unsafe_allow_html=True)
-            child_button(children, social_media.SOCIAL_MEDIA_ROUTE, "Overview")
             child_button(
                 children,
                 social_media.AI_REELS_ROUTE,
@@ -8292,11 +8292,14 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             "seo",
             "SEO",
             SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
-            current_page in seo_nav.SEO_ROUTES,
+            seo_nav.SEO_OVERVIEW_ROUTE,
         ):
             children = st.container(key="sidebar-seo-children")
             children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
-            for route in seo_nav.SEO_ROUTES:
+            for route in navigation_runtime.disclosure_child_routes(
+                seo_nav.SEO_ROUTES,
+                seo_nav.SEO_OVERVIEW_ROUTE,
+            ):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
     email_container = st.container(key="sidebar-email-soon")
     email_container.button(

@@ -22,6 +22,14 @@ def toggle_disclosure_group(current_group, clicked_group):
     return "" if current == clicked else clicked
 
 
+def disclosure_parent_is_active(route, overview_route):
+    return str(route or "") == str(overview_route or "")
+
+
+def disclosure_child_routes(routes, overview_route):
+    return tuple(route for route in routes if route != overview_route)
+
+
 def dispatch_selected(selected, handlers):
     try:
         renderer = handlers[selected]
