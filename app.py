@@ -51,6 +51,7 @@ import shared_credentials
 import social_media
 import seo_navigation as seo_nav
 import sports_cave_dashboard
+import design_studio_styles
 import sports_cave_pricing
 import sports_sales_calendar
 import top_bar
@@ -3171,6 +3172,18 @@ def inject_styles():
         .sc-design-task-card .sc-small-meta {
             font-size: 0.66rem;
             margin-top: 0.12rem;
+        }
+        .sc-design-style-badge {
+            background: #f3ecdc;
+            border: 1px solid #d9c28d;
+            border-radius: 999px;
+            color: #6d531c;
+            display: inline-block;
+            font-size: .64rem;
+            font-weight: 700;
+            margin-left: .4rem;
+            padding: .1rem .38rem;
+            vertical-align: middle;
         }
 
         .sc-task-summary {
@@ -12200,6 +12213,16 @@ def _render_dashboard_task_csv_preview(preview):
             duplicate_rows += f", plus {len(preview.get('duplicates') or []) - 12} more"
         st.caption(f"Duplicates skipped: {duplicate_rows}.")
 
+    if preview.get("tasks"):
+        st.markdown("**Valid design styles**")
+        for task in preview.get("tasks", [])[:12]:
+            style_slug = sports_cave_dashboard.task_design_style(task)
+            if style_slug:
+                st.caption(
+                    f"Row {task.get('row_number')}: "
+                    f"{sports_cave_dashboard.task_design_style_label(task)}"
+                )
+
 
 def render_dashboard_task_csv_import_dialog(state):
     if not st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_OPEN_KEY):
@@ -12285,7 +12308,7 @@ def render_dashboard_task_header(state):
     with header_cols[2]:
         st.download_button(
             "Export CSV",
-            data=sports_cave_dashboard.build_task_import_template_csv(),
+            data=sports_cave_dashboard.build_task_import_template_csv(state.get("tasks") or []),
             file_name=sports_cave_dashboard.TASK_IMPORT_TEMPLATE_FILENAME,
             mime="text/csv",
             key="dashboard-task-csv-export",
@@ -12311,6 +12334,8 @@ def task_import_details_html(task):
         value = details.get(key)
         if not value:
             continue
+        if key == "design_style":
+            value = design_studio_styles.design_style_label(value)
         escaped_value = html.escape(value).replace("\n", "<br>")
         rows.append(
             '<div class="sc-task-detail-row">'
@@ -12321,7 +12346,14 @@ def task_import_details_html(task):
     return f'<div class="sc-task-detail-popover">{"".join(rows)}</div>'
 
 
-def dashboard_task_card_html(task_text, task_summary, created_label, *, is_design_group=False):
+def dashboard_task_card_html(
+    task_text,
+    task_summary,
+    created_label,
+    *,
+    is_design_group=False,
+    design_style="",
+):
     card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
     safe_title = html.escape(str(task_text or ""))
     safe_title_attr = html.escape(str(task_text or ""), quote=True)
@@ -12332,9 +12364,16 @@ def dashboard_task_card_html(task_text, task_summary, created_label, *, is_desig
         if summary
         else ""
     )
+    style_badge = (
+        '<span class="sc-design-style-badge">'
+        f'{html.escape(sports_cave_dashboard.task_design_style_label({"design_style": design_style}))}'
+        "</span>"
+        if is_design_group
+        else ""
+    )
     return (
         f'<div class="{card_class}">'
-        f'<strong title="{safe_title_attr}">{safe_title}</strong>'
+        f'<strong title="{safe_title_attr}">{safe_title}</strong>{style_badge}'
         f"{summary_html}"
         f'<span class="sc-small-meta">Added {html.escape(str(created_label or ""))}</span>'
         "</div>"
@@ -12376,6 +12415,7 @@ def render_task_group(group, tasks):
         task_text = task.get("text") or ""
         task_summary = sports_cave_dashboard.task_import_summary(task)
         task_details = sports_cave_dashboard.task_import_details(task)
+        design_style = sports_cave_dashboard.task_design_style(task)
         row = st.columns([4.5, 0.95, 1.15]) if task_details else st.columns([5, 1.25])
         with row[0]:
             st.html(
@@ -12384,6 +12424,7 @@ def render_task_group(group, tasks):
                     task_summary,
                     format_dashboard_timestamp(task.get("created_at")),
                     is_design_group=is_design_group,
+                    design_style=design_style,
                 )
             )
         if task_details:
@@ -12444,6 +12485,27 @@ def render_task_group(group, tasks):
                     st.session_state.pop("dashboard_pending_design_complete_task_text", None)
                     st.rerun()
 
+        if is_design_group and not design_style:
+            assign_columns = st.columns([3.2, 1])
+            style_slug = assign_columns[0].selectbox(
+                "Assign design style",
+                ["", *design_studio_styles.style_slugs()],
+                format_func=lambda value: design_studio_styles.design_style_label(value),
+                key=f"dashboard-design-style::{task_id}",
+            )
+            if assign_columns[1].button(
+                "Save style",
+                key=f"dashboard-design-style-save::{task_id}",
+                disabled=not style_slug,
+                use_container_width=True,
+            ):
+                try:
+                    sports_cave_dashboard.update_task_design_style(task_id, style_slug)
+                except (ValueError, sports_cave_dashboard.DashboardStorageError):
+                    st.warning("Could not save the design style right now.")
+                else:
+                    st.rerun()
+
     if overflow_tasks:
         with st.popover(f"+{len(overflow_tasks)} more"):
             preview_rows = []
@@ -12451,6 +12513,7 @@ def render_task_group(group, tasks):
                 task_title = str(task.get("text") or "")
                 task_summary = sports_cave_dashboard.task_import_summary(task)
                 details_html = task_import_details_html(task)
+                design_style_label = sports_cave_dashboard.task_design_style_label(task)
                 summary_html = (
                     f'<span class="sc-task-summary" title="{html.escape(task_summary, quote=True)}">'
                     f"{html.escape(task_summary)}</span>"
@@ -12469,6 +12532,7 @@ def render_task_group(group, tasks):
                     '<div class="sc-design-overflow-item" '
                     f'title="{html.escape(task_title, quote=True)}">'
                     f'{html.escape(sports_cave_dashboard.compact_design_task_preview(task_title))}'
+                    f'<span class="sc-design-style-badge">{html.escape(design_style_label)}</span>'
                     f"{summary_html}"
                     f"{details_block}"
                     "</div>"
@@ -12483,26 +12547,50 @@ def render_dashboard_tasks(state):
     render_dashboard_task_header(state)
     if state.get("task_error"):
         st.warning("Tasks could not load right now. Please try again shortly.")
-    with st.form("dashboard-add-task", clear_on_submit=True):
-        columns = st.columns([2.8, 1.4, 0.9])
-        task_text = columns[0].text_input(
-            "Task",
-            placeholder="Add a task",
+    if st.session_state.pop("dashboard-clear-add-task", False):
+        st.session_state.pop("dashboard-add-task-text", None)
+        st.session_state.pop("dashboard-add-task-style", None)
+    columns = st.columns([2.5, 1.2, 1.35, 0.8])
+    task_text = columns[0].text_input(
+        "Task",
+        placeholder="Add a task",
+        label_visibility="collapsed",
+        key="dashboard-add-task-text",
+    )
+    category = columns[1].selectbox(
+        "Group",
+        sports_cave_dashboard.TASK_GROUPS,
+        label_visibility="collapsed",
+        key="dashboard-add-task-group",
+    )
+    design_style = ""
+    if category == sports_cave_dashboard.DESIGN_TASK_GROUP:
+        design_style = columns[2].selectbox(
+            "Design style",
+            ["", *design_studio_styles.style_slugs()],
+            format_func=lambda value: design_studio_styles.design_style_label(value),
             label_visibility="collapsed",
+            key="dashboard-add-task-style",
         )
-        category = columns[1].selectbox(
-            "Group",
-            sports_cave_dashboard.TASK_GROUPS,
-            label_visibility="collapsed",
-        )
-        submitted = columns[2].form_submit_button("Add", use_container_width=True)
+    else:
+        columns[2].caption("")
+    submitted = columns[3].button(
+        "Add",
+        key="dashboard-add-task-submit",
+        use_container_width=True,
+    )
 
     if submitted:
         try:
-            sports_cave_dashboard.add_task(task_text, category)
+            sports_cave_dashboard.add_task(
+                task_text,
+                category,
+                design_style=design_style,
+            )
+            st.session_state["dashboard-clear-add-task"] = True
             st.rerun()
-        except ValueError:
-            st.warning("Add a task first.")
+        except ValueError as error:
+            st.warning(str(error) or "Add a task first.")
         except sports_cave_dashboard.DashboardStorageError:
             st.warning("Could not save the task right now. Please try again.")
 

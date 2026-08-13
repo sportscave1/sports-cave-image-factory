@@ -1,4 +1,5 @@
 from pathlib import Path
+import inspect
 import unittest
 
 import design_studio_page
@@ -291,138 +292,88 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertNotIn(marker, research_prompt)
         self.assertNotIn(marker, artwork_prompt)
-        self.assertIn(design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER, artwork_prompt)
-        self.assertIn(design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER, artwork_prompt)
+        self.assertIn(
+            design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER,
+            artwork_prompt,
+        )
+        self.assertNotIn(
+            design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER,
+            artwork_prompt,
+        )
+        self.assertNotIn(
+            design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER,
+            artwork_prompt,
+        )
 
-    def test_design_generation_prompt_uses_research_context_and_design_system(self):
+    def test_design_generation_prompt_uses_concise_master_instructions(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
-        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
-        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER
-        containment_marker = design_studio_page.DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER
-        signature_premium_marker = design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER
+        master_marker = design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER
+        legacy_markers = (
+            design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER,
+            design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
+            design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER,
+            design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER,
+            design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER,
+            design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER,
+            design_studio_page.DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER,
+            SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
+        )
 
         self.assertIn(
-            "From the research and images above, create a premium Sports Cave limited-edition collector artwork",
+            "Create a premium Sports Cave limited-edition collector artwork using the task variables and all supplied reference images.",
             prompt,
         )
         self.assertIn("TASK:\nBathurst Brock tribute", prompt)
-        self.assertIn("Bathurst Brock tribute", prompt)
-        self.assertIn("Hero image: immutable principal subject asset", prompt)
-        self.assertIn("Composite the original supplied subject unchanged into the generated Sports Cave environment.", prompt)
-        self.assertIn("Background/support image: atmosphere, venue and story reference", prompt)
-        self.assertIn("Detail references: factual accuracy references only", prompt)
-        self.assertIn("Limited-edition plaque: exact supplied graphic asset to composite, not regenerate.", prompt)
-        self.assertIn("Use the Sports Cave limited-edition plaque attached to this project", prompt)
-        self.assertIn("This must feel like premium limited-edition sports wall art", prompt)
-        self.assertIn("Realism and reference accuracy lock:", prompt)
-        self.assertIn("Use the selected images as strict source assets and factual references according to their roles above.", prompt)
-        self.assertIn("Do not redesign the athlete, driver, car, uniform, trophy, venue, or moment.", prompt)
-        self.assertIn("Do not mirror images if it reverses numbers, logos, sponsor text, or kit details.", prompt)
-        self.assertIn("legend + moment + nostalgia + darkness + subtle gold + framed collector energy", prompt)
-        self.assertIn("Use a dark cinematic foundation:", prompt)
-        self.assertIn("Use gold sparingly only for premium emphasis:", prompt)
-        self.assertIn("It must never overpower the subject.", prompt)
-        self.assertIn("If motorsport: realistic race cars", prompt)
-        self.assertIn("Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.", prompt)
-        self.assertEqual(prompt.count(hero_marker), 1)
-        self.assertEqual(prompt.count(border_marker), 1)
-        self.assertEqual(prompt.count(containment_marker), 1)
-        self.assertEqual(
-            prompt.count(design_studio_page._clean_prompt(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)),
-            1,
+        self.assertIn("Select the strongest supplied action or full-body photograph", prompt)
+        self.assertIn("Never redraw, regenerate, face-swap or recreate a player.", prompt)
+        self.assertIn("Never combine a face from one image with a body from another.", prompt)
+        self.assertIn("If an image cannot be extended naturally, retain its original crop.", prompt)
+        self.assertIn("The supplied players are the heroes and must dominate.", prompt)
+        self.assertIn("Do not add generated players, detailed AI crowds", prompt)
+        self.assertIn("Never generate, rewrite or imitate a signature.", prompt)
+        self.assertIn("If no verified signature exists for a player, omit it.", prompt)
+        self.assertIn("Never invent, redraw or approximate a plaque.", prompt)
+        self.assertIn("Create a landscape 4:3 composition", prompt)
+        self.assertIn("professional photographic composite", prompt)
+        self.assertEqual(prompt.count(master_marker), 1)
+        self.assertLess(
+            len(
+                design_studio_page._clean_prompt(
+                    design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT
+                )
+            ),
+            3000,
         )
-        self.assertIn("Use only the supplied main heroes.", prompt)
-        self.assertIn("Do not invent, generate, duplicate, reconstruct, or add any additional athletes", prompt)
-        self.assertIn("AI-generated background players", prompt)
-        self.assertIn("recognisable individual people, faces, bodies or AI-generated players", prompt)
-        self.assertIn("The supplied main heroes must carry the emotional and visual weight", prompt)
-        self.assertIn("Keep the background minimal, cinematic, relevant and controlled.", prompt)
-        self.assertIn("Every finished collector artwork must include a clean, precise and premium Sports Cave border", prompt)
-        self.assertIn("The Sports Cave branded border is a hard containment boundary", prompt)
-        self.assertIn("Every visual element must remain completely inside the inner edge of the border", prompt)
-        self.assertIn("The border must always render as the uninterrupted topmost structural layer.", prompt)
-        self.assertIn("Reduce its scale.", prompt)
-        self.assertIn("Reposition it inward.", prompt)
-        self.assertIn("Do not continue scenery, lighting, smoke, people, vehicles, typography or decorative effects outside the border.", prompt)
-        self.assertNotIn(design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER, prompt)
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER), 1)
-        self.assertIn("AUTHENTIC SIGNATURE ASSETS", prompt)
-        self.assertIn("Never invent, approximate, font-set, trace or regenerate a missing signature.", prompt)
-        self.assertIn("Do not add claims such as:", prompt)
-        self.assertIn("* Hand-signed", prompt)
-        self.assertIn("unless the product is genuinely hand-signed", prompt)
-        self.assertNotIn(signature_premium_marker, prompt)
-        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
-        self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", prompt)
-        self.assertIn("ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION", prompt)
-        self.assertNotIn("Treat the uploaded full-resolution product as an immutable physical asset.", prompt)
-        self.assertNotIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
-        self.assertNotIn("Continue with this Sports Cave design system:", prompt)
-        self.assertNotIn("Sports Cave Master Design System Prompt", prompt)
+        for marker in legacy_markers:
+            self.assertNotIn(marker, prompt)
 
-    def test_new_design_step_three_includes_subject_lock_once_before_creative_direction(self):
+    def test_new_design_step_three_contains_master_once_before_task(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
-        marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
-        signature_marker = design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER
-        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
-        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER
-        containment_marker = design_studio_page.DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER
+        marker = design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER
 
         self.assertTrue(prompt.startswith(marker))
         self.assertEqual(prompt.count(marker), 1)
-        self.assertEqual(prompt.count(containment_marker), 1)
-        self.assertLess(
-            prompt.index("7. If any instruction conflicts with these rules"),
-            prompt.index(signature_marker),
-        )
-        self.assertLess(
-            prompt.index(signature_marker),
-            prompt.index(hero_marker),
-        )
-        self.assertLess(prompt.index(border_marker), prompt.index(containment_marker))
-        self.assertLess(prompt.index(containment_marker), prompt.index("TASK:\nBathurst Brock tribute"))
-        self.assertLess(prompt.index(hero_marker), prompt.index("TASK:\nBathurst Brock tribute"))
         self.assertLess(prompt.index(marker), prompt.index("TASK:\nBathurst Brock tribute"))
-        self.assertLess(prompt.index(marker), prompt.index("Reference roles:"))
-        self.assertLess(prompt.index(marker), prompt.index("Create the artwork in landscape 4:3 ratio."))
-        self.assertLess(prompt.index(marker), prompt.index("Sports Cave collector style:"))
-        self.assertIn("USE THE ORIGINAL SUPPLIED SUBJECT IMAGE ITSELF.", prompt)
-        self.assertIn("Do not face-swap the subject.", prompt)
-        self.assertIn("The background and design will adapt to the subject.", prompt)
+        self.assertNotIn(design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER, prompt)
+        self.assertNotIn(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER, prompt)
 
-    def test_rivalry_step_three_prompt_includes_rivalry_rules_once_after_subject_lock(self):
+    def test_rivalry_step_three_uses_same_concise_cohero_master_prompt(self):
         prompt = design_studio_page.build_design_generation_prompt(
             "Create a minimalist Messi vs Ronaldo face-off collector design"
         )
-        subject_marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER
-        rivalry_marker = design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER
-        signature_marker = design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER
-        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER
 
-        self.assertEqual(prompt.count(subject_marker), 1)
-        self.assertEqual(prompt.count(rivalry_marker), 1)
-        self.assertEqual(prompt.count(signature_marker), 1)
-        self.assertEqual(prompt.count(hero_marker), 1)
-        self.assertLess(prompt.index(subject_marker), prompt.index(rivalry_marker))
-        self.assertLess(prompt.index(rivalry_marker), prompt.index(signature_marker))
-        self.assertLess(prompt.index(signature_marker), prompt.index(hero_marker))
-        self.assertLess(prompt.index(hero_marker), prompt.index("TASK:\nCreate a minimalist Messi vs Ronaldo face-off collector design"))
-        self.assertLess(prompt.index(rivalry_marker), prompt.index(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER))
-        self.assertIn("The two opposing principal subjects are the only visual heroes.", prompt)
-        self.assertIn("equal status, comparable scale and balanced visual weight", prompt)
-        self.assertIn("MODE A — MINIMAL FACE-OFF RIVALRY", prompt)
-        self.assertIn("MODE B — LEGENDS JERSEY-BACK COMPOSITION", prompt)
-        self.assertIn("Never add anonymous players, generated athletes", prompt)
-        self.assertIn("Background players", prompt)
-        self.assertIn("The two opposing principal subjects must be co-equal heroes.", prompt)
-        self.assertNotIn("The subject must be the hero.", prompt)
-        self.assertIn("Use one authentic signature for each principal rival.", prompt)
-        self.assertIn("Left hero -> left hero's authentic signature", prompt)
-        self.assertIn("Right hero -> right hero's authentic signature", prompt)
-        for example_name in ("Jordan", "Bryant", "Bradshaw", "Montana"):
-            self.assertNotIn(example_name, prompt)
+        self.assertEqual(
+            prompt.count(design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER),
+            1,
+        )
+        self.assertIn(
+            "TASK:\nCreate a minimalist Messi vs Ronaldo face-off collector design",
+            prompt,
+        )
+        self.assertIn("The supplied players are the heroes and must dominate.", prompt)
+        self.assertNotIn(design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER, prompt)
 
-    def test_rivalry_text_triggers_activate_step_three_prompt(self):
+    def test_rivalry_text_does_not_append_legacy_blocks_to_step_three_prompt(self):
         trigger_tasks = (
             "Create Messi VS Ronaldo collector artwork",
             "Create Messi versus Ronaldo collector artwork",
@@ -438,8 +389,12 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             with self.subTest(task=task):
                 prompt = design_studio_page.build_design_generation_prompt(task)
                 self.assertEqual(
-                    prompt.count(design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER),
+                    prompt.count(design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER),
                     1,
+                )
+                self.assertNotIn(
+                    design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
+                    prompt,
                 )
 
     def test_structured_rivalry_context_activates_generation_prompt(self):
@@ -489,14 +444,17 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
-            rivalry_prompt.count(design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER),
-            1,
-        )
-        self.assertNotIn(
-            design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
-            single_subject_prompt,
-        )
+        for prompt in (rivalry_prompt, single_subject_prompt):
+            self.assertEqual(
+                prompt.count(design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER),
+                1,
+            )
+            self.assertNotIn(
+                design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
+                prompt,
+            )
+        self.assertIn("TASK:\nCreate a premium collector artwork", rivalry_prompt)
+        self.assertIn("TASK:\nCreate a premium VS title artwork", single_subject_prompt)
 
     def test_rivalry_rules_apply_once_to_all_final_artwork_routes_when_context_matches(self):
         generation_names = (
@@ -505,15 +463,26 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "Create Sports Cave Style Artwork Prompt",
         )
 
+        step_three_prompt = design_studio_page.build_design_generation_prompt(
+            "Create a rivalry design: Messi vs Ronaldo"
+        )
         prompts = [
-            design_studio_page.build_design_generation_prompt("Create a rivalry design: Messi vs Ronaldo")
-        ]
-        prompts.extend(
             design_studio_page.build_design_studio_image_generation_prompt(
                 design_studio_page.PROMPT_BOXES[prompt_name][0],
                 design_context={"artwork_type": "rivalry"},
             )
             for prompt_name in generation_names
+        ]
+
+        self.assertEqual(
+            step_three_prompt.count(
+                design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER
+            ),
+            1,
+        )
+        self.assertNotIn(
+            design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
+            step_three_prompt,
         )
 
         for prompt in prompts:
@@ -531,52 +500,161 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
                 self.assertIn("Nothing may overlap, sit over, pass through, hide or extend beyond the border.", prompt)
 
     def test_final_generation_maps_selected_signature_assets(self):
-        signature_marker = design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER
-        premium_marker = design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER
         prompt = design_studio_page.build_design_generation_prompt(
             "Create Joe Montana collector artwork",
             design_context={
                 "principal_subjects": [{"name": "Joe Montana"}],
-                "signature_assets": [
+                "selected_images": [
                     {
+                        "role": "hero_image",
                         "subject_name": "Joe Montana",
-                        "image_reference": "selected signature carousel image 4",
+                        "image_reference": "C:/selected/joe-montana-action.jpg",
+                    },
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "Joe Montana",
+                        "image_reference": "C:/selected/joe-montana-signature.png",
                     }
                 ],
             },
         )
 
-        self.assertEqual(prompt.count(signature_marker), 1)
-        self.assertEqual(prompt.count(premium_marker), 1)
-        self.assertLess(prompt.index(signature_marker), prompt.index(premium_marker))
-        self.assertLess(prompt.index(premium_marker), prompt.index("COLLECTOR PLACEMENT"))
-        self.assertIn("AUTHENTIC SIGNATURE ASSETS", prompt)
-        self.assertIn("* Joe Montana -> selected signature carousel image 4", prompt)
-        self.assertIn("Use only signature images selected from the Find Images carousel", prompt)
-        self.assertIn("Composite the original signature mark itself", prompt)
-        self.assertIn("Only use the supplied, selected or reliably sourced authentic signature belonging to the featured person.", prompt)
-        self.assertIn("Preserve its genuine handwritten structure exactly", prompt)
-        self.assertIn("* Natural pressure and line-weight variation", prompt)
-        self.assertIn("* Overall width-to-height ratio", prompt)
-        self.assertIn("Do not redraw, reinterpret, simplify, correct, beautify or replace the authentic signature.", prompt)
-        self.assertIn("Present the authentic signature as a thin, elegant and restrained collector detail.", prompt)
-        self.assertIn("Preserve genuine stroke variation while ensuring the overall presentation remains visually light", prompt)
-        self.assertIn("* Thick or chunky signature rendering", prompt)
-        self.assertIn("* Generic cursive fonts", prompt)
-        self.assertIn("* Signatures placed outside the Sports Cave border", prompt)
-        self.assertIn("* Remain fully inside the Sports Cave branded border", prompt)
-        self.assertIn("The signature adds authenticity and collector value. It must never become the dominant visual element.", prompt)
+        self.assertIn("SELECTED IMAGE ASSETS AND ROLE METADATA", prompt)
+        self.assertIn("Pass and use these actual selected image files as image inputs.", prompt)
+        self.assertIn(
+            "* C:/selected/joe-montana-action.jpg | role: hero_image; subject: Joe Montana",
+            prompt,
+        )
+        self.assertIn(
+            "* C:/selected/joe-montana-signature.png | role: signature_asset; subject: Joe Montana",
+            prompt,
+        )
+        self.assertIn("VERIFIED SIGNATURE ASSET MAPPING", prompt)
+        self.assertIn("* Joe Montana -> C:/selected/joe-montana-signature.png", prompt)
+        self.assertNotIn(
+            design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER,
+            prompt,
+        )
+        self.assertNotIn(
+            design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER,
+            prompt,
+        )
+
+    def test_final_generation_preserves_selected_asset_roles_and_subjects(self):
+        prompt = design_studio_page.build_design_generation_prompt(
+            "Create Joe Montana collector artwork",
+            design_context={
+                "principal_subjects": [{"name": "Joe Montana"}],
+                "selected_images": [
+                    {
+                        "role": "hero_image",
+                        "subject_name": "Joe Montana",
+                        "file_path": "C:/assets/joe-action.jpg",
+                    },
+                    {
+                        "role": "identity_reference",
+                        "subject_name": "Joe Montana",
+                        "file_path": "C:/assets/joe-face.jpg",
+                    },
+                    {
+                        "role": "background",
+                        "file_path": "C:/assets/candlestick-park.jpg",
+                    },
+                    {
+                        "role": "plaque_asset",
+                        "file_path": "C:/assets/sports-cave-plaque.png",
+                    },
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "Joe Montana",
+                        "file_path": "C:/assets/joe-signature.png",
+                    },
+                ],
+            },
+        )
+
+        expected_asset_lines = (
+            "* C:/assets/joe-action.jpg | role: hero_image; subject: Joe Montana",
+            "* C:/assets/joe-face.jpg | role: identity_reference; subject: Joe Montana",
+            "* C:/assets/candlestick-park.jpg | role: background",
+            "* C:/assets/sports-cave-plaque.png | role: plaque_asset",
+            "* C:/assets/joe-signature.png | role: signature_asset; subject: Joe Montana",
+        )
+        for line in expected_asset_lines:
+            self.assertIn(line, prompt)
+        self.assertIn("* Joe Montana -> C:/assets/joe-signature.png", prompt)
+        self.assertLess(
+            prompt.index("SELECTED IMAGE ASSETS AND ROLE METADATA"),
+            prompt.index("VERIFIED SIGNATURE ASSET MAPPING"),
+        )
+
+    def test_final_generation_rejects_style_phrases_as_signature_subjects(self):
+        prompt = design_studio_page.build_design_generation_prompt(
+            "Create Joe Montana collector artwork",
+            design_context={
+                "principal_subjects": [{"name": "Joe Montana"}],
+                "selected_images": [
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "Joe Montana",
+                        "file_path": "C:/assets/joe-signature.png",
+                    },
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "Thin Sports Cave",
+                        "file_path": "C:/assets/false-thin.png",
+                    },
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "The Sports Cave",
+                        "file_path": "C:/assets/false-brand.png",
+                    },
+                    {
+                        "role": "signature_asset",
+                        "subject_name": "Cinematic Realistic",
+                        "file_path": "C:/assets/false-style.png",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(prompt.count("VERIFIED SIGNATURE ASSET MAPPING"), 1)
+        self.assertIn("* Joe Montana -> C:/assets/joe-signature.png", prompt)
+        for invalid_value in (
+            "Thin Sports Cave",
+            "The Sports Cave",
+            "Cinematic Realistic",
+            "C:/assets/false-thin.png",
+            "C:/assets/false-brand.png",
+            "C:/assets/false-style.png",
+        ):
+            self.assertNotIn(invalid_value, prompt)
+
+    def test_final_generation_does_not_invent_plaque_without_asset(self):
+        prompt = design_studio_page.build_design_generation_prompt(
+            "Create Joe Montana collector artwork",
+            design_context={
+                "principal_subjects": [{"name": "Joe Montana"}],
+                "selected_images": [
+                    {
+                        "role": "hero_image",
+                        "subject_name": "Joe Montana",
+                        "file_path": "C:/assets/joe-action.jpg",
+                    }
+                ],
+            },
+        )
+
+        self.assertIn("Use an exact supplied Sports Cave limited-edition plaque asset only when one is supplied.", prompt)
+        self.assertIn("Never invent, redraw or approximate a plaque.", prompt)
+        self.assertNotIn("role: plaque_asset", prompt)
 
     def test_final_generation_signature_fallback_never_generates_missing_signature(self):
         prompt = design_studio_page.build_design_generation_prompt("Create vehicle-only Mount Panorama circuit artwork")
 
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER), 1)
-        self.assertNotIn(design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER, prompt)
-        self.assertIn("If a listed subject has no valid authentic signature asset, omit only that signature.", prompt)
-        self.assertIn("Do not generate one.", prompt)
-        self.assertIn("Do not use a script font.", prompt)
-        self.assertIn("Do not approximate the athlete's autograph.", prompt)
-        self.assertIn("For a rivalry, never duplicate the available rival's signature", prompt)
+        self.assertNotIn("VERIFIED SIGNATURE ASSET MAPPING", prompt)
+        self.assertIn("If no verified signature exists for a player, omit it.", prompt)
+        self.assertIn("Never generate, rewrite or imitate a signature.", prompt)
 
     def test_signature_premium_treatment_applies_to_all_final_routes_with_verified_assets(self):
         premium_marker = design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER
@@ -595,18 +673,23 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "Create Sports Cave Style Artwork Prompt",
         )
 
+        step_three_prompt = design_studio_page.build_design_generation_prompt(
+            "Create Joe Montana collector artwork",
+            design_context=signature_context,
+        )
         prompts = [
-            design_studio_page.build_design_generation_prompt(
-                "Create Joe Montana collector artwork",
-                design_context=signature_context,
-            )
-        ]
-        prompts.extend(
             design_studio_page.build_design_studio_image_generation_prompt(
                 design_studio_page.PROMPT_BOXES[prompt_name][0],
                 design_context=signature_context,
             )
             for prompt_name in generation_names
+        ]
+
+        self.assertNotIn(premium_marker, step_three_prompt)
+        self.assertIn("VERIFIED SIGNATURE ASSET MAPPING", step_three_prompt)
+        self.assertIn(
+            "* Joe Montana -> selected signature carousel image 4",
+            step_three_prompt,
         )
 
         for prompt in prompts:
@@ -633,7 +716,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         )
 
         self.assertNotIn(design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER, prompt)
-        self.assertIn("* Michael Jordan -> selected signature image reference for Michael Jordan", prompt)
+        self.assertNotIn("VERIFIED SIGNATURE ASSET MAPPING", prompt)
         self.assertNotIn("* Michael Jordan -> selected hero carousel image 1", prompt)
 
     def test_signature_premium_treatment_accepts_role_tagged_signature_assets(self):
@@ -650,7 +733,12 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER), 1)
+        self.assertNotIn(design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER, prompt)
+        self.assertIn("VERIFIED SIGNATURE ASSET MAPPING", prompt)
+        self.assertIn(
+            "* selected image carousel item 7 | role: signature_asset; subject: Joe Montana",
+            prompt,
+        )
         self.assertIn("* Joe Montana -> selected image carousel item 7", prompt)
 
     def test_existing_approved_artwork_signature_rules_do_not_add_unrelated_signatures(self):
@@ -744,8 +832,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("[PASTE BACKGROUND IMAGE DIRECTION]", twice)
         self.assertIn("Use the Sports Cave limited-edition plaque attached to this project", twice)
 
-    def test_signature_premium_treatment_is_idempotent_when_signature_selected(self):
-        premium_marker = design_studio_page.SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER
+    def test_step_three_master_is_stable_when_signature_selected(self):
         design_context = {
             "principal_subjects": [{"name": "Joe Montana"}],
             "signature_assets": [
@@ -759,28 +846,26 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "Create Joe Montana collector artwork",
             design_context=design_context,
         )
-        twice = design_studio_page.build_design_studio_image_generation_prompt(
-            once,
+        twice = design_studio_page.build_design_generation_prompt(
+            "Create Joe Montana collector artwork",
             design_context=design_context,
         )
 
         self.assertEqual(once, twice)
-        self.assertEqual(twice.count(premium_marker), 1)
-        self.assertEqual(twice.count(design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER), 1)
-        self.assertLess(twice.index(premium_marker), twice.index("COLLECTOR PLACEMENT"))
+        self.assertEqual(
+            twice.count(design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER),
+            1,
+        )
+        self.assertEqual(twice.count("VERIFIED SIGNATURE ASSET MAPPING"), 1)
 
-    def test_rivalry_composition_is_idempotent(self):
-        marker = design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER
+    def test_step_three_master_is_stable_for_rivalry_task(self):
+        marker = design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER
         once = design_studio_page.build_design_generation_prompt("Create a motorsport rivalry design: Brock vs Moffat")
-        twice = design_studio_page.build_design_studio_image_generation_prompt(once)
+        twice = design_studio_page.build_design_generation_prompt("Create a motorsport rivalry design: Brock vs Moffat")
 
         self.assertEqual(once, twice)
         self.assertEqual(twice.count(marker), 1)
-        self.assertEqual(twice.count(design_studio_page.SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER), 1)
-        self.assertEqual(twice.count(design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER), 1)
-        self.assertEqual(twice.count(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER), 1)
-        self.assertEqual(twice.count(design_studio_page.DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER), 1)
-        self.assertEqual(twice.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertNotIn(design_studio_page.SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER, twice)
 
     def test_design_studio_sources_do_not_contain_active_signature_style_permission(self):
         source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
@@ -842,33 +927,24 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertEqual(design_studio_page.list_new_design_task_titles(failing_list_tasks), [])
 
-    def test_new_design_tab_is_second_after_upgrade_existing_design(self):
-        source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
-        tabs_source = source[
-            source.index("upgrade_tab, research_tab") : source.index("\n\n    with upgrade_tab:")
-        ]
+    def test_design_studio_active_renderer_has_no_legacy_workflow_tabs(self):
+        renderer = inspect.getsource(design_studio_page.render_design_studio_page)
+        v2_renderer = inspect.getsource(design_studio_page.render_design_studio_v2)
 
-        self.assertLess(
-            tabs_source.index('"Upgrade Existing Design"'),
-            tabs_source.index('"New Design"'),
-        )
-        self.assertLess(
-            tabs_source.index('"New Design"'),
-            tabs_source.index('"Update Expired Edition"'),
-        )
+        self.assertNotIn("st.tabs", renderer)
+        self.assertNotIn("st.tabs", v2_renderer)
+        self.assertNotIn("Upgrade Existing Design", v2_renderer)
+        self.assertNotIn("Update Expired Edition", v2_renderer)
 
-    def test_new_design_renderer_has_three_steps_in_order(self):
-        source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
-        renderer = source[
-            source.index("def render_new_design_tab") : source.index("\n\ndef _render_prompt_box")
-        ]
+    def test_design_studio_v2_renderer_has_three_prompt_steps_in_order(self):
+        renderer = inspect.getsource(design_studio_page.render_design_studio_v2)
 
-        self.assertLess(renderer.index("Step 1 - Research"), renderer.index("Step 2 - Find Images"))
-        self.assertLess(renderer.index("Step 2 - Find Images"), renderer.index("Step 3 - Generate Design"))
+        self.assertLess(renderer.index("Research Prompt"), renderer.index("Find Images Prompt"))
+        self.assertLess(renderer.index("Find Images Prompt"), renderer.index("Design Generation Prompt"))
+        self.assertLess(renderer.index("Design Generation Prompt"), renderer.index("Harsh Review"))
         self.assertIn("Choose design task", renderer)
-        self.assertIn("No new design tasks waiting", renderer)
-        self.assertNotIn("Paste research answer", renderer)
-        self.assertIn("Copy Find Images Prompt", renderer)
+        self.assertIn("Design style", renderer)
+        self.assertIn("Design details", inspect.getsource(design_studio_page._render_design_details))
 
 
 if __name__ == "__main__":

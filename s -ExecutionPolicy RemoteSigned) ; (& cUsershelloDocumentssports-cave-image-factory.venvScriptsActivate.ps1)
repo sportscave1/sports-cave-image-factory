@@ -1,0 +1,248 @@
+[1mdiff --git a/design_studio_page.py b/design_studio_page.py[m
+[1mindex 9456d99..b5e2bb1 100644[m
+[1m--- a/design_studio_page.py[m
+[1m+++ b/design_studio_page.py[m
+[36m@@ -160,6 +160,104 @@[m [mBefore generating, verify internally:[m
+ """[m
+ [m
+ [m
+[32m+[m[32mDESIGN_STUDIO_HERO_DOMINANCE_MARKER = "PRIMARY HERO DOMINANCE AND MINIMAL BACKGROUND — MANDATORY"[m
+[32m+[m[32mDESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER = "SPORTS CAVE LIMITED-EDITION BORDER — MANDATORY"[m
+[32m+[m
+[32m+[m
+[32m+[m[32mDESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK = f"""[m
+[32m+[m[32m{DESIGN_STUDIO_HERO_DOMINANCE_MARKER}[m
+[32m+[m
+[32m+[m[32mThe supplied and approved main hero subjects must dominate the finished artwork. These may include an athlete, driver, team, rivalry pair, vehicle, motorcycle, jersey, trophy, or another specifically supplied principal subject.[m
+[32m+[m
+[32m+[m[32mUse only the supplied main heroes. Do not invent, generate, duplicate, reconstruct, or add any additional athletes, players, drivers, teammates, opponents, coaches, spectators, or human figures.[m
+[32m+[m
+[32m+[m[32mABSOLUTELY DO NOT ADD:[m
+[32m+[m
+[32m+[m[32m* AI-generated background players[m
+[32m+[m[32m* Faceless or poorly formed people[m
+[32m+[m[32m* Headless or partially visible bodies[m
+[32m+[m[32m* Anonymous athletes or teammates[m
+[32m+[m[32m* Fake crowd members with recognisable bodies or faces[m
+[32m+[m[32m* Player silhouettes that compete with the main heroes[m
+[32m+[m[32m* Ghosted or duplicated versions of the hero[m
+[32m+[m[32m* Random helmets, limbs, faces, uniforms, or human shapes[m
+[32m+[m[32m* Additional people merely to fill empty space[m
+[32m+[m
+[32m+[m[32mIf multiple supplied heroes are required for a team or rivalry design, preserve and use those supplied heroes only. Never generate extra supporting players.[m
+[32m+[m
+[32m+[m[32mThe supplied main heroes must carry the emotional and visual weight of the composition. Their faces, bodies, vehicles, uniforms, or defining details must remain clearly visible and immediately recognisable.[m
+[32m+[m
+[32m+[m[32mKeep the background minimal, cinematic, relevant and controlled. Build atmosphere with elements such as:[m
+[32m+[m
+[32m+[m[32m* Stadium or circuit architecture[m
+[32m+[m[32m* Empty stands or indistinct crowd texture[m
+[32m+[m[32m* Lighting, shadows and subtle spotlights[m
+[32m+[m[32m* Smoke, haze, dust, rain or sparks[m
+[32m+[m[32m* Track, turf, court or arena textures[m
+[32m+[m[32m* Scoreboards, goal structures or venue landmarks[m
+[32m+[m[32m* Restrained team colours and subtle historical details[m
+[32m+[m
+[32m+[m[32mAny crowd treatment must remain distant, abstract, blurred and textural. It must not contain recognisable individual people, faces, bodies or AI-generated players.[m
+[32m+[m
+[32m+[m[32mDo not overcrowd the composition. Do not fill negative space with unnecessary subjects. Negative space is intentional and should make the main heroes feel larger, stronger and more premium.[m
+[32m+[m
+[32m+[m[32mThe final hierarchy must always be:[m
+[32m+[m
+[32m+[m[32m1. Supplied main heroes[m
+[32m+[m[32m2. Title and essential collector storytelling[m
+[32m+[m[32m3. Sports Cave limited-edition plaque or collector details[m
+[32m+[m[32m4. Restrained venue atmosphere[m
+[32m+[m[32m5. Minimal supporting effects[m
+[32m+[m
+[32m+[m[32m{DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER}[m
+[32m+[m
+[32m+[m[32mEvery finished collector artwork must include a clean, precise and premium Sports Cave border inside the artwork canvas.[m
+[32m+[m
+[32m+[m[32mThe border must feel custom-designed for an expensive limited-edition sports collectible—not like a generic poster outline, picture frame, television graphic or template.[m
+[32m+[m
+[32m+[m[32mCreate a refined Sports Cave border using:[m
+[32m+[m
+[32m+[m[32m* Deep black, charcoal or near-black foundations[m
+[32m+[m[32m* Fine warm-gold or muted-metallic pinlines[m
+[32m+[m[32m* Clean layered keylines[m
+[32m+[m[32m* Precise symmetrical spacing[m
+[32m+[m[32m* Restrained geometric corner detailing[m
+[32m+[m[32m* Subtle plaque-inspired collector accents[m
+[32m+[m[32m* Consistent thickness on every edge[m
+[32m+[m[32m* Clear separation between the artwork and its outer boundary[m
+[32m+[m[32m* Safe internal margins suitable for professional printing and framing[m
+[32m+[m
+[32m+[m[32mThe border should be detailed enough to signal “limited edition” but restrained enough to remain masculine, timeless and premium. It should frame the story without competing with the heroes.[m
+[32m+[m
+[32m+[m[32mThe border must remain:[m
+[32m+[m
+[32m+[m[32m* Perfectly straight[m
+[32m+[m[32m* Symmetrical[m
+[32m+[m[32m* Crisp and uninterrupted[m
+[32m+[m[32m* Consistent on all four sides[m
+[32m+[m[32m* Fully contained inside the canvas[m
+[32m+[m[32m* Free from warping, broken corners or uneven thickness[m
+[32m+[m[32m* Compatible with the required landscape 4:3 composition[m
+[32m+[m
+[32m+[m[32mDO NOT USE:[m
+[32m+[m
+[32m+[m[32m* Thick generic borders[m
+[32m+[m[32m* Cheap gold gradients[m
+[32m+[m[32m* Bright yellow gold[m
+[32m+[m[32m* Neon effects[m
+[32m+[m[32m* Ornate Victorian decoration[m
+[32m+[m[32m* Excessive filigree[m
+[32m+[m[32m* Busy sports-broadcast graphics[m
+[32m+[m[32m* Random corner shapes[m
+[32m+[m[32m* Uneven or misaligned lines[m
+[32m+[m[32m* Fake external frames or wall mockups[m
+[32m+[m[32m* Borders that crop or cover the supplied heroes[m
+[32m+[m[32m* Decorative elements that overpower the artwork[m
+[32m+[m
+[32m+[m[32mThe border, plaque and artwork must feel like one cohesive Sports Cave collector product.[m
+[32m+[m[32m"""[m
+[32m+[m
+[32m+[m
+ UPGRADE_EXISTING_DESIGN_VIDEO_URL = ([m
+     "https://cdn.shopify.com/videos/c/o/v/67bad26ad6f24cca9527772f226b5320.mp4"[m
+ )[m
+[36m@@ -1620,6 +1718,14 @@[m [mdef design_studio_prompt_has_subject_preservation_lock(prompt_text: str) -> bool[m
+     return DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER.casefold() in str(prompt_text or "").casefold()[m
+ [m
+ [m
+[32m+[m[32mdef design_studio_prompt_has_hero_dominance_and_border_lock(prompt_text: str) -> bool:[m
+[32m+[m[32m    prompt = str(prompt_text or "").casefold()[m
+[32m+[m[32m    return ([m
+[32m+[m[32m        DESIGN_STUDIO_HERO_DOMINANCE_MARKER.casefold() in prompt[m
+[32m+[m[32m        and DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER.casefold() in prompt[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m
+ def prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:[m
+     prompt = _clean_prompt(prompt_text)[m
+     if design_studio_prompt_has_subject_preservation_lock(prompt):[m
+[36m@@ -1628,8 +1734,25 @@[m [mdef prepend_design_studio_subject_preservation_lock(prompt_text: str) -> str:[m
+     return f"{lock}\n\n{prompt}" if prompt else lock[m
+ [m
+ [m
+[31m-def build_design_studio_image_generation_prompt(prompt_text: str) -> str:[m
+[32m+[m[32mdef prepend_design_studio_mandatory_artwork_rules(prompt_text: str) -> str:[m
+     prompt = prepend_design_studio_subject_preservation_lock(prompt_text)[m
+[32m+[m[32m    if design_studio_prompt_has_hero_dominance_and_border_lock(prompt):[m
+[32m+[m[32m        return prompt[m
+[32m+[m
+[32m+[m[32m    subject_lock = _clean_prompt(DESIGN_STUDIO_SUBJECT_PRESERVATION_LOCK)[m
+[32m+[m[32m    artwork_lock = _clean_prompt(DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)[m
+[32m+[m[32m    if prompt.startswith(subject_lock):[m
+[32m+[m[32m        remaining_prompt = prompt[len(subject_lock) :].lstrip()[m
+[32m+[m[32m        return ([m
+[32m+[m[32m            f"{subject_lock}\n\n{artwork_lock}\n\n{remaining_prompt}"[m
+[32m+[m[32m            if remaining_prompt[m
+[32m+[m[32m            else f"{subject_lock}\n\n{artwork_lock}"[m
+[32m+[m[32m        )[m
+[32m+[m[32m    return f"{artwork_lock}\n\n{prompt}" if prompt else artwork_lock[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef build_design_studio_image_generation_prompt(prompt_text: str) -> str:[m
+[32m+[m[32m    prompt = prepend_design_studio_mandatory_artwork_rules(prompt_text)[m
+     return append_sports_cave_image_realism_rules([m
+         prompt,[m
+         include_product_lock=False,[m
+[1mdiff --git a/tests/test_design_studio_page.py b/tests/test_design_studio_page.py[m
+[1mindex 4554b6f..bd61ff0 100644[m
+[1m--- a/tests/test_design_studio_page.py[m
+[1m+++ b/tests/test_design_studio_page.py[m
+[36m@@ -59,6 +59,8 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+ [m
+     def test_design_generation_prompt_uses_research_context_and_design_system(self):[m
+         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")[m
+[32m+[m[32m        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER[m
+[32m+[m[32m        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER[m
+ [m
+         self.assertIn([m
+             "From the research and images above, create a premium Sports Cave limited-edition collector artwork",[m
+[36m@@ -83,6 +85,19 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+         self.assertIn("It must never overpower the subject.", prompt)[m
+         self.assertIn("If motorsport: realistic race cars", prompt)[m
+         self.assertIn("Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.", prompt)[m
+[32m+[m[32m        self.assertEqual(prompt.count(hero_marker), 1)[m
+[32m+[m[32m        self.assertEqual(prompt.count(border_marker), 1)[m
+[32m+[m[32m        self.assertEqual([m
+[32m+[m[32m            prompt.count(design_studio_page._clean_prompt(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)),[m
+[32m+[m[32m            1,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        self.assertIn("Use only the supplied main heroes.", prompt)[m
+[32m+[m[32m        self.assertIn("Do not invent, generate, duplicate, reconstruct, or add any additional athletes", prompt)[m
+[32m+[m[32m        self.assertIn("AI-generated background players", prompt)[m
+[32m+[m[32m        self.assertIn("recognisable individual people, faces, bodies or AI-generated players", prompt)[m
+[32m+[m[32m        self.assertIn("The supplied main heroes must carry the emotional and visual weight", prompt)[m
+[32m+[m[32m        self.assertIn("Keep the background minimal, cinematic, relevant and controlled.", prompt)[m
+[32m+[m[32m        self.assertIn("Every finished collector artwork must include a clean, precise and premium Sports Cave border", prompt)[m
+         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)[m
+         self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", prompt)[m
+         self.assertIn("ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION", prompt)[m
+[36m@@ -94,9 +109,15 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+     def test_new_design_step_three_includes_subject_lock_once_before_creative_direction(self):[m
+         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")[m
+         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER[m
+[32m+[m[32m        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER[m
+ [m
+         self.assertTrue(prompt.startswith(marker))[m
+         self.assertEqual(prompt.count(marker), 1)[m
+[32m+[m[32m        self.assertLess([m
+[32m+[m[32m            prompt.index("7. If any instruction conflicts with these rules"),[m
+[32m+[m[32m            prompt.index(hero_marker),[m
+[32m+[m[32m        )[m
+[32m+[m[32m        self.assertLess(prompt.index(hero_marker), prompt.index("TASK:\nBathurst Brock tribute"))[m
+         self.assertLess(prompt.index(marker), prompt.index("TASK:\nBathurst Brock tribute"))[m
+         self.assertLess(prompt.index(marker), prompt.index("Reference roles:"))[m
+         self.assertLess(prompt.index(marker), prompt.index("Create the artwork in landscape 4:3 ratio."))[m
+[36m@@ -121,13 +142,20 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+ [m
+                 self.assertTrue(prompt.startswith(marker))[m
+                 self.assertEqual(prompt.count(marker), 1)[m
+[32m+[m[32m                self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER), 1)[m
+[32m+[m[32m                self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER), 1)[m
+                 self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)[m
+[32m+[m[32m                self.assertIn("Never generate extra supporting players.", prompt)[m
+[32m+[m[32m                self.assertIn("Any crowd treatment must remain distant, abstract, blurred and textural.", prompt)[m
+[32m+[m[32m                self.assertIn("The border must remain:", prompt)[m
+                 self.assertIn("4:3 landscape", prompt)[m
+                 self.assertIn("collector artwork", prompt)[m
+                 self.assertIn("Sports Cave", prompt)[m
+ [m
+     def test_unrelated_design_studio_prompts_do_not_receive_subject_lock(self):[m
+         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER[m
+[32m+[m[32m        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER[m
+[32m+[m[32m        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER[m
+         unrelated_prompts = [[m
+             design_studio_page.build_design_research_prompt("Michael Jordan final shot"),[m
+             design_studio_page.build_design_image_carousel_prompt("Michael Jordan final shot", ""),[m
+[36m@@ -138,9 +166,13 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+         for prompt in unrelated_prompts:[m
+             with self.subTest(prompt=prompt[:40]):[m
+                 self.assertNotIn(marker, prompt)[m
+[32m+[m[32m                self.assertNotIn(hero_marker, prompt)[m
+[32m+[m[32m                self.assertNotIn(border_marker, prompt)[m
+ [m
+     def test_subject_lock_composition_is_idempotent_and_preserves_prompt_details(self):[m
+         marker = design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER[m
+[32m+[m[32m        hero_marker = design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER[m
+[32m+[m[32m        border_marker = design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER[m
+         once = design_studio_page.build_design_studio_image_generation_prompt([m
+             design_studio_page.CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT[m
+         )[m
+[36m@@ -148,6 +180,12 @@[m [mclass DesignStudioResearchPromptTests(unittest.TestCase):[m
+ [m
+         self.assertEqual(once, twice)[m
+         self.assertEqual(twice.count(marker), 1)[m
+[32m+[m[32m        self.assertEqual(twice.count(hero_marker), 1)[m
+[32m+[m[32m        self.assertEqual(twice.count(border_marker), 1)[m
+[32m+[m[32m        self.assertEqual([m
+[32m+[m[32m            twice.count(design_studio_page._clean_prompt(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_AND_BORDER_LOCK)),[m
+[32m+[m[32m            1,[m
+[32m+[m[32m        )[m
+         self.assertEqual(twice.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)[m
+         self.assertIn("[PASTE SELECTED MOMENT]", twice)[m
+         self.assertIn("[PASTE HERO IMAGE DIRECTION]", twice)[m

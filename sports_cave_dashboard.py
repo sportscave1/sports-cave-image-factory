@@ -8,6 +8,7 @@ import re
 from time import monotonic
 
 import os_accounts
+import design_studio_styles
 import sports_sales_calendar
 
 
@@ -37,6 +38,7 @@ TASK_IMPORT_METADATA_KEY = "task_import"
 TASK_IMPORT_CSV_COLUMNS = (
     "task_section",
     "task_title",
+    "design_style",
     "sport",
     "league_or_competition",
     "team_or_athlete",
@@ -48,6 +50,7 @@ TASK_IMPORT_CSV_COLUMNS = (
     "notes",
 )
 TASK_IMPORT_DETAIL_FIELDS = (
+    ("design_style", "Design style"),
     ("sport", "Sport"),
     ("league_or_competition", "League or competition"),
     ("team_or_athlete", "Team or athlete"),
@@ -224,6 +227,7 @@ def _storage_error(error):
 
 def _normalise_task(task):
     task = dict(task or {})
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
     title = str(task.get("title") or task.get("text") or "").strip()
     section = normalize_task_category(task.get("section") or task.get("category"))
     return {
@@ -233,7 +237,22 @@ def _normalise_task(task):
         "title": title,
         "category": section,
         "section": section,
+        "design_style": design_studio_styles.normalize_design_style(
+            task.get("design_style") or metadata.get("design_style")
+        ),
     }
+
+
+def task_design_style(task):
+    task = dict(task or {})
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    return design_studio_styles.normalize_design_style(
+        task.get("design_style") or metadata.get("design_style")
+    )
+
+
+def task_design_style_label(task):
+    return design_studio_styles.design_style_label(task_design_style(task))
 
 
 def _task_created_at_sort_key(task):
@@ -348,10 +367,27 @@ def _clean_task_csv_field(value):
     return str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def build_task_import_template_csv():
+def build_task_import_template_csv(tasks=None):
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=TASK_IMPORT_CSV_COLUMNS)
     writer.writeheader()
+    if tasks is not None:
+        for task in tasks or []:
+            normalised = _normalise_task(task)
+            details = task_import_details(normalised)
+            writer.writerow(
+                {
+                    "task_section": normalised.get("section") or "",
+                    "task_title": normalised.get("title") or "",
+                    "design_style": task_design_style(normalised),
+                    **{
+                        column: details.get(column, "")
+                        for column in TASK_IMPORT_CSV_COLUMNS
+                        if column not in {"task_section", "task_title", "design_style"}
+                    },
+                }
+            )
+        return output.getvalue().encode("utf-8")
     for section in TASK_GROUPS:
         writer.writerow({"task_section": section})
     return output.getvalue().encode("utf-8")
@@ -465,6 +501,7 @@ def _task_csv_row_is_blank(row):
 def _task_import_metadata(values, *, section, title, row_number, filename=""):
     metadata = {
         "source": "task_csv_import",
+        "design_style": values.get("design_style") or "",
         TASK_IMPORT_METADATA_KEY: {
             "schema_version": TASK_IMPORT_SCHEMA_VERSION,
             "row_number": row_number,
@@ -500,7 +537,12 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             raise TaskCSVImportError(
                 f"The task CSV has duplicate column headers: {', '.join(duplicated_headers)}."
             )
-        missing = [column for column in TASK_IMPORT_CSV_COLUMNS if column not in fieldnames]
+        optional_columns = {"design_style"}
+        missing = [
+            column
+            for column in TASK_IMPORT_CSV_COLUMNS
+            if column not in fieldnames and column not in optional_columns
+        ]
         if missing:
             raise TaskCSVImportError(
                 f"The task CSV is missing required columns: {', '.join(missing)}."
@@ -532,6 +574,8 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             continue
         values = {
             column: _clean_task_csv_field(row.get(header_map[column]))
+            if column in header_map
+            else ""
             for column in TASK_IMPORT_CSV_COLUMNS
         }
         section = normalize_task_import_section(values.get("task_section"))
@@ -543,6 +587,13 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
         title = values.get("task_title") or values.get("design_title")
         if not title:
             row_errors.append("task_title or design_title is required.")
+        raw_style = values.get("design_style")
+        style_slug = design_studio_styles.normalize_design_style(raw_style)
+        if raw_style and not style_slug:
+            row_errors.append(f"Unknown design_style: {raw_style}.")
+        if section == DESIGN_TASK_GROUP and not style_slug:
+            row_errors.append("Style required for new design tasks.")
+        values["design_style"] = style_slug
         if row_errors:
             errors.append({"row_number": offset, "errors": row_errors})
             continue
@@ -713,25 +764,59 @@ def list_tasks(status="open"):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def add_task(text, category, *, metadata=None):
+def add_task(text, category, *, metadata=None, design_style=""):
     task_text = str(text or "").strip()
     if not task_text:
         raise ValueError("Task text is required.")
+    section = normalize_task_category(category)
+    metadata = dict(metadata or {})
+    style_slug = design_studio_styles.normalize_design_style(
+        design_style or metadata.get("design_style")
+    )
+    if section == DESIGN_TASK_GROUP and not style_slug:
+        raise ValueError("Style required for new design tasks.")
+    if style_slug:
+        metadata["design_style"] = style_slug
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
 
-        task = _normalise_task(
-            backend.create_dashboard_task(
-                task_text,
-                normalize_task_category(category),
-                metadata=metadata or {},
-                actor=get_activity_actor(),
-            )
+        created = backend.create_dashboard_task(
+            task_text,
+            section,
+            metadata=metadata,
+            design_style=style_slug,
+            actor=get_activity_actor(),
         )
+        task = _normalise_task(created)
         clear_task_cache()
         clear_activity_cache()
         return task
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def update_task_design_style(task_id, design_style):
+    clean_task_id = str(task_id or "").strip()
+    style_slug = design_studio_styles.normalize_design_style(design_style)
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not style_slug:
+        raise ValueError("Style required.")
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        updated = backend.update_dashboard_task_design_style(
+            clean_task_id,
+            style_slug,
+            actor=get_activity_actor(),
+        )
+        clear_task_cache()
+        clear_activity_cache()
+        return _normalise_task(updated) if updated else None
+    except ValueError:
+        raise
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 

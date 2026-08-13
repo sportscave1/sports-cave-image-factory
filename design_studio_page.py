@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
+import design_studio_styles
 import prompt_store
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
@@ -24,6 +25,12 @@ HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH = (
 )
 NEW_DESIGN_TASK_CATEGORY = "New designs to complete"
 MANUAL_NEW_DESIGN_TASK_OPTION = "Enter task manually"
+DESIGN_STUDIO_V2_SELECTED_TASK_KEY = "design-studio-v2-selected-task"
+DESIGN_STUDIO_V2_STYLE_KEY = "design-studio-v2-style"
+DESIGN_STUDIO_V2_LOADED_TASK_KEY = "design-studio-v2-loaded-task"
+DESIGN_STUDIO_V2_STYLE_MEMORY_KEY = "design-studio-v2-style-memory"
+DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY = "design-studio-v2-manual-task-memory"
+DESIGN_STUDIO_V2_DETAILS_MEMORY_KEY = "design-studio-v2-details-memory"
 DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER = "HIGHEST-PRIORITY SOURCE SUBJECT LOCK — MANDATORY"
 
 
@@ -1146,6 +1153,9 @@ SIGNATURE_ASSET_REFERENCE_KEYS = (
     "url",
     "file",
     "path",
+    "file_path",
+    "local_path",
+    "asset_path",
     "id",
 )
 SIGNATURE_VERIFIED_ASSET_CONTEXT_KEYS = (
@@ -1227,6 +1237,64 @@ SIGNATURE_VEHICLE_OR_VENUE_ONLY_PATTERN = re.compile(
     r"\b(?:vehicle|car|race\s*car|motorcycle|bike|jersey|trophy|venue|stadium|arena|circuit|track|course|room|mockup)[\s-]*only\b",
     re.IGNORECASE,
 )
+
+FINAL_ARTWORK_SELECTED_IMAGE_CONTEXT_KEYS = (
+    "selected_images",
+    "selected_image_assets",
+    "selected_assets",
+    "supplied_images",
+    "supplied_image_assets",
+    "reference_images",
+    "image_assets",
+)
+FINAL_ARTWORK_PRINCIPAL_HUMAN_CONTEXT_KEYS = (
+    "principal_subjects",
+    "principal_athletes",
+    "principal_players",
+    "principal_human_subjects",
+    "heroes",
+    "athletes",
+    "players",
+    "drivers",
+    "fighters",
+)
+FINAL_ARTWORK_HUMAN_ASSET_ROLES = {
+    "action",
+    "action_image",
+    "athlete",
+    "body_uniform",
+    "driver",
+    "fighter",
+    "full_body",
+    "hero",
+    "hero_image",
+    "player",
+    "player_image",
+    "principal_subject",
+    "subject",
+    "subject_image",
+}
+FINAL_ARTWORK_NON_NAME_WORDS = {
+    "artwork",
+    "border",
+    "cave",
+    "cinematic",
+    "collector",
+    "composition",
+    "design",
+    "edition",
+    "final",
+    "gold",
+    "limited",
+    "minimal",
+    "minimalist",
+    "premium",
+    "realistic",
+    "sports",
+    "style",
+    "styled",
+    "thin",
+}
 
 
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
@@ -1978,6 +2046,39 @@ A piece of sporting history
 
 Do not stop at "good enough."
 Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.
+"""
+
+
+SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER = "SPORTS CAVE FINAL ARTWORK MASTER PROMPT V2"
+SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT = f"""
+{SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER}
+
+Create a premium Sports Cave limited-edition collector artwork using the task variables and all supplied reference images.
+
+TASK:
+[PASTED TASK]
+
+Use every image according to its correct role. Select the strongest supplied action or full-body photograph for each featured player and composite that original photograph directly into the artwork.
+
+Never redraw, regenerate, face-swap or recreate a player. Preserve the real face, expression, body, pose, uniform, jersey number, equipment, proportions and photographic texture from the selected source image. Never combine a face from one image with a body from another. If an image cannot be extended naturally, retain its original crop.
+
+Additional player photographs are identity and accuracy references only. Background images may provide subtle venue and historical details without being forced into the finished composition. Use every supplied image for its assigned purpose; not every image must appear visibly in the artwork.
+
+The supplied players are the heroes and must dominate. Build the design around them using a minimal, dark, cinematic background with restrained team colours, shadows, texture, light haze and subtle historical or venue details. Do not add generated players, detailed AI crowds, unnecessary stadium elements or distracting effects.
+
+Blend the original photographs naturally using believable scale, perspective, lighting, contact shadows and restrained colour grading. Preserve natural skin, fabric and photographic detail.
+
+Use each supplied authentic signature exactly as provided and place it subtly near the correct player. Never generate, rewrite or imitate a signature. If no verified signature exists for a player, omit it.
+
+Use an exact supplied Sports Cave limited-edition plaque asset only when one is supplied. Never invent, redraw or approximate a plaque.
+
+Create a landscape 4:3 composition with a thin premium Sports Cave border, restrained black, charcoal and subtle-gold styling, minimal event text, clean negative space and strong player dominance.
+
+The finished artwork must feel realistic, nostalgic, masculine, emotionally powerful, framed-first and worthy of a Sports Cave limited-edition release--an ultimate 10/10 collector design with genuine bestseller potential.
+
+It must look like a professional photographic composite made from the supplied player images, never newly generated AI artwork.
+
+If styling would require changing or regenerating a player, simplify the design and preserve the original photograph instead.
 """
 
 
@@ -3054,6 +3155,191 @@ def verified_signature_asset_records_from_context(design_context=None) -> list[d
     return deduped
 
 
+def _normalise_asset_role(value) -> str:
+    return "_".join(
+        str(value or "").strip().casefold().replace("-", " ").replace("_", " ").split()
+    )
+
+
+def _selected_image_asset_record(value) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    role = next(
+        (
+            str(value.get(key) or "").strip()
+            for key in SIGNATURE_ASSET_ROLE_KEYS
+            if str(value.get(key) or "").strip()
+        ),
+        "",
+    )
+    reference = _signature_asset_reference_from_context(value)
+    if not role or not reference:
+        return {}
+    return {
+        "reference": reference,
+        "role": role,
+        "subject_name": _normalise_signature_subject_name(
+            _signature_subject_name_from_context(value)
+        ),
+    }
+
+
+def selected_image_asset_records_from_context(design_context=None) -> list[dict]:
+    records = []
+
+    def collect(value, *, selected_container=False):
+        if isinstance(value, dict):
+            if selected_container:
+                record = _selected_image_asset_record(value)
+                if record:
+                    records.append(record)
+            for key, nested_value in value.items():
+                collect(
+                    nested_value,
+                    selected_container=(
+                        selected_container
+                        or str(key or "") in FINAL_ARTWORK_SELECTED_IMAGE_CONTEXT_KEYS
+                    ),
+                )
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                collect(item, selected_container=selected_container)
+
+    collect(design_context)
+    deduped = []
+    seen = set()
+    for record in records:
+        key = (
+            record["reference"].casefold(),
+            _normalise_asset_role(record["role"]),
+            record["subject_name"].casefold(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(record)
+    return deduped
+
+
+def _is_plausible_named_human_subject(value, *, allow_single_name=False) -> bool:
+    name = _normalise_signature_subject_name(value)
+    if not name or any(character.isdigit() for character in name):
+        return False
+    words = [word.strip(".'-") for word in name.split() if word.strip(".'-")]
+    if not words or (len(words) < 2 and not allow_single_name) or len(words) > 4:
+        return False
+    if any(word.casefold() in FINAL_ARTWORK_NON_NAME_WORDS for word in words):
+        return False
+    return all(any(character.isalpha() for character in word) for word in words)
+
+
+def _collect_principal_human_names_from_context(design_context=None) -> list[str]:
+    names = []
+
+    def collect(value):
+        if isinstance(value, dict):
+            for key, nested_value in value.items():
+                if str(key or "") in FINAL_ARTWORK_PRINCIPAL_HUMAN_CONTEXT_KEYS:
+                    items = (
+                        nested_value
+                        if isinstance(nested_value, (list, tuple, set))
+                        else [nested_value]
+                    )
+                    for item in items:
+                        candidate = _signature_subject_name_from_context(item)
+                        if _is_plausible_named_human_subject(
+                            candidate,
+                            allow_single_name=True,
+                        ):
+                            names.append(_normalise_signature_subject_name(candidate))
+                elif isinstance(nested_value, (dict, list, tuple, set)):
+                    collect(nested_value)
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                collect(item)
+
+    collect(design_context)
+    for asset in selected_image_asset_records_from_context(design_context):
+        if (
+            _normalise_asset_role(asset.get("role")) in FINAL_ARTWORK_HUMAN_ASSET_ROLES
+            and _is_plausible_named_human_subject(
+                asset.get("subject_name"),
+                allow_single_name=True,
+            )
+        ):
+            names.append(_normalise_signature_subject_name(asset.get("subject_name")))
+    return list(dict.fromkeys(name for name in names if name))
+
+
+def verified_final_signature_asset_records(task_text: str, *, design_context=None) -> list[dict]:
+    verified_records = verified_signature_asset_records_from_context(design_context)
+    if not verified_records:
+        return []
+    principal_names = _collect_principal_human_names_from_context(design_context)
+    if not principal_names:
+        principal_names = [
+            record["name"]
+            for record in _signature_subject_records_from_text(task_text)
+            if _is_plausible_named_human_subject(record.get("name"))
+        ]
+    principal_keys = {name.casefold() for name in principal_names}
+    return [
+        record
+        for record in verified_records
+        if record["name"].casefold() in principal_keys
+        and _is_plausible_named_human_subject(
+            record.get("name"),
+            allow_single_name=True,
+        )
+    ]
+
+
+def build_final_artwork_asset_context(task_text: str, *, design_context=None) -> str:
+    assets = selected_image_asset_records_from_context(design_context)
+    signatures = verified_final_signature_asset_records(
+        task_text,
+        design_context=design_context,
+    )
+    approved_signature_references = {
+        record["reference"].casefold() for record in signatures
+    }
+    assets = [
+        asset
+        for asset in assets
+        if not _signature_asset_role_matches(asset.get("role"))
+        or asset["reference"].casefold() in approved_signature_references
+    ]
+    sections = []
+    if assets:
+        lines = [
+            "SELECTED IMAGE ASSETS AND ROLE METADATA",
+            "",
+            "Pass and use these actual selected image files as image inputs. Keep each role and subject association unchanged:",
+        ]
+        for asset in assets:
+            subject = (
+                f"; subject: {asset['subject_name']}"
+                if asset.get("subject_name")
+                else ""
+            )
+            lines.append(
+                f"* {asset['reference']} | role: {asset['role']}{subject}"
+            )
+        sections.append("\n".join(lines))
+    if signatures:
+        lines = [
+            "VERIFIED SIGNATURE ASSET MAPPING",
+            "",
+            "Only these verified named human subjects may receive signatures:",
+        ]
+        lines.extend(
+            f"* {record['name']} -> {record['reference']}"
+            for record in signatures
+        )
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
 def _find_design_context_value(value, keys: tuple[str, ...]):
     if isinstance(value, dict):
         for key in keys:
@@ -3489,14 +3775,16 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, 
 
 
 def build_design_generation_prompt(task_text: str, *, design_context=None) -> str:
-    prompt = _clean_prompt(DESIGN_GENERATION_PROMPT_TEMPLATE).replace(
+    prompt = _clean_prompt(SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
     )
-    prompt_context = design_context if design_context is not None else {"task_text": task_text}
-    return build_design_studio_image_generation_prompt(
-        prompt,
-        design_context=prompt_context,
+    asset_context = build_final_artwork_asset_context(
+        task_text,
+        design_context=design_context,
+    )
+    return "\n\n".join(
+        section for section in (prompt, asset_context) if str(section or "").strip()
     )
 
 
@@ -3828,90 +4116,280 @@ def _render_prompt_box(name, prompt, key, can_edit_prompts):
     render_copy_prompt_box(name, prompt, key, can_edit_prompts)
 
 
-def render_design_studio_page(can_edit_prompts: bool = False):
-    st.title("Design Studio")
-    st.caption("Sports Cave prompt hub for premium collector artwork.")
+def _task_design_style(task):
+    try:
+        import sports_cave_dashboard
 
-    upgrade_tab, research_tab, expired_tab, create_tab, review_tab = st.tabs(
-        [
-            "Upgrade Existing Design",
-            "New Design",
-            "Update Expired Edition",
-            "Create New Ultimate Moment",
-            "Harsh Review Checklist",
+        return sports_cave_dashboard.task_design_style(task)
+    except Exception:
+        metadata = (task or {}).get("metadata") or {}
+        return design_studio_styles.normalize_design_style(
+            (task or {}).get("design_style") or metadata.get("design_style")
+        )
+
+
+def _task_design_details(task):
+    metadata = dict((task or {}).get("metadata") or {})
+    try:
+        import sports_cave_dashboard
+
+        imported = sports_cave_dashboard.task_import_details(task)
+    except Exception:
+        imported = {}
+    saved = metadata.get("design_details")
+    saved = saved if isinstance(saved, dict) else {}
+    details = {**imported, **saved}
+    team_or_athlete = str(details.get("team_or_athlete") or "").strip()
+    saved_principals = details.get("principal_subjects") or metadata.get("principal_subjects") or []
+    if not isinstance(saved_principals, (list, tuple, set)):
+        saved_principals = [
+            part.strip()
+            for part in re.split(r"\s*(?:,|\band\b|&)\s*", str(saved_principals or ""), flags=re.I)
+            if part.strip()
         ]
+    else:
+        saved_principals = [str(value or "").strip() for value in saved_principals if str(value or "").strip()]
+    if len(saved_principals) < 3 and team_or_athlete:
+        delimited_people = [
+            part.strip()
+            for part in re.split(r"\s*(?:,|\band\b|&)\s*", team_or_athlete, flags=re.I)
+            if part.strip()
+        ]
+        if len(delimited_people) > len(saved_principals):
+            saved_principals = delimited_people
+    subject_one = str(details.get("principal_subject_one") or "").strip()
+    subject_two = str(details.get("principal_subject_two") or "").strip()
+    if team_or_athlete and not subject_one:
+        parts = re.split(r"\s+(?:vs\.?|versus)\s+", team_or_athlete, maxsplit=1, flags=re.I)
+        subject_one = parts[0].strip()
+        subject_two = subject_two or (parts[1].strip() if len(parts) > 1 else "")
+    return {
+        "design_title": details.get("design_title") or "",
+        "sport": details.get("sport") or "",
+        "principal_subject_one": subject_one,
+        "principal_subject_two": subject_two,
+        "team_country": details.get("team_country") or details.get("team_or_athlete") or "",
+        "season_era": details.get("season_era") or "",
+        "event_moment": details.get("event_moment") or details.get("moment_or_theme") or "",
+        "venue_location": details.get("venue_location") or "",
+        "uniform_equipment_livery": details.get("uniform_equipment_livery") or "",
+        "essential_text": details.get("essential_text") or "",
+        "special_instructions": details.get("special_instructions") or details.get("design_description") or details.get("notes") or "",
+        "_saved_principal_subjects": saved_principals,
+    }
+
+
+def _task_selected_assets(task):
+    metadata = dict((task or {}).get("metadata") or {})
+    for key in ("selected_images", "selected_assets", "image_assets"):
+        value = metadata.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _persist_task_style(task, style_slug):
+    task_id = str((task or {}).get("id") or "").strip()
+    if not task_id:
+        return False
+    try:
+        import sports_cave_dashboard
+
+        sports_cave_dashboard.update_task_design_style(task_id, style_slug)
+    except Exception:
+        st.warning("Could not save the design style right now. Please try again.")
+        return False
+    st.success("Design style saved to the Home task.")
+    return True
+
+
+def _render_v2_prompt_card(label, purpose, prompt, key, *, expanded=False, height=260):
+    with st.expander(label, expanded=expanded):
+        st.caption(purpose)
+        prompt_text = _clean_prompt(prompt)
+        st.text_area(
+            f"{label} preview",
+            value=prompt_text,
+            height=height,
+            key=f"design-studio-v2-prompt::{key}::{hashlib.sha1(prompt_text.encode('utf-8')).hexdigest()[:10]}",
+            label_visibility="collapsed",
+            disabled=True,
+        )
+        _render_copy_button(prompt_text, f"design-studio-v2::{key}", label=f"Copy {label}")
+
+
+def _render_design_details(defaults, identity):
+    fields = (
+        ("Design title", "design_title"),
+        ("Sport", "sport"),
+        ("Principal subject one", "principal_subject_one"),
+        ("Principal subject two", "principal_subject_two"),
+        ("Team / country", "team_country"),
+        ("Season / era", "season_era"),
+        ("Event / moment", "event_moment"),
+        ("Venue / location", "venue_location"),
+        ("Uniform / equipment / livery", "uniform_equipment_livery"),
+        ("Essential text", "essential_text"),
+        ("Special instructions", "special_instructions"),
+    )
+    values = {}
+    with st.expander("Design details", expanded=False):
+        columns = st.columns(2)
+        for index, (label, name) in enumerate(fields):
+            target = columns[index % 2]
+            values[name] = target.text_input(
+                label,
+                value=str(defaults.get(name) or ""),
+                key=f"design-studio-v2-detail::{identity}::{name}",
+            )
+    return values
+
+
+def render_design_studio_v2(can_edit_prompts=False):
+    del can_edit_prompts
+    st.markdown(
+        """
+        <style>
+        .sc-design-v2-intro { color: #706b62; margin: -.3rem 0 .7rem; }
+        .sc-design-v2-style { border-left: 2px solid #b79243; color: #5f5a52; font-size: .82rem; margin: .35rem 0 .65rem; padding: .35rem .65rem; }
+        .sc-design-v2-steps { background: #f8f6f1; border: 1px solid #ded8cb; border-radius: 6px; color: #292724; font-size: .84rem; font-weight: 650; margin: .65rem 0; padding: .55rem .75rem; text-align: center; }
+        .sc-design-v2-badge { background: #f3ecdc; border: 1px solid #d9c28d; border-radius: 999px; color: #6d531c; display: inline-block; font-size: .68rem; font-weight: 700; margin-left: .35rem; padding: .12rem .42rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title("Design Studio")
+    st.markdown(
+        '<div class="sc-design-v2-intro">Choose one task and one proven Sports Cave composition system.</div>',
+        unsafe_allow_html=True,
     )
 
-    with upgrade_tab:
-        st.subheader("Upgrade Existing Sports Cave Design")
-        with st.expander("How To Upgrade an Existing Sports Cave Design"):
-            st.markdown("Watch this quick guide before upgrading a design.")
-            st.video(UPGRADE_EXISTING_DESIGN_VIDEO_URL)
-            st.caption(
-                f"If the video does not load, open it here: {UPGRADE_EXISTING_DESIGN_VIDEO_URL}"
+    task_records = list_new_design_task_records()
+    task_by_title = {task["title"]: task for task in task_records}
+    task_options = [MANUAL_NEW_DESIGN_TASK_OPTION, *task_by_title]
+    selected_title = st.selectbox(
+        "Choose design task",
+        task_options,
+        key=DESIGN_STUDIO_V2_SELECTED_TASK_KEY,
+    )
+    selected_task = task_by_title.get(selected_title)
+    task_identity = str((selected_task or {}).get("id") or selected_title or "manual")
+    previous_identity = st.session_state.get(DESIGN_STUDIO_V2_LOADED_TASK_KEY)
+    style_memory = st.session_state.setdefault(DESIGN_STUDIO_V2_STYLE_MEMORY_KEY, {})
+    if previous_identity != task_identity:
+        st.session_state[DESIGN_STUDIO_V2_LOADED_TASK_KEY] = task_identity
+        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = (
+            _task_design_style(selected_task)
+            if selected_task
+            else design_studio_styles.normalize_design_style(style_memory.get(task_identity))
+        )
+
+    style_options = ["", *design_studio_styles.style_slugs()]
+    if st.session_state.get(DESIGN_STUDIO_V2_STYLE_KEY) not in style_options:
+        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = (
+            _task_design_style(selected_task)
+            if selected_task
+            else design_studio_styles.normalize_design_style(style_memory.get(task_identity))
+        )
+    selected_style = st.selectbox(
+        "Design style",
+        style_options,
+        format_func=lambda value: design_studio_styles.design_style_label(value),
+        key=DESIGN_STUDIO_V2_STYLE_KEY,
+    )
+    style_memory[task_identity] = selected_style
+    style = design_studio_styles.get_design_style(selected_style)
+    if style:
+        st.markdown(
+            f'<div class="sc-design-v2-style"><strong>{html.escape(style.description)}</strong> Example: {html.escape(style.example)}.</div>',
+            unsafe_allow_html=True,
+        )
+
+    if selected_task:
+        task_text = str(selected_task.get("text") or selected_task.get("title") or "").strip()
+        saved_style = _task_design_style(selected_task)
+        if selected_style and selected_style != saved_style:
+            label = "Assign style to task" if not saved_style else "Save changed style"
+            if st.button(label, key=f"design-studio-v2-save-style::{task_identity}"):
+                if _persist_task_style(selected_task, selected_style):
+                    selected_task["design_style"] = selected_style
+                    selected_task.setdefault("metadata", {})["design_style"] = selected_style
+                    st.rerun()
+    else:
+        manual_task_key = "design-studio-v2-manual-task"
+        if manual_task_key not in st.session_state:
+            st.session_state[manual_task_key] = st.session_state.get(
+                DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY,
+                "",
             )
-            st.markdown(
-                "1. Screenshot the current Sports Cave design.\n"
-                "2. Open ChatGPT.\n"
-                "3. Go to the \"Sports Cave Designs\" project/folder.\n"
-                "4. Upload the current design screenshot.\n"
-                "5. Upload or attach the Sports Cave limited-edition plaque asset from the project.\n"
-                "6. Copy and paste this prompt.\n"
-                "7. Generate the upgraded collector version."
-            )
-        _render_prompt_box(
-            "Upgrade Existing Design Prompt",
-            *PROMPT_BOXES["Upgrade Existing Design Prompt"],
-            can_edit_prompts=can_edit_prompts,
+        task_text = st.text_area(
+            "Manual design task",
+            placeholder="Describe the exact Sports Cave design task...",
+            height=90,
+            key=manual_task_key,
         )
+        st.session_state[DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY] = task_text
 
-    with research_tab:
-        render_new_design_tab()
+    defaults = _task_design_details(selected_task)
+    details_memory = st.session_state.setdefault(DESIGN_STUDIO_V2_DETAILS_MEMORY_KEY, {})
+    remembered_details = details_memory.get(task_identity)
+    if isinstance(remembered_details, dict):
+        defaults = {**defaults, **remembered_details}
+    details = _render_design_details(
+        defaults,
+        hashlib.sha1(task_identity.encode("utf-8")).hexdigest()[:10],
+    )
+    details_memory[task_identity] = details
+    if len(defaults.get("_saved_principal_subjects") or []) > 2:
+        details["principal_subjects"] = defaults["_saved_principal_subjects"]
+    st.markdown(
+        '<div class="sc-design-v2-steps">1 Research &nbsp;&rarr;&nbsp; 2 Find Images &nbsp;&rarr;&nbsp; 3 Generate</div>',
+        unsafe_allow_html=True,
+    )
 
-    with expired_tab:
-        st.subheader("Update Expired Edition")
-        st.markdown(
-            "Use this when an expired or sold-out limited edition needs a fresh next-chapter "
-            "collector artwork without reprinting the original design."
-        )
-        _render_prompt_box(
-            "Expired Edition / Next Chapter Design Prompt",
-            *PROMPT_BOXES["Expired Edition / Next Chapter Design Prompt"],
-            can_edit_prompts=can_edit_prompts,
-        )
+    if not selected_style:
+        st.warning("Style required. Choose a design style to build the four V2 prompts.")
+        return
+    errors = design_studio_styles.validate_design_request(selected_style, details, task_text)
+    if errors:
+        for error in errors:
+            st.error(error)
+        return
 
-    with create_tab:
-        st.subheader("Create New Ultimate Moment")
-        st.markdown(
-            "1. Start with the Find The Moment prompt.\n"
-            "2. Replace [PLAYER / TEAM / RIVALRY / MOMENT] with the assignment.\n"
-            "3. Let ChatGPT identify the strongest commercial and emotional moment.\n"
-            "4. Search for the best hero image and best background/support image.\n"
-            "5. Upload the selected images into ChatGPT with the limited-edition plaque asset.\n"
-            "6. Use the Create Sports Cave Style Artwork prompt.\n"
-            "7. Refine with harsh review until it feels close to 10/10.\n"
-            "8. Save final PSD and flattened JPG in the correct Google Drive folder."
-        )
-        _render_prompt_box(
-            "Find The Moment Prompt",
-            *PROMPT_BOXES["Find The Moment Prompt"],
-            can_edit_prompts=can_edit_prompts,
-        )
-        st.divider()
-        _render_prompt_box(
-            "Create Sports Cave Style Artwork Prompt",
-            *PROMPT_BOXES["Create Sports Cave Style Artwork Prompt"],
-            can_edit_prompts=can_edit_prompts,
-        )
+    selected_assets = _task_selected_assets(selected_task)
+    prompts = design_studio_styles.build_prompt_bundle(
+        selected_style,
+        task_text,
+        details,
+        selected_assets,
+    )
+    _render_v2_prompt_card(
+        "Research Prompt",
+        "Verify the moment, source direction and factual collector story.",
+        prompts["research"],
+        f"{task_identity}::{selected_style}::research",
+        expanded=True,
+    )
+    _render_v2_prompt_card(
+        "Find Images Prompt",
+        "Retrieve only authentic final-use assets required by this style.",
+        prompts["find_images"],
+        f"{task_identity}::{selected_style}::find-images",
+    )
+    _render_v2_prompt_card(
+        "Design Generation Prompt",
+        "Composite the selected immutable source assets into the chosen Sports Cave system.",
+        prompts["generation"],
+        f"{task_identity}::{selected_style}::generation",
+        height=300,
+    )
+    _render_v2_prompt_card(
+        "Harsh Review",
+        "Score the finished artwork and return one precise correction brief.",
+        prompts["review"],
+        f"{task_identity}::{selected_style}::review",
+    )
 
-    with review_tab:
-        st.subheader("Harsh Review Checklist")
-        st.markdown(
-            "After generating or designing, screenshot the artwork and use this prompt to judge whether "
-            "it is good enough before saving final PSD/JPG."
-        )
-        _render_prompt_box(
-            "Harsh Truth Sports Cave Design Review",
-            *PROMPT_BOXES["Harsh Truth Sports Cave Design Review"],
-            can_edit_prompts=can_edit_prompts,
-        )
+
+def render_design_studio_page(can_edit_prompts: bool = False):
+    render_design_studio_v2(can_edit_prompts=can_edit_prompts)

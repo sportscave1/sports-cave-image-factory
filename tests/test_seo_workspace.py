@@ -316,12 +316,15 @@ class SEOOverviewAndUIContractTests(unittest.TestCase):
         self.assertEqual(metrics["Outreach Pending"], 1)
         self.assertEqual(metrics["Backlinks Live"], 1)
 
-    def test_ui_contains_all_pages_future_dashes_and_no_fake_integrations(self):
+    def test_ui_contains_all_pages_honest_reporting_state_and_no_fake_integrations(self):
         source = (ROOT / "seo_page.py").read_text(encoding="utf-8")
         navigation_source = (ROOT / "seo_navigation.py").read_text(encoding="utf-8")
         for route in seo_navigation.SEO_NAV_LABELS.values():
             self.assertIn(route, navigation_source)
-        self.assertIn('class="sc-seo-future-value">&mdash;', source)
+        self.assertNotIn('class="sc-seo-future-value">&mdash;', source)
+        self.assertIn('"Main SEO metrics"', source)
+        self.assertIn('"Organic Performance"', source)
+        self.assertIn("SEO reporting will appear here when GSC, GA4 and Shopify share", source)
         self.assertIn(
             "Not connected",
             (ROOT / "google_seo.py").read_text(encoding="utf-8"),

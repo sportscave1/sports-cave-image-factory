@@ -105,6 +105,12 @@ class FakeUI:
     def progress(self, *_args, **_kwargs):
         return None
 
+    def divider(self):
+        return None
+
+    def button(self, *_args, **_kwargs):
+        return False
+
 
 class MemoryStore:
     def __init__(self, connection=None):
@@ -611,7 +617,9 @@ class GoogleStorageAndArchitectureTests(unittest.TestCase):
         )
         for value in forbidden:
             self.assertNotIn(value, source)
-        self.assertIn("get_connection", source)
+        self.assertNotIn("get_connection", source)
+        self.assertIn("_render_reporting_dashboard", source)
+        self.assertIn("_render_data_connections_admin", source)
 
     def test_ordinary_overview_render_invokes_no_google_http_client(self):
         ui = FakeUI()

@@ -627,8 +627,9 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test.button[generate_button_index].click().run(timeout=20)
 
         self.assertTrue(
-            any(exception.value == "Please upload an artwork image first." for exception in app_test.exception)
+            any(error.value == "Please upload an artwork image first." for error in app_test.error)
         )
+        self.assertEqual(len(app_test.exception), 0)
         self.assertFalse(
             any("generator must not run without artwork" in str(exception.value) for exception in app_test.exception)
         )

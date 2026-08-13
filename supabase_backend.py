@@ -1235,10 +1235,12 @@ def _ensure_schema_uncached():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     completed_at TIMESTAMPTZ,
                     completed_by TEXT,
+                    design_style TEXT,
                     metadata JSONB DEFAULT '{}'::jsonb
                 )
                 """
             )
+            cur.execute("ALTER TABLE dashboard_tasks ADD COLUMN IF NOT EXISTS design_style TEXT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS daily_execution_sheets (
@@ -2254,6 +2256,7 @@ def ensure_dashboard_schema():
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         completed_at TIMESTAMPTZ,
                         completed_by TEXT,
+                        design_style TEXT,
                         metadata JSONB DEFAULT '{}'::jsonb
                     )
                     """
@@ -2291,6 +2294,7 @@ def ensure_dashboard_schema():
                 cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_snapshot JSONB DEFAULT '{}'::jsonb")
                 cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ")
                 cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
+                cur.execute("ALTER TABLE dashboard_tasks ADD COLUMN IF NOT EXISTS design_style TEXT")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_user_date ON daily_execution_sheets(user_id, sheet_date DESC)")
@@ -2908,6 +2912,7 @@ def _dashboard_task_from_row(row):
         "created_at": row.get("created_at"),
         "completed_at": row.get("completed_at"),
         "completed_by": row.get("completed_by") or "",
+        "design_style": str(row.get("design_style") or ""),
         "metadata": row.get("metadata") or {},
     }
 
@@ -3130,7 +3135,7 @@ def list_dashboard_tasks(status="open", *, limit=200):
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
                 f"""
-                SELECT id, title, section, status, created_at, completed_at, completed_by, metadata
+                SELECT id, title, section, status, created_at, completed_at, completed_by, design_style, metadata
                 FROM dashboard_tasks
                 {where_sql}
                 ORDER BY created_at DESC
@@ -3215,7 +3220,14 @@ def list_dashboard_edition_products(*, limit=1000):
             return rows
 
 
-def create_dashboard_task(title, section, *, metadata=None, actor="sports_cave_os"):
+def create_dashboard_task(
+    title,
+    section,
+    *,
+    metadata=None,
+    design_style="",
+    actor="sports_cave_os",
+):
     clean_title = str(title or "").strip()
     clean_section = str(section or "").strip()
     if not clean_title:
@@ -3227,11 +3239,16 @@ def create_dashboard_task(title, section, *, metadata=None, actor="sports_cave_o
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO dashboard_tasks(title, section, metadata)
-                VALUES (%s, %s, %s::jsonb)
+                INSERT INTO dashboard_tasks(title, section, design_style, metadata)
+                VALUES (%s, %s, NULLIF(%s, ''), %s::jsonb)
                 RETURNING *
                 """,
-                (clean_title, clean_section, json_dumps(metadata or {})),
+                (
+                    clean_title,
+                    clean_section,
+                    str(design_style or "").strip(),
+                    json_dumps(metadata or {}),
+                ),
             )
             row = cur.fetchone() or {}
             task = _dashboard_task_from_row(row)
@@ -3249,6 +3266,55 @@ def create_dashboard_task(title, section, *, metadata=None, actor="sports_cave_o
                     "metadata": metadata or {},
                 },
                 reason=f"Task added: {clean_title}",
+                actor=str(actor or "").strip() or "sports_cave_os",
+                source="Dashboard",
+            )
+        conn.commit()
+    return task
+
+
+def update_dashboard_task_design_style(
+    task_id,
+    design_style,
+    *,
+    actor="sports_cave_os",
+):
+    clean_task_id = str(task_id or "").strip()
+    clean_style = str(design_style or "").strip()
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not clean_style:
+        raise ValueError("Design style is required.")
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET design_style=%s,
+                    metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('design_style', %s)
+                WHERE id=%s AND section=%s
+                RETURNING *
+                """,
+                (clean_style, clean_style, clean_task_id, "New designs to complete"),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return None
+            task = _dashboard_task_from_row(row)
+            _insert_audit_log(
+                cur,
+                event_type="task_design_style_updated",
+                entity_type="dashboard_task",
+                entity_id=clean_task_id,
+                new_value={
+                    "message": f"Design style updated: {task.get('title') or 'Task'}",
+                    "page": "Dashboard",
+                    "action_type": "task_design_style_updated",
+                    "design_style": clean_style,
+                },
+                reason=f"Design style updated: {clean_style}",
                 actor=str(actor or "").strip() or "sports_cave_os",
                 source="Dashboard",
             )

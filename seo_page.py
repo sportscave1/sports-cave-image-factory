@@ -17,6 +17,7 @@ import seo_workspace as seo
 
 SEO_OVERVIEW_CACHE_TTL_SECONDS = 15
 SEO_PROGRESS_POLL_SECONDS = 15
+SEO_ADMIN_OPEN_STATE_KEY = "seo-data-connections-open"
 
 
 PAGE_SUBTITLES = {
@@ -76,16 +77,14 @@ def _inject_styles():
         .sc-seo-progress-fill { background: #b79243; height: 100%; min-width: 0; transition: width .2s ease; }
         .sc-seo-progress-summary { color: #292724; font-size: .78rem; font-weight: 700; margin: 0 0 .25rem; }
         .sc-seo-progress-detail { color: #6e6b65; font-size: .71rem; line-height: 1.4; margin: .15rem 0; }
-        .sc-seo-empty-chart { align-items: center; background: #fbfaf7; border: 1px dashed #d7d2c7; border-radius: 8px; color: #6e6b65; display: flex; justify-content: center; min-height: 13rem; padding: 2rem; text-align: center; }
-        .sc-seo-future-metric { background: #fff; border: 1px solid #dfdbd1; border-top: 2px solid #c5a45c; border-radius: 8px; min-height: 7rem; padding: .85rem; }
-        .sc-seo-future-label { color: #393734; font-size: .78rem; font-weight: 650; line-height: 1.25; min-height: 2rem; }
-        .sc-seo-future-value { color: #171614; font-size: 1.7rem; line-height: 1; margin: .45rem 0 .55rem; }
-        .sc-seo-future-source { color: #77736b; font-size: .7rem; line-height: 1.3; }
+        .sc-seo-empty-chart { align-items: center; background: #fbfaf7; border: 1px dashed #d7d2c7; border-radius: 6px; color: #6e6b65; display: flex; justify-content: center; min-height: 3.75rem; padding: .8rem 1rem; text-align: center; }
         .sc-seo-rule-grid { display: grid; gap: .55rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .sc-seo-rule { background: #faf8f2; border-left: 2px solid #b79243; border-radius: 4px; font-size: .8rem; padding: .65rem .75rem; }
         .sc-seo-note { background: #faf8f2; border: 1px solid #e1d9c8; border-radius: 6px; padding: .8rem; }
         .sc-seo-note strong { color: #242321; }
         .sc-seo-danger { border-left-color: #a74b42; }
+        .sc-seo-section-title { color: #1d1c1a; font-size: 1.05rem; line-height: 1.25; margin: 1rem 0 .55rem; }
+        .sc-seo-data-date { color: #77736b; font-size: .72rem; margin: -.1rem 0 .65rem; }
         [data-testid="stDataFrame"] { border-radius: 6px !important; overflow: hidden !important; }
         [data-testid="stSegmentedControl"] { margin-bottom: .7rem; }
         [data-testid="stSegmentedControl"] button { border-radius: 4px !important; }
@@ -110,6 +109,13 @@ def _header(route):
             </div>
         </div>
         """,
+        unsafe_allow_html=True,
+    )
+
+
+def _section_heading(title):
+    st.markdown(
+        f'<h2 class="sc-seo-section-title">{html.escape(str(title))}</h2>',
         unsafe_allow_html=True,
     )
 
@@ -307,6 +313,7 @@ def _consume_google_oauth_notice():
     if not message:
         return
     if str(result or "") == "connected":
+        st.session_state[SEO_ADMIN_OPEN_STATE_KEY] = True
         invalidate_seo_overview_summary_cache()
     (st.success if message[1] else st.warning)(message[0])
     try:
@@ -350,10 +357,32 @@ def _cached_default_phase4_health():
     return google_seo_phase4.default_phase4_store().saved_health()
 
 
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=24)
+def _cached_default_reporting_snapshot(
+    preset,
+    market,
+    device,
+    search,
+    custom_start,
+    custom_end,
+):
+    phase4_store = google_seo_phase4.default_phase4_store()
+    reader = google_seo_phase4.PostgresSEOReportingReader(phase4_store)
+    return reader.snapshot(
+        preset=preset,
+        market=market,
+        device=device,
+        search=search,
+        custom_start=custom_start,
+        custom_end=custom_end,
+    )
+
+
 def invalidate_seo_overview_summary_cache():
     _cached_default_shopify_health.clear()
     _cached_default_google_connection.clear()
     _cached_default_phase4_health.clear()
+    _cached_default_reporting_snapshot.clear()
 
 
 def _render_google_controls(user, store, config_status, connection):
@@ -687,8 +716,7 @@ def _render_phase4_foundation(
 ):
     using_default_store = phase4_store is None
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
-    reporting_reader = reporting_reader or google_seo_phase4.PostgresSEOReportingReader(phase4_store)
-    st.subheader("Joined reporting foundation")
+    st.subheader("Phase 4 mapping and reconciliation")
     try:
         health = dict(
             saved_health
@@ -725,156 +753,364 @@ def _render_phase4_foundation(
         unsafe_allow_html=True,
     )
 
-    filter_columns = st.columns([1.2, 1, 1, 1])
-    preset = filter_columns[0].selectbox(
-        "Period", ("Last 28 days", "Last 90 days", "Last 12 months", "Custom dates"),
+    if not os_accounts.is_admin(user):
+        return
+    settings = phase4_store.get_settings()
+    brand_text = st.text_input(
+        "Brand terms",
+        value=", ".join(settings.get("brand_terms") or []),
+        help="Comma-separated terms used only for GSC Brand and Non-brand query filtering.",
+        key="seo-phase4-brand-terms",
+    )
+    locale_text = st.text_input(
+        "Known locale prefixes",
+        value=", ".join(settings.get("known_locale_prefixes") or []),
+        help="Locale paths remain distinct; this list labels them for market review.",
+        key="seo-phase4-locales",
+    )
+    if st.button("Save reporting settings", key="seo-phase4-save-settings"):
+        phase4_store.save_settings(
+            brand_terms=brand_text.split(","), known_locale_prefixes=locale_text.split(","),
+            updated_by=str(user.get("id") or ""),
+        )
+        _set_notice("SEO reporting settings saved.")
+        invalidate_seo_overview_summary_cache()
+        st.rerun()
+    action_columns = st.columns(2)
+    if action_columns[0].button(
+        "Build joined reporting data", type="primary", icon=":material/account_tree:",
+        key="seo-phase4-historical",
+    ):
+        try:
+            google_seo_phase4.queue_phase4_pipeline(
+                user, "historical", phase4_store=phase4_store,
+                connection_store=connection_store,
+            )
+        except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice("Joined SEO history queued. Existing Phase 3 checkpoints were preserved.")
+            invalidate_seo_overview_summary_cache()
+        st.rerun()
+    if action_columns[1].button(
+        "Refresh joined data", icon=":material/sync:", key="seo-phase4-manual",
+    ):
+        try:
+            google_seo_phase4.queue_phase4_pipeline(
+                user, "manual", phase4_store=phase4_store,
+                connection_store=connection_store,
+            )
+        except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice("Joined SEO refresh queued.")
+            invalidate_seo_overview_summary_cache()
+        st.rerun()
+
+
+def _load_reporting_health(phase4_store=None):
+    try:
+        if phase4_store is not None:
+            return dict(phase4_store.saved_health())
+        return dict(_cached_default_phase4_health())
+    except google_seo_phase4.SEOPhase4Error:
+        return {}
+
+
+def _reporting_filters():
+    columns = st.columns([1.2, 1, 1, 1])
+    preset = columns[0].selectbox(
+        "Period",
+        ("Last 28 days", "Last 90 days", "Last 12 months", "Custom dates"),
         key="seo-phase4-period",
     )
-    market = filter_columns[1].selectbox(
-        "Market", ("All markets", "Australia", "United States", "United Kingdom"),
+    market = columns[1].selectbox(
+        "Market",
+        ("All markets", "Australia", "United States", "United Kingdom"),
         key="seo-phase4-market",
     )
-    device = filter_columns[2].selectbox(
-        "Device", ("All devices", "Desktop", "Mobile"), key="seo-phase4-device",
+    device = columns[2].selectbox(
+        "Device",
+        ("All devices", "Desktop", "Mobile"),
+        key="seo-phase4-device",
     )
-    search = filter_columns[3].selectbox(
-        "Search", ("All searches", "Brand", "Non-brand"), key="seo-phase4-search",
+    search = columns[3].selectbox(
+        "Search",
+        ("All searches", "Brand", "Non-brand"),
+        key="seo-phase4-search",
     )
     custom_start = custom_end = None
     if preset == "Custom dates":
         date_columns = st.columns(2)
         custom_start = date_columns[0].date_input("Start date", key="seo-phase4-start")
         custom_end = date_columns[1].date_input("End date", key="seo-phase4-end")
-    reporting_preview = st.checkbox(
-        "Load saved reporting preview",
-        value=False,
-        key="seo-phase4-reporting-preview",
-        help="Loads database aggregates only. It never contacts Google or Shopify.",
+    return {
+        "preset": preset,
+        "market": market,
+        "device": device,
+        "search": search,
+        "custom_start": custom_start,
+        "custom_end": custom_end,
+    }
+
+
+def _load_reporting_snapshot(filters, *, phase4_store=None, reporting_reader=None):
+    arguments = {
+        "preset": filters["preset"],
+        "market": filters["market"],
+        "device": filters["device"],
+        "search": filters["search"],
+        "custom_start": filters["custom_start"],
+        "custom_end": filters["custom_end"],
+    }
+    if reporting_reader is not None:
+        return reporting_reader.snapshot(**arguments)
+    if phase4_store is not None:
+        return google_seo_phase4.PostgresSEOReportingReader(phase4_store).snapshot(
+            **arguments
+        )
+    return _cached_default_reporting_snapshot(
+        arguments["preset"],
+        arguments["market"],
+        arguments["device"],
+        arguments["search"],
+        arguments["custom_start"],
+        arguments["custom_end"],
     )
-    if reporting_preview:
+
+
+def _numeric_value(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metric_value(value, *, style="number"):
+    numeric = _numeric_value(value)
+    if numeric is None:
+        return "—"
+    if style == "percent":
+        return f"{numeric * 100:.1f}%"
+    if style == "position":
+        return f"{numeric:.1f}"
+    return f"{round(numeric):,}"
+
+
+def _metric_delta(current, previous, *, position=False):
+    current_value = _numeric_value(current)
+    previous_value = _numeric_value(previous)
+    if current_value is None or previous_value in (None, 0):
+        return None
+    if position:
+        return f"{current_value - previous_value:+.1f} vs previous"
+    change = ((current_value - previous_value) / abs(previous_value)) * 100
+    return f"{change:+.1f}% vs previous"
+
+
+def _render_reporting_metrics(snapshot):
+    current = snapshot.get("current") or {}
+    previous = snapshot.get("previous") or {}
+    metrics = (
+        ("Organic Clicks", "organic_clicks", "number", False),
+        ("Organic Impressions", "organic_impressions", "number", False),
+        ("CTR", "ctr", "percent", False),
+        ("Average Position", "average_position", "position", True),
+        ("Organic Sessions", "organic_sessions", "number", False),
+    )
+    columns = st.columns(len(metrics))
+    for column, (label, key, style, inverse) in zip(columns, metrics):
+        column.metric(
+            label,
+            _metric_value(current.get(key), style=style),
+            _metric_delta(current.get(key), previous.get(key), position=inverse),
+            delta_color="inverse" if inverse else "normal",
+        )
+    note = str(current.get("search_scope_note") or "")
+    if note:
+        st.caption(note)
+
+
+def _render_reporting_tables(snapshot):
+    pages = []
+    for row in list(snapshot.get("top_pages") or [])[:8]:
+        pages.append(
+            {
+                "Landing page": row.get("title") or row.get("canonical_url") or "Untitled",
+                "Clicks": row.get("clicks") or 0,
+                "Impressions": row.get("impressions") or 0,
+                "Position": _metric_value(row.get("average_position"), style="position"),
+                "Sessions": row.get("sessions") or 0,
+            }
+        )
+    _section_heading("Top Landing Pages")
+    _table(
+        pages,
+        empty="No mapped landing-page results are available for this period.",
+        height=285,
+    )
+
+    queries = []
+    for row in list(snapshot.get("top_queries") or [])[:8]:
+        queries.append(
+            {
+                "Search query": row.get("query") or "(not provided)",
+                "Clicks": row.get("clicks") or 0,
+                "Impressions": row.get("impressions") or 0,
+                "CTR": _metric_value(row.get("ctr"), style="percent"),
+                "Position": _metric_value(row.get("average_position"), style="position"),
+            }
+        )
+    _section_heading("Top Search Queries")
+    _table(
+        queries,
+        empty="No search-query results are available for this period.",
+        height=285,
+    )
+
+
+def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
+    health = _load_reporting_health(phase4_store)
+    through_date = str(health.get("common_reporting_date") or "")
+    if through_date:
+        filters = _reporting_filters()
+        st.markdown(
+            f'<div class="sc-seo-data-date">Reporting data through {html.escape(_display_progress_date(through_date))}</div>',
+            unsafe_allow_html=True,
+        )
         try:
-            snapshot = reporting_reader.snapshot(
-                preset=preset, market=market, device=device, search=search,
-                custom_start=custom_start, custom_end=custom_end,
+            snapshot = _load_reporting_snapshot(
+                filters,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
             )
-        except google_seo_phase4.SEOPhase4Error as error:
-            st.caption(error.public_message)
-        else:
-            if snapshot.get("ready"):
-                selected = snapshot.get("filters") or {}
-                st.caption(
-                    f"Saved reporting data selected: {selected.get('start_date')} to {selected.get('end_date')}; "
-                    f"comparison {selected.get('previous_start_date')} to {selected.get('previous_end_date')}."
-                )
-                note = str((snapshot.get("current") or {}).get("search_scope_note") or "")
-                if note:
-                    st.caption(note)
-            else:
-                st.caption("The joined reporting read model will activate when GSC, GA4 and Shopify share a completed date.")
+        except google_seo_phase4.SEOPhase4Error:
+            snapshot = {}
     else:
-        st.caption("Reporting aggregates load only when requested.")
+        snapshot = {}
 
-    if not os_accounts.is_admin(user):
-        return
-    show_administration = st.checkbox(
-        "Show Phase 4 administration",
-        value=False,
-        key="seo-phase4-show-administration",
+    _section_heading("Main SEO metrics")
+    if snapshot.get("ready"):
+        _render_reporting_metrics(snapshot)
+    else:
+        st.info(
+            "SEO reporting will appear here when GSC, GA4 and Shopify share a reliable completed date."
+        )
+
+    _section_heading("Organic Performance")
+    st.markdown(
+        '<div class="sc-seo-empty-chart">A saved daily trend is not available yet. No live services are queried from this dashboard.</div>',
+        unsafe_allow_html=True,
     )
-    if show_administration:
-        settings = phase4_store.get_settings()
-        brand_text = st.text_input(
-            "Brand terms",
-            value=", ".join(settings.get("brand_terms") or []),
-            help="Comma-separated terms used only for GSC Brand and Non-brand query filtering.",
-            key="seo-phase4-brand-terms",
-        )
-        locale_text = st.text_input(
-            "Known locale prefixes",
-            value=", ".join(settings.get("known_locale_prefixes") or []),
-            help="Locale paths remain distinct; this list labels them for market review.",
-            key="seo-phase4-locales",
-        )
-        if st.button("Save reporting settings", key="seo-phase4-save-settings"):
-            phase4_store.save_settings(
-                brand_terms=brand_text.split(","), known_locale_prefixes=locale_text.split(","),
-                updated_by=str(user.get("id") or ""),
-            )
-            _set_notice("SEO reporting settings saved.")
-            invalidate_seo_overview_summary_cache()
-            st.rerun()
-        action_columns = st.columns(2)
-        if action_columns[0].button(
-            "Build joined reporting data", type="primary", icon=":material/account_tree:",
-            key="seo-phase4-historical",
-        ):
-            try:
-                google_seo_phase4.queue_phase4_pipeline(
-                    user, "historical", phase4_store=phase4_store,
-                    connection_store=connection_store,
-                )
-            except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
-                _set_notice(getattr(error, "public_message", str(error)), success=False)
-            else:
-                _set_notice("Joined SEO history queued. Existing Phase 3 checkpoints were preserved.")
-                invalidate_seo_overview_summary_cache()
-            st.rerun()
-        if action_columns[1].button(
-            "Refresh joined data", icon=":material/sync:", key="seo-phase4-manual",
-        ):
-            try:
-                google_seo_phase4.queue_phase4_pipeline(
-                    user, "manual", phase4_store=phase4_store,
-                    connection_store=connection_store,
-                )
-            except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
-                _set_notice(getattr(error, "public_message", str(error)), success=False)
-            else:
-                _set_notice("Joined SEO refresh queued.")
-                invalidate_seo_overview_summary_cache()
-            st.rerun()
+
+    if snapshot.get("ready"):
+        _section_heading("SEO opportunities")
+        st.caption("No stored SEO opportunities are available yet.")
+        _render_reporting_tables(snapshot)
 
 
-def _render_overview(
-    state,
+def _render_current_work(state, user, navigate):
+    _section_heading("Current work")
+    actions = st.columns(4)
+    if actions[0].button("Create Blog Brief", icon=":material/edit_note:", use_container_width=True):
+        _navigate(navigate, seo.SEO_BLOG_ROUTE)
+    if actions[1].button("Import GSC Keywords", icon=":material/upload_file:", use_container_width=True):
+        st.session_state["seo-keyword-view"] = "Import GSC CSV"
+        _navigate(navigate, seo.SEO_KEYWORDS_ROUTE)
+    if actions[2].button("Add Outreach Prospect", icon=":material/person_add:", use_container_width=True):
+        st.session_state["seo-open-outreach-dialog"] = True
+        _navigate(navigate, seo.SEO_BACKLINKS_ROUTE)
+    if actions[3].button("Add Citation", icon=":material/add_link:", use_container_width=True):
+        st.session_state["seo-open-citation-dialog"] = True
+        _navigate(navigate, seo.SEO_CITATIONS_ROUTE)
+
+    left, right = st.columns([1, 1.4])
+    with left:
+        _section_heading("Approved Weekly Plan")
+        targets = state.get("settings", {}).get("weekly_targets") or list(seo.WEEKLY_TARGETS)
+        selected = st.multiselect(
+            "Completed this week",
+            targets,
+            default=[],
+            key="seo-weekly-focus-completed",
+            label_visibility="collapsed",
+        )
+        st.progress(
+            len(selected) / max(len(targets), 1),
+            text=f"{len(selected)} of {len(targets)} complete",
+        )
+    with right:
+        _section_heading("Completed work")
+        entries = []
+        if os_accounts.can_view_activity_log(user):
+            try:
+                import sports_cave_dashboard
+
+                rows = sports_cave_dashboard.list_activity_entries(
+                    local_now=datetime.now(timezone.utc),
+                    limit=40,
+                    user=user,
+                )
+                entries = [
+                    row
+                    for row in rows
+                    if str(row.get("Page/Area") or "").startswith("SEO /")
+                ][:8]
+            except Exception:
+                entries = []
+        _table(
+            entries,
+            empty="Completed SEO work will appear here as activity is recorded.",
+            height=250,
+        )
+
+
+def _render_data_connections_admin(
     user,
-    navigate,
+    *,
     google_store=None,
     import_store=None,
     phase4_store=None,
     reporting_reader=None,
 ):
-    has_injected_dependencies = any(
-        value is not None
-        for value in (google_store, import_store, phase4_store, reporting_reader)
-    )
-    _header(seo.SEO_OVERVIEW_ROUTE)
-    _consume_google_oauth_notice()
+    st.divider()
+    is_open = bool(st.session_state.get(SEO_ADMIN_OPEN_STATE_KEY, False))
+    if st.button(
+        "Data Connections & Sync Settings",
+        icon=":material/expand_less:" if is_open else ":material/expand_more:",
+        key="seo-data-connections-toggle",
+        use_container_width=True,
+    ):
+        st.session_state[SEO_ADMIN_OPEN_STATE_KEY] = not is_open
+        st.rerun()
+    if not is_open:
+        return
+
     config_status = google_seo.configuration_status()
+    using_default_google_store = google_store is None
     google_store = google_store or google_seo.default_store()
     try:
         connection = (
-            google_store.get_connection()
-            if has_injected_dependencies
-            else _cached_default_google_connection()
+            _cached_default_google_connection()
+            if using_default_google_store
+            else google_store.get_connection()
         )
     except google_seo.GoogleSEOError:
         connection = {}
-        fallback_status = "Needs attention" if config_status.get("ready") else "Configuration required"
-        gsc_status = fallback_status
-        ga4_status = fallback_status
+        fallback = "Needs attention" if config_status.get("ready") else "Configuration required"
+        gsc_status = ga4_status = fallback
     else:
         gsc_status = google_seo.connection_status_label(
-            config_status,
-            connection,
-            service="gsc",
+            config_status, connection, service="gsc"
         )
         ga4_status = google_seo.connection_status_label(
-            config_status,
-            connection,
-            service="ga4",
+            config_status, connection, service="ga4"
         )
-    shopify = _shopify_health() if has_injected_dependencies else _cached_default_shopify_health()
+    shopify = _cached_default_shopify_health() if using_default_google_store else _shopify_health()
+
+    st.subheader("Connections")
     integration_columns = st.columns([1.1, 1.1, .8])
     integration_columns[0].markdown(
         _integration_card(
@@ -910,6 +1146,7 @@ def _render_overview(
         unsafe_allow_html=True,
     )
     _render_google_controls(user, google_store, config_status, connection)
+
     _render_historical_import_controls(
         user,
         connection,
@@ -925,79 +1162,23 @@ def _render_overview(
         google_store,
     )
 
-    st.subheader("Future organic reporting")
-    future_metrics = (
-        ("Organic Clicks", "GSC"),
-        ("Organic Impressions", "GSC"),
-        ("Average Position", "GSC"),
-        ("Organic Sessions", "GA4"),
-        ("Organic Revenue", "GA4"),
+
+def _render_overview(
+    state,
+    user,
+    navigate,
+    google_store=None,
+    import_store=None,
+    phase4_store=None,
+    reporting_reader=None,
+):
+    _header(seo.SEO_OVERVIEW_ROUTE)
+    _consume_google_oauth_notice()
+    _render_reporting_dashboard(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
     )
-    future_columns = st.columns(5)
-    for column, (label, source) in zip(future_columns, future_metrics):
-        column.markdown(
-            f'<div class="sc-seo-future-metric">'
-            f'<div class="sc-seo-future-label">{html.escape(label)}</div>'
-            f'<div class="sc-seo-future-value">&mdash;</div>'
-            f'<div class="sc-seo-future-source">{html.escape(source)} &middot; Reporting import not enabled</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.subheader("Organic Performance")
-    st.markdown(
-        '<div class="sc-seo-empty-chart">Connection health is available now. Organic reporting data will be added in a later phase.</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.subheader("Current work")
-    metrics = seo.overview_metrics(state)
-    columns = st.columns(5)
-    for column, (label, value) in zip(columns, metrics.items()):
-        column.metric(label, value)
-
-    st.subheader("Quick actions")
-    actions = st.columns(4)
-    if actions[0].button("Create Blog Brief", icon=":material/edit_note:", use_container_width=True):
-        _navigate(navigate, seo.SEO_BLOG_ROUTE)
-    if actions[1].button("Import GSC Keywords", icon=":material/upload_file:", use_container_width=True):
-        st.session_state["seo-keyword-view"] = "Import GSC CSV"
-        _navigate(navigate, seo.SEO_KEYWORDS_ROUTE)
-    if actions[2].button("Add Outreach Prospect", icon=":material/person_add:", use_container_width=True):
-        st.session_state["seo-open-outreach-dialog"] = True
-        _navigate(navigate, seo.SEO_BACKLINKS_ROUTE)
-    if actions[3].button("Add Citation", icon=":material/add_link:", use_container_width=True):
-        st.session_state["seo-open-citation-dialog"] = True
-        _navigate(navigate, seo.SEO_CITATIONS_ROUTE)
-
-    left, right = st.columns([1, 1.4])
-    with left:
-        st.subheader("Weekly focus")
-        targets = state.get("settings", {}).get("weekly_targets") or list(seo.WEEKLY_TARGETS)
-        selected = st.multiselect(
-            "Completed this week",
-            targets,
-            default=[],
-            key="seo-weekly-focus-completed",
-            label_visibility="collapsed",
-        )
-        st.progress(len(selected) / max(len(targets), 1), text=f"{len(selected)} of {len(targets)} complete")
-    with right:
-        st.subheader("Recent SEO activity")
-        entries = []
-        if os_accounts.can_view_activity_log(user):
-            try:
-                import sports_cave_dashboard
-
-                rows = sports_cave_dashboard.list_activity_entries(
-                    local_now=datetime.now(timezone.utc),
-                    limit=40,
-                    user=user,
-                )
-                entries = [row for row in rows if str(row.get("Page/Area") or "").startswith("SEO /")][:8]
-            except Exception:
-                entries = []
-        _table(entries, empty="SEO activity will appear here as work is recorded.", height=250)
+    _render_current_work(state, user, navigate)
 
     with st.expander("Core rules and markets", expanded=False):
         st.markdown(
@@ -1015,6 +1196,14 @@ def _render_overview(
         )
         st.caption("Primary markets: Australia, United States and United Kingdom")
         st.caption("Secondary markets: Canada and New Zealand")
+
+    _render_data_connections_admin(
+        user,
+        google_store=google_store,
+        import_store=import_store,
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
 
 
 @st.dialog("Citation record", width="large")

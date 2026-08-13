@@ -70,18 +70,35 @@ class FakeDashboardBackend:
         }
         self.activity_rows.insert(0, row)
 
-    def create_dashboard_task(self, title, section, *, metadata=None, actor="sports_cave_os"):
+    def create_dashboard_task(
+        self,
+        title,
+        section,
+        *,
+        metadata=None,
+        design_style="",
+        actor="sports_cave_os",
+    ):
         task = {
             "id": f"task-{len(self.tasks) + 1}",
             "title": title,
             "section": section,
             "status": "open",
             "created_at": "2026-07-21T00:00:00+00:00",
+            "design_style": design_style,
             "metadata": metadata or {},
         }
         self.tasks.append(task)
         self._activity_row("task_added", f"Task added: {title}")
         return task
+
+    def update_dashboard_task_design_style(self, task_id, design_style, *, actor="sports_cave_os"):
+        for task in self.tasks:
+            if task["id"] == task_id and task["section"] == sports_cave_dashboard.DESIGN_TASK_GROUP:
+                task["design_style"] = design_style
+                task.setdefault("metadata", {})["design_style"] = design_style
+                return task
+        return None
 
     def complete_dashboard_task(
         self,
@@ -592,6 +609,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             task = sports_cave_dashboard.add_task(
                 "Create New Supercars Design",
                 sports_cave_dashboard.DESIGN_TASK_GROUP,
+                design_style="motorsport_driver_car",
             )
             result = sports_cave_dashboard.complete_design_task_for_upload(
                 task["id"],
@@ -606,6 +624,46 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual([task["text"] for task in state["tasks"]], ["Create New Supercars Design (all mockups)"])
         self.assertEqual([task["section"] for task in state["tasks"]], [sports_cave_dashboard.UPLOAD_TASK_GROUP])
         self.assertEqual(backend.activity_rows[1]["reason"], "Task completed: Create New Supercars Design")
+
+    def test_new_design_task_requires_and_persists_a_canonical_style(self):
+        backend = FakeDashboardBackend()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            with self.assertRaisesRegex(ValueError, "Style required"):
+                sports_cave_dashboard.add_task(
+                    "Create a legends design",
+                    sports_cave_dashboard.DESIGN_TASK_GROUP,
+                )
+            task = sports_cave_dashboard.add_task(
+                "Create a legends design",
+                sports_cave_dashboard.DESIGN_TASK_GROUP,
+                design_style="Legends Jersey Display",
+            )
+
+        self.assertEqual(task["design_style"], "legends_jersey_display")
+        self.assertEqual(task["metadata"]["design_style"], "legends_jersey_display")
+
+    def test_legacy_design_task_style_can_be_assigned_and_persisted(self):
+        backend = FakeDashboardBackend()
+        backend.tasks.append(
+            {
+                "id": "legacy-design",
+                "title": "Update old plaque",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "created_at": "2026-07-21T00:00:00+00:00",
+                "metadata": {},
+            }
+        )
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            updated = sports_cave_dashboard.update_task_design_style(
+                "legacy-design",
+                "Update Existing Design",
+            )
+
+        self.assertEqual(updated["design_style"], "update_existing")
+        self.assertEqual(updated["metadata"]["design_style"], "update_existing")
 
     def test_task_cache_is_cleared_after_add_and_complete(self):
         backend = FakeDashboardBackend()
@@ -650,6 +708,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                     "sport": "Tennis",
                     "league_or_competition": "US Open",
                     "team_or_athlete": "Serena Williams",
+                    "design_style": "Championship / Achievement",
                     "design_title": "The Final Serve",
                     "moment_or_theme": "Career legacy and final US Open appearance",
                     "design_description": description,
@@ -673,9 +732,94 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(details["sport"], "Tennis")
         self.assertEqual(details["team_or_athlete"], "Serena Williams")
         self.assertEqual(details["design_description"], description)
+        self.assertEqual(sports_cave_dashboard.task_design_style(task), "championship_achievement")
         self.assertEqual(
             sports_cave_dashboard.task_import_summary({"metadata": task["metadata"]}),
             "Tennis · Serena Williams · US Open",
+        )
+
+    def test_task_csv_style_round_trip_preserves_the_stable_slug(self):
+        source_tasks = [
+            {
+                "id": "design-1",
+                "title": "The Rivals",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "design_style": "rivalry_faceoff",
+                "metadata": {
+                    "design_style": "rivalry_faceoff",
+                    sports_cave_dashboard.TASK_IMPORT_METADATA_KEY: {
+                        "task_title": "The Rivals",
+                        "team_or_athlete": "Peter Brock vs Allan Moffat",
+                    },
+                },
+            }
+        ]
+
+        exported = sports_cave_dashboard.build_task_import_template_csv(source_tasks)
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            exported,
+            "tasks.csv",
+            existing_tasks=[],
+        )
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(
+            sports_cave_dashboard.task_design_style(preview["tasks"][0]),
+            "rivalry_faceoff",
+        )
+
+    def test_old_csv_without_design_style_is_safe_and_requires_style_for_designs(self):
+        columns = [
+            column
+            for column in sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS
+            if column != "design_style"
+        ]
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "task_section": "Collections to update",
+                "task_title": "Refresh NFL collection",
+            }
+        )
+        writer.writerow(
+            {
+                "task_section": "New designs to complete",
+                "task_title": "Legacy design import",
+            }
+        )
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            output.getvalue().encode("utf-8"),
+            "old-tasks.csv",
+            existing_tasks=[],
+        )
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(preview["invalid_count"], 1)
+        self.assertIn("Style required", preview["errors"][0]["errors"][0])
+
+    def test_task_csv_unknown_design_style_is_a_clear_row_error(self):
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            task_csv_bytes(
+                [
+                    {
+                        "task_section": "New designs to complete",
+                        "task_title": "Wrong style",
+                        "design_style": "Crowded montage",
+                    }
+                ]
+            ),
+            "tasks.csv",
+            existing_tasks=[],
+        )
+
+        self.assertEqual(preview["valid_count"], 0)
+        self.assertIn(
+            "Unknown design_style: Crowded montage.",
+            preview["errors"][0]["errors"],
         )
 
     def test_task_csv_validation_reports_blank_invalid_and_duplicate_rows(self):
@@ -751,6 +895,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                 "moment_or_theme": "Finals moment",
                 "design_description": f"Structured brief {index}",
                 "priority": "High",
+                "design_style": "minimalist_hero",
             }
             for index in range(1, 16)
         ]
@@ -2386,6 +2531,24 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
+    def test_home_design_tasks_require_a_style_and_render_style_badges(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        task_group_source = source[
+            source.index("def render_task_group") :
+            source.index("\n\ndef render_dashboard_tasks")
+        ]
+        add_source = source[
+            source.index("def render_dashboard_tasks") :
+            source.index("\n\ndef dashboard_activity_month_options")
+        ]
+
+        self.assertIn("sc-design-style-badge", task_group_source)
+        self.assertIn("task_design_style(task)", task_group_source)
+        self.assertIn('"Design style"', add_source)
+        self.assertIn("design_studio_styles.style_slugs()", add_source)
+        self.assertIn("design_style=design_style", add_source)
+        self.assertNotIn('st.form("dashboard-add-task"', add_source)
+
     def test_new_design_queue_is_compact_and_limits_visible_tasks(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         render_source = source[
