@@ -8,6 +8,7 @@ import streamlit as st
 from activity_log import record_activity_log
 import google_seo
 import google_seo_import
+import google_seo_phase4
 import navigation_runtime
 import os_accounts
 import seo_workspace as seo
@@ -542,7 +543,159 @@ def _render_historical_import_controls(
         st.rerun()
 
 
-def _render_overview(state, user, navigate, google_store=None, import_store=None):
+def _phase4_status_card(label, value, detail=""):
+    return (
+        '<div class="sc-seo-import-status">'
+        f'<h4>{html.escape(str(label))}</h4><dl>'
+        f'<dt>Status</dt><dd>{html.escape(str(value or "Not available").replace("_", " ").title())}</dd>'
+        f'<dt>Detail</dt><dd>{html.escape(str(detail or "No saved data"))}</dd>'
+        '</dl></div>'
+    )
+
+
+def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, connection_store=None):
+    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
+    reporting_reader = reporting_reader or google_seo_phase4.PostgresSEOReportingReader(phase4_store)
+    st.subheader("Joined reporting foundation")
+    try:
+        health = phase4_store.saved_health()
+        phase3 = phase4_store.phase3_health()
+        statuses = phase4_store.recent_status()
+    except google_seo_phase4.SEOPhase4Error as error:
+        st.caption(error.public_message)
+        return
+
+    health_columns = st.columns(4)
+    health_columns[0].markdown(
+        _phase4_status_card("Common reporting date", health.get("data_status"), health.get("common_reporting_date")),
+        unsafe_allow_html=True,
+    )
+    health_columns[1].markdown(
+        _phase4_status_card("URL mapping", "Saved", f"{health.get('unmapped_page_count', 0):,} unmapped"),
+        unsafe_allow_html=True,
+    )
+    health_columns[2].markdown(
+        _phase4_status_card("Revenue matching", "Saved", f"{health.get('unmatched_transaction_count', 0):,} unmatched or disputed"),
+        unsafe_allow_html=True,
+    )
+    ga4_phase3 = phase3.get("GA4") or {}
+    health_columns[3].markdown(
+        _phase4_status_card(
+            "GA4 history",
+            ga4_phase3.get("status") or "Not started",
+            ga4_phase3.get("active_slice_date") or ga4_phase3.get("latest_stored_date") or "No completed date",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    filter_columns = st.columns([1.2, 1, 1, 1])
+    preset = filter_columns[0].selectbox(
+        "Period", ("Last 28 days", "Last 90 days", "Last 12 months", "Custom dates"),
+        key="seo-phase4-period",
+    )
+    market = filter_columns[1].selectbox(
+        "Market", ("All markets", "Australia", "United States", "United Kingdom"),
+        key="seo-phase4-market",
+    )
+    device = filter_columns[2].selectbox(
+        "Device", ("All devices", "Desktop", "Mobile"), key="seo-phase4-device",
+    )
+    search = filter_columns[3].selectbox(
+        "Search", ("All searches", "Brand", "Non-brand"), key="seo-phase4-search",
+    )
+    custom_start = custom_end = None
+    if preset == "Custom dates":
+        date_columns = st.columns(2)
+        custom_start = date_columns[0].date_input("Start date", key="seo-phase4-start")
+        custom_end = date_columns[1].date_input("End date", key="seo-phase4-end")
+    try:
+        snapshot = reporting_reader.snapshot(
+            preset=preset, market=market, device=device, search=search,
+            custom_start=custom_start, custom_end=custom_end,
+        )
+    except google_seo_phase4.SEOPhase4Error as error:
+        st.caption(error.public_message)
+    else:
+        if snapshot.get("ready"):
+            selected = snapshot.get("filters") or {}
+            st.caption(
+                f"Saved reporting data selected: {selected.get('start_date')} to {selected.get('end_date')}; "
+                f"comparison {selected.get('previous_start_date')} to {selected.get('previous_end_date')}."
+            )
+            note = str((snapshot.get("current") or {}).get("search_scope_note") or "")
+            if note:
+                st.caption(note)
+        else:
+            st.caption("The joined reporting read model will activate when GSC, GA4 and Shopify share a completed date.")
+
+    if not os_accounts.is_admin(user):
+        return
+    with st.expander("Phase 4 administration", expanded=False):
+        settings = phase4_store.get_settings()
+        brand_text = st.text_input(
+            "Brand terms",
+            value=", ".join(settings.get("brand_terms") or []),
+            help="Comma-separated terms used only for GSC Brand and Non-brand query filtering.",
+            key="seo-phase4-brand-terms",
+        )
+        locale_text = st.text_input(
+            "Known locale prefixes",
+            value=", ".join(settings.get("known_locale_prefixes") or []),
+            help="Locale paths remain distinct; this list labels them for market review.",
+            key="seo-phase4-locales",
+        )
+        if st.button("Save reporting settings", key="seo-phase4-save-settings"):
+            phase4_store.save_settings(
+                brand_terms=brand_text.split(","), known_locale_prefixes=locale_text.split(","),
+                updated_by=str(user.get("id") or ""),
+            )
+            _set_notice("SEO reporting settings saved.")
+            st.rerun()
+        action_columns = st.columns(2)
+        if action_columns[0].button(
+            "Build joined reporting data", type="primary", icon=":material/account_tree:",
+            key="seo-phase4-historical",
+        ):
+            try:
+                google_seo_phase4.queue_phase4_pipeline(
+                    user, "historical", phase4_store=phase4_store,
+                    connection_store=connection_store,
+                )
+            except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
+                _set_notice(getattr(error, "public_message", str(error)), success=False)
+            else:
+                _set_notice("Joined SEO history queued. Existing Phase 3 checkpoints were preserved.")
+            st.rerun()
+        if action_columns[1].button(
+            "Refresh joined data", icon=":material/sync:", key="seo-phase4-manual",
+        ):
+            try:
+                google_seo_phase4.queue_phase4_pipeline(
+                    user, "manual", phase4_store=phase4_store,
+                    connection_store=connection_store,
+                )
+            except (google_seo.GoogleSEOError, google_seo_phase4.SEOPhase4Error) as error:
+                _set_notice(getattr(error, "public_message", str(error)), success=False)
+            else:
+                _set_notice("Joined SEO refresh queued.")
+            st.rerun()
+        active = [
+            f"{source.replace('_', ' ').title()}: {row.get('status', 'not started')}"
+            for source, row in statuses.items()
+        ]
+        if active:
+            st.caption(" | ".join(active))
+
+
+def _render_overview(
+    state,
+    user,
+    navigate,
+    google_store=None,
+    import_store=None,
+    phase4_store=None,
+    reporting_reader=None,
+):
     _header(seo.SEO_OVERVIEW_ROUTE)
     _consume_google_oauth_notice()
     config_status = google_seo.configuration_status()
@@ -607,6 +760,12 @@ def _render_overview(state, user, navigate, google_store=None, import_store=None
         import_store,
         google_store,
         config_status.get("ready", False),
+    )
+    _render_phase4_foundation(
+        user,
+        phase4_store,
+        reporting_reader,
+        google_store,
     )
 
     st.subheader("Future organic reporting")
@@ -1446,7 +1605,16 @@ def _render_keywords(store, state, user):
 
 
 @st.fragment
-def _render_active_route(user, route, store, navigate, google_store=None, import_store=None):
+def _render_active_route(
+    user,
+    route,
+    store,
+    navigate,
+    google_store=None,
+    import_store=None,
+    phase4_store=None,
+    reporting_reader=None,
+):
     try:
         state = store.load()
     except seo.SEOStoreError as error:
@@ -1491,6 +1659,8 @@ def _render_active_route(user, route, store, navigate, google_store=None, import
                 navigate,
                 google_store,
                 import_store,
+                phase4_store,
+                reporting_reader,
             ),
             seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
             seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
@@ -1509,10 +1679,21 @@ def render_page(
     navigate=None,
     google_store=None,
     import_store=None,
+    phase4_store=None,
+    reporting_reader=None,
 ):
     if route not in seo.SEO_ROUTES:
         raise ValueError(f"Unknown SEO route: {route}")
     _inject_styles()
     _render_notice()
     store = store or seo.default_store()
-    _render_active_route(user, route, store, navigate, google_store, import_store)
+    _render_active_route(
+        user,
+        route,
+        store,
+        navigate,
+        google_store,
+        import_store,
+        phase4_store,
+        reporting_reader,
+    )
