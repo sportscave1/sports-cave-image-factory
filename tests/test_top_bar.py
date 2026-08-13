@@ -272,12 +272,25 @@ class TopBarComponentTests(unittest.TestCase):
 
         self.assertIn("Search Sports Cave OS", source)
         self.assertIn("Sports Cave OS monogram", source)
+        markup_start = source.index("const markup = `")
+        markup = source[markup_start : source.index("`;", markup_start)]
+        refresh = markup.index('id="sc-os-refresh"')
+        search = markup.index('id="sc-os-global-search"')
         notifications = source.index('id="sc-os-notifications"')
         profile = source.index('id="sc-os-profile"')
         settings = source.index('id="sc-os-settings"')
+        self.assertLess(refresh, search)
         self.assertLess(notifications, profile)
         self.assertLess(profile, settings)
         self.assertNotIn("Shopify", source)
+
+    def test_refresh_button_performs_a_full_page_reload(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(1, source.count('id="sc-os-refresh"'))
+        self.assertIn('aria-label="Refresh Sports Cave OS"', source)
+        self.assertIn('refreshButton.addEventListener("click"', source)
+        self.assertIn("parentWindow.location.reload();", source)
 
     def test_profile_settings_and_keyboard_contracts_are_functional(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
@@ -368,6 +381,7 @@ class TopBarComponentTests(unittest.TestCase):
         body, kwargs = components.calls[0]
         self.assertEqual({"height": 0, "width": 0}, kwargs)
         self.assertIn('"authToken": "signed-token"', body)
+        self.assertEqual(1, body.count('id="sc-os-refresh"'))
         self.assertEqual(1, body.count('id="sc-os-notifications"'))
         self.assertEqual(1, body.count('id="sc-os-profile"'))
         self.assertEqual(1, body.count('id="sc-os-settings"'))

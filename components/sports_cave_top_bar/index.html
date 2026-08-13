@@ -16,6 +16,7 @@
   const icon = (name) => {
     const paths = {
       search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>',
+      refresh: '<path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path>',
       bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
       user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
       settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>',
@@ -77,6 +78,10 @@
       width: 34px;
     }
     .sc-os-topbar-brand-copy { min-width: 0; }
+    .sc-os-topbar-refresh {
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
     .sc-os-topbar-name {
       color: #fff;
       font-size: 14px;
@@ -413,6 +418,7 @@
         <div class="sc-os-topbar-name"></div>
         <div class="sc-os-topbar-subtitle"></div>
       </div>
+      <button id="sc-os-refresh" class="sc-os-topbar-icon-button sc-os-topbar-refresh" type="button" aria-label="Refresh Sports Cave OS" title="Refresh">${icon("refresh")}</button>
     </div>
     <div class="sc-os-topbar-search-wrap">
       <div class="sc-os-topbar-search-shell">
@@ -467,6 +473,7 @@
     };
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
+    const refreshButton = root.querySelector("#sc-os-refresh");
     const notificationsButton = root.querySelector("#sc-os-notifications");
     const notificationsPanel = root.querySelector("#sc-os-notifications-panel");
     const profileButton = root.querySelector("#sc-os-profile");
@@ -809,6 +816,9 @@
     };
 
     searchInput.addEventListener("focus", openSearch, listenerOptions);
+    refreshButton.addEventListener("click", () => {
+      parentWindow.location.reload();
+    }, listenerOptions);
     searchInput.addEventListener("input", () => {
       if (state.activePanel !== "search") openPanel("search");
       renderSearchResults();
