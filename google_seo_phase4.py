@@ -978,13 +978,43 @@ class PostgresSEOPhase4Store:
             connection.commit()
         return ok
 
+    def prepare_run_range(self, run_id, lease_owner, start_date, end_date):
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE seo_phase4_runs
+                    SET requested_start_date=COALESCE(requested_start_date, %s),
+                        requested_end_date=COALESCE(requested_end_date, %s),
+                        active_slice_date=COALESCE(active_slice_date, %s),
+                        updated_at=now()
+                    WHERE id=%s AND status='running' AND lease_owner=%s
+                    RETURNING *
+                    """,
+                    (
+                        _as_date(start_date),
+                        _as_date(end_date),
+                        _as_date(start_date),
+                        run_id,
+                        lease_owner,
+                    ),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        if not row:
+            raise SEOPhase4Error("The Phase 4 job lease was lost.", code="phase4_lease_lost")
+        return _clean_run(row)
+
     def checkpoint_run(self, run_id, lease_owner, *, checkpoint_date=None, cursor_payload=None, received=0, written=0, rejected=0):
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
                     UPDATE seo_phase4_runs
-                    SET checkpoint_date=COALESCE(%s, checkpoint_date),
+                    SET checkpoint_date=GREATEST(
+                            COALESCE(checkpoint_date, %s),
+                            COALESCE(%s, checkpoint_date)
+                        ),
                         active_slice_date=COALESCE(%s, active_slice_date),
                         cursor_payload=COALESCE(%s, cursor_payload),
                         rows_received=rows_received + %s,
@@ -994,6 +1024,7 @@ class PostgresSEOPhase4Store:
                     WHERE id=%s AND status='running' AND lease_owner=%s RETURNING id
                     """,
                     (
+                        _as_date(checkpoint_date),
                         _as_date(checkpoint_date),
                         _as_date(checkpoint_date),
                         json.dumps(cursor_payload) if cursor_payload is not None else None,
@@ -1799,6 +1830,72 @@ class PostgresSEOPhase4Store:
                 )
                 return {str(row.get("source") or ""): _clean_run(row) for row in cursor.fetchall() or []}
 
+    def progress_status(self):
+        """Load the latest Phase 3 and Phase 4 job state in one database query."""
+        self.ensure_schema()
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    WITH selected_properties AS (
+                        SELECT gsc_site_url, ga4_property_id
+                        FROM seo_google_connections
+                        WHERE workspace_key=%s
+                    ), latest_phase3 AS (
+                        SELECT DISTINCT ON (run.source)
+                               'phase3'::TEXT AS job_family,
+                               run.source, run.id, run.mode, run.status,
+                               run.requested_start_date, run.requested_end_date,
+                               run.completed_start_date, run.completed_end_date,
+                               run.active_slice_date, run.checkpoint_date,
+                               run.rows_received,
+                               COALESCE(inventory.rows_stored, 0) AS rows_stored,
+                               run.started_at, run.completed_at, run.error_summary,
+                               run.created_at, run.updated_at
+                        FROM seo_sync_runs AS run
+                        CROSS JOIN selected_properties AS selected
+                        LEFT JOIN seo_data_inventories AS inventory
+                          ON inventory.workspace_key=run.workspace_key
+                         AND inventory.source=run.source
+                         AND inventory.property_identifier=run.property_identifier
+                        WHERE run.workspace_key=%s
+                          AND (
+                              (run.source='GSC' AND run.property_identifier=selected.gsc_site_url)
+                              OR
+                              (run.source='GA4' AND run.property_identifier=selected.ga4_property_id)
+                          )
+                        ORDER BY run.source, run.created_at DESC
+                    ), latest_phase4 AS (
+                        SELECT DISTINCT ON (run.source)
+                               'phase4'::TEXT AS job_family,
+                               run.source, run.id, run.mode, run.status,
+                               run.requested_start_date, run.requested_end_date,
+                               NULL::DATE AS completed_start_date,
+                               NULL::DATE AS completed_end_date,
+                               run.active_slice_date, run.checkpoint_date,
+                               run.rows_received, run.rows_written AS rows_stored,
+                               run.started_at, run.completed_at, run.error_summary,
+                               run.created_at, run.updated_at
+                        FROM seo_phase4_runs AS run
+                        WHERE run.workspace_key=%s
+                        ORDER BY run.source, run.created_at DESC
+                    )
+                    SELECT * FROM latest_phase3
+                    UNION ALL
+                    SELECT * FROM latest_phase4
+                    ORDER BY job_family, source
+                    """,
+                    (WORKSPACE_KEY, WORKSPACE_KEY, WORKSPACE_KEY),
+                )
+                rows = [dict(row) for row in cursor.fetchall() or []]
+        result = {"phase3": {}, "phase4": {}}
+        for row in rows:
+            family = str(row.pop("job_family", "") or "")
+            source = str(row.get("source") or "")
+            if family in result and source:
+                result[family][source] = _clean_run(row)
+        return result
+
 
 _DEFAULT_PHASE4_STORE = None
 
@@ -2304,6 +2401,12 @@ class SEOPhase4Worker:
         end = _as_date(run.get("requested_end_date")) or latest
         if run.get("mode") in {"daily", "manual"}:
             start = max(earliest, latest - timedelta(days=6))
+        prepare_run_range = getattr(self.store, "prepare_run_range", None)
+        if callable(prepare_run_range):
+            run = prepare_run_range(run["id"], self.worker_id, start, end)
+        else:
+            run["requested_start_date"] = run.get("requested_start_date") or start
+            run["requested_end_date"] = run.get("requested_end_date") or end
         checkpoint = _as_date(run.get("checkpoint_date"))
         if checkpoint:
             start = max(start, checkpoint + timedelta(days=1))

@@ -11,7 +11,12 @@ import google_seo_import
 import google_seo_phase4
 import navigation_runtime
 import os_accounts
+import seo_sync_progress
 import seo_workspace as seo
+
+
+SEO_OVERVIEW_CACHE_TTL_SECONDS = 15
+SEO_PROGRESS_POLL_SECONDS = 15
 
 
 PAGE_SUBTITLES = {
@@ -67,6 +72,10 @@ def _inject_styles():
         .sc-seo-import-status dl { display: grid; font-size: .75rem; gap: .25rem .55rem; grid-template-columns: max-content minmax(0, 1fr); margin: 0; }
         .sc-seo-import-status dt { color: #77736b; }
         .sc-seo-import-status dd { margin: 0; overflow-wrap: anywhere; }
+        .sc-seo-progress-track { background: #e6e2d9; border-radius: 999px; height: 6px; margin: .55rem 0 .35rem; overflow: hidden; }
+        .sc-seo-progress-fill { background: #b79243; height: 100%; min-width: 0; transition: width .2s ease; }
+        .sc-seo-progress-summary { color: #292724; font-size: .78rem; font-weight: 700; margin: 0 0 .25rem; }
+        .sc-seo-progress-detail { color: #6e6b65; font-size: .71rem; line-height: 1.4; margin: .15rem 0; }
         .sc-seo-empty-chart { align-items: center; background: #fbfaf7; border: 1px dashed #d7d2c7; border-radius: 8px; color: #6e6b65; display: flex; justify-content: center; min-height: 13rem; padding: 2rem; text-align: center; }
         .sc-seo-future-metric { background: #fff; border: 1px solid #dfdbd1; border-top: 2px solid #c5a45c; border-radius: 8px; min-height: 7rem; padding: .85rem; }
         .sc-seo-future-label { color: #393734; font-size: .78rem; font-weight: 650; line-height: 1.25; min-height: 2rem; }
@@ -297,6 +306,8 @@ def _consume_google_oauth_notice():
     message = messages.get(str(result or ""))
     if not message:
         return
+    if str(result or "") == "connected":
+        invalidate_seo_overview_summary_cache()
     (st.success if message[1] else st.warning)(message[0])
     try:
         del st.query_params["google_oauth"]
@@ -322,6 +333,27 @@ def _shopify_health():
         except Exception:
             last_sync = "Unavailable"
     return {"status": status, "last_sync": last_sync}
+
+
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_default_shopify_health():
+    return _shopify_health()
+
+
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_default_google_connection():
+    return google_seo.default_store().get_connection()
+
+
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_default_phase4_health():
+    return google_seo_phase4.default_phase4_store().saved_health()
+
+
+def invalidate_seo_overview_summary_cache():
+    _cached_default_shopify_health.clear()
+    _cached_default_google_connection.clear()
+    _cached_default_phase4_health.clear()
 
 
 def _render_google_controls(user, store, config_status, connection):
@@ -352,6 +384,7 @@ def _render_google_controls(user, store, config_status, connection):
             result.get("message") or "Accessible Google properties refreshed.",
             success=bool(result.get("ok")),
         )
+        invalidate_seo_overview_summary_cache()
         st.rerun()
     if reconnect_required:
         controls[1].link_button(
@@ -406,6 +439,7 @@ def _render_google_controls(user, store, config_status, connection):
                     _set_notice(error.public_message, success=False)
                 else:
                     _set_notice("Google property selection saved.")
+                    invalidate_seo_overview_summary_cache()
                 st.rerun()
 
         st.divider()
@@ -424,57 +458,145 @@ def _render_google_controls(user, store, config_status, connection):
                 _set_notice(error.public_message, success=False)
             else:
                 _set_notice("Google disconnected.")
+                invalidate_seo_overview_summary_cache()
             st.rerun()
 
 
+def _display_progress_date(value, fallback="Not available"):
+    if isinstance(value, datetime):
+        parsed = value.date()
+        return f"{parsed.day} {parsed.strftime('%B %Y')}"
+    if isinstance(value, date):
+        return f"{value.day} {value.strftime('%B %Y')}"
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    try:
+        parsed = date.fromisoformat(text[:10])
+        return f"{parsed.day} {parsed.strftime('%B %Y')}"
+    except ValueError:
+        return text
+
+
+def _display_progress_time(value, fallback="Not available"):
+    if not value:
+        return fallback
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return str(value)
+    return parsed.astimezone(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+
+
 def _import_status_card(source, run):
-    status = str(run.get("status") or "not started").replace("_", " ").title()
-    completed_range = " - ".join(
-        value for value in (run.get("completed_start_date"), run.get("completed_end_date")) if value
-    ) or "No completed dates"
-    requested_range = " - ".join(
-        value for value in (run.get("requested_start_date"), run.get("requested_end_date")) if value
-    ) or "Discovering available history"
-    current = run.get("active_slice_date") or run.get("checkpoint_date") or "Not running"
+    progress = seo_sync_progress.calculate_sync_progress(run)
+    status = str(progress["status"] or "not started").replace("_", " ").title()
+    percent = progress["percentage"]
+    bar_percent = max(0, min(round(percent), 100))
+    if progress["range_valid"]:
+        summary = (
+            f"{bar_percent}% complete • {progress['completed_dates']:,} of "
+            f"{progress['total_dates']:,} dates"
+        )
+    elif progress["status"] == "completed":
+        summary = "100% complete"
+    elif progress["status"] == "queued":
+        summary = "0% complete • Preparing date range"
+    else:
+        summary = "Progress range unavailable • Calculating…"
+
+    rate = progress.get("rate_per_minute")
+    eta = progress.get("eta_seconds")
+    rate_text = f"{rate:.1f} dates/minute" if rate is not None else "Calculating…"
+    eta_text = (
+        f"Approximately {seo_sync_progress.format_duration(eta)} remaining"
+        if eta is not None
+        else "Approximate time remaining: Calculating…"
+    )
+    current = _display_progress_date(
+        progress.get("current_checkpoint_date"),
+        "Waiting to start" if progress["status"] == "queued" else "Not available",
+    )
     error = run.get("error_summary") or "None"
     return (
         '<div class="sc-seo-import-status">'
-        f'<h4>{html.escape(source)} import</h4><dl>'
+        f'<h4>{html.escape(source)} import</h4>'
+        f'<div class="sc-seo-progress-summary">{html.escape(summary)}</div>'
+        f'<div class="sc-seo-progress-track" role="progressbar" aria-valuemin="0" '
+        f'aria-valuemax="100" aria-valuenow="{bar_percent}" aria-label="{html.escape(source)} import progress">'
+        f'<div class="sc-seo-progress-fill" style="width:{bar_percent}%"></div></div>'
+        f'<p class="sc-seo-progress-detail">Current: {html.escape(current)} • {html.escape(rate_text)} • {html.escape(eta_text)}</p>'
+        '<dl>'
         f'<dt>Status</dt><dd>{html.escape(status)}</dd>'
-        f'<dt>Requested</dt><dd>{html.escape(str(requested_range))}</dd>'
-        f'<dt>Completed</dt><dd>{html.escape(str(completed_range))}</dd>'
-        f'<dt>Current</dt><dd>{html.escape(str(current))}</dd>'
-        f'<dt>Rows stored</dt><dd>{int(run.get("rows_stored") or 0):,}</dd>'
-        f'<dt>Rows received</dt><dd>{int(run.get("rows_received") or 0):,}</dd>'
-        f'<dt>Latest data</dt><dd>{html.escape(str(run.get("latest_stored_data_date") or "Not imported"))}</dd>'
-        f'<dt>Last completed</dt><dd>{html.escape(str(run.get("completed_at") or "Not completed"))}</dd>'
+        f'<dt>Rows received</dt><dd>{progress["rows_received"]:,}</dd>'
+        f'<dt>Rows stored</dt><dd>{progress["rows_stored"]:,}</dd>'
+        f'<dt>Elapsed</dt><dd>{html.escape(seo_sync_progress.format_duration(progress["elapsed_seconds"]))}</dd>'
+        f'<dt>Last progress</dt><dd>{html.escape(_display_progress_time(progress.get("last_progress_at")))}</dd>'
         f'<dt>Error</dt><dd>{html.escape(str(error))}</dd>'
         '</dl></div>'
     )
 
 
+def _load_sync_progress_statuses(import_store, phase4_store):
+    if (
+        isinstance(import_store, google_seo_import.PostgresSEOImportStore)
+        and isinstance(phase4_store, google_seo_phase4.PostgresSEOPhase4Store)
+        and import_store.backend is phase4_store.backend
+    ):
+        return phase4_store.progress_status()
+    return {
+        "phase3": import_store.recent_status(),
+        "phase4": phase4_store.recent_status(),
+    }
+
+
+@st.fragment(run_every=SEO_PROGRESS_POLL_SECONDS)
 def _render_historical_import_controls(
     user,
     connection,
     import_store=None,
+    phase4_store=None,
     connection_store=None,
     config_ready=True,
 ):
-    if not os_accounts.is_admin(user):
-        return
     import_store = import_store or google_seo_import.default_import_store()
+    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
     st.subheader("Google data import")
     try:
-        statuses = import_store.recent_status()
-    except google_seo_import.SEOImportError as error:
-        st.warning(error.public_message)
+        progress_statuses = _load_sync_progress_statuses(import_store, phase4_store)
+    except (google_seo_import.SEOImportError, google_seo_phase4.SEOPhase4Error) as error:
+        st.warning(getattr(error, "public_message", "Import status is temporarily unavailable."))
         return
+    statuses = progress_statuses.get("phase3") or {}
     columns = st.columns(2)
     for column, source in zip(columns, google_seo_import.SOURCES):
         column.markdown(
             _import_status_card(source, statuses.get(source) or {}),
             unsafe_allow_html=True,
         )
+
+    phase4_statuses = progress_statuses.get("phase4") or {}
+    if phase4_statuses:
+        st.caption("Phase 4 joined-data jobs")
+        for offset in range(0, len(google_seo_phase4.PHASE4_SOURCES), 3):
+            phase4_columns = st.columns(3)
+            for column, source in zip(
+                phase4_columns,
+                google_seo_phase4.PHASE4_SOURCES[offset:offset + 3],
+            ):
+                column.markdown(
+                    _import_status_card(
+                        source.replace("_", " ").title(),
+                        phase4_statuses.get(source) or {},
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+    if not os_accounts.is_admin(user):
+        return
 
     can_import = bool(
         config_ready
@@ -501,7 +623,8 @@ def _render_historical_import_controls(
             _set_notice(getattr(error, "public_message", str(error)), success=False)
         else:
             _set_notice("Historical GSC and GA4 imports queued.")
-        st.rerun()
+            invalidate_seo_overview_summary_cache()
+        st.rerun(scope="fragment")
     if actions[1].button(
         "Sync now",
         icon=":material/sync:",
@@ -519,7 +642,8 @@ def _render_historical_import_controls(
             _set_notice(getattr(error, "public_message", str(error)), success=False)
         else:
             _set_notice("GSC and GA4 refresh queued.")
-        st.rerun()
+            invalidate_seo_overview_summary_cache()
+        st.rerun(scope="fragment")
 
     failed = next(
         (
@@ -540,7 +664,8 @@ def _render_historical_import_controls(
             _set_notice(getattr(error, "public_message", str(error)), success=False)
         else:
             _set_notice(f"{failed.get('source') or 'Google'} import queued for retry.")
-        st.rerun()
+            invalidate_seo_overview_summary_cache()
+        st.rerun(scope="fragment")
 
 
 def _phase4_status_card(label, value, detail=""):
@@ -553,14 +678,27 @@ def _phase4_status_card(label, value, detail=""):
     )
 
 
-def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, connection_store=None):
+def _render_phase4_foundation(
+    user,
+    phase4_store=None,
+    reporting_reader=None,
+    connection_store=None,
+    saved_health=None,
+):
+    using_default_store = phase4_store is None
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
     reporting_reader = reporting_reader or google_seo_phase4.PostgresSEOReportingReader(phase4_store)
     st.subheader("Joined reporting foundation")
     try:
-        health = phase4_store.saved_health()
-        phase3 = phase4_store.phase3_health()
-        statuses = phase4_store.recent_status()
+        health = dict(
+            saved_health
+            if saved_health is not None
+            else (
+                _cached_default_phase4_health()
+                if using_default_store
+                else phase4_store.saved_health()
+            )
+        )
     except google_seo_phase4.SEOPhase4Error as error:
         st.caption(error.public_message)
         return
@@ -578,12 +716,11 @@ def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, co
         _phase4_status_card("Revenue matching", "Saved", f"{health.get('unmatched_transaction_count', 0):,} unmatched or disputed"),
         unsafe_allow_html=True,
     )
-    ga4_phase3 = phase3.get("GA4") or {}
     health_columns[3].markdown(
         _phase4_status_card(
             "GA4 history",
-            ga4_phase3.get("status") or "Not started",
-            ga4_phase3.get("active_slice_date") or ga4_phase3.get("latest_stored_date") or "No completed date",
+            health.get("data_status") or "Not started",
+            health.get("latest_ga4_date") or "No completed date",
         ),
         unsafe_allow_html=True,
     )
@@ -608,29 +745,43 @@ def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, co
         date_columns = st.columns(2)
         custom_start = date_columns[0].date_input("Start date", key="seo-phase4-start")
         custom_end = date_columns[1].date_input("End date", key="seo-phase4-end")
-    try:
-        snapshot = reporting_reader.snapshot(
-            preset=preset, market=market, device=device, search=search,
-            custom_start=custom_start, custom_end=custom_end,
-        )
-    except google_seo_phase4.SEOPhase4Error as error:
-        st.caption(error.public_message)
-    else:
-        if snapshot.get("ready"):
-            selected = snapshot.get("filters") or {}
-            st.caption(
-                f"Saved reporting data selected: {selected.get('start_date')} to {selected.get('end_date')}; "
-                f"comparison {selected.get('previous_start_date')} to {selected.get('previous_end_date')}."
+    reporting_preview = st.checkbox(
+        "Load saved reporting preview",
+        value=False,
+        key="seo-phase4-reporting-preview",
+        help="Loads database aggregates only. It never contacts Google or Shopify.",
+    )
+    if reporting_preview:
+        try:
+            snapshot = reporting_reader.snapshot(
+                preset=preset, market=market, device=device, search=search,
+                custom_start=custom_start, custom_end=custom_end,
             )
-            note = str((snapshot.get("current") or {}).get("search_scope_note") or "")
-            if note:
-                st.caption(note)
+        except google_seo_phase4.SEOPhase4Error as error:
+            st.caption(error.public_message)
         else:
-            st.caption("The joined reporting read model will activate when GSC, GA4 and Shopify share a completed date.")
+            if snapshot.get("ready"):
+                selected = snapshot.get("filters") or {}
+                st.caption(
+                    f"Saved reporting data selected: {selected.get('start_date')} to {selected.get('end_date')}; "
+                    f"comparison {selected.get('previous_start_date')} to {selected.get('previous_end_date')}."
+                )
+                note = str((snapshot.get("current") or {}).get("search_scope_note") or "")
+                if note:
+                    st.caption(note)
+            else:
+                st.caption("The joined reporting read model will activate when GSC, GA4 and Shopify share a completed date.")
+    else:
+        st.caption("Reporting aggregates load only when requested.")
 
     if not os_accounts.is_admin(user):
         return
-    with st.expander("Phase 4 administration", expanded=False):
+    show_administration = st.checkbox(
+        "Show Phase 4 administration",
+        value=False,
+        key="seo-phase4-show-administration",
+    )
+    if show_administration:
         settings = phase4_store.get_settings()
         brand_text = st.text_input(
             "Brand terms",
@@ -650,6 +801,7 @@ def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, co
                 updated_by=str(user.get("id") or ""),
             )
             _set_notice("SEO reporting settings saved.")
+            invalidate_seo_overview_summary_cache()
             st.rerun()
         action_columns = st.columns(2)
         if action_columns[0].button(
@@ -665,6 +817,7 @@ def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, co
                 _set_notice(getattr(error, "public_message", str(error)), success=False)
             else:
                 _set_notice("Joined SEO history queued. Existing Phase 3 checkpoints were preserved.")
+                invalidate_seo_overview_summary_cache()
             st.rerun()
         if action_columns[1].button(
             "Refresh joined data", icon=":material/sync:", key="seo-phase4-manual",
@@ -678,13 +831,8 @@ def _render_phase4_foundation(user, phase4_store=None, reporting_reader=None, co
                 _set_notice(getattr(error, "public_message", str(error)), success=False)
             else:
                 _set_notice("Joined SEO refresh queued.")
+                invalidate_seo_overview_summary_cache()
             st.rerun()
-        active = [
-            f"{source.replace('_', ' ').title()}: {row.get('status', 'not started')}"
-            for source, row in statuses.items()
-        ]
-        if active:
-            st.caption(" | ".join(active))
 
 
 def _render_overview(
@@ -696,12 +844,20 @@ def _render_overview(
     phase4_store=None,
     reporting_reader=None,
 ):
+    has_injected_dependencies = any(
+        value is not None
+        for value in (google_store, import_store, phase4_store, reporting_reader)
+    )
     _header(seo.SEO_OVERVIEW_ROUTE)
     _consume_google_oauth_notice()
     config_status = google_seo.configuration_status()
     google_store = google_store or google_seo.default_store()
     try:
-        connection = google_store.get_connection()
+        connection = (
+            google_store.get_connection()
+            if has_injected_dependencies
+            else _cached_default_google_connection()
+        )
     except google_seo.GoogleSEOError:
         connection = {}
         fallback_status = "Needs attention" if config_status.get("ready") else "Configuration required"
@@ -718,7 +874,7 @@ def _render_overview(
             connection,
             service="ga4",
         )
-    shopify = _shopify_health()
+    shopify = _shopify_health() if has_injected_dependencies else _cached_default_shopify_health()
     integration_columns = st.columns([1.1, 1.1, .8])
     integration_columns[0].markdown(
         _integration_card(
@@ -757,9 +913,10 @@ def _render_overview(
     _render_historical_import_controls(
         user,
         connection,
-        import_store,
-        google_store,
-        config_status.get("ready", False),
+        import_store=import_store,
+        phase4_store=phase4_store,
+        connection_store=google_store,
+        config_ready=config_status.get("ready", False),
     )
     _render_phase4_foundation(
         user,
@@ -1615,15 +1772,21 @@ def _render_active_route(
     phase4_store=None,
     reporting_reader=None,
 ):
-    try:
-        state = store.load()
-    except seo.SEOStoreError as error:
-        _header(route)
-        st.error(str(error))
-        st.caption("SEO records were not changed. Ask an administrator to check the shared data store.")
-        return
+    state = {}
+    if route != seo.SEO_OVERVIEW_ROUTE:
+        try:
+            state = store.load()
+        except seo.SEOStoreError as error:
+            _header(route)
+            st.error(str(error))
+            st.caption("SEO records were not changed. Ask an administrator to check the shared data store.")
+            return
     consume_summary = getattr(store, "consume_import_summary", None)
-    summary = consume_summary() if callable(consume_summary) else None
+    summary = (
+        consume_summary()
+        if route != seo.SEO_OVERVIEW_ROUTE and callable(consume_summary)
+        else None
+    )
     if summary:
         record_activity_log(
             "legacy_citations_imported",

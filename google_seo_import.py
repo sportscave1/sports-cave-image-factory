@@ -816,7 +816,8 @@ class PostgresSEOImportStore:
                 cur.execute(
                     """
                     UPDATE seo_sync_runs
-                    SET checkpoint_date=%s, active_slice_date=%s,
+                    SET checkpoint_date=GREATEST(COALESCE(checkpoint_date, %s), %s),
+                        active_slice_date=%s,
                         completed_start_date=LEAST(COALESCE(completed_start_date, %s), %s),
                         completed_end_date=GREATEST(COALESCE(completed_end_date, %s), %s),
                         latest_stored_data_date=GREATEST(COALESCE(latest_stored_data_date, %s), %s),
@@ -826,8 +827,11 @@ class PostgresSEOImportStore:
                     WHERE id=%s AND status='running' AND lease_owner=%s RETURNING id
                     """,
                     (
-                        slice_date, slice_date, slice_date, slice_date, slice_date, slice_date,
-                        slice_date, slice_date, received, inserted, replaced, rejected,
+                        slice_date, slice_date, slice_date,
+                        slice_date, slice_date,
+                        slice_date, slice_date,
+                        slice_date, slice_date,
+                        received, inserted, replaced, rejected,
                         utc_now() + timedelta(seconds=LEASE_SECONDS), run_id, lease_owner,
                     ),
                 )
