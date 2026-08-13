@@ -100,6 +100,24 @@ class FakeDashboardBackend:
                 return task
         return None
 
+    def update_dashboard_task_design_details(
+        self,
+        task_id,
+        design_style,
+        design_details,
+        *,
+        actor="sports_cave_os",
+    ):
+        for task in self.tasks:
+            if task["id"] == task_id and task["section"] == sports_cave_dashboard.DESIGN_TASK_GROUP:
+                task["design_style"] = design_style
+                task.setdefault("metadata", {})["design_style"] = design_style
+                task["metadata"][sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY] = dict(
+                    design_details
+                )
+                return task
+        return None
+
     def complete_dashboard_task(
         self,
         task_id,
@@ -678,23 +696,31 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(len(backend.task_status_calls), 3)
 
-    def test_task_csv_export_template_has_exact_headers_and_section_rows(self):
+    def test_task_csv_export_template_has_exact_headers_and_no_example_rows(self):
         template = sports_cave_dashboard.build_task_import_template_csv()
         decoded = template.decode("utf-8")
         reader = csv.DictReader(io.StringIO(decoded, newline=""))
         rows = list(reader)
 
         self.assertEqual(reader.fieldnames, list(sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS))
-        self.assertEqual(
-            [row["task_section"] for row in rows],
-            list(sports_cave_dashboard.TASK_GROUPS),
+        self.assertEqual(rows, [])
+
+    def test_non_design_export_leaves_design_studio_columns_blank(self):
+        exported = sports_cave_dashboard.build_task_import_template_csv(
+            [
+                {
+                    "id": "collection-1",
+                    "title": "Refresh NFL collection",
+                    "section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                    "status": "open",
+                    "metadata": {"design_style": "minimalist_hero"},
+                }
+            ]
         )
-        for row in rows:
-            for column in sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS:
-                if column == "task_section":
-                    self.assertTrue(row[column])
-                else:
-                    self.assertEqual(row[column], "")
+        row = next(csv.DictReader(io.StringIO(exported.decode("utf-8"), newline="")))
+
+        for column in sports_cave_dashboard.DESIGN_TASK_CSV_COLUMNS:
+            self.assertEqual(row[column], "")
 
     def test_task_csv_preview_preserves_structured_design_fields_and_aliases(self):
         description = (
@@ -817,9 +843,10 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         )
 
         self.assertEqual(preview["valid_count"], 0)
-        self.assertIn(
-            "Unknown design_style: Crowded montage.",
-            preview["errors"][0]["errors"],
+        self.assertTrue(
+            preview["errors"][0]["errors"][0].startswith(
+                "Unknown design_style: Crowded montage. Accepted styles:"
+            )
         )
 
     def test_task_csv_validation_reports_blank_invalid_and_duplicate_rows(self):
@@ -872,8 +899,8 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             {sports_cave_dashboard.COLLECTIONS_TASK_GROUP: 1},
         )
         self.assertEqual([error["row_number"] for error in preview["errors"]], [5, 6])
-        self.assertIn("task_section", preview["errors"][0]["errors"][0])
-        self.assertIn("task_title or design_title", preview["errors"][1]["errors"][0])
+        self.assertIn("category", preview["errors"][0]["errors"][0])
+        self.assertIn("task is required", preview["errors"][1]["errors"][0])
 
     def test_task_csv_rejects_unsupported_files_safely(self):
         with self.assertRaisesRegex(sports_cave_dashboard.TaskCSVImportError, ".csv"):
@@ -890,7 +917,8 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                 "task_title": f"Design idea {index}",
                 "sport": "Tennis",
                 "league_or_competition": "US Open",
-                "team_or_athlete": f"Athlete {index}",
+                "team_or_athlete": f"Athlete {chr(64 + index)}",
+                "principal_subject_one": f"Athlete {chr(64 + index)}",
                 "design_title": f"Design idea {index}",
                 "moment_or_theme": "Finals moment",
                 "design_description": f"Structured brief {index}",
@@ -939,6 +967,248 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(record_activity.call_args.kwargs["metadata"]["filename"], "designs.csv")
         self.assertEqual(record_activity.call_args.kwargs["metadata"]["imported_count"], 15)
         self.assertEqual(record_activity.call_args.kwargs["metadata"]["skipped_count"], 0)
+
+    def test_design_task_csv_round_trip_preserves_every_v2_field_and_multiline_text(self):
+        details = {
+            "design_title": "The Great Debate, Revisited",
+            "sport": "NFL",
+            "principal_subject_one": "Joe Montana",
+            "principal_subject_two": "Terry Bradshaw",
+            "team_country": "49ers / Steelers",
+            "season_era": "1970s-1980s",
+            "event_moment": "A generational face-off",
+            "venue_location": "Dark championship stadium",
+            "uniform_equipment_livery": "Authentic period uniforms",
+            "essential_text": "MONTANA VS BRADSHAW",
+            "special_instructions": "Keep both heroes equal.\nUse a restrained, premium finish.",
+        }
+        source = {
+            "id": "design-round-trip",
+            "title": "Create the Montana versus Bradshaw rivalry",
+            "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+            "status": "open",
+            "design_style": "rivalry_faceoff",
+            "metadata": {
+                "design_style": "rivalry_faceoff",
+                sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY: details,
+            },
+        }
+
+        exported = sports_cave_dashboard.build_task_import_template_csv([source])
+        exported_reader = csv.DictReader(io.StringIO(exported.decode("utf-8"), newline=""))
+        exported_row = next(exported_reader)
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            exported,
+            "round-trip.csv",
+            existing_tasks=[],
+        )
+        imported_details = sports_cave_dashboard.design_task_details(preview["tasks"][0])
+
+        self.assertEqual(
+            exported_reader.fieldnames,
+            list(sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS),
+        )
+        self.assertEqual(exported_row["task"], source["title"])
+        self.assertEqual(exported_row["category"], sports_cave_dashboard.DESIGN_TASK_GROUP)
+        self.assertEqual(exported_row["design_style"], "rivalry_faceoff")
+        self.assertEqual(exported_row["special_instructions"], details["special_instructions"])
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(imported_details, details)
+
+    def test_csv_import_populates_all_design_fields_and_converts_display_label(self):
+        row = {
+            "task": "Brock versus Moffat at Bathurst",
+            "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+            "design_style": "  Rivalry Face-Off  ",
+            "design_title": "The Mountain Rivals",
+            "sport": "Motorsport",
+            "principal_subject_one": "Peter Brock",
+            "principal_subject_two": "Allan Moffat",
+            "team_country": "Australia",
+            "season_era": "1970s",
+            "event_moment": "Bathurst rivalry",
+            "venue_location": "Mount Panorama",
+            "uniform_equipment_livery": "Correct period suits and liveries",
+            "essential_text": "BROCK VS MOFFAT",
+            "special_instructions": "Equal hero scale",
+        }
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            task_csv_bytes([row]),
+            "v2.csv",
+            existing_tasks=[],
+        )
+        task = preview["tasks"][0]
+        backend = FakeDashboardBackend()
+        sports_cave_dashboard.clear_task_cache()
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.record_activity_log"
+        ):
+            result = sports_cave_dashboard.import_task_csv_preview(preview)
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(result["imported_count"], 1)
+        self.assertEqual(sports_cave_dashboard.task_design_style(task), "rivalry_faceoff")
+        self.assertEqual(
+            sports_cave_dashboard.design_task_details(backend.tasks[0]),
+            {key: row[key] for key in sports_cave_dashboard.design_studio_styles.DESIGN_DETAIL_KEYS},
+        )
+
+    def test_csv_design_validation_covers_subject_limits_and_style_requirements(self):
+        cases = (
+            (
+                {
+                    "task": "Michael Jordan, Kobe Bryant and LeBron James collector design",
+                    "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                    "design_style": "ultimate_moment",
+                    "principal_subject_one": "Michael Jordan",
+                    "principal_subject_two": "Kobe Bryant",
+                },
+                "exceeds the new Sports Cave limit of two",
+            ),
+            (
+                {
+                    "task": "One-sided rivalry",
+                    "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                    "design_style": "rivalry_faceoff",
+                    "principal_subject_one": "Joe Montana",
+                },
+                "requires exactly two",
+            ),
+            (
+                {
+                    "task": "Two jersey legends",
+                    "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                    "design_style": "legends_jersey_display",
+                    "principal_subject_one": "Lionel Messi",
+                },
+                "requires exactly two",
+            ),
+        )
+        for row, expected in cases:
+            with self.subTest(style=row["design_style"]):
+                preview = sports_cave_dashboard.preview_task_csv_import(
+                    task_csv_bytes([row]),
+                    "invalid-design.csv",
+                    existing_tasks=[],
+                )
+                self.assertEqual(preview["valid_count"], 0)
+                self.assertTrue(
+                    any(expected in error for error in preview["errors"][0]["errors"])
+                )
+
+        permitted = (
+            {
+                "task": "Update the border only",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "design_style": "update_existing",
+            },
+            {
+                "task": "Restore the 1968 finish photograph",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "design_style": "vintage_restoration",
+                "event_moment": "1968 finish",
+            },
+        )
+        for row in permitted:
+            preview = sports_cave_dashboard.preview_task_csv_import(
+                task_csv_bytes([row]),
+                "permitted-design.csv",
+                existing_tasks=[],
+            )
+            self.assertEqual(preview["valid_count"], 1)
+
+    def test_non_design_and_legacy_csv_formats_remain_compatible(self):
+        legacy_columns = (
+            "task_section",
+            "task_title",
+            "sport",
+            "league_or_competition",
+            "team_or_athlete",
+            "design_title",
+            "moment_or_theme",
+            "design_description",
+            "priority",
+            "due_date",
+            "notes",
+        )
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=legacy_columns)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "task_section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "task_title": "Refresh the NFL collection",
+                "notes": "Legacy row",
+            }
+        )
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            output.getvalue().encode("utf-8"),
+            "legacy.csv",
+            existing_tasks=[],
+        )
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(preview["tasks"][0]["title"], "Refresh the NFL collection")
+        self.assertEqual(preview["tasks"][0]["section"], sports_cave_dashboard.COLLECTIONS_TASK_GROUP)
+
+    def test_unified_design_details_save_is_atomic_and_refreshes_metadata(self):
+        backend = FakeDashboardBackend()
+        details = {
+            key: ""
+            for key in sports_cave_dashboard.design_studio_styles.DESIGN_DETAIL_KEYS
+        }
+        details.update(
+            {
+                "design_title": "The Mountain Rivals",
+                "sport": "Motorsport",
+                "principal_subject_one": "Peter Brock",
+                "principal_subject_two": "Allan Moffat",
+                "special_instructions": "Keep it minimal",
+            }
+        )
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            task = sports_cave_dashboard.add_task(
+                "Brock versus Moffat rivalry",
+                sports_cave_dashboard.DESIGN_TASK_GROUP,
+                design_style="rivalry_faceoff",
+            )
+            updated = sports_cave_dashboard.update_task_design_details(
+                task["id"],
+                "Rivalry Face-Off",
+                details,
+            )
+
+        self.assertEqual(updated["design_style"], "rivalry_faceoff")
+        self.assertEqual(
+            updated["metadata"][sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY],
+            details,
+        )
+
+    def test_missing_design_style_column_surfaces_migration_action(self):
+        backend = FakeDashboardBackend()
+        task = backend.create_dashboard_task(
+            "Update old artwork",
+            sports_cave_dashboard.DESIGN_TASK_GROUP,
+            design_style="update_existing",
+        )
+        def missing_design_style_column(*args, **kwargs):
+            raise RuntimeError('column "design_style" does not exist')
+
+        backend.update_dashboard_task_design_details = missing_design_style_column
+        sports_cave_dashboard.clear_task_cache()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            with self.assertRaisesRegex(
+                sports_cave_dashboard.DashboardStorageError,
+                "Design Studio V2 database migration",
+            ):
+                sports_cave_dashboard.update_task_design_details(
+                    task["id"],
+                    "update_existing",
+                    {},
+                )
 
     def test_task_import_details_are_empty_for_legacy_simple_tasks(self):
         simple_task = {
@@ -2531,6 +2801,89 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
+    def test_imported_design_task_handoff_and_unified_save_work_in_streamlit(self):
+        backend = FakeDashboardBackend()
+        first_details = {
+            "design_title": "The Mountain Rivals",
+            "sport": "Motorsport",
+            "principal_subject_one": "Peter Brock",
+            "principal_subject_two": "Allan Moffat",
+            "team_country": "Australia",
+            "season_era": "1970s",
+            "event_moment": "Bathurst rivalry",
+            "venue_location": "Mount Panorama",
+            "uniform_equipment_livery": "Correct period suits and liveries",
+            "essential_text": "BROCK VS MOFFAT",
+            "special_instructions": "Equal hero scale",
+        }
+        backend.tasks.extend(
+            [
+                {
+                    "id": "design-one",
+                    "title": "Create Brock versus Moffat rivalry",
+                    "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                    "status": "open",
+                    "created_at": "2026-08-13T00:00:00+00:00",
+                    "design_style": "rivalry_faceoff",
+                    "metadata": {
+                        "design_style": "rivalry_faceoff",
+                        sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY: first_details,
+                    },
+                },
+                {
+                    "id": "design-two",
+                    "title": "Restore archival finish",
+                    "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                    "status": "open",
+                    "created_at": "2026-08-13T01:00:00+00:00",
+                    "design_style": "vintage_restoration",
+                    "metadata": {"design_style": "vintage_restoration"},
+                },
+            ]
+        )
+        sports_cave_dashboard.clear_task_cache()
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Design Studio"
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            app_test.run(timeout=20)
+            task_selector = next(
+                widget for widget in app_test.selectbox if widget.label == "Choose design task"
+            )
+            task_selector.select("Create Brock versus Moffat rivalry").run(timeout=20)
+            field_values = {widget.label: widget.value for widget in app_test.text_input}
+            text_area_values = {widget.label: widget.value for widget in app_test.text_area}
+
+            self.assertEqual(field_values["Design title"], first_details["design_title"])
+            self.assertEqual(field_values["Principal subject one"], "Peter Brock")
+            self.assertEqual(field_values["Principal subject two"], "Allan Moffat")
+            self.assertEqual(text_area_values["Special instructions"], "Equal hero scale")
+
+            next(
+                widget for widget in app_test.text_area if widget.label == "Special instructions"
+            ).set_value("Equal heroes with restrained atmosphere")
+            next(
+                button for button in app_test.button if button.label == "Save design details"
+            ).click().run(timeout=20)
+            self.assertEqual(
+                backend.tasks[0]["metadata"][sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY][
+                    "special_instructions"
+                ],
+                "Equal heroes with restrained atmosphere",
+            )
+
+            next(
+                widget for widget in app_test.selectbox if widget.label == "Choose design task"
+            ).select("Restore archival finish").run(timeout=20)
+            second_values = {widget.label: widget.value for widget in app_test.text_input}
+            self.assertEqual(second_values["Design title"], "")
+            self.assertEqual(second_values["Principal subject one"], "")
+
+        self.assertFalse(app_test.exception)
+
     def test_home_design_tasks_require_a_style_and_render_style_badges(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         task_group_source = source[
@@ -2579,12 +2932,27 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("\n\ndef render_dashboard_tasks")
         ]
 
-        self.assertIn("st.columns([1, 0.13, 0.13]", header_source)
+        self.assertIn("st.columns([1, 0.11, 0.11, 0.11]", header_source)
         self.assertIn('"Import CSV"', header_source)
+        self.assertIn('"CSV Template"', header_source)
         self.assertIn('"Export CSV"', header_source)
         self.assertIn("st.download_button(", header_source)
         self.assertIn("TASK_IMPORT_TEMPLATE_FILENAME", header_source)
         self.assertIn('st.dialog("Import Tasks CSV")', source)
+        preview_source = source[
+            source.index("def _render_dashboard_task_csv_preview") :
+            source.index("\n\ndef render_dashboard_task_csv_import_dialog")
+        ]
+        self.assertIn("st.dataframe", preview_source)
+        for label in (
+            "Task",
+            "Category",
+            "Design style",
+            "Principal subject one",
+            "Uniform/equipment/livery",
+            "Import status",
+        ):
+            self.assertIn(f'"{label}"', preview_source)
         self.assertIn("task_import_summary(task)", render_source)
         self.assertIn('with st.popover("View details")', render_source)
         self.assertIn("task_import_details_html(task)", render_source)

@@ -4133,13 +4133,15 @@ def _task_design_details(task):
     try:
         import sports_cave_dashboard
 
-        imported = sports_cave_dashboard.task_import_details(task)
+        details = sports_cave_dashboard.design_task_details(task)
+        legacy_details = sports_cave_dashboard.task_import_details(task)
     except Exception:
-        imported = {}
-    saved = metadata.get("design_details")
-    saved = saved if isinstance(saved, dict) else {}
-    details = {**imported, **saved}
-    team_or_athlete = str(details.get("team_or_athlete") or "").strip()
+        saved = metadata.get("design_details")
+        details = design_studio_styles.normalize_design_details(
+            saved if isinstance(saved, dict) else {}
+        )
+        legacy_details = metadata
+    team_or_athlete = str(legacy_details.get("team_or_athlete") or "").strip()
     saved_principals = details.get("principal_subjects") or metadata.get("principal_subjects") or []
     if not isinstance(saved_principals, (list, tuple, set)):
         saved_principals = [
@@ -4163,20 +4165,11 @@ def _task_design_details(task):
         parts = re.split(r"\s+(?:vs\.?|versus)\s+", team_or_athlete, maxsplit=1, flags=re.I)
         subject_one = parts[0].strip()
         subject_two = subject_two or (parts[1].strip() if len(parts) > 1 else "")
-    return {
-        "design_title": details.get("design_title") or "",
-        "sport": details.get("sport") or "",
-        "principal_subject_one": subject_one,
-        "principal_subject_two": subject_two,
-        "team_country": details.get("team_country") or details.get("team_or_athlete") or "",
-        "season_era": details.get("season_era") or "",
-        "event_moment": details.get("event_moment") or details.get("moment_or_theme") or "",
-        "venue_location": details.get("venue_location") or "",
-        "uniform_equipment_livery": details.get("uniform_equipment_livery") or "",
-        "essential_text": details.get("essential_text") or "",
-        "special_instructions": details.get("special_instructions") or details.get("design_description") or details.get("notes") or "",
-        "_saved_principal_subjects": saved_principals,
-    }
+    canonical = design_studio_styles.normalize_design_details(details)
+    canonical["principal_subject_one"] = subject_one
+    canonical["principal_subject_two"] = subject_two
+    canonical["_saved_principal_subjects"] = saved_principals
+    return canonical
 
 
 def _task_selected_assets(task):
@@ -4188,19 +4181,30 @@ def _task_selected_assets(task):
     return []
 
 
-def _persist_task_style(task, style_slug):
+def _persist_task_design_details(task, style_slug, details):
     task_id = str((task or {}).get("id") or "").strip()
     if not task_id:
-        return False
+        st.warning("This Home task has no durable task ID. Refresh the task list and try again.")
+        return None
     try:
         import sports_cave_dashboard
 
-        sports_cave_dashboard.update_task_design_style(task_id, style_slug)
+        updated = sports_cave_dashboard.update_task_design_details(
+            task_id,
+            style_slug,
+            details,
+        )
+    except (ValueError, sports_cave_dashboard.DashboardStorageError) as error:
+        st.warning(str(error))
+        return None
     except Exception:
-        st.warning("Could not save the design style right now. Please try again.")
-        return False
-    st.success("Design style saved to the Home task.")
-    return True
+        st.warning("Design details could not be saved. Refresh the task list and try again.")
+        return None
+    if hasattr(st, "toast"):
+        st.toast("Design details saved to the Home task.")
+    else:
+        st.success("Design details saved to the Home task.")
+    return updated
 
 
 def _render_v2_prompt_card(label, purpose, prompt, key, *, expanded=False, height=260):
@@ -4218,31 +4222,29 @@ def _render_v2_prompt_card(label, purpose, prompt, key, *, expanded=False, heigh
         _render_copy_button(prompt_text, f"design-studio-v2::{key}", label=f"Copy {label}")
 
 
-def _render_design_details(defaults, identity):
-    fields = (
-        ("Design title", "design_title"),
-        ("Sport", "sport"),
-        ("Principal subject one", "principal_subject_one"),
-        ("Principal subject two", "principal_subject_two"),
-        ("Team / country", "team_country"),
-        ("Season / era", "season_era"),
-        ("Event / moment", "event_moment"),
-        ("Venue / location", "venue_location"),
-        ("Uniform / equipment / livery", "uniform_equipment_livery"),
-        ("Essential text", "essential_text"),
-        ("Special instructions", "special_instructions"),
-    )
+def _render_design_details(defaults, identity, *, can_save=False):
     values = {}
+    save_clicked = False
     with st.expander("Design details", expanded=False):
         columns = st.columns(2)
-        for index, (label, name) in enumerate(fields):
+        for index, (name, label) in enumerate(design_studio_styles.DESIGN_DETAIL_FIELDS):
             target = columns[index % 2]
-            values[name] = target.text_input(
+            is_multiline = name in {"essential_text", "special_instructions"}
+            widget = target.text_area if is_multiline else target.text_input
+            kwargs = {"height": 88} if is_multiline else {}
+            values[name] = widget(
                 label,
                 value=str(defaults.get(name) or ""),
                 key=f"design-studio-v2-detail::{identity}::{name}",
+                **kwargs,
             )
-    return values
+        if can_save:
+            save_clicked = st.button(
+                "Save design details",
+                key=f"design-studio-v2-save-details::{identity}",
+                type="primary",
+            )
+    return values, save_clicked
 
 
 def render_design_studio_v2(can_edit_prompts=False):
@@ -4307,14 +4309,6 @@ def render_design_studio_v2(can_edit_prompts=False):
 
     if selected_task:
         task_text = str(selected_task.get("text") or selected_task.get("title") or "").strip()
-        saved_style = _task_design_style(selected_task)
-        if selected_style and selected_style != saved_style:
-            label = "Assign style to task" if not saved_style else "Save changed style"
-            if st.button(label, key=f"design-studio-v2-save-style::{task_identity}"):
-                if _persist_task_style(selected_task, selected_style):
-                    selected_task["design_style"] = selected_style
-                    selected_task.setdefault("metadata", {})["design_style"] = selected_style
-                    st.rerun()
     else:
         manual_task_key = "design-studio-v2-manual-task"
         if manual_task_key not in st.session_state:
@@ -4335,11 +4329,27 @@ def render_design_studio_v2(can_edit_prompts=False):
     remembered_details = details_memory.get(task_identity)
     if isinstance(remembered_details, dict):
         defaults = {**defaults, **remembered_details}
-    details = _render_design_details(
+    details, save_clicked = _render_design_details(
         defaults,
         hashlib.sha1(task_identity.encode("utf-8")).hexdigest()[:10],
+        can_save=bool(selected_task),
     )
     details_memory[task_identity] = details
+    if save_clicked:
+        if not selected_style:
+            st.warning("Style required before design details can be saved.")
+        else:
+            updated_task = _persist_task_design_details(
+                selected_task,
+                selected_style,
+                details,
+            )
+            if updated_task:
+                selected_task.clear()
+                selected_task.update(updated_task)
+                selected_task["design_style"] = selected_style
+                selected_task.setdefault("metadata", {})["design_style"] = selected_style
+                selected_task["metadata"]["design_details"] = dict(details)
     if len(defaults.get("_saved_principal_subjects") or []) > 2:
         details["principal_subjects"] = defaults["_saved_principal_subjects"]
     st.markdown(

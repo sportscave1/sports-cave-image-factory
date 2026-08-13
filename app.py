@@ -12196,32 +12196,41 @@ def _render_dashboard_task_csv_preview(preview):
     )
     st.caption(_task_csv_section_counts_text(preview.get("section_counts") or {}))
 
-    if preview.get("errors"):
-        st.markdown("**Rows to fix**")
-        for error in preview.get("errors", [])[:12]:
-            row_number = error.get("row_number")
-            message = "; ".join(error.get("errors") or [])
-            st.caption(f"Row {row_number}: {message}")
-        if len(preview.get("errors") or []) > 12:
-            st.caption(f"Plus {len(preview.get('errors') or []) - 12} more rows with errors.")
-
-    if preview.get("duplicates"):
-        duplicate_rows = ", ".join(
-            f"row {item.get('row_number')}" for item in preview.get("duplicates", [])[:12]
+    preview_rows = []
+    for item, status in (
+        *((task, "Ready") for task in preview.get("tasks", [])),
+        *((item, "Duplicate") for item in preview.get("duplicates", [])),
+        *((item, "; ".join(item.get("errors") or [])) for item in preview.get("errors", [])),
+    ):
+        values = dict(item.get("values") or {})
+        preview_rows.append(
+            {
+                "Row": item.get("row_number"),
+                "Task": values.get("task") or item.get("title") or "",
+                "Category": values.get("category") or item.get("section") or "",
+                "Design style": values.get("design_style") or "",
+                "Design title": values.get("design_title") or "",
+                "Sport": values.get("sport") or "",
+                "Principal subject one": values.get("principal_subject_one") or "",
+                "Principal subject two": values.get("principal_subject_two") or "",
+                "Team/country": values.get("team_country") or "",
+                "Season/era": values.get("season_era") or "",
+                "Event/moment": values.get("event_moment") or "",
+                "Venue/location": values.get("venue_location") or "",
+                "Uniform/equipment/livery": values.get("uniform_equipment_livery") or "",
+                "Essential text": values.get("essential_text") or "",
+                "Special instructions": values.get("special_instructions") or "",
+                "Import status": status,
+            }
         )
-        if len(preview.get("duplicates") or []) > 12:
-            duplicate_rows += f", plus {len(preview.get('duplicates') or []) - 12} more"
-        st.caption(f"Duplicates skipped: {duplicate_rows}.")
-
-    if preview.get("tasks"):
-        st.markdown("**Valid design styles**")
-        for task in preview.get("tasks", [])[:12]:
-            style_slug = sports_cave_dashboard.task_design_style(task)
-            if style_slug:
-                st.caption(
-                    f"Row {task.get('row_number')}: "
-                    f"{sports_cave_dashboard.task_design_style_label(task)}"
-                )
+    if preview_rows:
+        preview_rows.sort(key=lambda row: int(row.get("Row") or 0))
+        st.dataframe(
+            preview_rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(360, 38 + (len(preview_rows) * 35)),
+        )
 
 
 def render_dashboard_task_csv_import_dialog(state):
@@ -12230,6 +12239,10 @@ def render_dashboard_task_csv_import_dialog(state):
 
     @st.dialog("Import Tasks CSV")
     def import_dialog():
+        st.caption(
+            "Design styles: "
+            + ", ".join(design_studio_styles.style_slugs())
+        )
         upload_key = (
             "dashboard-task-csv-upload::"
             f"{int(st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_NONCE_KEY, 0))}"
@@ -12295,7 +12308,7 @@ def render_dashboard_task_csv_import_dialog(state):
 
 
 def render_dashboard_task_header(state):
-    header_cols = st.columns([1, 0.13, 0.13], gap="small")
+    header_cols = st.columns([1, 0.11, 0.11, 0.11], gap="small")
     with header_cols[0]:
         st.markdown(
             '<div class="sc-section-title sc-task-toolbar-title">Tasks</div>',
@@ -12307,9 +12320,18 @@ def render_dashboard_task_header(state):
             st.rerun()
     with header_cols[2]:
         st.download_button(
+            "CSV Template",
+            data=sports_cave_dashboard.build_task_import_template_csv(),
+            file_name=sports_cave_dashboard.TASK_IMPORT_TEMPLATE_FILENAME,
+            mime="text/csv",
+            key="dashboard-task-csv-template",
+            use_container_width=True,
+        )
+    with header_cols[3]:
+        st.download_button(
             "Export CSV",
             data=sports_cave_dashboard.build_task_import_template_csv(state.get("tasks") or []),
-            file_name=sports_cave_dashboard.TASK_IMPORT_TEMPLATE_FILENAME,
+            file_name=sports_cave_dashboard.TASK_EXPORT_FILENAME,
             mime="text/csv",
             key="dashboard-task-csv-export",
             use_container_width=True,
@@ -12501,8 +12523,8 @@ def render_task_group(group, tasks):
             ):
                 try:
                     sports_cave_dashboard.update_task_design_style(task_id, style_slug)
-                except (ValueError, sports_cave_dashboard.DashboardStorageError):
-                    st.warning("Could not save the design style right now.")
+                except (ValueError, sports_cave_dashboard.DashboardStorageError) as error:
+                    st.warning(str(error))
                 else:
                     st.rerun()
 

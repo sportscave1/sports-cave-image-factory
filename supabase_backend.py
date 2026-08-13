@@ -3322,6 +3322,71 @@ def update_dashboard_task_design_style(
     return task
 
 
+def update_dashboard_task_design_details(
+    task_id,
+    design_style,
+    design_details,
+    *,
+    actor="sports_cave_os",
+):
+    clean_task_id = str(task_id or "").strip()
+    clean_style = str(design_style or "").strip()
+    clean_details = {
+        str(key): str(value or "")
+        for key, value in dict(design_details or {}).items()
+    }
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not clean_style:
+        raise ValueError("Design style is required.")
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET design_style=%s,
+                    metadata=COALESCE(metadata, '{}'::jsonb)
+                        || jsonb_build_object(
+                            'design_style', %s,
+                            'design_details', %s::jsonb
+                        )
+                WHERE id=%s AND section=%s
+                RETURNING *
+                """,
+                (
+                    clean_style,
+                    clean_style,
+                    json_dumps(clean_details),
+                    clean_task_id,
+                    "New designs to complete",
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return None
+            task = _dashboard_task_from_row(row)
+            _insert_audit_log(
+                cur,
+                event_type="task_design_details_updated",
+                entity_type="dashboard_task",
+                entity_id=clean_task_id,
+                new_value={
+                    "message": f"Design details updated: {task.get('title') or 'Task'}",
+                    "page": "Design Studio",
+                    "action_type": "task_design_details_updated",
+                    "design_style": clean_style,
+                    "design_details": clean_details,
+                },
+                reason=f"Design details updated: {task.get('title') or 'Task'}",
+                actor=str(actor or "").strip() or "sports_cave_os",
+                source="Design Studio",
+            )
+        conn.commit()
+    return task
+
+
 def complete_dashboard_task(
     task_id,
     *,

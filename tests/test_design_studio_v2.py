@@ -4,6 +4,7 @@ import unittest
 
 import design_studio_page
 import design_studio_styles
+import run_migrations
 
 
 STYLE_DETAILS = {
@@ -291,6 +292,71 @@ class DesignStudioV2PageContractTests(unittest.TestCase):
         )
         self.assertEqual(design_studio_page._task_design_style({"metadata": {}}), "")
 
+    def test_imported_task_handoff_populates_every_design_detail_and_prompts(self):
+        details = {
+            "design_title": "The Mountain Rivals",
+            "sport": "Motorsport",
+            "principal_subject_one": "Peter Brock",
+            "principal_subject_two": "Allan Moffat",
+            "team_country": "Australia",
+            "season_era": "1970s",
+            "event_moment": "Bathurst rivalry",
+            "venue_location": "Mount Panorama",
+            "uniform_equipment_livery": "Correct period suits and cars",
+            "essential_text": "BROCK VS MOFFAT",
+            "special_instructions": "Keep both heroes equal",
+        }
+        task = {
+            "title": "Build the Bathurst rivalry",
+            "design_style": "rivalry_faceoff",
+            "metadata": {
+                "design_style": "rivalry_faceoff",
+                "design_details": details,
+            },
+        }
+
+        loaded = design_studio_page._task_design_details(task)
+        prompts = design_studio_styles.build_prompt_bundle(
+            design_studio_page._task_design_style(task),
+            task["title"],
+            loaded,
+        )
+
+        for key, value in details.items():
+            self.assertEqual(loaded[key], value)
+        for prompt_name in ("research", "find_images", "generation", "review"):
+            for value in details.values():
+                self.assertIn(value, prompts[prompt_name])
+
+    def test_loading_a_second_task_does_not_reuse_first_task_metadata(self):
+        first = design_studio_page._task_design_details(
+            {
+                "metadata": {
+                    "design_details": {
+                        "design_title": "First design",
+                        "principal_subject_one": "Michael Jordan",
+                        "special_instructions": "First task only",
+                    }
+                }
+            }
+        )
+        second = design_studio_page._task_design_details({"metadata": {}})
+
+        self.assertEqual(first["design_title"], "First design")
+        for key in design_studio_styles.DESIGN_DETAIL_KEYS:
+            self.assertEqual(second[key], "")
+
+    def test_unified_save_replaces_style_only_action(self):
+        renderer = inspect.getsource(design_studio_page.render_design_studio_v2)
+        details_renderer = inspect.getsource(design_studio_page._render_design_details)
+        persistence = inspect.getsource(design_studio_page._persist_task_design_details)
+
+        self.assertIn("Save design details", details_renderer)
+        self.assertIn("update_task_design_details", persistence)
+        self.assertNotIn("Assign style to task", renderer)
+        self.assertNotIn("Save changed style", renderer)
+        self.assertNotIn("st.rerun", persistence)
+
     def test_legacy_three_person_metadata_remains_visible_to_validation(self):
         details = design_studio_page._task_design_details(
             {
@@ -337,6 +403,17 @@ class DesignStudioV2PersistenceContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertEqual(len(parse_sql(migration)), 3)
 
+    def test_migration_is_discovered_by_the_normal_runner(self):
+        migration_name = "20260813_design_studio_v2_styles.sql"
+        discovered = {path.name: path for path in run_migrations.migration_files()}
+
+        self.assertIn(migration_name, discovered)
+        self.assertTrue(
+            run_migrations.safe_migration_sql(
+                discovered[migration_name].read_text(encoding="utf-8")
+            )
+        )
+
     def test_postgres_backend_reads_writes_and_updates_the_dedicated_field(self):
         backend_source = (
             Path(__file__).resolve().parents[1] / "supabase_backend.py"
@@ -344,6 +421,8 @@ class DesignStudioV2PersistenceContractTests(unittest.TestCase):
         self.assertIn("SELECT id, title, section, status, created_at, completed_at, completed_by, design_style, metadata", backend_source)
         self.assertIn("INSERT INTO dashboard_tasks(title, section, design_style, metadata)", backend_source)
         self.assertIn("def update_dashboard_task_design_style", backend_source)
+        self.assertIn("def update_dashboard_task_design_details", backend_source)
+        self.assertIn("'design_details', %s::jsonb", backend_source)
         self.assertIn("jsonb_build_object('design_style', %s)", backend_source)
 
 

@@ -3,6 +3,7 @@ from collections import Counter
 import csv
 import io
 import json
+import logging
 from pathlib import Path
 import re
 from time import monotonic
@@ -32,29 +33,40 @@ TASK_GROUPS = (
 DESIGN_TASK_VISIBLE_LIMIT = 3
 DESIGN_TASK_PREVIEW_WORD_LIMIT = 5
 TASK_IMPORT_TEMPLATE_FILENAME = "sports-cave-task-import-template.csv"
-TASK_IMPORT_SCHEMA_VERSION = "sports_cave_task_import_v1"
+TASK_EXPORT_FILENAME = "sports-cave-home-tasks.csv"
+TASK_IMPORT_SCHEMA_VERSION = "sports_cave_task_import_v2"
 TASK_IMPORT_MAX_BYTES = 2 * 1024 * 1024
 TASK_IMPORT_METADATA_KEY = "task_import"
-TASK_IMPORT_CSV_COLUMNS = (
+DESIGN_DETAILS_METADATA_KEY = "design_details"
+TASK_IMPORT_SHARED_COLUMNS = (
+    "task",
+    "category",
     "task_section",
     "task_title",
+)
+DESIGN_TASK_CSV_COLUMNS = (
     "design_style",
-    "sport",
+    *design_studio_styles.DESIGN_DETAIL_KEYS,
+)
+TASK_IMPORT_LEGACY_DETAIL_COLUMNS = (
     "league_or_competition",
     "team_or_athlete",
-    "design_title",
     "moment_or_theme",
     "design_description",
     "priority",
     "due_date",
     "notes",
 )
+TASK_IMPORT_CSV_COLUMNS = (
+    *TASK_IMPORT_SHARED_COLUMNS,
+    *DESIGN_TASK_CSV_COLUMNS,
+    *TASK_IMPORT_LEGACY_DETAIL_COLUMNS,
+)
 TASK_IMPORT_DETAIL_FIELDS = (
     ("design_style", "Design style"),
-    ("sport", "Sport"),
+    *design_studio_styles.DESIGN_DETAIL_FIELDS,
     ("league_or_competition", "League or competition"),
     ("team_or_athlete", "Team or athlete"),
-    ("design_title", "Design title"),
     ("moment_or_theme", "Moment or theme"),
     ("design_description", "Design description"),
     ("priority", "Priority"),
@@ -108,6 +120,7 @@ _ACTIVITY_CACHE = {}
 _CALENDAR_CACHE = {}
 _EDITION_PRODUCT_CACHE = {}
 _DAILY_EXECUTION_CACHE = {}
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardStorageError(RuntimeError):
@@ -367,6 +380,72 @@ def _clean_task_csv_field(value):
     return str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
+def _design_details_from_sources(*sources):
+    merged = {}
+    for source in sources:
+        if isinstance(source, dict):
+            merged.update(source)
+    details = design_studio_styles.normalize_design_details(merged)
+    team_or_athlete = _clean_task_csv_field(merged.get("team_or_athlete"))
+    if team_or_athlete and not details["principal_subject_one"]:
+        rivals = re.split(
+            r"\s+(?:vs\.?|versus)\s+",
+            team_or_athlete,
+            maxsplit=1,
+            flags=re.I,
+        )
+        details["principal_subject_one"] = rivals[0].strip()
+        if len(rivals) > 1 and not details["principal_subject_two"]:
+            details["principal_subject_two"] = rivals[1].strip()
+    if not details["team_country"]:
+        details["team_country"] = team_or_athlete
+    if not details["event_moment"]:
+        details["event_moment"] = _clean_task_csv_field(merged.get("moment_or_theme"))
+    if not details["special_instructions"]:
+        details["special_instructions"] = _clean_task_csv_field(
+            merged.get("design_description") or merged.get("notes")
+        )
+    return details
+
+
+def design_task_details(task):
+    task = dict(task or {})
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else task
+    if not isinstance(metadata, dict):
+        return design_studio_styles.normalize_design_details()
+    imported = metadata.get(TASK_IMPORT_METADATA_KEY)
+    brief = metadata.get("design_brief")
+    saved = metadata.get(DESIGN_DETAILS_METADATA_KEY)
+    root_details = {
+        key: metadata.get(key)
+        for key in (*design_studio_styles.DESIGN_DETAIL_KEYS, *TASK_IMPORT_LEGACY_DETAIL_COLUMNS)
+        if key in metadata
+    }
+    return _design_details_from_sources(root_details, brief, imported, saved)
+
+
+def validate_design_task_details(style_slug, details, task_text=""):
+    clean_details = design_studio_styles.normalize_design_details(details)
+    subjects = design_studio_styles.principal_subjects(clean_details)
+    for subject in design_studio_styles.principal_subjects({}, task_text):
+        subject_key = subject.casefold()
+        matches_existing = any(
+            subject_key == item.casefold()
+            or subject_key == (item.split()[-1].casefold() if item.split() else "")
+            or subject_key.startswith(f"{item.casefold()} ")
+            or item.casefold().startswith(f"{subject_key} ")
+            for item in subjects
+        )
+        if not matches_existing:
+            subjects.append(subject)
+    if len(subjects) > 2:
+        return [
+            "This task exceeds the new Sports Cave limit of two principal people. "
+            "Reduce it to one or two subjects before generating prompts."
+        ]
+    return design_studio_styles.validate_design_request(style_slug, clean_details)
+
+
 def build_task_import_template_csv(tasks=None):
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=TASK_IMPORT_CSV_COLUMNS)
@@ -375,21 +454,28 @@ def build_task_import_template_csv(tasks=None):
         for task in tasks or []:
             normalised = _normalise_task(task)
             details = task_import_details(normalised)
+            design_details = design_task_details(normalised)
+            is_design_task = normalised.get("section") == DESIGN_TASK_GROUP
+            title = normalised.get("title") or ""
+            section = normalised.get("section") or ""
             writer.writerow(
                 {
-                    "task_section": normalised.get("section") or "",
-                    "task_title": normalised.get("title") or "",
-                    "design_style": task_design_style(normalised),
+                    "task": title,
+                    "category": section,
+                    "task_section": section,
+                    "task_title": title,
+                    "design_style": task_design_style(normalised) if is_design_task else "",
+                    **{
+                        column: design_details.get(column, "") if is_design_task else ""
+                        for column in design_studio_styles.DESIGN_DETAIL_KEYS
+                    },
                     **{
                         column: details.get(column, "")
-                        for column in TASK_IMPORT_CSV_COLUMNS
-                        if column not in {"task_section", "task_title", "design_style"}
+                        for column in TASK_IMPORT_LEGACY_DETAIL_COLUMNS
                     },
                 }
             )
         return output.getvalue().encode("utf-8")
-    for section in TASK_GROUPS:
-        writer.writerow({"task_section": section})
     return output.getvalue().encode("utf-8")
 
 
@@ -450,9 +536,17 @@ def task_import_details(task):
         return {}
     fields = {
         key: _clean_task_csv_field(details.get(key))
-        for key in TASK_IMPORT_CSV_COLUMNS
-        if key != "task_section"
+        for key in (
+            "design_style",
+            *design_studio_styles.DESIGN_DETAIL_KEYS,
+            *TASK_IMPORT_LEGACY_DETAIL_COLUMNS,
+        )
     }
+    canonical_details = design_task_details(task)
+    for key, value in canonical_details.items():
+        if value:
+            fields[key] = value
+    fields["design_style"] = task_design_style(task)
     if not any(fields.values()):
         return {}
     return fields
@@ -464,7 +558,16 @@ def task_import_summary(task):
         return ""
     preferred = (
         details.get("sport"),
-        details.get("team_or_athlete"),
+        " vs ".join(
+            value
+            for value in (
+                details.get("principal_subject_one"),
+                details.get("principal_subject_two"),
+            )
+            if value
+        )
+        or details.get("team_or_athlete")
+        or details.get("team_country"),
         details.get("league_or_competition"),
     )
     parts = [part for part in preferred if part]
@@ -499,9 +602,11 @@ def _task_csv_row_is_blank(row):
 
 
 def _task_import_metadata(values, *, section, title, row_number, filename=""):
+    design_details = _design_details_from_sources(values)
     metadata = {
         "source": "task_csv_import",
         "design_style": values.get("design_style") or "",
+        DESIGN_DETAILS_METADATA_KEY: design_details,
         TASK_IMPORT_METADATA_KEY: {
             "schema_version": TASK_IMPORT_SCHEMA_VERSION,
             "row_number": row_number,
@@ -537,15 +642,13 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             raise TaskCSVImportError(
                 f"The task CSV has duplicate column headers: {', '.join(duplicated_headers)}."
             )
-        optional_columns = {"design_style"}
-        missing = [
-            column
-            for column in TASK_IMPORT_CSV_COLUMNS
-            if column not in fieldnames and column not in optional_columns
-        ]
-        if missing:
+        if not ({"task", "task_title", "design_title"} & set(fieldnames)):
             raise TaskCSVImportError(
-                f"The task CSV is missing required columns: {', '.join(missing)}."
+                "The task CSV must include task, task_title or design_title."
+            )
+        if not ({"category", "task_section"} & set(fieldnames)):
+            raise TaskCSVImportError(
+                "The task CSV must include category or task_section."
             )
         header_map = {clean: raw for clean, raw in zip(fieldnames, raw_fieldnames)}
         rows = list(reader)
@@ -578,24 +681,48 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             else ""
             for column in TASK_IMPORT_CSV_COLUMNS
         }
-        section = normalize_task_import_section(values.get("task_section"))
+        section_value = values.get("category") or values.get("task_section")
+        section = normalize_task_import_section(section_value)
         row_errors = []
         if not section:
             row_errors.append(
-                "task_section must match an existing task section or a supported short key."
+                "category must match an existing task section or a supported short key."
             )
-        title = values.get("task_title") or values.get("design_title")
+        title = values.get("task") or values.get("task_title") or values.get("design_title")
         if not title:
-            row_errors.append("task_title or design_title is required.")
+            row_errors.append("task is required.")
         raw_style = values.get("design_style")
         style_slug = design_studio_styles.normalize_design_style(raw_style)
         if raw_style and not style_slug:
-            row_errors.append(f"Unknown design_style: {raw_style}.")
-        if section == DESIGN_TASK_GROUP and not style_slug:
+            row_errors.append(
+                f"Unknown design_style: {raw_style}. Accepted styles: "
+                f"{', '.join(design_studio_styles.style_slugs())}."
+            )
+        if section == DESIGN_TASK_GROUP and not raw_style:
             row_errors.append("Style required for new design tasks.")
         values["design_style"] = style_slug
+        values["task"] = title
+        values["task_title"] = title
+        values["category"] = section
+        values["task_section"] = section
+        if section == DESIGN_TASK_GROUP and style_slug:
+            row_errors.extend(
+                validate_design_task_details(
+                    style_slug,
+                    _design_details_from_sources(values),
+                    title,
+                )
+            )
         if row_errors:
-            errors.append({"row_number": offset, "errors": row_errors})
+            errors.append(
+                {
+                    "row_number": offset,
+                    "section": section,
+                    "title": title,
+                    "values": values,
+                    "errors": row_errors,
+                }
+            )
             continue
         duplicate_key = task_import_duplicate_key(
             section,
@@ -609,6 +736,7 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
                     "row_number": offset,
                     "section": section,
                     "title": title,
+                    "values": values,
                     "duplicate_key": duplicate_key,
                 }
             )
@@ -620,6 +748,7 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
                 "row_number": offset,
                 "section": section,
                 "title": title,
+                "values": values,
                 "metadata": _task_import_metadata(
                     values,
                     section=section,
@@ -812,13 +941,77 @@ def update_task_design_style(task_id, design_style):
             style_slug,
             actor=get_activity_actor(),
         )
+        if not updated:
+            raise ValueError(
+                "The selected Home design task could not be found. Refresh the task list and try again."
+            )
+        clear_task_cache()
+        clear_activity_cache()
+        return _normalise_task(updated)
+    except ValueError:
+        raise
+    except Exception as error:
+        LOGGER.error(
+            "Design task style save failed (%s; task_id=%s)",
+            type(error).__name__,
+            clean_task_id,
+        )
+        raise DashboardStorageError(
+            "Design style could not be saved. Confirm the Design Studio V2 database migration has been applied."
+        ) from error
+
+
+def update_task_design_details(task_id, design_style, details):
+    clean_task_id = str(task_id or "").strip()
+    style_slug = design_studio_styles.normalize_design_style(design_style)
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not style_slug:
+        raise ValueError("Style required.")
+    clean_details = design_studio_styles.normalize_design_details(details)
+    task = next(
+        (
+            item
+            for item in list_tasks(status="all")
+            if str(item.get("id") or "") == clean_task_id
+        ),
+        None,
+    )
+    validation_errors = validate_design_task_details(
+        style_slug,
+        clean_details,
+        str((task or {}).get("title") or (task or {}).get("text") or ""),
+    )
+    if validation_errors:
+        raise ValueError(" ".join(validation_errors))
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        updated = backend.update_dashboard_task_design_details(
+            clean_task_id,
+            style_slug,
+            clean_details,
+            actor=get_activity_actor(),
+        )
+        if not updated:
+            raise ValueError(
+                "The selected Home design task could not be found. Refresh the task list and try again."
+            )
         clear_task_cache()
         clear_activity_cache()
         return _normalise_task(updated) if updated else None
     except ValueError:
         raise
     except Exception as error:
-        raise DashboardStorageError(_storage_error(error)) from error
+        LOGGER.error(
+            "Design task details save failed (%s; task_id=%s)",
+            type(error).__name__,
+            clean_task_id,
+        )
+        raise DashboardStorageError(
+            "Design details could not be saved. Confirm the Design Studio V2 database migration has been applied."
+        ) from error
 
 
 def complete_task(task_id, *, metadata=None):

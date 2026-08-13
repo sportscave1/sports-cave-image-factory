@@ -7,6 +7,21 @@ import re
 STYLE_REQUIRED_LABEL = "Style required"
 STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v2"
 
+DESIGN_DETAIL_FIELDS = (
+    ("design_title", "Design title"),
+    ("sport", "Sport"),
+    ("principal_subject_one", "Principal subject one"),
+    ("principal_subject_two", "Principal subject two"),
+    ("team_country", "Team / country"),
+    ("season_era", "Season / era"),
+    ("event_moment", "Event / moment"),
+    ("venue_location", "Venue / location"),
+    ("uniform_equipment_livery", "Uniform / equipment / livery"),
+    ("essential_text", "Essential text"),
+    ("special_instructions", "Special instructions"),
+)
+DESIGN_DETAIL_KEYS = tuple(key for key, _label in DESIGN_DETAIL_FIELDS)
+
 SUPPORTED_IMAGE_ROLES = (
     "hero_exact_photo",
     "secondary_exact_photo",
@@ -370,6 +385,17 @@ def design_style_label(value, fallback=STYLE_REQUIRED_LABEL):
     return style.label if style else fallback
 
 
+def normalize_design_details(values=None):
+    source = dict(values or {})
+    return {
+        key: str(source.get(key) or "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+        for key in DESIGN_DETAIL_KEYS
+    }
+
+
 _STYLE_WORDS = {
     "sports", "cave", "cinematic", "minimal", "minimalist", "collector",
     "limited", "edition", "thin", "border", "premium", "realistic",
@@ -426,7 +452,7 @@ def principal_subjects(details=None, task_text=""):
             values.extend(
                 match.group(0)
                 for match in re.finditer(
-                    r"\b[A-Z][a-z'.-]+(?:\s+[A-Z][a-z'.-]+){1,3}\b",
+                    r"\b[A-Z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*){1,3}\b",
                     text,
                 )
             )
