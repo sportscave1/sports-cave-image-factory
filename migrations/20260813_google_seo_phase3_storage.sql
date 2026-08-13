@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS seo_sync_runs (
     requested_end_date DATE,
     completed_start_date DATE,
     completed_end_date DATE,
-    current_date DATE,
+    active_slice_date DATE,
     checkpoint_date DATE,
     latest_stored_data_date DATE,
     rows_received BIGINT NOT NULL DEFAULT 0,

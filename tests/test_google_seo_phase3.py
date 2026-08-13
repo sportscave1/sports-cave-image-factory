@@ -464,6 +464,8 @@ class StorageAndOverviewTests(unittest.TestCase):
         sql = (ROOT / "migrations" / importer.SEO_IMPORT_MIGRATION).read_text(encoding="utf-8")
         self.assertTrue(run_migrations.safe_migration_sql(sql))
         self.assertNotIn("encrypted_refresh_token", sql)
+        self.assertIn("active_slice_date DATE", sql)
+        self.assertNotRegex(sql, r"\bcurrent_date\b")
         self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS idx_seo_sync_runs_one_active_source", sql)
         for table in (
             "seo_sync_runs", "seo_sync_errors", "seo_data_inventories", "seo_gsc_daily_totals",

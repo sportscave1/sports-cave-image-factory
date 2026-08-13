@@ -434,7 +434,7 @@ def _import_status_card(source, run):
     requested_range = " - ".join(
         value for value in (run.get("requested_start_date"), run.get("requested_end_date")) if value
     ) or "Discovering available history"
-    current = run.get("current_date") or run.get("checkpoint_date") or "Not running"
+    current = run.get("active_slice_date") or run.get("checkpoint_date") or "Not running"
     error = run.get("error_summary") or "None"
     return (
         '<div class="sc-seo-import-status">'

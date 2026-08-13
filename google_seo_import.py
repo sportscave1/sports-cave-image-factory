@@ -451,7 +451,7 @@ def _clean_run(row):
     row = dict(row or {})
     for field in (
         "requested_start_date", "requested_end_date", "completed_start_date",
-        "completed_end_date", "current_date", "checkpoint_date", "latest_stored_data_date",
+        "completed_end_date", "active_slice_date", "checkpoint_date", "latest_stored_data_date",
         "started_at", "completed_at", "lease_expires_at", "created_at", "updated_at",
     ):
         row[field] = _iso(row.get(field))
@@ -560,15 +560,15 @@ class PostgresSEOImportStore:
             conn.commit()
         return _clean_run(row) if row else None
 
-    def renew_lease(self, run_id, lease_owner, *, current_date=None, lease_seconds=LEASE_SECONDS):
+    def renew_lease(self, run_id, lease_owner, *, active_slice_date=None, lease_seconds=LEASE_SECONDS):
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE seo_sync_runs SET lease_expires_at=%s, current_date=%s, updated_at=now()
+                    UPDATE seo_sync_runs SET lease_expires_at=%s, active_slice_date=%s, updated_at=now()
                     WHERE id=%s AND status='running' AND lease_owner=%s RETURNING id
                     """,
-                    (utc_now() + timedelta(seconds=lease_seconds), _as_date(current_date), run_id, lease_owner),
+                    (utc_now() + timedelta(seconds=lease_seconds), _as_date(active_slice_date), run_id, lease_owner),
                 )
                 renewed = bool(cur.fetchone())
             conn.commit()
@@ -581,7 +581,7 @@ class PostgresSEOImportStore:
                     """
                     UPDATE seo_sync_runs
                     SET requested_start_date=%s, requested_end_date=%s,
-                        current_date=COALESCE(current_date, %s), updated_at=now()
+                        active_slice_date=COALESCE(active_slice_date, %s), updated_at=now()
                     WHERE id=%s AND status='running' AND lease_owner=%s RETURNING *
                     """,
                     (_as_date(start_date), _as_date(end_date), _as_date(start_date), run_id, lease_owner),
@@ -816,7 +816,7 @@ class PostgresSEOImportStore:
                 cur.execute(
                     """
                     UPDATE seo_sync_runs
-                    SET checkpoint_date=%s, current_date=%s,
+                    SET checkpoint_date=%s, active_slice_date=%s,
                         completed_start_date=LEAST(COALESCE(completed_start_date, %s), %s),
                         completed_end_date=GREATEST(COALESCE(completed_end_date, %s), %s),
                         latest_stored_data_date=GREATEST(COALESCE(latest_stored_data_date, %s), %s),
@@ -844,7 +844,7 @@ class PostgresSEOImportStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE seo_sync_runs SET status=%s, completed_at=now(), current_date=NULL,
+                    UPDATE seo_sync_runs SET status=%s, completed_at=now(), active_slice_date=NULL,
                         lease_owner='', lease_expires_at=NULL, error_code='', error_summary='', updated_at=now()
                     WHERE id=%s AND status='running' AND lease_owner=%s RETURNING *
                     """,
@@ -1108,7 +1108,7 @@ class SEOImportWorker:
         except Exception as error:
             code, message = sanitize_import_error(error)
             return self.import_store.fail_run(
-                run["id"], self.worker_id, source, slice_date=run.get("current_date"),
+                run["id"], self.worker_id, source, slice_date=run.get("active_slice_date"),
                 error_code=code, error_message=message, retry_count=0,
                 partial=bool(run.get("checkpoint_date")),
             )
@@ -1148,11 +1148,11 @@ class SEOImportWorker:
             return self.import_store.complete_run(run["id"], self.worker_id, "GSC")
         run = self.import_store.prepare_run_range(run["id"], self.worker_id, start_date, end_date)
         for slice_date in date_sequence(start_date, end_date):
-            if not self.import_store.renew_lease(run["id"], self.worker_id, current_date=slice_date):
+            if not self.import_store.renew_lease(run["id"], self.worker_id, active_slice_date=slice_date):
                 raise SEOImportError("The SEO import lease was lost.", code="import_lease_lost")
             try:
                 slice_data, _attempts = self._fetch_with_retry(lambda: client.fetch_gsc_date(site_url, slice_date))
-                if not self.import_store.renew_lease(run["id"], self.worker_id, current_date=slice_date):
+                if not self.import_store.renew_lease(run["id"], self.worker_id, active_slice_date=slice_date):
                     raise SEOImportError("The SEO import lease was lost.", code="import_lease_lost")
                 result = self.import_store.replace_gsc_date(site_url, slice_data)
                 self.import_store.checkpoint_date(
@@ -1184,7 +1184,7 @@ class SEOImportWorker:
         dimensions = client.compatible_ga4_dimensions(property_id)
         run = self.import_store.prepare_run_range(run["id"], self.worker_id, start_date, end_date)
         for slice_date in date_sequence(start_date, end_date):
-            if not self.import_store.renew_lease(run["id"], self.worker_id, current_date=slice_date):
+            if not self.import_store.renew_lease(run["id"], self.worker_id, active_slice_date=slice_date):
                 raise SEOImportError("The SEO import lease was lost.", code="import_lease_lost")
             try:
                 slice_data, _attempts = self._fetch_with_retry(
@@ -1192,7 +1192,7 @@ class SEOImportWorker:
                         property_id, slice_date, dimensions=dimensions, currency=metadata["currency"],
                     )
                 )
-                if not self.import_store.renew_lease(run["id"], self.worker_id, current_date=slice_date):
+                if not self.import_store.renew_lease(run["id"], self.worker_id, active_slice_date=slice_date):
                     raise SEOImportError("The SEO import lease was lost.", code="import_lease_lost")
                 result = self.import_store.replace_ga4_date(
                     property_id, slice_data,

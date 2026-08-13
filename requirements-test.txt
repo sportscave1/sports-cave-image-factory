@@ -1,0 +1,2 @@
+-r requirements.txt
+pglast>=7,<8
