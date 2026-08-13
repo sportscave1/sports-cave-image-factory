@@ -6,6 +6,7 @@ import re
 import streamlit as st
 
 from activity_log import record_activity_log
+import google_seo
 import navigation_runtime
 import os_accounts
 import seo_workspace as seo
@@ -51,7 +52,14 @@ def _inject_styles():
         .sc-seo-integration { border-left: 3px solid #b79243; min-height: 8rem; padding: .15rem .2rem .15rem .75rem; }
         .sc-seo-integration h3 { font-size: 1rem; margin: 0 0 .35rem; }
         .sc-seo-integration p { color: #6e6b65; font-size: .82rem; margin: .25rem 0; }
+        .sc-seo-integration dl { display: grid; font-size: .75rem; gap: .24rem .55rem; grid-template-columns: max-content minmax(0, 1fr); margin: .65rem 0 0; }
+        .sc-seo-integration dt { color: #77736b; }
+        .sc-seo-integration dd { color: #242321; margin: 0; overflow-wrap: anywhere; }
         .sc-seo-badge { background: #f3ecdc; border: 1px solid #d9c28d; border-radius: 999px; color: #6d531c; display: inline-block; font-size: .67rem; font-weight: 700; padding: .16rem .42rem; }
+        .sc-seo-badge-connected { background: #e8f3e9; border-color: #b8d5bb; color: #286332; }
+        .sc-seo-badge-attention { background: #f8eadf; border-color: #dfb99c; color: #8a481c; }
+        .sc-seo-badge-required { background: #f1f0ed; border-color: #d1cec6; color: #5f5c56; }
+        .sc-seo-shopify-health { min-height: 8rem; }
         .sc-seo-empty-chart { align-items: center; background: #fbfaf7; border: 1px dashed #d7d2c7; border-radius: 8px; color: #6e6b65; display: flex; justify-content: center; min-height: 13rem; padding: 2rem; text-align: center; }
         .sc-seo-future-metric { background: #fff; border: 1px solid #dfdbd1; border-top: 2px solid #c5a45c; border-radius: 8px; min-height: 7rem; padding: .85rem; }
         .sc-seo-future-label { color: #393734; font-size: .78rem; font-weight: 650; line-height: 1.25; min-height: 2rem; }
@@ -219,31 +227,271 @@ def _navigate(navigate, route):
         st.rerun()
 
 
-def _render_overview(state, user, navigate):
+def _google_badge_class(status):
+    if status == "Connected":
+        return "sc-seo-badge-connected"
+    if status == "Needs attention":
+        return "sc-seo-badge-attention"
+    if status == "Configuration required":
+        return "sc-seo-badge-required"
+    return ""
+
+
+def _integration_card(
+    title,
+    status,
+    *,
+    property_name="",
+    property_id="",
+    last_sync="",
+    data_date="",
+    extra_class="",
+    show_data_date=True,
+):
+    details = []
+    if property_name or property_id:
+        details.extend(
+            (
+                ("Property", property_name or "Not selected"),
+                ("Identifier", property_id or "Not selected"),
+            )
+        )
+    else:
+        details.append(("Property", "Not selected"))
+    details.append(("Last successful sync", last_sync or "Not yet synced"))
+    if show_data_date:
+        details.append(("Data available through", data_date or "Not yet checked"))
+    detail_html = "".join(
+        f"<dt>{html.escape(label)}</dt><dd>{html.escape(str(value))}</dd>"
+        for label, value in details
+    )
+    return (
+        f'<div class="sc-seo-integration {html.escape(extra_class)}">'
+        f'<span class="sc-seo-badge {_google_badge_class(status)}">{html.escape(status)}</span>'
+        f'<h3>{html.escape(title)}</h3><dl>{detail_html}</dl></div>'
+    )
+
+
+def _consume_google_oauth_notice():
+    try:
+        result = st.query_params.get("google_oauth", "")
+    except Exception:
+        return
+    if isinstance(result, (list, tuple)):
+        result = result[0] if result else ""
+    messages = {
+        "connected": ("Google connected. Select the Sports Cave properties to finish setup.", True),
+        "denied": ("Google access was not approved. No connection changes were made.", False),
+        "attention": ("Google could not be connected. Please try again.", False),
+        "state_invalid": ("That Google connection request expired or was already used. Please try again.", False),
+        "configuration_required": ("Google connection configuration is incomplete.", False),
+        "access_denied": ("Administrator access is required to manage Google.", False),
+    }
+    message = messages.get(str(result or ""))
+    if not message:
+        return
+    (st.success if message[1] else st.warning)(message[0])
+    try:
+        del st.query_params["google_oauth"]
+    except Exception:
+        pass
+
+
+def _shopify_health():
+    try:
+        import shopify_sync
+
+        config = shopify_sync.get_config()
+    except Exception:
+        return {"status": "Needs attention", "last_sync": "Unavailable"}
+    status = "Connected" if config.get("configured") else "Configuration required"
+    last_sync = "Not yet synced"
+    if config.get("configured"):
+        try:
+            import supabase_backend
+
+            sync_state = supabase_backend.get_sync_state_read_only()
+            last_sync = str(sync_state.get("last_successful_order_sync_at") or "Not yet synced")
+        except Exception:
+            last_sync = "Unavailable"
+    return {"status": status, "last_sync": last_sync}
+
+
+def _render_google_controls(user, store, config_status, connection):
+    if not os_accounts.is_admin(user):
+        return
+    connected = bool(connection.get("has_refresh_token"))
+    reconnect_required = bool(connection.get("reconnect_required"))
+    if not config_status.get("ready"):
+        st.info("Google connection configuration is required before an administrator can connect.")
+        return
+    if not connected:
+        st.link_button(
+            "Connect Google",
+            google_seo.GOOGLE_OAUTH_CONNECT_PATH,
+            type="primary",
+            icon=":material/link:",
+        )
+        return
+
+    controls = st.columns(3)
+    if controls[0].button(
+        "Sync now",
+        type="primary",
+        icon=":material/sync:",
+        disabled=not (connection.get("gsc_site_url") and connection.get("ga4_property_id")),
+        key="seo-google-sync-now",
+    ):
+        result = google_seo.sync_now(store, user, google_seo.load_config())
+        _set_notice(
+            result.get("message") or "Google connection checked.",
+            success=bool(result.get("ok")),
+        )
+        st.rerun()
+    if controls[1].button(
+        "Refresh properties",
+        icon=":material/refresh:",
+        key="seo-google-refresh-properties",
+    ):
+        result = google_seo.refresh_properties(store, user, google_seo.load_config())
+        _set_notice(
+            result.get("message") or "Accessible Google properties refreshed.",
+            success=bool(result.get("ok")),
+        )
+        st.rerun()
+    if reconnect_required:
+        controls[2].link_button(
+            "Reconnect",
+            google_seo.GOOGLE_OAUTH_CONNECT_PATH,
+            icon=":material/link:",
+        )
+
+    with st.expander(
+        "Manage connection",
+        expanded=not (connection.get("gsc_site_url") and connection.get("ga4_property_id")),
+    ):
+        gsc_rows = list(connection.get("available_gsc_properties") or [])
+        ga4_rows = list(connection.get("available_ga4_properties") or [])
+        if not gsc_rows or not ga4_rows:
+            st.warning("No selectable Search Console or Analytics properties are currently available.")
+        else:
+            gsc_by_id = {
+                str(row.get("id") or ""): row for row in gsc_rows if row.get("id")
+            }
+            ga4_by_id = {
+                str(row.get("id") or ""): row for row in ga4_rows if row.get("id")
+            }
+            selected_gsc = str(connection.get("gsc_site_url") or "")
+            selected_ga4 = str(connection.get("ga4_property_id") or "")
+            gsc_ids = tuple(gsc_by_id)
+            ga4_ids = tuple(ga4_by_id)
+            selectors = st.columns(2)
+            gsc_value = selectors[0].selectbox(
+                "Search Console property",
+                gsc_ids,
+                index=gsc_ids.index(selected_gsc) if selected_gsc in gsc_ids else 0,
+                format_func=lambda value: f"{gsc_by_id[value].get('name') or value} ({value})",
+                key="seo-google-gsc-property",
+            )
+            ga4_value = selectors[1].selectbox(
+                "Google Analytics 4 property",
+                ga4_ids,
+                index=ga4_ids.index(selected_ga4) if selected_ga4 in ga4_ids else 0,
+                format_func=lambda value: f"{ga4_by_id[value].get('name') or value} ({value})",
+                key="seo-google-ga4-property",
+            )
+            if st.button("Save property selection", key="seo-google-save-properties"):
+                try:
+                    google_seo.save_property_selection(
+                        store,
+                        user,
+                        gsc_site_url=gsc_value,
+                        ga4_property_id=ga4_value,
+                    )
+                except google_seo.GoogleSEOError as error:
+                    _set_notice(error.public_message, success=False)
+                else:
+                    _set_notice("Google property selection saved.")
+                st.rerun()
+
+        st.divider()
+        confirm_disconnect = st.checkbox(
+            "Disconnect Search Console and Analytics",
+            key="seo-google-confirm-disconnect",
+        )
+        if st.button(
+            "Disconnect Google",
+            disabled=not confirm_disconnect,
+            key="seo-google-disconnect",
+        ):
+            try:
+                google_seo.disconnect_google(store, user, google_seo.load_config())
+            except google_seo.GoogleSEOError as error:
+                _set_notice(error.public_message, success=False)
+            else:
+                _set_notice("Google disconnected.")
+            st.rerun()
+
+
+def _render_overview(state, user, navigate, google_store=None):
     _header(seo.SEO_OVERVIEW_ROUTE)
-    integration_columns = st.columns(2)
+    _consume_google_oauth_notice()
+    config_status = google_seo.configuration_status()
+    google_store = google_store or google_seo.default_store()
+    try:
+        connection = google_store.get_connection()
+    except google_seo.GoogleSEOError:
+        connection = {}
+        fallback_status = "Needs attention" if config_status.get("ready") else "Configuration required"
+        gsc_status = fallback_status
+        ga4_status = fallback_status
+    else:
+        gsc_status = google_seo.connection_status_label(
+            config_status,
+            connection,
+            service="gsc",
+        )
+        ga4_status = google_seo.connection_status_label(
+            config_status,
+            connection,
+            service="ga4",
+        )
+    shopify = _shopify_health()
+    integration_columns = st.columns([1.1, 1.1, .8])
     integration_columns[0].markdown(
-        """
-        <div class="sc-seo-integration">
-            <span class="sc-seo-badge">Planned</span>
-            <h3>Google Search Console</h3>
-            <strong>Not connected</strong>
-            <p>Clicks, impressions, CTR and search position will appear here later.</p>
-        </div>
-        """,
+        _integration_card(
+            "Google Search Console",
+            gsc_status,
+            property_name=connection.get("gsc_property_name") or "",
+            property_id=connection.get("gsc_site_url") or "",
+            last_sync=connection.get("last_successful_sync_at") or "",
+            data_date=connection.get("gsc_data_through_date") or "",
+        ),
         unsafe_allow_html=True,
     )
     integration_columns[1].markdown(
-        """
-        <div class="sc-seo-integration">
-            <span class="sc-seo-badge">Planned</span>
-            <h3>Google Analytics 4</h3>
-            <strong>Not connected</strong>
-            <p>Organic sessions, revenue and conversions will appear here later.</p>
-        </div>
-        """,
+        _integration_card(
+            "Google Analytics 4",
+            ga4_status,
+            property_name=connection.get("ga4_property_name") or "",
+            property_id=connection.get("ga4_property_id") or "",
+            last_sync=connection.get("last_successful_sync_at") or "",
+            data_date=connection.get("ga4_data_through_date") or "",
+        ),
         unsafe_allow_html=True,
     )
+    integration_columns[2].markdown(
+        _integration_card(
+            "Shopify",
+            shopify["status"],
+            property_name="Sports Cave store" if shopify["status"] == "Connected" else "",
+            last_sync=shopify["last_sync"],
+            extra_class="sc-seo-shopify-health",
+            show_data_date=False,
+        ),
+        unsafe_allow_html=True,
+    )
+    _render_google_controls(user, google_store, config_status, connection)
 
     st.subheader("Future organic reporting")
     future_metrics = (
@@ -258,15 +506,15 @@ def _render_overview(state, user, navigate):
         column.markdown(
             f'<div class="sc-seo-future-metric">'
             f'<div class="sc-seo-future-label">{html.escape(label)}</div>'
-            f'<div class="sc-seo-future-value">—</div>'
-            f'<div class="sc-seo-future-source">{html.escape(source)} · Awaiting connection</div>'
+            f'<div class="sc-seo-future-value">&mdash;</div>'
+            f'<div class="sc-seo-future-source">{html.escape(source)} &middot; Reporting import not enabled</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
     st.subheader("Organic Performance")
     st.markdown(
-        '<div class="sc-seo-empty-chart">Connect Google Search Console and GA4 in a later update to view organic performance over time.</div>',
+        '<div class="sc-seo-empty-chart">Connection health is available now. Organic reporting data will be added in a later phase.</div>',
         unsafe_allow_html=True,
     )
 
@@ -982,7 +1230,12 @@ def _render_keyword_library(store, state, user, keywords):
 
 
 def _render_gsc_import(store, state, user, keywords):
-    st.markdown('<div class="sc-seo-note"><strong>GSC Connection — Planned</strong><br>Use a real Performance Queries CSV now. Live OAuth is deliberately deferred.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sc-seo-note"><strong>Manual GSC keyword import</strong><br>'
+        'Use a real Performance Queries CSV for keyword records. The Phase 1 live connection '
+        'checks access and freshness only; it does not import reporting rows.</div>',
+        unsafe_allow_html=True,
+    )
     upload = st.file_uploader("Google Search Console Performance Queries CSV", type=["csv"], key="seo-gsc-upload")
     if st.button("Preview import", type="primary", disabled=upload is None, icon=":material/preview:"):
         try:
@@ -1077,7 +1330,7 @@ def _render_keywords(store, state, user):
 
 
 @st.fragment
-def _render_active_route(user, route, store, navigate):
+def _render_active_route(user, route, store, navigate, google_store=None):
     try:
         state = store.load()
     except seo.SEOStoreError as error:
@@ -1116,7 +1369,12 @@ def _render_active_route(user, route, store, navigate):
     navigation_runtime.dispatch_selected(
         route,
         {
-            seo.SEO_OVERVIEW_ROUTE: lambda: _render_overview(state, user, navigate),
+            seo.SEO_OVERVIEW_ROUTE: lambda: _render_overview(
+                state,
+                user,
+                navigate,
+                google_store,
+            ),
             seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
             seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
             seo.SEO_INTERNAL_LINKING_ROUTE: lambda: _render_internal_linking(store, state, user),
@@ -1126,10 +1384,10 @@ def _render_active_route(user, route, store, navigate):
     )
 
 
-def render_page(user, route, *, store=None, navigate=None):
+def render_page(user, route, *, store=None, navigate=None, google_store=None):
     if route not in seo.SEO_ROUTES:
         raise ValueError(f"Unknown SEO route: {route}")
     _inject_styles()
     _render_notice()
     store = store or seo.default_store()
-    _render_active_route(user, route, store, navigate)
+    _render_active_route(user, route, store, navigate, google_store)

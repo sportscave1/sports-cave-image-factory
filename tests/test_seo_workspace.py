@@ -321,12 +321,17 @@ class SEOOverviewAndUIContractTests(unittest.TestCase):
         navigation_source = (ROOT / "seo_navigation.py").read_text(encoding="utf-8")
         for route in seo_navigation.SEO_NAV_LABELS.values():
             self.assertIn(route, navigation_source)
-        self.assertIn('class="sc-seo-future-value">—', source)
-        self.assertIn("Not connected", source)
-        self.assertIn("GSC Connection — Planned", source)
+        self.assertIn('class="sc-seo-future-value">&mdash;', source)
+        self.assertIn(
+            "Not connected",
+            (ROOT / "google_seo.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn("Connect Google", source)
+        self.assertIn("Google Search Console", source)
+        self.assertIn("Google Analytics 4", source)
+        self.assertNotIn('<span class="sc-seo-badge">Planned</span>', source)
         self.assertIn("This module never writes to Shopify", source)
         self.assertIn("This workspace does not send outreach messages", source)
-        self.assertNotIn("connect Google", source)
         self.assertNotIn("Klaviyo", source)
         self.assertNotIn("SOP", source)
 

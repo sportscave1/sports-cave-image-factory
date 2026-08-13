@@ -1,3 +1,4 @@
+import logging
 import os
 
 from starlette.routing import Route
@@ -7,6 +8,8 @@ import app_branding
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
+import google_seo
+from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 
 
@@ -16,9 +19,17 @@ routes = [
         *FILES_UPLOAD_ROUTES,
         *COLLECTOR_VAULT_ROUTES,
         *TOP_BAR_ROUTE_HANDLERS,
+        *GOOGLE_SEO_ROUTE_HANDLERS,
     )
 ]
 routes.extend(app_branding.public_branding_routes())
+
+
+class _GoogleOAuthAccessLogFilter(logging.Filter):
+    def filter(self, record):
+        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
 streamlit_app = App("app.py", routes=routes)
 app = app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
 
