@@ -38,7 +38,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "find me the strongest, most accurate, and most useful reference images",
             prompt,
         )
-        self.assertIn("display them directly in this chat as an image carousel", prompt)
+        self.assertIn("using the separate image carousels required below", prompt)
         self.assertIn("Find multiple different image types, not just one hero photo.", prompt)
         self.assertIn("The correct athlete, driver, team, rivalry, event, season, era", prompt)
         self.assertIn("If Motorsport:", prompt)
@@ -48,12 +48,15 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("If Cricket:", prompt)
         self.assertIn("If Boxing/UFC:", prompt)
         self.assertIn("If NFL/Baseball/Ice Hockey:", prompt)
-        self.assertIn("Display a strong variety of images", prompt)
+        self.assertIn("Across the separate carousels", prompt)
         self.assertIn("Only display the strongest and most accurate images directly in this chat", prompt)
-        self.assertIn("Task context: Michael Jordan final shot collector piece", prompt)
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER), 1)
+        self.assertIn("DESIGN TITLE: Michael Jordan final shot collector piece", prompt)
+        self.assertEqual(
+            prompt.count(design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER),
+            1,
+        )
         self.assertIn("* Michael Jordan -> authentic signature image; role: signature_asset; subject_name: Michael Jordan", prompt)
-        self.assertNotIn("The strongest angle is the final shot", prompt)
+        self.assertIn("RESEARCH BRIEF: The strongest angle is the final shot", prompt)
         self.assertNotIn("recommendations, or creative direction", prompt.split("Only find and display the images.")[1])
         self.assertNotIn("display approximately 10-12 strong images", prompt)
         self.assertNotIn("Limited-edition plaque position", prompt)
@@ -65,16 +68,18 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "",
         )
 
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER), 1)
-        self.assertIn("find one and only one authentic signature or autograph image", prompt)
+        self.assertEqual(
+            prompt.count(design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER),
+            1,
+        )
+        self.assertIn("Return exactly one signature image for each distinct principal named person", prompt)
         self.assertIn("* Michael Jordan -> authentic signature image; role: signature_asset; subject_name: Michael Jordan", prompt)
-        self.assertIn("Place the strongest signature reference for each named subject directly in the same image carousel", prompt)
-        self.assertIn("A signature must never be classified as:", prompt)
-        self.assertIn("* Hero image", prompt)
-        self.assertIn("* Background image", prompt)
-        self.assertIn("If no sufficiently reliable signature can be found", prompt)
-        self.assertIn("Do not fabricate or approximate one", prompt)
-        self.assertIn("Maximum signature images permitted in the entire carousel: 1", prompt)
+        self.assertIn("1. PLAYER — Michael Jordan", prompt)
+        self.assertIn("2. DESIGN REFERENCES", prompt)
+        self.assertIn("3. SIGNATURES: return exactly 1 signature asset(s)", prompt)
+        self.assertIn("A signature reference must never count as a player", prompt)
+        self.assertIn("If no reliable signature can be verified", prompt)
+        self.assertIn("Never fabricate or approximate it", prompt)
         self.assertEqual(prompt.count("signature_slot_limit: 1"), 1)
 
     def test_find_images_signature_search_targets_each_rival(self):
@@ -83,12 +88,16 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "",
         )
 
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER), 1)
+        self.assertEqual(
+            prompt.count(design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER),
+            1,
+        )
         self.assertIn("* Joe Montana -> authentic signature image; role: signature_asset; subject_name: Joe Montana", prompt)
         self.assertIn("* Terry Bradshaw -> authentic signature image; role: signature_asset; subject_name: Terry Bradshaw", prompt)
-        self.assertIn("For a two-player rivalry, retrieve one authentic signature for each rival.", prompt)
-        self.assertIn("Never assign one player's signature to another player.", prompt)
-        self.assertIn("Maximum signature images permitted in the entire carousel: 2", prompt)
+        self.assertIn("1. PLAYER — Joe Montana", prompt)
+        self.assertIn("2. PLAYER — Terry Bradshaw", prompt)
+        self.assertIn("4. SIGNATURES: return exactly 2 signature asset(s)", prompt)
+        self.assertIn("Return exactly one signature image for each distinct principal named person", prompt)
         self.assertEqual(prompt.count("signature_slot_limit: 1"), 2)
 
     def test_find_images_signature_search_targets_multi_player_context(self):
@@ -106,8 +115,9 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         for name in ("Michael Jordan", "Scottie Pippen", "Dennis Rodman"):
             self.assertIn(f"* {name} -> authentic signature image; role: signature_asset; subject_name: {name}", prompt)
-        self.assertIn("For a multi-player design, retrieve one authentic signature for every principal named player", prompt)
-        self.assertIn("Maximum signature images permitted in the entire carousel: 3", prompt)
+        for index, name in enumerate(("Michael Jordan", "Scottie Pippen", "Dennis Rodman"), start=1):
+            self.assertIn(f"{index}. PLAYER — {name}", prompt)
+        self.assertIn("5. SIGNATURES: return exactly 3 signature asset(s)", prompt)
         self.assertEqual(prompt.count("signature_slot_limit: 1"), 3)
 
     def test_find_images_signature_slots_are_deduplicated_by_featured_person(self):
@@ -123,8 +133,8 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Distinct named principal human subjects: 1", prompt)
-        self.assertIn("Maximum signature images permitted in the entire carousel: 1", prompt)
+        self.assertIn("PRINCIPAL SUBJECTS: Michael Jordan", prompt)
+        self.assertEqual(prompt.count("PLAYER — Michael Jordan:"), 1)
         self.assertEqual(prompt.count("signature_slot_limit: 1"), 1)
 
     def test_find_images_shared_reference_balance_is_authoritative_and_ordered(self):
@@ -134,24 +144,25 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         )
 
         priority_headings = (
-            "1. FEATURED PLAYER / HERO REFERENCES - HIGHEST PRIORITY",
-            "2. VENUE / BACKGROUND REFERENCES - SECOND PRIORITY",
-            "3. EQUIPMENT / TROPHY / HISTORICAL DETAIL REFERENCES - THIRD PRIORITY",
-            "4. SIGNATURE REFERENCES - SUPPORTING REFERENCES ONLY AND ALWAYS LAST",
+            "MANDATORY MULTI-SEARCH WORKFLOW",
+            "PLAYER CAROUSEL — MINIMUM CONTENT PER PLAYER",
+            "SHARED DESIGN-REFERENCE CAROUSEL",
+            "SIGNATURE CAROUSEL — ALWAYS LAST",
         )
         heading_positions = [prompt.index(heading) for heading in priority_headings]
         self.assertEqual(heading_positions, sorted(heading_positions))
-        self.assertIn("Player and hero photographs must dominate the results.", prompt)
-        self.assertIn("The clear majority of all non-signature results must be useful, high-quality player or hero photographs.", prompt)
-        self.assertIn("Player/hero and venue/background references together must dominate the complete carousel.", prompt)
-        self.assertIn("provide balanced coverage of every featured hero", prompt)
-        self.assertIn("Never classify memorabilia-product photography as a background reference.", prompt)
-        self.assertIn("Never return a second signature example for the same person.", prompt)
-        self.assertIn("Never fill unused carousel positions with additional signature or autograph material.", prompt)
-        self.assertIn("including a signed action photograph, consumes that person's one signature slot", prompt)
-        self.assertIn("must not also count as a player, hero or action reference", prompt)
-        self.assertIn("Never return several such items for the same person.", prompt)
-        self.assertIn("Signature references must appear at the very end of the carousel", prompt)
+        self.assertIn("Do not perform one broad image search and mix all results together.", prompt)
+        self.assertIn("Return 6 to 10 genuinely useful", prompt)
+        self.assertIn("At least half of every player's carousel must show that player's face clearly", prompt)
+        self.assertIn("target at least 1200 pixels on the longest edge and prefer 2000 pixels or more", prompt)
+        self.assertIn("Only after every player carousel is complete", prompt)
+        self.assertIn("return one separate shared carousel containing 5 to 8 strong images", prompt)
+        self.assertIn("Return exactly one signature image for each distinct principal named person", prompt)
+        self.assertIn("Signed material is permitted only in the final signature carousel", prompt)
+        self.assertIn("* Trading cards of any kind", prompt)
+        self.assertIn("* Autographed player photographs", prompt)
+        self.assertIn("* Signed cards, balls, helmets, jerseys or boots", prompt)
+        self.assertNotIn("Place the strongest signature reference for each named subject directly in the same image carousel", prompt)
 
     def test_find_images_shared_rules_appear_once_for_single_rivalry_and_group_designs(self):
         cases = (
@@ -189,12 +200,14 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
                     design_context=context,
                 )
                 self.assertEqual(
-                    prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER),
+                    prompt.count(
+                        design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER
+                    ),
                     1,
                 )
                 self.assertEqual(prompt.count("signature_slot_limit: 1"), expected_slots)
                 self.assertIn(
-                    f"Maximum signature images permitted in the entire carousel: {expected_slots}",
+                    f"SIGNATURES: return exactly {expected_slots} signature asset(s)",
                     prompt,
                 )
 
@@ -204,10 +217,17 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "",
         )
 
-        self.assertEqual(prompt.count(design_studio_page.SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER), 1)
-        self.assertIn("do not request a signature asset", prompt)
+        self.assertEqual(
+            prompt.count(design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER),
+            1,
+        )
+        self.assertIn("Do not request an irrelevant signature", prompt)
         self.assertNotIn("Ford Mustang -> authentic signature image", prompt)
         self.assertNotIn("race car -> authentic signature image", prompt)
+
+        task_context = prompt.split("TASK-SPECIFIC VARIABLES AND RESEARCH CONTEXT", 1)[1]
+        self.assertNotIn(". PLAYER —", task_context)
+        self.assertIn("Omit PLAYER and SIGNATURES carousels", task_context)
 
     def test_find_images_signature_search_targets_named_motorsport_driver(self):
         prompt = design_studio_page.build_design_image_carousel_prompt(
@@ -216,6 +236,63 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         )
 
         self.assertIn("* Ayrton Senna -> authentic signature image; role: signature_asset; subject_name: Ayrton Senna", prompt)
+
+    def test_find_images_v2_source_is_inserted_verbatim_before_task_context(self):
+        prompt = design_studio_page.build_design_image_carousel_prompt(
+            "Create Michael Jordan final shot collector artwork",
+            "Verified research context.",
+        )
+        source = design_studio_page.HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH.read_text(
+            encoding="utf-8"
+        ).strip()
+        source_start = prompt.index(
+            design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER
+        )
+        context_start = prompt.index("TASK-SPECIFIC VARIABLES AND RESEARCH CONTEXT")
+
+        self.assertEqual(prompt[source_start:context_start].strip(), source)
+        self.assertLess(source_start, context_start)
+        self.assertEqual(prompt.count(source), 1)
+
+    def test_find_images_player_carousels_precede_design_references_and_signatures(self):
+        prompt = design_studio_page.build_design_image_carousel_prompt(
+            "Create a Chicago legends collector artwork",
+            "Verified three-player research.",
+            design_context={
+                "principal_subjects": [
+                    {"name": "Michael Jordan"},
+                    {"name": "Scottie Pippen"},
+                    {"name": "Dennis Rodman"},
+                ]
+            },
+        )
+        execution_plan = prompt.split("REQUIRED SEARCH AND CAROUSEL EXECUTION PLAN", 1)[1]
+        expected = (
+            "1. PLAYER — Michael Jordan",
+            "2. PLAYER — Scottie Pippen",
+            "3. PLAYER — Dennis Rodman",
+            "4. DESIGN REFERENCES",
+            "5. SIGNATURES",
+        )
+        positions = [execution_plan.index(item) for item in expected]
+
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(execution_plan.count("signature_slot_limit: 1"), 3)
+        self.assertIn("run and complete a separate search", execution_plan)
+
+    def test_find_images_v2_does_not_leak_into_research_or_artwork_generation(self):
+        research_prompt = design_studio_page.build_design_research_prompt(
+            "Michael Jordan final shot collector artwork"
+        )
+        artwork_prompt = design_studio_page.build_design_generation_prompt(
+            "Michael Jordan final shot collector artwork"
+        )
+        marker = design_studio_page.SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER
+
+        self.assertNotIn(marker, research_prompt)
+        self.assertNotIn(marker, artwork_prompt)
+        self.assertIn(design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER, artwork_prompt)
+        self.assertIn(design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER, artwork_prompt)
 
     def test_design_generation_prompt_uses_research_context_and_design_system(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")

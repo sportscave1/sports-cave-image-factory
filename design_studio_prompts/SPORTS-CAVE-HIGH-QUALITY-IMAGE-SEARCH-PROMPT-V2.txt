@@ -1,0 +1,217 @@
+SPORTS CAVE DESIGN STUDIO — HIGH-QUALITY REFERENCE IMAGE SEARCH V2
+
+PLACEMENT
+
+Codex must insert this entire block immediately before the Design Studio Find Images task variables. This block overrides any older image-carousel ordering, quantity, or signature-placement rule where they conflict.
+
+PURPOSE
+
+The images returned are working reference assets for creating a realistic, premium Sports Cave collector artwork. The main objective is not variety for its own sake. The main objective is to give ChatGPT enough clear, accurate photographic evidence to preserve each featured person's real face, head shape, body, uniform, equipment, era and iconic identity.
+
+The quality of the player references is more important than filling every slot. Never return a weak image merely to complete a carousel.
+
+MANDATORY MULTI-SEARCH WORKFLOW
+
+Do not perform one broad image search and mix all results together.
+
+First identify every principal player, athlete, driver, rider, fighter or other named human subject established by the task, research brief and visible chat context.
+
+Then perform separate image searches and produce separate carousels in this exact sequence:
+
+1. PLAYER 1 — dedicated identity and hero-reference carousel
+2. PLAYER 2 — dedicated identity and hero-reference carousel
+3. Continue with one dedicated carousel for each additional principal player
+4. SHARED DESIGN REFERENCES — venue, stadium, background, iconic event, atmosphere, trophy and factual details
+5. SIGNATURE REFERENCES — one isolated signature for each principal player, always last
+
+Never combine several players into one player-reference carousel. Complete Player 1 before searching for Player 2. Give every player balanced, independent coverage.
+
+If only one player is featured, produce:
+
+1. One dedicated player-reference carousel
+2. One shared design-reference carousel
+3. One final signature carousel containing exactly one signature asset
+
+If there is no named human subject, omit player and signature carousels and return only the relevant subject, venue, vehicle, equipment and historical-reference carousels.
+
+PLAYER CAROUSEL — MINIMUM CONTENT PER PLAYER
+
+Return 6 to 10 genuinely useful, distinct, high-quality photographic images for each principal player whenever suitable images exist.
+
+Each player's carousel must contain, in priority order:
+
+1. FACE IDENTITY REFERENCE — FRONT OR NEAR-FRONT
+   - Clear, unobstructed, recognisable face
+   - Eyes, nose, mouth, jaw, ears, hairline and skin texture visibly resolved
+   - Head and shoulders or chest-up crop preferred
+   - Neutral, focused or authentic game expression
+   - No helmet, sunglasses, hand, microphone, heavy shadow or object hiding important facial features when an uncovered-face image exists
+
+2. FACE IDENTITY REFERENCE — THREE-QUARTER ANGLE
+   - A different real photograph and facial angle
+   - Sharp eyes and natural facial proportions
+   - Useful for recognising the subject from more than one view
+
+3. FACE IDENTITY REFERENCE — SECOND ALTERNATE ANGLE
+   - Side, opposite three-quarter angle, candid sideline image or celebration close-up
+   - Must add new facial information rather than repeat the same photograph or crop
+
+4. BODY AND UNIFORM REFERENCE
+   - Three-quarter-body or full-body photograph
+   - Correct team, country, season, era, jersey, number, logos, footwear and equipment
+   - Natural body proportions and a clearly readable uniform silhouette
+
+5. AUTHENTIC ACTION REFERENCE
+   - High-quality sporting action in the correct kit and era
+   - Face should remain visible where reasonably possible
+   - Pose must be useful for a hero composition
+
+6. ICONIC MOMENT REFERENCE
+   - A recognised career-defining play, celebration, championship moment or emotionally important image connected to the design concept
+   - Must still be photographically useful and historically accurate
+
+7–10. OPTIONAL SUPPORTING PLAYER REFERENCES
+   - Additional sharp face angles
+   - Helmet-on and helmet-off comparison where relevant
+   - Uniform front, back or equipment detail
+   - Celebration, tunnel, podium, sideline or rivalry moment
+   - Use only when each image adds distinct identity, pose, uniform or historical information
+
+FACE-FIRST ALLOCATION RULE
+
+At least half of every player's carousel must show that player's face clearly enough to aid identity reconstruction. When the face is normally obscured in competition, search press conferences, official portraits, sideline photographs, podiums, weigh-ins, warm-ups or other era-appropriate editorial photography for clear facial evidence.
+
+An action photograph with a tiny, blurred or helmet-obscured face does not count as a face-identity reference.
+
+IMAGE QUALITY GATE — EVERY PLAYER IMAGE MUST PASS
+
+Open or inspect the source page and select the largest available original or editorial image. Do not judge quality from the search thumbnail alone.
+
+Every returned player image must satisfy all applicable checks:
+
+* Authentic photograph of the exact intended person
+* Face recognisable at normal carousel viewing size
+* Sharp or naturally film-grained, never visibly pixelated or smeared
+* Sufficient resolution for close inspection; target at least 1200 pixels on the longest edge and prefer 2000 pixels or more
+* Correct player, team, season, era, jersey number, uniform and equipment for the intended design
+* Natural proportions, real skin texture and unaltered facial features
+* No strong watermark across the face or body
+* No screenshot chrome, social-media interface, video-player controls or webpage text
+* No severe compression artifacts or enlarged thumbnail
+* No duplicate photograph, alternate crop, colourised copy or mirrored copy of another selected result
+
+For genuinely historic subjects, an original high-resolution archival scan with authentic grain is acceptable. Age alone is not a defect. Reject small, muddy, blocky or artificially sharpened reproductions.
+
+SOURCE PRIORITY
+
+Prefer, in order:
+
+1. Official league, team, club, tournament, athlete or hall-of-fame photography
+2. Reputable editorial and sports-photo archives with full-size previews
+3. Major news organisations and established sports publications
+4. Recognised historical archives and Wikimedia Commons when the file is sufficiently large and accurately attributed
+5. Other credible photographic sources only when image identity, date, uniform and quality can be verified
+
+Do not use a search-engine thumbnail URL when a larger source image is available.
+
+ABSOLUTE EXCLUSIONS FROM PLAYER CAROUSELS
+
+Never return any of the following as a face, hero, body, uniform, action or iconic-moment reference:
+
+* Trading cards of any kind
+* Signed or unsigned memorabilia listings
+* Autographed player photographs
+* Signed cards, balls, helmets, jerseys or boots
+* Framed products, wall art, posters, prints or existing graphic designs
+* Marketplace, auction or authentication-product photos
+* Collages, montages or contact sheets
+* AI-generated, face-swapped, illustrated, painted, colourised or heavily manipulated images
+* Wax figures, statues, video-game renders or impersonators
+* Fan edits, wallpapers or promotional composites
+* Photos where another person's face dominates or blocks the featured player
+* Tiny search thumbnails, blurry screenshots or low-resolution enlargements
+* Repeated versions of the same photograph
+
+Signed material is permitted only in the final signature carousel and still must obey the strict signature rules below.
+
+SHARED DESIGN-REFERENCE CAROUSEL
+
+Only after every player carousel is complete, return one separate shared carousel containing 5 to 8 strong images selected for the overall design.
+
+Prioritise:
+
+1. Correct venue, stadium, arena, circuit, court, field, course or location
+2. Era-appropriate wide establishing view
+3. Medium view showing recognisable architecture, scoreboard, tunnel, crowd or environmental details
+4. Exact iconic event, rivalry, championship or celebration scene
+5. Correct trophy, vehicle, helmet, kit, equipment or historical detail
+6. Useful authentic atmosphere such as stadium lights, rain, dust, smoke, sunset, crowd or tunnel lighting
+
+Shared references must be accurate to the researched event and useful for a realistic 4:3 Sports Cave background. Do not add a generic stadium or unrelated trophy merely for visual variety.
+
+Do not use memorabilia products, framed art, trading cards, posters or AI imagery as shared design references.
+
+SIGNATURE CAROUSEL — ALWAYS LAST
+
+Return exactly one signature image for each distinct principal named person and no more.
+
+Each signature asset must:
+
+* Belong to the exact named subject
+* Be the clearest and most credible available specimen
+* Preferably be isolated on a transparent, white or plain background
+* Show complete, uncropped strokes
+* Come from an official, archival or reputable authenticated source where possible
+* Be labelled internally as signature_asset with the exact subject name
+
+A signature reference must never count as a player, face, hero, body, action, venue or background image.
+
+Do not use a signed trading card or signed memorabilia item if a clean isolated signature specimen is available. If no reliable signature can be verified, mark that person's signature unavailable. Never fabricate or approximate it.
+
+RESULT VALIDATION BEFORE DISPLAY
+
+Before returning the carousels, check every selected image against the task's verified subject, season, venue, uniform and historical details.
+
+For every player, confirm:
+
+* The first three usable results provide distinct, clear facial views
+* At least one result clearly shows body shape and the correct uniform
+* At least one result shows authentic action
+* At least one result represents the iconic or emotional moment when available
+* No memorabilia, card, poster, artwork or duplicate has entered the player carousel
+* No wrong-era or wrong-team image has been substituted because it was visually sharper
+
+If the correct-era material is limited, use clear photographs from the nearest accurate period for facial identity only, while keeping all uniform, action, venue and event references historically exact. Internally identify any facial-reference-only exception. Never silently present the wrong kit or era as historically exact.
+
+OUTPUT CONTRACT
+
+Display images only. Do not repeat the research and do not add analysis, recommendations, creative direction, captions or explanatory paragraphs.
+
+Use separate image carousels in this exact visible order:
+
+1. One carousel for each player, one player at a time
+2. One shared venue/background/iconic-moment/detail carousel
+3. One signature carousel, last
+
+Where the interface supports headings without violating the image-only contract, use only these short labels:
+
+PLAYER — [FULL NAME]
+DESIGN REFERENCES
+SIGNATURES
+
+Use descriptive alt text and internal metadata for every image. Include the subject's exact name, reference role, team/era where known, and whether it is face_front, face_three_quarter, face_alternate, body_uniform, action, iconic_moment, venue, equipment_detail, atmosphere or signature_asset.
+
+Do not collapse all results into one mixed carousel. Do not reduce player coverage to make room for backgrounds. Do not stop after finding one acceptable image of a player. Facial identity and authentic uniform coverage are the highest priority.
+
+TASK VARIABLES — INSERT BELOW THIS LINE
+
+[DESIGN TITLE]
+[RESEARCH BRIEF]
+[PRINCIPAL SUBJECTS]
+[SPORT]
+[TEAM / COUNTRY]
+[SEASON / ERA]
+[EVENT / MOMENT]
+[VENUE / LOCATION]
+[CORRECT UNIFORM / EQUIPMENT DETAILS]
+[OUTPUT IMAGE CAPACITY OR INTERFACE LIMITS]

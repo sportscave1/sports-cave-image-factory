@@ -17,6 +17,11 @@ BASE_DIR = Path(__file__).resolve().parent
 EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH = (
     BASE_DIR / "design_studio_prompts" / "expired_edition_next_chapter_prompt.txt"
 )
+HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH = (
+    BASE_DIR
+    / "design_studio_prompts"
+    / "SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt"
+)
 NEW_DESIGN_TASK_CATEGORY = "New designs to complete"
 MANUAL_NEW_DESIGN_TASK_OPTION = "Enter task manually"
 DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER = "HIGHEST-PRIORITY SOURCE SUBJECT LOCK — MANDATORY"
@@ -801,6 +806,14 @@ Never assign one player's signature to another player.
 
 If no sufficiently reliable signature can be found for a subject, state or mark that signature asset as unavailable using the existing internal workflow metadata or unavailable state. Do not fabricate or approximate one, do not return several uncertain examples, and do not replace it with signed merchandise. Continue with the other valid player, venue and factual-detail reference images.
 """
+
+
+SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER = (
+    "SPORTS CAVE DESIGN STUDIO — HIGH-QUALITY REFERENCE IMAGE SEARCH V2"
+)
+SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2 = (
+    HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH.read_text(encoding="utf-8").strip()
+)
 
 
 SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_MARKER = "SPORTS_CAVE_AUTHENTIC_SIGNATURE_APPLICATION_RULES_V1"
@@ -1746,7 +1759,7 @@ Stop after completing the research brief.
 
 
 DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE = """
-Based on everything above, find me the strongest, most accurate, and most useful reference images for this Sports Cave design and display them directly in this chat as an image carousel.
+Based on everything above, find me the strongest, most accurate, and most useful reference images for this Sports Cave design and display them directly in this chat using the separate image carousels required below.
 
 Do not copy and paste or repeat the research.
 Do not provide more research, analysis, recommendations, or creative direction.
@@ -1847,7 +1860,7 @@ Find images of:
 - Trophy, celebration, rivalry, or iconic moment references
 - Equipment close-ups if useful
 
-Display a strong variety of images, including:
+Across the separate carousels, include the applicable reference types below:
 - Main hero subject
 - Supporting action image
 - Venue/background image
@@ -1857,7 +1870,7 @@ Display a strong variety of images, including:
 
 Do not show weak, generic, inaccurate, low-resolution, cartoon, AI-looking, wrong-era, wrong-kit, wrong-car, wrong-stadium, or unrelated images.
 
-Only display the strongest and most accurate images directly in this chat as an image carousel.
+Only display the strongest and most accurate images directly in this chat using the required separate carousels.
 """
 
 
@@ -2692,7 +2705,9 @@ def design_studio_prompt_has_rivalry_composition_rules(prompt_text: str) -> bool
 
 
 def design_studio_prompt_has_signature_image_search_rules(prompt_text: str) -> bool:
-    return SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_MARKER.casefold() in str(prompt_text or "").casefold()
+    return SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER.casefold() in str(
+        prompt_text or ""
+    ).casefold()
 
 
 def design_studio_prompt_has_signature_application_rules(prompt_text: str) -> bool:
@@ -3039,33 +3054,114 @@ def verified_signature_asset_records_from_context(design_context=None) -> list[d
     return deduped
 
 
-def build_signature_image_search_context(task_text: str, *, design_context=None) -> str:
+def _find_design_context_value(value, keys: tuple[str, ...]):
+    if isinstance(value, dict):
+        for key in keys:
+            candidate = value.get(key)
+            if candidate not in (None, "", [], (), {}):
+                return candidate
+        for nested_value in value.values():
+            if isinstance(nested_value, (dict, list, tuple)):
+                candidate = _find_design_context_value(nested_value, keys)
+                if candidate not in (None, "", [], (), {}):
+                    return candidate
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            candidate = _find_design_context_value(item, keys)
+            if candidate not in (None, "", [], (), {}):
+                return candidate
+    return ""
+
+
+def _format_find_images_context_value(value, fallback: str) -> str:
+    if isinstance(value, dict):
+        values = [str(item).strip() for item in value.values() if str(item).strip()]
+        return "; ".join(values) if values else fallback
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            if isinstance(item, dict):
+                item = _signature_subject_name_from_context(item) or _find_design_context_value(
+                    item,
+                    ("title", "name", "label", "value"),
+                )
+            text = str(item or "").strip()
+            if text:
+                values.append(text)
+        return "; ".join(values) if values else fallback
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def build_high_quality_image_search_context(
+    task_text: str,
+    research_answer: str,
+    *,
+    design_context=None,
+) -> str:
+    subject_detection_text = "\n".join(
+        value
+        for value in (str(task_text or "").strip(), str(research_answer or "").strip())
+        if value
+    )
     records = signature_subject_records_from_context(
         design_context,
-        fallback_text=task_text,
+        fallback_text=subject_detection_text,
     )
+    task = _task_or_placeholder(task_text)
+    unavailable = "Use the verified task, research brief and visible chat context."
+    variable_specs = (
+        ("SPORT", ("sport", "sport_name")),
+        ("TEAM / COUNTRY", ("team_country", "team", "club", "country", "nation")),
+        ("SEASON / ERA", ("season_era", "season", "era", "year")),
+        ("EVENT / MOMENT", ("event_moment", "event", "moment", "match", "race")),
+        ("VENUE / LOCATION", ("venue_location", "venue", "location", "stadium", "circuit")),
+        (
+            "CORRECT UNIFORM / EQUIPMENT DETAILS",
+            ("uniform_equipment_details", "uniform", "kit", "equipment", "livery"),
+        ),
+    )
+    title = _find_design_context_value(
+        design_context,
+        ("design_title", "title", "task", "task_text"),
+    ) or task
+    research = str(research_answer or "").strip() or (
+        "Use the verified research brief already present above in this chat."
+    )
+    subject_names = [record["name"] for record in records]
+    principal_subjects = "; ".join(subject_names) if subject_names else (
+        "No named principal human subject detected. Use the verified non-human principal subject from the task and research."
+    )
+
     lines = [
-        "SIGNATURE ASSET TARGETS",
+        "TASK-SPECIFIC VARIABLES AND RESEARCH CONTEXT",
         "",
-        "Use the task, prior research and visible chat context to identify named principal human sporting subjects.",
+        f"DESIGN TITLE: {_format_find_images_context_value(title, task)}",
+        f"RESEARCH BRIEF: {research}",
+        f"PRINCIPAL SUBJECTS: {principal_subjects}",
     ]
-    task = str(task_text or "").strip()
-    if task:
-        lines.extend(["", f"Task context: {task}"])
-    if records:
-        signature_limit = len(records)
-        lines.extend(
-            [
-                "",
-                f"Distinct named principal human subjects: {signature_limit}",
-                f"Maximum signature images permitted in the entire carousel: {signature_limit}",
-                "Each listed subject has exactly one signature slot. Never return a second signature or signed-memorabilia image for that subject.",
-                "",
-                "Signature assets to retrieve at the end of the same image carousel:",
-            ]
+    for label, keys in variable_specs:
+        lines.append(
+            f"{label}: {_format_find_images_context_value(_find_design_context_value(design_context, keys), unavailable)}"
         )
-        for record in records:
-            name = record["name"]
+    lines.append(
+        "OUTPUT IMAGE CAPACITY OR INTERFACE LIMITS: The application imposes no mixed-search or total-result limit. Follow the V2 per-carousel ranges and keep every carousel separate."
+    )
+
+    lines.extend(["", "REQUIRED SEARCH AND CAROUSEL EXECUTION PLAN", ""])
+    if subject_names:
+        for index, name in enumerate(subject_names, start=1):
+            lines.append(
+                f"{index}. PLAYER — {name}: run and complete a separate search, then return 6–10 qualifying player photographs before moving to the next person."
+            )
+        lines.append(
+            f"{len(subject_names) + 1}. DESIGN REFERENCES: run one separate shared search and return 5–8 qualifying venue, background, iconic-moment, trophy, equipment and historical-detail references."
+        )
+        lines.append(
+            f"{len(subject_names) + 2}. SIGNATURES: return exactly {len(subject_names)} signature asset(s), one for each distinct principal person, as the final carousel."
+        )
+        lines.extend(["", "EXACT SIGNATURE ASSET MAPPING"])
+        for name in subject_names:
             lines.append(
                 f"* {name} -> authentic signature image; role: signature_asset; "
                 f"subject_name: {name}; signature_slot_limit: 1"
@@ -3073,13 +3169,20 @@ def build_signature_image_search_context(task_text: str, *, design_context=None)
     else:
         lines.extend(
             [
-                "",
-                "No named principal human subject was detected from the task text alone.",
-                "If the research/chat context names principal human sporting subjects, retrieve one authentic signature asset for each of them.",
-                "If the task is vehicle-only, venue-only, trophy-only, jersey-only, team-logo-only or otherwise has no named principal human subject, do not request a signature asset.",
+                "1. DESIGN REFERENCES: return only the relevant subject, venue, vehicle, equipment and historical-reference carousel(s).",
+                "2. Omit PLAYER and SIGNATURES carousels unless the verified research or visible chat context establishes a named principal human subject.",
+                "Do not request an irrelevant signature for a vehicle-only, venue-only, trophy-only, jersey-only or team-only design.",
             ]
         )
     return "\n".join(lines)
+
+
+def build_signature_image_search_context(task_text: str, *, design_context=None) -> str:
+    return build_high_quality_image_search_context(
+        task_text,
+        "",
+        design_context=design_context,
+    )
 
 
 def build_signature_asset_mapping_context(prompt_text: str, *, design_context=None) -> str:
@@ -3370,13 +3473,17 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, 
     prompt = _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
     if design_studio_prompt_has_signature_image_search_rules(prompt):
         return prompt
-    signature_sections = [
-        _clean_prompt(SPORTS_CAVE_SIGNATURE_IMAGE_SEARCH_RULES_V1),
-        build_signature_image_search_context(task_text, design_context=design_context),
+    image_search_sections = [
+        _clean_prompt(SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2),
+        build_high_quality_image_search_context(
+            task_text,
+            research_answer,
+            design_context=design_context,
+        ),
     ]
     return "\n\n".join(
         section
-        for section in (prompt, *signature_sections)
+        for section in (prompt, *image_search_sections)
         if str(section or "").strip()
     )
 
