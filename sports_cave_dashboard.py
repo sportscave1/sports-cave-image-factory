@@ -1648,14 +1648,18 @@ def daily_execution_user_name(user):
     )
 
 
-def _require_daily_execution_owner(user):
-    if not os_accounts.is_reporting_owner(user):
+def can_manage_daily_planner(user):
+    return os_accounts.is_admin(user)
+
+
+def _require_daily_execution_admin(user):
+    if not can_manage_daily_planner(user):
         raise DashboardStorageError("Daily Execution access is not available for this account.")
     return daily_execution_user_id(user)
 
 
 def get_daily_execution_sheet(user, sheet_date):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
     cache_key = ("daily_execution", user_id, clean_date)
     cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
@@ -1671,7 +1675,7 @@ def get_daily_execution_sheet(user, sheet_date):
 
 
 def get_daily_execution_home_sheets(user, today):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_today = today.isoformat() if isinstance(today, date) else str(today or "")
     tomorrow = date.fromisoformat(clean_today) + timedelta(days=1)
     cache_key = ("daily_home", user_id, clean_today)
@@ -1728,7 +1732,7 @@ def get_daily_execution_home_sheets(user, today):
 
 
 def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
     try:
         backend = get_supabase_backend()
@@ -1757,7 +1761,7 @@ def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None
 
 
 def save_daily_execution_top_tasks(sheet_id, top_tasks, *, user=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(
@@ -1774,7 +1778,7 @@ def save_daily_execution_top_tasks(sheet_id, top_tasks, *, user=None):
 
 
 def save_daily_execution_tasks(sheet_id, top_tasks, additional_items, *, user=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(
@@ -1792,7 +1796,7 @@ def save_daily_execution_tasks(sheet_id, top_tasks, additional_items, *, user=No
 
 
 def set_daily_execution_mip_completed(sheet_id, index, completed, *, outcome=None, user=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_outcome = _compact_text(outcome or "").casefold()
     if clean_outcome not in DAILY_TASK_FINISHED_STATUSES:
         clean_outcome = DAILY_TASK_STATUS_DONE if bool(completed) else ""
@@ -1815,7 +1819,7 @@ def set_daily_execution_mip_completed(sheet_id, index, completed, *, outcome=Non
 
 
 def complete_daily_execution_review(sheet_id, review_payload, *, user=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
@@ -1832,7 +1836,7 @@ def complete_daily_execution_review(sheet_id, review_payload, *, user=None):
 
 
 def save_daily_execution_prompt(sheet_id, prompt, *, user=None):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(
@@ -1849,7 +1853,7 @@ def save_daily_execution_prompt(sheet_id, prompt, *, user=None):
 
 
 def list_daily_execution_sheets(user, start_date, end_date, *, limit=10):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         rows = backend.list_daily_execution_sheets(
@@ -1874,7 +1878,7 @@ def save_daily_execution_plan(
     archive_sheet_id=None,
 ):
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
@@ -1928,7 +1932,7 @@ def save_daily_execution_plan(
 
 
 def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=8):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
     clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
     cache_key = ("daily_week", user_id, clean_start, clean_end, int(limit))
@@ -1954,7 +1958,7 @@ def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=
 
 
 def get_daily_execution_archive_detail(user, sheet_id):
-    user_id = _require_daily_execution_owner(user)
+    user_id = _require_daily_execution_admin(user)
     clean_id = str(sheet_id or "").strip()
     cache_key = ("daily_archive_detail", user_id, clean_id)
     cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)

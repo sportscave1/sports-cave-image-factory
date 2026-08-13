@@ -4333,17 +4333,10 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
                 selected_task["metadata"]["design_details"] = dict(details)
     if len(defaults.get("_saved_principal_subjects") or []) > 2:
         details["principal_subjects"] = defaults["_saved_principal_subjects"]
-    st.markdown('<div id="design-studio-workflow"></div>', unsafe_allow_html=True)
-    if st.session_state.pop("design-studio-scroll-to-workflow", False):
-        components.html(
-            """
-            <script>
-            const marker = window.parent.document.getElementById('design-studio-workflow');
-            if (marker) marker.scrollIntoView({behavior: 'smooth', block: 'start'});
-            </script>
-            """,
-            height=0,
-        )
+    st.markdown(
+        '<div id="design-studio-workflow" class="sc-design-studio-workflow"></div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         '<div class="sc-design-v2-steps">1 Research &nbsp;&rarr;&nbsp; 2 Find Images &nbsp;&rarr;&nbsp; 3 Generate</div>',
         unsafe_allow_html=True,

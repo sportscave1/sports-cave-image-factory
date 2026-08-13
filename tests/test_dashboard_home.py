@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit.testing.v1 import AppTest
 
 import sc_auth
+import design_schedule
 import os_accounts
 import sports_cave_dashboard
 import sports_sales_calendar
@@ -1804,7 +1805,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(repeated), 2)
         self.assertEqual(len(backend.activity_rows), event_count)
 
-    def test_daily_execution_data_helpers_reject_non_owner_accounts(self):
+    def test_daily_execution_data_helpers_allow_active_admins_and_reject_workers(self):
         backend = FakeDashboardBackend()
         worker = {
             "id": "worker-1",
@@ -1818,9 +1819,22 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "role": "admin",
             "is_active": True,
         }
+        inactive_admin = {
+            "id": "admin-3",
+            "email": "inactive@sportscave.test",
+            "role": "admin",
+            "is_active": False,
+        }
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
-            for user in (worker, non_owner_admin):
+            self.assertEqual(
+                sports_cave_dashboard.get_daily_execution_home_sheets(
+                    non_owner_admin,
+                    date(2026, 7, 21),
+                ),
+                {"today": {}, "tomorrow": {}, "carryover_review": {}},
+            )
+            for user in (worker, inactive_admin):
                 with self.subTest(user=user["id"]), self.assertRaises(
                     sports_cave_dashboard.DashboardStorageError
                 ):
@@ -1828,6 +1842,32 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                         user,
                         date(2026, 7, 21),
                     )
+
+        self.assertEqual([call[0] for call in backend.daily_calls], ["home"])
+
+    def test_daily_execution_mutations_reject_non_admin_direct_calls(self):
+        backend = FakeDashboardBackend()
+        worker = {
+            "id": "worker-1",
+            "email": "worker@sportscave.test",
+            "role": "worker",
+            "is_active": True,
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            with self.assertRaises(sports_cave_dashboard.DashboardStorageError):
+                sports_cave_dashboard.create_daily_execution_sheet(
+                    worker,
+                    date(2026, 7, 21),
+                    "Asia/Manila",
+                )
+            with self.assertRaises(sports_cave_dashboard.DashboardStorageError):
+                sports_cave_dashboard.save_daily_execution_tasks(
+                    "forged-sheet-id",
+                    [{"task": "Forged"}],
+                    [],
+                    user=worker,
+                )
 
         self.assertEqual(backend.daily_calls, [])
 
@@ -2089,7 +2129,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "page_permissions": [os_accounts.REPORTING_PAGE_KEY],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
-        app_test.session_state["selected_page"] = "Reporting"
+        app_test.session_state["selected_page"] = "Dashboard"
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             app_test.run(timeout=20)
@@ -2351,7 +2391,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "page_permissions": [os_accounts.REPORTING_PAGE_KEY],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
-        app_test.session_state["selected_page"] = "Reporting"
+        app_test.session_state["selected_page"] = "Dashboard"
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             app_test.run(timeout=20)
             plan_button = next(button for button in app_test.button if button.label == "Plan tomorrow")
@@ -3272,8 +3312,28 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
-    def test_home_is_notifications_only_and_does_not_query_tasks(self):
+    def test_admin_home_restores_planner_calendar_and_does_not_query_design_tasks(self):
         backend = FakeDashboardBackend()
+        today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
+        backend.daily_sheets = [
+            {
+                "id": "admin-today",
+                "user_id": "admin-1",
+                "user_name": "Nathan",
+                "sheet_date": today,
+                "timezone": "Australia/Sydney",
+                "status": "active",
+                "top_tasks": [
+                    {"task": "Priority one", "status": "done"},
+                    {"task": "Priority two", "status": "done"},
+                    {"task": "Priority three", "status": "done"},
+                ],
+                "additional_items": [{"task": "Other task", "status": "done"}],
+                "ratings": {},
+                "review_data": {},
+                "no_grey_zone": {},
+            }
+        ]
         backend.tasks = [
             {
                 "id": "design-hidden-from-home",
@@ -3305,7 +3365,50 @@ class DashboardRenderContractTests(unittest.TestCase):
         )
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Active alerts", rendered)
+        self.assertIn("Daily Execution", rendered)
+        self.assertIn("MIP Task 1", rendered)
+        self.assertIn("Other tasks", rendered)
+        self.assertIn("Daily Execution Archive", rendered)
+        self.assertIn("Sports &amp; Sales Calendar", rendered)
         self.assertIn("Recent operational activity", rendered)
+        self.assertTrue(any(button.label == "Complete Daily Review" for button in app_test.button))
+
+    def test_non_admin_home_remains_notifications_only_even_with_planner_session_state(self):
+        backend = FakeDashboardBackend()
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "worker-1",
+            "username": "worker",
+            "email": "worker@sportscave.test",
+            "display_name": "Worker",
+            "role": "worker",
+            "timezone": "Asia/Manila",
+            "is_active": True,
+            "page_permissions": ["dashboard"],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+        app_test.session_state["daily_execution_plan_date"] = date.today().isoformat()
+        app_test.session_state["daily_execution_review_sheet_id"] = "forged-sheet-id"
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            app_test.run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual(backend.daily_calls, [])
+        rendered = "\n".join(str(item.value) for item in app_test.markdown)
+        self.assertIn("Active alerts", rendered)
+        self.assertNotIn("Daily Execution", rendered)
+        self.assertNotIn("Daily Execution Archive", rendered)
+        self.assertNotIn("Sports & Sales Calendar", rendered)
+        planner_labels = {
+            "Create today's sheet",
+            "Save List",
+            "Complete Daily Review",
+            "Plan tomorrow",
+        }
+        self.assertFalse(planner_labels.intersection({button.label for button in app_test.button}))
 
     def test_design_schedule_queries_and_renders_only_the_visible_view(self):
         backend = FakeDashboardBackend()
@@ -3409,6 +3512,21 @@ class DashboardRenderContractTests(unittest.TestCase):
                 for button in app_test.button
                 if button.key == "design-schedule-open::active-designs"
             ).click().run(timeout=20)
+            self.assertEqual(
+                app_test.session_state.filtered_state.get(
+                    design_schedule.SELECTED_DESIGN_TASK_KEY
+                ),
+                "design-one",
+            )
+            self.assertTrue(
+                {
+                    "Design details",
+                    "Research Prompt",
+                    "Find Images Prompt",
+                    "Design Generation Prompt",
+                    "Harsh Review",
+                }.issubset({expander.label for expander in app_test.expander})
+            )
             field_values = {widget.label: widget.value for widget in app_test.text_input}
             text_area_values = {widget.label: widget.value for widget in app_test.text_area}
 
@@ -3440,6 +3558,32 @@ class DashboardRenderContractTests(unittest.TestCase):
             second_values = {widget.label: widget.value for widget in app_test.text_input}
             self.assertEqual(second_values["Design title"], "")
             self.assertEqual(second_values["Principal subject one"], "")
+
+            app_test.session_state["design-schedule-row::active-designs"] = "design-one"
+            app_test.run(timeout=20)
+            next(
+                button
+                for button in app_test.button
+                if button.key == "design-schedule-open::active-designs"
+            ).click().run(timeout=20)
+            self.assertEqual(
+                app_test.session_state.filtered_state.get(
+                    design_schedule.SELECTED_DESIGN_TASK_KEY
+                ),
+                "design-one",
+            )
+            self.assertTrue(
+                {
+                    "Research Prompt",
+                    "Find Images Prompt",
+                    "Design Generation Prompt",
+                    "Harsh Review",
+                }.issubset({expander.label for expander in app_test.expander})
+            )
+            self.assertNotIn(
+                "design-studio-scroll-to-workflow",
+                app_test.session_state.filtered_state,
+            )
 
         self.assertFalse(app_test.exception)
 
@@ -3581,6 +3725,28 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn('selectbox(\n                "Assign design style"', render_source)
         self.assertNotIn("dashboard_task_card_html(", render_source)
 
+    def test_open_in_studio_does_not_mount_scroll_lock_or_global_table_css(self):
+        schedule_source = (ROOT / "design_schedule.py").read_text(encoding="utf-8")
+        studio_source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
+        studio_renderer = studio_source[
+            studio_source.index("def render_design_studio_v2") :
+            studio_source.index("\n\ndef render_design_studio_page")
+        ]
+
+        self.assertNotIn("design-studio-scroll-to-workflow", schedule_source)
+        self.assertNotIn("design-studio-scroll-to-workflow", studio_renderer)
+        self.assertNotIn("scrollIntoView", studio_renderer)
+        self.assertNotIn("components.html(", studio_renderer)
+        self.assertNotIn(
+            'div[data-testid="stDataFrame"] { max-width: 100%; overflow: hidden; }',
+            schedule_source,
+        )
+        for selector in ("html", "body", ".stApp", ".block-container"):
+            self.assertNotIn(f"{selector} {{ overflow: hidden", schedule_source)
+            self.assertNotIn(f"{selector} {{ height:", schedule_source)
+        self.assertIn("height=420", schedule_source)
+        self.assertIn("row_height=34", schedule_source)
+
     def test_design_idea_and_manual_task_workflows_open_only_from_design_studio(self):
         source = (ROOT / "design_schedule.py").read_text(encoding="utf-8")
         home_source = (ROOT / "app.py").read_text(encoding="utf-8").split(
@@ -3710,7 +3876,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("DELETE FROM dashboard_tasks", delete_source)
         self.assertNotIn("shopify", delete_source.casefold())
 
-    def test_dashboard_no_longer_renders_manual_custom_calendar_ui(self):
+    def test_dashboard_restores_admin_planner_without_restoring_design_workflow(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         dashboard_source = source[
             source.index("def get_browser_timezone") : source.index("\n\ndef page_uses_local_database")
@@ -3725,16 +3891,19 @@ class DashboardRenderContractTests(unittest.TestCase):
         ]
         self.assertIn("render_active_alerts(events, today)", render_body)
         self.assertIn("render_home_recent_activity(local_now)", render_body)
-        self.assertNotIn("render_daily_execution_panel", render_body)
+        self.assertIn("can_manage_daily_planner(user)", render_body)
+        self.assertIn("render_daily_execution_panel", render_body)
+        self.assertIn("render_daily_execution_archive", render_body)
+        self.assertIn("render_sports_sales_calendar", render_body)
         self.assertNotIn("render_dashboard_tasks", render_body)
         self.assertNotIn("render_todays_design_ideas", render_body)
         reporting_route = source[
             source.index('elif current_page == "Reporting"') :
             source.index('elif current_page == "Files"')
         ]
-        self.assertIn("render_daily_execution_panel", reporting_route)
-        self.assertIn("render_daily_execution_archive", reporting_route)
-        self.assertIn("render_sports_sales_calendar", reporting_route)
+        self.assertNotIn("render_daily_execution_panel", reporting_route)
+        self.assertNotIn("render_daily_execution_archive", reporting_route)
+        self.assertNotIn("render_sports_sales_calendar", reporting_route)
 
     def test_calendar_helper_has_no_backend_or_network_imports(self):
         source = (ROOT / "sports_sales_calendar.py").read_text(encoding="utf-8")

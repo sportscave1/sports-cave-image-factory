@@ -11950,6 +11950,9 @@ def _daily_execution_review_payload(prefix, sheet):
 
 
 def _save_daily_execution_review(sheet, payload, *, rerun=True):
+    if not sports_cave_dashboard.can_manage_daily_planner(current_os_user()):
+        st.warning("Daily Execution access is not available for this account.")
+        return False
     try:
         saved_sheet = sports_cave_dashboard.complete_daily_execution_review(
             sheet.get("id"),
@@ -11974,6 +11977,8 @@ def _save_daily_execution_review(sheet, payload, *, rerun=True):
 
 
 def render_daily_execution_review(sheet):
+    if not sports_cave_dashboard.can_manage_daily_planner(current_os_user()):
+        return False
     if hasattr(st, "dialog"):
         @st.dialog("Complete Daily Review")
         def review_dialog():
@@ -11987,7 +11992,7 @@ def render_daily_execution_review(sheet):
                 st.rerun()
 
         review_dialog()
-        return
+        return True
 
     with st.expander("Complete Daily Review", expanded=True):
         with st.form(f"daily-execution-review::{sheet.get('id')}"):
@@ -11995,6 +12000,7 @@ def render_daily_execution_review(sheet):
             submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
         if submitted:
             _save_daily_execution_review(sheet, payload)
+    return True
 
 
 def _daily_execution_date_heading(target_date):
@@ -12009,6 +12015,8 @@ def _daily_execution_status_control(container, label, current, key):
 
 
 def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet, timezone_name):
+    if not sports_cave_dashboard.can_manage_daily_planner(user):
+        return False
     date_key = target_date.isoformat()
     try:
         source_date = date.fromisoformat(str((source_sheet or {}).get("sheet_date") or ""))
@@ -12142,7 +12150,7 @@ def _render_daily_execution_read_only(sheet):
 @st.fragment
 def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     user = current_os_user()
-    if not os_accounts.is_reporting_owner(user):
+    if not sports_cave_dashboard.can_manage_daily_planner(user):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
@@ -13269,7 +13277,7 @@ def _render_archived_sheet_detail(sheet):
 @st.fragment
 def render_daily_execution_archive(local_now, *, show_denied=True):
     user = current_os_user()
-    if not os_accounts.is_reporting_owner(user):
+    if not sports_cave_dashboard.can_manage_daily_planner(user):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
@@ -13414,6 +13422,8 @@ def _sports_sales_calendar_html(events, selected_month, today):
 
 @st.fragment
 def render_sports_sales_calendar(events, local_now):
+    if not sports_cave_dashboard.can_manage_daily_planner(current_os_user()):
+        return False
     render_html_section_title("Sports & Sales Calendar")
     options = sports_sales_calendar.month_options()
     default = sports_sales_calendar.default_month(local_now)
@@ -13430,6 +13440,7 @@ def render_sports_sales_calendar(events, local_now):
         _sports_sales_calendar_html(events, selected_month, today),
         unsafe_allow_html=True,
     )
+    return True
 
 
 def render_lightweight_dashboard_page():
@@ -13450,7 +13461,12 @@ def render_lightweight_dashboard_page():
         unsafe_allow_html=True,
     )
     render_active_alerts(events, today)
+    if sports_cave_dashboard.can_manage_daily_planner(user):
+        render_daily_execution_panel(local_now, events, {}, show_denied=False)
     render_home_recent_activity(local_now)
+    if sports_cave_dashboard.can_manage_daily_planner(user):
+        render_daily_execution_archive(local_now, show_denied=False)
+        render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
@@ -14783,15 +14799,7 @@ def render_selected_page(current_page):
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
     elif current_page == "Reporting":
-        reporting_user = current_os_user()
-        get_reporting_page().render_page(reporting_user)
-        if os_accounts.is_reporting_owner(reporting_user):
-            local_now = account_local_now(reporting_user)
-            events = sports_cave_dashboard.load_calendar_events()
-            render_daily_execution_panel(local_now, events, {}, show_denied=False)
-            render_daily_execution_archive(local_now)
-            if os_accounts.is_admin(reporting_user):
-                render_sports_sales_calendar(events, local_now)
+        get_reporting_page().render_page(current_os_user())
     elif current_page == "Files":
         render_files_page()
     elif current_page == "Products":

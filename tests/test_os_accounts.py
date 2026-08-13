@@ -2529,7 +2529,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("Active alerts", text)
         self.assertIn("Recent operational activity", text)
-        self.assertNotIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
+        self.assertIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
 
     def test_admin_home_renders_after_daily_execution_save_with_legacy_other_tasks(self):
         class DailyExecutionBackend:
@@ -2590,7 +2590,7 @@ class AccountAccessTests(unittest.TestCase):
             "page_permissions": [os_accounts.REPORTING_PAGE_KEY],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-        app_test.session_state["selected_page"] = "Reporting"
+        app_test.session_state["selected_page"] = "Dashboard"
 
         with patch.object(
             sports_cave_dashboard,
@@ -2618,16 +2618,10 @@ class AccountAccessTests(unittest.TestCase):
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
-        reporting_source = source[
-            source.index('elif current_page == "Reporting"') :
-            source.index('elif current_page == "Files"')
-        ]
-
-        self.assertIn("if not os_accounts.is_reporting_owner(user):", panel_source)
+        self.assertIn("if not sports_cave_dashboard.can_manage_daily_planner(user):", panel_source)
         self.assertIn("Access not approved", panel_source)
-        self.assertNotIn("render_daily_execution_panel", dashboard_source)
-        self.assertIn("if os_accounts.is_reporting_owner(reporting_user):", reporting_source)
-        self.assertIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", reporting_source)
+        self.assertIn("if sports_cave_dashboard.can_manage_daily_planner(user):", dashboard_source)
+        self.assertIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", dashboard_source)
 
 
 if __name__ == "__main__":

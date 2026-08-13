@@ -78,7 +78,6 @@ def _inject_styles():
         .sc-selected-design strong { color: #211f1b; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
         .sc-schedule-allocation { border-left: 2px solid #b79243; color: #5f5a52; font-size: .8rem; margin: .35rem 0 .55rem; padding: .3rem .55rem; }
         .sc-schedule-allocation.invalid { border-color: #a33c32; color: #8b2f27; }
-        div[data-testid="stDataFrame"] { max-width: 100%; overflow: hidden; }
         section[data-testid="stMain"] .st-key-design-schedule-import-trigger div[data-testid="stButton"] button,
         section[data-testid="stMain"] .st-key-design-schedule-template div[data-testid="stDownloadButton"] button,
         section[data-testid="stMain"] .st-key-design-schedule-export-trigger div[data-testid="stButton"] button,
@@ -870,7 +869,6 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
     ):
         st.session_state[SELECTED_DESIGN_TASK_KEY] = selected_row["_task_id"]
         st.session_state.pop(LOADED_DESIGN_TASK_KEY, None)
-        st.session_state["design-studio-scroll-to-workflow"] = True
         st.rerun()
     if actions[2].button(
         "View/Edit Details",
