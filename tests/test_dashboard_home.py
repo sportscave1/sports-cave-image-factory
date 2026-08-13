@@ -118,6 +118,26 @@ class FakeDashboardBackend:
                 return task
         return None
 
+    def delete_dashboard_task(
+        self,
+        task_id,
+        *,
+        required_section,
+        deleted_by="",
+        actor="sports_cave_os",
+    ):
+        for task in self.tasks:
+            if (
+                task["id"] == task_id
+                and task["section"] == required_section
+                and task.get("status") == "open"
+            ):
+                task["status"] = "deleted"
+                task.setdefault("metadata", {})["deleted_by"] = deleted_by
+                self._activity_row("task_deleted", f"Design task deleted: {task['title']}")
+                return task
+        return None
+
     def complete_dashboard_task(
         self,
         task_id,
@@ -488,7 +508,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "Short design title",
         )
 
-    def test_dashboard_renders_oldest_three_designs_with_compact_overflow(self):
+    def test_dashboard_renders_all_designs_in_one_compact_list(self):
         backend = FakeDashboardBackend()
         backend.tasks = [
             {
@@ -525,18 +545,17 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             if '<div class="sc-task-card sc-design-task-card">' in str(item.proto.body)
         ]
         self.assertFalse(app_test.exception)
-        self.assertEqual(len(design_cards), 3)
+        self.assertEqual(len(design_cards), 5)
         self.assertIn("Oldest design one", design_cards[0])
         self.assertIn("Second design two", design_cards[1])
         self.assertIn("Middle design three", design_cards[2])
+        self.assertIn("Fourth design four", design_cards[3])
+        self.assertIn("Newest design five", design_cards[4])
         self.assertEqual(
             len([button for button in app_test.button if button.label == "Complete"]),
-            3,
+            5,
         )
-        self.assertEqual(len(app_test.get("popover")), 1)
-        rendered = "\n".join(str(item.value) for item in app_test.markdown)
-        self.assertIn("Fourth design four extra preview...", rendered)
-        self.assertIn("Newest design five extra preview...", rendered)
+        self.assertEqual(len(app_test.get("popover")), 5)
 
     def test_task_cards_render_metadata_normally_and_escape_dynamic_content(self):
         backend = FakeDashboardBackend()
@@ -619,6 +638,97 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(state["tasks"], [])
         self.assertEqual(state["activity_log"][0]["message"], "Task completed: Refresh NFL collection")
         self.assertEqual(state["activity_log"][1]["message"], "Task added: Refresh NFL collection")
+
+    def test_design_task_delete_uses_stable_id_and_preserves_other_sections(self):
+        backend = FakeDashboardBackend()
+        backend.tasks = [
+            {
+                "id": "design-keep",
+                "title": "Same title",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "metadata": {},
+            },
+            {
+                "id": "design-delete",
+                "title": "Same title",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "metadata": {},
+            },
+            {
+                "id": "collection-keep",
+                "title": "Same title",
+                "section": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "status": "open",
+                "metadata": {},
+            },
+        ]
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            deleted = sports_cave_dashboard.delete_design_task(
+                "design-delete",
+                user=owner_user(),
+            )
+            repeated = sports_cave_dashboard.delete_design_task(
+                "design-delete",
+                user=owner_user(),
+            )
+
+        self.assertEqual(deleted["id"], "design-delete")
+        self.assertEqual(deleted["status"], "deleted")
+        self.assertIsNone(repeated)
+        self.assertEqual(backend.tasks[0]["status"], "open")
+        self.assertEqual(backend.tasks[2]["status"], "open")
+        self.assertEqual(
+            [row["event_type"] for row in backend.activity_rows],
+            ["task_deleted"],
+        )
+
+    def test_design_task_delete_requires_existing_task_permission(self):
+        worker = {
+            "id": "worker-1",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": [],
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend") as backend:
+            with self.assertRaisesRegex(PermissionError, "permission"):
+                sports_cave_dashboard.delete_design_task(
+                    "design-1",
+                    user=worker,
+                )
+
+        backend.assert_not_called()
+
+    def test_deleted_design_does_not_block_csv_reimport(self):
+        row = {
+            "task": "Create NFL design - THE DRIVE",
+            "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+            "design_style": "ultimate_moment",
+            "design_title": "THE DRIVE",
+            "sport": "NFL",
+        }
+        existing = {
+            "id": "deleted-design",
+            "title": row["task"],
+            "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+            "status": "deleted",
+            "design_style": "ultimate_moment",
+            "metadata": {
+                sports_cave_dashboard.TASK_IMPORT_METADATA_KEY: row,
+            },
+        }
+
+        preview = sports_cave_dashboard.preview_task_csv_import(
+            task_csv_bytes([row]),
+            "designs.csv",
+            existing_tasks=[existing],
+        )
+
+        self.assertEqual(preview["valid_count"], 1)
+        self.assertEqual(preview["duplicate_count"], 0)
 
     def test_new_design_completion_creates_upload_task_with_mockup_choice(self):
         backend = FakeDashboardBackend()
@@ -2253,52 +2363,98 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "Collections to update",
         )
 
-    def test_design_ideas_prompt_uses_calendar_and_existing_products(self):
-        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
-        events = [
-            {
-                "end_date": "2026-07-26",
-                "id": "f1-hungary",
-                "importance": 5,
-                "regions": ["Australia", "UK", "USA"],
-                "sport": "Motorsport",
-                "start_date": "2026-07-24",
-                "title": "Formula 1 Hungarian Grand Prix 2026",
-            }
-        ]
-        products = [
-            {
-                "title": "Six Laps Ahead",
-                "handle": "six-laps-ahead",
-                "category": "Motorsport",
-                "status": "Active",
-            }
-        ]
+    def test_design_ideas_prompt_uses_selected_sport_mix_and_exact_csv_schema(self):
+        mix = sports_cave_dashboard.suggest_design_idea_style_mix("NFL", 10)
 
-        prompt = sports_cave_dashboard.build_design_ideas_prompt(now, events, products)
+        prompt = sports_cave_dashboard.build_new_design_ideas_prompt(
+            "NFL",
+            10,
+            mix,
+            exclude_existing=True,
+            calendar_relevance=True,
+        )
 
-        self.assertIn("Formula 1 Hungarian Grand Prix 2026", prompt)
-        self.assertIn("Six Laps Ahead", prompt)
-        self.assertIn("six-laps-ahead", prompt)
-        self.assertIn("do-not-duplicate", prompt)
-        self.assertIn("Do not recommend an existing product", prompt)
-        self.assertIn("Recommend exactly 5 ideas", prompt)
-        self.assertIn("Golf", prompt)
-        self.assertIn("Suggested task wording", prompt)
+        self.assertIn("exactly 10 new NFL collector-art concepts", prompt)
+        self.assertIn("Use the connected Shopify account in read-only mode", prompt)
+        self.assertIn("Do not create, edit, publish, archive or delete anything in Shopify", prompt)
+        self.assertIn("must not duplicate existing Sports Cave products", prompt)
+        self.assertIn("Upcoming anniversaries", prompt)
+        self.assertIn(",".join(sports_cave_dashboard.TASK_IMPORT_CSV_COLUMNS), prompt)
+        self.assertIn("Every concept must contain either one principal person or two principal people", prompt)
+        for style_slug, style_label in sports_cave_dashboard.DESIGN_IDEA_STYLE_FIELDS:
+            self.assertIn(
+                f"{style_label} (CSV design_style: {style_slug}): {mix[style_slug]}",
+                prompt,
+            )
 
-    def test_design_ideas_prompt_fetches_lightweight_edition_products(self):
-        backend = FakeDashboardBackend()
-        backend.edition_products = [
-            {"title": "The Final Lap", "handle": "the-final-lap", "category": "Motorsport", "status": "Active"}
-        ]
-        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+    def test_design_ideas_prompt_builder_makes_no_database_or_shopify_call(self):
+        mix = sports_cave_dashboard.suggest_design_idea_style_mix(
+            "Formula 1 / Motorsport",
+            8,
+        )
 
-        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
-            prompt = sports_cave_dashboard.build_todays_design_ideas_prompt(now, events=[])
+        with patch.object(sports_cave_dashboard, "get_supabase_backend") as backend:
+            prompt = sports_cave_dashboard.build_new_design_ideas_prompt(
+                "Formula 1 / Motorsport",
+                8,
+                mix,
+            )
 
-        self.assertEqual(backend.edition_product_calls, [1000])
-        self.assertIn("The Final Lap", prompt)
-        self.assertIn("the-final-lap", prompt)
+        backend.assert_not_called()
+        self.assertIn("Formula 1 / Motorsport", prompt)
+        self.assertNotIn("DATABASE_URL", prompt)
+
+    def test_suggested_design_mix_is_exact_and_sport_appropriate(self):
+        for sport in sports_cave_dashboard.DESIGN_IDEA_SPORTS:
+            for total in (1, 10, 30):
+                with self.subTest(sport=sport, total=total):
+                    mix = sports_cave_dashboard.suggest_design_idea_style_mix(
+                        sport,
+                        total,
+                    )
+                    self.assertEqual(sum(mix.values()), total)
+                    self.assertEqual(
+                        set(mix),
+                        set(sports_cave_dashboard.DESIGN_IDEA_STYLE_SLUGS),
+                    )
+
+        motorsport = sports_cave_dashboard.suggest_design_idea_style_mix(
+            "Formula 1 / Motorsport",
+            10,
+        )
+        nfl = sports_cave_dashboard.suggest_design_idea_style_mix("NFL", 10)
+        horse_racing = sports_cave_dashboard.suggest_design_idea_style_mix(
+            "Horse Racing",
+            10,
+        )
+        self.assertGreater(
+            motorsport["motorsport_driver_car"],
+            motorsport["rivalry_faceoff"],
+        )
+        self.assertEqual(nfl["motorsport_driver_car"], 0)
+        self.assertEqual(horse_racing["motorsport_driver_car"], 0)
+
+    def test_design_ideas_prompt_rejects_mismatched_allocation(self):
+        with self.assertRaisesRegex(ValueError, "currently allocated 0"):
+            sports_cave_dashboard.build_new_design_ideas_prompt(
+                "NBA",
+                10,
+                {},
+            )
+
+    def test_design_ideas_prompt_reflects_disabled_research_controls(self):
+        mix = sports_cave_dashboard.suggest_design_idea_style_mix("Golf", 4)
+
+        prompt = sports_cave_dashboard.build_new_design_ideas_prompt(
+            "Golf",
+            4,
+            mix,
+            exclude_existing=False,
+            calendar_relevance=False,
+        )
+
+        self.assertIn("Existing-product exclusion is not a mandatory gate", prompt)
+        self.assertIn("Do not use current calendar or news relevance", prompt)
 
     def test_activity_log_display_hides_developer_wording(self):
         rows = [
@@ -2884,25 +3040,144 @@ class DashboardRenderContractTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
 
+    def test_home_design_idea_controls_validate_mix_and_prepare_prompt(self):
+        backend = FakeDashboardBackend()
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(
+            sports_cave_dashboard,
+            "get_supabase_backend",
+            return_value=backend,
+        ):
+            app_test.run(timeout=20)
+            self.assertIn(
+                "Generate New Design Ideas",
+                [item.label for item in app_test.expander],
+            )
+            next(
+                item for item in app_test.selectbox if item.label == "Sport or collection"
+            ).select("NBA").run(timeout=20)
+            next(
+                item for item in app_test.number_input if item.label == "Number of design ideas"
+            ).set_value(11).run(timeout=20)
+            prepare = next(
+                button for button in app_test.button if button.label == "Prepare Design Brief"
+            )
+            self.assertTrue(prepare.disabled)
+
+            next(
+                button for button in app_test.button if button.label == "Suggest Best Mix"
+            ).click().run(timeout=20)
+            style_labels = {
+                label for _slug, label in sports_cave_dashboard.DESIGN_IDEA_STYLE_FIELDS
+            }
+            allocated = sum(
+                int(item.value)
+                for item in app_test.number_input
+                if item.label in style_labels
+            )
+            self.assertEqual(allocated, 11)
+
+            next(
+                button for button in app_test.button if button.label == "Prepare Design Brief"
+            ).click().run(timeout=20)
+            prompt = next(
+                item for item in app_test.text_area if item.label == "Design brief prompt"
+            )
+            self.assertIn("exactly 11 new NBA", prompt.value)
+            self.assertTrue(prompt.disabled)
+
+        self.assertFalse(app_test.exception)
+
+    def test_home_design_delete_cancel_and_confirm(self):
+        backend = FakeDashboardBackend()
+        backend.tasks = [
+            {
+                "id": "design-delete-1",
+                "title": "Create NFL design - THE DRIVE",
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "created_at": "2026-08-13T08:00:00+00:00",
+                "design_style": "ultimate_moment",
+                "metadata": {
+                    "design_style": "ultimate_moment",
+                    sports_cave_dashboard.DESIGN_DETAILS_METADATA_KEY: {
+                        "design_title": "THE DRIVE",
+                        "sport": "NFL",
+                    },
+                },
+            }
+        ]
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(
+            sports_cave_dashboard,
+            "get_supabase_backend",
+            return_value=backend,
+        ):
+            app_test.run(timeout=20)
+            trigger_key = "dashboard-delete-task-trigger::design-delete-1"
+            next(button for button in app_test.button if button.key == trigger_key).click().run(
+                timeout=20
+            )
+            self.assertIsNotNone(
+                next(
+                    button
+                    for button in app_test.button
+                    if button.key == "dashboard-delete-task-confirm::design-delete-1"
+                )
+            )
+            self.assertEqual(backend.tasks[0]["status"], "open")
+            next(
+                button
+                for button in app_test.button
+                if button.key == "dashboard-delete-task-cancel::design-delete-1"
+            ).click().run(timeout=20)
+            self.assertEqual(backend.tasks[0]["status"], "open")
+
+            next(button for button in app_test.button if button.key == trigger_key).click().run(
+                timeout=20
+            )
+            next(
+                button
+                for button in app_test.button
+                if button.key == "dashboard-delete-task-confirm::design-delete-1"
+            ).click().run(timeout=20)
+
+        self.assertEqual(backend.tasks[0]["status"], "deleted")
+        self.assertFalse(app_test.exception)
+
     def test_home_design_tasks_require_a_style_and_render_style_badges(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         task_group_source = source[
             source.index("def render_task_group") :
             source.index("\n\ndef render_dashboard_tasks")
         ]
+        card_source = source[
+            source.index("def dashboard_task_card_html") :
+            source.index("\n\ndef render_task_import_details")
+        ]
         add_source = source[
             source.index("def render_dashboard_tasks") :
             source.index("\n\ndef dashboard_activity_month_options")
         ]
 
-        self.assertIn("sc-design-style-badge", task_group_source)
+        self.assertIn("sc-design-style-badge", card_source)
         self.assertIn("task_design_style(task)", task_group_source)
         self.assertIn('"Design style"', add_source)
         self.assertIn("design_studio_styles.style_slugs()", add_source)
         self.assertIn("design_style=design_style", add_source)
         self.assertNotIn('st.form("dashboard-add-task"', add_source)
 
-    def test_new_design_queue_is_compact_and_limits_visible_tasks(self):
+    def test_new_design_queue_is_compact_full_width_and_keeps_style_in_details(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         render_source = source[
             source.index("def render_task_group") :
@@ -2914,12 +3189,54 @@ class DashboardRenderContractTests(unittest.TestCase):
         ]
 
         self.assertIn("ordered_task_group(tasks, group)", render_source)
-        self.assertIn("DESIGN_TASK_VISIBLE_LIMIT", render_source)
-        self.assertIn("group_tasks[:sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT]", render_source)
-        self.assertIn('with st.popover(f"+{len(overflow_tasks)} more")', render_source)
-        self.assertIn("compact_design_task_preview", render_source)
-        self.assertIn("sc-design-overflow-list", render_source)
+        self.assertIn("for task in group_tasks", render_source)
+        self.assertIn("design_task_list_details(task)", render_source)
+        self.assertIn('with st.popover("View details")', render_source)
+        self.assertIn("render_design_task_details(task)", render_source)
+        self.assertNotIn("DESIGN_TASK_VISIBLE_LIMIT", render_source)
+        self.assertNotIn("overflow_tasks", render_source)
+        self.assertNotIn('selectbox(\n                "Assign design style"', render_source)
         self.assertIn("sc-design-task-card", helper_source)
+
+    def test_design_idea_and_manual_task_workflows_are_collapsed_by_default(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        ideas_source = source[
+            source.index("def render_todays_design_ideas") :
+            source.index("\n\ndef _daily_execution_fragment_rerun")
+        ]
+        tasks_source = source[
+            source.index("def render_dashboard_tasks") :
+            source.index("\n\ndef dashboard_activity_month_options")
+        ]
+
+        self.assertIn('st.expander("Generate New Design Ideas", expanded=False)', ideas_source)
+        self.assertIn('"Sport or collection"', ideas_source)
+        self.assertIn('"Number of design ideas"', ideas_source)
+        self.assertIn('"Suggest Best Mix"', ideas_source)
+        self.assertIn('"Prepare Design Brief"', ideas_source)
+        self.assertNotIn("Daily ChatGPT brief", ideas_source)
+        self.assertNotIn('"Prepare prompt"', ideas_source)
+        self.assertIn('st.expander("Add Task Manually", expanded=False)', tasks_source)
+
+    def test_design_delete_ui_requires_confirmation_and_uses_material_icon(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        dialog_source = source[
+            source.index("def render_design_task_delete_dialog") :
+            source.index("\n\ndef render_task_group")
+        ]
+        row_source = source[
+            source.index("def render_task_group") :
+            source.index("\n\ndef render_dashboard_tasks")
+        ]
+
+        self.assertIn('icon=":material/delete:"', row_source)
+        self.assertIn('help="Delete design"', row_source)
+        self.assertIn('st.session_state["dashboard-pending-delete-task-id"] = task_id', row_source)
+        self.assertIn('@st.dialog(f\'Delete "{design_title}"?\')', dialog_source)
+        self.assertIn('"It does not delete anything from Shopify."', dialog_source)
+        self.assertIn('"Cancel"', dialog_source)
+        self.assertIn('"Delete design"', dialog_source)
+        self.assertIn("delete_design_task", dialog_source)
 
     def test_task_csv_controls_are_inline_and_details_are_compact(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -2932,7 +3249,7 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("\n\ndef render_dashboard_tasks")
         ]
 
-        self.assertIn("st.columns([1, 0.11, 0.11, 0.11]", header_source)
+        self.assertIn("st.columns([1, 0.17, 0.21, 0.17]", header_source)
         self.assertIn('"Import CSV"', header_source)
         self.assertIn('"CSV Template"', header_source)
         self.assertIn('"Export CSV"', header_source)
@@ -2955,7 +3272,7 @@ class DashboardRenderContractTests(unittest.TestCase):
             self.assertIn(f'"{label}"', preview_source)
         self.assertIn("task_import_summary(task)", render_source)
         self.assertIn('with st.popover("View details")', render_source)
-        self.assertIn("task_import_details_html(task)", render_source)
+        self.assertIn("render_task_import_details(task)", render_source)
         self.assertIn("dashboard_task_card_html(", render_source)
         self.assertIn("st.html(", render_source)
         self.assertNotIn("sc-small-meta\">Added {html.escape", render_source)
@@ -2988,6 +3305,20 @@ class DashboardRenderContractTests(unittest.TestCase):
 
         self.assertNotIn("ensure_schema(", helper_source)
         self.assertIn("SET LOCAL statement_timeout", helper_source)
+
+    def test_design_task_delete_backend_is_scoped_transactional_and_soft(self):
+        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        delete_source = source[
+            source.index("def delete_dashboard_task") :
+            source.index("\n\ndef complete_dashboard_task")
+        ]
+
+        self.assertIn("SET status='deleted'", delete_source)
+        self.assertIn("WHERE id=%s AND section=%s AND status='open'", delete_source)
+        self.assertIn('event_type="task_deleted"', delete_source)
+        self.assertIn("conn.commit()", delete_source)
+        self.assertNotIn("DELETE FROM dashboard_tasks", delete_source)
+        self.assertNotIn("shopify", delete_source.casefold())
 
     def test_dashboard_no_longer_renders_manual_custom_calendar_ui(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

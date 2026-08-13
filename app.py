@@ -3186,6 +3186,20 @@ def inject_styles():
             vertical-align: middle;
         }
 
+        .sc-design-idea-allocation {
+            font-size: 0.78rem;
+            font-weight: 720;
+            margin: 0.25rem 0 0.45rem;
+        }
+
+        .sc-design-idea-allocation-valid {
+            color: #55704B !important;
+        }
+
+        .sc-design-idea-allocation-invalid {
+            color: #9A4B3C !important;
+        }
+
         .sc-task-summary {
             color: #4F4A41 !important;
             display: block;
@@ -3344,6 +3358,30 @@ def inject_styles():
             padding-top: 0.32rem;
         }
 
+        div[class*="st-key-dashboard-delete-task-trigger"] button {
+            background: transparent !important;
+            border: 1px solid #D8C8C0 !important;
+            color: #8C3B32 !important;
+            height: 2.25rem !important;
+            min-height: 2.25rem !important;
+            min-width: 2.25rem !important;
+            padding: 0 !important;
+        }
+
+        div[class*="st-key-dashboard-delete-task-trigger"] button:hover {
+            background: #FFF5F3 !important;
+            border-color: #B85A4E !important;
+        }
+
+        div[class*="st-key-dashboard-delete-task-trigger"] button p {
+            font-size: 0 !important;
+        }
+
+        div[class*="st-key-dashboard-delete-task-trigger"] button [data-testid="stIconMaterial"] {
+            font-size: 1rem !important;
+            margin: 0 !important;
+        }
+
         div[data-testid="stHorizontalBlock"]:has(.sc-task-toolbar-title) {
             align-items: center;
             gap: 0.45rem;
@@ -3389,37 +3427,6 @@ def inject_styles():
                 font-size: 0.7rem !important;
                 padding: 0 0.45rem !important;
             }
-        }
-
-        .sc-design-overflow-list {
-            max-height: 10rem;
-            min-width: 15rem;
-            overflow-y: auto;
-            padding-right: 0.2rem;
-        }
-
-        .sc-design-overflow-item {
-            border-bottom: 1px solid #E8E2D7;
-            color: #252321;
-            font-size: 0.78rem;
-            line-height: 1.25;
-            padding: 0.38rem 0.1rem;
-        }
-
-        .sc-design-overflow-item:last-child {
-            border-bottom: 0;
-        }
-
-        .sc-design-overflow-details summary {
-            color: #8A651D !important;
-            cursor: default;
-            font-size: 0.68rem;
-            font-weight: 700;
-            margin-top: 0.2rem;
-        }
-
-        .sc-design-overflow-details .sc-task-detail-row {
-            padding: 0.3rem 0;
         }
 
         .sc-task-card strong,
@@ -3483,22 +3490,6 @@ def inject_styles():
             padding: 0.22rem 0.42rem;
             text-transform: uppercase;
             vertical-align: middle;
-        }
-
-        .sc-design-ideas-box {
-            background: #FFFFFF;
-            border: 1px solid #E5E0D4;
-            border-left: 3px solid #D4A54C;
-            border-radius: 8px;
-            margin-bottom: 0.55rem;
-            padding: 0.6rem 0.72rem;
-        }
-
-        .sc-design-ideas-copy {
-            color: #4E493F !important;
-            font-size: 0.86rem;
-            line-height: 1.3;
-            margin: 0;
         }
 
         .sc-month-grid {
@@ -11709,47 +11700,160 @@ def render_active_alerts(events, today):
     )
 
 
-def render_todays_design_ideas(local_now, events):
-    render_html_section_title("Today’s Design Ideas")
-    loaded_key = "dashboard_design_ideas_prompt_loaded"
-    with st.container():
-        summary_columns = st.columns([4.5, 1])
-        with summary_columns[0]:
-            st.markdown(
-                """
-                <div class="sc-design-ideas-box">
-                    <p class="sc-design-ideas-copy">Daily ChatGPT brief for 5 fresh product angles using the calendar and current products.</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with summary_columns[1]:
-            if st.button("Prepare prompt", key="dashboard-design-ideas-prepare", use_container_width=True):
-                st.session_state[loaded_key] = True
+DASHBOARD_DESIGN_IDEA_SPORT_KEY = "dashboard-design-idea-sport"
+DASHBOARD_DESIGN_IDEA_TOTAL_KEY = "dashboard-design-idea-total"
+DASHBOARD_DESIGN_IDEA_PROMPT_KEY = "dashboard-design-idea-prompt"
 
-    if not st.session_state.get(loaded_key):
-        return
 
-    prompt_text = sports_cave_dashboard.build_todays_design_ideas_prompt(local_now, events)
-    action_columns = st.columns([1.15, 4])
-    with action_columns[0]:
-        render_copy_prompt_button(
-            prompt_text,
-            "dashboard-design-ideas",
-            label="Copy prompt",
-            background="#D4A54C",
-            text_color="#15120B",
-            border_color="#D4A54C",
+def _dashboard_design_idea_mix_key(style_slug):
+    return f"dashboard-design-idea-style::{style_slug}"
+
+
+def _initialise_dashboard_design_idea_controls():
+    st.session_state.setdefault(
+        DASHBOARD_DESIGN_IDEA_SPORT_KEY,
+        sports_cave_dashboard.DESIGN_IDEA_SPORTS[0],
+    )
+    st.session_state.setdefault(
+        DASHBOARD_DESIGN_IDEA_TOTAL_KEY,
+        sports_cave_dashboard.DESIGN_IDEA_DEFAULT_TOTAL,
+    )
+    initial_mix = sports_cave_dashboard.suggest_design_idea_style_mix(
+        st.session_state[DASHBOARD_DESIGN_IDEA_SPORT_KEY],
+        st.session_state[DASHBOARD_DESIGN_IDEA_TOTAL_KEY],
+    )
+    for style_slug in sports_cave_dashboard.DESIGN_IDEA_STYLE_SLUGS:
+        st.session_state.setdefault(
+            _dashboard_design_idea_mix_key(style_slug),
+            initial_mix[style_slug],
         )
-    with action_columns[1]:
-        with st.expander("View prompt", expanded=False):
-            st.text_area(
-                "Today’s Design Ideas prompt",
-                value=prompt_text,
-                height=160,
-                label_visibility="collapsed",
-                key="dashboard-design-ideas-prompt-text",
+
+
+def _apply_dashboard_design_idea_best_mix():
+    suggested = sports_cave_dashboard.suggest_design_idea_style_mix(
+        st.session_state[DASHBOARD_DESIGN_IDEA_SPORT_KEY],
+        st.session_state[DASHBOARD_DESIGN_IDEA_TOTAL_KEY],
+    )
+    for style_slug, count in suggested.items():
+        st.session_state[_dashboard_design_idea_mix_key(style_slug)] = count
+    st.session_state.pop(DASHBOARD_DESIGN_IDEA_PROMPT_KEY, None)
+
+
+def render_todays_design_ideas(local_now, events):
+    del local_now, events
+    _initialise_dashboard_design_idea_controls()
+    with st.expander("Generate New Design Ideas", expanded=False):
+        setup_columns = st.columns([1.7, 0.8], gap="medium")
+        sport = setup_columns[0].selectbox(
+            "Sport or collection",
+            sports_cave_dashboard.DESIGN_IDEA_SPORTS,
+            key=DASHBOARD_DESIGN_IDEA_SPORT_KEY,
+        )
+        total_ideas = setup_columns[1].number_input(
+            "Number of design ideas",
+            min_value=1,
+            max_value=30,
+            step=1,
+            key=DASHBOARD_DESIGN_IDEA_TOTAL_KEY,
+        )
+
+        st.markdown("**Design style mix**")
+        style_mix = {}
+        style_columns = st.columns(2, gap="medium")
+        for index, (style_slug, style_label) in enumerate(
+            sports_cave_dashboard.DESIGN_IDEA_STYLE_FIELDS
+        ):
+            style_mix[style_slug] = style_columns[index % 2].number_input(
+                style_label,
+                min_value=0,
+                max_value=30,
+                step=1,
+                key=_dashboard_design_idea_mix_key(style_slug),
             )
+
+        allocated = sports_cave_dashboard.design_idea_style_mix_total(style_mix)
+        allocation_valid = allocated == int(total_ideas)
+        allocation_class = (
+            "sc-design-idea-allocation-valid"
+            if allocation_valid
+            else "sc-design-idea-allocation-invalid"
+        )
+        st.markdown(
+            f'<div class="sc-design-idea-allocation {allocation_class}">'
+            f"Allocated: {allocated} of {int(total_ideas)} designs</div>",
+            unsafe_allow_html=True,
+        )
+        if not allocation_valid:
+            st.caption("Adjust the style counts so the allocation exactly matches the requested total.")
+
+        option_columns = st.columns(2, gap="medium")
+        exclude_existing = option_columns[0].checkbox(
+            "Exclude ideas already sold by Sports Cave",
+            value=True,
+            key="dashboard-design-idea-exclude-existing",
+        )
+        calendar_relevance = option_columns[1].checkbox(
+            "Consider upcoming anniversaries and current sporting relevance",
+            value=True,
+            key="dashboard-design-idea-calendar-relevance",
+        )
+
+        action_columns = st.columns([1, 1.35, 2.6], gap="small")
+        action_columns[0].button(
+            "Suggest Best Mix",
+            key="dashboard-design-idea-suggest-mix",
+            on_click=_apply_dashboard_design_idea_best_mix,
+            use_container_width=True,
+        )
+
+        if action_columns[1].button(
+            "Prepare Design Brief",
+            key="dashboard-design-idea-prepare",
+            type="primary",
+            disabled=not allocation_valid,
+            use_container_width=True,
+        ):
+            try:
+                st.session_state[DASHBOARD_DESIGN_IDEA_PROMPT_KEY] = (
+                    sports_cave_dashboard.build_new_design_ideas_prompt(
+                        sport,
+                        total_ideas,
+                        style_mix,
+                        exclude_existing=exclude_existing,
+                        calendar_relevance=calendar_relevance,
+                    )
+                )
+            except ValueError as error:
+                st.warning(str(error))
+
+        prompt_text = st.session_state.get(DASHBOARD_DESIGN_IDEA_PROMPT_KEY, "")
+        if prompt_text:
+            st.text_area(
+                "Design brief prompt",
+                value=prompt_text,
+                height=300,
+                disabled=True,
+                key="dashboard-design-idea-prompt-preview",
+            )
+            prompt_actions = st.columns([0.9, 1.15, 3], gap="small")
+            with prompt_actions[0]:
+                render_copy_prompt_button(
+                    prompt_text,
+                    "dashboard-design-ideas-v2",
+                    label="Copy prompt",
+                    background="#D4A54C",
+                    text_color="#15120B",
+                    border_color="#D4A54C",
+                )
+            with prompt_actions[1]:
+                st.download_button(
+                    "Download prompt as TXT",
+                    data=prompt_text.encode("utf-8"),
+                    file_name="sports-cave-design-ideas-brief.txt",
+                    mime="text/plain",
+                    key="dashboard-design-idea-download",
+                    use_container_width=True,
+                )
 
 
 def _daily_execution_fragment_rerun():
@@ -12308,7 +12412,7 @@ def render_dashboard_task_csv_import_dialog(state):
 
 
 def render_dashboard_task_header(state):
-    header_cols = st.columns([1, 0.11, 0.11, 0.11], gap="small")
+    header_cols = st.columns([1, 0.17, 0.21, 0.17], gap="small")
     with header_cols[0]:
         st.markdown(
             '<div class="sc-section-title sc-task-toolbar-title">Tasks</div>',
@@ -12375,11 +12479,29 @@ def dashboard_task_card_html(
     *,
     is_design_group=False,
     design_style="",
+    design_title="",
+    sport="",
+    principal_subject_one="",
+    principal_subject_two="",
+    priority="",
 ):
     card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
-    safe_title = html.escape(str(task_text or ""))
-    safe_title_attr = html.escape(str(task_text or ""), quote=True)
-    summary = str(task_summary or "")
+    display_title = str(design_title or task_text or "")
+    safe_title = html.escape(display_title)
+    safe_title_attr = html.escape(display_title, quote=True)
+    if is_design_group:
+        summary = " · ".join(
+            str(value).strip()
+            for value in (
+                sport,
+                principal_subject_one,
+                principal_subject_two,
+                f"{priority} priority" if priority else "",
+            )
+            if str(value or "").strip()
+        )
+    else:
+        summary = str(task_summary or "")
     summary_html = (
         f'<span class="sc-task-summary" title="{html.escape(summary, quote=True)}">'
         f"{html.escape(summary)}</span>"
@@ -12410,6 +12532,95 @@ def render_task_import_details(task):
     st.html(details_html)
 
 
+def render_design_task_details(task):
+    task_id = str(task.get("id") or "")
+    render_task_import_details(task)
+    current_style = sports_cave_dashboard.task_design_style(task)
+    style_options = ["", *design_studio_styles.style_slugs()]
+    selected_style = st.selectbox(
+        "Design style",
+        style_options,
+        index=style_options.index(current_style) if current_style in style_options else 0,
+        format_func=lambda value: design_studio_styles.design_style_label(value),
+        key=f"dashboard-design-style::{task_id}",
+    )
+    if st.button(
+        "Save style",
+        key=f"dashboard-design-style-save::{task_id}",
+        disabled=not selected_style or selected_style == current_style,
+        use_container_width=True,
+    ):
+        try:
+            sports_cave_dashboard.update_task_design_style(task_id, selected_style)
+        except (ValueError, sports_cave_dashboard.DashboardStorageError) as error:
+            st.warning(str(error))
+        else:
+            st.session_state["dashboard-task-toast"] = "Design style saved."
+            st.rerun()
+
+
+def render_design_task_delete_dialog(tasks):
+    pending_id = str(st.session_state.get("dashboard-pending-delete-task-id") or "")
+    if not pending_id:
+        return
+    pending_task = next(
+        (
+            task
+            for task in tasks or []
+            if str(task.get("id") or "") == pending_id
+            and (task.get("section") or task.get("category"))
+            == sports_cave_dashboard.DESIGN_TASK_GROUP
+        ),
+        None,
+    )
+    if not pending_task:
+        st.session_state.pop("dashboard-pending-delete-task-id", None)
+        return
+    display = sports_cave_dashboard.design_task_list_details(pending_task)
+    design_title = display.get("design_title") or pending_task.get("text") or "Design task"
+
+    @st.dialog(f'Delete "{design_title}"?')
+    def delete_dialog():
+        st.write(
+            "This removes the design task from Sports Cave OS. "
+            "It does not delete anything from Shopify."
+        )
+        action_columns = st.columns(2)
+        if action_columns[0].button(
+            "Cancel",
+            key=f"dashboard-delete-task-cancel::{pending_id}",
+            use_container_width=True,
+        ):
+            st.session_state.pop("dashboard-pending-delete-task-id", None)
+            st.rerun()
+        if action_columns[1].button(
+            "Delete design",
+            key=f"dashboard-delete-task-confirm::{pending_id}",
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                deleted = sports_cave_dashboard.delete_design_task(
+                    pending_id,
+                    user=current_os_user(),
+                )
+            except PermissionError as error:
+                st.warning(str(error))
+                return
+            except sports_cave_dashboard.DashboardStorageError as error:
+                st.warning(str(error))
+                return
+            if deleted is None:
+                st.warning("That design task is no longer active.")
+                return
+            st.session_state.pop("dashboard-pending-delete-task-id", None)
+            st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+            st.session_state["dashboard-task-toast"] = f'Deleted "{design_title}".'
+            st.rerun()
+
+    delete_dialog()
+
+
 def render_task_group(group, tasks):
     st.markdown(f"**{html.escape(group)}**")
     group_tasks = sports_cave_dashboard.ordered_task_group(tasks, group)
@@ -12421,24 +12632,28 @@ def render_task_group(group, tasks):
         return
 
     is_design_group = group == sports_cave_dashboard.DESIGN_TASK_GROUP
-    visible_tasks = (
-        group_tasks[:sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT]
-        if is_design_group
-        else group_tasks
-    )
-    overflow_tasks = (
-        group_tasks[sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT:]
-        if is_design_group
-        else []
+    can_delete_designs = sports_cave_dashboard.can_manage_dashboard_tasks(
+        current_os_user()
     )
 
-    for task in visible_tasks:
+    for task in group_tasks:
         task_id = task.get("id") or ""
         task_text = task.get("text") or ""
         task_summary = sports_cave_dashboard.task_import_summary(task)
         task_details = sports_cave_dashboard.task_import_details(task)
         design_style = sports_cave_dashboard.task_design_style(task)
-        row = st.columns([4.5, 0.95, 1.15]) if task_details else st.columns([5, 1.25])
+        design_display = (
+            sports_cave_dashboard.design_task_list_details(task)
+            if is_design_group
+            else {}
+        )
+        has_details_action = bool(task_details) or is_design_group
+        if is_design_group and can_delete_designs:
+            row = st.columns([5.1, 1.05, 1.05, 0.48], gap="small")
+        elif has_details_action:
+            row = st.columns([5.1, 1.05, 1.05], gap="small")
+        else:
+            row = st.columns([5.1, 1.05], gap="small")
         with row[0]:
             st.html(
                 dashboard_task_card_html(
@@ -12447,14 +12662,22 @@ def render_task_group(group, tasks):
                     format_dashboard_timestamp(task.get("created_at")),
                     is_design_group=is_design_group,
                     design_style=design_style,
+                    design_title=design_display.get("design_title") or "",
+                    sport=design_display.get("sport") or "",
+                    principal_subject_one=design_display.get("principal_subject_one") or "",
+                    principal_subject_two=design_display.get("principal_subject_two") or "",
+                    priority=design_display.get("priority") or "",
                 )
             )
-        if task_details:
+        if has_details_action:
             with row[1]:
                 with st.popover("View details"):
-                    render_task_import_details(task)
+                    if is_design_group:
+                        render_design_task_details(task)
+                    else:
+                        render_task_import_details(task)
 
-        complete_column = row[2] if task_details else row[1]
+        complete_column = row[2] if has_details_action else row[1]
         with complete_column:
             if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
                 if group == sports_cave_dashboard.DESIGN_TASK_GROUP:
@@ -12471,6 +12694,19 @@ def render_task_group(group, tasks):
                     st.warning("That task is no longer open.")
                     return
                 st.rerun()
+
+        if is_design_group and can_delete_designs:
+            with row[3]:
+                if st.button(
+                    "Delete design",
+                    icon=":material/delete:",
+                    help="Delete design",
+                    key=f"dashboard-delete-task-trigger::{task_id}",
+                    type="tertiary",
+                    use_container_width=True,
+                ):
+                    st.session_state["dashboard-pending-delete-task-id"] = task_id
+                    st.rerun()
 
         if (
             group == sports_cave_dashboard.DESIGN_TASK_GROUP
@@ -12507,119 +12743,75 @@ def render_task_group(group, tasks):
                     st.session_state.pop("dashboard_pending_design_complete_task_text", None)
                     st.rerun()
 
-        if is_design_group and not design_style:
-            assign_columns = st.columns([3.2, 1])
-            style_slug = assign_columns[0].selectbox(
-                "Assign design style",
-                ["", *design_studio_styles.style_slugs()],
-                format_func=lambda value: design_studio_styles.design_style_label(value),
-                key=f"dashboard-design-style::{task_id}",
-            )
-            if assign_columns[1].button(
-                "Save style",
-                key=f"dashboard-design-style-save::{task_id}",
-                disabled=not style_slug,
-                use_container_width=True,
-            ):
-                try:
-                    sports_cave_dashboard.update_task_design_style(task_id, style_slug)
-                except (ValueError, sports_cave_dashboard.DashboardStorageError) as error:
-                    st.warning(str(error))
-                else:
-                    st.rerun()
-
-    if overflow_tasks:
-        with st.popover(f"+{len(overflow_tasks)} more"):
-            preview_rows = []
-            for task in overflow_tasks:
-                task_title = str(task.get("text") or "")
-                task_summary = sports_cave_dashboard.task_import_summary(task)
-                details_html = task_import_details_html(task)
-                design_style_label = sports_cave_dashboard.task_design_style_label(task)
-                summary_html = (
-                    f'<span class="sc-task-summary" title="{html.escape(task_summary, quote=True)}">'
-                    f"{html.escape(task_summary)}</span>"
-                    if task_summary
-                    else ""
-                )
-                details_block = (
-                    '<details class="sc-design-overflow-details">'
-                    "<summary>View details</summary>"
-                    f"{details_html}"
-                    "</details>"
-                    if details_html
-                    else ""
-                )
-                preview_rows.append(
-                    '<div class="sc-design-overflow-item" '
-                    f'title="{html.escape(task_title, quote=True)}">'
-                    f'{html.escape(sports_cave_dashboard.compact_design_task_preview(task_title))}'
-                    f'<span class="sc-design-style-badge">{html.escape(design_style_label)}</span>'
-                    f"{summary_html}"
-                    f"{details_block}"
-                    "</div>"
-                )
-            st.markdown(
-                f'<div class="sc-design-overflow-list">{"".join(preview_rows)}</div>',
-                unsafe_allow_html=True,
-            )
-
-
 def render_dashboard_tasks(state):
     render_dashboard_task_header(state)
+    task_toast = st.session_state.pop("dashboard-task-toast", "")
+    if task_toast:
+        if hasattr(st, "toast"):
+            st.toast(task_toast)
+        else:
+            st.success(task_toast)
     if state.get("task_error"):
         st.warning("Tasks could not load right now. Please try again shortly.")
     if st.session_state.pop("dashboard-clear-add-task", False):
         st.session_state.pop("dashboard-add-task-text", None)
         st.session_state.pop("dashboard-add-task-style", None)
-    columns = st.columns([2.5, 1.2, 1.35, 0.8])
-    task_text = columns[0].text_input(
-        "Task",
-        placeholder="Add a task",
-        label_visibility="collapsed",
-        key="dashboard-add-task-text",
-    )
-    category = columns[1].selectbox(
-        "Group",
-        sports_cave_dashboard.TASK_GROUPS,
-        label_visibility="collapsed",
-        key="dashboard-add-task-group",
-    )
-    design_style = ""
-    if category == sports_cave_dashboard.DESIGN_TASK_GROUP:
-        design_style = columns[2].selectbox(
-            "Design style",
-            ["", *design_studio_styles.style_slugs()],
-            format_func=lambda value: design_studio_styles.design_style_label(value),
+    with st.expander("Add Task Manually", expanded=False):
+        columns = st.columns([2.5, 1.2, 1.35, 0.8], gap="small")
+        task_text = columns[0].text_input(
+            "Task",
+            placeholder="Add a task",
             label_visibility="collapsed",
-            key="dashboard-add-task-style",
+            key="dashboard-add-task-text",
         )
-    else:
-        columns[2].caption("")
-    submitted = columns[3].button(
-        "Add",
-        key="dashboard-add-task-submit",
-        use_container_width=True,
-    )
-
-    if submitted:
-        try:
-            sports_cave_dashboard.add_task(
-                task_text,
-                category,
-                design_style=design_style,
+        category = columns[1].selectbox(
+            "Group",
+            sports_cave_dashboard.TASK_GROUPS,
+            label_visibility="collapsed",
+            key="dashboard-add-task-group",
+        )
+        design_style = ""
+        if category == sports_cave_dashboard.DESIGN_TASK_GROUP:
+            design_style = columns[2].selectbox(
+                "Design style",
+                ["", *design_studio_styles.style_slugs()],
+                format_func=lambda value: design_studio_styles.design_style_label(value),
+                label_visibility="collapsed",
+                key="dashboard-add-task-style",
             )
-            st.session_state["dashboard-clear-add-task"] = True
-            st.rerun()
-        except ValueError as error:
-            st.warning(str(error) or "Add a task first.")
-        except sports_cave_dashboard.DashboardStorageError:
-            st.warning("Could not save the task right now. Please try again.")
+        else:
+            columns[2].caption("")
+        submitted = columns[3].button(
+            "Add",
+            key="dashboard-add-task-submit",
+            use_container_width=True,
+        )
 
-    groups = st.columns(2)
-    for index, group in enumerate(sports_cave_dashboard.TASK_GROUPS):
-        with groups[index % len(groups)]:
-            render_task_group(group, state.get("tasks") or [])
+        if submitted:
+            try:
+                sports_cave_dashboard.add_task(
+                    task_text,
+                    category,
+                    design_style=design_style,
+                )
+                st.session_state["dashboard-clear-add-task"] = True
+                st.rerun()
+            except ValueError as error:
+                st.warning(str(error) or "Add a task first.")
+            except sports_cave_dashboard.DashboardStorageError:
+                st.warning("Could not save the task right now. Please try again.")
+
+    task_group_order = (
+        sports_cave_dashboard.DESIGN_TASK_GROUP,
+        *(
+            group
+            for group in sports_cave_dashboard.TASK_GROUPS
+            if group != sports_cave_dashboard.DESIGN_TASK_GROUP
+        ),
+    )
+    for group in task_group_order:
+        render_task_group(group, state.get("tasks") or [])
+    render_design_task_delete_dialog(state.get("tasks") or [])
 
 
 def dashboard_activity_month_options(local_now, count=12):

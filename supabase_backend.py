@@ -3387,6 +3387,66 @@ def update_dashboard_task_design_details(
     return task
 
 
+def delete_dashboard_task(
+    task_id,
+    *,
+    required_section,
+    deleted_by="",
+    actor="sports_cave_os",
+):
+    clean_task_id = str(task_id or "").strip()
+    clean_section = str(required_section or "").strip()
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not clean_section:
+        raise ValueError("Task section is required.")
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET status='deleted',
+                    metadata=COALESCE(metadata, '{}'::jsonb)
+                        || jsonb_build_object(
+                            'deleted_at', now()::text,
+                            'deleted_by', %s
+                        )
+                WHERE id=%s AND section=%s AND status='open'
+                RETURNING *
+                """,
+                (
+                    str(deleted_by or "").strip(),
+                    clean_task_id,
+                    clean_section,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return None
+            task = _dashboard_task_from_row(row)
+            task_title = task.get("title") or "Design task"
+            _insert_audit_log(
+                cur,
+                event_type="task_deleted",
+                entity_type="dashboard_task",
+                entity_id=clean_task_id,
+                new_value={
+                    "message": f"Design task deleted: {task_title}",
+                    "page": "Dashboard",
+                    "action_type": "task_deleted",
+                    "title": task_title,
+                    "section": clean_section,
+                },
+                reason=f"Design task deleted: {task_title}",
+                actor=str(actor or "").strip() or "sports_cave_os",
+                source="Dashboard",
+            )
+        conn.commit()
+    return task
+
+
 def complete_dashboard_task(
     task_id,
     *,

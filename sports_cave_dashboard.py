@@ -62,6 +62,70 @@ TASK_IMPORT_CSV_COLUMNS = (
     *DESIGN_TASK_CSV_COLUMNS,
     *TASK_IMPORT_LEGACY_DETAIL_COLUMNS,
 )
+DESIGN_IDEA_SPORTS = (
+    "NFL",
+    "NBA",
+    "Football / Soccer",
+    "AFL",
+    "NRL",
+    "Cricket",
+    "Formula 1 / Motorsport",
+    "UFC / Boxing",
+    "MLB / Baseball",
+    "NHL / Ice Hockey",
+    "Tennis",
+    "Golf",
+    "Horse Racing",
+    "Other",
+)
+DESIGN_IDEA_STYLE_FIELDS = (
+    ("ultimate_moment", "Ultimate Moment"),
+    ("rivalry_faceoff", "Rivalry Face-Off"),
+    ("legends_jersey_display", "Legends — Jerseys on Display"),
+    ("nostalgic_tribute", "Nostalgic Moment"),
+    ("motorsport_driver_car", "Motor Racing"),
+    ("minimalist_hero", "Simple Minimalistic"),
+    ("championship_achievement", "Specific Sporting Moment"),
+    ("vintage_restoration", "Restored Collector Series"),
+)
+DESIGN_IDEA_STYLE_SLUGS = tuple(slug for slug, _label in DESIGN_IDEA_STYLE_FIELDS)
+DESIGN_IDEA_DEFAULT_TOTAL = 10
+DESIGN_IDEA_STYLE_WEIGHTS = {
+    "Formula 1 / Motorsport": (
+        ("motorsport_driver_car", 5),
+        ("ultimate_moment", 3),
+        ("nostalgic_tribute", 2),
+        ("minimalist_hero", 2),
+        ("championship_achievement", 1),
+        ("vintage_restoration", 1),
+        ("rivalry_faceoff", 1),
+    ),
+    "NFL": (
+        ("rivalry_faceoff", 3),
+        ("legends_jersey_display", 2),
+        ("ultimate_moment", 2),
+        ("nostalgic_tribute", 2),
+        ("championship_achievement", 2),
+        ("minimalist_hero", 1),
+        ("vintage_restoration", 1),
+    ),
+    "Horse Racing": (
+        ("ultimate_moment", 3),
+        ("nostalgic_tribute", 3),
+        ("minimalist_hero", 2),
+        ("championship_achievement", 2),
+        ("vintage_restoration", 1),
+    ),
+}
+DESIGN_IDEA_GENERIC_STYLE_WEIGHTS = (
+    ("ultimate_moment", 3),
+    ("nostalgic_tribute", 2),
+    ("minimalist_hero", 2),
+    ("championship_achievement", 2),
+    ("rivalry_faceoff", 1),
+    ("legends_jersey_display", 1),
+    ("vintage_restoration", 1),
+)
 TASK_IMPORT_DETAIL_FIELDS = (
     ("design_style", "Design style"),
     *design_studio_styles.DESIGN_DETAIL_FIELDS,
@@ -374,6 +438,63 @@ def normalize_task_import_section(section):
     return _task_section_aliases().get(_task_section_alias_key(clean), "")
 
 
+def normalize_design_idea_sport(value):
+    clean = " ".join(str(value or "").strip().casefold().split())
+    for sport in DESIGN_IDEA_SPORTS:
+        if clean == sport.casefold():
+            return sport
+    return ""
+
+
+def normalize_design_idea_style_mix(style_mix=None):
+    source = dict(style_mix or {})
+    normalized = {}
+    for slug, label in DESIGN_IDEA_STYLE_FIELDS:
+        raw_value = source.get(slug, source.get(label, 0))
+        try:
+            count = int(raw_value or 0)
+        except (TypeError, ValueError):
+            count = 0
+        normalized[slug] = max(count, 0)
+    return normalized
+
+
+def design_idea_style_mix_total(style_mix=None):
+    return sum(normalize_design_idea_style_mix(style_mix).values())
+
+
+def suggest_design_idea_style_mix(sport, total):
+    selected_sport = normalize_design_idea_sport(sport)
+    if not selected_sport:
+        raise ValueError("Select a supported sport or collection.")
+    try:
+        requested_total = int(total)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Number of design ideas must be between 1 and 30.") from error
+    if not 1 <= requested_total <= 30:
+        raise ValueError("Number of design ideas must be between 1 and 30.")
+
+    weighted_styles = DESIGN_IDEA_STYLE_WEIGHTS.get(
+        selected_sport,
+        DESIGN_IDEA_GENERIC_STYLE_WEIGHTS,
+    )
+    total_weight = sum(weight for _slug, weight in weighted_styles)
+    mix = {slug: 0 for slug in DESIGN_IDEA_STYLE_SLUGS}
+    remainders = []
+    allocated = 0
+    for order, (slug, weight) in enumerate(weighted_styles):
+        exact = requested_total * weight / total_weight
+        count = int(exact)
+        mix[slug] = count
+        allocated += count
+        remainders.append((exact - count, -order, slug))
+    for _fraction, _order, slug in sorted(remainders, reverse=True)[
+        : requested_total - allocated
+    ]:
+        mix[slug] += 1
+    return mix
+
+
 def _clean_task_csv_field(value):
     if value is None:
         return ""
@@ -577,6 +698,23 @@ def task_import_summary(task):
     return " · ".join(parts[:3])
 
 
+def design_task_list_details(task):
+    task = _normalise_task(task)
+    details = task_import_details(task)
+    canonical = design_task_details(task)
+    return {
+        "task_id": task.get("id") or "",
+        "design_title": canonical.get("design_title") or task.get("title") or "Untitled design",
+        "design_style": task_design_style(task),
+        "design_style_label": task_design_style_label(task),
+        "sport": canonical.get("sport") or details.get("league_or_competition") or "",
+        "principal_subject_one": canonical.get("principal_subject_one") or "",
+        "principal_subject_two": canonical.get("principal_subject_two") or "",
+        "priority": details.get("priority") or "",
+        "created_at": task.get("created_at"),
+    }
+
+
 def _task_existing_duplicate_key(task):
     task = _normalise_task(task)
     details = task_import_details(task)
@@ -662,7 +800,7 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
     existing_keys = {
         _task_existing_duplicate_key(task)
         for task in (existing_tasks or [])
-        if task
+        if task and str(task.get("status") or "open").strip().casefold() != "deleted"
     }
     seen_keys = set(existing_keys)
     candidates = []
@@ -1011,6 +1149,45 @@ def update_task_design_details(task_id, design_style, details):
         )
         raise DashboardStorageError(
             "Design details could not be saved. Confirm the Design Studio V2 database migration has been applied."
+        ) from error
+
+
+def can_manage_dashboard_tasks(user):
+    return bool(
+        os_accounts.account_is_active(user)
+        and os_accounts.can_access_page(user, "Dashboard")
+    )
+
+
+def delete_design_task(task_id, *, user):
+    clean_task_id = str(task_id or "").strip()
+    if not clean_task_id:
+        raise ValueError("Task id is required.")
+    if not can_manage_dashboard_tasks(user):
+        raise PermissionError("You do not have permission to delete design tasks.")
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        deleted = backend.delete_dashboard_task(
+            clean_task_id,
+            required_section=DESIGN_TASK_GROUP,
+            deleted_by=str((user or {}).get("display_name") or (user or {}).get("username") or ""),
+            actor=get_activity_actor(),
+        )
+        clear_task_cache()
+        clear_activity_cache()
+        return _normalise_task(deleted) if deleted else None
+    except PermissionError:
+        raise
+    except Exception as error:
+        LOGGER.error(
+            "Design task deletion failed (%s; task_id=%s)",
+            type(error).__name__,
+            clean_task_id,
+        )
+        raise DashboardStorageError(
+            "The design task could not be deleted right now. Refresh the list and try again."
         ) from error
 
 
@@ -2900,99 +3077,183 @@ def format_event_date_range(event):
     return f"{start.strftime('%d %b %Y')} - {end.strftime('%d %b %Y')}"
 
 
-def sporting_calendar_prompt_summary(events, today, *, limit=28, upcoming_days=180):
-    selected = filter_calendar_events(
-        events or [],
-        today,
-        status="Active/upcoming",
-        upcoming_days=upcoming_days,
-    )
-    if not selected:
-        return "- No active or upcoming Sports Cave calendar moments loaded."
-    lines = []
-    for event in selected[:limit]:
-        status = event_status(event, today)
-        region_text = ", ".join(event.get("regions") or [])
-        lines.append(
-            f"- {event.get('title') or 'Sports moment'} ({event.get('sport') or 'Sport'}, "
-            f"{region_text}; {format_event_date_range(event)}; {status})"
-        )
-    if len(selected) > limit:
-        lines.append(f"- Plus {len(selected) - limit} more calendar moments in the Sports Cave calendar.")
-    return "\n".join(lines)
-
-
-def edition_products_prompt_summary(products, *, warning=""):
-    if warning:
-        return warning
-    lines = []
-    for product in products or []:
-        title = _compact_text(product.get("title") or product.get("product_title") or "")
-        handle = _compact_text(product.get("handle") or product.get("shopify_handle") or "")
-        category = _compact_text(product.get("category") or product.get("sport") or product.get("product_type") or "")
-        status = _compact_text(product.get("status") or "")
-        if not title and not handle:
-            continue
-        detail_parts = [part for part in (handle, category, status) if part]
-        detail = f" ({'; '.join(detail_parts)})" if detail_parts else ""
-        lines.append(f"- {title or handle}{detail}")
-    if not lines:
-        return "- No existing Edition Ops products were loaded."
-    return "\n".join(lines)
-
-
-def build_design_ideas_prompt(local_now, events, products, *, product_warning=""):
-    local_now = local_now or datetime.now(timezone.utc)
-    today = local_now.date()
-    calendar_summary = sporting_calendar_prompt_summary(events or [], today)
-    product_summary = edition_products_prompt_summary(products or [], warning=product_warning)
-    today_label = today.strftime("%d %B %Y")
-    return f"""Act as Sports Cave's live product research strategist.
-
-Today is {today_label}.
-
-Use live web research to study today's current sports news, trends, major events, anniversaries, finals, rivalries, injuries, returns, retirements, title races, championship moments, awards, transfer/signing stories, and upcoming calendar moments across AU, USA, UK, Canada, and NZ.
-
-Use this Sports Cave sporting calendar context:
-{calendar_summary}
-
-Use this existing Edition Ops product list as do-not-duplicate context:
-{product_summary}
-
-Sports Cave sells premium framed limited-edition sports collector artwork. Each idea must feel wall-worthy, emotional, nostalgic or culturally relevant, and strong enough to become a best seller.
-
-Do not recommend an existing product unless you label it as REWORK EXISTING PRODUCT and explain the refresh angle.
-
-Recommend exactly 5 ideas.
-
-Cover Sports Cave categories such as Motorsport, NBA, Football/Soccer, Cricket, Tennis, Golf, Rugby Union, Baseball, NFL, Combat, Ice Hockey, Horse Racing, and Other.
-
-Prefer ideas that could become premium limited-edition framed collector pieces. Include classics, legends, rivalries, current trending stars, emotional moments, and country-specific demand.
-
-For each idea, provide:
-1. Product title
-2. Sport/category
-3. Country priority
-4. Why this has demand right now
-5. Fan emotion
-6. Visual direction
-7. Best mockup angle
-8. Ad hook
-9. Suggested task wording to add to the dashboard
-
-Be commercially honest. Prioritise ideas most likely to sell."""
-
-
-def build_todays_design_ideas_prompt(local_now, events=None):
-    product_warning = ""
-    products = []
+def build_new_design_ideas_prompt(
+    sport,
+    total_ideas,
+    style_mix,
+    *,
+    exclude_existing=True,
+    calendar_relevance=True,
+):
+    selected_sport = normalize_design_idea_sport(sport)
+    if not selected_sport:
+        raise ValueError("Select a supported sport or collection.")
     try:
-        products = list_existing_edition_products()
-    except DashboardStorageError:
-        product_warning = "- Existing Edition Ops product list could not be loaded."
-    return build_design_ideas_prompt(
-        local_now or datetime.now(timezone.utc),
-        events if events is not None else load_calendar_events(),
-        products,
-        product_warning=product_warning,
+        requested_total = int(total_ideas)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Number of design ideas must be between 1 and 30.") from error
+    if not 1 <= requested_total <= 30:
+        raise ValueError("Number of design ideas must be between 1 and 30.")
+
+    normalized_mix = normalize_design_idea_style_mix(style_mix)
+    allocated_total = sum(normalized_mix.values())
+    if allocated_total != requested_total:
+        raise ValueError(
+            f"Design style allocation must equal {requested_total}; currently allocated {allocated_total}."
+        )
+    style_lines = "\n".join(
+        f"- {label} (CSV design_style: {slug}): {normalized_mix[slug]}"
+        for slug, label in DESIGN_IDEA_STYLE_FIELDS
     )
+    csv_header = ",".join(TASK_IMPORT_CSV_COLUMNS)
+    duplicate_rules = (
+        """The new concepts must not duplicate existing Sports Cave products.
+
+Avoid:
+* The same athlete with substantially the same story
+* The same rivalry with substantially the same title or composition
+* The same historic moment
+* Minor renaming of an existing product
+* Ideas already overrepresented in the selected collection
+
+Look for meaningful commercial gaps in the existing range."""
+        if exclude_existing
+        else "Existing-product exclusion is not a mandatory gate, but identify any obvious overlap rather than presenting it as a new range gap."
+    )
+    calendar_rules = (
+        """Use current web research to consider:
+* Upcoming anniversaries
+* Current tournaments, finals or championships
+* Hall of Fame or retirement relevance
+* Major rivalry renewals
+* Historically important calendar dates
+* Current fan interest
+
+Current relevance should strengthen a genuinely collectible concept. Do not force weak news angles."""
+        if calendar_relevance
+        else "Do not use current calendar or news relevance as a required ranking signal. Prioritise enduring collector demand."
+    )
+
+    return f"""You are the Sports Cave product researcher, commercial range planner and premium collector-art creative director.
+
+Your task is to produce exactly {requested_total} new {selected_sport} collector-art concepts for Sports Cave.
+
+SHOPIFY RESEARCH - REQUIRED
+
+Use the connected Shopify account in read-only mode.
+
+Find and inspect the Sports Cave Shopify collection that best matches:
+
+{selected_sport}
+
+Review the collection's current products, titles, athletes, teams, rivalries, sporting moments, themes and design angles. If an exact collection is unavailable, use the closest matching collection and relevant product tags, and state which collection or fallback was inspected.
+
+Do not create, edit, publish, archive or delete anything in Shopify. Do not claim access to sales information that is unavailable. Never include Shopify credentials, tokens or private administration data in the response.
+
+EXISTING RANGE
+
+{duplicate_rules}
+
+CURRENT RELEVANCE
+
+{calendar_rules}
+
+COMMERCIAL STANDARD
+
+Every concept must be designed for Sports Cave: "Premium Limited-Edition Sports Wall Art For Fans Who Collect Moments, Not Posters."
+
+Prioritise fan identity, nostalgia, legacy, rivalry, championship history, national or team pride, emotional ownership, strong framed-wall appeal, Shopify-thumbnail readability and genuine bestseller potential.
+
+SUBJECT LIMIT - ABSOLUTE
+
+Every concept must contain either one principal person or two principal people. Never propose three or more principal people. Never place multiple names inside one principal-subject field.
+
+Use one player by default. Use two only for a genuine rivalry, comparison, cross-generation legends concept, meaningful player partnership, or team-versus-team story represented by one hero from each team. No background player portraits, ghost players, team collages or groups.
+
+STYLE ALLOCATION - EXACT
+
+Create exactly the following number of ideas for each style. Store the stable slug shown after "CSV design_style" in the CSV:
+
+{style_lines}
+
+Total required: {requested_total}
+
+Do not substitute styles. Do not create more or fewer ideas than requested.
+
+STYLE RULES
+
+Ultimate Moment:
+Use one exact, historically remembered sporting event. The moment, season, date, venue, uniforms and emotional meaning must be accurate.
+
+Rivalry Face-Off:
+Use two genuine rivals or opposing heroes with a valid historical connection. Do not manufacture fake rivalries.
+
+Legends - Jerseys on Display:
+Use one or two legends. Make jersey identity, number, era and supporter nostalgia central. This is a legacy display, not an aggressive rivalry.
+
+Nostalgic Moment:
+Use one or two subjects connected to a beloved era, emotional memory, city, team or generation.
+
+Motor Racing:
+Use one driver as the principal person, with the exact vehicle as the supporting hero. A second driver is allowed only for a genuine rivalry or historic one-two finish. Preserve era-accurate livery, sponsors, number, circuit and vehicle model.
+
+Simple Minimalistic:
+Use one dominant hero, strong negative space, minimal text and restrained team colour. The athlete's identity must carry the design.
+
+Specific Sporting Moment:
+Use a clearly identifiable real play, celebration, finish, goal, shot, catch, overtake, knockout or performance. It must be more specific than a general career tribute.
+
+Restored Collector Series:
+Use one or two subjects from a historically important archival photograph. Restore the source into a premium collector piece without inventing missing historical details.
+
+REALISM AND ACCURACY
+
+Every concept must support a realistic photographic composite using real source photography for all principal subjects. Do not propose AI-generated likenesses, invented uniforms, incorrect numbers, fake vehicles or liveries, inaccurate venues, unverified statistics, fake quotes, fake signatures or generic background athletes.
+
+Every final design must be landscape 4:3 with a premium dark Sports Cave collector treatment, strong negative space, a thin border and restrained gold. The official supplied Sports Cave limited-edition plaque must be composited as an exact asset and never recreated or retyped.
+
+TITLE RULES
+
+Give every design a cinematic, emotionally meaningful collector title, preferably two to five words. Titles must be distinct from existing Sports Cave product titles, avoid generic phrases such as "Player Wall Art", match the exact story and never promise an achievement that did not happen.
+
+OUTPUT - IMPORT-READY CSV ONLY
+
+Return one import-ready CSV code block with exactly this header and column order:
+
+{csv_header}
+
+Create exactly {requested_total} data rows and populate every design-related field.
+
+Use these fixed values:
+category = {DESIGN_TASK_GROUP}
+task_section = {DESIGN_TASK_GROUP}
+task = Create {selected_sport} design - {{DESIGN_TITLE}}
+task_title = Create {selected_sport} design - {{DESIGN_TITLE}}
+
+FIELD REQUIREMENTS
+
+design_style: Use the exact stable slug from the requested allocation.
+design_title: The final uppercase collector title.
+sport: {selected_sport}
+principal_subject_one: One person only.
+principal_subject_two: One person only or blank.
+team_country: Relevant team, teams or country; use "Team A vs Team B" only for a genuine rivalry.
+season_era: Exact season, year range or historical era.
+event_moment: Precise emotional or historical story.
+venue_location: Correct stadium, arena, circuit, course, city or location.
+uniform_equipment_livery: Accurate jersey, number, colours, helmet, equipment, vehicle, livery and era requirements.
+essential_text: Only text that must appear in the artwork; keep it minimal.
+special_instructions: Concise, complete generation direction covering hero arrangement, composition, lighting, minimal background, realism, source-image preservation, the maximum-two-subject rule, landscape 4:3, thin border and exact supplied plaque usage.
+league_or_competition: Correct league, tournament or competition.
+team_or_athlete: Search-friendly athlete/team description.
+moment_or_theme: Emotional hook.
+design_description: Concise commercial description of what the collector artwork celebrates.
+priority: High, Medium or Low based on commercial strength, Shopify range gap and current relevance.
+due_date: Blank unless there is a real time-sensitive event or anniversary.
+notes: Briefly explain the Shopify collection gap and why the selected style is appropriate.
+
+CSV RULES
+
+Properly escape commas and quotation marks. Do not output a Markdown table. Do not omit columns. Do not add commentary before or after the CSV. Do not leave required design fields blank. Do not include more than two principal people. Ensure the style totals exactly match the requested allocation. Ensure every concept is materially different from the current Shopify collection and from the other generated concepts.
+
+Before returning the CSV, silently verify the exact row count, exact style allocation, maximum two principal people per row, no duplicate titles, no duplicated existing Shopify concepts, all required fields, credible historical/uniform details and a clear reason each fan would want the concept on their wall."""
