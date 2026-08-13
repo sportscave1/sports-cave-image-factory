@@ -942,7 +942,8 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertLess(renderer.index("Research Prompt"), renderer.index("Find Images Prompt"))
         self.assertLess(renderer.index("Find Images Prompt"), renderer.index("Design Generation Prompt"))
         self.assertLess(renderer.index("Design Generation Prompt"), renderer.index("Harsh Review"))
-        self.assertIn("Choose design task", renderer)
+        self.assertIn("render_design_schedule", renderer)
+        self.assertIn("if not selected_task", renderer)
         self.assertIn("Design style", renderer)
         self.assertIn("Design details", inspect.getsource(design_studio_page._render_design_details))
 

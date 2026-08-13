@@ -266,7 +266,8 @@ class DesignStudioV2PageContractTests(unittest.TestCase):
         renderer = inspect.getsource(design_studio_page.render_design_studio_v2)
         self.assertNotIn("st.tabs", page_source)
         self.assertNotIn("st.tabs", renderer)
-        self.assertIn("Choose design task", renderer)
+        self.assertIn("render_design_schedule", renderer)
+        self.assertIn("if not selected_task", renderer)
         self.assertIn("Design style", renderer)
         self.assertIn("Design details", inspect.getsource(design_studio_page._render_design_details))
         self.assertIn("Research Prompt", renderer)
@@ -279,8 +280,8 @@ class DesignStudioV2PageContractTests(unittest.TestCase):
         self.assertIn("previous_identity != task_identity", renderer)
         self.assertIn("_task_design_style(selected_task)", renderer)
         self.assertIn("DESIGN_STUDIO_V2_STYLE_MEMORY_KEY", renderer)
-        self.assertIn("DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY", renderer)
         self.assertIn("DESIGN_STUDIO_V2_DETAILS_MEMORY_KEY", renderer)
+        self.assertIn("details_memory.pop(task_identity, None)", renderer)
         self.assertEqual(
             design_studio_page._task_design_style(
                 {

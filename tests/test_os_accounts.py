@@ -788,7 +788,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("if not os_accounts.is_admin(actor):", account_source)
         self.assertNotIn("Account active", source)
         for forbidden in ("Deactivate Account", "Reactivate Account", "Restore Account", "reactivate"):
-            self.assertNotIn(forbidden, source)
+            self.assertNotIn(forbidden, account_source)
 
     def test_account_action_source_uses_session_version_tombstone_and_no_history_deletes(self):
         account_source = (ROOT / "os_accounts.py").read_text(encoding="utf-8")
@@ -2290,7 +2290,7 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("My Work Log", text)
+        self.assertIn("Recent operational activity", text)
         self.assertNotIn("Activity log", text)
         self.assertFalse(any(select.label == "User" for select in app_test.selectbox))
         self.assertNotIn("Daily Task Execution Sheet", text)
@@ -2501,7 +2501,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(render_for(approved_worker), 2)
         self.assertEqual(render_for(admin), 2)
 
-    def test_admin_home_still_renders_activity_log(self):
+    def test_admin_home_renders_compact_operational_activity(self):
         owner_email = "owner@sportscave.test"
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
@@ -2513,7 +2513,7 @@ class AccountAccessTests(unittest.TestCase):
             "role": "admin",
             "timezone": os_accounts.ADMIN_TIMEZONE,
             "is_active": True,
-            "page_permissions": [],
+            "page_permissions": [os_accounts.REPORTING_PAGE_KEY],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Dashboard"
@@ -2527,15 +2527,16 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
-        self.assertIn("Activity log", text)
+        self.assertIn("Active alerts", text)
+        self.assertIn("Recent operational activity", text)
+        self.assertNotIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
 
     def test_admin_home_renders_after_daily_execution_save_with_legacy_other_tasks(self):
         class DailyExecutionBackend:
             def is_configured(self):
                 return True
 
-            def list_dashboard_tasks(self, status="open"):
+            def list_dashboard_tasks(self, status="open", *, limit=200):
                 return []
 
             def list_activity_logs(
@@ -2586,10 +2587,10 @@ class AccountAccessTests(unittest.TestCase):
             "role": "admin",
             "timezone": os_accounts.ADMIN_TIMEZONE,
             "is_active": True,
-            "page_permissions": [],
+            "page_permissions": [os_accounts.REPORTING_PAGE_KEY],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-        app_test.session_state["selected_page"] = "Dashboard"
+        app_test.session_state["selected_page"] = "Reporting"
 
         with patch.object(
             sports_cave_dashboard,
@@ -2617,11 +2618,16 @@ class AccountAccessTests(unittest.TestCase):
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
+        reporting_source = source[
+            source.index('elif current_page == "Reporting"') :
+            source.index('elif current_page == "Files"')
+        ]
 
         self.assertIn("if not os_accounts.is_reporting_owner(user):", panel_source)
         self.assertIn("Access not approved", panel_source)
-        self.assertIn("if os_accounts.is_reporting_owner(user):", dashboard_source)
-        self.assertIn("render_daily_execution_panel(local_now, events, state)", dashboard_source)
+        self.assertNotIn("render_daily_execution_panel", dashboard_source)
+        self.assertIn("if os_accounts.is_reporting_owner(reporting_user):", reporting_source)
+        self.assertIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", reporting_source)
 
 
 if __name__ == "__main__":

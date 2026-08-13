@@ -11700,6 +11700,45 @@ def render_active_alerts(events, today):
     )
 
 
+def render_home_recent_activity(local_now):
+    user = current_os_user()
+    if not os_accounts.can_view_activity_log(user):
+        return
+    render_html_section_title("Recent operational activity")
+    try:
+        records = sports_cave_dashboard.list_activity_entries(
+            sports_cave_dashboard.ACTIVITY_VIEW_TODAY,
+            local_now,
+            limit=8,
+            user=user,
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.caption("Recent activity is unavailable right now.")
+        return
+    if not records:
+        st.markdown(
+            '<div class="sc-empty-note">No important activity recorded today.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    rows = [
+        {
+            "Time": record.get("Time") or "",
+            "Action": record.get("Action") or record.get("Activity") or "Activity",
+            "Area": record.get("Page/Area") or record.get("Area") or "Sports Cave",
+            "Status": record.get("Result/Status") or "",
+        }
+        for record in records[:8]
+    ]
+    st.dataframe(
+        rows,
+        hide_index=True,
+        width="stretch",
+        height=min(300, 42 + len(rows) * 34),
+        row_height=32,
+    )
+
+
 DASHBOARD_DESIGN_IDEA_SPORT_KEY = "dashboard-design-idea-sport"
 DASHBOARD_DESIGN_IDEA_TOTAL_KEY = "dashboard-design-idea-total"
 DASHBOARD_DESIGN_IDEA_PROMPT_KEY = "dashboard-design-idea-prompt"
@@ -12273,7 +12312,7 @@ def _reset_dashboard_task_csv_import(*, keep_open=False):
 
 def _dashboard_task_csv_existing_tasks(fallback_tasks):
     try:
-        return sports_cave_dashboard.list_tasks(status="all")
+        return sports_cave_dashboard.list_tasks(status="all", limit=5000)
     except sports_cave_dashboard.DashboardStorageError:
         return list(fallback_tasks or [])
 
@@ -12288,43 +12327,36 @@ def _task_csv_section_counts_text(section_counts):
 
 
 def _render_dashboard_task_csv_preview(preview):
-    valid_count = int(preview.get("valid_count") or 0)
-    skipped_count = int(preview.get("skipped_count") or 0)
-    duplicate_count = int(preview.get("duplicate_count") or 0)
-    st.markdown(
-        (
-            f"**{valid_count}** valid tasks · "
-            f"**{skipped_count}** invalid/skipped rows · "
-            f"**{duplicate_count}** duplicates"
-        )
+    counts = (
+        ("Valid new", int(preview.get("new_count") or 0)),
+        ("Will reactivate", int(preview.get("reactivate_count") or 0)),
+        ("Active duplicates", int(preview.get("active_duplicate_count") or 0)),
+        ("Completed duplicates", int(preview.get("completed_duplicate_count") or 0)),
+        ("Invalid", int(preview.get("invalid_count") or 0)),
+        ("Total rows", int(preview.get("total_row_count") or 0)),
     )
+    metric_columns = st.columns(len(counts), gap="small")
+    for column, (label, value) in zip(metric_columns, counts):
+        column.metric(label, value)
     st.caption(_task_csv_section_counts_text(preview.get("section_counts") or {}))
 
     preview_rows = []
     for item, status in (
-        *((task, "Ready") for task in preview.get("tasks", [])),
-        *((item, "Duplicate") for item in preview.get("duplicates", [])),
-        *((item, "; ".join(item.get("errors") or [])) for item in preview.get("errors", [])),
+        *((task, task.get("intended_action") or "Valid new") for task in preview.get("tasks", [])),
+        *((item, item.get("intended_action") or "Existing active duplicate") for item in preview.get("duplicates", [])),
+        *((item, "Invalid") for item in preview.get("errors", [])),
     ):
         values = dict(item.get("values") or {})
         preview_rows.append(
             {
                 "Row": item.get("row_number"),
-                "Task": values.get("task") or item.get("title") or "",
-                "Category": values.get("category") or item.get("section") or "",
+                "Task title": values.get("task_title") or item.get("title") or "",
+                "Section": values.get("task_section") or item.get("section") or "",
                 "Design style": values.get("design_style") or "",
-                "Design title": values.get("design_title") or "",
-                "Sport": values.get("sport") or "",
                 "Principal subject one": values.get("principal_subject_one") or "",
                 "Principal subject two": values.get("principal_subject_two") or "",
-                "Team/country": values.get("team_country") or "",
-                "Season/era": values.get("season_era") or "",
-                "Event/moment": values.get("event_moment") or "",
-                "Venue/location": values.get("venue_location") or "",
-                "Uniform/equipment/livery": values.get("uniform_equipment_livery") or "",
-                "Essential text": values.get("essential_text") or "",
-                "Special instructions": values.get("special_instructions") or "",
-                "Import status": status,
+                "Intended action": status,
+                "Validation result": "; ".join(item.get("errors") or []) or "Valid",
             }
         )
     if preview_rows:
@@ -12333,7 +12365,16 @@ def _render_dashboard_task_csv_preview(preview):
             preview_rows,
             hide_index=True,
             use_container_width=True,
-            height=min(360, 38 + (len(preview_rows) * 35)),
+            height=min(380, 48 + (len(preview_rows) * 35)),
+            row_height=32,
+        )
+    if preview.get("errors"):
+        st.download_button(
+            "Download error CSV",
+            data=sports_cave_dashboard.build_task_import_error_csv(preview),
+            file_name="sports-cave-task-import-errors.csv",
+            mime="text/csv",
+            key="dashboard-task-csv-errors",
         )
 
 
@@ -12341,7 +12382,7 @@ def render_dashboard_task_csv_import_dialog(state):
     if not st.session_state.get(DASHBOARD_TASK_CSV_IMPORT_OPEN_KEY):
         return
 
-    @st.dialog("Import Tasks CSV")
+    @st.dialog("Import Tasks CSV", width="large")
     def import_dialog():
         st.caption(
             "Design styles: "
@@ -12389,9 +12430,19 @@ def render_dashboard_task_csv_import_dialog(state):
             _reset_dashboard_task_csv_import()
             st.rerun()
 
-        confirm_disabled = not preview or int(preview.get("valid_count") or 0) <= 0
+        affected_count = int((preview or {}).get("valid_count") or 0)
+        affected_sections = {
+            str(item.get("section") or "")
+            for item in ((preview or {}).get("tasks") or [])
+        }
+        design_only = affected_sections == {sports_cave_dashboard.DESIGN_TASK_GROUP}
+        if design_only:
+            task_word = "design task" if affected_count == 1 else "design tasks"
+        else:
+            task_word = "task" if affected_count == 1 else "tasks"
+        confirm_disabled = not preview or affected_count <= 0
         if action_cols[1].button(
-            "Confirm Import",
+            f"Import {affected_count} {task_word}",
             key="dashboard-task-csv-confirm",
             type="primary",
             disabled=confirm_disabled,
@@ -12399,8 +12450,8 @@ def render_dashboard_task_csv_import_dialog(state):
         ):
             try:
                 result = sports_cave_dashboard.import_task_csv_preview(preview)
-            except sports_cave_dashboard.DashboardStorageError:
-                st.warning("Could not import the task CSV right now. Please try again.")
+            except sports_cave_dashboard.DashboardStorageError as error:
+                st.warning(str(error) or "Could not import the task CSV right now. Please try again.")
                 return
             st.session_state[DASHBOARD_TASK_CSV_IMPORT_TOAST_KEY] = (
                 sports_cave_dashboard.format_task_import_result_message(result)
@@ -12534,28 +12585,55 @@ def render_task_import_details(task):
 
 def render_design_task_details(task):
     task_id = str(task.get("id") or "")
-    render_task_import_details(task)
     current_style = sports_cave_dashboard.task_design_style(task)
+    current_details = sports_cave_dashboard.design_task_details(task)
     style_options = ["", *design_studio_styles.style_slugs()]
     selected_style = st.selectbox(
         "Design style",
         style_options,
         index=style_options.index(current_style) if current_style in style_options else 0,
         format_func=lambda value: design_studio_styles.design_style_label(value),
-        key=f"dashboard-design-style::{task_id}",
+        key=f"dashboard-design-edit-style::{task_id}",
     )
+    edited_details = {}
+    long_fields = {
+        "event_moment", "uniform_equipment_livery", "essential_text", "special_instructions"
+    }
+    detail_columns = st.columns(2, gap="small")
+    for index, (field, label) in enumerate(design_studio_styles.DESIGN_DETAIL_FIELDS):
+        target = detail_columns[index % 2]
+        with target:
+            if field in long_fields:
+                edited_details[field] = st.text_area(
+                    label,
+                    value=current_details.get(field) or "",
+                    height=92,
+                    key=f"dashboard-design-edit::{task_id}::{field}",
+                )
+            else:
+                edited_details[field] = st.text_input(
+                    label,
+                    value=current_details.get(field) or "",
+                    key=f"dashboard-design-edit::{task_id}::{field}",
+                )
     if st.button(
-        "Save style",
-        key=f"dashboard-design-style-save::{task_id}",
-        disabled=not selected_style or selected_style == current_style,
+        "Save design details",
+        key=f"dashboard-design-details-save::{task_id}",
+        disabled=not selected_style,
+        type="primary",
         use_container_width=True,
     ):
         try:
-            sports_cave_dashboard.update_task_design_style(task_id, selected_style)
+            sports_cave_dashboard.update_task_design_details(
+                task_id,
+                selected_style,
+                edited_details,
+            )
         except (ValueError, sports_cave_dashboard.DashboardStorageError) as error:
             st.warning(str(error))
         else:
-            st.session_state["dashboard-task-toast"] = "Design style saved."
+            st.session_state.pop("dashboard-view-task-id", None)
+            st.session_state["dashboard-task-toast"] = "Design details saved."
             st.rerun()
 
 
@@ -12621,127 +12699,266 @@ def render_design_task_delete_dialog(tasks):
     delete_dialog()
 
 
-def render_task_group(group, tasks):
-    st.markdown(f"**{html.escape(group)}**")
-    group_tasks = sports_cave_dashboard.ordered_task_group(tasks, group)
-    if not group_tasks:
-        st.markdown(
-            '<div class="sc-empty-note">Nothing waiting.</div>',
-            unsafe_allow_html=True,
-        )
+DESIGN_TASK_TABLE_COLUMNS = (
+    ("design_title", "Design title"),
+    ("design_style", "Design style"),
+    ("sport", "Sport"),
+    ("principal_subject_one", "Principal subject one"),
+    ("principal_subject_two", "Principal subject two"),
+    ("team_country", "Team/country"),
+    ("season_era", "Season/era"),
+    ("event_moment", "Event/moment"),
+    ("venue_location", "Venue/location"),
+    ("uniform_equipment_livery", "Uniform/equipment/livery"),
+    ("essential_text", "Essential text"),
+    ("special_instructions", "Special instructions"),
+    ("league_or_competition", "League/competition"),
+    ("team_or_athlete", "Team/athlete"),
+    ("moment_or_theme", "Moment/theme"),
+    ("design_description", "Design description"),
+    ("priority", "Priority"),
+    ("due_date", "Due date"),
+    ("notes", "Notes"),
+    ("task", "Task"),
+    ("category", "Category"),
+    ("task_section", "Task section"),
+    ("task_title", "Task title"),
+)
+
+
+def _task_table_selected_indices(event):
+    selection = getattr(event, "selection", None)
+    if selection is None and isinstance(event, dict):
+        selection = event.get("selection")
+    rows = getattr(selection, "rows", None)
+    if rows is None and isinstance(selection, dict):
+        rows = selection.get("rows")
+    return list(rows or [])
+
+
+def _task_table_display_rows(rows, *, design_group):
+    if design_group:
+        output = []
+        for row in rows:
+            display = {}
+            for field, label in DESIGN_TASK_TABLE_COLUMNS:
+                value = row.get(field) or ""
+                if field == "design_style":
+                    value = design_studio_styles.design_style_label(value)
+                display[label] = value
+            output.append(display)
+        return output
+    return [
+        {
+            "Task": row.get("task") or "",
+            "Priority": row.get("priority") or "",
+            "Due date": row.get("due_date") or "",
+            "Notes": row.get("notes") or "",
+            "Added": format_dashboard_timestamp(row.get("_created_at")),
+        }
+        for row in rows
+    ]
+
+
+def render_task_details_dialog(tasks):
+    task_id = str(st.session_state.get("dashboard-view-task-id") or "")
+    if not task_id:
+        return
+    task = next((item for item in tasks or [] if str(item.get("id") or "") == task_id), None)
+    if not task:
+        st.session_state.pop("dashboard-view-task-id", None)
         return
 
-    is_design_group = group == sports_cave_dashboard.DESIGN_TASK_GROUP
-    can_delete_designs = sports_cave_dashboard.can_manage_dashboard_tasks(
-        current_os_user()
-    )
-
-    for task in group_tasks:
-        task_id = task.get("id") or ""
-        task_text = task.get("text") or ""
-        task_summary = sports_cave_dashboard.task_import_summary(task)
-        task_details = sports_cave_dashboard.task_import_details(task)
-        design_style = sports_cave_dashboard.task_design_style(task)
-        design_display = (
-            sports_cave_dashboard.design_task_list_details(task)
-            if is_design_group
-            else {}
-        )
-        has_details_action = bool(task_details) or is_design_group
-        if is_design_group and can_delete_designs:
-            row = st.columns([5.1, 1.05, 1.05, 0.48], gap="small")
-        elif has_details_action:
-            row = st.columns([5.1, 1.05, 1.05], gap="small")
+    @st.dialog("View/Edit Details", width="large")
+    def details_dialog():
+        if (task.get("section") or task.get("category")) == sports_cave_dashboard.DESIGN_TASK_GROUP:
+            render_design_task_details(task)
+            if st.button(
+                "Close",
+                key=f"dashboard-task-details-close::{task_id}",
+                use_container_width=True,
+            ):
+                st.session_state.pop("dashboard-view-task-id", None)
+                st.rerun()
         else:
-            row = st.columns([5.1, 1.05], gap="small")
-        with row[0]:
-            st.html(
-                dashboard_task_card_html(
-                    task_text,
-                    task_summary,
-                    format_dashboard_timestamp(task.get("created_at")),
-                    is_design_group=is_design_group,
-                    design_style=design_style,
-                    design_title=design_display.get("design_title") or "",
-                    sport=design_display.get("sport") or "",
-                    principal_subject_one=design_display.get("principal_subject_one") or "",
-                    principal_subject_two=design_display.get("principal_subject_two") or "",
-                    priority=design_display.get("priority") or "",
-                )
-            )
-        if has_details_action:
-            with row[1]:
-                with st.popover("View details"):
-                    if is_design_group:
-                        render_design_task_details(task)
-                    else:
-                        render_task_import_details(task)
-
-        complete_column = row[2] if has_details_action else row[1]
-        with complete_column:
-            if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
-                if group == sports_cave_dashboard.DESIGN_TASK_GROUP:
-                    st.session_state["dashboard_pending_design_complete_task_id"] = task_id
-                    st.session_state["dashboard_pending_design_complete_task_text"] = task_text
-                    st.rerun()
-                    return
-                try:
-                    completed = sports_cave_dashboard.complete_task(task_id)
-                except sports_cave_dashboard.DashboardStorageError:
-                    st.warning("Could not update the task right now. Please try again.")
-                    return
-                if completed is None:
-                    st.warning("That task is no longer open.")
-                    return
+            st.markdown(f"**{html.escape(str(task.get('title') or task.get('text') or 'Task'))}**")
+            render_task_import_details(task)
+            if st.button(
+                "Close",
+                key=f"dashboard-task-details-close::{task_id}",
+                use_container_width=True,
+            ):
+                st.session_state.pop("dashboard-view-task-id", None)
                 st.rerun()
 
-        if is_design_group and can_delete_designs:
-            with row[3]:
-                if st.button(
-                    "Delete design",
-                    icon=":material/delete:",
-                    help="Delete design",
-                    key=f"dashboard-delete-task-trigger::{task_id}",
-                    type="tertiary",
-                    use_container_width=True,
-                ):
-                    st.session_state["dashboard-pending-delete-task-id"] = task_id
-                    st.rerun()
+    details_dialog()
 
-        if (
-            group == sports_cave_dashboard.DESIGN_TASK_GROUP
-            and st.session_state.get("dashboard_pending_design_complete_task_id") == task_id
+
+def render_design_task_complete_dialog(tasks):
+    task_id = str(st.session_state.get("dashboard_pending_design_complete_task_id") or "")
+    if not task_id:
+        return
+    task = next((item for item in tasks or [] if str(item.get("id") or "") == task_id), None)
+    if not task:
+        st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+        return
+
+    @st.dialog("Complete design task")
+    def complete_dialog():
+        task_text = task.get("text") or task.get("title") or "Design task"
+        st.write(task_text)
+        mockup_label = st.radio(
+            "Mockups needed?",
+            ("Website mockups", "All mockups"),
+            horizontal=True,
+            key=f"dashboard-design-mockup-scope::{task_id}",
+        )
+        columns = st.columns(2)
+        if columns[0].button("Cancel", key=f"dashboard-design-cancel-move::{task_id}", use_container_width=True):
+            st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+            st.rerun()
+        if columns[1].button(
+            "Move to upload",
+            key=f"dashboard-design-move-upload::{task_id}",
+            type="primary",
+            use_container_width=True,
         ):
-            choice_columns = st.columns([2.2, 0.9, 0.9])
-            with choice_columns[0]:
-                mockup_label = st.radio(
-                    "Mockups needed?",
-                    ("Website mockups", "All mockups"),
-                    horizontal=True,
-                    key=f"dashboard-design-mockup-scope::{task_id}",
+            try:
+                result = sports_cave_dashboard.complete_design_task_for_upload(
+                    task_id,
+                    task_text,
+                    mockup_label,
                 )
-            with choice_columns[1]:
-                if st.button("Move to upload", key=f"dashboard-design-move-upload::{task_id}", use_container_width=True):
-                    try:
-                        result = sports_cave_dashboard.complete_design_task_for_upload(
-                            task_id,
-                            task_text,
-                            mockup_label,
-                        )
-                    except sports_cave_dashboard.DashboardStorageError:
-                        st.warning("Could not move the task right now. Please try again.")
-                        return
-                    if result is None:
-                        st.warning("That task is no longer open.")
-                        return
-                    st.session_state.pop("dashboard_pending_design_complete_task_id", None)
-                    st.session_state.pop("dashboard_pending_design_complete_task_text", None)
-                    st.rerun()
-            with choice_columns[2]:
-                if st.button("Cancel", key=f"dashboard-design-cancel-move::{task_id}", use_container_width=True):
-                    st.session_state.pop("dashboard_pending_design_complete_task_id", None)
-                    st.session_state.pop("dashboard_pending_design_complete_task_text", None)
-                    st.rerun()
+            except sports_cave_dashboard.DashboardStorageError:
+                st.warning("Could not move the task right now. Please try again.")
+                return
+            if result is None:
+                st.warning("That task is no longer open.")
+                return
+            st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+            st.session_state["dashboard-task-toast"] = "Design moved to product uploads."
+            st.rerun()
+
+    complete_dialog()
+
+
+def render_task_group(group, tasks):
+    st.markdown(f"**{html.escape(group)}**")
+    authoritative_rows = sports_cave_dashboard.task_table_rows(tasks, group)
+    if not authoritative_rows:
+        st.markdown('<div class="sc-empty-note">Nothing waiting.</div>', unsafe_allow_html=True)
+        return
+
+    design_group = group == sports_cave_dashboard.DESIGN_TASK_GROUP
+    group_key = hashlib.sha1(group.encode("utf-8")).hexdigest()[:10]
+    if design_group:
+        filter_columns = st.columns([2.2, 1, 1, 0.8], gap="small")
+        search = filter_columns[0].text_input(
+            "Search designs",
+            placeholder="Search designs",
+            key=f"dashboard-task-search::{group_key}",
+        )
+        style_options = ["", *sorted({row.get("design_style") for row in authoritative_rows if row.get("design_style")})]
+        design_style = filter_columns[1].selectbox(
+            "Design style",
+            style_options,
+            format_func=lambda value: "All styles" if not value else design_studio_styles.design_style_label(value),
+            key=f"dashboard-task-style-filter::{group_key}",
+        )
+        sport_options = ["", *sorted({row.get("sport") for row in authoritative_rows if row.get("sport")})]
+        sport = filter_columns[2].selectbox(
+            "Sport",
+            sport_options,
+            format_func=lambda value: value or "All sports",
+            key=f"dashboard-task-sport-filter::{group_key}",
+        )
+        priority_options = ["", *[item for item in ("High", "Medium", "Low") if any(row.get("priority") == item for row in authoritative_rows)]]
+        priority = filter_columns[3].selectbox(
+            "Priority",
+            priority_options,
+            format_func=lambda value: value or "All priorities",
+            key=f"dashboard-task-priority-filter::{group_key}",
+        )
+        rows = sports_cave_dashboard.filter_task_table_rows(
+            authoritative_rows,
+            search=search,
+            design_style=design_style,
+            sport=sport,
+            priority=priority,
+        )
+    else:
+        search = st.text_input(
+            f"Search {group}",
+            placeholder="Search tasks",
+            key=f"dashboard-task-search::{group_key}",
+            label_visibility="collapsed",
+        )
+        rows = sports_cave_dashboard.filter_task_table_rows(authoritative_rows, search=search)
+
+    toolbar = st.container()
+    if rows:
+        event = st.dataframe(
+            _task_table_display_rows(rows, design_group=design_group),
+            hide_index=True,
+            width="stretch",
+            height=360,
+            row_height=34,
+            key=f"dashboard-task-table::{group_key}",
+            on_select="rerun",
+            selection_mode="single-row",
+        )
+        indices = _task_table_selected_indices(event)
+        if indices and 0 <= indices[0] < len(rows):
+            st.session_state[f"dashboard-selected-task::{group_key}"] = rows[indices[0]]["_task_id"]
+    else:
+        st.info("No tasks match the current search and filters.")
+
+    selected_id = str(st.session_state.get(f"dashboard-selected-task::{group_key}") or "")
+    selected = next((row for row in rows if row.get("_task_id") == selected_id), None)
+    with toolbar:
+        action_columns = st.columns([1, 0.9, 0.75, 0.38], gap="small")
+        count_label = "design" if len(rows) == 1 and design_group else "designs" if design_group else "task" if len(rows) == 1 else "tasks"
+        action_columns[0].caption(f"{len(rows)} {count_label} · Select one row for actions")
+        if action_columns[1].button(
+            "View/Edit Details",
+            icon=":material/edit:",
+            key=f"dashboard-task-view::{group_key}",
+            disabled=selected is None,
+            use_container_width=True,
+        ):
+            st.session_state["dashboard-view-task-id"] = selected["_task_id"]
+            st.rerun()
+        if action_columns[2].button(
+            "Complete",
+            icon=":material/check:",
+            key=f"dashboard-task-complete::{group_key}",
+            disabled=selected is None,
+            use_container_width=True,
+        ):
+            if design_group:
+                st.session_state["dashboard_pending_design_complete_task_id"] = selected["_task_id"]
+                st.rerun()
+                return
+            try:
+                completed = sports_cave_dashboard.complete_task(selected["_task_id"])
+            except sports_cave_dashboard.DashboardStorageError:
+                st.warning("Could not update the task right now. Please try again.")
+                return
+            if completed is None:
+                st.warning("That task is no longer open.")
+                return
+            st.rerun()
+        if design_group and sports_cave_dashboard.can_manage_dashboard_tasks(current_os_user()):
+            if action_columns[3].button(
+                "Delete design",
+                icon=":material/delete:",
+                help="Delete design",
+                key=f"dashboard-task-delete::{group_key}",
+                type="tertiary",
+                disabled=selected is None,
+            ):
+                st.session_state["dashboard-pending-delete-task-id"] = selected["_task_id"]
+                st.rerun()
 
 def render_dashboard_tasks(state):
     render_dashboard_task_header(state)
@@ -12811,6 +13028,8 @@ def render_dashboard_tasks(state):
     )
     for group in task_group_order:
         render_task_group(group, state.get("tasks") or [])
+    render_task_details_dialog(state.get("tasks") or [])
+    render_design_task_complete_dialog(state.get("tasks") or [])
     render_design_task_delete_dialog(state.get("tasks") or [])
 
 
@@ -13218,7 +13437,6 @@ def render_lightweight_dashboard_page():
     user = current_os_user()
     local_now = account_local_now(user)
     today = local_now.date()
-    state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
     events = sports_cave_dashboard.load_calendar_events()
     greeting = sports_cave_dashboard.greeting_for_account(local_now, user)
 
@@ -13232,16 +13450,7 @@ def render_lightweight_dashboard_page():
         unsafe_allow_html=True,
     )
     render_active_alerts(events, today)
-    if os_accounts.is_reporting_owner(user):
-        render_daily_execution_panel(local_now, events, state)
-    render_todays_design_ideas(local_now, events)
-    render_dashboard_tasks(state)
-    if os_accounts.can_view_activity_log(user):
-        render_activity_log(local_now)
-    if os_accounts.is_reporting_owner(user):
-        render_daily_execution_archive(local_now)
-    if os_accounts.is_admin(user):
-        render_sports_sales_calendar(events, local_now)
+    render_home_recent_activity(local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
@@ -14574,7 +14783,15 @@ def render_selected_page(current_page):
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
     elif current_page == "Reporting":
-        get_reporting_page().render_page(current_os_user())
+        reporting_user = current_os_user()
+        get_reporting_page().render_page(reporting_user)
+        if os_accounts.is_reporting_owner(reporting_user):
+            local_now = account_local_now(reporting_user)
+            events = sports_cave_dashboard.load_calendar_events()
+            render_daily_execution_panel(local_now, events, {}, show_denied=False)
+            render_daily_execution_archive(local_now)
+            if os_accounts.is_admin(reporting_user):
+                render_sports_sales_calendar(events, local_now)
     elif current_page == "Files":
         render_files_page()
     elif current_page == "Products":
@@ -14595,7 +14812,8 @@ def render_selected_page(current_page):
         )
     elif current_page == "Design Studio":
         get_design_studio_page().render_design_studio_page(
-            can_edit_prompts=prompt_editing_allowed()
+            can_edit_prompts=prompt_editing_allowed(),
+            user=current_os_user(),
         )
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()

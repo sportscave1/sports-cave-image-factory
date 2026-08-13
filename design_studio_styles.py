@@ -222,8 +222,8 @@ Use exactly two genuine rear or rear three-quarter source photographs at equal s
         "Nostalgic Tribute",
         "A person-first emotional tribute built around one specific memory.",
         "Shane Warne bowing at the MCG",
-        1,
-        1,
+        2,
+        2,
         ("hero_exact_photo",),
         ("venue_reference", "historical_reference", "signature_asset"),
         """
@@ -233,11 +233,10 @@ Identify the strongest emotionally recognisable gesture, farewell, candid expres
 Return the strongest emotionally specific final-use hero candidates first, then a small set of genuine alternatives, then the correct nostalgic venue or era reference, then one verified signature last.
 """,
         """
-Use one dominant authentic hero photograph and one distinct athlete only. Do not duplicate the athlete. Support the memory with restrained warm light, stadium shadow, gentle haze, authentic grain and dark edges. Avoid fantasy lighting, synthetic crowds and generic action montage treatment.
+Use one dominant authentic hero photograph, or two authentic subjects when the shared memory genuinely requires both. Do not duplicate the athlete; when two supplied subjects are required, do not duplicate either one. Support the memory with restrained warm light, stadium shadow, gentle haze, authentic grain and dark edges. Avoid fantasy lighting, synthetic crowds and generic action montage treatment.
 """,
         "Judge emotional specificity, authentic memory and restraint. Reject generic action, duplicated athletes or fantasy styling.",
         minimum=1,
-        exact=1,
     ),
     _style(
         "motorsport_driver_car",
@@ -365,13 +364,31 @@ def style_labels():
     return tuple(style.label for style in get_style_registry().values())
 
 
+_STYLE_LABEL_ALIASES = {
+    "legends jerseys on display": "legends_jersey_display",
+    "nostalgic moment": "nostalgic_tribute",
+    "motor racing": "motorsport_driver_car",
+    "simple minimalistic": "minimalist_hero",
+    "specific sporting moment": "championship_achievement",
+    "restored collector series": "vintage_restoration",
+}
+
+
+def _normalise_style_label(value):
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"[\u2010-\u2015/_-]+", " ", text)
+    return " ".join(text.split())
+
+
 def normalize_design_style(value):
-    clean = "_".join(str(value or "").strip().casefold().replace("/", " ").replace("-", " ").split())
+    clean = "_".join(_normalise_style_label(value).split())
     if clean in get_style_registry():
         return clean
-    raw_label = " ".join(str(value or "").strip().casefold().split())
+    raw_label = _normalise_style_label(value)
+    if raw_label in _STYLE_LABEL_ALIASES:
+        return _STYLE_LABEL_ALIASES[raw_label]
     for style in get_style_registry().values():
-        if raw_label == " ".join(style.label.casefold().split()):
+        if raw_label == _normalise_style_label(style.label):
             return style.slug
     return ""
 

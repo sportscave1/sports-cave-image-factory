@@ -3117,16 +3117,21 @@ def list_activity_logs(
             return cur.fetchall()
 
 
-def list_dashboard_tasks(status="open", *, limit=200):
+def list_dashboard_tasks(status="open", *, section=None, limit=200):
     ensure_dashboard_schema()
     clean_status = str(status or "open").strip().casefold()
+    clean_section = str(section or "").strip()
     params = []
-    where_sql = ""
+    clauses = []
     if clean_status and clean_status != "all":
-        where_sql = "WHERE status = %s"
+        clauses.append("status = %s")
         params.append(clean_status)
+    if clean_section:
+        clauses.append("section = %s")
+        params.append(clean_section)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     try:
-        safe_limit = min(max(int(limit or 200), 1), 500)
+        safe_limit = min(max(int(limit or 200), 1), 5000)
     except (TypeError, ValueError):
         safe_limit = 200
     params.append(safe_limit)
@@ -3144,6 +3149,48 @@ def list_dashboard_tasks(status="open", *, limit=200):
                 params,
             )
             return [_dashboard_task_from_row(row) for row in cur.fetchall()]
+
+
+def get_dashboard_task(task_id):
+    clean_task_id = str(task_id or "").strip()
+    if not clean_task_id:
+        return None
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT id, title, section, status, created_at, completed_at,
+                       completed_by, design_style, metadata
+                FROM dashboard_tasks
+                WHERE id = %s
+                """,
+                (clean_task_id,),
+            )
+            row = cur.fetchone()
+            return _dashboard_task_from_row(row) if row else None
+
+
+def count_dashboard_tasks(status="open", *, section=None):
+    ensure_dashboard_schema()
+    clean_status = str(status or "open").strip().casefold()
+    clean_section = str(section or "").strip()
+    clauses = []
+    params = []
+    if clean_status and clean_status != "all":
+        clauses.append("status = %s")
+        params.append(clean_status)
+    if clean_section:
+        clauses.append("section = %s")
+        params.append(clean_section)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(f"SELECT COUNT(*) AS task_count FROM dashboard_tasks {where_sql}", params)
+            row = cur.fetchone() or {}
+            return int(row.get("task_count") or 0)
 
 
 def list_dashboard_edition_products(*, limit=1000):
@@ -3218,6 +3265,169 @@ def list_dashboard_edition_products(*, limit=1000):
                     }
                 )
             return rows
+
+
+def _task_import_normalise_part(value):
+    text = str(value or "").replace("\u2019", "'").replace("\u2018", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    return " ".join(text.split()).casefold()
+
+
+def _task_import_section_key(value):
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return "_".join(text.split())
+
+
+def _dashboard_task_import_key(task):
+    task = dict(task or {})
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    details = metadata.get("task_import") if isinstance(metadata.get("task_import"), dict) else {}
+    if not details and isinstance(metadata.get("design_brief"), dict):
+        details = metadata["design_brief"]
+    title = details.get("task_title") or task.get("title") or task.get("text") or ""
+    return (
+        _task_import_section_key(task.get("section") or task.get("category")),
+        _task_import_normalise_part(title),
+        _task_import_normalise_part(details.get("design_title")),
+        _task_import_normalise_part(details.get("team_or_athlete")),
+    )
+
+
+def _dashboard_task_import_status_group(task):
+    status = str((task or {}).get("status") or "open").strip().casefold()
+    if status in {"deleted", "archived"}:
+        return "deleted"
+    if status in {"complete", "completed"}:
+        return "completed"
+    return "active"
+
+
+def import_dashboard_tasks_batch(candidates, *, actor="sports_cave_os"):
+    """Create or reactivate a confirmed CSV batch in one transaction."""
+    candidates = [dict(candidate or {}) for candidate in candidates or []]
+    ensure_dashboard_schema()
+    result = {
+        "created_count": 0,
+        "reactivated_count": 0,
+        "active_duplicate_count": 0,
+        "completed_duplicate_count": 0,
+        "failed_count": 0,
+        "imported_tasks": [],
+        "section_counts": {},
+    }
+    section_counts = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("LOCK TABLE dashboard_tasks IN SHARE ROW EXCLUSIVE MODE")
+            cur.execute(
+                """
+                SELECT id, title, section, status, created_at, completed_at,
+                       completed_by, design_style, metadata
+                FROM dashboard_tasks
+                ORDER BY created_at DESC, id
+                """
+            )
+            existing = [_dashboard_task_from_row(row) for row in cur.fetchall()]
+            index = {}
+            priority = {"active": 3, "completed": 2, "deleted": 1}
+            for task in existing:
+                key = _dashboard_task_import_key(task)
+                group = _dashboard_task_import_status_group(task)
+                current = index.get(key)
+                if current is None or priority[group] > priority[current[0]]:
+                    index[key] = (group, task)
+
+            for candidate in candidates:
+                section = str(candidate.get("section") or "").strip()
+                title = str(candidate.get("title") or "Task").strip()
+                metadata = dict(candidate.get("metadata") or {})
+                details = metadata.get("task_import") if isinstance(metadata.get("task_import"), dict) else {}
+                style = str(metadata.get("design_style") or details.get("design_style") or "").strip()
+                supplied_key = candidate.get("duplicate_key")
+                key = tuple(supplied_key) if isinstance(supplied_key, (list, tuple)) else (
+                    _task_import_section_key(section),
+                    _task_import_normalise_part(details.get("task_title") or title),
+                    _task_import_normalise_part(details.get("design_title")),
+                    _task_import_normalise_part(details.get("team_or_athlete")),
+                )
+                group, match = index.get(key, ("", None))
+                if group == "active":
+                    result["active_duplicate_count"] += 1
+                    continue
+                if group == "completed":
+                    result["completed_duplicate_count"] += 1
+                    continue
+
+                if group == "deleted" and match:
+                    restored_metadata = dict(match.get("metadata") or {})
+                    for field in (
+                        "deleted_at", "deleted_by", "archived_at", "archived_by",
+                        "cleanup_batch", "cleanup_reason",
+                    ):
+                        restored_metadata.pop(field, None)
+                    restored_metadata.update(metadata)
+                    restored_metadata["reactivated_at"] = datetime.now(timezone.utc).isoformat()
+                    restored_metadata["reactivated_from_status"] = str(match.get("status") or "deleted")
+                    cur.execute(
+                        """
+                        UPDATE dashboard_tasks
+                        SET title=%s,
+                            section=%s,
+                            status='open',
+                            completed_at=NULL,
+                            completed_by=NULL,
+                            design_style=NULLIF(%s, ''),
+                            metadata=%s::jsonb
+                        WHERE id=%s AND status IN ('deleted', 'archived')
+                        RETURNING *
+                        """,
+                        (title, section, style, json_dumps(restored_metadata), match["id"]),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        raise RuntimeError("A task changed while the CSV import was being confirmed.")
+                    task = _dashboard_task_from_row(row)
+                    event_type = "task_reactivated"
+                    message = f"Task reactivated from CSV: {title}"
+                    result["reactivated_count"] += 1
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO dashboard_tasks(title, section, design_style, metadata)
+                        VALUES (%s, %s, NULLIF(%s, ''), %s::jsonb)
+                        RETURNING *
+                        """,
+                        (title, section, style, json_dumps(metadata)),
+                    )
+                    task = _dashboard_task_from_row(cur.fetchone() or {})
+                    event_type = "task_added"
+                    message = f"Task added from CSV: {title}"
+                    result["created_count"] += 1
+
+                _insert_audit_log(
+                    cur,
+                    event_type=event_type,
+                    entity_type="dashboard_task",
+                    entity_id=task.get("id") or "",
+                    new_value={
+                        "message": message,
+                        "page": "Dashboard",
+                        "action_type": event_type,
+                        "title": title,
+                        "section": section,
+                    },
+                    reason=message,
+                    actor=str(actor or "").strip() or "sports_cave_os",
+                    source="Dashboard",
+                )
+                result["imported_tasks"].append(task)
+                section_counts[section] = section_counts.get(section, 0) + 1
+                index[key] = ("active", task)
+        conn.commit()
+    result["section_counts"] = section_counts
+    result["imported_count"] = result["created_count"] + result["reactivated_count"]
+    return result
 
 
 def create_dashboard_task(

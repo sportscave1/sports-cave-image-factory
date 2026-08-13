@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
+import design_schedule
 import design_studio_styles
 import prompt_store
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
@@ -25,7 +26,7 @@ HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH = (
 )
 NEW_DESIGN_TASK_CATEGORY = "New designs to complete"
 MANUAL_NEW_DESIGN_TASK_OPTION = "Enter task manually"
-DESIGN_STUDIO_V2_SELECTED_TASK_KEY = "design-studio-v2-selected-task"
+DESIGN_STUDIO_V2_SELECTED_TASK_KEY = design_schedule.SELECTED_DESIGN_TASK_KEY
 DESIGN_STUDIO_V2_STYLE_KEY = "design-studio-v2-style"
 DESIGN_STUDIO_V2_LOADED_TASK_KEY = "design-studio-v2-loaded-task"
 DESIGN_STUDIO_V2_STYLE_MEMORY_KEY = "design-studio-v2-style-memory"
@@ -4184,7 +4185,7 @@ def _task_selected_assets(task):
 def _persist_task_design_details(task, style_slug, details):
     task_id = str((task or {}).get("id") or "").strip()
     if not task_id:
-        st.warning("This Home task has no durable task ID. Refresh the task list and try again.")
+        st.warning("This design task has no durable task ID. Refresh the Design Schedule and try again.")
         return None
     try:
         import sports_cave_dashboard
@@ -4198,12 +4199,12 @@ def _persist_task_design_details(task, style_slug, details):
         st.warning(str(error))
         return None
     except Exception:
-        st.warning("Design details could not be saved. Refresh the task list and try again.")
+        st.warning("Design details could not be saved. Refresh the Design Schedule and try again.")
         return None
     if hasattr(st, "toast"):
-        st.toast("Design details saved to the Home task.")
+        st.toast("Design details saved to the Design Schedule.")
     else:
-        st.success("Design details saved to the Home task.")
+        st.success("Design details saved to the Design Schedule.")
     return updated
 
 
@@ -4247,7 +4248,7 @@ def _render_design_details(defaults, identity, *, can_save=False):
     return values, save_clicked
 
 
-def render_design_studio_v2(can_edit_prompts=False):
+def render_design_studio_v2(can_edit_prompts=False, user=None):
     del can_edit_prompts
     st.markdown(
         """
@@ -4262,37 +4263,33 @@ def render_design_studio_v2(can_edit_prompts=False):
     )
     st.title("Design Studio")
     st.markdown(
-        '<div class="sc-design-v2-intro">Choose one task and one proven Sports Cave composition system.</div>',
+        '<div class="sc-design-v2-intro">Manage the design schedule, then build one selected collector artwork.</div>',
         unsafe_allow_html=True,
     )
 
-    task_records = list_new_design_task_records()
-    task_by_title = {task["title"]: task for task in task_records}
-    task_options = [MANUAL_NEW_DESIGN_TASK_OPTION, *task_by_title]
-    selected_title = st.selectbox(
-        "Choose design task",
-        task_options,
-        key=DESIGN_STUDIO_V2_SELECTED_TASK_KEY,
+    selected_task = design_schedule.render_design_schedule(
+        user,
+        copy_prompt_renderer=lambda prompt, key, label: _render_copy_button(
+            prompt,
+            key,
+            label=label,
+        ),
     )
-    selected_task = task_by_title.get(selected_title)
-    task_identity = str((selected_task or {}).get("id") or selected_title or "manual")
+    if not selected_task:
+        return
+
+    task_identity = str(selected_task.get("id") or "")
     previous_identity = st.session_state.get(DESIGN_STUDIO_V2_LOADED_TASK_KEY)
     style_memory = st.session_state.setdefault(DESIGN_STUDIO_V2_STYLE_MEMORY_KEY, {})
+    details_memory = st.session_state.setdefault(DESIGN_STUDIO_V2_DETAILS_MEMORY_KEY, {})
     if previous_identity != task_identity:
         st.session_state[DESIGN_STUDIO_V2_LOADED_TASK_KEY] = task_identity
-        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = (
-            _task_design_style(selected_task)
-            if selected_task
-            else design_studio_styles.normalize_design_style(style_memory.get(task_identity))
-        )
+        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = _task_design_style(selected_task)
+        details_memory.pop(task_identity, None)
 
     style_options = ["", *design_studio_styles.style_slugs()]
     if st.session_state.get(DESIGN_STUDIO_V2_STYLE_KEY) not in style_options:
-        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = (
-            _task_design_style(selected_task)
-            if selected_task
-            else design_studio_styles.normalize_design_style(style_memory.get(task_identity))
-        )
+        st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = _task_design_style(selected_task)
     selected_style = st.selectbox(
         "Design style",
         style_options,
@@ -4307,25 +4304,9 @@ def render_design_studio_v2(can_edit_prompts=False):
             unsafe_allow_html=True,
         )
 
-    if selected_task:
-        task_text = str(selected_task.get("text") or selected_task.get("title") or "").strip()
-    else:
-        manual_task_key = "design-studio-v2-manual-task"
-        if manual_task_key not in st.session_state:
-            st.session_state[manual_task_key] = st.session_state.get(
-                DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY,
-                "",
-            )
-        task_text = st.text_area(
-            "Manual design task",
-            placeholder="Describe the exact Sports Cave design task...",
-            height=90,
-            key=manual_task_key,
-        )
-        st.session_state[DESIGN_STUDIO_V2_MANUAL_TASK_MEMORY_KEY] = task_text
+    task_text = str(selected_task.get("text") or selected_task.get("title") or "").strip()
 
     defaults = _task_design_details(selected_task)
-    details_memory = st.session_state.setdefault(DESIGN_STUDIO_V2_DETAILS_MEMORY_KEY, {})
     remembered_details = details_memory.get(task_identity)
     if isinstance(remembered_details, dict):
         defaults = {**defaults, **remembered_details}
@@ -4352,6 +4333,17 @@ def render_design_studio_v2(can_edit_prompts=False):
                 selected_task["metadata"]["design_details"] = dict(details)
     if len(defaults.get("_saved_principal_subjects") or []) > 2:
         details["principal_subjects"] = defaults["_saved_principal_subjects"]
+    st.markdown('<div id="design-studio-workflow"></div>', unsafe_allow_html=True)
+    if st.session_state.pop("design-studio-scroll-to-workflow", False):
+        components.html(
+            """
+            <script>
+            const marker = window.parent.document.getElementById('design-studio-workflow');
+            if (marker) marker.scrollIntoView({behavior: 'smooth', block: 'start'});
+            </script>
+            """,
+            height=0,
+        )
     st.markdown(
         '<div class="sc-design-v2-steps">1 Research &nbsp;&rarr;&nbsp; 2 Find Images &nbsp;&rarr;&nbsp; 3 Generate</div>',
         unsafe_allow_html=True,
@@ -4401,5 +4393,5 @@ def render_design_studio_v2(can_edit_prompts=False):
     )
 
 
-def render_design_studio_page(can_edit_prompts: bool = False):
-    render_design_studio_v2(can_edit_prompts=can_edit_prompts)
+def render_design_studio_page(can_edit_prompts: bool = False, user=None):
+    render_design_studio_v2(can_edit_prompts=can_edit_prompts, user=user)

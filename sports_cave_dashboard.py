@@ -548,17 +548,21 @@ def design_task_details(task):
 def validate_design_task_details(style_slug, details, task_text=""):
     clean_details = design_studio_styles.normalize_design_details(details)
     subjects = design_studio_styles.principal_subjects(clean_details)
-    for subject in design_studio_styles.principal_subjects({}, task_text):
-        subject_key = subject.casefold()
-        matches_existing = any(
-            subject_key == item.casefold()
-            or subject_key == (item.split()[-1].casefold() if item.split() else "")
-            or subject_key.startswith(f"{item.casefold()} ")
-            or item.casefold().startswith(f"{subject_key} ")
-            for item in subjects
-        )
-        if not matches_existing:
-            subjects.append(subject)
+    task_text = str(task_text or "")
+    # Explicit CSV subject fields are authoritative. Only inspect prose when it
+    # clearly contains a list, so collector titles are never mistaken for people.
+    if not subjects or ("," in task_text and re.search(r"\b(?:and|&)\b", task_text, re.I)):
+        for subject in design_studio_styles.principal_subjects({}, task_text):
+            subject_key = subject.casefold()
+            matches_existing = any(
+                subject_key == item.casefold()
+                or subject_key == (item.split()[-1].casefold() if item.split() else "")
+                or subject_key.startswith(f"{item.casefold()} ")
+                or item.casefold().startswith(f"{subject_key} ")
+                for item in subjects
+            )
+            if not matches_existing:
+                subjects.append(subject)
     if len(subjects) > 2:
         return [
             "This task exceeds the new Sports Cave limit of two principal people. "
@@ -620,6 +624,7 @@ def _decode_task_import_csv(data, filename=""):
             text = raw.decode("utf-8-sig")
         except UnicodeDecodeError as error:
             raise TaskCSVImportError("Save the task CSV as UTF-8 and try again.") from error
+    text = text.lstrip("\ufeff")
     if byte_length > TASK_IMPORT_MAX_BYTES:
         raise TaskCSVImportError("The task CSV must be smaller than 2 MB.")
     if "\x00" in text[:2048]:
@@ -715,6 +720,75 @@ def design_task_list_details(task):
     }
 
 
+def task_csv_values(task):
+    task = _normalise_task(task)
+    details = task_import_details(task)
+    section = task.get("section") or task.get("category") or ""
+    title = task.get("title") or task.get("text") or ""
+    values = {
+        "task": title,
+        "category": section,
+        "task_section": section,
+        "task_title": details.get("task_title") or title,
+        "design_style": task_design_style(task),
+    }
+    for key in (*design_studio_styles.DESIGN_DETAIL_KEYS, *TASK_IMPORT_LEGACY_DETAIL_COLUMNS):
+        values[key] = details.get(key) or ""
+    return values
+
+
+def _task_table_rank(values):
+    match = re.search(r"\brank\s+(\d+)\b", str((values or {}).get("notes") or ""), re.I)
+    return int(match.group(1)) if match else 10_000
+
+
+def task_table_rows(tasks, group):
+    rows = []
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    normalised_tasks = [_normalise_task(task) for task in tasks or []]
+    for task in ordered_task_group(normalised_tasks, group):
+        values = task_csv_values(task)
+        created_at = task.get("created_at")
+        rows.append(
+            {
+                "_task_id": str(task.get("id") or ""),
+                "_created_at": created_at,
+                "_created_label": str(created_at or ""),
+                **values,
+            }
+        )
+    if group == DESIGN_TASK_GROUP:
+        rows.sort(
+            key=lambda row: (
+                priority_order.get(str(row.get("priority") or "").casefold(), 3),
+                _task_table_rank(row),
+                str(row.get("_created_at") or ""),
+            )
+        )
+    return rows
+
+
+def filter_task_table_rows(rows, *, search="", design_style="", sport="", priority=""):
+    search_key = _normalise_duplicate_part(search)
+    filtered = []
+    for row in rows or []:
+        if design_style and row.get("design_style") != design_style:
+            continue
+        if sport and row.get("sport") != sport:
+            continue
+        if priority and row.get("priority") != priority:
+            continue
+        if search_key:
+            haystack = " ".join(
+                _normalise_duplicate_part(row.get(column))
+                for column in TASK_IMPORT_CSV_COLUMNS
+            )
+            if search_key not in haystack:
+                continue
+        filtered.append(row)
+    return filtered
+
+
 def _task_existing_duplicate_key(task):
     task = _normalise_task(task)
     details = task_import_details(task)
@@ -727,6 +801,38 @@ def _task_existing_duplicate_key(task):
         details.get("design_title") if details else "",
         details.get("team_or_athlete") if details else "",
     )
+
+
+TASK_IMPORT_ACTION_NEW = "Valid new"
+TASK_IMPORT_ACTION_REACTIVATE = "Will reactivate"
+TASK_IMPORT_ACTION_ACTIVE_DUPLICATE = "Existing active duplicate"
+TASK_IMPORT_ACTION_COMPLETED_DUPLICATE = "Completed duplicate"
+TASK_IMPORT_ACTION_INVALID = "Invalid"
+_TASK_IMPORT_DELETED_STATUSES = {"deleted", "archived"}
+_TASK_IMPORT_COMPLETED_STATUSES = {"complete", "completed"}
+
+
+def _task_import_status_group(task):
+    status = str((task or {}).get("status") or "open").strip().casefold()
+    if status in _TASK_IMPORT_DELETED_STATUSES:
+        return "deleted"
+    if status in _TASK_IMPORT_COMPLETED_STATUSES:
+        return "completed"
+    return "active"
+
+
+def _task_import_existing_index(tasks):
+    index = {}
+    priority = {"active": 3, "completed": 2, "deleted": 1}
+    for task in tasks or []:
+        if not task:
+            continue
+        duplicate_key = _task_existing_duplicate_key(task)
+        group = _task_import_status_group(task)
+        current = index.get(duplicate_key)
+        if current is None or priority[group] > priority[current[0]]:
+            index[duplicate_key] = (group, task)
+    return index
 
 
 def _task_csv_row_is_blank(row):
@@ -797,15 +903,13 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             "The task CSV could not be read. Check its quoting and line breaks."
         ) from error
 
-    existing_keys = {
-        _task_existing_duplicate_key(task)
-        for task in (existing_tasks or [])
-        if task and str(task.get("status") or "open").strip().casefold() != "deleted"
-    }
-    seen_keys = set(existing_keys)
+    existing_index = _task_import_existing_index(existing_tasks or [])
+    seen_actions = {}
     candidates = []
     errors = []
-    duplicates = []
+    active_duplicates = []
+    completed_duplicates = []
+    reactivations = []
     blank_count = 0
     section_counts = Counter()
 
@@ -822,35 +926,42 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
         section_value = values.get("category") or values.get("task_section")
         section = normalize_task_import_section(section_value)
         row_errors = []
+        row_error_details = []
+
+        def add_row_error(field, message):
+            row_errors.append(message)
+            row_error_details.append({"field": field, "message": message})
+
         if not section:
-            row_errors.append(
+            add_row_error(
+                "category",
                 "category must match an existing task section or a supported short key."
             )
         title = values.get("task") or values.get("task_title") or values.get("design_title")
         if not title:
-            row_errors.append("task is required.")
+            add_row_error("task", "task is required.")
         raw_style = values.get("design_style")
         style_slug = design_studio_styles.normalize_design_style(raw_style)
         if raw_style and not style_slug:
-            row_errors.append(
+            add_row_error(
+                "design_style",
                 f"Unknown design_style: {raw_style}. Accepted styles: "
                 f"{', '.join(design_studio_styles.style_slugs())}."
             )
         if section == DESIGN_TASK_GROUP and not raw_style:
-            row_errors.append("Style required for new design tasks.")
+            add_row_error("design_style", "Style required for new design tasks.")
         values["design_style"] = style_slug
         values["task"] = title
         values["task_title"] = title
         values["category"] = section
         values["task_section"] = section
         if section == DESIGN_TASK_GROUP and style_slug:
-            row_errors.extend(
-                validate_design_task_details(
-                    style_slug,
-                    _design_details_from_sources(values),
-                    title,
-                )
-            )
+            for message in validate_design_task_details(
+                style_slug,
+                _design_details_from_sources(values),
+                title,
+            ):
+                add_row_error("principal_subjects", message)
         if row_errors:
             errors.append(
                 {
@@ -859,6 +970,7 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
                     "title": title,
                     "values": values,
                     "errors": row_errors,
+                    "error_details": row_error_details,
                 }
             )
             continue
@@ -868,48 +980,86 @@ def preview_task_csv_import(data, filename="", existing_tasks=None):
             values.get("design_title"),
             values.get("team_or_athlete"),
         )
-        if duplicate_key in seen_keys:
-            duplicates.append(
-                {
-                    "row_number": offset,
-                    "section": section,
-                    "title": title,
-                    "values": values,
-                    "duplicate_key": duplicate_key,
-                }
-            )
-            continue
-        seen_keys.add(duplicate_key)
-        section_counts[section] += 1
-        candidates.append(
-            {
-                "row_number": offset,
-                "section": section,
-                "title": title,
-                "values": values,
-                "metadata": _task_import_metadata(
-                    values,
-                    section=section,
-                    title=title,
-                    row_number=offset,
-                    filename=filename,
-                ),
-                "duplicate_key": duplicate_key,
-            }
-        )
+        existing_group, existing_task = existing_index.get(duplicate_key, ("", None))
+        if duplicate_key in seen_actions or existing_group == "active":
+            action = TASK_IMPORT_ACTION_ACTIVE_DUPLICATE
+        elif existing_group == "completed":
+            action = TASK_IMPORT_ACTION_COMPLETED_DUPLICATE
+        elif existing_group == "deleted":
+            action = TASK_IMPORT_ACTION_REACTIVATE
+        else:
+            action = TASK_IMPORT_ACTION_NEW
+        item = {
+            "row_number": offset,
+            "section": section,
+            "title": title,
+            "values": values,
+            "metadata": _task_import_metadata(
+                values,
+                section=section,
+                title=title,
+                row_number=offset,
+                filename=filename,
+            ),
+            "duplicate_key": duplicate_key,
+            "intended_action": action,
+            "existing_task_id": str((existing_task or {}).get("id") or ""),
+        }
+        if action == TASK_IMPORT_ACTION_ACTIVE_DUPLICATE:
+            active_duplicates.append(item)
+        elif action == TASK_IMPORT_ACTION_COMPLETED_DUPLICATE:
+            completed_duplicates.append(item)
+        else:
+            candidates.append(item)
+            section_counts[section] += 1
+            if action == TASK_IMPORT_ACTION_REACTIVATE:
+                reactivations.append(item)
+        seen_actions[duplicate_key] = action
 
     return {
         "filename": str(filename or ""),
         "valid_count": len(candidates),
+        "new_count": len(candidates) - len(reactivations),
+        "reactivate_count": len(reactivations),
+        "active_duplicate_count": len(active_duplicates),
+        "completed_duplicate_count": len(completed_duplicates),
+        "total_row_count": len(rows) - blank_count,
         "blank_count": blank_count,
         "invalid_count": len(errors),
         "skipped_count": blank_count + len(errors),
-        "duplicate_count": len(duplicates),
+        "duplicate_count": len(active_duplicates) + len(completed_duplicates),
         "section_counts": dict(section_counts),
         "tasks": candidates,
         "errors": errors,
-        "duplicates": duplicates,
+        "duplicates": [*active_duplicates, *completed_duplicates],
+        "active_duplicates": active_duplicates,
+        "completed_duplicates": completed_duplicates,
+        "reactivations": reactivations,
     }
+
+
+def build_task_import_error_csv(preview):
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=("row_number", "design_title", "field", "error"),
+    )
+    writer.writeheader()
+    for item in (preview or {}).get("errors") or []:
+        details = item.get("error_details") or [
+            {"field": "row", "message": message}
+            for message in item.get("errors") or []
+        ]
+        for detail in details:
+            writer.writerow(
+                {
+                    "row_number": item.get("row_number") or "",
+                    "design_title": (item.get("values") or {}).get("design_title") or item.get("title") or "",
+                    "field": detail.get("field") or "row",
+                    "error": detail.get("message") or "",
+                }
+            )
+    return output.getvalue().encode("utf-8")
 
 
 def _task_import_section_counts_text(section_counts):
@@ -923,59 +1073,60 @@ def _task_import_section_counts_text(section_counts):
 
 def format_task_import_result_message(result):
     imported_count = int((result or {}).get("imported_count") or 0)
-    task_word = "task" if imported_count == 1 else "tasks"
-    counts_text = _task_import_section_counts_text((result or {}).get("section_counts") or {})
-    if counts_text:
-        return f"{imported_count} {task_word} imported: {counts_text}."
-    return f"{imported_count} {task_word} imported."
+    section_counts = {
+        section: int(count or 0)
+        for section, count in ((result or {}).get("section_counts") or {}).items()
+        if int(count or 0) > 0
+    }
+    design_only = bool(section_counts) and set(section_counts) == {DESIGN_TASK_GROUP}
+    if design_only:
+        task_word = "design task" if imported_count == 1 else "design tasks"
+    else:
+        task_word = "task" if imported_count == 1 else "tasks"
+    return (
+        f"{imported_count} {task_word} imported — "
+        f"{int((result or {}).get('created_count') or 0)} created, "
+        f"{int((result or {}).get('reactivated_count') or 0)} reactivated, "
+        f"{int((result or {}).get('skipped_count') or 0)} skipped, "
+        f"{int((result or {}).get('failed_count') or 0)} failed."
+    )
 
 
 def import_task_csv_preview(preview):
     candidates = [dict(task) for task in (preview or {}).get("tasks") or []]
     try:
-        existing_keys = {
-            _task_existing_duplicate_key(task)
-            for task in list_tasks(status="all")
-            if task
-        }
-        seen_keys = set(existing_keys)
-        imported = []
-        duplicates = []
-        section_counts = Counter()
-        for candidate in candidates:
-            section = (
-                normalize_task_import_section(candidate.get("section"))
-                or normalize_task_category(candidate.get("section"))
-            )
-            details = ((candidate.get("metadata") or {}).get(TASK_IMPORT_METADATA_KEY) or {})
-            duplicate_key = candidate.get("duplicate_key") or task_import_duplicate_key(
-                section,
-                details.get("task_title"),
-                details.get("design_title"),
-                details.get("team_or_athlete"),
-            )
-            if duplicate_key in seen_keys:
-                duplicates.append(candidate)
-                continue
-            created = add_task(
-                candidate.get("title") or "Task",
-                section,
-                metadata=candidate.get("metadata") or {},
-            )
-            imported.append(created)
-            section_counts[section] += 1
-            seen_keys.add(duplicate_key)
-        result = {
-            "imported_count": len(imported),
-            "imported_tasks": imported,
-            "section_counts": dict(section_counts),
-            "duplicate_count": int((preview or {}).get("duplicate_count") or 0) + len(duplicates),
-            "skipped_count": int((preview or {}).get("skipped_count") or 0)
-            + int((preview or {}).get("duplicate_count") or 0)
-            + len(duplicates),
-            "filename": str((preview or {}).get("filename") or ""),
-        }
-        if imported:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        result = backend.import_dashboard_tasks_batch(
+            candidates,
+            actor=get_activity_actor(),
+        )
+        result = dict(result or {})
+        result["filename"] = str((preview or {}).get("filename") or "")
+        result["active_duplicate_count"] = int(result.get("active_duplicate_count") or 0) + int(
+            (preview or {}).get("active_duplicate_count") or 0
+        )
+        result["completed_duplicate_count"] = int(
+            result.get("completed_duplicate_count") or 0
+        ) + int((preview or {}).get("completed_duplicate_count") or 0)
+        result["duplicate_count"] = (
+            result["active_duplicate_count"] + result["completed_duplicate_count"]
+        )
+        result["failed_count"] = int(result.get("failed_count") or 0) + int(
+            (preview or {}).get("invalid_count") or 0
+        )
+        result["skipped_count"] = (
+            int(result.get("active_duplicate_count") or 0)
+            + int(result.get("completed_duplicate_count") or 0)
+            + int((preview or {}).get("blank_count") or 0)
+        )
+        result["imported_count"] = int(result.get("created_count") or 0) + int(
+            result.get("reactivated_count") or 0
+        )
+        clear_task_cache()
+        clear_activity_cache()
+        if result["imported_count"]:
             try:
                 from activity_log import get_activity_actor, record_activity_log
 
@@ -987,8 +1138,10 @@ def import_task_csv_preview(preview):
                     metadata={
                         "filename": result["filename"],
                         "imported_count": result["imported_count"],
+                        "created_count": int(result.get("created_count") or 0),
+                        "reactivated_count": int(result.get("reactivated_count") or 0),
                         "skipped_count": result["skipped_count"],
-                        "section_counts": result["section_counts"],
+                        "section_counts": result.get("section_counts") or {},
                     },
                     actor=get_activity_actor(),
                 )
@@ -1018,15 +1171,86 @@ def upload_task_title_for_design(task_text, mockup_scope):
     return f"{title} ({normalize_mockup_scope(mockup_scope)})"
 
 
-def list_tasks(status="open"):
-    cache_key = ("tasks", str(status or "open").strip().casefold())
+def list_tasks(status="open", *, section=None, limit=200):
+    try:
+        safe_limit = min(max(int(limit or 200), 1), 5000)
+    except (TypeError, ValueError):
+        safe_limit = 200
+    clean_section = normalize_task_category(section) if section else ""
+    try:
+        backend = get_supabase_backend()
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    cache_key = (
+        "tasks",
+        id(backend),
+        str(status or "open").strip().casefold(),
+        clean_section,
+        safe_limit,
+    )
     cached = _cache_get(_TASK_CACHE, cache_key)
     if cached is not None:
         return [_normalise_task(task) for task in cached]
     try:
-        backend = get_supabase_backend()
-        tasks = [_normalise_task(task) for task in backend.list_dashboard_tasks(status=status)]
+        try:
+            raw_tasks = backend.list_dashboard_tasks(
+                status=status,
+                section=clean_section or None,
+                limit=safe_limit,
+            )
+        except TypeError:
+            raw_tasks = backend.list_dashboard_tasks(status=status, limit=safe_limit)
+            if clean_section:
+                raw_tasks = [
+                    task
+                    for task in raw_tasks or []
+                    if normalize_task_category(task.get("section") or task.get("category"))
+                    == clean_section
+                ]
+        tasks = [
+            _normalise_task(task)
+            for task in raw_tasks
+        ]
         return _cache_set(_TASK_CACHE, cache_key, tasks, TASK_CACHE_TTL_SECONDS)
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def get_task(task_id):
+    clean_task_id = str(task_id or "").strip()
+    if not clean_task_id:
+        return None
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "get_dashboard_task"):
+            task = backend.get_dashboard_task(clean_task_id)
+            return _normalise_task(task) if task else None
+        raw_tasks = backend.list_dashboard_tasks(status="all", limit=5000)
+        return next(
+            (
+                _normalise_task(task)
+                for task in raw_tasks or []
+                if str(task.get("id") or "") == clean_task_id
+            ),
+            None,
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def count_tasks(status="open", *, section=None):
+    clean_section = normalize_task_category(section) if section else ""
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "count_dashboard_tasks"):
+            return int(
+                backend.count_dashboard_tasks(
+                    status=status,
+                    section=clean_section or None,
+                )
+                or 0
+            )
+        return len(list_tasks(status=status, section=clean_section or None, limit=5000))
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
@@ -1107,14 +1331,7 @@ def update_task_design_details(task_id, design_style, details):
     if not style_slug:
         raise ValueError("Style required.")
     clean_details = design_studio_styles.normalize_design_details(details)
-    task = next(
-        (
-            item
-            for item in list_tasks(status="all")
-            if str(item.get("id") or "") == clean_task_id
-        ),
-        None,
-    )
+    task = get_task(clean_task_id)
     validation_errors = validate_design_task_details(
         style_slug,
         clean_details,
@@ -2831,13 +3048,15 @@ def load_dashboard_state(
     *,
     month_start=None,
     include_activity=True,
+    include_tasks=True,
     user=None,
 ):
     state = {"tasks": [], "activity_log": [], "task_error": "", "activity_error": ""}
-    try:
-        state["tasks"] = list_tasks(status="open")
-    except DashboardStorageError as error:
-        state["task_error"] = str(error)
+    if include_tasks:
+        try:
+            state["tasks"] = list_tasks(status="open")
+        except DashboardStorageError as error:
+            state["task_error"] = str(error)
     if not include_activity:
         return state
     try:
