@@ -109,9 +109,11 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
 
         reporting_source = inspect.getsource(seo_page._render_reporting_dashboard)
         expected = (
+            "_render_data_health_strip(health)",
             '"Main SEO metrics"',
             '"Organic Performance"',
-            '"SEO opportunities"',
+            '"SEO Opportunities"',
+            "_render_reporting_opportunities(snapshot)",
             "_render_reporting_tables(snapshot)",
         )
         positions = [reporting_source.index(value) for value in expected]

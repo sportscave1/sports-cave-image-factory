@@ -147,7 +147,7 @@ class URLNormalizationTests(unittest.TestCase):
         self.assertEqual(result["status"], "matched")
         self.assertEqual(result["page_key"], page["page_key"])
 
-    def test_locale_paths_are_not_blindly_merged(self):
+    def test_known_locale_paths_match_unique_canonical_shopify_path(self):
         page = phase4.canonical_page_from_shopify(
             {
                 "page_type": "product",
@@ -163,8 +163,26 @@ class URLNormalizationTests(unittest.TestCase):
             known_locale_prefixes=("en-au",),
         )
         result = phase4.map_alias_to_pages(alias, [page])
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["method"], "unique_canonical_path")
+
+    def test_unknown_locale_paths_are_not_blindly_merged(self):
+        page = phase4.canonical_page_from_shopify(
+            {
+                "page_type": "product",
+                "shopify_resource_id": "gid://shopify/Product/1",
+                "handle": "hero",
+                "canonical_url": "https://example.test/products/hero",
+            },
+            primary_host="example.test",
+            known_locale_prefixes=("en-au",),
+        )
+        alias = phase4.normalize_seo_url(
+            "https://example.test/fr-fr/products/hero",
+            known_locale_prefixes=("en-au",),
+        )
+        result = phase4.map_alias_to_pages(alias, [page])
         self.assertEqual(result["status"], "unmapped")
-        self.assertEqual(result["reason"], "locale_alias_requires_explicit_shopify_mapping")
 
 
 class MetricsAndFilterTests(unittest.TestCase):
@@ -193,9 +211,29 @@ class MetricsAndFilterTests(unittest.TestCase):
 
     def test_reporting_sql_aggregates_sources_before_join(self):
         source = inspect.getsource(phase4.PostgresSEOReportingReader._top_pages)
-        self.assertIn("WITH gsc AS", source)
-        self.assertIn("), ga4 AS (", source)
+        self.assertIn("seo_reporting_landing_page_daily", source)
+        self.assertIn("seo_reporting_landing_page_revenue_daily", source)
         self.assertNotIn("seo_gsc_daily_details AS gsc JOIN seo_ga4", source)
+
+    def test_overview_reader_uses_persisted_reporting_snapshots(self):
+        source = "\n".join(
+            (
+                inspect.getsource(phase4.PostgresSEOReportingReader._period_metrics),
+                inspect.getsource(phase4.PostgresSEOReportingReader._daily_trend),
+                inspect.getsource(phase4.PostgresSEOReportingReader._top_queries),
+            )
+        )
+        self.assertIn("seo_reporting_daily_metrics", source)
+        self.assertIn("seo_reporting_revenue_daily", source)
+        self.assertIn("seo_reporting_query_daily", source)
+        self.assertNotIn("seo_gsc_daily_totals", source)
+        self.assertNotIn("seo_ga4_daily_landing_pages", source)
+
+    def test_reporting_snapshot_refresh_is_database_only(self):
+        source = inspect.getsource(phase4.PostgresSEOPhase4Store.refresh_reporting_snapshots)
+        self.assertIn("seo_reporting_daily_metrics", source)
+        for forbidden in ("ShopifySEOClient", "GoogleSEOReportingClient", "requests.get", "requests.post"):
+            self.assertNotIn(forbidden, source)
 
 
 class RevenueReconciliationTests(unittest.TestCase):
@@ -409,6 +447,11 @@ class WorkerAndSecurityTests(unittest.TestCase):
         source = inspect.getsource(seo_page._render_phase4_foundation)
         for forbidden in ("ShopifySEOClient", "GoogleSEOReportingClient", "graphql_request", "requests.get", "requests.post"):
             self.assertNotIn(forbidden, source)
+
+    def test_phase4_cards_do_not_show_zero_success_before_rows_are_evaluated(self):
+        source = inspect.getsource(seo_page._render_phase4_foundation)
+        self.assertIn("No source URLs processed", source)
+        self.assertIn("No GA4 transactions evaluated", source)
 
 
 if __name__ == "__main__":

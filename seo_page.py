@@ -85,6 +85,9 @@ def _inject_styles():
         .sc-seo-danger { border-left-color: #a74b42; }
         .sc-seo-section-title { color: #1d1c1a; font-size: 1.05rem; line-height: 1.25; margin: 1rem 0 .55rem; }
         .sc-seo-data-date { color: #77736b; font-size: .72rem; margin: -.1rem 0 .65rem; }
+        .sc-seo-health-pill { border-left: 2px solid #b79243; min-height: 3.2rem; padding: .25rem .65rem; }
+        .sc-seo-health-pill span { color: #77736b; display: block; font-size: .67rem; font-weight: 700; text-transform: uppercase; }
+        .sc-seo-health-pill strong { color: #242321; display: block; font-size: .82rem; line-height: 1.25; margin-top: .18rem; overflow-wrap: anywhere; }
         [data-testid="stDataFrame"] { border-radius: 6px !important; overflow: hidden !important; }
         [data-testid="stSegmentedControl"] { margin-bottom: .7rem; }
         [data-testid="stSegmentedControl"] button { border-radius: 4px !important; }
@@ -737,11 +740,29 @@ def _render_phase4_foundation(
         unsafe_allow_html=True,
     )
     health_columns[1].markdown(
-        _phase4_status_card("URL mapping", "Saved", f"{health.get('unmapped_page_count', 0):,} unmapped"),
+        _phase4_status_card(
+            "URL mapping",
+            "Saved" if health.get("mapping_source_url_count") else "Not started",
+            (
+                f"{health.get('unmapped_page_count', 0):,} unmapped from "
+                f"{health.get('mapping_source_url_count', 0):,} checked"
+                if health.get("mapping_source_url_count")
+                else "No source URLs processed"
+            ),
+        ),
         unsafe_allow_html=True,
     )
     health_columns[2].markdown(
-        _phase4_status_card("Revenue matching", "Saved", f"{health.get('unmatched_transaction_count', 0):,} unmatched or disputed"),
+        _phase4_status_card(
+            "Revenue matching",
+            "Saved" if health.get("reconciled_transaction_count") else "Not started",
+            (
+                f"{health.get('unmatched_transaction_count', 0):,} unmatched or disputed from "
+                f"{health.get('reconciled_transaction_count', 0):,} evaluated"
+                if health.get("reconciled_transaction_count")
+                else "No GA4 transactions evaluated"
+            ),
+        ),
         unsafe_allow_html=True,
     )
     health_columns[3].markdown(
@@ -826,7 +847,7 @@ def _reporting_filters():
     )
     market = columns[1].selectbox(
         "Market",
-        ("All markets", "Australia", "United States", "United Kingdom"),
+        ("All markets", "AU", "US", "UK"),
         key="seo-phase4-market",
     )
     device = columns[2].selectbox(
@@ -888,7 +909,7 @@ def _numeric_value(value):
         return None
 
 
-def _metric_value(value, *, style="number"):
+def _legacy_metric_value(value, *, style="number"):
     numeric = _numeric_value(value)
     if numeric is None:
         return "—"
@@ -899,7 +920,7 @@ def _metric_value(value, *, style="number"):
     return f"{round(numeric):,}"
 
 
-def _metric_delta(current, previous, *, position=False):
+def _legacy_metric_delta(current, previous, *, position=False):
     current_value = _numeric_value(current)
     previous_value = _numeric_value(previous)
     if current_value is None or previous_value in (None, 0):
@@ -910,39 +931,215 @@ def _metric_delta(current, previous, *, position=False):
     return f"{change:+.1f}% vs previous"
 
 
+def _metric_value(value, *, style="number", currency=""):
+    numeric = _numeric_value(value)
+    if numeric is None:
+        return "Unavailable"
+    if style == "currency":
+        prefix = f"{currency} " if currency else ""
+        return f"{prefix}{numeric:,.0f}"
+    if style == "percent":
+        return f"{numeric * 100:.1f}%"
+    if style == "position":
+        return f"{numeric:.1f}"
+    return f"{round(numeric):,}"
+
+
+def _metric_delta(current, previous, *, position=False):
+    current_value = _numeric_value(current)
+    previous_value = _numeric_value(previous)
+    if current_value is None or previous_value is None:
+        return None, None
+    absolute = current_value - previous_value
+    if previous_value == 0:
+        return f"{absolute:+,.0f}", None
+    if position:
+        return f"{absolute:+.1f}", None
+    change = ((current_value - previous_value) / abs(previous_value)) * 100
+    return f"{absolute:+,.0f}", f"{change:+.1f}%"
+
+
+def _single_currency(rows):
+    currencies = sorted({str(row.get("currency") or "").upper() for row in rows or [] if row.get("currency")})
+    return currencies[0] if len(currencies) == 1 else ""
+
+
+def _status_label(value):
+    labels = {
+        "ready": "Ready",
+        "import_running": "Import Running",
+        "awaiting_delayed_data": "Awaiting Delayed Data",
+        "no_saved_rows": "No Saved Rows",
+        "stale_data": "Stale Data",
+        "partial_failure": "Partial Failure",
+        "configuration_required": "Configuration Required",
+    }
+    return labels.get(str(value or ""), str(value or "Not Available").replace("_", " ").title())
+
+
+def _render_data_health_strip(health):
+    items = (
+        ("Status", _status_label(health.get("data_status"))),
+        ("Common date", health.get("common_reporting_date") or "Not available"),
+        ("URLs checked", f"{health.get('mapping_source_url_count', 0):,}"),
+        ("Revenue matches", f"{health.get('confirmed_transaction_count', 0):,} confirmed"),
+        ("Snapshot", health.get("reporting_snapshot_refreshed_at") or "Not refreshed"),
+    )
+    columns = st.columns(len(items))
+    for column, (label, value) in zip(columns, items):
+        column.markdown(
+            '<div class="sc-seo-health-pill">'
+            f'<span>{html.escape(label)}</span><strong>{html.escape(str(value))}</strong>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def _render_reporting_metrics(snapshot):
     current = snapshot.get("current") or {}
     previous = snapshot.get("previous") or {}
+    currency = _single_currency(current.get("shopify_confirmed_by_currency") or previous.get("shopify_confirmed_by_currency") or [])
     metrics = (
+        ("Confirmed Organic Revenue", "confirmed_organic_revenue", "currency", False),
+        ("Confirmed Organic Orders", "organic_orders", "number", False),
+        ("Organic Sessions", "organic_sessions", "number", False),
         ("Organic Clicks", "organic_clicks", "number", False),
         ("Organic Impressions", "organic_impressions", "number", False),
         ("CTR", "ctr", "percent", False),
         ("Average Position", "average_position", "position", True),
-        ("Organic Sessions", "organic_sessions", "number", False),
     )
-    columns = st.columns(len(metrics))
+    columns = st.columns(4)
     for column, (label, key, style, inverse) in zip(columns, metrics):
+        absolute, percent = _metric_delta(current.get(key), previous.get(key), position=inverse)
         column.metric(
             label,
-            _metric_value(current.get(key), style=style),
-            _metric_delta(current.get(key), previous.get(key), position=inverse),
+            _metric_value(current.get(key), style=style, currency=currency if style == "currency" else ""),
+            percent or absolute,
             delta_color="inverse" if inverse else "normal",
         )
+        previous_value = _metric_value(previous.get(key), style=style, currency=currency if style == "currency" else "")
+        detail = f"Previous: {previous_value}"
+        if absolute and percent:
+            detail += f" | Change: {absolute}"
+        column.caption(detail)
+    if len(metrics) > 4:
+        columns = st.columns(3)
+        for column, (label, key, style, inverse) in zip(columns, metrics[4:]):
+            absolute, percent = _metric_delta(current.get(key), previous.get(key), position=inverse)
+            column.metric(
+                label,
+                _metric_value(current.get(key), style=style),
+                percent or absolute,
+                delta_color="inverse" if inverse else "normal",
+            )
+            previous_value = _metric_value(previous.get(key), style=style)
+            detail = f"Previous: {previous_value}"
+            if absolute and percent:
+                detail += f" | Change: {absolute}"
+            column.caption(detail)
     note = str(current.get("search_scope_note") or "")
     if note:
         st.caption(note)
 
 
+TREND_METRICS = {
+    "Confirmed organic revenue": "confirmed_organic_revenue",
+    "Organic orders": "organic_orders",
+    "Organic sessions": "organic_sessions",
+    "Clicks": "organic_clicks",
+    "Impressions": "organic_impressions",
+    "CTR": "ctr",
+    "Average position": "average_position",
+}
+
+
+def _render_performance_chart(snapshot):
+    selected = st.selectbox(
+        "Chart metric",
+        tuple(TREND_METRICS),
+        key="seo-performance-chart-metric",
+    )
+    key = TREND_METRICS[selected]
+    chart_rows = []
+    for period_label, rows in (
+        ("Current period", snapshot.get("daily_trend") or []),
+        ("Previous period", snapshot.get("previous_daily_trend") or []),
+    ):
+        for row in rows:
+            value = _numeric_value(row.get(key))
+            if value is None:
+                continue
+            chart_rows.append({"Date": row.get("date"), "Value": value, "Period": period_label})
+    if not chart_rows:
+        st.markdown(
+            '<div class="sc-seo-empty-chart">This saved metric is unavailable for the active filters.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    st.line_chart(chart_rows, x="Date", y="Value", color="Period", height=260)
+
+
+def _opportunity_label(value):
+    labels = {
+        "keywords_near_page_one": "Near Page One",
+        "high_impressions_weak_ctr": "Weak CTR",
+        "declining_pages": "Declining Page",
+        "unmapped_keywords": "Unmapped Keyword",
+        "competing_pages_same_keyword": "Competing Pages",
+    }
+    return labels.get(str(value or ""), str(value or "").replace("_", " ").title())
+
+
+def _evidence_summary(evidence):
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            evidence = {}
+    evidence = dict(evidence or {})
+    parts = []
+    for label, key, style in (
+        ("Clicks", "clicks", "number"),
+        ("Impressions", "impressions", "number"),
+        ("CTR", "ctr", "percent"),
+        ("Position", "average_position", "position"),
+        ("Pages", "page_count", "number"),
+    ):
+        if key in evidence:
+            parts.append(f"{label}: {_metric_value(evidence.get(key), style=style)}")
+    return " | ".join(parts)
+
+
+def _render_reporting_opportunities(snapshot):
+    rows = []
+    for row in list(snapshot.get("opportunities") or [])[:8]:
+        rows.append(
+            {
+                "Type": _opportunity_label(row.get("opportunity_type")),
+                "Query/Page": row.get("query") or row.get("normalized_path") or "Mapped landing page",
+                "Evidence": _evidence_summary(row.get("evidence")),
+            }
+        )
+    _table(
+        rows,
+        empty="No deterministic SEO opportunities are saved for the active data date.",
+        height=250,
+    )
+
+
 def _render_reporting_tables(snapshot):
     pages = []
     for row in list(snapshot.get("top_pages") or [])[:8]:
+        currency = _single_currency([{"currency": value} for value in row.get("currencies") or []])
         pages.append(
             {
                 "Landing page": row.get("title") or row.get("canonical_url") or "Untitled",
+                "Revenue": _metric_value(row.get("confirmed_revenue"), style="currency", currency=currency),
+                "Orders": row.get("confirmed_orders") or 0,
+                "Sessions": row.get("sessions") or 0,
                 "Clicks": row.get("clicks") or 0,
                 "Impressions": row.get("impressions") or 0,
                 "Position": _metric_value(row.get("average_position"), style="position"),
-                "Sessions": row.get("sessions") or 0,
             }
         )
     _section_heading("Top Landing Pages")
@@ -973,6 +1170,7 @@ def _render_reporting_tables(snapshot):
 
 def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
     health = _load_reporting_health(phase4_store)
+    _render_data_health_strip(health)
     through_date = str(health.get("common_reporting_date") or "")
     if through_date:
         filters = _reporting_filters()
@@ -995,37 +1193,27 @@ def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
     if snapshot.get("ready"):
         _render_reporting_metrics(snapshot)
     else:
+        reason = _status_label(health.get("data_status"))
         st.info(
-            "SEO reporting will appear here when GSC, GA4 and Shopify share a reliable completed date."
+            f"SEO reporting is unavailable: {reason}."
         )
 
     _section_heading("Organic Performance")
-    st.markdown(
-        '<div class="sc-seo-empty-chart">A saved daily trend is not available yet. No live services are queried from this dashboard.</div>',
-        unsafe_allow_html=True,
-    )
+    if snapshot.get("ready"):
+        _render_performance_chart(snapshot)
+    else:
+        st.markdown(
+            '<div class="sc-seo-empty-chart">A saved daily trend is not available for the current reporting state.</div>',
+            unsafe_allow_html=True,
+        )
 
     if snapshot.get("ready"):
-        _section_heading("SEO opportunities")
-        st.caption("No stored SEO opportunities are available yet.")
+        _section_heading("SEO Opportunities")
+        _render_reporting_opportunities(snapshot)
         _render_reporting_tables(snapshot)
 
 
 def _render_current_work(state, user, navigate):
-    _section_heading("Current work")
-    actions = st.columns(4)
-    if actions[0].button("Create Blog Brief", icon=":material/edit_note:", use_container_width=True):
-        _navigate(navigate, seo.SEO_BLOG_ROUTE)
-    if actions[1].button("Import GSC Keywords", icon=":material/upload_file:", use_container_width=True):
-        st.session_state["seo-keyword-view"] = "Import GSC CSV"
-        _navigate(navigate, seo.SEO_KEYWORDS_ROUTE)
-    if actions[2].button("Add Outreach Prospect", icon=":material/person_add:", use_container_width=True):
-        st.session_state["seo-open-outreach-dialog"] = True
-        _navigate(navigate, seo.SEO_BACKLINKS_ROUTE)
-    if actions[3].button("Add Citation", icon=":material/add_link:", use_container_width=True):
-        st.session_state["seo-open-citation-dialog"] = True
-        _navigate(navigate, seo.SEO_CITATIONS_ROUTE)
-
     left, right = st.columns([1, 1.4])
     with left:
         _section_heading("Approved Weekly Plan")
@@ -1042,7 +1230,7 @@ def _render_current_work(state, user, navigate):
             text=f"{len(selected)} of {len(targets)} complete",
         )
     with right:
-        _section_heading("Completed work")
+        _section_heading("Completed Work and Measured Results")
         entries = []
         if os_accounts.can_view_activity_log(user):
             try:
@@ -1179,23 +1367,6 @@ def _render_overview(
         reporting_reader=reporting_reader,
     )
     _render_current_work(state, user, navigate)
-
-    with st.expander("Core rules and markets", expanded=False):
-        st.markdown(
-            """
-            <div class="sc-seo-rule-grid">
-                <div class="sc-seo-rule">Organic sales are the primary goal.</div>
-                <div class="sc-seo-rule">Write for sports fans first.</div>
-                <div class="sc-seo-rule">Use one primary keyword per target page.</div>
-                <div class="sc-seo-rule">Quality beats quantity.</div>
-                <div class="sc-seo-rule">Never use spam links or fake profiles.</div>
-                <div class="sc-seo-rule">If a page, URL or fact is uncertain, stop and verify it.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.caption("Primary markets: Australia, United States and United Kingdom")
-        st.caption("Secondary markets: Canada and New Zealand")
 
     _render_data_connections_admin(
         user,

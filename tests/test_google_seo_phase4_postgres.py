@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PHASE1_SQL = (ROOT / "migrations" / google_seo.GOOGLE_SEO_MIGRATION).read_text(encoding="utf-8")
 PHASE3_SQL = (ROOT / "migrations" / google_seo_import.SEO_IMPORT_MIGRATION).read_text(encoding="utf-8")
 PHASE4_SQL = (ROOT / "migrations" / google_seo_phase4.PHASE4_MIGRATION).read_text(encoding="utf-8")
+PHASE4_REPORTING_SQL = (ROOT / "migrations" / google_seo_phase4.PHASE4_REPORTING_MIGRATION).read_text(encoding="utf-8")
 LOCAL_POSTGRES_URL = os.getenv("SPORTS_CAVE_TEST_POSTGRES_URL", "").strip()
 
 
@@ -38,9 +39,16 @@ class Phase4PostgresParserTests(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS seo_canonical_pages", PHASE4_SQL)
         self.assertIn("CREATE TABLE IF NOT EXISTS seo_revenue_reconciliations", PHASE4_SQL)
 
+    def test_phase4_reporting_snapshot_migration_parses_with_postgresql_grammar(self):
+        statements = parse_sql(PHASE4_REPORTING_SQL)
+        self.assertGreater(len(statements), 10)
+        self.assertIn("CREATE TABLE IF NOT EXISTS seo_reporting_daily_metrics", PHASE4_REPORTING_SQL)
+        self.assertIn("CREATE TABLE IF NOT EXISTS seo_reporting_opportunities", PHASE4_REPORTING_SQL)
+
     def test_phase4_column_names_are_valid_postgresql_identifiers(self):
         visitor = _ColumnNameVisitor()
         visitor(parse_sql(PHASE4_SQL))
+        visitor(parse_sql(PHASE4_REPORTING_SQL))
         restricted = RESERVED_KEYWORDS | TYPE_FUNC_NAME_KEYWORDS | COL_NAME_KEYWORDS
         self.assertEqual(sorted({name for name in visitor.names if name.lower() in restricted}), [])
 
@@ -85,6 +93,8 @@ class Phase4PostgresExecutionTests(unittest.TestCase):
                 )
                 cursor.execute(PHASE4_SQL)
                 cursor.execute(PHASE4_SQL)
+                cursor.execute(PHASE4_REPORTING_SQL)
+                cursor.execute(PHASE4_REPORTING_SQL)
                 cursor.execute(
                     "SELECT encrypted_refresh_token FROM seo_google_connections WHERE workspace_key=%s",
                     ("sports-cave",),

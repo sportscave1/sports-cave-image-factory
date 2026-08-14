@@ -24,6 +24,8 @@ import shopify_sync
 
 
 PHASE4_MIGRATION = "20260813_google_seo_phase4_join.sql"
+PHASE4_REPORTING_MIGRATION = "20260814_google_seo_phase4_reporting_snapshots.sql"
+PHASE4_MIGRATIONS = (PHASE4_MIGRATION, PHASE4_REPORTING_MIGRATION)
 WORKSPACE_KEY = google_seo.GOOGLE_SEO_WORKSPACE_KEY
 BASE_DIR = Path(__file__).resolve().parent
 PHASE4_SOURCES = (
@@ -59,6 +61,9 @@ UNRESERVED = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
 )
 DEFAULT_MARKET_COUNTRIES = {
+    "AU": {"AU", "AUS"},
+    "US": {"US", "USA"},
+    "UK": {"GB", "GBR", "UK"},
     "Australia": {"AU", "AUS"},
     "United States": {"US", "USA"},
     "United Kingdom": {"GB", "GBR", "UK"},
@@ -148,14 +153,38 @@ def _clean_path(path):
 def _locale_details(path, known_locale_prefixes=()):
     first = next((part for part in str(path or "").split("/") if part), "")
     configured = {str(item or "").strip("/").casefold() for item in known_locale_prefixes}
-    looks_like_locale = bool(re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", first.casefold()))
-    if not first or (first.casefold() not in configured and not looks_like_locale):
+    if not first or first.casefold() not in configured:
         return "", ""
     pieces = first.casefold().split("-")
     country = pieces[-1].upper() if len(pieces) == 2 else ""
     if country == "UK":
         country = "GB"
     return first, country
+
+
+def _strip_known_locale_path(path, known_locale_prefixes=()):
+    locale_prefix, _market_code = _locale_details(path, known_locale_prefixes)
+    if not locale_prefix:
+        return str(path or "") or "/"
+    prefix = f"/{locale_prefix}"
+    original = str(path or "")
+    if original == prefix:
+        return "/"
+    if original.startswith(prefix + "/"):
+        return original[len(prefix):] or "/"
+    return original or "/"
+
+
+def canonical_shopify_path(path, *, known_locale_prefixes=()):
+    path = _strip_known_locale_path(_clean_path(path), known_locale_prefixes)
+    parts = [part for part in path.strip("/").split("/") if part]
+    if len(parts) >= 4 and parts[0] == "collections" and parts[2] == "products":
+        return f"/products/{parts[3]}"
+    if len(parts) >= 2 and parts[0] in {"products", "collections", "pages"}:
+        return f"/{parts[0]}/{parts[1]}"
+    if len(parts) >= 2 and parts[0] == "blogs":
+        return f"/blogs/{parts[1]}" if len(parts) == 2 else f"/blogs/{parts[1]}/{parts[2]}"
+    return path
 
 
 def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
@@ -167,6 +196,7 @@ def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
             "normalized_url": "",
             "normalized_host": "",
             "normalized_path": "",
+            "canonical_path": "",
             "query_string": "",
             "locale_prefix": "",
             "market_code": "",
@@ -182,6 +212,7 @@ def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
                 "normalized_url": "",
                 "normalized_host": "",
                 "normalized_path": "",
+                "canonical_path": "",
                 "query_string": "",
                 "locale_prefix": "",
                 "market_code": "",
@@ -200,6 +231,7 @@ def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
             "normalized_url": "",
             "normalized_host": "",
             "normalized_path": "",
+            "canonical_path": "",
             "query_string": "",
             "locale_prefix": "",
             "market_code": "",
@@ -212,6 +244,7 @@ def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
         host = f"{host}:{port}"
     path = _clean_path(parsed.path)
     locale_prefix, market_code = _locale_details(path, known_locale_prefixes)
+    canonical_path = canonical_shopify_path(path, known_locale_prefixes=known_locale_prefixes)
     normalized_url = f"https://{host}{path}"
     return {
         "valid": True,
@@ -219,6 +252,7 @@ def normalize_seo_url(raw_url, *, primary_host="", known_locale_prefixes=()):
         "normalized_url": normalized_url,
         "normalized_host": host,
         "normalized_path": path,
+        "canonical_path": canonical_path,
         "query_string": parsed.query or "",
         "locale_prefix": locale_prefix,
         "market_code": market_code,
@@ -277,11 +311,13 @@ def canonical_page_from_shopify(resource, *, primary_host, known_locale_prefixes
             code="shopify_resource_id_missing",
             retryable=False,
         )
+    canonical_path = normalized.get("canonical_path") or normalized["normalized_path"]
+    canonical_url = f"https://{normalized['normalized_host']}{canonical_path}"
     return {
-        "page_key": stable_page_key(page_type, resource_id, normalized["normalized_url"]),
-        "canonical_url": normalized["normalized_url"],
+        "page_key": stable_page_key(page_type, resource_id, canonical_url),
+        "canonical_url": canonical_url,
         "normalized_host": normalized["normalized_host"],
-        "normalized_path": normalized["normalized_path"],
+        "normalized_path": canonical_path,
         "locale_prefix": normalized["locale_prefix"],
         "market_code": normalized["market_code"],
         "page_type": page_type,
@@ -296,24 +332,68 @@ def canonical_page_from_shopify(resource, *, primary_host, known_locale_prefixes
 
 def map_alias_to_pages(alias, pages):
     if not alias.get("valid"):
-        return {"status": "invalid", "page_key": None, "candidates": [], "reason": alias.get("reason") or "invalid_url"}
-    candidates = [
+        return {
+            "status": "invalid",
+            "page_key": None,
+            "page_type": "",
+            "shopify_resource_id": "",
+            "shopify_stable_identifier": "",
+            "candidates": [],
+            "method": "invalid",
+            "reason": alias.get("reason") or "invalid_url",
+            "review_reason": alias.get("reason") or "invalid_url",
+        }
+    exact_candidates = [
         page
         for page in pages
         if page.get("normalized_host") == alias.get("normalized_host")
         and page.get("normalized_path") == alias.get("normalized_path")
     ]
+    canonical_path = alias.get("canonical_path") or alias.get("normalized_path")
+    path_candidates = [
+        page
+        for page in pages
+        if page.get("normalized_path") == canonical_path
+    ]
+    candidates = exact_candidates or path_candidates
     if len(candidates) == 1:
-        return {"status": "matched", "page_key": candidates[0]["page_key"], "candidates": [], "reason": "exact_canonical_path"}
+        page = candidates[0]
+        method = "exact_host_path" if exact_candidates else "unique_canonical_path"
+        return {
+            "status": "matched",
+            "page_key": page["page_key"],
+            "page_type": page.get("page_type", ""),
+            "shopify_resource_id": page.get("shopify_resource_id", ""),
+            "shopify_stable_identifier": page.get("shopify_resource_id") or page.get("canonical_url", ""),
+            "candidates": [],
+            "method": method,
+            "reason": method,
+            "review_reason": "",
+        }
     if len(candidates) > 1:
         return {
             "status": "ambiguous",
             "page_key": None,
+            "page_type": "",
+            "shopify_resource_id": "",
+            "shopify_stable_identifier": "",
             "candidates": sorted(page["page_key"] for page in candidates),
-            "reason": "multiple_exact_canonical_pages",
+            "method": "ambiguous_canonical_path",
+            "reason": "multiple_canonical_page_candidates",
+            "review_reason": "multiple_canonical_page_candidates",
         }
-    reason = "locale_alias_requires_explicit_shopify_mapping" if alias.get("locale_prefix") else "no_exact_shopify_canonical_page"
-    return {"status": "unmapped", "page_key": None, "candidates": [], "reason": reason}
+    reason = "no_matching_shopify_canonical_path"
+    return {
+        "status": "unmapped",
+        "page_key": None,
+        "page_type": "",
+        "shopify_resource_id": "",
+        "shopify_stable_identifier": "",
+        "candidates": [],
+        "method": "unmapped",
+        "reason": reason,
+        "review_reason": reason,
+    }
 
 
 def _match_key(value):
@@ -791,13 +871,14 @@ class PostgresSEOPhase4Store:
     def ensure_schema(self):
         if self._schema_ready:
             return
-        migration = BASE_DIR / "migrations" / PHASE4_MIGRATION
-        if not migration.is_file():
+        migrations = [BASE_DIR / "migrations" / filename for filename in PHASE4_MIGRATIONS]
+        if not all(migration.is_file() for migration in migrations):
             raise SEOPhase4Error("SEO Phase 4 storage is unavailable.", code="migration_missing")
         try:
             with self._backend().connect() as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(migration.read_text(encoding="utf-8"))
+                    for migration in migrations:
+                        cursor.execute(migration.read_text(encoding="utf-8"))
                 connection.commit()
         except Exception as error:
             raise SEOPhase4Error("SEO Phase 4 storage could not be prepared.", code="storage_unavailable") from error
@@ -1098,19 +1179,34 @@ class PostgresSEOPhase4Store:
                 )
                 return dict(cursor.fetchone() or {})
 
-    def save_source_state(self, source, resource_type="", *, checkpoint_value="", latest_completed_date=None, status="completed"):
+    def save_source_state(
+        self,
+        source,
+        resource_type="",
+        *,
+        checkpoint_value="",
+        latest_completed_date=None,
+        status="completed",
+        rows_processed=0,
+        rows_written=0,
+        rows_rejected=0,
+    ):
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
                     INSERT INTO seo_phase4_source_state(
                         workspace_key, source, resource_type, checkpoint_value,
-                        latest_completed_date, last_success_at, status, error_code, error_summary
-                    ) VALUES (%s, %s, %s, %s, %s, now(), %s, '', '')
+                        latest_completed_date, last_success_at, status, error_code,
+                        error_summary, rows_processed, rows_written, rows_rejected
+                    ) VALUES (%s, %s, %s, %s, %s, now(), %s, '', '', %s, %s, %s)
                     ON CONFLICT (workspace_key, source, resource_type) DO UPDATE SET
                         checkpoint_value=EXCLUDED.checkpoint_value,
                         latest_completed_date=COALESCE(EXCLUDED.latest_completed_date, seo_phase4_source_state.latest_completed_date),
                         last_success_at=now(), status=EXCLUDED.status,
+                        rows_processed=EXCLUDED.rows_processed,
+                        rows_written=EXCLUDED.rows_written,
+                        rows_rejected=EXCLUDED.rows_rejected,
                         error_code='', error_summary='', updated_at=now()
                     """,
                     (
@@ -1120,6 +1216,9 @@ class PostgresSEOPhase4Store:
                         str(checkpoint_value or "")[:500],
                         _as_date(latest_completed_date),
                         status,
+                        int(rows_processed or 0),
+                        int(rows_written or 0),
+                        int(rows_rejected or 0),
                     ),
                 )
                 if source == "shopify_orders" and latest_completed_date:
@@ -1432,7 +1531,8 @@ class PostgresSEOPhase4Store:
                 cursor.execute(
                     """
                     SELECT page_key, canonical_url, normalized_host, normalized_path,
-                           locale_prefix, market_code, page_type, title
+                           locale_prefix, market_code, page_type,
+                           shopify_resource_id, shopify_handle, title
                     FROM seo_canonical_pages
                     WHERE workspace_key=%s AND is_active=TRUE
                     """,
@@ -1488,8 +1588,11 @@ class PostgresSEOPhase4Store:
                             alias_key, workspace_key, source, property_identifier, raw_url, normalized_url,
                             normalized_host, normalized_path, raw_query_string,
                             locale_prefix, market_code, canonical_page_key,
-                            mapping_status, mapping_reason, candidate_page_keys
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            mapping_status, mapping_reason, candidate_page_keys,
+                            source_url, shopify_resource_type, shopify_resource_id,
+                            shopify_stable_identifier, mapping_method, review_reason,
+                            last_checked_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                         ON CONFLICT (workspace_key, source, property_identifier, raw_url) DO UPDATE SET
                             normalized_url=EXCLUDED.normalized_url,
                             normalized_host=EXCLUDED.normalized_host,
@@ -1501,7 +1604,13 @@ class PostgresSEOPhase4Store:
                             mapping_status=EXCLUDED.mapping_status,
                             mapping_reason=EXCLUDED.mapping_reason,
                             candidate_page_keys=EXCLUDED.candidate_page_keys,
-                            last_seen_at=now(), updated_at=now()
+                            source_url=EXCLUDED.source_url,
+                            shopify_resource_type=EXCLUDED.shopify_resource_type,
+                            shopify_resource_id=EXCLUDED.shopify_resource_id,
+                            shopify_stable_identifier=EXCLUDED.shopify_stable_identifier,
+                            mapping_method=EXCLUDED.mapping_method,
+                            review_reason=EXCLUDED.review_reason,
+                            last_checked_at=now(), last_seen_at=now(), updated_at=now()
                         """,
                         alias_rows,
                     )
@@ -1579,6 +1688,24 @@ class PostgresSEOPhase4Store:
                     """,
                     (WORKSPACE_KEY,),
                 )
+                cursor.execute(
+                    """
+                    INSERT INTO seo_phase4_source_state(
+                        workspace_key, source, resource_type, checkpoint_value,
+                        rows_processed, rows_written, rows_rejected,
+                        latest_completed_date, last_success_at, status,
+                        error_code, error_summary
+                    ) VALUES (%s, 'mapping', '', '', %s, %s, 0, %s, now(), 'completed', '', '')
+                    ON CONFLICT (workspace_key, source, resource_type) DO UPDATE SET
+                        rows_processed=EXCLUDED.rows_processed,
+                        rows_written=EXCLUDED.rows_written,
+                        rows_rejected=0,
+                        latest_completed_date=EXCLUDED.latest_completed_date,
+                        last_success_at=now(), status='completed',
+                        error_code='', error_summary='', updated_at=now()
+                    """,
+                    (WORKSPACE_KEY, len(alias_rows), len(alias_rows), utc_now().date()),
+                )
             connection.commit()
         matched = sum(1 for row in alias_rows if row[12] == "matched")
         return {"received": len(alias_rows), "written": len(alias_rows), "matched": matched}
@@ -1593,6 +1720,10 @@ class PostgresSEOPhase4Store:
             normalized.get("locale_prefix", ""), normalized.get("market_code", ""),
             mapping.get("page_key"), mapping["status"], mapping.get("reason", ""),
             json.dumps(mapping.get("candidates") or []),
+            normalized.get("raw_url", raw_url), mapping.get("page_type", ""),
+            mapping.get("shopify_resource_id", ""),
+            mapping.get("shopify_stable_identifier", ""),
+            mapping.get("method", ""), mapping.get("review_reason", ""),
         )
 
     def reconcile_revenue(self):
@@ -1676,6 +1807,35 @@ class PostgresSEOPhase4Store:
                     """,
                     (WORKSPACE_KEY,),
                 )
+                latest_transaction_date = None
+                for transaction in transactions:
+                    tx_date = _as_date(transaction.get("transaction_date"))
+                    latest_transaction_date = max(latest_transaction_date, tx_date) if latest_transaction_date else tx_date
+                cursor.execute(
+                    """
+                    INSERT INTO seo_phase4_source_state(
+                        workspace_key, source, resource_type, checkpoint_value,
+                        rows_processed, rows_written, rows_rejected,
+                        latest_completed_date, last_success_at, status,
+                        error_code, error_summary
+                    ) VALUES (%s, 'reconciliation', '', %s, %s, %s, 0, %s, now(), 'completed', '', '')
+                    ON CONFLICT (workspace_key, source, resource_type) DO UPDATE SET
+                        checkpoint_value=EXCLUDED.checkpoint_value,
+                        rows_processed=EXCLUDED.rows_processed,
+                        rows_written=EXCLUDED.rows_written,
+                        rows_rejected=0,
+                        latest_completed_date=EXCLUDED.latest_completed_date,
+                        last_success_at=now(), status='completed',
+                        error_code='', error_summary='', updated_at=now()
+                    """,
+                    (
+                        WORKSPACE_KEY,
+                        latest_transaction_date.isoformat() if latest_transaction_date else "",
+                        len(transactions),
+                        len(results),
+                        latest_transaction_date,
+                    ),
+                )
             connection.commit()
         unmatched = sum(1 for _transaction, result in results if result["state"] != "confirmed_shopify_match")
         return {"received": len(transactions), "written": len(results), "unmatched": unmatched}
@@ -1687,7 +1847,9 @@ class PostgresSEOPhase4Store:
                 cursor.execute(
                     """
                     SELECT gsc_site_url, ga4_property_id, phase4_last_mapping_at,
-                           phase4_last_reconciliation_at, phase4_error_summary
+                           phase4_last_reconciliation_at, phase4_error_summary,
+                           gsc_data_through_date, ga4_data_through_date,
+                           shopify_data_through_date
                     FROM seo_google_connections WHERE workspace_key=%s
                     """,
                     (WORKSPACE_KEY,),
@@ -1699,16 +1861,50 @@ class PostgresSEOPhase4Store:
                         (SELECT MAX(date) FROM seo_gsc_daily_totals
                          WHERE workspace_key=%s AND gsc_site_url=%s
                            AND is_complete=TRUE AND is_final=TRUE) AS latest_gsc_date,
+                        (SELECT COUNT(*) FROM seo_gsc_daily_totals
+                         WHERE workspace_key=%s AND gsc_site_url=%s
+                           AND is_complete=TRUE AND is_final=TRUE) AS gsc_total_rows,
+                        (SELECT COUNT(*) FROM seo_gsc_daily_details
+                         WHERE workspace_key=%s AND gsc_site_url=%s
+                           AND is_complete=TRUE) AS gsc_detail_rows,
                         (SELECT MAX(date) FROM seo_ga4_daily_landing_pages
                          WHERE workspace_key=%s AND ga4_property_id=%s
                            AND is_complete=TRUE) AS latest_ga4_date,
+                        (SELECT COUNT(*) FROM seo_ga4_daily_landing_pages
+                         WHERE workspace_key=%s AND ga4_property_id=%s
+                           AND is_complete=TRUE) AS ga4_rows,
+                        (SELECT COUNT(*) FROM seo_ga4_transactions
+                         WHERE workspace_key=%s AND ga4_property_id=%s
+                           AND is_complete=TRUE) AS ga4_transaction_rows,
+                        (SELECT COUNT(*) FROM seo_shopify_order_facts
+                         WHERE workspace_key=%s) AS shopify_order_rows,
                         (SELECT latest_completed_date FROM seo_phase4_source_state
                          WHERE workspace_key=%s AND source='shopify_orders'
-                           AND resource_type='') AS latest_shopify_date
+                           AND resource_type='') AS shopify_state_date,
+                        (SELECT latest_completed_date FROM seo_phase4_source_state
+                         WHERE workspace_key=%s AND source='ga4_transactions'
+                           AND resource_type='') AS ga4_transaction_state_date,
+                        (SELECT latest_completed_date FROM seo_phase4_source_state
+                         WHERE workspace_key=%s AND source='reconciliation'
+                           AND resource_type='') AS reconciliation_state_date,
+                        (SELECT rows_processed FROM seo_phase4_source_state
+                         WHERE workspace_key=%s AND source='mapping'
+                           AND resource_type='') AS mapping_rows_processed,
+                        (SELECT rows_processed FROM seo_phase4_source_state
+                         WHERE workspace_key=%s AND source='reconciliation'
+                           AND resource_type='') AS reconciliation_rows_processed
                     """,
                     (
                         WORKSPACE_KEY, str(saved.get("gsc_site_url") or ""),
+                        WORKSPACE_KEY, str(saved.get("gsc_site_url") or ""),
+                        WORKSPACE_KEY, str(saved.get("gsc_site_url") or ""),
                         WORKSPACE_KEY, str(saved.get("ga4_property_id") or ""),
+                        WORKSPACE_KEY, str(saved.get("ga4_property_id") or ""),
+                        WORKSPACE_KEY, str(saved.get("ga4_property_id") or ""),
+                        WORKSPACE_KEY,
+                        WORKSPACE_KEY,
+                        WORKSPACE_KEY,
+                        WORKSPACE_KEY,
                         WORKSPACE_KEY,
                     ),
                 )
@@ -1716,8 +1912,11 @@ class PostgresSEOPhase4Store:
                 cursor.execute(
                     """
                     SELECT
+                        COUNT(*) AS source_count,
+                        COUNT(*) FILTER (WHERE mapping_status='matched') AS mapped_count,
                         COUNT(*) FILTER (WHERE mapping_status='unmapped') AS unmapped_count,
-                        COUNT(*) FILTER (WHERE mapping_status='ambiguous') AS ambiguous_count
+                        COUNT(*) FILTER (WHERE mapping_status='ambiguous') AS ambiguous_count,
+                        COUNT(*) FILTER (WHERE mapping_status='invalid') AS invalid_count
                     FROM seo_url_aliases
                     WHERE workspace_key=%s AND (
                         (source='GSC' AND property_identifier=%s) OR
@@ -1732,18 +1931,39 @@ class PostgresSEOPhase4Store:
                 mapping = dict(cursor.fetchone() or {})
                 cursor.execute(
                     """
-                    SELECT COUNT(*) AS unmatched_count
+                    SELECT
+                        COUNT(*) AS reconciled_count,
+                        COUNT(*) FILTER (
+                            WHERE reconciliation_state='confirmed_shopify_match'
+                        ) AS confirmed_count,
+                        COUNT(*) FILTER (
+                            WHERE reconciliation_state<>'confirmed_shopify_match'
+                        ) AS unmatched_count,
+                        COUNT(*) FILTER (
+                            WHERE reconciliation_state IN (
+                                'duplicate_or_conflicting_transaction',
+                                'excluded_test_order', 'excluded_cancelled_order',
+                                'excluded_fully_refunded_order', 'currency_mismatch'
+                            )
+                        ) AS disputed_count
                     FROM seo_revenue_reconciliations
                     WHERE workspace_key=%s AND ga4_property_id=%s
-                      AND reconciliation_state<>'confirmed_shopify_match'
                     """,
                     (WORKSPACE_KEY, str(saved.get("ga4_property_id") or "")),
                 )
-                unmatched = _integer((cursor.fetchone() or {}).get("unmatched_count"))
+                reconciliation = dict(cursor.fetchone() or {})
+                latest_shopify_date = (
+                    _as_date(completed_dates.get("shopify_state_date"))
+                    or _as_date(saved.get("shopify_data_through_date"))
+                )
+                ga4_transaction_through = _as_date(completed_dates.get("ga4_transaction_state_date"))
+                reconciliation_through = _as_date(completed_dates.get("reconciliation_state_date"))
                 dates = [
                     _as_date(completed_dates.get("latest_gsc_date")),
                     _as_date(completed_dates.get("latest_ga4_date")),
-                    _as_date(completed_dates.get("latest_shopify_date")),
+                    latest_shopify_date,
+                    ga4_transaction_through,
+                    reconciliation_through,
                 ]
                 common = min(dates) if all(dates) else None
                 cursor.execute(
@@ -1755,14 +1975,47 @@ class PostgresSEOPhase4Store:
                     (WORKSPACE_KEY,),
                 )
                 run_state = dict(cursor.fetchone() or {})
-                if _integer(run_state.get("failed")):
-                    data_status = "failed_or_partial"
-                elif _integer(run_state.get("active")) or not common:
-                    data_status = "partial"
+                mapping_processed = _integer(completed_dates.get("mapping_rows_processed"))
+                reconciliation_processed = _integer(completed_dates.get("reconciliation_rows_processed"))
+                if not saved.get("gsc_site_url") or not saved.get("ga4_property_id"):
+                    data_status = "configuration_required"
+                    health_reason = "google_properties_required"
+                elif _integer(run_state.get("failed")):
+                    data_status = "partial_failure"
+                    health_reason = "latest_phase4_run_failed_or_partial"
+                elif _integer(run_state.get("active")):
+                    data_status = "import_running"
+                    health_reason = "phase4_job_running"
+                elif not _integer(completed_dates.get("gsc_total_rows")):
+                    data_status = "no_saved_rows"
+                    health_reason = "no_saved_gsc_total_rows"
+                elif not _integer(completed_dates.get("gsc_detail_rows")):
+                    data_status = "no_saved_rows"
+                    health_reason = "no_saved_gsc_detail_rows"
+                elif not _integer(completed_dates.get("ga4_rows")):
+                    data_status = "no_saved_rows"
+                    health_reason = "no_saved_ga4_rows"
+                elif not mapping_processed or not _integer(mapping.get("source_count")):
+                    data_status = "no_saved_rows"
+                    health_reason = "url_mapping_not_evaluated"
+                elif not latest_shopify_date:
+                    data_status = "awaiting_delayed_data"
+                    health_reason = "shopify_completed_date_unavailable"
+                elif not ga4_transaction_through:
+                    data_status = "awaiting_delayed_data"
+                    health_reason = "ga4_transaction_completed_date_unavailable"
+                elif _integer(completed_dates.get("ga4_transaction_rows")) and not reconciliation_processed:
+                    data_status = "no_saved_rows"
+                    health_reason = "revenue_reconciliation_not_evaluated"
+                elif not common:
+                    data_status = "awaiting_delayed_data"
+                    health_reason = "common_reporting_date_unavailable"
                 elif common < utc_now().date() - timedelta(days=3):
-                    data_status = "stale"
+                    data_status = "stale_data"
+                    health_reason = "common_reporting_date_is_stale"
                 else:
                     data_status = "ready"
+                    health_reason = "saved_reporting_data_ready"
                 cursor.execute(
                     """
                     INSERT INTO seo_phase4_health(
@@ -1770,8 +2023,12 @@ class PostgresSEOPhase4Store:
                         latest_shopify_date, common_reporting_date, last_mapping_at,
                         last_reconciliation_at, unmapped_page_count,
                         unmatched_transaction_count, ambiguous_page_count,
-                        data_status, error_summary
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        data_status, error_summary, mapping_source_url_count,
+                        mapped_page_count, invalid_page_count,
+                        reconciled_transaction_count, confirmed_transaction_count,
+                        disputed_transaction_count, ga4_transaction_through_date,
+                        reconciliation_through_date, health_reason
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (workspace_key) DO UPDATE SET
                         latest_gsc_date=EXCLUDED.latest_gsc_date,
                         latest_ga4_date=EXCLUDED.latest_ga4_date,
@@ -1783,20 +2040,700 @@ class PostgresSEOPhase4Store:
                         unmatched_transaction_count=EXCLUDED.unmatched_transaction_count,
                         ambiguous_page_count=EXCLUDED.ambiguous_page_count,
                         data_status=EXCLUDED.data_status,
+                        mapping_source_url_count=EXCLUDED.mapping_source_url_count,
+                        mapped_page_count=EXCLUDED.mapped_page_count,
+                        invalid_page_count=EXCLUDED.invalid_page_count,
+                        reconciled_transaction_count=EXCLUDED.reconciled_transaction_count,
+                        confirmed_transaction_count=EXCLUDED.confirmed_transaction_count,
+                        disputed_transaction_count=EXCLUDED.disputed_transaction_count,
+                        ga4_transaction_through_date=EXCLUDED.ga4_transaction_through_date,
+                        reconciliation_through_date=EXCLUDED.reconciliation_through_date,
+                        health_reason=EXCLUDED.health_reason,
                         error_summary=EXCLUDED.error_summary, updated_at=now()
                     RETURNING *
                     """,
                     (
-                        WORKSPACE_KEY, dates[0], dates[1], dates[2], common,
+                        WORKSPACE_KEY, dates[0], dates[1], latest_shopify_date, common,
                         saved.get("phase4_last_mapping_at"), saved.get("phase4_last_reconciliation_at"),
-                        _integer(mapping.get("unmapped_count")), unmatched,
+                        _integer(mapping.get("unmapped_count")), _integer(reconciliation.get("unmatched_count")),
                         _integer(mapping.get("ambiguous_count")), data_status,
                         str(saved.get("phase4_error_summary") or "")[:300],
+                        _integer(mapping.get("source_count")),
+                        _integer(mapping.get("mapped_count")),
+                        _integer(mapping.get("invalid_count")),
+                        _integer(reconciliation.get("reconciled_count")),
+                        _integer(reconciliation.get("confirmed_count")),
+                        _integer(reconciliation.get("disputed_count")),
+                        ga4_transaction_through,
+                        reconciliation_through,
+                        health_reason,
                     ),
                 )
                 result = dict(cursor.fetchone() or {})
             connection.commit()
         return self._clean_health(result)
+
+    @staticmethod
+    def _market_case_sql(column_name):
+        return (
+            f"CASE "
+            f"WHEN UPPER({column_name}) IN ('AU', 'AUS') THEN 'AU' "
+            f"WHEN UPPER({column_name}) IN ('US', 'USA') THEN 'US' "
+            f"WHEN UPPER({column_name}) IN ('GB', 'GBR', 'UK') THEN 'UK' "
+            f"ELSE '' END"
+        )
+
+    @staticmethod
+    def _brand_expression_sql(column_name, brand_terms):
+        terms = [str(term or "").strip().casefold() for term in brand_terms if str(term or "").strip()]
+        if not terms:
+            return "FALSE", []
+        return " OR ".join(f"LOWER({column_name}) LIKE %s" for _term in terms), [f"%{term}%" for term in terms]
+
+    def refresh_reporting_snapshots(self):
+        self.ensure_schema()
+        settings = self.get_settings()
+        brand_expr, brand_params = self._brand_expression_sql("query", settings.get("brand_terms") or [])
+        health = self.refresh_health()
+        common = _as_date(health.get("common_reporting_date"))
+        connection_record = self.connection_record()
+        gsc_site_url = str(connection_record.get("gsc_site_url") or "")
+        ga4_property_id = str(connection_record.get("ga4_property_id") or "")
+        refresh_id = str(uuid.uuid4())
+        if not common:
+            with self._backend().connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO seo_reporting_snapshot_runs(
+                            id, workspace_key, status, common_reporting_date,
+                            error_code, error_summary
+                        ) VALUES (%s, %s, 'partial', NULL, %s, %s)
+                        """,
+                        (
+                            refresh_id,
+                            WORKSPACE_KEY,
+                            str(health.get("data_status") or "common_reporting_date_unavailable")[:100],
+                            str(health.get("health_reason") or "common_reporting_date_unavailable")[:300],
+                        ),
+                    )
+                connection.commit()
+            return {"status": "partial", "common_reporting_date": ""}
+
+        market_country = self._market_case_sql("country_code")
+        gsc_market = self._market_case_sql("country_code")
+        ga4_market = self._market_case_sql("country_code")
+        start_28 = common - timedelta(days=27)
+        prev_end = start_28 - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=27)
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                for table in (
+                    "seo_reporting_opportunities",
+                    "seo_reporting_query_daily",
+                    "seo_reporting_landing_page_revenue_daily",
+                    "seo_reporting_landing_page_daily",
+                    "seo_reporting_revenue_daily",
+                    "seo_reporting_daily_metrics",
+                ):
+                    cursor.execute(f"DELETE FROM {table} WHERE workspace_key=%s", (WORKSPACE_KEY,))
+
+                cursor.execute(
+                    """
+                    INSERT INTO seo_reporting_daily_metrics(
+                        workspace_key, date, country_code, market_code,
+                        device_category, search_class, organic_clicks,
+                        organic_impressions, position_weight, source_gsc_rows
+                    )
+                    SELECT %s, date, '', '', 'all', 'all',
+                           COALESCE(SUM(clicks), 0),
+                           COALESCE(SUM(impressions), 0),
+                           COALESCE(SUM(average_position * impressions), 0),
+                           COUNT(*)
+                    FROM seo_gsc_daily_totals
+                    WHERE workspace_key=%s AND gsc_site_url=%s
+                      AND date<=%s AND is_complete=TRUE AND is_final=TRUE
+                    GROUP BY date
+                    ON CONFLICT (workspace_key, date, country_code, device_category, search_class)
+                    DO UPDATE SET
+                        organic_clicks=EXCLUDED.organic_clicks,
+                        organic_impressions=EXCLUDED.organic_impressions,
+                        position_weight=EXCLUDED.position_weight,
+                        source_gsc_rows=EXCLUDED.source_gsc_rows,
+                        updated_at=now()
+                    """,
+                    (WORKSPACE_KEY, WORKSPACE_KEY, gsc_site_url, common),
+                )
+                cursor.execute(
+                    f"""
+                    WITH base AS (
+                        SELECT date, UPPER(country_code) AS country_code,
+                               LOWER(device) AS device_category, query,
+                               clicks, impressions, average_position
+                        FROM seo_gsc_daily_details
+                        WHERE workspace_key=%s AND gsc_site_url=%s
+                          AND date<=%s AND is_complete=TRUE
+                    ), grouped AS (
+                        SELECT date, country_code, {gsc_market} AS market_code,
+                               device_category, 'all'::TEXT AS search_class,
+                               SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                               SUM(average_position * impressions) AS position_weight,
+                               COUNT(*) AS source_rows
+                        FROM base
+                        GROUP BY date, country_code, device_category
+                        UNION ALL
+                        SELECT date, country_code, {gsc_market} AS market_code,
+                               device_category,
+                               CASE WHEN {brand_expr} THEN 'brand' ELSE 'nonbrand' END AS search_class,
+                               SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                               SUM(average_position * impressions) AS position_weight,
+                               COUNT(*) AS source_rows
+                        FROM base
+                        GROUP BY date, country_code, device_category, search_class
+                    )
+                    INSERT INTO seo_reporting_daily_metrics(
+                        workspace_key, date, country_code, market_code,
+                        device_category, search_class, organic_clicks,
+                        organic_impressions, position_weight, source_gsc_rows
+                    )
+                    SELECT %s, date, country_code, market_code, device_category,
+                           search_class, COALESCE(clicks, 0),
+                           COALESCE(impressions, 0),
+                           COALESCE(position_weight, 0), source_rows
+                    FROM grouped
+                    ON CONFLICT (workspace_key, date, country_code, device_category, search_class)
+                    DO UPDATE SET
+                        market_code=EXCLUDED.market_code,
+                        organic_clicks=EXCLUDED.organic_clicks,
+                        organic_impressions=EXCLUDED.organic_impressions,
+                        position_weight=EXCLUDED.position_weight,
+                        source_gsc_rows=EXCLUDED.source_gsc_rows,
+                        updated_at=now()
+                    """,
+                    [WORKSPACE_KEY, gsc_site_url, common, *brand_params, WORKSPACE_KEY],
+                )
+                cursor.execute(
+                    f"""
+                    WITH base AS (
+                        SELECT date, UPPER(country_id) AS country_code,
+                               LOWER(device_category) AS device_category,
+                               sessions, engaged_sessions, transactions,
+                               purchase_revenue, property_currency
+                        FROM seo_ga4_daily_landing_pages
+                        WHERE workspace_key=%s AND ga4_property_id=%s
+                          AND date<=%s AND is_complete=TRUE
+                    ), grouped AS (
+                        SELECT date, ''::TEXT AS country_code, ''::TEXT AS market_code,
+                               'all'::TEXT AS device_category,
+                               SUM(sessions) AS sessions,
+                               SUM(engaged_sessions) AS engaged_sessions,
+                               SUM(transactions) AS transactions,
+                               SUM(purchase_revenue) AS purchase_revenue,
+                               MIN(property_currency) AS property_currency,
+                               COUNT(*) AS source_rows
+                        FROM base
+                        GROUP BY date
+                        UNION ALL
+                        SELECT date, country_code, {ga4_market} AS market_code,
+                               device_category, SUM(sessions), SUM(engaged_sessions),
+                               SUM(transactions), SUM(purchase_revenue),
+                               MIN(property_currency), COUNT(*)
+                        FROM base
+                        GROUP BY date, country_code, device_category
+                    )
+                    INSERT INTO seo_reporting_daily_metrics(
+                        workspace_key, date, country_code, market_code,
+                        device_category, search_class, organic_sessions,
+                        engaged_sessions, ga4_attributed_purchases,
+                        ga4_attributed_revenue, ga4_currency, source_ga4_rows
+                    )
+                    SELECT %s, date, country_code, market_code, device_category,
+                           'all', COALESCE(sessions, 0), COALESCE(engaged_sessions, 0),
+                           COALESCE(transactions, 0), COALESCE(purchase_revenue, 0),
+                           COALESCE(property_currency, ''), source_rows
+                    FROM grouped
+                    ON CONFLICT (workspace_key, date, country_code, device_category, search_class)
+                    DO UPDATE SET
+                        market_code=EXCLUDED.market_code,
+                        organic_sessions=EXCLUDED.organic_sessions,
+                        engaged_sessions=EXCLUDED.engaged_sessions,
+                        ga4_attributed_purchases=EXCLUDED.ga4_attributed_purchases,
+                        ga4_attributed_revenue=EXCLUDED.ga4_attributed_revenue,
+                        ga4_currency=EXCLUDED.ga4_currency,
+                        source_ga4_rows=EXCLUDED.source_ga4_rows,
+                        updated_at=now()
+                    """,
+                    (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
+                )
+                cursor.execute(
+                    f"""
+                    WITH base AS (
+                        SELECT tx.transaction_date AS date,
+                               UPPER(tx.country_id) AS country_code,
+                               LOWER(tx.device_category) AS device_category,
+                               reconciliation.currency,
+                               reconciliation.reconciliation_state,
+                               reconciliation.shopify_confirmed_revenue
+                        FROM seo_revenue_reconciliations AS reconciliation
+                        JOIN seo_ga4_transactions AS tx
+                          ON tx.workspace_key=reconciliation.workspace_key
+                         AND tx.ga4_property_id=reconciliation.ga4_property_id
+                         AND tx.transaction_id=reconciliation.transaction_id
+                         AND tx.transaction_date=reconciliation.transaction_date
+                        WHERE reconciliation.workspace_key=%s
+                          AND reconciliation.ga4_property_id=%s
+                          AND tx.transaction_date<=%s AND tx.is_complete=TRUE
+                    ), grouped AS (
+                        SELECT date, ''::TEXT AS country_code, ''::TEXT AS market_code,
+                               'all'::TEXT AS device_category, currency,
+                               COUNT(*) FILTER (WHERE reconciliation_state='confirmed_shopify_match') AS orders,
+                               COALESCE(SUM(shopify_confirmed_revenue) FILTER (
+                                   WHERE reconciliation_state='confirmed_shopify_match'
+                               ), 0) AS revenue,
+                               COUNT(*) FILTER (WHERE reconciliation_state<>'confirmed_shopify_match') AS unmatched,
+                               COUNT(*) AS source_rows
+                        FROM base
+                        GROUP BY date, currency
+                        UNION ALL
+                        SELECT date, country_code, {market_country} AS market_code,
+                               device_category, currency,
+                               COUNT(*) FILTER (WHERE reconciliation_state='confirmed_shopify_match'),
+                               COALESCE(SUM(shopify_confirmed_revenue) FILTER (
+                                   WHERE reconciliation_state='confirmed_shopify_match'
+                               ), 0),
+                               COUNT(*) FILTER (WHERE reconciliation_state<>'confirmed_shopify_match'),
+                               COUNT(*)
+                        FROM base
+                        GROUP BY date, country_code, device_category, currency
+                    )
+                    INSERT INTO seo_reporting_revenue_daily(
+                        workspace_key, date, country_code, market_code,
+                        device_category, currency, confirmed_organic_orders,
+                        confirmed_organic_revenue, unmatched_or_disputed_transactions,
+                        source_reconciliation_rows
+                    )
+                    SELECT %s, date, country_code, market_code, device_category,
+                           COALESCE(currency, ''), orders, revenue, unmatched, source_rows
+                    FROM grouped
+                    ON CONFLICT (workspace_key, date, country_code, device_category, currency)
+                    DO UPDATE SET
+                        market_code=EXCLUDED.market_code,
+                        confirmed_organic_orders=EXCLUDED.confirmed_organic_orders,
+                        confirmed_organic_revenue=EXCLUDED.confirmed_organic_revenue,
+                        unmatched_or_disputed_transactions=EXCLUDED.unmatched_or_disputed_transactions,
+                        source_reconciliation_rows=EXCLUDED.source_reconciliation_rows,
+                        updated_at=now()
+                    """,
+                    (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
+                )
+                self._refresh_landing_page_snapshots(cursor, gsc_site_url, ga4_property_id, common)
+                self._refresh_query_snapshots(cursor, gsc_site_url, common, brand_expr, brand_params)
+                self._refresh_reporting_opportunities(cursor, common, start_28, prev_start, prev_end)
+                cursor.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM seo_gsc_daily_details WHERE workspace_key=%s AND gsc_site_url=%s) +
+                        (SELECT COUNT(*) FROM seo_gsc_daily_totals WHERE workspace_key=%s AND gsc_site_url=%s) AS gsc_rows,
+                        (SELECT COUNT(*) FROM seo_ga4_daily_landing_pages WHERE workspace_key=%s AND ga4_property_id=%s) AS ga4_rows,
+                        (SELECT COUNT(*) FROM seo_ga4_transactions WHERE workspace_key=%s AND ga4_property_id=%s) AS ga4_transaction_rows,
+                        (SELECT COUNT(*) FROM seo_shopify_order_facts WHERE workspace_key=%s) AS shopify_order_rows,
+                        (SELECT COUNT(*) FROM seo_url_aliases WHERE workspace_key=%s AND source IN ('GSC', 'GA4')) AS mapped_url_rows,
+                        (SELECT COUNT(*) FROM seo_revenue_reconciliations WHERE workspace_key=%s AND ga4_property_id=%s) AS reconciled_transaction_rows
+                    """,
+                    (
+                        WORKSPACE_KEY, gsc_site_url, WORKSPACE_KEY, gsc_site_url,
+                        WORKSPACE_KEY, ga4_property_id,
+                        WORKSPACE_KEY, ga4_property_id,
+                        WORKSPACE_KEY,
+                        WORKSPACE_KEY,
+                        WORKSPACE_KEY, ga4_property_id,
+                    ),
+                )
+                counts = dict(cursor.fetchone() or {})
+                cursor.execute(
+                    """
+                    INSERT INTO seo_reporting_snapshot_runs(
+                        id, workspace_key, status, common_reporting_date,
+                        gsc_rows, ga4_rows, ga4_transaction_rows,
+                        shopify_order_rows, mapped_url_rows,
+                        reconciled_transaction_rows
+                    ) VALUES (%s, %s, 'completed', %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        refresh_id,
+                        WORKSPACE_KEY,
+                        common,
+                        _integer(counts.get("gsc_rows")),
+                        _integer(counts.get("ga4_rows")),
+                        _integer(counts.get("ga4_transaction_rows")),
+                        _integer(counts.get("shopify_order_rows")),
+                        _integer(counts.get("mapped_url_rows")),
+                        _integer(counts.get("reconciled_transaction_rows")),
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE seo_phase4_health
+                    SET reporting_snapshot_refreshed_at=now(), updated_at=now()
+                    WHERE workspace_key=%s
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+            connection.commit()
+        return {"status": "completed", "common_reporting_date": common.isoformat()}
+
+    def _refresh_landing_page_snapshots(self, cursor, gsc_site_url, ga4_property_id, common):
+        market = self._market_case_sql("country_code")
+        cursor.execute(
+            f"""
+            INSERT INTO seo_reporting_landing_page_daily(
+                workspace_key, date, canonical_page_key, country_code, market_code,
+                device_category, organic_clicks, organic_impressions,
+                position_weight
+            )
+            SELECT %s, date, canonical_page_key, UPPER(country_code) AS country_code,
+                   {market} AS market_code, LOWER(device) AS device_category,
+                   SUM(clicks), SUM(impressions), SUM(average_position * impressions)
+            FROM seo_gsc_daily_details
+            WHERE workspace_key=%s AND gsc_site_url=%s AND date<=%s
+              AND is_complete=TRUE AND canonical_page_key IS NOT NULL
+            GROUP BY date, canonical_page_key, country_code, device_category
+            ON CONFLICT (workspace_key, date, canonical_page_key, country_code, device_category)
+            DO UPDATE SET
+                market_code=EXCLUDED.market_code,
+                organic_clicks=EXCLUDED.organic_clicks,
+                organic_impressions=EXCLUDED.organic_impressions,
+                position_weight=EXCLUDED.position_weight,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, WORKSPACE_KEY, gsc_site_url, common),
+        )
+        cursor.execute(
+            f"""
+            WITH base AS (
+                SELECT date, canonical_page_key, UPPER(country_id) AS country_code,
+                       LOWER(device_category) AS device_category, sessions,
+                       engaged_sessions, transactions, purchase_revenue
+                FROM seo_ga4_daily_landing_pages
+                WHERE workspace_key=%s AND ga4_property_id=%s AND date<=%s
+                  AND is_complete=TRUE AND canonical_page_key IS NOT NULL
+            )
+            INSERT INTO seo_reporting_landing_page_daily(
+                workspace_key, date, canonical_page_key, country_code, market_code,
+                device_category, organic_sessions, engaged_sessions,
+                ga4_attributed_purchases, ga4_attributed_revenue
+            )
+            SELECT %s, date, canonical_page_key, country_code, {market},
+                   device_category, SUM(sessions), SUM(engaged_sessions),
+                   SUM(transactions), SUM(purchase_revenue)
+            FROM base
+            GROUP BY date, canonical_page_key, country_code, device_category
+            ON CONFLICT (workspace_key, date, canonical_page_key, country_code, device_category)
+            DO UPDATE SET
+                market_code=EXCLUDED.market_code,
+                organic_sessions=EXCLUDED.organic_sessions,
+                engaged_sessions=EXCLUDED.engaged_sessions,
+                ga4_attributed_purchases=EXCLUDED.ga4_attributed_purchases,
+                ga4_attributed_revenue=EXCLUDED.ga4_attributed_revenue,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
+        )
+        cursor.execute(
+            f"""
+            WITH base AS (
+                SELECT tx.transaction_date AS date, tx.canonical_page_key,
+                       UPPER(tx.country_id) AS country_code,
+                       LOWER(tx.device_category) AS device_category,
+                       reconciliation.currency,
+                       reconciliation.reconciliation_state,
+                       reconciliation.shopify_confirmed_revenue
+                FROM seo_revenue_reconciliations AS reconciliation
+                JOIN seo_ga4_transactions AS tx
+                  ON tx.workspace_key=reconciliation.workspace_key
+                 AND tx.ga4_property_id=reconciliation.ga4_property_id
+                 AND tx.transaction_id=reconciliation.transaction_id
+                 AND tx.transaction_date=reconciliation.transaction_date
+                WHERE reconciliation.workspace_key=%s
+                  AND reconciliation.ga4_property_id=%s
+                  AND tx.transaction_date<=%s AND tx.is_complete=TRUE
+                  AND tx.canonical_page_key IS NOT NULL
+            )
+            INSERT INTO seo_reporting_landing_page_revenue_daily(
+                workspace_key, date, canonical_page_key, country_code,
+                market_code, device_category, currency, confirmed_organic_orders,
+                confirmed_organic_revenue, unmatched_or_disputed_transactions
+            )
+            SELECT %s, date, canonical_page_key, country_code, {market},
+                   device_category, COALESCE(currency, ''),
+                   COUNT(*) FILTER (WHERE reconciliation_state='confirmed_shopify_match'),
+                   COALESCE(SUM(shopify_confirmed_revenue) FILTER (
+                       WHERE reconciliation_state='confirmed_shopify_match'
+                   ), 0),
+                   COUNT(*) FILTER (WHERE reconciliation_state<>'confirmed_shopify_match')
+            FROM base
+            GROUP BY date, canonical_page_key, country_code, device_category, currency
+            ON CONFLICT (
+                workspace_key, date, canonical_page_key, country_code, device_category, currency
+            )
+            DO UPDATE SET
+                market_code=EXCLUDED.market_code,
+                confirmed_organic_orders=EXCLUDED.confirmed_organic_orders,
+                confirmed_organic_revenue=EXCLUDED.confirmed_organic_revenue,
+                unmatched_or_disputed_transactions=EXCLUDED.unmatched_or_disputed_transactions,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
+        )
+
+    def _refresh_query_snapshots(self, cursor, gsc_site_url, common, brand_expr, brand_params):
+        market = self._market_case_sql("country_code")
+        cursor.execute(
+            f"""
+            WITH base AS (
+                SELECT date, query, COALESCE(canonical_page_key, '') AS canonical_page_key,
+                       UPPER(country_code) AS country_code,
+                       LOWER(device) AS device_category, clicks, impressions,
+                       average_position
+                FROM seo_gsc_daily_details
+                WHERE workspace_key=%s AND gsc_site_url=%s AND date<=%s
+                  AND is_complete=TRUE
+            ), grouped AS (
+                SELECT date, query, canonical_page_key, country_code,
+                       {market} AS market_code, device_category, 'all'::TEXT AS search_class,
+                       SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                       SUM(average_position * impressions) AS position_weight
+                FROM base
+                GROUP BY date, query, canonical_page_key, country_code, device_category
+                UNION ALL
+                SELECT date, query, canonical_page_key, country_code,
+                       {market} AS market_code, device_category,
+                       CASE WHEN {brand_expr} THEN 'brand' ELSE 'nonbrand' END AS search_class,
+                       SUM(clicks), SUM(impressions),
+                       SUM(average_position * impressions)
+                FROM base
+                GROUP BY date, query, canonical_page_key, country_code, device_category, search_class
+            )
+            INSERT INTO seo_reporting_query_daily(
+                workspace_key, date, query_hash, query, canonical_page_key,
+                country_code, market_code, device_category, search_class,
+                organic_clicks, organic_impressions, position_weight
+            )
+            SELECT %s, date, md5(query), query, canonical_page_key,
+                   country_code, market_code, device_category, search_class,
+                   COALESCE(clicks, 0), COALESCE(impressions, 0),
+                   COALESCE(position_weight, 0)
+            FROM grouped
+            ON CONFLICT (
+                workspace_key, date, query_hash, canonical_page_key,
+                country_code, device_category, search_class
+            )
+            DO UPDATE SET
+                query=EXCLUDED.query,
+                market_code=EXCLUDED.market_code,
+                organic_clicks=EXCLUDED.organic_clicks,
+                organic_impressions=EXCLUDED.organic_impressions,
+                position_weight=EXCLUDED.position_weight,
+                updated_at=now()
+            """,
+            [WORKSPACE_KEY, gsc_site_url, common, *brand_params, WORKSPACE_KEY],
+        )
+
+    def _refresh_reporting_opportunities(self, cursor, common, start_28, prev_start, prev_end):
+        cursor.execute(
+            """
+            WITH metric AS (
+                SELECT query, canonical_page_key,
+                       SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions,
+                       CASE WHEN SUM(organic_impressions)>0
+                            THEN SUM(position_weight)/SUM(organic_impressions) ELSE 0 END AS average_position,
+                       CASE WHEN SUM(organic_impressions)>0
+                            THEN SUM(organic_clicks)/SUM(organic_impressions) ELSE 0 END AS ctr
+                FROM seo_reporting_query_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                  AND search_class='all' AND query<>''
+                GROUP BY query, canonical_page_key
+            ), ranked AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    ORDER BY impressions DESC, average_position ASC
+                ) AS rank
+                FROM metric
+                WHERE impressions>=20 AND average_position BETWEEN 8 AND 15
+            )
+            INSERT INTO seo_reporting_opportunities(
+                opportunity_key, workspace_key, opportunity_type, priority_score,
+                title, query, canonical_page_key, evidence, measurement_date
+            )
+            SELECT md5(%s || '|near_page_one|' || query || '|' || canonical_page_key),
+                   %s, 'keywords_near_page_one',
+                   impressions / NULLIF(average_position, 0),
+                   'Keyword near page one', query, NULLIF(canonical_page_key, ''),
+                   jsonb_build_object('clicks', clicks, 'impressions', impressions,
+                                      'ctr', ctr, 'average_position', average_position),
+                   %s
+            FROM ranked WHERE rank<=25
+            ON CONFLICT (opportunity_key) DO UPDATE SET
+                priority_score=EXCLUDED.priority_score,
+                evidence=EXCLUDED.evidence,
+                measurement_date=EXCLUDED.measurement_date,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, start_28, common, WORKSPACE_KEY, WORKSPACE_KEY, common),
+        )
+        cursor.execute(
+            """
+            WITH metric AS (
+                SELECT query, canonical_page_key,
+                       SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions,
+                       CASE WHEN SUM(organic_impressions)>0
+                            THEN SUM(organic_clicks)/SUM(organic_impressions) ELSE 0 END AS ctr,
+                       CASE WHEN SUM(organic_impressions)>0
+                            THEN SUM(position_weight)/SUM(organic_impressions) ELSE 0 END AS average_position
+                FROM seo_reporting_query_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                  AND search_class='all' AND query<>''
+                GROUP BY query, canonical_page_key
+            ), ranked AS (
+                SELECT *, ROW_NUMBER() OVER (ORDER BY impressions DESC, ctr ASC) AS rank
+                FROM metric
+                WHERE impressions>=100 AND ctr<0.01 AND average_position<=25
+            )
+            INSERT INTO seo_reporting_opportunities(
+                opportunity_key, workspace_key, opportunity_type, priority_score,
+                title, query, canonical_page_key, evidence, measurement_date
+            )
+            SELECT md5(%s || '|weak_ctr|' || query || '|' || canonical_page_key),
+                   %s, 'high_impressions_weak_ctr',
+                   impressions * (0.01 - ctr),
+                   'High impressions with weak CTR', query, NULLIF(canonical_page_key, ''),
+                   jsonb_build_object('clicks', clicks, 'impressions', impressions,
+                                      'ctr', ctr, 'average_position', average_position),
+                   %s
+            FROM ranked WHERE rank<=25
+            ON CONFLICT (opportunity_key) DO UPDATE SET
+                priority_score=EXCLUDED.priority_score,
+                evidence=EXCLUDED.evidence,
+                measurement_date=EXCLUDED.measurement_date,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, start_28, common, WORKSPACE_KEY, WORKSPACE_KEY, common),
+        )
+        cursor.execute(
+            """
+            WITH current_period AS (
+                SELECT canonical_page_key, SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions
+                FROM seo_reporting_landing_page_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                GROUP BY canonical_page_key
+            ), previous_period AS (
+                SELECT canonical_page_key, SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions
+                FROM seo_reporting_landing_page_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                GROUP BY canonical_page_key
+            ), declined AS (
+                SELECT current_period.canonical_page_key,
+                       current_period.clicks AS current_clicks,
+                       previous_period.clicks AS previous_clicks,
+                       current_period.impressions AS current_impressions,
+                       ROW_NUMBER() OVER (
+                           ORDER BY previous_period.clicks - current_period.clicks DESC
+                       ) AS rank
+                FROM current_period
+                JOIN previous_period USING (canonical_page_key)
+                WHERE previous_period.clicks>=10
+                  AND current_period.clicks < previous_period.clicks * 0.8
+            )
+            INSERT INTO seo_reporting_opportunities(
+                opportunity_key, workspace_key, opportunity_type, priority_score,
+                title, canonical_page_key, evidence, measurement_date
+            )
+            SELECT md5(%s || '|declining_page|' || canonical_page_key),
+                   %s, 'declining_pages',
+                   previous_clicks - current_clicks,
+                   'Declining landing page', canonical_page_key,
+                   jsonb_build_object('current_clicks', current_clicks,
+                                      'previous_clicks', previous_clicks,
+                                      'current_impressions', current_impressions),
+                   %s
+            FROM declined WHERE rank<=25
+            ON CONFLICT (opportunity_key) DO UPDATE SET
+                priority_score=EXCLUDED.priority_score,
+                evidence=EXCLUDED.evidence,
+                measurement_date=EXCLUDED.measurement_date,
+                updated_at=now()
+            """,
+            (
+                WORKSPACE_KEY, start_28, common,
+                WORKSPACE_KEY, prev_start, prev_end,
+                WORKSPACE_KEY, WORKSPACE_KEY, common,
+            ),
+        )
+        cursor.execute(
+            """
+            WITH metric AS (
+                SELECT query, SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions,
+                       ROW_NUMBER() OVER (ORDER BY SUM(organic_impressions) DESC) AS rank
+                FROM seo_reporting_query_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                  AND search_class='all' AND canonical_page_key='' AND query<>''
+                GROUP BY query
+                HAVING SUM(organic_impressions)>=10
+            )
+            INSERT INTO seo_reporting_opportunities(
+                opportunity_key, workspace_key, opportunity_type, priority_score,
+                title, query, evidence, measurement_date
+            )
+            SELECT md5(%s || '|unmapped_keyword|' || query),
+                   %s, 'unmapped_keywords', impressions,
+                   'Unmapped keyword', query,
+                   jsonb_build_object('clicks', clicks, 'impressions', impressions),
+                   %s
+            FROM metric WHERE rank<=25
+            ON CONFLICT (opportunity_key) DO UPDATE SET
+                priority_score=EXCLUDED.priority_score,
+                evidence=EXCLUDED.evidence,
+                measurement_date=EXCLUDED.measurement_date,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, start_28, common, WORKSPACE_KEY, WORKSPACE_KEY, common),
+        )
+        cursor.execute(
+            """
+            WITH metric AS (
+                SELECT query, COUNT(DISTINCT canonical_page_key) AS page_count,
+                       SUM(organic_clicks) AS clicks,
+                       SUM(organic_impressions) AS impressions,
+                       ROW_NUMBER() OVER (ORDER BY SUM(organic_impressions) DESC) AS rank
+                FROM seo_reporting_query_daily
+                WHERE workspace_key=%s AND date BETWEEN %s AND %s
+                  AND search_class='all' AND canonical_page_key<>'' AND query<>''
+                GROUP BY query
+                HAVING COUNT(DISTINCT canonical_page_key)>1
+            )
+            INSERT INTO seo_reporting_opportunities(
+                opportunity_key, workspace_key, opportunity_type, priority_score,
+                title, query, evidence, measurement_date
+            )
+            SELECT md5(%s || '|competing_pages|' || query),
+                   %s, 'competing_pages_same_keyword', impressions,
+                   'Competing pages for one keyword', query,
+                   jsonb_build_object('page_count', page_count, 'clicks', clicks,
+                                      'impressions', impressions),
+                   %s
+            FROM metric WHERE rank<=25
+            ON CONFLICT (opportunity_key) DO UPDATE SET
+                priority_score=EXCLUDED.priority_score,
+                evidence=EXCLUDED.evidence,
+                measurement_date=EXCLUDED.measurement_date,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, start_28, common, WORKSPACE_KEY, WORKSPACE_KEY, common),
+        )
 
     def saved_health(self):
         self.ensure_schema()
@@ -1810,10 +2747,19 @@ class PostgresSEOPhase4Store:
         row = dict(row or {})
         for field in (
             "latest_gsc_date", "latest_ga4_date", "latest_shopify_date",
-            "common_reporting_date", "last_mapping_at", "last_reconciliation_at", "updated_at",
+            "common_reporting_date", "ga4_transaction_through_date",
+            "reconciliation_through_date", "last_mapping_at",
+            "last_reconciliation_at", "reporting_snapshot_refreshed_at",
+            "updated_at",
         ):
             row[field] = _iso(row.get(field))
-        for field in ("unmapped_page_count", "unmatched_transaction_count", "ambiguous_page_count"):
+        for field in (
+            "unmapped_page_count", "unmatched_transaction_count",
+            "ambiguous_page_count", "mapping_source_url_count",
+            "mapped_page_count", "invalid_page_count",
+            "reconciled_transaction_count", "confirmed_transaction_count",
+            "disputed_transaction_count",
+        ):
             row[field] = _integer(row.get(field))
         return row
 
@@ -2046,114 +2992,99 @@ class PostgresSEOReportingReader:
             },
             "current": current,
             "previous": previous,
+            "daily_trend": self._daily_trend(filters, period.start_date, period.end_date),
+            "previous_daily_trend": self._daily_trend(filters, period.previous_start_date, period.previous_end_date),
+            "opportunities": self._opportunities(period.end_date),
             "top_pages": self._top_pages(filters, period.start_date, period.end_date),
             "top_queries": self._top_queries(filters, settings.get("brand_terms") or [], period.start_date, period.end_date),
         }
 
-    def _period_metrics(self, filters, brand_terms, start_date, end_date):
-        connection_record = self.store.connection_record()
-        gsc_site_url = str(connection_record.get("gsc_site_url") or "")
-        ga4_property_id = str(connection_record.get("ga4_property_id") or "")
+    @staticmethod
+    def _search_class(filters):
+        return {
+            "Brand": "brand",
+            "Non-brand": "nonbrand",
+        }.get(filters.search, "all")
+
+    @staticmethod
+    def _snapshot_scope(filters, *, summary=False):
+        countries = sorted(str(value).upper() for value in filters.country_values())
+        devices = sorted(str(value).casefold() for value in filters.device_values())
+        if summary and not countries and not devices:
+            return ["country_code=''", "device_category='all'"], []
+        clauses = []
+        params = []
+        if summary:
+            clauses.extend(["country_code<>''", "device_category<>'all'"])
+        if countries:
+            clauses.append("UPPER(country_code)=ANY(%s)")
+            params.append(countries)
+        if devices:
+            clauses.append("LOWER(device_category)=ANY(%s)")
+            params.append(devices)
+        return clauses, params
+
+    def _period_metrics(self, filters, _brand_terms, start_date, end_date):
+        search_scoped = filters.search in {"Brand", "Non-brand"}
+        search_class = self._search_class(filters)
+        clauses, params = self._snapshot_scope(filters, summary=filters.search == "All searches")
+        metric_clauses = ["workspace_key=%s", "date BETWEEN %s AND %s", "search_class=%s", *clauses]
+        metric_params = [WORKSPACE_KEY, start_date, end_date, search_class, *params]
+        revenue_clauses, revenue_params = self._snapshot_scope(filters, summary=True)
+        revenue_where = ["workspace_key=%s", "date BETWEEN %s AND %s", *revenue_clauses]
         with self.store._backend().connect() as connection:
             with connection.cursor() as cursor:
-                if filters.market == "All markets" and filters.device == "All devices" and filters.search == "All searches":
-                    cursor.execute(
-                        """
-                        SELECT COALESCE(SUM(clicks), 0) AS clicks,
-                               COALESCE(SUM(impressions), 0) AS impressions,
-                               CASE WHEN SUM(impressions)>0 THEN SUM(clicks)/SUM(impressions) ELSE 0 END AS ctr,
-                               CASE WHEN SUM(impressions)>0
-                                    THEN SUM(average_position*impressions)/SUM(impressions) ELSE 0 END AS average_position
-                        FROM seo_gsc_daily_totals
-                        WHERE workspace_key=%s AND gsc_site_url=%s
-                          AND date BETWEEN %s AND %s AND is_complete=TRUE AND is_final=TRUE
-                        """,
-                        (WORKSPACE_KEY, gsc_site_url, start_date, end_date),
-                    )
-                else:
-                    clauses, params = self._detail_filters(
-                        filters, brand_terms, date_start=start_date, date_end=end_date,
-                    )
-                    cursor.execute(
-                        f"""
-                        SELECT COALESCE(SUM(clicks), 0) AS clicks,
-                               COALESCE(SUM(impressions), 0) AS impressions,
-                               CASE WHEN SUM(impressions)>0 THEN SUM(clicks)/SUM(impressions) ELSE 0 END AS ctr,
-                               CASE WHEN SUM(impressions)>0
-                                    THEN SUM(average_position*impressions)/SUM(impressions) ELSE 0 END AS average_position
-                        FROM seo_gsc_daily_details
-                        WHERE workspace_key=%s AND gsc_site_url=%s AND {' AND '.join(clauses)}
-                        """,
-                        [WORKSPACE_KEY, gsc_site_url, *params],
-                    )
-                gsc = dict(cursor.fetchone() or {})
-
-                ga4_clauses, ga4_params = self._ga4_filters(
-                    filters, date_start=start_date, date_end=end_date,
-                )
                 cursor.execute(
                     f"""
-                    SELECT COALESCE(SUM(sessions), 0) AS organic_sessions,
-                           COALESCE(SUM(transactions), 0) AS ga4_attributed_purchases,
-                           COALESCE(SUM(purchase_revenue), 0) AS ga4_attributed_revenue,
-                           ARRAY_REMOVE(ARRAY_AGG(DISTINCT property_currency), '') AS ga4_currencies
-                    FROM seo_ga4_daily_landing_pages
-                    WHERE workspace_key=%s AND ga4_property_id=%s
-                      AND {' AND '.join(ga4_clauses)}
+                    SELECT COALESCE(SUM(organic_clicks), 0) AS clicks,
+                           COALESCE(SUM(organic_impressions), 0) AS impressions,
+                           COALESCE(SUM(position_weight), 0) AS position_weight,
+                           COALESCE(SUM(organic_sessions), 0) AS organic_sessions,
+                           COALESCE(SUM(engaged_sessions), 0) AS engaged_sessions,
+                           COALESCE(SUM(ga4_attributed_purchases), 0) AS ga4_attributed_purchases,
+                           COALESCE(SUM(ga4_attributed_revenue), 0) AS ga4_attributed_revenue,
+                           ARRAY_REMOVE(ARRAY_AGG(DISTINCT ga4_currency), '') AS ga4_currencies,
+                           COALESCE(SUM(source_gsc_rows), 0) AS source_gsc_rows,
+                           COALESCE(SUM(source_ga4_rows), 0) AS source_ga4_rows
+                    FROM seo_reporting_daily_metrics
+                    WHERE {' AND '.join(metric_clauses)}
                     """,
-                    [WORKSPACE_KEY, ga4_property_id, *ga4_params],
+                    metric_params,
                 )
-                ga4 = dict(cursor.fetchone() or {})
-
-                transaction_clauses = [
-                    "tx.transaction_date BETWEEN %s AND %s", "tx.is_complete=TRUE",
-                ]
-                transaction_params = [start_date, end_date]
-                countries = sorted(filters.country_values())
-                devices = sorted(str(value).upper() for value in filters.device_values())
-                if countries:
-                    transaction_clauses.append("UPPER(tx.country_id)=ANY(%s)")
-                    transaction_params.append(countries)
-                if devices:
-                    transaction_clauses.append("UPPER(tx.device_category)=ANY(%s)")
-                    transaction_params.append(devices)
+                metrics = dict(cursor.fetchone() or {})
                 cursor.execute(
                     f"""
-                    SELECT reconciliation.currency,
-                           COUNT(*) FILTER (
-                               WHERE reconciliation.reconciliation_state='confirmed_shopify_match'
-                           ) AS confirmed_orders,
-                           COALESCE(SUM(reconciliation.shopify_confirmed_revenue) FILTER (
-                               WHERE reconciliation.reconciliation_state='confirmed_shopify_match'
-                           ), 0) AS confirmed_revenue,
-                           COUNT(*) FILTER (
-                               WHERE reconciliation.reconciliation_state<>'confirmed_shopify_match'
-                           ) AS unmatched_or_disputed
-                    FROM seo_revenue_reconciliations AS reconciliation
-                    JOIN seo_ga4_transactions AS tx
-                      ON tx.workspace_key=reconciliation.workspace_key
-                     AND tx.ga4_property_id=reconciliation.ga4_property_id
-                     AND tx.transaction_id=reconciliation.transaction_id
-                     AND tx.transaction_date=reconciliation.transaction_date
-                    WHERE reconciliation.workspace_key=%s
-                      AND reconciliation.ga4_property_id=%s
-                      AND {' AND '.join(transaction_clauses)}
-                    GROUP BY reconciliation.currency
-                    ORDER BY reconciliation.currency
+                    SELECT currency,
+                           COALESCE(SUM(confirmed_organic_orders), 0) AS confirmed_orders,
+                           COALESCE(SUM(confirmed_organic_revenue), 0) AS confirmed_revenue,
+                           COALESCE(SUM(unmatched_or_disputed_transactions), 0) AS unmatched_or_disputed,
+                           COALESCE(SUM(source_reconciliation_rows), 0) AS source_reconciliation_rows
+                    FROM seo_reporting_revenue_daily
+                    WHERE {' AND '.join(revenue_where)}
+                    GROUP BY currency
+                    ORDER BY currency
                     """,
-                    [WORKSPACE_KEY, ga4_property_id, *transaction_params],
+                    [WORKSPACE_KEY, start_date, end_date, *revenue_params],
                 )
                 currency_rows = [dict(row) for row in cursor.fetchall() or []]
+        impressions = _decimal(metrics.get("impressions"))
+        has_gsc = _integer(metrics.get("source_gsc_rows")) > 0
+        has_ga4 = _integer(metrics.get("source_ga4_rows")) > 0
+        revenue_available = bool(self.store.saved_health().get("reconciliation_through_date"))
+        confirmed_orders = sum((_integer(row.get("confirmed_orders")) for row in currency_rows), 0)
+        confirmed_revenue = sum((_decimal(row.get("confirmed_revenue")) for row in currency_rows), Decimal("0"))
         return {
-            "organic_clicks": _decimal(gsc.get("clicks")),
-            "organic_impressions": _decimal(gsc.get("impressions")),
-            "ctr": _decimal(gsc.get("ctr")),
-            "average_position": _decimal(gsc.get("average_position")),
-            "organic_sessions": None if search_scoped else _decimal(ga4.get("organic_sessions")),
-            "ga4_attributed_purchases": None if search_scoped else _decimal(ga4.get("ga4_attributed_purchases")),
-            "ga4_attributed_revenue": None if search_scoped else _decimal(ga4.get("ga4_attributed_revenue")),
+            "organic_clicks": _decimal(metrics.get("clicks")) if has_gsc else None,
+            "organic_impressions": impressions if has_gsc else None,
+            "ctr": (_decimal(metrics.get("clicks")) / impressions) if has_gsc and impressions else (Decimal("0") if has_gsc else None),
+            "average_position": (_decimal(metrics.get("position_weight")) / impressions) if has_gsc and impressions else (Decimal("0") if has_gsc else None),
+            "organic_sessions": None if search_scoped or not has_ga4 else _decimal(metrics.get("organic_sessions")),
+            "organic_orders": None if search_scoped or not revenue_available else Decimal(confirmed_orders),
+            "confirmed_organic_revenue": None if search_scoped or not revenue_available else confirmed_revenue,
+            "ga4_attributed_purchases": None if search_scoped or not has_ga4 else _decimal(metrics.get("ga4_attributed_purchases")),
+            "ga4_attributed_revenue": None if search_scoped or not has_ga4 else _decimal(metrics.get("ga4_attributed_revenue")),
             "ga4_revenue_basis": "GA4 attributed/unconfirmed",
-            "ga4_currencies": [] if search_scoped else list(ga4.get("ga4_currencies") or []),
+            "ga4_currencies": [] if search_scoped else list(metrics.get("ga4_currencies") or []),
             "shopify_confirmed_by_currency": [] if search_scoped else currency_rows,
             "search_scope_note": (
                 "Brand classification applies to GSC query metrics only; GA4 and Shopify are not query-grain datasets."
@@ -2161,82 +3092,188 @@ class PostgresSEOReportingReader:
             ),
         }
 
-    def _top_pages(self, filters, start_date, end_date, limit=25):
-        gsc_countries = sorted(filters.country_values())
-        devices = sorted(str(value).upper() for value in filters.device_values())
-        gsc_extra = []
-        ga4_extra = []
-        gsc_params = [WORKSPACE_KEY, start_date, end_date]
-        ga4_params = [WORKSPACE_KEY, start_date, end_date]
-        if gsc_countries:
-            gsc_extra.append("UPPER(country_code)=ANY(%s)")
-            ga4_extra.append("UPPER(country_id)=ANY(%s)")
-            gsc_params.append(gsc_countries)
-            ga4_params.append(gsc_countries)
-        if devices:
-            gsc_extra.append("UPPER(device)=ANY(%s)")
-            ga4_extra.append("UPPER(device_category)=ANY(%s)")
-            gsc_params.append(devices)
-            ga4_params.append(devices)
-        gsc_where = "" if not gsc_extra else " AND " + " AND ".join(gsc_extra)
-        ga4_where = "" if not ga4_extra else " AND " + " AND ".join(ga4_extra)
-        if filters.search in {"Brand", "Non-brand"}:
-            ga4_where += " AND FALSE"
+    def _daily_trend(self, filters, start_date, end_date):
+        search_class = self._search_class(filters)
+        search_scoped = filters.search in {"Brand", "Non-brand"}
+        clauses, params = self._snapshot_scope(filters, summary=filters.search == "All searches")
+        metric_where = ["workspace_key=%s", "date BETWEEN %s AND %s", "search_class=%s", *clauses]
+        revenue_clauses, revenue_params = self._snapshot_scope(filters, summary=True)
+        revenue_where = ["workspace_key=%s", "date BETWEEN %s AND %s", *revenue_clauses]
         with self.store._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     f"""
-                    WITH gsc AS (
-                        SELECT canonical_page_key, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                               CASE WHEN SUM(impressions)>0
-                                    THEN SUM(average_position*impressions)/SUM(impressions) ELSE 0 END AS average_position
-                        FROM seo_gsc_daily_details
-                        WHERE workspace_key=%s AND date BETWEEN %s AND %s
-                          AND is_complete=TRUE AND canonical_page_key IS NOT NULL{gsc_where}
+                    SELECT date,
+                           COALESCE(SUM(organic_clicks), 0) AS organic_clicks,
+                           COALESCE(SUM(organic_impressions), 0) AS organic_impressions,
+                           COALESCE(SUM(position_weight), 0) AS position_weight,
+                           COALESCE(SUM(organic_sessions), 0) AS organic_sessions,
+                           COALESCE(SUM(ga4_attributed_purchases), 0) AS ga4_attributed_purchases,
+                           COALESCE(SUM(source_gsc_rows), 0) AS source_gsc_rows,
+                           COALESCE(SUM(source_ga4_rows), 0) AS source_ga4_rows
+                    FROM seo_reporting_daily_metrics
+                    WHERE {' AND '.join(metric_where)}
+                    GROUP BY date ORDER BY date
+                    """,
+                    [WORKSPACE_KEY, start_date, end_date, search_class, *params],
+                )
+                metric_rows = [dict(row) for row in cursor.fetchall() or []]
+                cursor.execute(
+                    f"""
+                    SELECT date,
+                           COALESCE(SUM(confirmed_organic_orders), 0) AS organic_orders,
+                           COALESCE(SUM(confirmed_organic_revenue), 0) AS confirmed_organic_revenue
+                    FROM seo_reporting_revenue_daily
+                    WHERE {' AND '.join(revenue_where)}
+                    GROUP BY date ORDER BY date
+                    """,
+                    [WORKSPACE_KEY, start_date, end_date, *revenue_params],
+                )
+                revenue_rows = {row["date"]: dict(row) for row in cursor.fetchall() or []}
+        result = []
+        for row in metric_rows:
+            impressions = _decimal(row.get("organic_impressions"))
+            revenue = revenue_rows.get(row.get("date"), {})
+            result.append({
+                "date": _iso(row.get("date")),
+                "organic_clicks": _decimal(row.get("organic_clicks")),
+                "organic_impressions": impressions,
+                "ctr": _decimal(row.get("organic_clicks")) / impressions if impressions else Decimal("0"),
+                "average_position": _decimal(row.get("position_weight")) / impressions if impressions else Decimal("0"),
+                "organic_sessions": None if search_scoped else _decimal(row.get("organic_sessions")),
+                "organic_orders": None if search_scoped else _decimal(revenue.get("organic_orders")),
+                "confirmed_organic_revenue": None if search_scoped else _decimal(revenue.get("confirmed_organic_revenue")),
+            })
+        return result
+
+    def _top_pages(self, filters, start_date, end_date, limit=25):
+        clauses, params = self._snapshot_scope(filters)
+        if filters.search in {"Brand", "Non-brand"}:
+            search_class = self._search_class(filters)
+            where = [
+                "workspace_key=%s", "date BETWEEN %s AND %s",
+                "search_class=%s", "canonical_page_key<>''", *clauses,
+            ]
+            with self.store._backend().connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        WITH metrics AS (
+                            SELECT canonical_page_key,
+                                   SUM(organic_clicks) AS clicks,
+                                   SUM(organic_impressions) AS impressions,
+                                   SUM(position_weight) AS position_weight
+                            FROM seo_reporting_query_daily
+                            WHERE {' AND '.join(where)}
+                            GROUP BY canonical_page_key
+                        )
+                        SELECT page.page_key, page.canonical_url, page.title, page.page_type,
+                               COALESCE(metrics.clicks, 0) AS clicks,
+                               COALESCE(metrics.impressions, 0) AS impressions,
+                               CASE WHEN COALESCE(metrics.impressions, 0)>0
+                                    THEN metrics.position_weight/metrics.impressions ELSE 0 END AS average_position,
+                               0 AS sessions, 0 AS attributed_purchases,
+                               0 AS attributed_revenue, 0 AS confirmed_orders,
+                               0 AS confirmed_revenue, ARRAY[]::TEXT[] AS currencies
+                        FROM metrics
+                        JOIN seo_canonical_pages AS page ON page.page_key=metrics.canonical_page_key
+                        ORDER BY metrics.clicks DESC, metrics.impressions DESC
+                        LIMIT %s
+                        """,
+                        [WORKSPACE_KEY, start_date, end_date, search_class, *params, int(limit)],
+                    )
+                    return [dict(row) for row in cursor.fetchall() or []]
+        where = ["workspace_key=%s", "date BETWEEN %s AND %s", *clauses]
+        revenue_where = ["workspace_key=%s", "date BETWEEN %s AND %s", *clauses]
+        with self.store._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    WITH metrics AS (
+                        SELECT canonical_page_key,
+                               SUM(organic_clicks) AS clicks,
+                               SUM(organic_impressions) AS impressions,
+                               SUM(position_weight) AS position_weight,
+                               SUM(organic_sessions) AS sessions,
+                               SUM(ga4_attributed_purchases) AS attributed_purchases,
+                               SUM(ga4_attributed_revenue) AS attributed_revenue
+                        FROM seo_reporting_landing_page_daily
+                        WHERE {' AND '.join(where)}
                         GROUP BY canonical_page_key
-                    ), ga4 AS (
-                        SELECT canonical_page_key, SUM(sessions) AS sessions,
-                               SUM(transactions) AS attributed_purchases,
-                               SUM(purchase_revenue) AS attributed_revenue
-                        FROM seo_ga4_daily_landing_pages
-                        WHERE workspace_key=%s AND date BETWEEN %s AND %s
-                          AND is_complete=TRUE AND canonical_page_key IS NOT NULL{ga4_where}
+                    ), revenue AS (
+                        SELECT canonical_page_key,
+                               SUM(confirmed_organic_orders) AS confirmed_orders,
+                               SUM(confirmed_organic_revenue) AS confirmed_revenue,
+                               ARRAY_REMOVE(ARRAY_AGG(DISTINCT currency), '') AS currencies
+                        FROM seo_reporting_landing_page_revenue_daily
+                        WHERE {' AND '.join(revenue_where)}
                         GROUP BY canonical_page_key
                     )
                     SELECT page.page_key, page.canonical_url, page.title, page.page_type,
-                           COALESCE(gsc.clicks, 0) AS clicks,
-                           COALESCE(gsc.impressions, 0) AS impressions,
-                           COALESCE(gsc.average_position, 0) AS average_position,
-                           COALESCE(ga4.sessions, 0) AS sessions,
-                           COALESCE(ga4.attributed_purchases, 0) AS attributed_purchases,
-                           COALESCE(ga4.attributed_revenue, 0) AS attributed_revenue
-                    FROM gsc FULL OUTER JOIN ga4 USING (canonical_page_key)
-                    JOIN seo_canonical_pages AS page
-                      ON page.page_key=COALESCE(gsc.canonical_page_key, ga4.canonical_page_key)
-                    ORDER BY COALESCE(gsc.clicks, 0) DESC, COALESCE(ga4.sessions, 0) DESC
+                           COALESCE(metrics.clicks, 0) AS clicks,
+                           COALESCE(metrics.impressions, 0) AS impressions,
+                           CASE WHEN COALESCE(metrics.impressions, 0)>0
+                                THEN metrics.position_weight/metrics.impressions ELSE 0 END AS average_position,
+                           COALESCE(metrics.sessions, 0) AS sessions,
+                           COALESCE(metrics.attributed_purchases, 0) AS attributed_purchases,
+                           COALESCE(metrics.attributed_revenue, 0) AS attributed_revenue,
+                           COALESCE(revenue.confirmed_orders, 0) AS confirmed_orders,
+                           COALESCE(revenue.confirmed_revenue, 0) AS confirmed_revenue,
+                           COALESCE(revenue.currencies, ARRAY[]::TEXT[]) AS currencies
+                    FROM metrics
+                    JOIN seo_canonical_pages AS page ON page.page_key=metrics.canonical_page_key
+                    LEFT JOIN revenue ON revenue.canonical_page_key=metrics.canonical_page_key
+                    ORDER BY COALESCE(revenue.confirmed_revenue, 0) DESC,
+                             COALESCE(revenue.confirmed_orders, 0) DESC,
+                             COALESCE(metrics.sessions, 0) DESC,
+                             COALESCE(metrics.clicks, 0) DESC
                     LIMIT %s
                     """,
-                    [*gsc_params, *ga4_params, int(limit)],
+                    [WORKSPACE_KEY, start_date, end_date, *params, WORKSPACE_KEY, start_date, end_date, *params, int(limit)],
                 )
                 return [dict(row) for row in cursor.fetchall() or []]
 
-    def _top_queries(self, filters, brand_terms, start_date, end_date, limit=25):
-        clauses, params = self._detail_filters(
-            filters, brand_terms, date_start=start_date, date_end=end_date,
-        )
+    def _top_queries(self, filters, _brand_terms, start_date, end_date, limit=25):
+        clauses, params = self._snapshot_scope(filters)
+        search_class = self._search_class(filters)
+        where = ["workspace_key=%s", "date BETWEEN %s AND %s", "search_class=%s", *clauses]
         with self.store._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     f"""
-                    SELECT query, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                           CASE WHEN SUM(impressions)>0 THEN SUM(clicks)/SUM(impressions) ELSE 0 END AS ctr,
-                           CASE WHEN SUM(impressions)>0
-                                THEN SUM(average_position*impressions)/SUM(impressions) ELSE 0 END AS average_position
-                    FROM seo_gsc_daily_details
-                    WHERE workspace_key=%s AND {' AND '.join(clauses)}
-                    GROUP BY query ORDER BY clicks DESC, impressions DESC LIMIT %s
+                    SELECT query,
+                           SUM(organic_clicks) AS clicks,
+                           SUM(organic_impressions) AS impressions,
+                           CASE WHEN SUM(organic_impressions)>0
+                                THEN SUM(organic_clicks)/SUM(organic_impressions) ELSE 0 END AS ctr,
+                           CASE WHEN SUM(organic_impressions)>0
+                                THEN SUM(position_weight)/SUM(organic_impressions) ELSE 0 END AS average_position,
+                           MAX(CASE WHEN query ~* '(buy|shop|poster|print|wall art|memorabilia|jersey|gift|framed|man cave|sports cave)' THEN 1 ELSE 0 END) AS commercial_score
+                    FROM seo_reporting_query_daily
+                    WHERE {' AND '.join(where)} AND query<>''
+                    GROUP BY query
+                    HAVING SUM(organic_impressions)>0
+                    ORDER BY commercial_score DESC, clicks DESC, impressions DESC
+                    LIMIT %s
                     """,
-                    [WORKSPACE_KEY, *params, int(limit)],
+                    [WORKSPACE_KEY, start_date, end_date, search_class, *params, int(limit)],
+                )
+                return [dict(row) for row in cursor.fetchall() or []]
+
+    def _opportunities(self, through_date, limit=25):
+        with self.store._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT opportunity_type, priority_score, title, query,
+                           normalized_path, evidence, measurement_date
+                    FROM seo_reporting_opportunities
+                    WHERE workspace_key=%s AND status='open'
+                      AND (measurement_date IS NULL OR measurement_date<=%s)
+                    ORDER BY priority_score DESC, opportunity_type
+                    LIMIT %s
+                    """,
+                    (WORKSPACE_KEY, through_date, int(limit)),
                 )
                 return [dict(row) for row in cursor.fetchall() or []]
 
@@ -2267,6 +3304,8 @@ class SEOPhase4Worker:
             return None
         try:
             result = self._process(run)
+            if run.get("source") in {"mapping", "reconciliation"} and hasattr(self.store, "refresh_reporting_snapshots"):
+                self.store.refresh_reporting_snapshots()
             self.store.refresh_health()
             return result
         except Exception as error:
@@ -2320,8 +3359,10 @@ class SEOPhase4Worker:
             updated_after = str(state.get("checkpoint_value") or "")
             batch = []
             latest_checkpoint = updated_after
+            type_received = type_written = type_rejected = 0
             for resource in client.iter_resources(page_type, updated_after=updated_after):
                 received += 1
+                type_received += 1
                 try:
                     page = canonical_page_from_shopify(
                         resource,
@@ -2330,6 +3371,7 @@ class SEOPhase4Worker:
                     )
                 except SEOPhase4Error:
                     rejected += 1
+                    type_rejected += 1
                     continue
                 batch.append(page)
                 if page_type == "article" and resource.get("blog_id") and resource.get("blog_handle"):
@@ -2350,12 +3392,23 @@ class SEOPhase4Worker:
                     )
                 latest_checkpoint = max(latest_checkpoint, str(resource.get("updated_at") or ""))
                 if len(batch) >= 100:
-                    written += self.store.upsert_canonical_pages(batch)
+                    batch_written = self.store.upsert_canonical_pages(batch)
+                    written += batch_written
+                    type_written += batch_written
                     batch = []
                     self.store.renew_lease(run["id"], self.worker_id)
             if batch:
-                written += self.store.upsert_canonical_pages(batch)
-            self.store.save_source_state("shopify_pages", page_type, checkpoint_value=latest_checkpoint)
+                batch_written = self.store.upsert_canonical_pages(batch)
+                written += batch_written
+                type_written += batch_written
+            self.store.save_source_state(
+                "shopify_pages",
+                page_type,
+                checkpoint_value=latest_checkpoint,
+                rows_processed=type_received,
+                rows_written=type_written,
+                rows_rejected=type_rejected,
+            )
         self.store.checkpoint_run(
             run["id"], self.worker_id, received=received, written=written, rejected=rejected,
         )
@@ -2383,7 +3436,9 @@ class SEOPhase4Worker:
             written += self.store.upsert_shopify_order_facts(batch)
         self.store.save_source_state(
             "shopify_orders", checkpoint_value=latest_checkpoint,
-            latest_completed_date=utc_now().date(),
+            latest_completed_date=latest_order_date or utc_now().date(),
+            rows_processed=received,
+            rows_written=written,
         )
         self.store.checkpoint_run(run["id"], self.worker_id, received=received, written=written)
         return self.store.complete_run(run["id"], self.worker_id)
@@ -2415,6 +3470,7 @@ class SEOPhase4Worker:
         client = self.google_client_factory(access_token)
         currency = str(connection.get("ga4_property_currency") or "")
         dimensions = compatible_ga4_transaction_dimensions(client, property_id)
+        received = written = 0
         for slice_date in date_sequence(start, end):
             if not self.store.renew_lease(run["id"], self.worker_id, active_slice_date=slice_date):
                 raise SEOPhase4Error("The Phase 4 job lease was lost.", code="phase4_lease_lost")
@@ -2422,6 +3478,8 @@ class SEOPhase4Worker:
                 client, property_id, slice_date, currency=currency, dimensions=dimensions,
             )
             result = self.store.replace_ga4_transactions_date(property_id, slice_data)
+            received += _integer(slice_data.get("rows_received"))
+            written += _integer(result.get("inserted"))
             self.store.checkpoint_run(
                 run["id"], self.worker_id, checkpoint_date=slice_date,
                 received=slice_data.get("rows_received", 0), written=result["inserted"],
@@ -2430,6 +3488,8 @@ class SEOPhase4Worker:
         self.store.save_source_state(
             "ga4_transactions", latest_completed_date=end,
             checkpoint_value=end.isoformat(),
+            rows_processed=received,
+            rows_written=written,
         )
         return self.store.complete_run(run["id"], self.worker_id)
 
