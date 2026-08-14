@@ -91,6 +91,19 @@ LEGACY_IMAGE_ROLE_ALIASES = MappingProxyType(
 )
 
 VISIBLE_USE_MODES = {"visible_whole_photo", "visible_cutout", "edit_target"}
+MAX_SUPPORTED_PRINCIPAL_HUMAN_SUBJECTS = 3
+HUMAN_PRINCIPAL_ASSET_ROLES = frozenset(
+    {
+        "hero_exact_photo",
+        "secondary_exact_photo",
+        "rival_one_photo",
+        "rival_two_photo",
+        "rear_jersey_one",
+        "rear_jersey_two",
+        "driver_photo",
+        "signature_asset",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -158,8 +171,8 @@ _STYLES = (
         "Ultimate Moment",
         "One exact sporting instant that fans recognise immediately.",
         "The Catch",
-        2,
-        2,
+        3,
+        3,
         ("exact_moment_photo",),
         ("venue_reference", "historical_reference", "signature_asset"),
         """
@@ -222,8 +235,8 @@ Use exactly two genuine rear or rear three-quarter source photographs at equal s
         "Nostalgic Tribute",
         "A person-first emotional tribute built around one specific memory.",
         "Shane Warne bowing at the MCG",
-        2,
-        2,
+        3,
+        3,
         ("hero_exact_photo",),
         ("venue_reference", "historical_reference", "signature_asset"),
         """
@@ -309,8 +322,8 @@ Use one distinct athlete and a dominant authentic trophy, celebration or achieve
         "Vintage Restoration",
         "One genuine archival photograph restored as a restrained collector series.",
         "One-Two Finish",
-        2,
-        2,
+        3,
+        3,
         ("archival_restoration_source",),
         ("historical_reference", "signature_asset"),
         """
@@ -457,6 +470,12 @@ def principal_subjects(details=None, task_text=""):
             values.extend(nested)
         elif nested:
             values.append(nested)
+    if not values and re.search(
+        r"\b(?:vehicle-only|venue-only|trophy-only|jersey-only|team-only|non-human|car-only|circuit artwork|race car collector)\b",
+        str(task_text or ""),
+        flags=re.I,
+    ):
+        return []
     if not values:
         text = str(task_text or "")
         versus = re.search(
@@ -490,10 +509,10 @@ def validate_design_request(style_slug, details=None, task_text=""):
         return [STYLE_REQUIRED_LABEL]
     subjects = principal_subjects(details, task_text)
     errors = []
-    if len(subjects) > 2:
+    if len(subjects) > MAX_SUPPORTED_PRINCIPAL_HUMAN_SUBJECTS:
         errors.append(
-            "This task exceeds the new Sports Cave limit of two principal people. "
-            "Reduce it to one or two subjects before generating prompts."
+            "This task exceeds the Sports Cave prompt limit of three principal people. "
+            "Reduce it to one, two or three named principal subjects before generating prompts."
         )
         return errors
     if style.exact_named_principals is not None and len(subjects) != style.exact_named_principals:
@@ -598,6 +617,127 @@ def verified_signature_assets(selected_assets=None, subjects=None):
     return records
 
 
+def _principal_subjects_for_prompt(details=None, task_text="", selected_assets=None):
+    subjects = principal_subjects(details, task_text)
+    seen = {subject.casefold() for subject in subjects}
+    for asset in normalise_selected_assets(selected_assets):
+        if asset["role"] not in HUMAN_PRINCIPAL_ASSET_ROLES:
+            continue
+        subject = _clean_subject_name(asset.get("subject_name"))
+        if not subject or subject.casefold() in seen:
+            continue
+        seen.add(subject.casefold())
+        subjects.append(subject)
+    return subjects
+
+
+def _plaque_assets(selected_assets=None):
+    return [
+        asset
+        for asset in normalise_selected_assets(selected_assets)
+        if asset["role"] == "plaque_asset"
+    ]
+
+
+def _selected_asset_use_plan(assets, signatures):
+    approved_signature_refs = {
+        item["reference"].casefold()
+        for item in signatures
+    }
+    filtered_assets = [
+        asset
+        for asset in assets
+        if asset["role"] != "signature_asset"
+        or asset["reference"].casefold() in approved_signature_refs
+    ]
+    lines = ["SELECTED ASSET ROLES AND MAPPINGS"]
+    if filtered_assets:
+        for asset in filtered_assets:
+            subject = f" | subject={asset['subject_name']}" if asset.get("subject_name") else ""
+            lines.append(
+                f"* {asset['reference']} | role={asset['role']} | use_mode={asset['use_mode']}{subject}"
+            )
+    else:
+        lines.append(
+            "* No selected assets are recorded yet. Use only actual files supplied in the chat, assign roles before generating, and do not invent missing photos, signatures or plaque art."
+        )
+    return "\n".join(lines)
+
+
+def _required_names_block(subjects):
+    lines = ["EXACT REQUIRED PRINCIPAL NAMES"]
+    if subjects:
+        lines.extend(f"* {subject}" for subject in subjects)
+        lines.extend(
+            [
+                "",
+                "Every listed full name must be visibly designed into the artwork.",
+                "For one principal, show the full name once as a collector caption, subtitle or identity lockup.",
+                "For multiple principals, show every full name separately and map each name clearly to the correct person.",
+                "Do not rely on a jersey name, title word or background text as the only identification.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "* No named human principal is supplied.",
+                "",
+                "Do not invent player names or signatures. Preserve only applicable team, event, vehicle, trophy or subject names supplied in TASK VARIABLES.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _signature_mapping_block(subjects, signatures):
+    by_subject = {item["subject_name"].casefold(): item for item in signatures}
+    lines = ["EXACT SIGNATURE-TO-PRINCIPAL MAPPING"]
+    if subjects:
+        for subject in subjects:
+            item = by_subject.get(subject.casefold())
+            if item:
+                lines.append(f"* {subject} -> {item['reference']}")
+            else:
+                lines.append(
+                    f"* {subject} -> MISSING VERIFIED SIGNATURE ASSET; do not invent, imitate or typeset a signature for this person."
+                )
+        lines.extend(
+            [
+                "",
+                "Every listed human principal needs one verified authentic signature asset. If a mapping is missing, make that incompleteness explicit rather than presenting the design as final.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "* No named human principal requires a signature.",
+                "",
+                "Vehicle-only, venue-only, trophy-only, jersey-only, team-only and non-human designs must not invent signatures.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _plaque_mapping_block(selected_assets=None):
+    plaques = _plaque_assets(selected_assets)
+    lines = ["EXACT PLAQUE ASSET MAPPING"]
+    if plaques:
+        for plaque in plaques:
+            lines.append(
+                f"* Sports Cave limited-edition plaque -> {plaque['reference']} | role=plaque_asset | use exact asset unchanged"
+            )
+    else:
+        lines.append(
+            "* Sports Cave limited-edition plaque -> project source asset limited-edition-plaque.png or limited-edition-plaque.psd when available; if no exact plaque asset is available, do not invent the seal, wording or edition number."
+        )
+    lines.extend(
+        [
+            "",
+            "Composite the exact plaque asset unchanged, fully inside the border and safe area, normally bottom-centre or lower corner, about 8-12% of canvas width, readable but quieter than title, principal names and photography.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _task_variables(task_text, details, subjects):
     details = dict(details or {})
     fields = (
@@ -628,42 +768,80 @@ def _adapter_block(adapter_key):
 COMMON_RESEARCH_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - RESEARCH
 
-A winning design starts with the right verified moment and the right final-use photograph. Use reliable current and archival research. Verify facts, names, dates, results, uniforms, equipment and venue details required by this style. Do not find or display images yet. Do not generate artwork. Stop after a concise final creative brief.
+A winning design starts with one confident commercial concept and a clear photo brief. Use reliable current and archival research to verify facts, names, dates, results, uniforms, equipment, vehicles, venue and era. Do not find or display images yet. Do not generate artwork. Do not return a menu of equal options.
+
+Return this concise handoff:
+1. Recommended defining moment, season, rivalry or identity
+2. Why fans would buy that moment
+3. Best photographic treatment for each principal
+4. Exact era, uniform, equipment, vehicle and venue requirements
+5. Recommended hero image type and pose
+6. One optional supporting image or background reference
+7. Minimal background direction
+8. Exact full principal names requiring signatures
+9. Three focused image-search phrases per principal
+10. One fallback moment if preferred photography is unavailable
+
+For rivalry or group designs, choose photographs that can coexist naturally in one restrained composition and match the intended eras.
 """.strip()
 
 COMMON_FIND_IMAGES_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
 
-Find final-use authentic photographs, not facial pieces for AI reconstruction. Open and inspect each source page. Prefer official teams, leagues, photographers, editorial archives and major publications. Select the largest credible original; prefer 1200px or more and 2000px or more when available. Authentic historical grain is acceptable.
+Use the recommended moment and photo brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass and put actual image results directly into this chat.
 
-Reject AI images, artwork, posters, framed products, cards, fan edits, signed photographs used as hero references, marketplace memorabilia, screenshots, large watermarks, wrong-era subjects and duplicate crops. Do not substitute a sharper wrong-era image. Return only genuinely useful assets and do not fill a carousel to meet a quota.
+Return only the three strongest final-use photographs per principal, no more than one relevant shared-moment or venue image, and exactly one clearest verified signature candidate per named human principal last. Keep principals in separate labelled image groups. Use very short labels.
 
-Keep signatures last. Return at most one verified isolated signature for each valid named principal. If it cannot be verified, omit it. The visible response must be image-only apart from short carousel labels.
+Prefer sharp, large, authentic official or major editorial photographs. Reject AI imagery, artwork, posters, products, cards, screenshots, large watermarks, wrong-era subjects and duplicate crops. A signature must be a verified authentic asset, never typed, invented or guessed. If unavailable, mark unavailable.
+
+The visible response should be almost entirely images: no essay, long source commentary or repeated warnings.
 """.strip()
 
 COMMON_GENERATION_RULES = """
-SPORTS CAVE DESIGN STUDIO V2 - GENERATION
+SPORTS CAVE COLLECTOR DESIGN CONTRACT - MANDATORY
 
 Create a premium landscape 4:3 Sports Cave limited-edition collector artwork from the selected final-use photographs.
 
-IMMUTABLE SOURCE ASSETS
-Every selected final-use photograph is an immutable asset. Composite the original photograph itself. Never redraw, regenerate, face-swap, re-pose or reconstruct a person, car, uniform, trophy or historical moment. Never combine a face from one image with a body from another. Respect the original crop; if styling conflicts with preservation, simplify the styling.
+AUTHENTIC SOURCE PHOTOGRAPHY
+Every selected final-use photograph is an immutable source asset. Composite the actual photograph. Never redraw, reconstruct, face-swap, re-pose or approximate a person, vehicle, uniform, trophy or historical moment. Do not invent missing limbs, extend a crop with a generated body, or combine a face from one image with a body from another. Preserve faces, expressions, pose, anatomy, uniform, jersey numbers, equipment, vehicle liveries, perspective and photographic texture.
 
-Use every selected image according to its explicit role and use mode. Only visible_whole_photo, visible_cutout and edit_target assets may appear visibly. Reference-only images provide facts and must never be used to rebuild a face, body, vehicle or scene. Do not place every reference visibly.
+Use every selected asset according to its explicit role and use mode. Only visible_whole_photo, visible_cutout and edit_target assets may appear visibly. Reference-only images provide facts and must never rebuild a face, body, vehicle or scene. Build the layout around available source crops.
 
-HUMAN AND BACKGROUND LIMITS
-Use no more intentionally composed figures than the selected style permits. Never add generated athletes, teammates, opponents, coaches, spectators or recognisable crowd figures. Incidental people already inside one immutable historical photograph may remain only inside that photograph. Keep the background subtle, dark and relevant; the hero photograph carries the emotion.
+MANDATORY NAMES
+Every name in the required principal-name section must be visible in the finished artwork. Names must be correctly spelled, readable at Shopify-thumbnail size, secondary to the design title and hero photography, and mapped clearly to the correct person. No completed design may omit a named principal's full name.
 
-COLLECTOR FINISH
-Preserve natural skin, fabric, film grain and photographic texture. Use restrained black, charcoal, team colour and subtle warm-gold details, minimal accurate typography and clean negative space. Include a thin premium Sports Cave border fully inside the canvas. Keep every subject, word, signature, plaque and effect inside the border with a safe gap. Use an exact plaque only when supplied; never invent one. Use at most one verified signature per principal, mapped to the correct person; never generate or imitate a missing signature. The result must feel framed-first, print-ready, realistic and sellable, never like newly generated AI artwork.
+MANDATORY VERIFIED SIGNATURES
+Every mapped human principal must receive the correct verified signature asset. Composite the actual signature mark, remove only its external background, preserve handwriting shape, and keep it thin, elegant, small and subtle. Never type a name in a script font. Never invent, redraw or imitate a missing signature. If a verified signature is missing, make that explicit rather than pretending the design is final.
+
+LIMITED-EDITION PLAQUE
+Use the exact Sports Cave limited-edition plaque asset from the plaque mapping section whenever available. Preserve its proportions and wording. Do not retype, regenerate or fake a serial number.
+
+SPORTS CAVE LOOK AND CONTAINMENT
+Use a deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, strong negative space, subtle relevant venue/track/stadium/era texture and one thin border fully inside the canvas. Background detail must support the story without generated players, recognisable crowds, random logos, oversized text, excessive smoke or clutter. Keep every subject, word, signature, plaque and effect fully inside the border and safe area.
+
+Style-specific composition may guide hierarchy, but it cannot suppress source-photo preservation, required names, verified signatures, plaque treatment, landscape 4:3, border containment, human-figure limits or text accuracy.
+""".strip()
+
+COMMON_SIGNATURE_PLACEMENT_RULES = """
+SPORTS CAVE SIGNATURE PLACEMENT PASS - MANDATORY
+
+Use the artwork generated in the immediately preceding step plus the verified signature assets selected during Find Images. This is a surgical collector-detail edit, not permission to redesign the artwork.
+
+Preserve the complete approved artwork unchanged. Do not regenerate people, vehicles, background or composition. Do not alter faces, bodies, uniforms, title, colours, border or plaque.
+
+Add or correct every principal's printed full name and place the correct authentic signature beside the corresponding person or in nearby clean negative space. Remove only the signature image's external background. Preserve the real handwritten form. Make signatures consistent in colour and visual weight, small, thin, elegant, premium and clearly visible.
+
+Keep names and signatures fully inside the safe area and border. Never place signatures over faces, bodies, hands, key uniform details, vehicles, plaque or main title. If a verified signature is missing, do not fabricate one; mark that detail as not complete.
 """.strip()
 
 COMMON_REVIEW_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - HARSH REVIEW
 
-Give a deliberately harsh commercial review of the supplied finished design. Score it out of 10. Identify visible failures, then give one precise correction brief.
+Give a deliberately harsh commercial review of the supplied finished design using only the current task variables, names and asset mappings below. Ignore stale names, signatures or research details from previous tasks. Score it out of 10, identify visible failures, then give one precise correction brief.
 
-Check: original source preservation; face, body, pose, uniform, vehicle, trophy and equipment accuracy; no AI reconstruction; correct era and venue; the style's human-figure limit; no extra generated people; clear hero hierarchy; minimal background; authentic signature mapping; exact typography; full border containment; landscape 4:3; Shopify-thumbnail readability; framed collector appeal; print readiness; and whether fans would genuinely buy it.
+Check: every named principal appears correctly; every human principal has the correct verified signature; signatures are authentic, correctly mapped, elegant and not oversized; the exact plaque is present, subtle and correctly positioned; title and names are readable at Shopify-thumbnail size; principal subjects remain original photographic assets; no AI reconstruction is visible; background detail is relevant and restrained; no extra people or generated crowd figures appear; composition resembles premium Sports Cave best-seller discipline; landscape 4:3, border containment, print readiness and framed collector appeal.
+
+Hard-cap the score at 6/10 if any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable. The correction brief must preserve the existing artwork and identify the smallest exact edit needed.
 """.strip()
 
 
@@ -671,10 +849,15 @@ def build_research_prompt(style_slug, task_text, details=None):
     style = get_design_style(style_slug)
     if style is None:
         return STYLE_REQUIRED_LABEL
-    subjects = principal_subjects(details, task_text)
+    subjects = _principal_subjects_for_prompt(details, task_text)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     return "\n\n".join(
-        (COMMON_RESEARCH_RULES, f"STYLE - {style.label}\n{style.research_rules}", _adapter_block(adapter), _task_variables(task_text, details, subjects))
+        (
+            COMMON_RESEARCH_RULES,
+            _task_variables(task_text, details, subjects),
+            f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
+            _adapter_block(adapter),
+        )
     )
 
 
@@ -682,17 +865,17 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     style = get_design_style(style_slug)
     if style is None:
         return STYLE_REQUIRED_LABEL
-    subjects = principal_subjects(details, task_text)
+    subjects = _principal_subjects_for_prompt(details, task_text)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     roles = ", ".join(style.required_image_roles)
     optional = ", ".join(style.optional_image_roles) or "none"
     return "\n\n".join(
         (
             COMMON_FIND_IMAGES_RULES,
-            f"STYLE - {style.label}\n{style.find_images_rules}",
+            _task_variables(task_text, details, subjects),
+            f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
             f"IMAGE ROLE CONTRACT\nRequired: {roles}. Optional: {optional}. Assign one supported role and use mode to every selected asset.",
             _adapter_block(adapter),
-            _task_variables(task_text, details, subjects),
         )
     )
 
@@ -701,55 +884,64 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
     style = get_design_style(style_slug)
     if style is None:
         return STYLE_REQUIRED_LABEL
-    subjects = principal_subjects(details, task_text)
-    adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     assets = normalise_selected_assets(selected_assets)
+    subjects = _principal_subjects_for_prompt(details, task_text, assets)
+    adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     signatures = verified_signature_assets(assets, subjects)
-    signature_refs = {item["reference"].casefold() for item in signatures}
-    filtered_assets = [
-        asset for asset in assets
-        if asset["role"] != "signature_asset" or asset["reference"].casefold() in signature_refs
-    ]
-    asset_lines = ["SELECTED ASSET USE PLAN"]
-    if filtered_assets:
-        for asset in filtered_assets:
-            subject = f"; subject={asset['subject_name']}" if asset.get("subject_name") else ""
-            asset_lines.append(
-                f"* {asset['reference']} | role={asset['role']} | use_mode={asset['use_mode']}{subject}"
-            )
-    else:
-        asset_lines.append("* Use only the actual image files supplied with this request and assign their roles before generating.")
-    if signatures:
-        asset_lines.extend(["", "VERIFIED SIGNATURE MAPPING"])
-        asset_lines.extend(f"* {item['subject_name']} -> {item['reference']}" for item in signatures)
     return "\n\n".join(
         (
             COMMON_GENERATION_RULES,
             (
-                f"STYLE - {style.label}\n"
+                f"STYLE-SPECIFIC COMPOSITION - {style.label}\n"
                 f"Maximum distinct principal people: {style.maximum_distinct_human_subjects}. "
                 f"Maximum intentionally composed figures: {style.maximum_intentionally_composed_human_figures}.\n"
                 f"Required selected image roles: {', '.join(style.required_image_roles)}. "
                 f"Optional roles: {', '.join(style.optional_image_roles) or 'none'}.\n"
-                f"{style.generation_rules}"
+                f"{style.generation_rules}\n\n"
+                f"{_adapter_block(adapter)}"
             ),
-            _adapter_block(adapter),
             _task_variables(task_text, details, subjects),
-            "\n".join(asset_lines),
+            _selected_asset_use_plan(assets, signatures),
+            _required_names_block(subjects),
+            _signature_mapping_block(subjects, signatures),
+            _plaque_mapping_block(assets),
         )
     )
 
 
-def build_harsh_review_prompt(style_slug, task_text, details=None):
+def build_signature_placement_prompt(style_slug, task_text, details=None, selected_assets=None):
     style = get_design_style(style_slug)
     if style is None:
         return STYLE_REQUIRED_LABEL
-    subjects = principal_subjects(details, task_text)
+    assets = normalise_selected_assets(selected_assets)
+    subjects = _principal_subjects_for_prompt(details, task_text, assets)
+    signatures = verified_signature_assets(assets, subjects)
+    return "\n\n".join(
+        (
+            COMMON_SIGNATURE_PLACEMENT_RULES,
+            _task_variables(task_text, details, subjects),
+            _required_names_block(subjects),
+            _signature_mapping_block(subjects, signatures),
+            _plaque_mapping_block(assets),
+        )
+    )
+
+
+def build_harsh_review_prompt(style_slug, task_text, details=None, selected_assets=None):
+    style = get_design_style(style_slug)
+    if style is None:
+        return STYLE_REQUIRED_LABEL
+    assets = normalise_selected_assets(selected_assets)
+    subjects = _principal_subjects_for_prompt(details, task_text, assets)
+    signatures = verified_signature_assets(assets, subjects)
     return "\n\n".join(
         (
             COMMON_REVIEW_RULES,
-            f"STYLE-SPECIFIC REVIEW - {style.label}\n{style.harsh_review_rules}",
             _task_variables(task_text, details, subjects),
+            _required_names_block(subjects),
+            _signature_mapping_block(subjects, signatures),
+            _plaque_mapping_block(assets),
+            f"STYLE-SPECIFIC REVIEW - {style.label}\n{style.harsh_review_rules}",
         )
     )
 
@@ -757,11 +949,24 @@ def build_harsh_review_prompt(style_slug, task_text, details=None):
 def build_prompt_bundle(style_slug, task_text, details=None, selected_assets=None):
     errors = validate_design_request(style_slug, details, task_text)
     if errors:
-        return {"errors": errors, "research": "", "find_images": "", "generation": "", "review": ""}
+        return {
+            "errors": errors,
+            "research": "",
+            "find_images": "",
+            "generation": "",
+            "signature_placement": "",
+            "review": "",
+        }
     return {
         "errors": [],
         "research": build_research_prompt(style_slug, task_text, details),
         "find_images": build_find_images_prompt(style_slug, task_text, details),
         "generation": build_generation_prompt(style_slug, task_text, details, selected_assets),
-        "review": build_harsh_review_prompt(style_slug, task_text, details),
+        "signature_placement": build_signature_placement_prompt(
+            style_slug,
+            task_text,
+            details,
+            selected_assets,
+        ),
+        "review": build_harsh_review_prompt(style_slug, task_text, details, selected_assets),
     }

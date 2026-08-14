@@ -75,7 +75,13 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                     STYLE_DETAILS[slug],
                 )
                 self.assertEqual(bundle["errors"], [])
-                for prompt_name in ("research", "find_images", "generation", "review"):
+                for prompt_name in (
+                    "research",
+                    "find_images",
+                    "generation",
+                    "signature_placement",
+                    "review",
+                ):
                     self.assertGreater(len(bundle[prompt_name]), 300)
                 label = design_studio_styles.get_design_style(slug).label
                 self.assertIn(label, bundle["generation"])
@@ -101,7 +107,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
             "Create Michael Jordan artwork",
             STYLE_DETAILS["minimalist_hero"],
         )
-        self.assertIn("STYLE - Minimalist Hero", prompt)
+        self.assertIn("STYLE-SPECIFIC COMPOSITION - Minimalist Hero", prompt)
         self.assertNotIn("STYLE - Rivalry Face-Off", prompt)
         self.assertNotIn("STYLE - Legends Jersey Display", prompt)
         self.assertNotIn("modernise, reliver", prompt)
@@ -122,7 +128,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 STYLE_DETAILS[slug],
             )
             with self.subTest(style=slug):
-                self.assertLess(len(prompt), 3500)
+                self.assertLess(len(prompt), 5500)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
 
@@ -226,7 +232,99 @@ class DesignStudioImageContractTests(unittest.TestCase):
         self.assertNotIn("Thin Sports Cave", prompt)
         self.assertNotIn("Cinematic Realistic", prompt)
 
-    def test_three_named_people_are_blocked_without_silent_removal(self):
+    def test_generation_requires_every_principal_name_signature_and_exact_plaque_once(self):
+        prompt = design_studio_styles.build_generation_prompt(
+            "rivalry_faceoff",
+            "Peter Brock vs Allan Moffat",
+            STYLE_DETAILS["rivalry_faceoff"],
+            [
+                {"file_path": "brock.jpg", "role": "rival_one_photo", "subject_name": "Peter Brock"},
+                {"file_path": "moffat.jpg", "role": "rival_two_photo", "subject_name": "Allan Moffat"},
+                {"file_path": "brock-signature.png", "role": "signature_asset", "subject_name": "Peter Brock"},
+                {"file_path": "moffat-signature.png", "role": "signature_asset", "subject_name": "Allan Moffat"},
+                {"file_path": "limited-edition-plaque.png", "role": "plaque_asset"},
+            ],
+        )
+
+        self.assertEqual(prompt.count("EXACT REQUIRED PRINCIPAL NAMES"), 1)
+        self.assertIn("* Peter Brock", prompt)
+        self.assertIn("* Allan Moffat", prompt)
+        self.assertEqual(prompt.count("EXACT SIGNATURE-TO-PRINCIPAL MAPPING"), 1)
+        self.assertEqual(prompt.count("* Peter Brock -> brock-signature.png"), 1)
+        self.assertEqual(prompt.count("* Allan Moffat -> moffat-signature.png"), 1)
+        self.assertEqual(prompt.count("EXACT PLAQUE ASSET MAPPING"), 1)
+        self.assertIn(
+            "* Sports Cave limited-edition plaque -> limited-edition-plaque.png | role=plaque_asset | use exact asset unchanged",
+            prompt,
+        )
+
+    def test_find_images_is_compact_and_references_research_recommendation(self):
+        prompt = design_studio_styles.build_find_images_prompt(
+            "minimalist_hero",
+            "Create Michael Jordan collector artwork",
+            STYLE_DETAILS["minimalist_hero"],
+        )
+        fixed_body = prompt.split("TASK VARIABLES", 1)[0]
+
+        self.assertLessEqual(len(fixed_body), 1200)
+        self.assertIn("immediately preceding Research response", fixed_body)
+        self.assertIn("Do not repeat or redo the research", fixed_body)
+        self.assertIn("three strongest final-use photographs per principal", fixed_body)
+        self.assertIn("exactly one clearest verified signature candidate", fixed_body)
+
+    def test_signature_placement_appears_immediately_after_generation(self):
+        bundle = design_studio_styles.build_prompt_bundle(
+            "minimalist_hero",
+            "Create Michael Jordan collector artwork",
+            STYLE_DETAILS["minimalist_hero"],
+            [
+                {"file_path": "jordan.png", "role": "signature_asset", "subject_name": "Michael Jordan"},
+            ],
+        )
+
+        self.assertEqual(
+            list(bundle.keys()),
+            ["errors", "research", "find_images", "generation", "signature_placement", "review"],
+        )
+        placement = bundle["signature_placement"]
+        self.assertIn("SPORTS CAVE SIGNATURE PLACEMENT PASS - MANDATORY", placement)
+        self.assertIn("immediately preceding step", placement)
+        self.assertIn("* Michael Jordan -> jordan.png", placement)
+        self.assertIn("Do not regenerate people, vehicles, background or composition", placement)
+
+    def test_vehicle_and_non_human_prompts_do_not_invent_signatures(self):
+        vehicle_prompt = design_studio_styles.build_generation_prompt(
+            "motorsport_driver_car",
+            "Create Peter Brock with the Bathurst-winning car",
+            {
+                "sport": "Motorsport",
+                "principal_subject_one": "Peter Brock",
+            },
+            [{"file_path": "torana.png", "role": "vehicle_exact_photo"}],
+        )
+        non_human_prompt = design_studio_styles.build_generation_prompt(
+            "update_existing",
+            "Update vehicle-only Mount Panorama artwork",
+            {},
+            [{"file_path": "mount-panorama.png", "role": "venue_reference"}],
+        )
+
+        self.assertIn("* Peter Brock -> MISSING VERIFIED SIGNATURE ASSET", vehicle_prompt)
+        self.assertIn("No named human principal is supplied", non_human_prompt)
+        self.assertIn("non-human designs must not invent signatures", non_human_prompt)
+
+    def test_harsh_review_applies_missing_detail_score_cap(self):
+        prompt = design_studio_styles.build_harsh_review_prompt(
+            "minimalist_hero",
+            "Create Michael Jordan collector artwork",
+            STYLE_DETAILS["minimalist_hero"],
+        )
+
+        self.assertIn("Hard-cap the score at 6/10", prompt)
+        self.assertIn("any required name, verified signature or exact plaque is missing", prompt)
+        self.assertIn("Ignore stale names, signatures or research details from previous tasks", prompt)
+
+    def test_three_named_people_are_supported_without_silent_removal(self):
         errors = design_studio_styles.validate_design_request(
             "ultimate_moment",
             {
@@ -238,11 +336,43 @@ class DesignStudioImageContractTests(unittest.TestCase):
             },
             "Three legends",
         )
+        self.assertEqual(errors, [])
+        prompt = design_studio_styles.build_generation_prompt(
+            "ultimate_moment",
+            "Three legends",
+            {
+                "principal_subjects": [
+                    "Michael Jordan",
+                    "Kobe Bryant",
+                    "LeBron James",
+                ]
+            },
+        )
+        for name in ("Michael Jordan", "Kobe Bryant", "LeBron James"):
+            self.assertIn(f"* {name}", prompt)
+            self.assertIn(
+                f"* {name} -> MISSING VERIFIED SIGNATURE ASSET",
+                prompt,
+            )
+
+    def test_four_named_people_are_blocked(self):
+        errors = design_studio_styles.validate_design_request(
+            "ultimate_moment",
+            {
+                "principal_subjects": [
+                    "Michael Jordan",
+                    "Kobe Bryant",
+                    "LeBron James",
+                    "Magic Johnson",
+                ]
+            },
+            "Four legends",
+        )
         self.assertEqual(
             errors,
             [
-                "This task exceeds the new Sports Cave limit of two principal people. "
-                "Reduce it to one or two subjects before generating prompts."
+                "This task exceeds the Sports Cave prompt limit of three principal people. "
+                "Reduce it to one, two or three named principal subjects before generating prompts."
             ],
         )
 

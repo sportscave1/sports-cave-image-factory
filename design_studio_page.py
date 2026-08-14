@@ -816,11 +816,11 @@ If no sufficiently reliable signature can be found for a subject, state or mark 
 """
 
 
-SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER = (
-    "SPORTS CAVE DESIGN STUDIO — HIGH-QUALITY REFERENCE IMAGE SEARCH V2"
-)
 SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2 = (
     HIGH_QUALITY_IMAGE_SEARCH_V2_PROMPT_PATH.read_text(encoding="utf-8").strip()
+)
+SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2_MARKER = (
+    SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2.splitlines()[0]
 )
 
 
@@ -1772,174 +1772,26 @@ TASK TO RESEARCH
 
 You are the dedicated Sports Cave sports-product researcher and premium collector-art creative director.
 
-Analyse the task above deeply and conduct current web research before recommending any creative direction.
+Use current web research to choose one strongest commercial concept and guide the next image-search stage. Do not find or display images yet. Do not generate artwork. Do not return a long list of equal options.
 
-Your job is to research the sporting moment and identify the strongest accurate details needed for a realistic, premium Sports Cave collector artwork.
+Return this concise handoff:
+1. Recommended defining moment, season, rivalry or identity
+2. Why fans would buy that moment
+3. Best photographic treatment for each principal
+4. Exact era, uniform, equipment, vehicle and venue requirements
+5. Recommended hero image type and pose
+6. One optional supporting image or background reference
+7. Minimal background direction
+8. Exact full principal names requiring signatures
+9. Three focused image-search phrases per principal
+10. One fallback moment if preferred photography is unavailable
 
-RESEARCH THE SUBJECT
-
-Identify and verify:
-
-- The athlete, driver, team, rivalry, event or sporting moment
-- Why the subject matters to fans
-- The strongest emotional and nostalgic angle
-- The correct era, season and location
-- Accurate uniforms, race liveries, cars, equipment and colours
-- Correct stadium, circuit, arena, pitch, course or background
-- Correct trophies, medals and historical details
-- Any current event or calendar reason the moment matters now
-- The best design angle for the moment
-
-RESEARCH OUTPUT
-
-Provide:
-
-- Recommended collector title
-- Core fan emotion
-- Verified subject, era, event and location
-- Why the concept matters to fans
-- Why the moment matters now
-- Accurate visual details that must appear
-- Historical details that must not be shown incorrectly
-- Best hero-subject direction
-- Best venue, track, stadium or background direction
-- Important supporting details such as a trophy, car or equipment
-- A concise image-search brief for the next step
-
-The final direction must feel:
-
-- Realistic
-- Premium
-- Cinematic
-- Minimal but emotionally powerful
-- Nostalgic or culturally relevant
-- Framed-first
-- Collector-driven
-- Suitable for a landscape 4:3 artwork
-
-If the task is too broad or unclear, recommend a stronger sporting moment or clearer design angle.
-
-Use current web research, but do not find or display images yet.
-
-Do not generate the final artwork yet.
-
-Stop after completing the research brief.
+For rivalry or group designs, choose photographs that can coexist naturally in one restrained Sports Cave composition. The direction must feel premium, realistic, minimal, dark, framed-first and collector-driven.
 """
 
 
 DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE = """
-Based on everything above, find me the strongest, most accurate, and most useful reference images for this Sports Cave design and display them directly in this chat using the separate image carousels required below.
-
-Do not copy and paste or repeat the research.
-Do not provide more research, analysis, recommendations, or creative direction.
-Only find and display the images.
-
-Find multiple different image types, not just one hero photo.
-
-Prioritise images that are accurate to:
-- The correct athlete, driver, team, rivalry, event, season, era, venue, kit, livery, equipment, trophy, and location
-- The emotional hook of the design
-- What would help create a premium Sports Cave limited-edition collector artwork
-
-Image requirements by sport:
-
-If Motorsport:
-Find images of:
-- The exact driver
-- The exact car
-- The correct race livery
-- The helmet/suit if relevant
-- The circuit or race location
-- Pit lane, garage, podium, trophy, smoke, burnout, or track atmosphere
-For Bathurst/Supercars, prioritise Mount Panorama, mountain road atmosphere, pit lane, garages, podium moments, and correct car liveries.
-
-If Soccer/Football:
-Find images of:
-- The player or players
-- Correct team/national kit
-- Stadium or pitch background
-- Trophy or celebration moment if relevant
-- Crowd/floodlight atmosphere
-- Team celebration or rivalry image if useful
-
-If NBA/Basketball:
-Find images of:
-- The player
-- Correct jersey/era
-- Arena background
-- Court action
-- Championship/trophy/celebration references
-- Rivalry or legacy images if relevant
-
-If AFL/NRL/Rugby:
-Find images of:
-- The player
-- Correct club or national kit
-- Stadium/floodlights
-- Turf/action background
-- Grand final, rivalry, or trophy references if relevant
-
-If Cricket:
-Find images of:
-- The player
-- Correct whites or team kit
-- Batting/bowling action
-- Stadium/pitch background
-- MCG, Lord's, SCG, or correct venue if relevant
-- Trophy, celebration, or historic match atmosphere
-
-If Tennis:
-Find images of:
-- The player
-- Correct outfit/era
-- Court surface and stadium
-- Trophy/celebration moment
-- Rival player if the design is rivalry-based
-- Wimbledon, Roland Garros, US Open, Australian Open, or correct venue if relevant
-
-If Golf:
-Find images of:
-- The golfer
-- Swing or celebration moment
-- Correct course
-- Clubhouse, green, fairway, or trophy background
-- Masters/Open/PGA/Ryder Cup atmosphere if relevant
-
-If Boxing/UFC:
-Find images of:
-- The fighter
-- Ring or octagon action
-- Gloves, belt, robe, walkout, or face-off
-- Championship lighting and crowd atmosphere
-- Rival opponent if relevant
-
-If Horse Racing:
-Find images of:
-- The horse
-- The jockey
-- Race action
-- Finish line or winning moment
-- Track, grandstand, dust, turf, or trophy atmosphere
-
-If NFL/Baseball/Ice Hockey:
-Find images of:
-- The athlete
-- Correct uniform/era
-- Stadium, field, rink, or arena background
-- Trophy, celebration, rivalry, or iconic moment references
-- Equipment close-ups if useful
-
-Across the separate carousels, include the applicable reference types below:
-- Main hero subject
-- Supporting action image
-- Venue/background image
-- Trophy or celebration image
-- Detail image such as car, kit, helmet, gloves, bat, ball, belt, trophy, jersey, or equipment
-- Atmosphere image for lighting, crowd, smoke, dust, rain, sunset, stadium lights, or premium cinematic mood
-
-Do not show weak, generic, inaccurate, low-resolution, cartoon, AI-looking, wrong-era, wrong-kit, wrong-car, wrong-stadium, or unrelated images.
-
-Only display the strongest and most accurate images directly in this chat using the required separate carousels.
+Use the immediately preceding Research response. Do not repeat or redo research. Find and display the images only.
 """
 
 
@@ -2059,27 +1911,19 @@ Create a premium Sports Cave limited-edition collector artwork using the task va
 TASK:
 [PASTED TASK]
 
-Use every image according to its correct role. Select the strongest supplied action or full-body photograph for each featured player and composite that original photograph directly into the artwork.
+Use every image according to its correct role. Composite each selected final-use photograph as the immutable source asset. Never redraw, regenerate, face-swap, re-pose, rebuild, extend with invented limbs, or approximate a person, vehicle, uniform, trophy or historical moment. Preserve faces, expressions, bodies, uniforms, jersey numbers, equipment, vehicle liveries, perspective and photographic texture.
 
-Never redraw, regenerate, face-swap or recreate a player. Preserve the real face, expression, body, pose, uniform, jersey number, equipment, proportions and photographic texture from the selected source image. Never combine a face from one image with a body from another. If an image cannot be extended naturally, retain its original crop.
+Every named principal in the asset/name mapping below must have the correctly spelled full name visibly designed into the finished artwork. Do not rely on a jersey name, title word or background text as the only identification.
 
-Additional player photographs are identity and accuracy references only. Background images may provide subtle venue and historical details without being forced into the finished composition. Use every supplied image for its assigned purpose; not every image must appear visibly in the artwork.
+Use each verified authentic signature asset exactly as provided and place it subtly beside the correct person or nearby clean negative space. Never type, generate, rewrite, redraw or imitate a signature. If no verified signature exists for a named human principal, make the missing signature explicit and do not pretend the artwork is final.
 
-The supplied players are the heroes and must dominate. Build the design around them using a minimal, dark, cinematic background with restrained team colours, shadows, texture, light haze and subtle historical or venue details. Do not add generated players, detailed AI crowds, unnecessary stadium elements or distracting effects.
+Use the exact Sports Cave limited-edition plaque asset from the mapping below whenever available. Never invent, redraw, retype or approximate the plaque, seal, wording or edition number.
 
-Blend the original photographs naturally using believable scale, perspective, lighting, contact shadows and restrained colour grading. Preserve natural skin, fabric and photographic detail.
+Build around one clear hero or a controlled rivalry/group composition. Use a minimal deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, subtle relevant venue or era texture, strong negative space and a thin border fully inside the 4:3 landscape canvas.
 
-Use each supplied authentic signature exactly as provided and place it subtly near the correct player. Never generate, rewrite or imitate a signature. If no verified signature exists for a player, omit it.
+Do not add generated players, recognisable crowd figures, random logos, oversized text, excessive smoke or generic clutter. Keep every subject, name, signature, plaque, title, effect and border detail fully inside the safe area.
 
-Use an exact supplied Sports Cave limited-edition plaque asset only when one is supplied. Never invent, redraw or approximate a plaque.
-
-Create a landscape 4:3 composition with a thin premium Sports Cave border, restrained black, charcoal and subtle-gold styling, minimal event text, clean negative space and strong player dominance.
-
-The finished artwork must feel realistic, nostalgic, masculine, emotionally powerful, framed-first and worthy of a Sports Cave limited-edition release--an ultimate 10/10 collector design with genuine bestseller potential.
-
-It must look like a professional photographic composite made from the supplied player images, never newly generated AI artwork.
-
-If styling would require changing or regenerating a player, simplify the design and preserve the original photograph instead.
+The finished artwork must feel like premium Sports Cave limited-edition wall art from the same commercial family as the best sellers: realistic, nostalgic, disciplined, framed-first, print-ready and sellable.
 """
 
 
@@ -2734,24 +2578,25 @@ I want brutal honesty.
 
 Tell me:
 
-1. What still feels weak
-2. What still feels too AI, too generic, or too cheap
-3. Whether the composition feels premium and intentional
-4. Whether fans would actually buy this and hang it proudly
-5. Whether the background adds nostalgia and depth or just noise
-6. Whether the title feels iconic or generic
-7. Whether the limited-edition plaque feels properly placed
-8. Whether the subject looks realistic and physically present
-9. Whether the design feels framed-first and wall-worthy
-10. What exact changes are needed to make this as close to 10/10 as possible
+1. Every named principal appears with the correct full name
+2. Every human principal has the correct verified authentic signature
+3. Signatures are correctly mapped, elegant, subtle and not oversized
+4. The exact Sports Cave plaque is present, subtle, unchanged and correctly positioned
+5. The title and names remain readable at Shopify-thumbnail size
+6. Principal subjects remain original photographic assets with no AI reconstruction
+7. The background is relevant, restrained and not generic clutter
+8. No extra players, generated people or recognisable crowd figures appear
+9. The composition feels premium, intentional, framed-first and wall-worthy
+10. The smallest exact correction needed to make it sellable
 
 Do not be polite.
 Be commercially honest.
 Judge it like it needs to become a bestseller.
 
 Rule:
-Do not stop just because it looks good enough.
-Refine until it feels premium, emotional, collector-worthy, and ready to sell.
+Hard-cap the score at 6/10 if any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
+
+Do not stop just because it looks good enough. Preserve the existing artwork and recommend the smallest surgical edit that makes it premium, emotional, collector-worthy and ready to sell.
 """
 
 
@@ -3338,6 +3183,50 @@ def build_final_artwork_asset_context(task_text: str, *, design_context=None) ->
             for record in signatures
         )
         sections.append("\n".join(lines))
+    principal_names = _collect_principal_human_names_from_context(design_context)
+    if not principal_names:
+        principal_names = [
+            record["name"]
+            for record in _signature_subject_records_from_text(task_text)
+            if _is_plausible_named_human_subject(record.get("name"))
+        ]
+    if principal_names:
+        lines = [
+            "EXACT REQUIRED PRINCIPAL NAMES",
+            "",
+            "Every listed full name must be visibly designed into the artwork:",
+        ]
+        lines.extend(f"* {name}" for name in principal_names)
+        lines.extend(
+            [
+                "",
+                "For multiple principals, show every full name separately and map each name clearly to the correct person.",
+            ]
+        )
+        sections.append("\n".join(lines))
+    else:
+        sections.append(
+            "EXACT REQUIRED PRINCIPAL NAMES\n\n* No named human principal is supplied. Do not invent player names or signatures."
+        )
+    plaque_assets = [
+        asset
+        for asset in assets
+        if _normalise_asset_role(asset.get("role")) == "plaque_asset"
+    ]
+    lines = ["EXACT PLAQUE ASSET MAPPING", ""]
+    if plaque_assets:
+        lines.extend(
+            f"* Sports Cave limited-edition plaque -> {asset['reference']} | role=plaque_asset | use exact asset unchanged"
+            for asset in plaque_assets
+        )
+    else:
+        lines.append(
+            "* Sports Cave limited-edition plaque -> project source asset limited-edition-plaque.png or limited-edition-plaque.psd when available; if no exact plaque asset is available, do not invent the seal, wording or edition number."
+        )
+    lines.append(
+        "Keep the plaque unchanged, correctly proportioned, inside the safe area and quieter than the title, names and hero photography."
+    )
+    sections.append("\n".join(lines))
     return "\n\n".join(sections)
 
 
@@ -3432,17 +3321,17 @@ def build_high_quality_image_search_context(
             f"{label}: {_format_find_images_context_value(_find_design_context_value(design_context, keys), unavailable)}"
         )
     lines.append(
-        "OUTPUT IMAGE CAPACITY OR INTERFACE LIMITS: The application imposes no mixed-search or total-result limit. Follow the V2 per-carousel ranges and keep every carousel separate."
+        "OUTPUT IMAGE CAPACITY OR INTERFACE LIMITS: Follow the compact V2 limit: three final-use photographs per principal, no more than one shared reference, and one verified signature candidate per human principal."
     )
 
     lines.extend(["", "REQUIRED SEARCH AND CAROUSEL EXECUTION PLAN", ""])
     if subject_names:
         for index, name in enumerate(subject_names, start=1):
             lines.append(
-                f"{index}. PLAYER — {name}: run and complete a separate search, then return 6–10 qualifying player photographs before moving to the next person."
+                f"{index}. PLAYER - {name}: return only the three strongest final-use photographs for this principal."
             )
         lines.append(
-            f"{len(subject_names) + 1}. DESIGN REFERENCES: run one separate shared search and return 5–8 qualifying venue, background, iconic-moment, trophy, equipment and historical-detail references."
+            f"{len(subject_names) + 1}. DESIGN REFERENCES: return no more than one shared moment, venue, background, trophy, equipment or historical-detail reference."
         )
         lines.append(
             f"{len(subject_names) + 2}. SIGNATURES: return exactly {len(subject_names)} signature asset(s), one for each distinct principal person, as the final carousel."
@@ -4338,7 +4227,7 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="sc-design-v2-steps">1 Research &nbsp;&rarr;&nbsp; 2 Find Images &nbsp;&rarr;&nbsp; 3 Generate</div>',
+        '<div class="sc-design-v2-steps">1 Research &nbsp;&rarr;&nbsp; 2 Find Images &nbsp;&rarr;&nbsp; 3 Generate &nbsp;&rarr;&nbsp; 4 Signature Placement &nbsp;&rarr;&nbsp; 5 Harsh Review</div>',
         unsafe_allow_html=True,
     )
 
@@ -4377,6 +4266,12 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
         prompts["generation"],
         f"{task_identity}::{selected_style}::generation",
         height=300,
+    )
+    _render_v2_prompt_card(
+        "Signature Placement Prompt",
+        "Make the final surgical name and authentic-signature pass without redesigning the artwork.",
+        prompts["signature_placement"],
+        f"{task_identity}::{selected_style}::signature-placement",
     )
     _render_v2_prompt_card(
         "Harsh Review",
