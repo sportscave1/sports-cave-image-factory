@@ -19,23 +19,23 @@ Inspect saved Phase 3 and Phase 4 health without calling Google or Shopify:
 python google_seo_phase4.py health
 ```
 
-Run the durable Phase 4 worker as a continuously available Render background
-worker:
+For local or manual Phase 4 recovery, process one queued item with:
 
 ```powershell
-python google_seo_phase4.py worker --poll-seconds 15
+python google_seo_phase4.py worker --once
 ```
 
-Queue the incremental daily pipeline from a Render Cron Job:
+The normal analytics refresh does not require another paid Render worker.
+
+The existing Render morning job now refreshes Google imports and saved
+analytics in one command:
 
 ```powershell
-python google_seo_phase4.py daily
+python google_seo_import.py daily
 ```
 
-Recommended cron schedule: `35 17 * * *` UTC, which is after the normal Google
-reporting-day boundary while remaining outside the existing application startup
-path. Keep the Phase 3 daily import scheduled before this command so Phase 4 can
-consume its latest completed GA4 dates.
+Keep the existing paid morning schedule after the normal Google reporting-day
+boundary. No additional Render service is required.
 
 ## Safe rollout
 
@@ -45,11 +45,10 @@ consume its latest completed GA4 dates.
    advancing active date are safe; an expired lease must be reclaimed by the
    existing Phase 3 worker before Phase 4 is queued.
 3. Run the additive migration.
-4. Start one Phase 4 worker process.
-5. Use **Build joined reporting data** on SEO Overview. This queues work and
-   returns immediately.
-6. Review the saved common reporting date, unmapped URL count, and unmatched or
-   disputed transaction count before enabling Phase 5 reporting.
+4. Run `python google_seo_import.py daily` once to activate the saved analytics
+   refresh.
+5. Confirm source-specific GSC, GA4 and Shopify/Supabase dates on SEO / Store
+   Analytics. A missing joined date no longer hides valid source metrics.
 
 ## Data rules
 

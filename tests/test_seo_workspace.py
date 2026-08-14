@@ -26,21 +26,21 @@ def user(*, permissions=(), role="worker"):
 
 
 class SEONavigationTests(unittest.TestCase):
-    def test_registry_has_one_assignable_parent_and_all_growth_routes(self):
+    def test_registry_has_one_assignable_parent_and_only_live_analytics_routes(self):
         parent = os_accounts.PAGE_BY_KEY[seo.SEO_PAGE_KEY]
         self.assertEqual(parent["route"], seo.SEO_OVERVIEW_ROUTE)
         self.assertEqual(parent["label"], "SEO")
         self.assertTrue(parent["worker_assignable"])
-        self.assertEqual(len(seo.SEO_ROUTES), 8)
+        self.assertEqual(len(seo.SEO_ROUTES), 2)
         self.assertEqual(
-            seo.SEO_ROUTES[:4],
+            seo.SEO_ROUTES,
             (
                 seo.SEO_OVERVIEW_ROUTE,
                 seo.SEO_KEYWORDS_ROUTE,
-                seo.SEO_REPORTS_ROUTE,
-                seo.SEO_TASKS_ROUTE,
             ),
         )
+        self.assertIn(seo.SEO_REPORTS_ROUTE, seo_navigation.SEO_WORKSPACE_ROUTES)
+        self.assertFalse(seo_navigation.SEO_FULL_WORKSPACE_ENABLED)
         for route in seo.SEO_ROUTES:
             self.assertIn(route, os_accounts.PAGE_BY_ROUTE)
         for route in seo.SEO_ROUTES[1:]:
@@ -325,15 +325,16 @@ class SEOOverviewAndUIContractTests(unittest.TestCase):
         self.assertEqual(metrics["Outreach Pending"], 1)
         self.assertEqual(metrics["Backlinks Live"], 1)
 
-    def test_ui_contains_all_pages_honest_reporting_state_and_no_fake_integrations(self):
+    def test_ui_contains_simple_partial_reporting_state_and_no_fake_integrations(self):
         source = (ROOT / "seo_page.py").read_text(encoding="utf-8")
         navigation_source = (ROOT / "seo_navigation.py").read_text(encoding="utf-8")
         for route in seo_navigation.SEO_NAV_LABELS.values():
             self.assertIn(route, navigation_source)
         self.assertNotIn('class="sc-seo-future-value">&mdash;', source)
-        self.assertIn('"Main SEO metrics"', source)
-        self.assertIn('"Organic Performance"', source)
-        self.assertIn("SEO reporting will appear here when GSC, GA4 and Shopify share", source)
+        self.assertIn('"Main analytics"', source)
+        self.assertIn('"Performance"', source)
+        self.assertIn("Showing saved source data. Joined reporting refresh is pending.", source)
+        self.assertNotIn("SEO reporting will appear here when GSC, GA4 and Shopify share", source)
         self.assertIn(
             "Not connected",
             (ROOT / "google_seo.py").read_text(encoding="utf-8"),

@@ -24,7 +24,7 @@ class SidebarDisclosureTests(unittest.TestCase):
     def test_deep_route_opens_once_but_explicit_collapse_survives_rerun(self):
         self.assertEqual(
             navigation_runtime.initial_disclosure_group(
-                seo_navigation.SEO_CITATIONS_ROUTE,
+                seo_navigation.SEO_KEYWORDS_ROUTE,
                 stored=None,
                 social_routes=SOCIAL_ROUTES,
                 seo_routes=seo_navigation.SEO_ROUTES,
@@ -33,7 +33,7 @@ class SidebarDisclosureTests(unittest.TestCase):
         )
         self.assertEqual(
             navigation_runtime.initial_disclosure_group(
-                seo_navigation.SEO_CITATIONS_ROUTE,
+                seo_navigation.SEO_KEYWORDS_ROUTE,
                 stored="",
                 social_routes=SOCIAL_ROUTES,
                 seo_routes=seo_navigation.SEO_ROUTES,
@@ -54,10 +54,10 @@ class SidebarDisclosureTests(unittest.TestCase):
         selected = mock.Mock(return_value="selected")
         inactive = mock.Mock()
         result = navigation_runtime.dispatch_selected(
-            seo_navigation.SEO_CITATIONS_ROUTE,
+            seo_navigation.SEO_KEYWORDS_ROUTE,
             {
-                seo_navigation.SEO_CITATIONS_ROUTE: selected,
-                seo_navigation.SEO_BLOG_ROUTE: inactive,
+                seo_navigation.SEO_KEYWORDS_ROUTE: selected,
+                seo_navigation.SEO_CITATIONS_ROUTE: inactive,
             },
         )
         self.assertEqual(result, "selected")

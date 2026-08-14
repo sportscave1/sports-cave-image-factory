@@ -76,6 +76,15 @@ class FakeUI:
         def caption(self, *_args, **_kwargs):
             return None
 
+        def selectbox(self, _label, options, *_args, **_kwargs):
+            return tuple(options)[0]
+
+        def toggle(self, _label, value=False, *_args, **_kwargs):
+            return value
+
+        def date_input(self, *_args, **_kwargs):
+            return None
+
     def __init__(self):
         self.query_params = {}
         self.session_state = {}

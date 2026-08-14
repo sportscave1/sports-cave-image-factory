@@ -208,7 +208,7 @@ class SyncProgressArchitectureTests(unittest.TestCase):
         self.assertLess(guard, source.index("google_seo.configuration_status()"))
         self.assertLess(guard, source.index("_cached_default_google_connection()"))
         self.assertLess(guard, source.index("_render_historical_import_controls("))
-        self.assertLess(guard, source.index("_render_phase4_foundation("))
+        self.assertLess(guard, source.index("_render_analytics_refresh_admin("))
 
     def test_overview_route_skips_full_legacy_workspace_read(self):
         source = inspect.getsource(seo_page._render_active_route)
@@ -225,12 +225,15 @@ class SyncProgressArchitectureTests(unittest.TestCase):
         ) as google_clear, patch.object(
             seo_page._cached_default_phase4_health, "clear"
         ) as phase4_clear, patch.object(
+            seo_page._cached_default_live_source_health, "clear"
+        ) as live_health_clear, patch.object(
             seo_page._cached_default_reporting_snapshot, "clear"
         ) as reporting_clear:
             seo_page.invalidate_seo_overview_summary_cache()
         shopify_clear.assert_called_once_with()
         google_clear.assert_called_once_with()
         phase4_clear.assert_called_once_with()
+        live_health_clear.assert_called_once_with()
         reporting_clear.assert_called_once_with()
 
     def test_import_actions_explicitly_invalidate_summary_cache(self):

@@ -22,6 +22,7 @@ import google_seo
 import google_seo_import
 import google_seo_phase4
 import os_accounts
+import seo_live_analytics
 import seo_workspace as seo_workspace
 
 
@@ -45,6 +46,16 @@ PIPELINE_STAGES = (
     ("joined_reporting", "Joined reporting snapshots"),
     ("opportunities", "Opportunity detection"),
     ("measurements", "28/56/90-day measurements"),
+)
+ANALYTICS_REFRESH_STAGES = (
+    ("schema_check", "Analytics schema"),
+    ("gsc_daily_sync", "GSC recent refresh"),
+    ("ga4_daily_sync", "GA4 recent refresh"),
+    ("shopify_saved_data", "Shopify/Supabase saved data"),
+    ("url_mapping", "URL mapping"),
+    ("revenue_reconciliation", "Revenue reconciliation"),
+    ("joined_reporting", "Joined reporting snapshots"),
+    ("source_health", "Source health"),
 )
 ANALYSIS_MODES = (
     "Generate Weekly Growth Report",
@@ -573,6 +584,27 @@ class PostgresSEOGrowthStore:
             connection.commit()
         return dict(row or {}) if row else None
 
+    def renew_pipeline_lease(self, pipeline_run_id, worker_id, *, lease_seconds=PIPELINE_LEASE_SECONDS):
+        now = utc_now()
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE seo_growth_pipeline_runs
+                    SET lease_expires_at=%s, updated_at=now()
+                    WHERE id=%s AND status='running' AND lease_owner=%s
+                    RETURNING id
+                    """,
+                    (
+                        now + timedelta(seconds=lease_seconds),
+                        pipeline_run_id,
+                        str(worker_id or "")[:200],
+                    ),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return bool(row)
+
     def start_stage(self, pipeline_run_id, stage_key, stage_order):
         self.ensure_schema()
         stage_id = _stable_id("seo-growth-stage", pipeline_run_id, stage_key)
@@ -643,10 +675,17 @@ class PostgresSEOGrowthStore:
 
     def complete_pipeline(self, pipeline_run_id, *, status="completed", error_code="", error_summary=""):
         health = {}
+        source_health = {}
         try:
             health = self.phase4_store.saved_health()
         except Exception:
             health = {}
+        try:
+            source_health = seo_live_analytics.PostgresSEOLiveAnalyticsReader(
+                self.phase4_store
+            ).source_health()
+        except Exception:
+            source_health = {}
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -662,9 +701,9 @@ class PostgresSEOGrowthStore:
                     """,
                     (
                         str(status or "completed")[:40],
-                        _as_date(health.get("latest_gsc_date")),
-                        _as_date(health.get("latest_ga4_date")),
-                        _as_date(health.get("latest_shopify_date")),
+                        _as_date((source_health.get("gsc") or {}).get("through_date") or health.get("latest_gsc_date")),
+                        _as_date((source_health.get("ga4") or {}).get("through_date") or health.get("latest_ga4_date")),
+                        _as_date((source_health.get("shopify") or {}).get("through_date") or health.get("latest_shopify_date")),
                         _as_date(health.get("common_reporting_date")),
                         _as_date(health.get("reconciliation_through_date")),
                         str(error_code or "")[:100],
@@ -1374,6 +1413,118 @@ def _stage_result_counts(result):
     }
 
 
+def run_daily_analytics_refresh(
+    *,
+    store=None,
+    import_store=None,
+    phase4_store=None,
+    connection_store=None,
+    requested_by="render-cron",
+    worker_id="",
+):
+    """Refresh saved analytics without running reports, tasks or measurements."""
+    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
+    store = store or PostgresSEOGrowthStore(phase4_store)
+    import_store = import_store or google_seo_import.default_import_store()
+    connection_store = connection_store or google_seo.default_store()
+    worker_id = str(worker_id or f"seo-analytics-{secrets.token_hex(6)}")[:200]
+    queued = store.queue_pipeline_run(mode="analytics", requested_by=requested_by)
+    run = store.claim_pipeline_run(worker_id)
+    if not run:
+        return {"status": "already_running", "run": queued, "failed_stages": []}
+    pipeline_id = run["id"]
+    google_worker = google_seo_import.SEOImportWorker(
+        import_store=import_store,
+        connection_store=connection_store,
+        worker_id=f"{worker_id}-google",
+    )
+    failures = []
+
+    def renew_lease():
+        renew = getattr(store, "renew_pipeline_lease", None)
+        if callable(renew) and not renew(pipeline_id, worker_id):
+            raise SEOGrowthError("The analytics refresh lock was lost.", code="analytics_lock_lost")
+
+    def run_stage(stage_index, key, callback):
+        renew_lease()
+        store.start_stage(pipeline_id, key, stage_index)
+        try:
+            result = callback() or {}
+            counts = _stage_result_counts(result)
+            store.complete_stage(
+                pipeline_id,
+                key,
+                source_status=str(result.get("status") or "healthy"),
+                data_through_date=counts["data_through_date"],
+                rows_processed=counts["rows_processed"],
+                rows_written=counts["rows_written"],
+            )
+            renew_lease()
+            return result
+        except Exception as error:
+            store.fail_stage(pipeline_id, key, error)
+            failures.append((key, error))
+            return None
+
+    def schema_check():
+        store.ensure_schema()
+        return {"status": "ready"}
+
+    def google_source(source):
+        google_seo_import.queue_daily_source(
+            source,
+            import_store=import_store,
+            connection_store=connection_store,
+            requested_by=requested_by,
+        )
+        return google_worker.run_once(source=source) or {"status": "no_pending_run"}
+
+    def saved_source_health():
+        health = seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store).source_health()
+        source_rows = sum(_integer((health.get(key) or {}).get("rows")) for key in ("gsc", "ga4", "shopify"))
+        through_dates = [
+            _as_date((health.get(key) or {}).get("through_date"))
+            for key in ("gsc", "ga4", "shopify")
+        ]
+        through_dates = [value for value in through_dates if value]
+        return {
+            "status": "ready" if source_rows else "no_saved_rows",
+            "rows_processed": source_rows,
+            "data_through_date": max(through_dates).isoformat() if through_dates else "",
+        }
+
+    callbacks = {
+        "schema_check": schema_check,
+        "gsc_daily_sync": lambda: google_source("GSC"),
+        "ga4_daily_sync": lambda: google_source("GA4"),
+        "shopify_saved_data": saved_source_health,
+        "url_mapping": phase4_store.map_saved_urls,
+        "revenue_reconciliation": phase4_store.reconcile_revenue,
+        "joined_reporting": phase4_store.refresh_reporting_snapshots,
+        "source_health": saved_source_health,
+    }
+    try:
+        for index, (stage_key, _label) in enumerate(ANALYTICS_REFRESH_STAGES, start=1):
+            run_stage(index, stage_key, callbacks[stage_key])
+    finally:
+        try:
+            phase4_store.refresh_health()
+        except Exception as error:
+            failures.append(("source_health", error))
+    status = "partial" if failures else "completed"
+    completed = store.complete_pipeline(
+        pipeline_id,
+        status=status,
+        error_code=failures[0][0] if failures else "",
+        error_summary="One or more analytics sources need attention." if failures else "",
+    )
+    return {
+        "status": status,
+        "run": _json_safe(completed),
+        "failed_stages": sorted({key for key, _error in failures}),
+    }
+
+
 def run_daily_growth_pipeline(
     *,
     store=None,
@@ -1477,19 +1628,19 @@ def run_daily_growth_pipeline(
 
 def main(argv=None):
     load_dotenv(BASE_DIR / ".env")
-    parser = argparse.ArgumentParser(description="Sports Cave SEO Growth Intelligence")
+    parser = argparse.ArgumentParser(description="Sports Cave saved SEO analytics refresh")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("daily", help="Run the complete daily SEO Growth Intelligence pipeline")
-    worker_parser = subparsers.add_parser("worker", help="Poll for queued SEO Growth Intelligence pipeline runs")
+    subparsers.add_parser("daily", help="Refresh saved SEO and store analytics")
+    worker_parser = subparsers.add_parser("worker", help="Poll for queued SEO analytics refresh runs")
     worker_parser.add_argument("--once", action="store_true")
     worker_parser.add_argument("--poll-seconds", type=int, default=60)
     args = parser.parse_args(argv)
     if args.command == "daily":
-        run_daily_growth_pipeline()
+        run_daily_analytics_refresh()
         return 0
     if args.command == "worker":
         while True:
-            run_daily_growth_pipeline(requested_by="seo-growth-worker")
+            run_daily_analytics_refresh(requested_by="seo-analytics-worker")
             if args.once:
                 return 0
             time.sleep(max(15, int(args.poll_seconds or 60)))

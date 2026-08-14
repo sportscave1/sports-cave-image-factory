@@ -1218,19 +1218,36 @@ class SEOImportWorker:
         return self.import_store.complete_run(run["id"], self.worker_id, "GA4")
 
 
-def queue_daily_runs(*, import_store=None, connection_store=None, requested_by="render-cron"):
+def queue_daily_source(source, *, import_store=None, connection_store=None, requested_by="render-cron"):
     import_store = import_store or default_import_store()
     connection_store = connection_store or google_seo.default_store()
     connection = connection_store.get_connection_secret()
+    source = str(source or "").upper()
+    if source not in SOURCES:
+        raise SEOImportError("The requested Google source is invalid.", code="source_invalid")
     properties = {
         "GSC": str(connection.get("gsc_site_url") or ""),
         "GA4": str(connection.get("ga4_property_id") or ""),
     }
-    if not connection.get("encrypted_refresh_token") or not all(properties.values()):
-        raise SEOImportError("Google must be connected with both properties selected.", code="google_connection_required")
+    if not connection.get("encrypted_refresh_token"):
+        raise SEOImportError("Google must be connected before analytics can refresh.", code="google_connection_required")
+    if not properties[source]:
+        raise SEOImportError(
+            f"Select the {source} property before refreshing that source.",
+            code="property_selection_required",
+        )
+    return import_store.queue_run(
+        source, "daily", property_identifier=properties[source], requested_by=requested_by,
+    )
+
+
+def queue_daily_runs(*, import_store=None, connection_store=None, requested_by="render-cron"):
     return [
-        import_store.queue_run(
-            source, "daily", property_identifier=properties[source], requested_by=requested_by,
+        queue_daily_source(
+            source,
+            import_store=import_store,
+            connection_store=connection_store,
+            requested_by=requested_by,
         )
         for source in SOURCES
     ]
@@ -1245,7 +1262,7 @@ def run_complete_daily_pipeline():
         return {"status": "legacy_google_daily_only"}
     import seo_growth_intelligence
 
-    return seo_growth_intelligence.run_daily_growth_pipeline(requested_by="render-cron")
+    return seo_growth_intelligence.run_daily_analytics_refresh(requested_by="render-cron")
 
 
 def _run_worker_loop(worker, *, once=False, poll_seconds=15):

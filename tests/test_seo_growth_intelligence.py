@@ -183,9 +183,9 @@ class GrowthPipelineTests(unittest.TestCase):
         self.assertEqual(store.started, [stage[0] for stage in growth.PIPELINE_STAGES])
         self.assertEqual(store.completed, [stage[0] for stage in growth.PIPELINE_STAGES])
 
-    def test_existing_google_daily_command_delegates_to_growth_pipeline(self):
+    def test_existing_google_daily_command_delegates_to_analytics_refresh(self):
         source = inspect.getsource(google_seo_import.run_complete_daily_pipeline)
-        self.assertIn("seo_growth_intelligence.run_daily_growth_pipeline", source)
+        self.assertIn("seo_growth_intelligence.run_daily_analytics_refresh", source)
         self.assertIn("SEO_GOOGLE_IMPORT_DAILY_ONLY", source)
 
 

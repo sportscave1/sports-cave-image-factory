@@ -1,34 +1,33 @@
-# Sports Cave SEO Growth Intelligence
+# Sports Cave SEO / Store Analytics
 
 ## Daily Command
 
-The existing Google SEO daily command is now the compatibility hook for the complete Growth Intelligence pipeline:
+The existing paid Render morning command remains the analytics entry point:
 
 ```bash
 python google_seo_import.py daily
 ```
 
-That command delegates to:
+It now delegates to the analytics-only refresh command:
 
 ```bash
 python seo_growth_intelligence.py daily
 ```
 
-It runs one durable pipeline with these stages:
+It runs one durable refresh with these internal stages:
 
-1. Connection health read
-2. GSC seven-day refresh
-3. GA4 seven-day refresh
-4. Shopify page refresh
-5. Shopify order refresh
-6. GA4 transaction refresh
-7. URL mapping
-8. Revenue reconciliation
-9. Joined reporting snapshots
-10. Deterministic opportunity detection
-11. Due 28/56/90-day measurements
+1. Verify the additive analytics schema.
+2. Refresh the recent GSC dates when GSC is configured.
+3. Refresh the recent GA4 dates when GA4 is configured.
+4. Read the existing Shopify/Supabase operational order ledger.
+5. Refresh URL mapping and revenue reconciliation where their inputs exist.
+6. Refresh joined reporting snapshots where possible.
+7. Save source-specific data-through dates and refresh health.
 
-Each stage records status in Postgres and uses existing import/Phase 4 locks and idempotent upserts. The command is safe to run repeatedly; overlapping pipeline runs are blocked by `seo_growth_pipeline_runs`.
+The command does not run reports, recommendations, tasks or measurements. Each
+stage records safe status in Postgres and uses the existing import locks,
+idempotent upserts and the durable `seo_growth_pipeline_runs` lease. A later
+failure does not delete previously saved analytics.
 
 ## Render Schedule
 
@@ -40,13 +39,27 @@ If the existing paid morning automation already calls the Google SEO daily comma
 python google_seo_import.py daily
 ```
 
-If creating or repairing the Render scheduled job outside this repo, use:
+Before the first analytics refresh after deployment, apply additive migrations:
 
 ```bash
-python seo_growth_intelligence.py daily
+python run_migrations.py
 ```
 
-Recommended schedule: once each morning after Google delayed reporting data is normally available for the store timezone.
+Then leave the existing paid Render morning command as:
+
+```bash
+python google_seo_import.py daily
+```
+
+For the one-time production activation after deployment, run:
+
+```bash
+python run_migrations.py && python google_seo_import.py daily
+```
+
+No cron service is added to `render.yaml`; the existing paid scheduler remains
+the owner of this command. Run it once each morning after Google delayed data is
+normally available.
 
 ## Required Environment Variables
 
@@ -54,10 +67,8 @@ Set these on Render without exposing their values in logs or the UI:
 
 - `DATABASE_URL` or the repository-supported Supabase/Postgres equivalent
 - Google OAuth/client configuration already used by `google_seo.py`
-- Shopify configuration already used by `shopify_sync.py`
-- Optional: `SPORTS_CAVE_OPENAI_API_KEY` or `OPENAI_API_KEY`
-- Optional: `SPORTS_CAVE_OPENAI_MODEL`
-- Optional: `SEO_GROWTH_DAILY_SCHEDULE_LOCAL_TIME`
+- The existing Supabase operational tables populated by Sports Cave OS
+- Shopify configuration already used by the operational sync
 
 Emergency legacy mode for Google-only daily refresh:
 
@@ -65,12 +76,11 @@ Emergency legacy mode for Google-only daily refresh:
 SEO_GOOGLE_IMPORT_DAILY_ONLY=1 python google_seo_import.py daily
 ```
 
-Use that only for temporary recovery if Phase 4 or Growth Intelligence must be bypassed while preserving GSC/GA4 daily imports.
+Use that only for temporary Google import recovery.
 
 ## Manual Recovery
 
-In Sports Cave OS, open:
-
-SEO Overview -> Data Connections & Sync Settings -> Daily Growth Intelligence pipeline -> Run daily pipeline now
-
-The button queues the durable pipeline. It does not expose credentials and does not run on ordinary Overview page load.
+In Sports Cave OS, open `SEO / Store Analytics`, expand **Data Connections &
+Sync Settings**, then select **Refresh analytics**. Ordinary page rendering and
+filtering perform saved-database reads only; they do not call Google, Shopify or
+OpenAI.

@@ -48,6 +48,9 @@ class FakeUI:
         def date_input(self, *_args, **_kwargs):
             return None
 
+        def toggle(self, _label, value=False, *_args, **_kwargs):
+            return value
+
     def __init__(self, *, admin_open=False, click_toggle=False):
         self.events = []
         self.query_params = {}
@@ -98,23 +101,22 @@ class FakeUI:
 
 
 class SEOOverviewLazyAdminTests(unittest.TestCase):
-    def test_default_page_orders_reporting_before_current_work_and_admin(self):
+    def test_default_page_orders_analytics_before_admin_and_hides_workflows(self):
         source = inspect.getsource(seo_page._render_overview)
         reporting = source.index("_render_reporting_dashboard(")
-        current_work = source.index("_render_current_work(")
         administration = source.index("_render_data_connections_admin(")
 
-        self.assertLess(reporting, current_work)
-        self.assertLess(current_work, administration)
+        self.assertLess(reporting, administration)
+        self.assertNotIn("_render_current_work(", source)
 
         reporting_source = inspect.getsource(seo_page._render_reporting_dashboard)
         expected = (
             "_render_data_health_strip(health)",
-            '"Main SEO metrics"',
-            '"Organic Performance"',
-            '"SEO Opportunities"',
-            "_render_reporting_opportunities(snapshot)",
-            "_render_reporting_tables(snapshot)",
+            "_reporting_filters()",
+            '"Main analytics"',
+            '"Performance"',
+            "_render_reporting_tables(snapshot",
+            "_render_country_device_breakdowns(snapshot)",
         )
         positions = [reporting_source.index(value) for value in expected]
         self.assertEqual(positions, sorted(positions))
@@ -130,8 +132,8 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         ) as progress, patch.object(
             seo_page, "_render_phase4_foundation"
         ) as phase4_admin, patch.object(
-            seo_page, "_render_growth_pipeline_admin"
-        ) as growth_admin, patch.object(
+            seo_page, "_render_analytics_refresh_admin"
+        ) as refresh_admin, patch.object(
             seo_page, "_shopify_health"
         ) as shopify_health, patch.object(
             google_seo, "configuration_status"
@@ -149,7 +151,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         phase4_store.get_settings.assert_not_called()
         progress.assert_not_called()
         phase4_admin.assert_not_called()
-        growth_admin.assert_not_called()
+        refresh_admin.assert_not_called()
         shopify_health.assert_not_called()
         configuration_status.assert_not_called()
 
@@ -178,10 +180,8 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         ) as google_controls, patch.object(
             seo_page, "_render_historical_import_controls"
         ) as progress, patch.object(
-            seo_page, "_render_phase4_foundation"
-        ) as phase4_admin, patch.object(
-            seo_page, "_render_growth_pipeline_admin"
-        ) as growth_admin:
+            seo_page, "_render_analytics_refresh_admin"
+        ) as refresh_admin:
             seo_page._render_data_connections_admin(
                 admin_user(),
                 google_store=connection_store,
@@ -199,8 +199,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
 
         google_controls.assert_called_once()
         progress.assert_called_once()
-        phase4_admin.assert_called_once()
-        growth_admin.assert_called_once()
+        refresh_admin.assert_called_once()
         self.assertEqual(connection_store.get_connection.call_count, 1)
         rendered = " ".join(value for _kind, value in ui.events)
         self.assertIn("Google Search Console", rendered)
@@ -218,13 +217,18 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
     def test_default_overview_does_not_construct_admin_or_call_external_clients(self):
         ui = FakeUI(admin_open=False)
         forbidden = Mock(side_effect=AssertionError("external client called"))
-        health_reads = Mock(return_value={})
+
+        class Reader:
+            def source_health(self):
+                return {
+                    key: {"available": False, "status": "no_saved_rows"}
+                    for key in ("gsc", "ga4", "shopify", "reconciliation", "snapshot", "refresh")
+                }
+
+            def snapshot(self, **_kwargs):
+                return {"ready": False, "health": self.source_health()}
 
         with patch.object(seo_page, "st", ui), patch.object(
-            seo_page, "_load_reporting_health", health_reads
-        ), patch.object(
-            seo_page, "_render_current_work"
-        ), patch.object(
             google_seo, "list_gsc_properties", forbidden
         ), patch.object(
             google_seo, "list_ga4_properties", forbidden
@@ -235,23 +239,22 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         ), patch.object(
             google_seo_phase4, "queue_phase4_pipeline", forbidden
         ):
-            seo_page._render_overview({}, admin_user(), None)
+            seo_page._render_overview({}, admin_user(), None, reporting_reader=Reader())
 
-        health_reads.assert_called_once_with(None)
         forbidden.assert_not_called()
         rendered = " ".join(value for _kind, value in ui.events)
-        self.assertIn("Main SEO metrics", rendered)
-        self.assertIn("Organic Performance", rendered)
+        self.assertIn("Main analytics", rendered)
+        self.assertIn("Performance", rendered)
         self.assertNotIn("Google Search Console", rendered)
         self.assertNotIn("Google data import", rendered)
 
-    def test_all_existing_admin_actions_remain_available_and_admin_guarded(self):
+    def test_admin_exposes_one_refresh_and_keeps_connection_recovery(self):
         sources = "\n".join(
             (
                 inspect.getsource(seo_page._render_google_controls),
                 inspect.getsource(seo_page._render_historical_import_controls),
-                inspect.getsource(seo_page._render_phase4_foundation),
-                inspect.getsource(seo_page._render_growth_pipeline_admin),
+                inspect.getsource(seo_page._render_analytics_refresh_admin),
+                inspect.getsource(seo_page._render_data_connections_admin),
             )
         )
         for label in (
@@ -262,13 +265,13 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
             "Import historical data",
             "Sync now",
             "Retry failed import",
-            "Save reporting settings",
-            "Build joined reporting data",
-            "Refresh joined data",
-            "Run daily pipeline now",
+            "Refresh analytics",
+            "Historical import recovery",
         ):
             self.assertIn(label, sources)
-        self.assertGreaterEqual(sources.count("os_accounts.is_admin(user)"), 3)
+        admin_source = inspect.getsource(seo_page._render_data_connections_admin)
+        self.assertNotIn("Build joined reporting data", admin_source)
+        self.assertNotIn("Run daily pipeline now", admin_source)
 
 
 if __name__ == "__main__":

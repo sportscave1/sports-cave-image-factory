@@ -13,6 +13,7 @@ import google_seo_phase4
 import navigation_runtime
 import os_accounts
 import seo_growth_intelligence
+import seo_live_analytics
 import seo_sync_progress
 import seo_workspace as seo
 
@@ -23,7 +24,7 @@ SEO_ADMIN_OPEN_STATE_KEY = "seo-data-connections-open"
 
 
 PAGE_SUBTITLES = {
-    seo.SEO_OVERVIEW_ROUTE: "Plan content, track authority work and monitor organic growth from one place.",
+    seo.SEO_OVERVIEW_ROUTE: "Saved store and organic performance, with each source shown as soon as its data is available.",
     seo.SEO_KEYWORDS_ROUTE: "Turn real Google Search Console queries into buyer-focused page and content opportunities.",
     seo.SEO_REPORTS_ROUTE: "Prepare evidence-based growth reports, review recommendations and build strategy from saved data.",
     seo.SEO_TASKS_ROUTE: "Turn approved SEO recommendations into assigned work and measure results over time.",
@@ -105,13 +106,13 @@ def _inject_styles():
     )
 
 
-def _header(route):
+def _header(route, *, title=""):
     st.markdown(
         f"""
         <div class="sc-seo-header">
             <div>
                 <div class="sc-seo-kicker">Growth / SEO</div>
-                <h1>{html.escape(route)}</h1>
+                <h1>{html.escape(title or route)}</h1>
                 <p>{html.escape(PAGE_SUBTITLES[route])}</p>
             </div>
         </div>
@@ -364,24 +365,30 @@ def _cached_default_phase4_health():
     return google_seo_phase4.default_phase4_store().saved_health()
 
 
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_default_live_source_health():
+    return seo_live_analytics.default_reader().source_health()
+
+
 @st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=24)
 def _cached_default_reporting_snapshot(
     preset,
     market,
     device,
-    search,
+    compare,
     custom_start,
     custom_end,
+    source_health,
 ):
-    phase4_store = google_seo_phase4.default_phase4_store()
-    reader = google_seo_phase4.PostgresSEOReportingReader(phase4_store)
+    reader = seo_live_analytics.default_reader()
     return reader.snapshot(
         preset=preset,
         market=market,
         device=device,
-        search=search,
+        compare=compare,
         custom_start=custom_start,
         custom_end=custom_end,
+        source_health=source_health,
     )
 
 
@@ -394,6 +401,7 @@ def invalidate_seo_overview_summary_cache():
     _cached_default_shopify_health.clear()
     _cached_default_google_connection.clear()
     _cached_default_phase4_health.clear()
+    _cached_default_live_source_health.clear()
     _cached_default_reporting_snapshot.clear()
     _cached_default_growth_pipeline_status.clear()
 
@@ -961,6 +969,58 @@ def _render_growth_pipeline_admin(user, *, growth_store=None):
         )
 
 
+def _render_analytics_refresh_admin(user, *, growth_store=None):
+    if not os_accounts.is_admin(user):
+        return
+    growth_store = growth_store or seo_growth_intelligence.default_store()
+    if st.button(
+        "Refresh analytics",
+        type="primary",
+        icon=":material/refresh:",
+        key="seo-refresh-analytics",
+        use_container_width=True,
+    ):
+        try:
+            result = seo_growth_intelligence.run_daily_analytics_refresh(
+                store=growth_store,
+                requested_by=str(user.get("id") or "manual")[:200],
+            )
+        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError, seo_growth_intelligence.SEOGrowthError) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            failed = list(result.get("failed_stages") or [])
+            if result.get("status") == "completed":
+                _set_notice("Analytics refreshed from the latest saved source data.")
+            elif result.get("status") == "already_running":
+                _set_notice("An analytics refresh is already running.")
+            else:
+                _set_notice(
+                    "Saved analytics remain available; one or more sources need attention.",
+                    success=False,
+                )
+            if failed:
+                st.session_state["seo-refresh-failed-stages"] = failed
+            invalidate_seo_overview_summary_cache()
+        st.rerun()
+
+    st.caption("Refreshes recent Google data, reads the existing Shopify/Supabase ledger and updates saved reporting.")
+    with st.expander("Developer details", expanded=False):
+        try:
+            status = growth_store.recent_pipeline_status()
+        except Exception:
+            status = {}
+        run = dict((status or {}).get("run") or {})
+        if not run:
+            st.caption("No analytics refresh has been recorded yet.")
+        else:
+            st.caption(
+                f"Last refresh: {str(run.get('status') or 'unknown').replace('_', ' ').title()}"
+                f" | Completed: {run.get('completed_at') or 'Not completed'}"
+            )
+            if run.get("error_summary"):
+                st.caption(str(run.get("error_summary")))
+
+
 def _load_reporting_health(phase4_store=None):
     try:
         if phase4_store is not None:
@@ -971,15 +1031,15 @@ def _load_reporting_health(phase4_store=None):
 
 
 def _reporting_filters():
-    columns = st.columns([1.2, 1, 1, 1])
+    columns = st.columns([1.35, 1, 1, 1.2])
     preset = columns[0].selectbox(
         "Period",
-        ("Last 28 days", "Last 90 days", "Last 12 months", "Custom dates"),
+        ("Last 28 days", "Last 90 days", "Last 12 months", "Custom range"),
         key="seo-phase4-period",
     )
     market = columns[1].selectbox(
         "Market",
-        ("All markets", "AU", "US", "UK"),
+        ("All markets", "Australia", "United States", "United Kingdom"),
         key="seo-phase4-market",
     )
     device = columns[2].selectbox(
@@ -987,13 +1047,13 @@ def _reporting_filters():
         ("All devices", "Desktop", "Mobile"),
         key="seo-phase4-device",
     )
-    search = columns[3].selectbox(
-        "Search",
-        ("All searches", "Brand", "Non-brand"),
-        key="seo-phase4-search",
+    compare = columns[3].toggle(
+        "Previous matching period",
+        value=True,
+        key="seo-phase4-compare",
     )
     custom_start = custom_end = None
-    if preset == "Custom dates":
+    if preset == "Custom range":
         date_columns = st.columns(2)
         custom_start = date_columns[0].date_input("Start date", key="seo-phase4-start")
         custom_end = date_columns[1].date_input("End date", key="seo-phase4-end")
@@ -1001,34 +1061,37 @@ def _reporting_filters():
         "preset": preset,
         "market": market,
         "device": device,
-        "search": search,
+        "compare": compare,
         "custom_start": custom_start,
         "custom_end": custom_end,
     }
 
 
-def _load_reporting_snapshot(filters, *, phase4_store=None, reporting_reader=None):
+def _load_reporting_snapshot(filters, *, phase4_store=None, reporting_reader=None, source_health=None):
     arguments = {
         "preset": filters["preset"],
         "market": filters["market"],
         "device": filters["device"],
-        "search": filters["search"],
+        "compare": filters["compare"],
         "custom_start": filters["custom_start"],
         "custom_end": filters["custom_end"],
     }
     if reporting_reader is not None:
+        if isinstance(reporting_reader, seo_live_analytics.PostgresSEOLiveAnalyticsReader):
+            return reporting_reader.snapshot(**arguments, source_health=source_health)
         return reporting_reader.snapshot(**arguments)
     if phase4_store is not None:
-        return google_seo_phase4.PostgresSEOReportingReader(phase4_store).snapshot(
-            **arguments
+        return seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store).snapshot(
+            **arguments, source_health=source_health
         )
     return _cached_default_reporting_snapshot(
         arguments["preset"],
         arguments["market"],
         arguments["device"],
-        arguments["search"],
+        arguments["compare"],
         arguments["custom_start"],
         arguments["custom_end"],
+        source_health or {},
     )
 
 
@@ -1110,12 +1173,27 @@ def _status_label(value):
 
 
 def _render_data_health_strip(health):
+    def source_value(key):
+        source = dict(health.get(key) or {})
+        through = source.get("through_date")
+        if source.get("available"):
+            suffix = f" through {_display_progress_date(through)}" if through else ""
+            return f"{_status_label(source.get('status'))}{suffix}"
+        return _status_label(source.get("status") or "no_saved_rows")
+
+    snapshot = dict(health.get("snapshot") or {})
     items = (
-        ("Status", _status_label(health.get("data_status"))),
-        ("Common date", health.get("common_reporting_date") or "Not available"),
-        ("URLs checked", f"{health.get('mapping_source_url_count', 0):,}"),
-        ("Revenue matches", f"{health.get('confirmed_transaction_count', 0):,} confirmed"),
-        ("Snapshot", health.get("reporting_snapshot_refreshed_at") or "Not refreshed"),
+        ("Search Console", source_value("gsc")),
+        ("Analytics 4", source_value("ga4")),
+        ("Store data", source_value("shopify")),
+        (
+            "Joined reporting",
+            (
+                f"Ready through {_display_progress_date(snapshot.get('through_date'))}"
+                if snapshot.get("available")
+                else "Refresh pending"
+            ),
+        ),
     )
     columns = st.columns(len(items))
     for column, (label, value) in zip(columns, items):
@@ -1130,58 +1208,149 @@ def _render_data_health_strip(health):
 def _render_reporting_metrics(snapshot):
     current = snapshot.get("current") or {}
     previous = snapshot.get("previous") or {}
-    currency = _single_currency(current.get("shopify_confirmed_by_currency") or previous.get("shopify_confirmed_by_currency") or [])
-    metrics = (
-        ("Confirmed Organic Revenue", "confirmed_organic_revenue", "currency", False),
-        ("Confirmed Organic Orders", "organic_orders", "number", False),
-        ("Organic Sessions", "organic_sessions", "number", False),
-        ("Organic Clicks", "organic_clicks", "number", False),
-        ("Organic Impressions", "organic_impressions", "number", False),
-        ("CTR", "ctr", "percent", False),
-        ("Average Position", "average_position", "position", True),
+    health = snapshot.get("health") or {}
+    organic_revenue_key = (
+        "confirmed_organic_revenue"
+        if current.get("confirmed_organic_revenue") is not None
+        else "ga4_attributed_revenue"
     )
-    columns = st.columns(4)
-    for column, (label, key, style, inverse) in zip(columns, metrics):
-        absolute, percent = _metric_delta(current.get(key), previous.get(key), position=inverse)
-        column.metric(
-            label,
-            _metric_value(current.get(key), style=style, currency=currency if style == "currency" else ""),
-            percent or absolute,
-            delta_color="inverse" if inverse else "normal",
-        )
-        previous_value = _metric_value(previous.get(key), style=style, currency=currency if style == "currency" else "")
-        detail = f"Previous: {previous_value}"
-        if absolute and percent:
-            detail += f" | Change: {absolute}"
-        column.caption(detail)
-    if len(metrics) > 4:
-        columns = st.columns(3)
-        for column, (label, key, style, inverse) in zip(columns, metrics[4:]):
+    organic_revenue_confirmed = organic_revenue_key == "confirmed_organic_revenue"
+    metrics = (
+        {
+            "label": "Store Revenue",
+            "key": "store_revenue",
+            "style": "currency",
+            "currency_key": "store_currency",
+            "source": "Shopify/Supabase operational data",
+            "source_key": "shopify",
+            "status": "Confirmed",
+        },
+        {
+            "label": "Store Orders",
+            "key": "store_orders",
+            "style": "number",
+            "source": "Shopify/Supabase operational data",
+            "source_key": "shopify",
+            "status": "Confirmed",
+        },
+        {
+            "label": "Organic Revenue" if organic_revenue_confirmed else "Organic Revenue (attributed)",
+            "key": organic_revenue_key,
+            "style": "currency",
+            "currency_key": "confirmed_organic_currency" if organic_revenue_confirmed else "ga4_currency",
+            "source": "Shopify-confirmed reconciliation" if organic_revenue_confirmed else "Google Analytics 4",
+            "source_key": "reconciliation" if organic_revenue_confirmed else "ga4",
+            "status": "Confirmed" if organic_revenue_confirmed else "Attributed, not Shopify-confirmed",
+        },
+        {
+            "label": "Organic Sessions",
+            "key": "organic_sessions",
+            "style": "number",
+            "source": "Google Analytics 4",
+            "source_key": "ga4",
+            "status": "Attributed",
+        },
+        {
+            "label": "Organic Clicks",
+            "key": "organic_clicks",
+            "style": "number",
+            "source": "Google Search Console",
+            "source_key": "gsc",
+            "status": "Saved source data",
+        },
+        {
+            "label": "Organic Impressions",
+            "key": "organic_impressions",
+            "style": "number",
+            "source": "Google Search Console",
+            "source_key": "gsc",
+            "status": "Saved source data",
+        },
+        {
+            "label": "CTR",
+            "key": "ctr",
+            "style": "percent",
+            "source": "Google Search Console",
+            "source_key": "gsc",
+            "status": "Weighted",
+        },
+        {
+            "label": "Average Position",
+            "key": "average_position",
+            "style": "position",
+            "source": "Google Search Console",
+            "source_key": "gsc",
+            "status": "Impression-weighted",
+            "inverse": True,
+        },
+        {
+            "label": "Engagement Rate",
+            "key": "engagement_rate",
+            "style": "percent",
+            "source": "Google Analytics 4",
+            "source_key": "ga4",
+            "status": "Attributed",
+        },
+        {
+            "label": "Conversion Rate",
+            "key": "conversion_rate",
+            "style": "percent",
+            "source": "Google Analytics 4",
+            "source_key": "ga4",
+            "status": "GA4-attributed purchases / sessions",
+        },
+    )
+    for start in range(0, len(metrics), 4):
+        columns = st.columns(4)
+        for column, metric in zip(columns, metrics[start:start + 4]):
+            key = metric["key"]
+            inverse = bool(metric.get("inverse"))
+            currency = str(current.get(metric.get("currency_key") or "") or previous.get(metric.get("currency_key") or "") or "")
             absolute, percent = _metric_delta(current.get(key), previous.get(key), position=inverse)
             column.metric(
-                label,
-                _metric_value(current.get(key), style=style),
+                metric["label"],
+                _metric_value(
+                    current.get(key),
+                    style=metric["style"],
+                    currency=currency if metric["style"] == "currency" else "",
+                ),
                 percent or absolute,
                 delta_color="inverse" if inverse else "normal",
             )
-            previous_value = _metric_value(previous.get(key), style=style)
-            detail = f"Previous: {previous_value}"
+            previous_value = _metric_value(
+                previous.get(key),
+                style=metric["style"],
+                currency=currency if metric["style"] == "currency" else "",
+            )
+            source_health = health.get(metric["source_key"]) or {}
+            through = source_health.get("through_date")
+            detail = f"Previous: {previous_value} | {metric['source']}"
+            if through:
+                detail += f" | Available through {_display_progress_date(through)}"
+            detail += f" | {metric['status']}" if current.get(key) is not None else " | Unavailable for these filters"
             if absolute and percent:
                 detail += f" | Change: {absolute}"
             column.caption(detail)
-    note = str(current.get("search_scope_note") or "")
-    if note:
-        st.caption(note)
 
 
 TREND_METRICS = {
-    "Confirmed organic revenue": "confirmed_organic_revenue",
-    "Organic orders": "organic_orders",
+    "Store revenue": "store_revenue",
+    "Store orders": "store_orders",
     "Organic sessions": "organic_sessions",
-    "Clicks": "organic_clicks",
-    "Impressions": "organic_impressions",
+    "Organic clicks": "organic_clicks",
+    "Organic impressions": "organic_impressions",
     "CTR": "ctr",
     "Average position": "average_position",
+}
+
+TREND_SOURCES = {
+    "store_revenue": ("Shopify/Supabase operational data", "shopify"),
+    "store_orders": ("Shopify/Supabase operational data", "shopify"),
+    "organic_sessions": ("Google Analytics 4", "ga4"),
+    "organic_clicks": ("Google Search Console", "gsc"),
+    "organic_impressions": ("Google Search Console", "gsc"),
+    "ctr": ("Google Search Console", "gsc"),
+    "average_position": ("Google Search Console", "gsc"),
 }
 
 
@@ -1209,6 +1378,12 @@ def _render_performance_chart(snapshot):
         )
         return
     st.line_chart(chart_rows, x="Date", y="Value", color="Period", height=260)
+    source_label, source_key = TREND_SOURCES[key]
+    through = ((snapshot.get("health") or {}).get(source_key) or {}).get("through_date")
+    detail = f"Source: {source_label}"
+    if through:
+        detail += f" | Available through {_display_progress_date(through)}"
+    st.caption(detail)
 
 
 def _opportunity_label(value):
@@ -1271,25 +1446,27 @@ def _render_reporting_opportunities(snapshot):
     )
 
 
-def _render_reporting_tables(snapshot):
+def _render_reporting_tables(snapshot, *, navigate=None):
     pages = []
     for row in list(snapshot.get("top_pages") or [])[:8]:
         currency = _single_currency([{"currency": value} for value in row.get("currencies") or []])
         pages.append(
             {
-                "Landing page": row.get("title") or row.get("canonical_url") or "Untitled",
-                "Revenue": _metric_value(row.get("confirmed_revenue"), style="currency", currency=currency),
-                "Orders": row.get("confirmed_orders") or 0,
-                "Sessions": row.get("sessions") or 0,
-                "Clicks": row.get("clicks") or 0,
-                "Impressions": row.get("impressions") or 0,
-                "Position": _metric_value(row.get("average_position"), style="position"),
+                "Landing page": row.get("title") or row.get("canonical_url") or row.get("path") or "Untitled",
+                "Type": row.get("page_type") or "Page",
+                "Sessions": _metric_value(row.get("sessions")),
+                "Clicks": _metric_value(row.get("clicks")),
+                "Impressions": _metric_value(row.get("impressions")),
+                "Engagement": _metric_value(row.get("engagement_rate"), style="percent"),
+                "Attributed orders": _metric_value(row.get("attributed_purchases")),
+                "Attributed revenue": _metric_value(row.get("attributed_revenue"), style="currency", currency=currency),
+                "Previous change": _metric_value(row.get("previous_change")),
             }
         )
     _section_heading("Top Landing Pages")
     _table(
         pages,
-        empty="No mapped landing-page results are available for this period.",
+        empty="No saved GSC page or GA4 landing-page results are available for this period.",
         height=285,
     )
 
@@ -1302,6 +1479,10 @@ def _render_reporting_tables(snapshot):
                 "Impressions": row.get("impressions") or 0,
                 "CTR": _metric_value(row.get("ctr"), style="percent"),
                 "Position": _metric_value(row.get("average_position"), style="position"),
+                "Previous clicks": _metric_value(row.get("previous_clicks")),
+                "Ranking gain/loss": _metric_value(row.get("ranking_change"), style="position"),
+                "Market": row.get("market") or "Other",
+                "Device": str(row.get("device") or "").title(),
             }
         )
     _section_heading("Top Search Queries")
@@ -1310,39 +1491,82 @@ def _render_reporting_tables(snapshot):
         empty="No search-query results are available for this period.",
         height=285,
     )
+    if navigate is not None and st.button(
+        "Keyword Research & Mapping",
+        icon=":material/search:",
+        key="seo-open-keyword-research",
+    ):
+        _navigate(navigate, seo.SEO_KEYWORDS_ROUTE)
 
 
-def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
-    health = _load_reporting_health(phase4_store)
-    _render_data_health_strip(health)
-    through_date = str(health.get("common_reporting_date") or "")
-    if through_date:
-        filters = _reporting_filters()
-        st.markdown(
-            f'<div class="sc-seo-data-date">Reporting data through {html.escape(_display_progress_date(through_date))}</div>',
-            unsafe_allow_html=True,
+def _render_country_device_breakdowns(snapshot):
+    _section_heading("Countries and Devices")
+    columns = st.columns(2)
+    with columns[0]:
+        _table(
+            [
+                {
+                    "Market": row.get("market"),
+                    "GSC clicks": _metric_value(row.get("gsc_clicks")),
+                    "GSC impressions": _metric_value(row.get("gsc_impressions")),
+                    "GA4 sessions": _metric_value(row.get("ga4_sessions")),
+                }
+                for row in snapshot.get("countries") or []
+            ],
+            empty="No saved country breakdown is available.",
+            height=225,
         )
-        try:
-            snapshot = _load_reporting_snapshot(
-                filters,
-                phase4_store=phase4_store,
-                reporting_reader=reporting_reader,
-            )
-        except google_seo_phase4.SEOPhase4Error:
-            snapshot = {}
-    else:
-        snapshot = {}
+    with columns[1]:
+        _table(
+            [
+                {
+                    "Device": row.get("device"),
+                    "GSC clicks": _metric_value(row.get("gsc_clicks")),
+                    "GSC impressions": _metric_value(row.get("gsc_impressions")),
+                    "GA4 sessions": _metric_value(row.get("ga4_sessions")),
+                }
+                for row in snapshot.get("devices") or []
+            ],
+            empty="No saved device breakdown is available.",
+            height=225,
+        )
 
-    _section_heading("Main SEO metrics")
+
+def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None, navigate=None):
+    if reporting_reader is not None and hasattr(reporting_reader, "source_health"):
+        health = reporting_reader.source_health()
+    elif phase4_store is not None:
+        reporting_reader = seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store)
+        health = reporting_reader.source_health()
+    else:
+        try:
+            health = dict(_cached_default_live_source_health())
+        except Exception:
+            health = {}
+    _render_data_health_strip(health)
+    filters = _reporting_filters()
+    try:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_health=health,
+        )
+    except google_seo_phase4.SEOPhase4Error:
+        snapshot = {}
+    health = snapshot.get("health") or health
+    if snapshot.get("fallback_mode") and snapshot.get("ready"):
+        st.caption("Showing saved source data. Joined reporting refresh is pending.")
+    if snapshot.get("stale"):
+        st.warning("The latest analytics refresh needs attention. Previously saved analytics remain available.")
+
+    _section_heading("Main analytics")
     if snapshot.get("ready"):
         _render_reporting_metrics(snapshot)
     else:
-        reason = _status_label(health.get("data_status"))
-        st.info(
-            f"SEO reporting is unavailable: {reason}. SEO reporting will appear here when GSC, GA4 and Shopify share a saved common reporting date."
-        )
+        st.info("No saved GSC, GA4 or Shopify operational rows are available for these analytics yet.")
 
-    _section_heading("Organic Performance")
+    _section_heading("Performance")
     if snapshot.get("ready"):
         _render_performance_chart(snapshot)
     else:
@@ -1352,9 +1576,8 @@ def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
         )
 
     if snapshot.get("ready"):
-        _section_heading("SEO Opportunities")
-        _render_reporting_opportunities(snapshot)
-        _render_reporting_tables(snapshot)
+        _render_reporting_tables(snapshot, navigate=navigate)
+        _render_country_device_breakdowns(snapshot)
 
 
 def _render_current_work(state, user, navigate):
@@ -1469,9 +1692,10 @@ def _render_data_connections_admin(
     )
     integration_columns[2].markdown(
         _integration_card(
-            "Shopify",
+            "Shopify/Supabase operational data",
             shopify["status"],
-            property_name="Sports Cave store" if shopify["status"] == "Connected" else "",
+            property_name="Sports Cave operational order ledger",
+            property_id="Sports Cave OS",
             last_sync=shopify["last_sync"],
             extra_class="sc-seo-shopify-health",
             show_data_date=False,
@@ -1480,21 +1704,16 @@ def _render_data_connections_admin(
     )
     _render_google_controls(user, google_store, config_status, connection)
 
-    _render_historical_import_controls(
-        user,
-        connection,
-        import_store=import_store,
-        phase4_store=phase4_store,
-        connection_store=google_store,
-        config_ready=config_status.get("ready", False),
-    )
-    _render_phase4_foundation(
-        user,
-        phase4_store,
-        reporting_reader,
-        google_store,
-    )
-    _render_growth_pipeline_admin(user, growth_store=growth_store)
+    _render_analytics_refresh_admin(user, growth_store=growth_store)
+    with st.expander("Historical import recovery", expanded=False):
+        _render_historical_import_controls(
+            user,
+            connection,
+            import_store=import_store,
+            phase4_store=phase4_store,
+            connection_store=google_store,
+            config_ready=config_status.get("ready", False),
+        )
 
 
 def _render_overview(
@@ -1507,13 +1726,13 @@ def _render_overview(
     reporting_reader=None,
     growth_store=None,
 ):
-    _header(seo.SEO_OVERVIEW_ROUTE)
+    _header(seo.SEO_OVERVIEW_ROUTE, title="SEO / Store Analytics")
     _consume_google_oauth_notice()
     _render_reporting_dashboard(
         phase4_store=phase4_store,
         reporting_reader=reporting_reader,
+        navigate=navigate,
     )
-    _render_current_work(state, user, navigate)
 
     _render_data_connections_admin(
         user,
@@ -1521,6 +1740,7 @@ def _render_overview(
         import_store=import_store,
         phase4_store=phase4_store,
         reporting_reader=reporting_reader,
+        growth_store=growth_store,
     )
 
 
