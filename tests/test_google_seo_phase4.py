@@ -272,6 +272,21 @@ class RevenueReconciliationTests(unittest.TestCase):
         self.assertEqual(result["state"], "currency_mismatch")
         self.assertEqual(result["shopify_confirmed_revenue"], Decimal("0"))
 
+    def test_public_reconciliation_status_separates_confirmed_unmatched_and_disputed(self):
+        confirmed = phase4.public_reconciliation_status(
+            phase4.reconcile_transaction(self.transaction, [self.order])
+        )
+        self.assertEqual(confirmed["status"], "confirmed")
+        self.assertEqual(confirmed["shopify_order_count"], 1)
+        unmatched = phase4.public_reconciliation_status(
+            phase4.reconcile_transaction(self.transaction, [])
+        )
+        self.assertEqual(unmatched["status"], "unmatched")
+        disputed = phase4.public_reconciliation_status(
+            phase4.reconcile_transaction(self.transaction, [{**self.order, "currency": "USD"}])
+        )
+        self.assertEqual(disputed["status"], "disputed")
+
     def test_conflicting_ga4_transaction_is_never_confirmed(self):
         result = phase4.reconcile_transaction(
             {**self.transaction, "conflict_state": "duplicate_across_dates"},
@@ -435,6 +450,12 @@ class WorkerAndSecurityTests(unittest.TestCase):
             "ON CONFLICT (workspace_key, ga4_property_id, transaction_id, transaction_date)",
             reconciliation_source,
         )
+
+    def test_manual_url_mappings_survive_automatic_mapping_refresh(self):
+        source = inspect.getsource(phase4.PostgresSEOPhase4Store.map_saved_urls)
+        self.assertIn("manual_override=TRUE", source)
+        self.assertIn("CASE WHEN seo_url_aliases.manual_override", source)
+        self.assertIn("manual_aliases.get", source)
 
     def test_phase4_jobs_use_expiring_leases_and_dependency_order(self):
         source = inspect.getsource(phase4.PostgresSEOPhase4Store.claim_next_run)

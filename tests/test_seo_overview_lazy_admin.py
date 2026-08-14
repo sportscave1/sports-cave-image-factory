@@ -130,6 +130,8 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         ) as progress, patch.object(
             seo_page, "_render_phase4_foundation"
         ) as phase4_admin, patch.object(
+            seo_page, "_render_growth_pipeline_admin"
+        ) as growth_admin, patch.object(
             seo_page, "_shopify_health"
         ) as shopify_health, patch.object(
             google_seo, "configuration_status"
@@ -147,6 +149,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         phase4_store.get_settings.assert_not_called()
         progress.assert_not_called()
         phase4_admin.assert_not_called()
+        growth_admin.assert_not_called()
         shopify_health.assert_not_called()
         configuration_status.assert_not_called()
 
@@ -176,7 +179,9 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
             seo_page, "_render_historical_import_controls"
         ) as progress, patch.object(
             seo_page, "_render_phase4_foundation"
-        ) as phase4_admin:
+        ) as phase4_admin, patch.object(
+            seo_page, "_render_growth_pipeline_admin"
+        ) as growth_admin:
             seo_page._render_data_connections_admin(
                 admin_user(),
                 google_store=connection_store,
@@ -195,6 +200,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         google_controls.assert_called_once()
         progress.assert_called_once()
         phase4_admin.assert_called_once()
+        growth_admin.assert_called_once()
         self.assertEqual(connection_store.get_connection.call_count, 1)
         rendered = " ".join(value for _kind, value in ui.events)
         self.assertIn("Google Search Console", rendered)
@@ -245,6 +251,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
                 inspect.getsource(seo_page._render_google_controls),
                 inspect.getsource(seo_page._render_historical_import_controls),
                 inspect.getsource(seo_page._render_phase4_foundation),
+                inspect.getsource(seo_page._render_growth_pipeline_admin),
             )
         )
         for label in (
@@ -258,6 +265,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
             "Save reporting settings",
             "Build joined reporting data",
             "Refresh joined data",
+            "Run daily pipeline now",
         ):
             self.assertIn(label, sources)
         self.assertGreaterEqual(sources.count("os_accounts.is_admin(user)"), 3)

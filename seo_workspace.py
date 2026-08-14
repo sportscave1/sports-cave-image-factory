@@ -21,7 +21,9 @@ from seo_navigation import (
     SEO_NAV_LABELS,
     SEO_OVERVIEW_ROUTE,
     SEO_PAGE_KEY,
+    SEO_REPORTS_ROUTE,
     SEO_ROUTES,
+    SEO_TASKS_ROUTE,
 )
 
 SEO_MIGRATION = "20260812_seo_workspace_v1.sql"

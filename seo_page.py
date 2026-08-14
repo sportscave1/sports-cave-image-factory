@@ -1,6 +1,7 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import html
 import json
+import os
 import re
 
 import streamlit as st
@@ -11,6 +12,7 @@ import google_seo_import
 import google_seo_phase4
 import navigation_runtime
 import os_accounts
+import seo_growth_intelligence
 import seo_sync_progress
 import seo_workspace as seo
 
@@ -22,11 +24,13 @@ SEO_ADMIN_OPEN_STATE_KEY = "seo-data-connections-open"
 
 PAGE_SUBTITLES = {
     seo.SEO_OVERVIEW_ROUTE: "Plan content, track authority work and monitor organic growth from one place.",
+    seo.SEO_KEYWORDS_ROUTE: "Turn real Google Search Console queries into buyer-focused page and content opportunities.",
+    seo.SEO_REPORTS_ROUTE: "Prepare evidence-based growth reports, review recommendations and build strategy from saved data.",
+    seo.SEO_TASKS_ROUTE: "Turn approved SEO recommendations into assigned work and measure results over time.",
     seo.SEO_CITATIONS_ROUTE: "Track reputable external profiles and business listings that display the Sports Cave brand and website.",
     seo.SEO_BLOG_ROUTE: "Create premium sports stories that attract search traffic and lead fans naturally toward Sports Cave collections.",
     seo.SEO_INTERNAL_LINKING_ROUTE: "Plan and verify links inside blog content without changing owner-controlled Shopify pages.",
     seo.SEO_BACKLINKS_ROUTE: "Build genuine authority through relevant websites, creators and editorial relationships.",
-    seo.SEO_KEYWORDS_ROUTE: "Turn real Google Search Console queries into buyer-focused page and content opportunities.",
 }
 
 BLOG_REVIEW_ITEMS = (
@@ -381,11 +385,17 @@ def _cached_default_reporting_snapshot(
     )
 
 
+@st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_default_growth_pipeline_status():
+    return seo_growth_intelligence.default_store().recent_pipeline_status()
+
+
 def invalidate_seo_overview_summary_cache():
     _cached_default_shopify_health.clear()
     _cached_default_google_connection.clear()
     _cached_default_phase4_health.clear()
     _cached_default_reporting_snapshot.clear()
+    _cached_default_growth_pipeline_status.clear()
 
 
 def _render_google_controls(user, store, config_status, connection):
@@ -827,6 +837,128 @@ def _render_phase4_foundation(
             _set_notice("Joined SEO refresh queued.")
             invalidate_seo_overview_summary_cache()
         st.rerun()
+    _render_manual_url_mapping_admin(user, phase4_store)
+
+
+def _render_manual_url_mapping_admin(user, phase4_store):
+    if not os_accounts.is_admin(user):
+        return
+    with st.expander("Unmatched URL review", expanded=False):
+        search_columns = st.columns([1.2, 1.2, 2])
+        url_search = search_columns[0].text_input("Search unmatched URLs", key="seo-url-review-search")
+        page_search = search_columns[1].text_input("Search saved pages", key="seo-url-review-page-search")
+        search_columns[2].caption("Manual mappings override automatic URL matching and survive later syncs.")
+        try:
+            aliases = phase4_store.unmatched_url_aliases(search=url_search, status="Needs review", limit=50)
+            pages = phase4_store.canonical_page_options(search=page_search, limit=50)
+        except Exception:
+            st.info("Unmatched URL review is unavailable until Phase 4 tables are migrated.")
+            return
+        _table(
+            [
+                {
+                    "Source": row.get("source"),
+                    "URL": row.get("raw_url"),
+                    "Path": row.get("normalized_path"),
+                    "Status": row.get("mapping_status"),
+                    "Reason": row.get("review_reason") or row.get("mapping_reason"),
+                    "Last seen": row.get("last_seen_at"),
+                }
+                for row in aliases
+            ],
+            empty="No unmatched, ambiguous or invalid source URLs need review.",
+            height=260,
+        )
+        if not aliases or not pages:
+            return
+        alias_by_key = {row["alias_key"]: row for row in aliases}
+        page_by_key = {row["page_key"]: row for row in pages}
+        selectors = st.columns(2)
+        alias_key = selectors[0].selectbox(
+            "Source URL",
+            tuple(alias_by_key),
+            format_func=lambda key: alias_by_key[key].get("raw_url") or key,
+            key="seo-url-review-alias",
+        )
+        page_key = selectors[1].selectbox(
+            "Canonical Shopify page",
+            tuple(page_by_key),
+            format_func=lambda key: page_by_key[key].get("title") or page_by_key[key].get("canonical_url") or key,
+            key="seo-url-review-page",
+        )
+        if st.button("Save manual mapping", icon=":material/link:", key="seo-url-review-save"):
+            try:
+                phase4_store.save_manual_url_mapping(
+                    alias_key,
+                    page_key,
+                    updated_by=str(user.get("id") or ""),
+                )
+            except google_seo_phase4.SEOPhase4Error as error:
+                _set_notice(error.public_message, success=False)
+            else:
+                _set_notice("Manual URL mapping saved. The next mapping refresh will apply it to source rows.")
+                invalidate_seo_overview_summary_cache()
+            st.rerun()
+
+
+def _render_growth_pipeline_admin(user, *, growth_store=None):
+    if not os_accounts.is_admin(user):
+        return
+    st.subheader("Daily Growth Intelligence pipeline")
+    using_default = growth_store is None
+    growth_store = growth_store or seo_growth_intelligence.default_store()
+    try:
+        status = (
+            _cached_default_growth_pipeline_status()
+            if using_default
+            else growth_store.recent_pipeline_status()
+        )
+    except seo_growth_intelligence.SEOGrowthError as error:
+        st.caption(error.public_message)
+        status = {}
+    run = dict((status or {}).get("run") or {})
+    stages = list((status or {}).get("stages") or [])
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("Last run", str(run.get("status") or "Not started").replace("_", " ").title())
+    summary_columns[1].metric("Common date", run.get("common_reporting_date") or "Not available")
+    summary_columns[2].metric("Confirmed revenue date", run.get("confirmed_revenue_through_date") or "Not available")
+    summary_columns[3].metric(
+        "Next scheduled run",
+        str(os.getenv("SEO_GROWTH_DAILY_SCHEDULE_LOCAL_TIME", "Render morning job")),
+    )
+    actions = st.columns([1.2, 4])
+    if actions[0].button(
+        "Run daily pipeline now",
+        type="primary",
+        icon=":material/play_arrow:",
+        key="seo-growth-pipeline-run-now",
+        use_container_width=True,
+    ):
+        try:
+            seo_growth_intelligence.queue_growth_pipeline(user, store=growth_store, mode="manual")
+        except (google_seo.GoogleSEOError, seo_growth_intelligence.SEOGrowthError, PermissionError) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            _set_notice("Daily SEO Growth Intelligence pipeline queued.")
+            invalidate_seo_overview_summary_cache()
+        st.rerun()
+    actions[1].caption("The scheduled command is safe to run repeatedly; each stage uses durable locks and idempotent writes.")
+    if stages:
+        _table(
+            [
+                {
+                    "Stage": str(row.get("stage_key") or "").replace("_", " ").title(),
+                    "Status": str(row.get("status") or "").replace("_", " ").title(),
+                    "Data through": row.get("data_through_date") or "",
+                    "Rows processed": row.get("rows_processed") or 0,
+                    "Rows written": row.get("rows_written") or 0,
+                    "Issue": row.get("error_summary") or "",
+                }
+                for row in stages
+            ],
+            empty="No daily pipeline stage history has been saved yet.",
+            height=280,
+        )
 
 
 def _load_reporting_health(phase4_store=None):
@@ -1084,8 +1216,20 @@ def _opportunity_label(value):
         "keywords_near_page_one": "Near Page One",
         "high_impressions_weak_ctr": "Weak CTR",
         "declining_pages": "Declining Page",
+        "new_search_queries": "New Query",
+        "trending_queries": "Trending Query",
+        "ranking_gains": "Ranking Gain",
+        "ranking_losses": "Ranking Loss",
+        "growing_pages": "Growing Page",
         "unmapped_keywords": "Unmapped Keyword",
         "competing_pages_same_keyword": "Competing Pages",
+        "product_seo_gaps": "Product Gap",
+        "landing_pages_weak_engagement": "Weak Engagement",
+        "landing_pages_weak_conversion": "Weak Conversion",
+        "blogs_traffic_not_supporting_products": "Blog Support Gap",
+        "internal_link_opportunities": "Internal Link",
+        "products_strong_sales_weak_organic_visibility": "Sales / Visibility Gap",
+        "market_keyword_gaps": "Market Gap",
     }
     return labels.get(str(value or ""), str(value or "").replace("_", " ").title())
 
@@ -1195,7 +1339,7 @@ def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None):
     else:
         reason = _status_label(health.get("data_status"))
         st.info(
-            f"SEO reporting is unavailable: {reason}."
+            f"SEO reporting is unavailable: {reason}. SEO reporting will appear here when GSC, GA4 and Shopify share a saved common reporting date."
         )
 
     _section_heading("Organic Performance")
@@ -1262,6 +1406,7 @@ def _render_data_connections_admin(
     import_store=None,
     phase4_store=None,
     reporting_reader=None,
+    growth_store=None,
 ):
     st.divider()
     is_open = bool(st.session_state.get(SEO_ADMIN_OPEN_STATE_KEY, False))
@@ -1349,6 +1494,7 @@ def _render_data_connections_admin(
         reporting_reader,
         google_store,
     )
+    _render_growth_pipeline_admin(user, growth_store=growth_store)
 
 
 def _render_overview(
@@ -1359,6 +1505,7 @@ def _render_overview(
     import_store=None,
     phase4_store=None,
     reporting_reader=None,
+    growth_store=None,
 ):
     _header(seo.SEO_OVERVIEW_ROUTE)
     _consume_google_oauth_notice()
@@ -2096,17 +2243,73 @@ def _render_page_mapping(store, state, user, keywords):
     st.caption("This workspace never changes live URLs or creates Shopify pages. Product and collection changes require owner approval.")
 
 
-def _render_keywords(store, state, user):
+def _render_saved_query_intelligence(*, growth_store=None):
+    filters = _reporting_filters()
+    opportunity_options = (
+        "All",
+        "new_search_queries",
+        "trending_queries",
+        "ranking_gains",
+        "ranking_losses",
+        "keywords_near_page_one",
+        "high_impressions_weak_ctr",
+        "unmapped_keywords",
+        "competing_pages_same_keyword",
+        "product_seo_gaps",
+        "market_keyword_gaps",
+    )
+    opportunity_type = st.selectbox(
+        "Opportunity type",
+        opportunity_options,
+        format_func=lambda value: "All opportunities" if value == "All" else _opportunity_label(value),
+        key="seo-keyword-saved-opportunity-type",
+    )
+    growth_store = growth_store or seo_growth_intelligence.default_store()
+    try:
+        rows = growth_store.keyword_workspace_rows(
+            filters=filters,
+            opportunity_type=opportunity_type,
+        )
+    except Exception:
+        st.info("Saved query intelligence is unavailable until reporting snapshots have been built.")
+        return
+    prepared = []
+    for row in rows:
+        prepared.append(
+            {
+                "Query": row.get("query") or "",
+                "Opportunity": _opportunity_label(row.get("opportunity_type")),
+                "Status": str(row.get("opportunity_status") or "").replace("_", " ").title(),
+                "Priority": row.get("priority_score") or 0,
+                "Current page": row.get("current_page") or "Unmapped",
+                "Page type": row.get("page_type") or "",
+                "Clicks": row.get("clicks") or 0,
+                "Impressions": row.get("impressions") or 0,
+                "CTR": _metric_value(row.get("ctr"), style="percent"),
+                "Position": _metric_value(row.get("average_position"), style="position"),
+            }
+        )
+    _table(
+        prepared,
+        empty="No saved query intelligence matches the current filters.",
+        height=420,
+    )
+    st.caption("Approve, ignore, snooze and task conversion happen from Reports & Strategy or Tasks & Results after owner review.")
+
+
+def _render_keywords(store, state, user, *, growth_store=None):
     _header(seo.SEO_KEYWORDS_ROUTE)
     st.caption("Use real search data only. This workspace never invents search volume, clicks, impressions, CTR or position.")
     keywords = seo.active_records(state, "keywords")
-    tab_names = ("Keyword Library", "Import GSC CSV", "Page Mapping", "Analysis Prompt", "Rules")
+    tab_names = ("Saved Query Intelligence", "Keyword Library", "Import GSC CSV", "Page Mapping", "Analysis Prompt", "Rules")
     view = _active_view(
         tab_names,
         key="seo-keyword-view",
         default=st.session_state.get("seo-keyword-view") or tab_names[0],
     )
-    if view == "Keyword Library":
+    if view == "Saved Query Intelligence":
+        _render_saved_query_intelligence(growth_store=growth_store)
+    elif view == "Keyword Library":
         _render_keyword_library(store, state, user, keywords)
     elif view == "Import GSC CSV":
         _render_gsc_import(store, state, user, keywords)
@@ -2121,6 +2324,295 @@ def _render_keywords(store, state, user):
         _rule_expander("Mapping", ["Use one primary keyword per target page.", "Warn about likely cannibalisation.", "Do not change live URLs or create pages automatically."])
 
 
+def _analysis_bundle_key(route_key):
+    return f"seo-growth-analysis-bundle::{route_key}"
+
+
+def _build_current_analysis_bundle(state, *, analysis_mode, filters, phase4_store=None, reporting_reader=None):
+    snapshot = _load_reporting_snapshot(
+        filters,
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
+    return seo_growth_intelligence.build_analysis_bundle(
+        snapshot,
+        state,
+        analysis_mode=analysis_mode,
+        filters=filters,
+    )
+
+
+def _render_analysis_bundle(bundle):
+    if not bundle:
+        return
+    st.caption(f"Prepared for {bundle.get('analysis_mode') or 'SEO analysis'} | Data through {bundle.get('data_through') or 'Not available'}")
+    st.text_area(
+        "Master prompt",
+        value=bundle.get("prompt") or "",
+        height=280,
+        key="seo-growth-master-prompt-preview",
+    )
+    st.text_area(
+        "Sanitised JSON analysis snapshot",
+        value=bundle.get("snapshot_json") or "",
+        height=260,
+        key="seo-growth-snapshot-json-preview",
+    )
+    st.download_button(
+        "Download JSON snapshot",
+        data=(bundle.get("snapshot_json") or "{}").encode("utf-8"),
+        file_name="sports-cave-seo-analysis-snapshot.json",
+        mime="application/json",
+        icon=":material/download:",
+        use_container_width=True,
+    )
+    with st.expander("Human-readable analytics summary", expanded=False):
+        st.code(bundle.get("summary") or "", language=None)
+
+
+def _render_report_history(growth_store):
+    try:
+        reports = growth_store.list_reports(limit=30)
+        snapshots = growth_store.list_snapshots(limit=10)
+    except Exception:
+        st.info("Saved report history is unavailable until the Growth Intelligence migration is applied.")
+        return
+    _section_heading("Report History")
+    _table(
+        [
+            {
+                "Report type": row.get("report_type") or "",
+                "Status": str(row.get("status") or "").replace("_", " ").title(),
+                "Model": row.get("model_name") or "Manual snapshot",
+                "Created": row.get("created_at") or "",
+                "Snapshot": row.get("snapshot_id") or "",
+            }
+            for row in reports
+        ],
+        empty="No saved reports yet. Prepare a snapshot or generate a report to start the history.",
+        height=260,
+    )
+    with st.expander("Recent source snapshots", expanded=False):
+        _table(
+            [
+                {
+                    "Mode": row.get("analysis_mode") or "",
+                    "Data through": row.get("data_through") or "",
+                    "Created": row.get("created_at") or "",
+                    "Created by": row.get("created_by") or "",
+                    "Snapshot ID": row.get("id") or "",
+                }
+                for row in snapshots
+            ],
+            empty="No analysis snapshots saved yet.",
+            height=220,
+        )
+
+
+def _render_recommendation_review(user, growth_store):
+    _section_heading("Recommendations")
+    try:
+        recommendations = growth_store.list_recommendations(limit=100)
+    except Exception:
+        st.info("Recommendations will appear after a structured report is saved.")
+        return
+    _table(
+        [
+            {
+                "Status": str(row.get("status") or "").replace("_", " ").title(),
+                "Priority": row.get("priority") or "",
+                "Target keyword": row.get("target_keyword") or "",
+                "Market": row.get("target_market") or "",
+                "Recommended action": row.get("recommended_action") or "",
+                "Owner": row.get("proposed_owner") or "",
+            }
+            for row in recommendations
+        ],
+        empty="No saved recommendations yet.",
+        height=300,
+    )
+    if not os_accounts.is_admin(user) or not recommendations:
+        return
+    by_id = {str(row.get("id")): row for row in recommendations}
+    selected_id = st.selectbox(
+        "Recommendation to review",
+        tuple(by_id),
+        format_func=lambda key: by_id[key].get("target_keyword") or by_id[key].get("recommended_action") or key,
+        key="seo-growth-recommendation-review-select",
+    )
+    selected = by_id[selected_id]
+    controls = st.columns([1, 1, 1, 1, 2])
+    if controls[0].button("Approve", icon=":material/check:", use_container_width=True):
+        growth_store.update_recommendation_status(selected_id, status="approved", actor=str(user.get("id") or ""))
+        _set_notice("Recommendation approved.")
+        st.rerun()
+    if controls[1].button("Reject", icon=":material/close:", use_container_width=True):
+        growth_store.update_recommendation_status(selected_id, status="rejected", actor=str(user.get("id") or ""))
+        _set_notice("Recommendation rejected.")
+        st.rerun()
+    if controls[2].button("Snooze", icon=":material/schedule:", use_container_width=True):
+        growth_store.update_recommendation_status(
+            selected_id,
+            status="snoozed",
+            actor=str(user.get("id") or ""),
+            snoozed_until=date.today() + timedelta(days=14),
+        )
+        _set_notice("Recommendation snoozed for 14 days.")
+        st.rerun()
+    if controls[3].button("Create task", icon=":material/assignment:", use_container_width=True):
+        growth_store.convert_recommendation_to_task(
+            selected_id,
+            actor=str(user.get("id") or ""),
+            owner=selected.get("proposed_owner") or "",
+        )
+        _set_notice("Approved SEO task created with 28/56/90-day measurements.")
+        st.rerun()
+    controls[4].caption("Recommendations never publish website changes automatically.")
+
+
+def _render_reports_strategy(
+    store,
+    state,
+    user,
+    *,
+    phase4_store=None,
+    reporting_reader=None,
+    growth_store=None,
+):
+    _header(seo.SEO_REPORTS_ROUTE)
+    growth_store = growth_store or seo_growth_intelligence.default_store()
+    mode = st.selectbox(
+        "Report type",
+        seo_growth_intelligence.ANALYSIS_MODES,
+        key="seo-growth-analysis-mode",
+    )
+    filters = _reporting_filters()
+    openai_status = seo_growth_intelligence.openai_config_status()
+    st.caption(
+        "OpenAI mode is server-side only. Prepare for ChatGPT always works without an API key."
+    )
+    action_columns = st.columns([1.2, 1.25, 2.5])
+    bundle_key = _analysis_bundle_key("reports")
+    if action_columns[0].button(
+        "Generate Weekly Growth Report",
+        type="primary",
+        icon=":material/auto_awesome:",
+        use_container_width=True,
+        key="seo-growth-generate-report",
+    ):
+        bundle = _build_current_analysis_bundle(
+            state,
+            analysis_mode=mode,
+            filters=filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+        )
+        st.session_state[bundle_key] = bundle
+        result = seo_growth_intelligence.generate_openai_report(
+            bundle,
+            store=growth_store,
+            created_by=str(user.get("id") or ""),
+        )
+        if result.get("ok"):
+            _set_notice("Structured SEO growth report saved.")
+        else:
+            _set_notice(result.get("message") or "OpenAI report unavailable. Use the prepared prompt.", success=False)
+        st.rerun()
+    if action_columns[1].button(
+        "Prepare for ChatGPT",
+        icon=":material/content_copy:",
+        use_container_width=True,
+        key="seo-growth-prepare-chatgpt",
+    ):
+        bundle = _build_current_analysis_bundle(
+            state,
+            analysis_mode=mode,
+            filters=filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+        )
+        st.session_state[bundle_key] = bundle
+        try:
+            growth_store.save_analysis_snapshot(bundle, created_by=str(user.get("id") or ""))
+        except Exception:
+            pass
+        _set_notice("Sanitised ChatGPT evidence pack prepared.")
+        st.rerun()
+    action_columns[2].caption(
+        f"In-app OpenAI: {'Configured' if openai_status.get('configured') else 'Not configured'}"
+        f" | Model: {openai_status.get('model') or 'Server default'}"
+    )
+    _render_analysis_bundle(st.session_state.get(bundle_key))
+    _render_report_history(growth_store)
+    _render_recommendation_review(user, growth_store)
+
+
+def _render_tasks_results(user, *, growth_store=None):
+    _header(seo.SEO_TASKS_ROUTE)
+    growth_store = growth_store or seo_growth_intelligence.default_store()
+    try:
+        tasks = growth_store.list_tasks(limit=100)
+        measurements = growth_store.list_measurements(limit=100)
+    except Exception:
+        st.info("Approved SEO tasks and measurements will appear after the Growth Intelligence migration is applied.")
+        return
+    _section_heading("Approved SEO Tasks")
+    visible_tasks = tasks if os_accounts.is_admin(user) else [row for row in tasks if row.get("status") in {"approved", "assigned", "in_progress", "completed", "measuring", "measured"}]
+    _table(
+        [
+            {
+                "Status": str(row.get("status") or "").replace("_", " ").title(),
+                "Task": row.get("title") or "",
+                "Keyword": row.get("target_keyword") or "",
+                "Market": row.get("target_market") or "",
+                "Target page": row.get("target_page") or "",
+                "Owner": row.get("owner") or "",
+                "Due": row.get("due_date") or "",
+            }
+            for row in visible_tasks
+        ],
+        empty="No approved SEO tasks yet.",
+        height=320,
+    )
+    if os_accounts.is_admin(user) and tasks:
+        by_id = {str(row.get("id")): row for row in tasks}
+        selected_id = st.selectbox(
+            "Task to update",
+            tuple(by_id),
+            format_func=lambda key: by_id[key].get("title") or key,
+            key="seo-growth-task-status-select",
+        )
+        update_columns = st.columns([1, 1, 1, 3])
+        for label, status in (
+            ("Assign", "assigned"),
+            ("Complete", "completed"),
+            ("Measuring", "measuring"),
+        ):
+            if update_columns[("Assign", "Complete", "Measuring").index(label)].button(label, use_container_width=True):
+                growth_store.update_task_status(selected_id, status=status, actor=str(user.get("id") or ""))
+                _set_notice(f"Task marked {status.replace('_', ' ')}.")
+                st.rerun()
+        update_columns[3].caption("Tasks require proof and owner review; nothing publishes automatically.")
+    _section_heading("Measured Results")
+    _table(
+        [
+            {
+                "Task": row.get("title") or "",
+                "Window": f"{row.get('window_days') or ''} days",
+                "Status": str(row.get("measurement_status") or "").replace("_", " ").title(),
+                "Baseline": row.get("baseline_date") or "",
+                "Due": row.get("due_date") or "",
+                "Measured": row.get("measured_at") or "",
+                "Result": (row.get("change_summary") or {}).get("result") if isinstance(row.get("change_summary"), dict) else "",
+                "Confidence": row.get("measurement_confidence") or "",
+            }
+            for row in measurements
+        ],
+        empty="No 28/56/90-day measurements have been scheduled yet.",
+        height=300,
+    )
+
+
 @st.fragment
 def _render_active_route(
     user,
@@ -2131,6 +2623,7 @@ def _render_active_route(
     import_store=None,
     phase4_store=None,
     reporting_reader=None,
+    growth_store=None,
 ):
     state = {}
     if route != seo.SEO_OVERVIEW_ROUTE:
@@ -2184,12 +2677,23 @@ def _render_active_route(
                 import_store,
                 phase4_store,
                 reporting_reader,
+                growth_store,
             ),
             seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
             seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
             seo.SEO_INTERNAL_LINKING_ROUTE: lambda: _render_internal_linking(store, state, user),
             seo.SEO_BACKLINKS_ROUTE: lambda: _render_outreach(store, state, user),
-            seo.SEO_KEYWORDS_ROUTE: lambda: _render_keywords(store, state, user),
+            seo.SEO_KEYWORDS_ROUTE: lambda: _render_keywords(store, state, user, growth_store=growth_store),
+            seo.SEO_REPORTS_ROUTE: lambda: _render_reports_strategy(
+                store, state, user,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
+                growth_store=growth_store,
+            ),
+            seo.SEO_TASKS_ROUTE: lambda: _render_tasks_results(
+                user,
+                growth_store=growth_store,
+            ),
         },
     )
 
@@ -2204,6 +2708,7 @@ def render_page(
     import_store=None,
     phase4_store=None,
     reporting_reader=None,
+    growth_store=None,
 ):
     if route not in seo.SEO_ROUTES:
         raise ValueError(f"Unknown SEO route: {route}")
@@ -2219,4 +2724,5 @@ def render_page(
         import_store,
         phase4_store,
         reporting_reader,
+        growth_store,
     )

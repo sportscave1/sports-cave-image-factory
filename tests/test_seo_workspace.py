@@ -26,12 +26,21 @@ def user(*, permissions=(), role="worker"):
 
 
 class SEONavigationTests(unittest.TestCase):
-    def test_registry_has_one_assignable_parent_and_all_six_routes(self):
+    def test_registry_has_one_assignable_parent_and_all_growth_routes(self):
         parent = os_accounts.PAGE_BY_KEY[seo.SEO_PAGE_KEY]
         self.assertEqual(parent["route"], seo.SEO_OVERVIEW_ROUTE)
         self.assertEqual(parent["label"], "SEO")
         self.assertTrue(parent["worker_assignable"])
-        self.assertEqual(len(seo.SEO_ROUTES), 6)
+        self.assertEqual(len(seo.SEO_ROUTES), 8)
+        self.assertEqual(
+            seo.SEO_ROUTES[:4],
+            (
+                seo.SEO_OVERVIEW_ROUTE,
+                seo.SEO_KEYWORDS_ROUTE,
+                seo.SEO_REPORTS_ROUTE,
+                seo.SEO_TASKS_ROUTE,
+            ),
+        )
         for route in seo.SEO_ROUTES:
             self.assertIn(route, os_accounts.PAGE_BY_ROUTE)
         for route in seo.SEO_ROUTES[1:]:

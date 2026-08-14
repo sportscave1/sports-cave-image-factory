@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import secrets
 import time
@@ -1235,6 +1236,18 @@ def queue_daily_runs(*, import_store=None, connection_store=None, requested_by="
     ]
 
 
+def run_complete_daily_pipeline():
+    if os.getenv("SEO_GOOGLE_IMPORT_DAILY_ONLY", "").strip() == "1":
+        queue_daily_runs()
+        worker = SEOImportWorker()
+        for source in SOURCES:
+            worker.run_once(source=source)
+        return {"status": "legacy_google_daily_only"}
+    import seo_growth_intelligence
+
+    return seo_growth_intelligence.run_daily_growth_pipeline(requested_by="render-cron")
+
+
 def _run_worker_loop(worker, *, once=False, poll_seconds=15):
     while True:
         result = worker.run_once()
@@ -1255,9 +1268,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     worker = SEOImportWorker()
     if args.command == "daily":
-        queue_daily_runs()
-        for source in SOURCES:
-            worker.run_once(source=source)
+        run_complete_daily_pipeline()
         return 0
     return _run_worker_loop(worker, once=args.once, poll_seconds=args.poll_seconds)
 
