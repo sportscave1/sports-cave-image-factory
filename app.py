@@ -42,7 +42,6 @@ import streamlit as st
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
 import app_branding
 import dropbox_integration
-import daily_planner
 import mockup_storage
 import navigation_runtime
 import os_accounts
@@ -8383,17 +8382,14 @@ def _render_sidebar_create_reporting(
             set_current_page("Reporting", source="sidebar")
             st.rerun(scope="app")
     if reporting_daily_allowed:
-        if children.button(
+        children.button(
             os_accounts.DAILY_PLANNER_ROUTE,
             key=f"sidebar-child::{os_accounts.DAILY_PLANNER_ROUTE}",
             use_container_width=True,
             type="secondary",
             icon=SIDEBAR_ICON_BY_ROUTE[os_accounts.DAILY_PLANNER_ROUTE],
-            help="Open Daily Planner",
-        ):
-            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
-            daily_planner.open_daily_planner()
-            st.rerun(scope="app")
+            help="Open Daily Planner in a separate window",
+        )
     if reporting_weekly_allowed:
         if children.button(
             os_accounts.WEEKLY_REVIEW_ROUTE,
@@ -11803,6 +11799,134 @@ def render_active_alerts(events, today):
     )
 
 
+def render_active_upcoming_events(events, today):
+    render_html_section_title("Active & Upcoming Events")
+    rows = sports_cave_dashboard.build_home_event_rows(events, today, limit=8)
+    if not rows:
+        st.markdown(
+            '<div class="sc-empty-note">No confirmed live or upcoming events.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    records = []
+    for row in rows:
+        remaining = int(row.get("days_remaining") or 0)
+        if row.get("status") == "Live":
+            timing = "Ends today" if remaining == 0 else f"{remaining} day{'s' if remaining != 1 else ''} left"
+        else:
+            timing = "Starts today" if remaining == 0 else f"In {remaining} day{'s' if remaining != 1 else ''}"
+        records.append(
+            {
+                "Event": row.get("name") or "",
+                "Type": row.get("category") or row.get("type") or "Event",
+                "Status": row.get("status") or "Coming soon",
+                "Dates": row.get("date_label") or "",
+                "Timing": timing,
+            }
+        )
+    st.dataframe(
+        records,
+        hide_index=True,
+        width="stretch",
+        height=min(340, 42 + len(records) * 34),
+        row_height=32,
+        key="home-active-upcoming-events",
+    )
+
+
+def _home_duration_label(seconds):
+    total = max(int(seconds or 0), 0)
+    hours, remainder = divmod(total, 3600)
+    minutes = remainder // 60
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def render_home_weekly_work(user, local_now):
+    render_html_section_title("This Week's Work")
+    started = time.perf_counter()
+    try:
+        snapshot = sports_cave_dashboard.build_home_weekly_work_snapshot(user, local_now)
+    except sports_cave_dashboard.DashboardStorageError:
+        st.markdown(
+            '<div class="sc-empty-note">Weekly work analytics are unavailable right now.</div>',
+            unsafe_allow_html=True,
+        )
+        safe_startup_print(f"PERF Dashboard weekly unavailable={(time.perf_counter() - started):.3f}s")
+        return
+    metrics = snapshot.get("metrics") or {}
+    cards = st.columns(5)
+    cards[0].metric("Tasks completed", int(metrics.get("tasks_completed") or 0))
+    cards[1].metric("Did not finish", int(metrics.get("tasks_not_finished") or 0))
+    cards[2].metric("Focused time", _home_duration_label(metrics.get("actual_seconds")))
+    cards[3].metric("Meaningful actions", int(metrics.get("meaningful_actions") or 0))
+    cards[4].metric(
+        "Staff active" if snapshot.get("is_team_view") else "Work days active",
+        int(metrics.get("staff_active") or 0),
+    )
+
+    if snapshot.get("is_team_view"):
+        team_rows = []
+        for row in snapshot.get("team") or []:
+            team_rows.append(
+                {
+                    "Staff member": row.get("staff") or "",
+                    "Role": row.get("role") or "",
+                    "Completed tasks": int(row.get("completed_tasks") or 0),
+                    "Did not finish": int(row.get("did_not_finish") or 0),
+                    "Allocated time": _home_duration_label(row.get("allocated_seconds")),
+                    "Focused time": _home_duration_label(row.get("actual_seconds")),
+                    "Meaningful actions": int(row.get("meaningful_actions") or 0),
+                    "Last meaningful activity": format_dashboard_timestamp(row.get("last_activity")),
+                }
+            )
+        if team_rows:
+            st.dataframe(
+                team_rows,
+                hide_index=True,
+                width="stretch",
+                height=min(300, 42 + len(team_rows) * 34),
+                row_height=32,
+                key="home-weekly-team-summary",
+            )
+
+    render_html_section_title("Completed Work This Week")
+    work_rows = [
+        {
+            "Date/time": format_dashboard_timestamp(row.get("timestamp")),
+            "Staff": row.get("staff") or "",
+            "Work/task": row.get("work") or "",
+            "Area": row.get("area") or "",
+            "Outcome/status": row.get("status") or "",
+            "Actual time": _home_duration_label(row.get("actual_seconds")) if row.get("actual_seconds") else "",
+        }
+        for row in snapshot.get("completed_work") or []
+    ]
+    if work_rows:
+        st.dataframe(
+            work_rows,
+            hide_index=True,
+            width="stretch",
+            height=min(390, max(220, 42 + len(work_rows) * 34)),
+            row_height=32,
+            key="home-completed-work-week",
+        )
+    else:
+        st.markdown(
+            '<div class="sc-empty-note">No completed work recorded this week.</div>',
+            unsafe_allow_html=True,
+        )
+    if os_accounts.can_access_page(user, "Reporting"):
+        if st.button("View full report", key="home-view-full-report", icon=":material/analytics:"):
+            set_current_page("Reporting", source="home-weekly-work")
+            st.rerun()
+    safe_startup_print(
+        "PERF Dashboard weekly "
+        f"total={(time.perf_counter() - started):.3f}s queries={snapshot.get('query_count') or 1}"
+    )
+
+
 def render_home_recent_activity(local_now):
     user = current_os_user()
     if not os_accounts.can_view_activity_log(user):
@@ -13550,7 +13674,7 @@ def render_lightweight_dashboard_page():
     started = time.perf_counter()
     user = current_os_user()
     local_now = account_local_now(user)
-    today = local_now.date()
+    today = sports_sales_calendar.sydney_date(local_now)
     events = sports_cave_dashboard.load_calendar_events()
     greeting = sports_cave_dashboard.greeting_for_account(local_now, user)
 
@@ -13563,7 +13687,12 @@ def render_lightweight_dashboard_page():
         """,
         unsafe_allow_html=True,
     )
-    render_active_alerts(events, today)
+    events_render_started = time.perf_counter()
+    render_active_upcoming_events(events, today)
+    safe_startup_print(
+        f"PERF Dashboard events={(time.perf_counter() - events_render_started):.3f}s"
+    )
+    render_home_weekly_work(user, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
@@ -14898,7 +15027,6 @@ def render_selected_page(current_page):
     elif current_page == "Reporting":
         get_reporting_page().render_page(current_os_user())
     elif current_page == os_accounts.DAILY_PLANNER_ROUTE:
-        daily_planner.open_daily_planner()
         set_current_page("Dashboard", source="daily-planner-popup")
         st.rerun()
     elif current_page == os_accounts.WEEKLY_REVIEW_ROUTE:
@@ -15011,7 +15139,6 @@ def main():
     log_startup_stage("PAGE RENDER START", current_page)
     try:
         render_selected_page(current_page)
-        daily_planner.render_daily_planner_overlays(current_os_user())
     except Exception as error:
         error_message = f"Page render failed for {current_page}: {error}"
         print(f"ERROR {error_message}", flush=True)

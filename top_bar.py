@@ -8,6 +8,7 @@ import time
 
 import os_accounts
 import top_bar_security
+from daily_planner import PLANNER_WINDOW_PATH
 
 
 COMPONENT_PATH = (
@@ -42,6 +43,7 @@ def top_bar_config(user, *, logo_src, current_route):
         "notificationsUrl": "/api/os/top-bar/notifications",
         "orderStatusUrl": "/api/os/top-bar/order-status",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
+        "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
         "dailyPlannerEnabled": os_accounts.is_admin(user),
         "ordersEnabled": "Orders" in allowed_routes,
         "authToken": token,

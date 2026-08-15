@@ -236,6 +236,8 @@
     }
     #sc-os-order-toast-region[hidden] { display: none !important; }
     #sc-os-planner-toast-region {
+      display: grid;
+      gap: 6px;
       position: fixed;
       right: 16px;
       top: calc(var(--sc-topbar-height) + 66px);
@@ -303,9 +305,30 @@
       width: 8px;
     }
     .sc-os-planner-toast:hover { background: #22211e; }
+    .sc-os-planner-stop-sound {
+      background: #fff;
+      border: 1px solid #c9b57f;
+      border-radius: 5px;
+      color: #241d10;
+      cursor: pointer;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      justify-self: end;
+      padding: 5px 9px;
+    }
+    .sc-os-planner-sound-warning {
+      background: #fff3d7;
+      border: 1px solid #d4a54c;
+      border-radius: 5px;
+      color: #49340d;
+      font-size: 11px;
+      padding: 6px 8px;
+    }
     .sc-os-topbar-icon-button:focus-visible,
     .sc-os-topbar-result:focus-visible,
     .sc-os-topbar-action:focus-visible,
+    .sc-os-planner-stop-sound:focus-visible,
     .sc-os-theme-option:focus-visible {
       outline: 2px solid #d4a54c;
       outline-offset: 2px;
@@ -534,6 +557,10 @@
       shownOrderIds: new Set(),
       shownPlannerEvents: new Set(),
       plannerAudioContext: null,
+      plannerWindow: parentWindow.SportsCaveDailyPlannerWindow || null,
+      plannerAlarmNodes: [],
+      plannerAlarmStopTimer: null,
+      plannerAlarmPlaying: false,
     };
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
@@ -563,10 +590,39 @@
       link.click();
       link.remove();
     };
+    const sendPlannerAuth = (plannerWindow) => {
+      try {
+        if (plannerWindow && !plannerWindow.closed) {
+          plannerWindow.postMessage({
+            type: "sports-cave-planner-auth",
+            token: state.config.authToken || "",
+          }, parentWindow.location.origin);
+        }
+      } catch (_error) {}
+    };
     const openDailyPlanner = () => {
-      const url = new URL(parentWindow.location.href);
-      url.searchParams.set("daily_planner", "open");
-      navigateDocument(url.toString());
+      const existing = state.plannerWindow || parentWindow.SportsCaveDailyPlannerWindow;
+      if (existing && !existing.closed) {
+        state.plannerWindow = existing;
+        try { existing.focus(); } catch (_error) {}
+        sendPlannerAuth(existing);
+        return existing;
+      }
+      const url = new URL(state.config.dailyPlannerWindowUrl || "/daily-planner", parentWindow.location.origin);
+      const features = "popup=yes,width=950,height=760,resizable=yes,scrollbars=yes";
+      const plannerWindow = parentWindow.open(url.toString(), "sports_cave_daily_planner", features);
+      if (!plannerWindow) {
+        showPlannerPopupBlocked(url.toString());
+        return null;
+      }
+      state.plannerWindow = plannerWindow;
+      parentWindow.SportsCaveDailyPlannerWindow = plannerWindow;
+      try { plannerWindow.focus(); } catch (_error) {}
+      sendPlannerAuth(plannerWindow);
+      later(() => sendPlannerAuth(plannerWindow), 120);
+      later(() => sendPlannerAuth(plannerWindow), 500);
+      later(() => sendPlannerAuth(plannerWindow), 1200);
+      return plannerWindow;
     };
     const navigate = (result) => {
       if (!result || !result.route_key) return;
@@ -671,25 +727,67 @@
         return false;
       }
     };
+    const stopPlannerAlarm = () => {
+      if (state.plannerAlarmStopTimer) {
+        parentWindow.clearTimeout(state.plannerAlarmStopTimer);
+        state.plannerAlarmStopTimer = null;
+      }
+      state.plannerAlarmNodes.forEach((node) => {
+        try { node.stop(); } catch (_error) {}
+      });
+      state.plannerAlarmNodes = [];
+      state.plannerAlarmPlaying = false;
+    };
     const playPlannerAlarm = async () => {
-      if (!(await enablePlannerAudio())) return;
+      if (state.plannerAlarmPlaying) return;
+      if (!(await enablePlannerAudio())) {
+        const warning = doc.createElement("div");
+        warning.className = "sc-os-planner-sound-warning";
+        warning.textContent = "Sound is blocked. Allow audio for Sports Cave OS, then use Test Sound in Daily Planner.";
+        plannerToastRegion.appendChild(warning);
+        return;
+      }
       const audio = state.plannerAudioContext;
-      const playOne = (offset, duration, frequency) => {
+      state.plannerAlarmPlaying = true;
+      const playOne = (offset, duration, frequency, volume) => {
         const oscillator = audio.createOscillator();
         const gain = audio.createGain();
-        oscillator.type = "sine";
+        oscillator.type = frequency > 700 ? "triangle" : "sine";
         oscillator.frequency.setValueAtTime(frequency, audio.currentTime + offset);
         gain.gain.setValueAtTime(0.0001, audio.currentTime + offset);
-        gain.gain.exponentialRampToValueAtTime(0.15, audio.currentTime + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(volume, audio.currentTime + offset + 0.05);
+        gain.gain.setValueAtTime(volume, audio.currentTime + offset + Math.max(duration - 0.2, 0.1));
         gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + offset + duration);
         oscillator.connect(gain);
         gain.connect(audio.destination);
         oscillator.start(audio.currentTime + offset);
         oscillator.stop(audio.currentTime + offset + duration + 0.05);
+        state.plannerAlarmNodes.push(oscillator);
       };
-      playOne(0, 0.2, 660);
-      playOne(0.27, 0.2, 880);
-      playOne(0.54, 0.25, 660);
+      for (let pulse = 0; pulse < 6; pulse += 1) {
+        playOne(pulse * 0.83, 0.68, 660, 0.22);
+        playOne(pulse * 0.83 + 0.025, 0.68, 880, 0.13);
+      }
+      state.plannerAlarmStopTimer = later(() => {
+        state.plannerAlarmNodes = [];
+        state.plannerAlarmPlaying = false;
+        state.plannerAlarmStopTimer = null;
+      }, 5050);
+    };
+    const showPlannerPopupBlocked = (url) => {
+      dismissPlannerToast();
+      const notice = doc.createElement("div");
+      notice.className = "sc-os-planner-toast sc-os-planner-popup-blocked";
+      const message = doc.createElement("span");
+      message.textContent = "Allow popups for Sports Cave OS.";
+      const link = doc.createElement("a");
+      link.href = url;
+      link.target = "sports_cave_daily_planner";
+      link.textContent = "Open planner";
+      notice.append(message, link);
+      plannerToastRegion.appendChild(notice);
+      plannerToastRegion.hidden = false;
+      state.plannerToastTimer = later(dismissPlannerToast, 12000);
     };
     const showPlannerToast = (message, {openPlanner = false, alarm = false, eventKey = ""} = {}) => {
       const clean = String(message || "").trim();
@@ -707,6 +805,14 @@
         openDailyPlanner();
       }, listenerOptions);
       plannerToastRegion.appendChild(toast);
+      if (alarm) {
+        const stopSound = doc.createElement("button");
+        stopSound.type = "button";
+        stopSound.className = "sc-os-planner-stop-sound";
+        stopSound.textContent = "Stop Sound";
+        stopSound.addEventListener("click", stopPlannerAlarm, listenerOptions);
+        plannerToastRegion.appendChild(stopSound);
+      }
       plannerToastRegion.hidden = false;
       if (alarm) playPlannerAlarm();
       if (openPlanner) later(openDailyPlanner, 120);
@@ -778,6 +884,10 @@
         if (plannerButton) plannerButton.hidden = true;
         return;
       }
+      if (state.plannerWindow && !state.plannerWindow.closed) {
+        later(refreshPlannerStatus, 30000);
+        return;
+      }
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
         updatePlannerButton(payload.timer || {});
@@ -785,7 +895,7 @@
           const timer = event.timer || {};
           const key = `${event.event || ""}:${timer.id || ""}:${timer.updated_at || ""}`;
           if (event.event === "halfway") {
-            showPlannerToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"}`, {eventKey: key});
+            showPlannerToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey: key});
           } else if (event.event === "expired") {
             showPlannerToast("Time’s up — did you complete this task?", {openPlanner: true, alarm: true, eventKey: key});
           }
@@ -802,6 +912,21 @@
         updatePlannerButton({});
       } finally {
         later(refreshPlannerStatus, 15000);
+      }
+    };
+    const bindReportingPlannerButton = () => {
+      const buttons = Array.from(doc.querySelectorAll('section[data-testid="stSidebar"] button'));
+      const button = buttons.find((candidate) => candidate.textContent.trim() === "Daily Planner");
+      if (button && button.dataset.scPlannerWindowBound !== "1") {
+        button.dataset.scPlannerWindowBound = "1";
+        button.setAttribute("aria-label", "Open Daily Planner");
+        button.setAttribute("title", "Open Daily Planner");
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          enablePlannerAudio();
+          openDailyPlanner();
+        }, {capture: true, signal: listenerController.signal});
       }
     };
     const loadSearchIndex = async () => {
@@ -1068,9 +1193,21 @@
       updateSidebarWidth,
       {passive: true, signal: listenerController.signal},
     );
+    parentWindow.addEventListener("message", (event) => {
+      if (event.origin !== parentWindow.location.origin || event.data?.type !== "sports-cave-planner-ready") return;
+      state.plannerWindow = event.source || state.plannerWindow;
+      parentWindow.SportsCaveDailyPlannerWindow = state.plannerWindow;
+      try {
+        event.source?.postMessage({
+          type: "sports-cave-planner-auth",
+          token: state.config.authToken || "",
+        }, parentWindow.location.origin);
+      } catch (_error) {}
+    }, listenerOptions);
     updateSidebarWidth();
     later(updateSidebarWidth, 250);
     later(updateSidebarWidth, 1000);
+    [0, 180, 500, 1100, 2200].forEach((delay) => later(bindReportingPlannerButton, delay));
     [0, 120, 420, 900, 1800, 3200].forEach((delay) => {
       later(resetInitialSidebarScroll, delay);
     });
@@ -1100,6 +1237,7 @@
       destroy() {
         listenerController.abort();
         timers.forEach((timer) => parentWindow.clearTimeout(timer));
+        stopPlannerAlarm();
         if (state.recorder?.state && state.recorder.state !== "inactive") {
           state.recorder.stop();
         }

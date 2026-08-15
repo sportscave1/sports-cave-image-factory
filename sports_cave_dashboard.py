@@ -2148,13 +2148,19 @@ def reconcile_daily_planner_timers(user):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def get_active_daily_planner_timer(user):
+def get_active_daily_planner_timer(user, *, reconcile=True):
     user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         if not hasattr(backend, "get_daily_execution_active_timer"):
             return {}
-        return _normalise_timer(backend.get_daily_execution_active_timer(user_id))
+        try:
+            timer = backend.get_daily_execution_active_timer(
+                user_id, reconcile=bool(reconcile)
+            )
+        except TypeError:
+            timer = backend.get_daily_execution_active_timer(user_id)
+        return _normalise_timer(timer)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
@@ -3593,6 +3599,310 @@ def build_active_alerts(
         add_event(event)
 
     return alerts
+
+
+def build_home_event_rows(events, today, *, limit=8):
+    """Return a compact, balanced live/upcoming list from confirmed calendar dates."""
+    today = today if isinstance(today, date) else date.fromisoformat(str(today))
+    candidates = []
+    for event in events or []:
+        dates = sports_sales_calendar.confirmed_event_dates(event)
+        if not dates or dates[1] < today or int(event.get("importance") or 0) < 3:
+            continue
+        start, end = dates
+        status = "Live" if start <= today <= end else "Coming soon"
+        candidates.append(
+            {
+                "event": dict(event),
+                "event_id": _compact_text(event.get("id") or event.get("title") or ""),
+                "name": _compact_text(event.get("title") or event.get("alert_label") or "Event"),
+                "category": "Sale" if sports_sales_calendar.event_kind(event) == "sale" else _compact_text(event.get("sport") or "Sport"),
+                "type": _compact_text(event.get("type") or ("Sale" if sports_sales_calendar.event_kind(event) == "sale" else "Sport")),
+                "status": status,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "date_label": format_event_date_range(event),
+                "days_remaining": (end - today).days if status == "Live" else (start - today).days,
+                "importance": int(event.get("importance") or 0),
+                "market": ", ".join(sports_sales_calendar.market_codes(event)),
+            }
+        )
+
+    def base_key(row):
+        anchor = date.fromisoformat(row["end_date"] if row["status"] == "Live" else row["start_date"])
+        return (anchor, -row["importance"], row["name"].casefold())
+
+    def select_balanced(rows, count):
+        ordered = sorted(rows, key=base_key)
+        selected = []
+        seen_ids = set()
+        seen_categories = set()
+
+        def add(row):
+            if row["event_id"] in seen_ids or len(selected) >= count:
+                return
+            seen_ids.add(row["event_id"])
+            seen_categories.add(row["category"])
+            selected.append(row)
+
+        sale = next((row for row in ordered if row["category"] == "Sale"), None)
+        sport = next((row for row in ordered if row["category"] != "Sale"), None)
+        if sale:
+            add(sale)
+        if sport:
+            add(sport)
+        for row in ordered:
+            if row["category"] not in seen_categories:
+                add(row)
+        for row in ordered:
+            add(row)
+        return selected
+
+    safe_limit = max(0, min(int(limit or 8), 8))
+    live = [row for row in candidates if row["status"] == "Live"]
+    upcoming = [row for row in candidates if row["status"] == "Coming soon"]
+    live_limit = min(len(live), min(4, safe_limit)) if upcoming else safe_limit
+    selected = select_balanced(live, live_limit)
+    selected.extend(select_balanced(upcoming, safe_limit - len(selected)))
+    if len(selected) < safe_limit:
+        chosen = {row["event_id"] for row in selected}
+        remaining = [row for row in candidates if row["event_id"] not in chosen]
+        remaining.sort(key=lambda row: (row["status"] != "Live", base_key(row)))
+        selected.extend(remaining[: safe_limit - len(selected)])
+    return sorted(
+        selected[:safe_limit],
+        key=lambda row: (
+            row["status"] != "Live",
+            date.fromisoformat(row["end_date"] if row["status"] == "Live" else row["start_date"]),
+            -row["importance"],
+            row["name"].casefold(),
+        ),
+    )
+
+
+def _weekly_work_timestamp(value, fallback):
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            parsed = fallback
+    else:
+        parsed = fallback
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _weekly_work_account(activity, users):
+    actor_id = str(activity.get("actor_id") or "")
+    if actor_id:
+        match = next((user for user in users if str(user.get("id") or "") == actor_id), None)
+        if match:
+            return match
+    actor = os_accounts.normalise_login(activity.get("actor") or activity.get("actor_email"))
+    matches = [
+        user
+        for user in users
+        if actor
+        and actor
+        in {
+            os_accounts.normalise_login(user.get("username")),
+            os_accounts.normalise_login(user.get("email")),
+            os_accounts.normalise_login(user.get("display_name")),
+        }
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def build_home_weekly_work_snapshot(user, local_now=None):
+    """Build role-scoped weekly KPIs and tables from one backend work bundle."""
+    if not os_accounts.account_is_active(user):
+        raise DashboardStorageError("This Week's Work is not available for this account.")
+    sydney_now = local_now or datetime.now(timezone.utc).astimezone(
+        sports_sales_calendar.SYDNEY_TIMEZONE
+    )
+    if sydney_now.tzinfo is None:
+        sydney_now = sydney_now.replace(tzinfo=sports_sales_calendar.SYDNEY_TIMEZONE)
+    else:
+        sydney_now = sydney_now.astimezone(sports_sales_calendar.SYDNEY_TIMEZONE)
+    week_start = sydney_now.date() - timedelta(days=sydney_now.date().weekday())
+    week_end = week_start + timedelta(days=6)
+    start_local = datetime.combine(week_start, time.min, tzinfo=sports_sales_calendar.SYDNEY_TIMEZONE)
+    try:
+        backend = get_supabase_backend()
+        bundle = backend.load_home_weekly_work_bundle(
+            daily_execution_user_id(user),
+            week_start,
+            week_end,
+            start_local.astimezone(timezone.utc),
+            sydney_now.astimezone(timezone.utc),
+            include_team=os_accounts.is_admin(user),
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+    users = [dict(row or {}) for row in bundle.get("users") or []]
+    if not os_accounts.is_admin(user):
+        users = [row for row in users if str(row.get("id") or "") == daily_execution_user_id(user)]
+    user_ids = {str(row.get("id") or "") for row in users}
+    staff = {
+        str(row.get("id") or ""): {
+            "staff_id": str(row.get("id") or ""),
+            "staff": _compact_text(row.get("display_name") or row.get("username") or "Staff member"),
+            "role": _compact_text(row.get("role") or "worker").title(),
+            "completed_tasks": 0,
+            "did_not_finish": 0,
+            "allocated_seconds": 0,
+            "actual_seconds": 0,
+            "meaningful_actions": 0,
+            "last_activity": None,
+        }
+        for row in users
+    }
+    timers = {
+        (str(timer.get("sheet_id") or ""), str(timer.get("task_type") or ""), int(timer.get("task_index") or 0)): dict(timer)
+        for timer in bundle.get("timers") or []
+    }
+    completed_work = []
+    for sheet in bundle.get("sheets") or []:
+        sheet = _normalise_daily_sheet(sheet)
+        owner_id = str(sheet.get("user_id") or "")
+        if owner_id not in user_ids or owner_id not in staff:
+            continue
+        fallback = datetime.combine(
+            date.fromisoformat(sheet.get("sheet_date")),
+            time(hour=12),
+            tzinfo=sports_sales_calendar.SYDNEY_TIMEZONE,
+        ).astimezone(timezone.utc)
+        for task_type, tasks in (
+            ("top", sheet.get("top_tasks") or []),
+            ("additional", sheet.get("additional_items") or []),
+        ):
+            for index, task in enumerate(tasks):
+                task = dict(task or {})
+                if not _compact_text(task.get("task") or task.get("details") or ""):
+                    continue
+                status = _normalise_daily_task_status(task)
+                outcome = _compact_text(task.get("outcome") or "").casefold()
+                if status not in DAILY_TASK_FINISHED_STATUSES and outcome not in {
+                    DAILY_TIMER_OUTCOME_COMPLETED,
+                    DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+                }:
+                    continue
+                timer = timers.get((sheet.get("id") or "", task_type, index), {})
+                completed_at = _weekly_work_timestamp(
+                    timer.get("outcome_at") or task.get("completed_at") or task.get("finished_at"),
+                    fallback,
+                )
+                if not (start_local.astimezone(timezone.utc) <= completed_at <= sydney_now.astimezone(timezone.utc)):
+                    continue
+                did_not_finish = bool(
+                    status == DAILY_TASK_STATUS_COULDNT_FINISH
+                    or outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH
+                    or timer.get("outcome") == DAILY_TIMER_OUTCOME_DID_NOT_FINISH
+                )
+                allocated = parse_daily_task_duration_seconds(task.get("time_blocked"))
+                actual = max(int(timer.get("actual_elapsed_seconds") or timer.get("elapsed_seconds") or 0), 0)
+                member = staff[owner_id]
+                member["did_not_finish" if did_not_finish else "completed_tasks"] += 1
+                member["allocated_seconds"] += allocated
+                member["actual_seconds"] += actual
+                member["last_activity"] = max(
+                    filter(None, (member["last_activity"], completed_at)), default=completed_at
+                )
+                completed_work.append(
+                    {
+                        "timestamp": completed_at,
+                        "staff": member["staff"],
+                        "staff_id": owner_id,
+                        "work": _compact_text(task.get("task") or task.get("details") or "Daily Planner task"),
+                        "area": "Daily Planner",
+                        "status": "Did not finish" if did_not_finish else "Completed",
+                        "actual_seconds": actual,
+                        "row_id": f"planner:{sheet.get('id')}:{task_type}:{index}",
+                    }
+                )
+
+    import daily_activity_reporting
+
+    seen_activity = set()
+    for raw in bundle.get("activities") or []:
+        if not daily_activity_reporting.activity_is_meaningful_work(raw):
+            continue
+        try:
+            activity = daily_activity_reporting.classify_activity(raw)
+        except (TypeError, ValueError):
+            continue
+        if not activity or activity.get("action", "").startswith("daily_planner_task_"):
+            continue
+        account = _weekly_work_account(activity, users)
+        if not account:
+            continue
+        owner_id = str(account.get("id") or "")
+        if owner_id not in staff:
+            continue
+        payload = raw.get("new_value") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+        metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        dedupe_key = _compact_text(metadata.get("event_key") or "") or "|".join(
+            (
+                _compact_text(raw.get("event_type") or activity.get("action") or ""),
+                _compact_text(raw.get("entity_type") or ""),
+                _compact_text(raw.get("entity_id") or ""),
+                _compact_text(activity.get("details") or "").casefold(),
+            )
+        )
+        if dedupe_key in seen_activity:
+            continue
+        seen_activity.add(dedupe_key)
+        timestamp = _weekly_work_timestamp(activity.get("created_at"), sydney_now.astimezone(timezone.utc))
+        member = staff[owner_id]
+        member["meaningful_actions"] += 1
+        member["last_activity"] = max(
+            filter(None, (member["last_activity"], timestamp)), default=timestamp
+        )
+        completed_work.append(
+            {
+                "timestamp": timestamp,
+                "staff": member["staff"],
+                "staff_id": owner_id,
+                "work": _compact_text(activity.get("details") or activity.get("item") or activity.get("action") or "Work completed"),
+                "area": _compact_text(activity.get("category") or activity.get("page") or "Sports Cave"),
+                "status": "Completed" if activity.get("status") == "success" else str(activity.get("status") or "Completed").title(),
+                "actual_seconds": 0,
+                "row_id": f"activity:{dedupe_key}",
+            }
+        )
+
+    team = sorted(staff.values(), key=lambda row: row["staff"].casefold())
+    completed_work.sort(key=lambda row: row["timestamp"], reverse=True)
+    return {
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "covered_until": sydney_now.isoformat(),
+        "is_team_view": os_accounts.is_admin(user),
+        "metrics": {
+            "tasks_completed": sum(row["completed_tasks"] for row in team),
+            "tasks_not_finished": sum(row["did_not_finish"] for row in team),
+            "actual_seconds": sum(row["actual_seconds"] for row in team),
+            "meaningful_actions": sum(row["meaningful_actions"] for row in team),
+            "staff_active": sum(
+                bool(row["completed_tasks"] or row["did_not_finish"] or row["meaningful_actions"])
+                for row in team
+            ),
+        },
+        "team": team,
+        "completed_work": completed_work,
+        "query_count": int(bundle.get("query_count") or 1),
+    }
 
 
 def format_event_date_range(event):

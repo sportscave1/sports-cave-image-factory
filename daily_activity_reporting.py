@@ -54,6 +54,29 @@ SYSTEM_SOURCES = {
     "supabase_ledger",
     "webhook",
 }
+MEANINGFUL_WORK_ACTIONS = frozenset(
+    {
+        "new_order_received",
+        "order_fulfilled",
+        "order_fulfilled_certificate_generated",
+        "certificate_generated",
+        "certificate_uploaded",
+        "product_uploaded",
+        "product_created",
+        "product_updated",
+        "product_media_updated",
+        "product_edition_updated",
+        "edition_product_updated",
+        "edition_product_manual_update",
+        "collection_created",
+        "collection_updated",
+        "design_task_completed",
+        "task_completed",
+        "dashboard_task_completed",
+        "daily_planner_task_completed",
+        "daily_planner_task_did_not_finish",
+    }
+)
 SECRET_PATTERN = re.compile(
     r"(?i)\b(api[_ -]?key|authorization|bearer|password|secret|token)\b\s*[:=]\s*\S+"
 )
@@ -79,6 +102,11 @@ ACTION_CATEGORIES = {
     "daily_execution_archived": "Daily Execution",
     "daily_execution_mip_completed": "Daily Execution",
     "daily_execution_task_completed": "Daily Execution",
+    "daily_planner_task_completed": "Daily Execution",
+    "daily_planner_task_did_not_finish": "Daily Execution",
+    "design_task_completed": "Prompts and creative work",
+    "collection_created": "Products",
+    "collection_updated": "Products",
     "design_prompt_saved": "Prompts and creative work",
     "reel_prompt_saved": "Prompts and creative work",
     "reel_video_uploaded": "Social media work",
@@ -332,6 +360,15 @@ def activity_is_meaningful(row):
     if action in ACTION_CATEGORIES or any(action.startswith(prefix) for prefix, _ in ACTION_PREFIX_CATEGORIES):
         return True
     return metadata.get("source_user_initiated") is True
+
+
+def activity_is_meaningful_work(row):
+    """Keep Home work analytics aligned to explicit staff-facing completions."""
+    payload, _metadata = _row_payload(row)
+    return bool(
+        _action_name(row, payload) in MEANINGFUL_WORK_ACTIONS
+        and activity_is_meaningful(row)
+    )
 
 
 def _activity_message(row, payload, metadata, action):

@@ -1905,17 +1905,17 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertTrue(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
 
-    def test_daily_planner_popup_has_today_catchup_and_real_tomorrow_planning(self):
-        panel_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+    def test_daily_planner_window_has_today_catchup_and_real_tomorrow_planning(self):
+        route_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("@st.dialog(\"Daily Planner\", width=\"large\")", panel_source)
-        self.assertIn("Create today's sheet", panel_source)
-        self.assertIn("Plan tomorrow", panel_source)
-        self.assertIn("_render_planning_form", panel_source)
-        self.assertNotIn("Tomorrow&apos;s list is ready.", panel_source)
-        self.assertNotIn('key="daily-execution-create-tomorrow-list"', panel_source)
-        self.assertNotIn("Generate Tomorrow's Execution Prompt", panel_source)
-        self.assertNotIn("Create Today's Sheet", panel_source)
+        self.assertNotIn("st.dialog", route_source)
+        self.assertIn("Create ${bundle.work_date === bundle.today ? \"today's\"", client_source)
+        self.assertIn("Plan tomorrow", client_source)
+        self.assertIn("saveSheet", client_source)
+        self.assertIn("archive_sheet_id:archiveSheetId", client_source)
+        self.assertNotIn("Tomorrow&apos;s list is ready.", client_source)
+        self.assertNotIn("Generate Tomorrow's Execution Prompt", client_source)
 
     def test_daily_execution_create_sheet_does_not_duplicate_same_date(self):
         backend = FakeDashboardBackend()
@@ -1929,19 +1929,18 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(len(backend.daily_sheets), 1)
 
     def test_daily_planner_task_column_labels_are_business_terms(self):
-        panel_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        panel_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("**Tasks**", panel_source)
-        self.assertIn('"Task"', panel_source)
-        self.assertIn('"Details"', panel_source)
-        self.assertIn('"Allocated"', panel_source)
-        self.assertIn('"Status"', panel_source)
-        self.assertIn("MIP Task {index + 1}", panel_source)
-        self.assertIn("**Other tasks**", panel_source)
-        self.assertIn("Save List", panel_source)
-        self.assertIn("Complete or close all three MIP tasks to unlock Daily Review.", panel_source)
-        self.assertIn("**Timers**", panel_source)
-        self.assertIn("Start Timer", panel_source)
+        self.assertIn(">Task</span>", panel_source)
+        self.assertIn("Details / outcome required", panel_source)
+        self.assertIn(">Allocated</span>", panel_source)
+        self.assertIn(">Status</span>", panel_source)
+        self.assertIn("Three major execution tasks", panel_source)
+        self.assertIn("Other tasks", panel_source)
+        self.assertIn("Save today's plan", panel_source)
+        self.assertIn("Finish the task statuses before completing the review.", panel_source)
+        self.assertIn(">Timer</span>", panel_source)
+        self.assertIn(">Start</button>", panel_source)
         self.assertNotIn("Save MIPs", panel_source)
 
     def test_daily_execution_additional_items_show_one_blank_row_by_default(self):
@@ -2085,30 +2084,24 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(backend.activity_rows[0]["event_type"], "daily_execution_completed")
         self.assertEqual(backend.activity_rows[0]["actor"], "Nathan")
 
-    def test_daily_review_submission_lives_inside_daily_planner_modal(self):
-        source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
-        review_source = source[
-            source.index("def _render_daily_review") :
-            source.index("\n\ndef _render_planner_body")
-        ]
+    def test_daily_review_submission_lives_inside_daily_planner_window(self):
+        route_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn('with st.expander("Daily Review", expanded=False):', review_source)
-        self.assertIn('"Complete Daily Review"', review_source)
-        self.assertIn("sports_cave_dashboard.complete_daily_execution_review", review_source)
-        self.assertIn("_rerun()", review_source)
-        self.assertIn('"Plan tomorrow"', source)
+        self.assertIn("complete_daily_execution_review", route_source)
+        self.assertIn("daily_execution_all_tasks_complete", route_source)
+        self.assertIn("Complete Daily Review", client_source)
+        self.assertIn("Plan tomorrow", client_source)
+        self.assertNotIn("st.dialog", route_source)
 
     def test_daily_review_ui_requires_a_confirmed_saved_sheet(self):
-        source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
-        save_source = source[
-            source.index("def _render_daily_review") :
-            source.index("\n\ndef _render_planner_body")
-        ]
+        route_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("sports_cave_dashboard.complete_daily_execution_review", save_source)
-        self.assertIn("Daily Review could not save right now.", save_source)
-        self.assertIn("_rerun()", save_source)
-        self.assertNotIn("_daily_execution_fragment_rerun()", save_source)
+        self.assertIn("get_daily_execution_archive_detail", route_source)
+        self.assertIn("That Daily Planner sheet is not available for this account.", route_source)
+        self.assertIn("reviewed || !mipsFinished", client_source)
+        self.assertNotIn("_daily_execution_fragment_rerun()", route_source)
 
     def test_tomorrow_plan_upserts_one_sheet_and_archives_reviewed_today_once(self):
         backend = FakeDashboardBackend()
@@ -2303,21 +2296,21 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(sum(call[2] == "2026-07-27" for call in week_calls), 1)
 
     def test_daily_planner_ui_contains_planning_and_reporting_history_flow(self):
-        source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
         reporting_source = (ROOT / "reporting_page.py").read_text(encoding="utf-8")
-        self.assertIn("Save plan", source)
+        self.assertIn("Save today's plan", source)
         self.assertIn("Main outcome for the day", source)
         self.assertIn("Appointment, deadline or fixed event", source)
-        self.assertIn("**Carryover**", source)
+        self.assertIn("Carryover from", source)
         self.assertIn("Daily Execution History", reporting_source)
         self.assertIn("render_weekly_review_page", reporting_source)
-        self.assertNotIn("@st.fragment\ndef render_daily_execution_panel", source)
+        self.assertIn("/api/os/daily-planner/history", source)
 
-    def test_plan_tomorrow_button_opens_editable_modal_form(self):
-        source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
-        self.assertIn('"Plan tomorrow"', source)
-        self.assertIn("st.session_state[PLAN_DATE_KEY] = (workflow_date + timedelta(days=1)).isoformat()", source)
-        self.assertIn("Save plan", source)
+    def test_plan_tomorrow_button_opens_editable_window_form(self):
+        source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Plan tomorrow", source)
+        self.assertIn('loadPlanner(addDays(state.bundle.work_date,1))', source)
+        self.assertIn("Save tomorrow's plan", source)
         self.assertIn("Main outcome for the day", source)
         self.assertIn("Appointment, deadline or fixed event", source)
 
@@ -3232,7 +3225,7 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
-    def test_admin_home_restores_planner_calendar_and_does_not_query_design_tasks(self):
+    def test_admin_home_renders_events_and_weekly_work_without_design_queries(self):
         backend = FakeDashboardBackend()
         today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
         backend.daily_sheets = [
@@ -3284,7 +3277,8 @@ class DashboardRenderContractTests(unittest.TestCase):
             any("Design title" in dataframe.value.columns for dataframe in app_test.dataframe)
         )
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
-        self.assertIn("Active alerts", rendered)
+        self.assertIn("Active &amp; Upcoming Events", rendered)
+        self.assertIn("This Week&#x27;s Work", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("MIP Task 1", rendered)
         self.assertNotIn("Other tasks", rendered)
@@ -3292,7 +3286,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("Recent operational activity", rendered)
         self.assertFalse(any(button.label == "Complete Daily Review" for button in app_test.button))
 
-    def test_non_admin_home_remains_notifications_only_even_with_planner_session_state(self):
+    def test_non_admin_home_remains_planner_free_with_forged_planner_session_state(self):
         backend = FakeDashboardBackend()
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
@@ -3317,7 +3311,8 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertEqual(backend.daily_calls, [])
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
-        self.assertIn("Active alerts", rendered)
+        self.assertIn("Active &amp; Upcoming Events", rendered)
+        self.assertIn("This Week&#x27;s Work", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("Daily Execution Archive", rendered)
         self.assertNotIn("Sports & Sales Calendar", rendered)
@@ -3795,7 +3790,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("DELETE FROM dashboard_tasks", delete_source)
         self.assertNotIn("shopify", delete_source.casefold())
 
-    def test_dashboard_restores_admin_planner_without_restoring_design_workflow(self):
+    def test_dashboard_uses_events_and_weekly_work_without_restoring_planner_or_design_workflow(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         dashboard_source = source[
             source.index("def get_browser_timezone") : source.index("\n\ndef page_uses_local_database")
@@ -3808,7 +3803,8 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
-        self.assertIn("render_active_alerts(events, today)", render_body)
+        self.assertIn("render_active_upcoming_events(events, today)", render_body)
+        self.assertIn("render_home_weekly_work(user, local_now)", render_body)
         self.assertNotIn("render_home_recent_activity(local_now)", render_body)
         self.assertNotIn("can_manage_daily_planner(user)", render_body)
         self.assertNotIn("render_daily_execution_panel", render_body)
@@ -3822,7 +3818,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         ]
         self.assertIn("get_reporting_page().render_page", reporting_route)
         self.assertIn("render_weekly_review_page", reporting_route)
-        self.assertIn("daily_planner.open_daily_planner()", reporting_route)
+        self.assertIn("os_accounts.DAILY_PLANNER_ROUTE", reporting_route)
 
     def test_calendar_helper_has_no_backend_or_network_imports(self):
         source = (ROOT / "sports_sales_calendar.py").read_text(encoding="utf-8")

@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sports Cave Daily Planner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171715;
+      --muted: #706d67;
+      --line: #dedbd4;
+      --soft: #f6f4ef;
+      --paper: #fffefa;
+      --gold: #d4a54c;
+      --gold-dark: #8d671f;
+      --danger: #a33a32;
+      --success: #28724b;
+      font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--soft); color: var(--ink); font-size: 13px; overflow: hidden; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid var(--gold); outline-offset: 2px;
+    }
+    .shell { display: grid; grid-template-rows: 48px 39px minmax(0, 1fr) 24px; height: 100%; }
+    .header {
+      align-items: center; background: #11110f; border-bottom: 1px solid #2b2924;
+      color: white; display: flex; gap: 10px; padding: 0 14px;
+    }
+    .brand-mark { color: var(--gold); font-family: Georgia, serif; font-size: 23px; line-height: 1; }
+    .header-title { font-size: 14px; font-weight: 730; }
+    .header-subtitle { color: #aaa79f; font-size: 10px; margin-left: 7px; text-transform: uppercase; }
+    .header-spacer { flex: 1; }
+    .icon-button {
+      align-items: center; background: transparent; border: 1px solid transparent; border-radius: 5px;
+      color: inherit; display: inline-flex; height: 30px; justify-content: center; min-width: 30px; padding: 0 8px;
+    }
+    .icon-button:hover { background: #292823; border-color: #3b3932; }
+    .tabs { align-items: stretch; background: #fff; border-bottom: 1px solid var(--line); display: flex; padding: 0 12px; }
+    .tab {
+      background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+      font-weight: 650; min-width: 88px; padding: 0 13px;
+    }
+    .tab[aria-selected="true"] { border-bottom-color: var(--gold); color: var(--ink); }
+    .main { min-height: 0; overflow: auto; padding: 12px 14px 20px; }
+    .statusbar {
+      align-items: center; background: #eeece6; border-top: 1px solid var(--line); color: var(--muted);
+      display: flex; font-size: 10px; justify-content: space-between; padding: 0 12px;
+    }
+    .toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .toolbar .date-input { width: 142px; }
+    .button {
+      align-items: center; background: white; border: 1px solid #cfcac0; border-radius: 5px; color: var(--ink);
+      display: inline-flex; font-weight: 650; gap: 5px; height: 31px; justify-content: center; padding: 0 10px;
+    }
+    .button:hover { background: #f5f2eb; border-color: #a99d84; }
+    .button.primary { background: var(--gold); border-color: var(--gold); color: #17130d; }
+    .button.danger { color: var(--danger); }
+    .button.small { height: 27px; padding: 0 8px; }
+    .button:disabled { cursor: not-allowed; opacity: .45; }
+    .section-title { align-items: center; display: flex; gap: 8px; margin: 14px 0 7px; }
+    .section-title h2 { font-size: 14px; margin: 0; }
+    .section-title .rule { background: var(--line); flex: 1; height: 1px; }
+    .meta-row { color: var(--muted); display: flex; flex-wrap: wrap; gap: 14px; margin: -3px 0 9px; }
+    .task-header, .task-row {
+      display: grid; gap: 6px; grid-template-columns: 28px minmax(160px, 1.7fr) minmax(180px, 2fr) 96px 118px 210px;
+    }
+    .task-header { color: var(--muted); font-size: 10px; font-weight: 700; padding: 0 5px 4px; text-transform: uppercase; }
+    .task-row {
+      align-items: start; background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+      margin-bottom: 6px; padding: 7px 6px;
+    }
+    .task-index { color: var(--gold-dark); font-weight: 800; padding-top: 7px; text-align: center; }
+    input, textarea, select {
+      background: white; border: 1px solid #cfcac0; border-radius: 4px; color: var(--ink); min-height: 30px; padding: 5px 7px; width: 100%;
+    }
+    textarea { min-height: 58px; resize: vertical; }
+    .timer-cell { display: flex; flex-wrap: wrap; gap: 4px; min-height: 30px; }
+    .duration-input { width: 64px; }
+    .countdown { font-variant-numeric: tabular-nums; font-weight: 760; min-width: 54px; padding: 7px 4px 0; }
+    .timer-cell .button { flex: 0 0 auto; }
+    .move-buttons { display: flex; gap: 3px; margin-top: 4px; }
+    .move-buttons button { background: transparent; border: 0; color: var(--muted); padding: 2px 3px; }
+    .planning-grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+    .planning-grid label, .review-grid label { color: var(--muted); display: grid; font-size: 11px; gap: 4px; }
+    .planning-grid .wide { grid-column: 1 / -1; }
+    .save-row { align-items: center; display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+    .save-state { color: var(--muted); margin-right: auto; }
+    .empty {
+      align-items: center; background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+      display: flex; justify-content: space-between; min-height: 74px; padding: 14px;
+    }
+    .empty strong { display: block; margin-bottom: 4px; }
+    .notice { border-radius: 5px; margin: 8px 0; padding: 8px 10px; }
+    .notice.info { background: #f1ead9; color: #5d471f; }
+    .notice.error { background: #f8e7e5; color: #782b25; }
+    .notice.success { background: #e3f1e8; color: #1f5b3c; }
+    .active-strip {
+      align-items: center; background: #1c1a16; border: 1px solid #3f3829; border-radius: 6px; color: white;
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding: 8px 10px;
+    }
+    .active-strip .task-name { font-weight: 700; }
+    .active-strip .time { color: #f3d17c; font-size: 17px; font-variant-numeric: tabular-nums; font-weight: 800; }
+    .active-strip .spacer { flex: 1; }
+    .review-grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+    .review-grid .wide { grid-column: 1 / -1; }
+    .ratings { display: grid; gap: 6px; grid-template-columns: repeat(4, 1fr); margin-top: 8px; }
+    .ratings label { color: var(--muted); font-size: 10px; }
+    .ratings input { margin-top: 3px; }
+    .table-wrap { background: white; border: 1px solid var(--line); border-radius: 6px; max-height: 500px; overflow: auto; }
+    table { border-collapse: separate; border-spacing: 0; min-width: 900px; width: 100%; }
+    th, td { border-bottom: 1px solid #ebe8e1; padding: 7px 8px; text-align: left; vertical-align: top; }
+    th { background: #f5f3ee; color: #5d5952; font-size: 10px; position: sticky; top: 0; text-transform: uppercase; z-index: 1; }
+    td { font-size: 12px; }
+    .segmented { display: inline-flex; }
+    .segmented button { border-radius: 0; margin-left: -1px; }
+    .segmented button:first-child { border-radius: 5px 0 0 5px; margin-left: 0; }
+    .segmented button:last-child { border-radius: 0 5px 5px 0; }
+    .segmented button.active { background: #27251f; color: white; }
+    .skeleton { animation: pulse 1.15s ease-in-out infinite; background: #e5e2db; border-radius: 4px; height: 34px; margin-bottom: 8px; }
+    .skeleton.short { width: 38%; }
+    @keyframes pulse { 50% { opacity: .45; } }
+    .toast {
+      background: #181714; border: 1px solid var(--gold); border-radius: 6px; bottom: 34px; color: white;
+      max-width: 420px; padding: 10px 12px; position: fixed; right: 14px; z-index: 20;
+    }
+    .outcome {
+      background: white; border: 2px solid var(--gold); border-radius: 7px; box-shadow: 0 18px 48px rgba(0,0,0,.25);
+      left: 50%; max-width: 540px; padding: 18px; position: fixed; top: 50%; transform: translate(-50%,-50%); width: calc(100% - 36px); z-index: 30;
+    }
+    .outcome h2 { font-size: 18px; margin: 0 0 8px; }
+    .outcome-actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin-top: 14px; }
+    .sound-row { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
+    .sound-row input { min-height: 0; width: 120px; }
+    .hidden { display: none !important; }
+    .compact-only { display: none; }
+    body.compact { min-height: 340px; }
+    body.compact .shell { grid-template-rows: 42px minmax(0,1fr); }
+    body.compact .tabs, body.compact .statusbar, body.compact .full-only { display: none !important; }
+    body.compact .compact-only { display: block; }
+    body.compact .main { align-items: stretch; display: flex; padding: 8px; }
+    .compact-panel {
+      align-items: center; background: #171613; border-radius: 7px; color: white; display: flex; flex: 1;
+      flex-direction: column; justify-content: center; min-height: 270px; padding: 14px; text-align: center;
+    }
+    .compact-task { font-size: 13px; font-weight: 700; max-width: 310px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .compact-countdown { color: #f2ce76; font-size: 58px; font-variant-numeric: tabular-nums; font-weight: 760; line-height: 1.2; }
+    .compact-meta { color: #bcb7aa; display: flex; gap: 16px; font-size: 11px; }
+    .compact-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
+    @media (max-width: 760px) {
+      .task-header { display: none; }
+      .task-row { grid-template-columns: 24px 1fr; }
+      .task-row > *:not(.task-index) { grid-column: 2; }
+      .planning-grid, .review-grid, .ratings { grid-template-columns: 1fr; }
+      .planning-grid .wide, .review-grid .wide { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="brand-mark">SC</div>
+      <div><span class="header-title">Daily Planner</span><span class="header-subtitle">Daily Task Execution Sheet</span></div>
+      <div class="header-spacer"></div>
+      <button class="icon-button" id="test-sound" title="Test Sound" aria-label="Test Sound">Sound</button>
+      <button class="icon-button" id="compact-toggle" title="Compact timer mode" aria-label="Compact timer mode">Compact</button>
+    </header>
+    <nav class="tabs full-only" aria-label="Daily Planner sections">
+      <button class="tab" data-tab="planner" aria-selected="true">Planner</button>
+      <button class="tab" data-tab="history" aria-selected="false">History</button>
+      <button class="tab" data-tab="weekly" aria-selected="false">Weekly Review</button>
+    </nav>
+    <main class="main" id="main">
+      <section class="full-only" id="view"></section>
+      <section class="compact-only compact-panel" id="compact-view"></section>
+    </main>
+    <footer class="statusbar full-only"><span id="connection-status">Waiting for secure session...</span><span id="performance-status">Shell ready</span></footer>
+  </div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div id="outcome" class="outcome hidden" role="alertdialog" aria-modal="true" aria-labelledby="outcome-title"></div>
+  <script>
+  (() => {
+    "use strict";
+    const shellVisibleAt = performance.now();
+    const storedFullBounds = (() => {
+      try {
+        const value = JSON.parse(localStorage.getItem("scPlannerFullBounds") || "null");
+        return value && value.width >= 500 && value.height >= 420 ? value : null;
+      } catch (_error) { return null; }
+    })();
+    const state = {
+      token: "", tab: "planner", bundle: null, draft: null, editingNew: false,
+      loading: true, saving: false, historyLoaded: false, weeklyLoaded: false,
+      historyPeriod: "today", historyStart: "", historyEnd: "", historyRows: [],
+      weeklyAnchor: "", weekly: null, statusTimer: null, countdownTimer: null,
+      toastTimer: null, seenEvents: new Set(), alarmPlaying: false, alarmNodes: [],
+      alarmStopTimer: null, audio: null, volume: Number(localStorage.getItem("scPlannerVolume") || .75),
+      compact: localStorage.getItem("scPlannerCompact") === "1",
+      fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
+    };
+    const view = document.querySelector("#view");
+    const compactView = document.querySelector("#compact-view");
+    const statusText = document.querySelector("#connection-status");
+    const performanceText = document.querySelector("#performance-status");
+    const toast = document.querySelector("#toast");
+    const outcome = document.querySelector("#outcome");
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;"
+    })[char]);
+    const isoToday = () => new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(new Date());
+    const formatClock = (seconds) => {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      return hours ? `${hours}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}` : `${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
+    };
+    const formatDate = (value) => {
+      if (!value) return "";
+      const parsed = new Date(`${value}T12:00:00+10:00`);
+      return new Intl.DateTimeFormat("en-AU", {timeZone:"Australia/Sydney", weekday:"short", day:"numeric", month:"short", year:"numeric"}).format(parsed);
+    };
+    const formatTimestamp = (value) => {
+      if (!value) return "";
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.valueOf())) return "";
+      return new Intl.DateTimeFormat("en-AU", {timeZone:"Australia/Sydney", day:"2-digit", month:"short", hour:"numeric", minute:"2-digit"}).format(parsed);
+    };
+    const addDays = (value, amount) => {
+      const parsed = new Date(`${value}T12:00:00Z`);
+      parsed.setUTCDate(parsed.getUTCDate() + amount);
+      return parsed.toISOString().slice(0,10);
+    };
+    const requestJson = async (path, options={}) => {
+      const response = await fetch(path, {
+        ...options,
+        credentials: "same-origin",
+        headers: {"Content-Type":"application/json", Authorization:`Bearer ${state.token}`, ...(options.headers || {})},
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch (_error) {}
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || "Daily Planner request failed.");
+      return payload;
+    };
+    const showToast = (message, type="info", duration=5000) => {
+      clearTimeout(state.toastTimer);
+      toast.className = `toast ${type === "error" ? "error" : ""}`;
+      toast.textContent = message;
+      state.toastTimer = setTimeout(() => toast.classList.add("hidden"), duration);
+    };
+    const showSkeleton = () => {
+      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    };
+    const postReady = () => window.opener?.postMessage({type:"sports-cave-planner-ready"}, location.origin);
+    window.addEventListener("message", (event) => {
+      if (event.origin !== location.origin || event.data?.type !== "sports-cave-planner-auth") return;
+      const token = String(event.data.token || "");
+      if (!token) return;
+      const changed = token !== state.token;
+      state.token = token;
+      statusText.textContent = "Secure session connected";
+      if (changed && !state.initialLoadComplete) loadPlanner(isoToday());
+    });
+
+    const timerRemaining = (timer) => {
+      if (!timer?.id) return 0;
+      if (timer.status === "running" && timer.deadline_at) {
+        return Math.max(0, Math.ceil((new Date(timer.deadline_at).valueOf() - Date.now()) / 1000));
+      }
+      if (timer.status === "paused") return Math.max(0, Number(timer.remaining_seconds) || 0);
+      return timer.status === "expired" ? 0 : Math.max(0, Number(timer.remaining_seconds) || 0);
+    };
+    const timerElapsed = (timer) => Math.max(0, Number(timer.actual_elapsed_seconds ?? timer.elapsed_seconds ?? ((timer.allocated_seconds || 0) - timerRemaining(timer))) || 0);
+    const activeTimer = () => state.bundle?.active_timer || {};
+    const timerForRow = (type, index) => {
+      const row = (state.bundle?.tasks || []).find((item) => item.task_type === type && Number(item.task_index) === index);
+      return row?.timer || {};
+    };
+    const activeMatches = (type, index) => {
+      const timer = activeTimer();
+      return timer.id && timer.sheet_id === state.bundle?.sheet?.id && timer.task_type === type && Number(timer.task_index) === index;
+    };
+    const taskForTimer = (timer) => timer?.task || "Daily Planner task";
+
+    const enableAudio = async () => {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        showToast("Browser audio is unavailable. Check site and system sound settings.", "error", 8000);
+        return false;
+      }
+      state.audio = state.audio || new AudioContext();
+      try {
+        await state.audio.resume();
+        return state.audio.state === "running";
+      } catch (_error) {
+        showToast("Sound is blocked. Allow audio for Sports Cave OS, then use Test Sound.", "error", 9000);
+        return false;
+      }
+    };
+    const stopAlarm = () => {
+      clearTimeout(state.alarmStopTimer);
+      state.alarmNodes.forEach((node) => { try { node.stop(); } catch (_error) {} });
+      state.alarmNodes = [];
+      state.alarmPlaying = false;
+    };
+    const playAlarm = async () => {
+      if (state.alarmPlaying) return;
+      if (!(await enableAudio())) return;
+      stopAlarm();
+      state.alarmPlaying = true;
+      const audio = state.audio;
+      const volume = Math.max(.05, Math.min(1, state.volume));
+      const started = audio.currentTime + .03;
+      for (let pulse = 0; pulse < 6; pulse += 1) {
+        const at = started + pulse * .83;
+        [660, 880].forEach((frequency, offset) => {
+          const oscillator = audio.createOscillator();
+          const gain = audio.createGain();
+          oscillator.type = offset ? "triangle" : "sine";
+          oscillator.frequency.setValueAtTime(frequency, at);
+          gain.gain.setValueAtTime(.0001, at);
+          gain.gain.exponentialRampToValueAtTime((offset ? .13 : .22) * volume, at + .05);
+          gain.gain.setValueAtTime((offset ? .13 : .22) * volume, at + .48);
+          gain.gain.exponentialRampToValueAtTime(.0001, at + .68);
+          oscillator.connect(gain); gain.connect(audio.destination);
+          oscillator.start(at + offset * .025); oscillator.stop(at + .72);
+          state.alarmNodes.push(oscillator);
+        });
+      }
+      state.alarmStopTimer = setTimeout(stopAlarm, 5050);
+    };
+
+    const setCompact = (enabled) => {
+      if (enabled && !state.compact) {
+        state.fullBounds = {width: window.outerWidth, height: window.outerHeight};
+        localStorage.setItem("scPlannerFullBounds", JSON.stringify(state.fullBounds));
+      }
+      state.compact = Boolean(enabled);
+      localStorage.setItem("scPlannerCompact", state.compact ? "1" : "0");
+      document.body.classList.toggle("compact", state.compact);
+      document.querySelector("#compact-toggle").textContent = state.compact ? "Full planner" : "Compact";
+      document.querySelector("#compact-toggle").setAttribute("aria-label", state.compact ? "Restore full planner" : "Compact timer mode");
+      try {
+        if (state.compact) window.resizeTo(360, 360);
+        else if (state.fullBounds) window.resizeTo(state.fullBounds.width, state.fullBounds.height);
+      } catch (_error) {}
+      renderCompact();
+    };
+
+    const blankTop = () => Array.from({length:3}, () => ({task:"", why:"", time_blocked:"", status:""}));
+    const normalDraft = (sheet) => {
+      const additional = (sheet?.additional_items || []).filter((row) => row.task || row.details || row.time_blocked).map((row) => ({...row}));
+      return {
+        top_tasks: (sheet?.top_tasks?.length ? sheet.top_tasks : blankTop()).map((row) => ({...row})).slice(0,3),
+        additional_items: additional.length ? additional : [{task:"", details:"", time_blocked:"", status:""}],
+        planning_data: {...(sheet?.planning_data || {})},
+      };
+    };
+    const unfinishedFromSource = () => {
+      const source = state.bundle?.source_sheet || {};
+      const rows = [];
+      (source.top_tasks || []).forEach((task, index) => {
+        if (task.task && task.status === "couldnt_finish") rows.push({...task, details:task.why || "", carryKey:`mip:${index}:${task.task}`});
+      });
+      (source.additional_items || []).forEach((task, index) => {
+        if (task.task && task.status === "couldnt_finish") rows.push({...task, carryKey:`other:${index}:${task.task}`});
+      });
+      return rows;
+    };
+    const ensureDraft = () => {
+      if (!state.draft) state.draft = normalDraft(state.bundle?.sheet || {});
+      while (state.draft.top_tasks.length < 3) state.draft.top_tasks.push(blankTop()[0]);
+      return state.draft;
+    };
+    const statusOptions = (selected) => [
+      ["", "Open"], ["done", "Done"], ["couldnt_finish", "Couldn't finish"]
+    ].map(([value,label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
+    const rowTimerControls = (type, index, task) => {
+      const timer = activeMatches(type,index) ? activeTimer() : timerForRow(type,index);
+      const active = activeMatches(type,index);
+      const defaultSeconds = Number(timer.allocated_seconds || 0) || parseDuration(task.time_blocked);
+      if (active && ["running","paused","expired"].includes(timer.status)) {
+        const control = timer.status === "running"
+          ? `<button class="button small" data-action="pause-timer">Pause</button>`
+          : timer.status === "paused" ? `<button class="button small" data-action="resume-timer">Resume</button>` : "";
+        return `<div class="countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div>${control}<button class="button small danger" data-action="reset-timer">Reset</button>`;
+      }
+      return `<input class="duration-input" type="number" min="1" max="720" value="${Math.max(1,Math.round(defaultSeconds/60)||1)}" aria-label="Timer minutes"><button class="button small" data-action="start-timer" data-task-type="${type}" data-task-index="${index}">Start</button>`;
+    };
+    const parseDuration = (value) => {
+      const text = String(value || "").toLowerCase();
+      const match = text.match(/(\d+(?:\.\d+)?)/);
+      if (!match) return 0;
+      const amount = Number(match[1]);
+      if (text.includes("sec") || /\d+s\b/.test(text)) return Math.round(amount);
+      if (text.includes("min") || /\d+m\b/.test(text)) return Math.round(amount*60);
+      return Math.round(amount*3600);
+    };
+    const taskRow = (task, type, index, readOnly=false) => `
+      <div class="task-row" data-task-type="${type}" data-task-index="${index}">
+        <div class="task-index">${type === "top" ? index + 1 : "+"}${readOnly ? "" : '<div class="move-buttons"><button data-action="move-up" title="Move up" aria-label="Move task up">&#8593;</button><button data-action="move-down" title="Move down" aria-label="Move task down">&#8595;</button></div>'}</div>
+        <input data-field="task" value="${escapeHtml(task.task || "")}" aria-label="Task" ${readOnly ? "disabled" : ""}>
+        <input data-field="${type === "top" ? "why" : "details"}" value="${escapeHtml((type === "top" ? task.why : task.details) || "")}" aria-label="Details or outcome required" ${readOnly ? "disabled" : ""}>
+        <input data-field="time_blocked" value="${escapeHtml(task.time_blocked || "")}" aria-label="Time allocated" ${readOnly ? "disabled" : ""}>
+        <select data-field="status" aria-label="Task status" ${readOnly ? "disabled" : ""}>${statusOptions(task.status || "")}</select>
+        <div class="timer-cell">${readOnly ? '<span class="save-state">Review closed</span>' : rowTimerControls(type,index,task)}${type === "additional" && !readOnly ? '<button class="button small danger" data-action="remove-task" title="Remove task">Remove</button>' : ""}</div>
+      </div>`;
+    const activeStrip = () => {
+      const timer = activeTimer();
+      if (!timer.id || timer.outcome) return "";
+      return `<div class="active-strip"><span class="task-name">${escapeHtml(taskForTimer(timer))}</span><span class="time" data-countdown="active">${formatClock(timerRemaining(timer))}</span><span>${escapeHtml(timer.status || "")}</span><span class="spacer"></span>${timer.sheet_date && timer.sheet_date !== state.bundle?.work_date ? '<button class="button small" data-action="reopen-active">Reopen task</button>' : ""}<button class="button small" data-action="toggle-compact">Compact</button></div>`;
+    };
+    const carryoverMarkup = () => {
+      if (state.bundle?.sheet?.id) return "";
+      const items = unfinishedFromSource();
+      if (!items.length) return "";
+      return `<div class="notice info"><strong>Carryover from ${escapeHtml(formatDate(state.bundle.source_sheet.sheet_date))}</strong>${items.map((item,index) => `<label><input type="checkbox" data-carry-index="${index}"> ${escapeHtml(item.task)}</label>`).join(" ")}</div>`;
+    };
+    const renderPlanner = () => {
+      if (state.loading) return showSkeleton();
+      const bundle = state.bundle || {};
+      if (!bundle.sheet?.id && !state.editingNew) {
+        view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date || isoToday())}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button></div>${activeStrip()}<div class="empty"><div><strong>No execution sheet for ${escapeHtml(formatDate(bundle.work_date))}</strong><span>Create the complete three-MIP plan for this work date.</span></div><button class="button primary" data-action="create-sheet">Create ${bundle.work_date === bundle.today ? "today's" : "this day's"} sheet</button></div>`;
+        return;
+      }
+      const draft = ensureDraft();
+      const sheet = bundle.sheet || {};
+      const reviewed = ["reviewed","completed","archived"].includes(String(sheet.status || "").toLowerCase());
+      const saveLabel = bundle.work_date === bundle.today ? "Save today's plan" : bundle.work_date === addDays(bundle.today,1) ? "Save tomorrow's plan" : "Save plan";
+      view.innerHTML = `
+        <div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date)}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button><span class="header-spacer"></span><button class="button" data-action="plan-tomorrow">Plan tomorrow</button></div>
+        ${activeStrip()}${carryoverMarkup()}
+        <div class="meta-row"><span><strong>Work date:</strong> ${escapeHtml(formatDate(bundle.work_date))}</span><span><strong>Owner:</strong> ${escapeHtml(sheet.user_name || bundle.user?.display_name || "Current user")}</span><span><strong>Status:</strong> ${escapeHtml(sheet.status || "New plan")}</span></div>
+        <div class="section-title"><h2>Three major execution tasks</h2><span class="rule"></span></div>
+        <div class="task-header"><span></span><span>Task</span><span>Details / outcome required</span><span>Allocated</span><span>Status</span><span>Timer</span></div>
+        <div id="top-tasks">${draft.top_tasks.map((task,index) => taskRow(task,"top",index,reviewed)).join("")}</div>
+        <div class="section-title"><h2>Other tasks</h2><span class="rule"></span>${reviewed ? "" : '<button class="button small" data-action="add-task">Add task</button>'}</div>
+        <div id="additional-tasks">${draft.additional_items.map((task,index) => taskRow(task,"additional",index,reviewed)).join("") || '<div class="notice info">No additional tasks.</div>'}</div>
+        <div class="section-title"><h2>Daily plan</h2><span class="rule"></span></div>
+        <div class="planning-grid">
+          <label>Main outcome for the day<input data-plan-field="main_outcome" value="${escapeHtml(draft.planning_data.main_outcome || "")}" ${reviewed ? "disabled" : ""}></label>
+          <label>Appointment, deadline or fixed event<input data-plan-field="fixed_event" value="${escapeHtml(draft.planning_data.fixed_event || "")}" ${reviewed ? "disabled" : ""}></label>
+          <label class="wide">Planning notes<textarea data-plan-field="notes" ${reviewed ? "disabled" : ""}>${escapeHtml(draft.planning_data.notes || "")}</textarea></label>
+        </div>
+        <div class="save-row"><span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : "Changes are saved only when you choose Save."}</span>${state.editingNew ? '<button class="button" data-action="cancel-new">Cancel</button>' : ""}${reviewed ? "" : `<button class="button primary" data-action="save-sheet" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving..." : saveLabel}</button>`}</div>
+        ${sheet.id ? reviewMarkup(sheet, reviewed) : ""}`;
+      bindDraftInputs();
+    };
+    const reviewMarkup = (sheet, reviewed) => {
+      const review = sheet.review_data || sheet.no_grey_zone || {};
+      const ratings = sheet.ratings || {};
+      const fields = [
+        ["completed","What was completed today?"], ["could_not_finish","What could not be finished and why?"],
+        ["worked_well","What worked well?"], ["improve_tomorrow","What needs improving tomorrow?"],
+        ["revenue","What moved Sports Cave closer to $5M revenue?"], ["noise","What was noise/distraction?"],
+        ["lesson","What lesson did today teach me?"], ["protected","What must be protected tomorrow?"],
+      ];
+      const ratingNames = ["Focus","Attention","Flow Awareness","Emotional Control","Execution","Vision Alignment","Overall Score"];
+      const mipsFinished = (sheet.top_tasks || []).filter((task) => task.task).length === 3 && (sheet.top_tasks || []).filter((task) => task.task && ["done","couldnt_finish"].includes(task.status)).length === 3;
+      const locked = reviewed ? "disabled" : "";
+      return `<div class="section-title"><h2>Daily Review</h2><span class="rule"></span></div><div class="review-grid">${fields.map(([key,label]) => `<label>${label}<textarea data-review-field="${key}" ${locked}>${escapeHtml(review[key] || (key === "completed" ? sheet.daily_summary : ""))}</textarea></label>`).join("")}<label class="wide">What is the ONE THING tomorrow must nail?<textarea data-review-tomorrow ${locked}>${escapeHtml(sheet.tomorrow_intention || "")}</textarea></label><label class="wide">Optional notes<textarea data-review-field="notes" ${locked}>${escapeHtml(review.notes || "")}</textarea></label></div><div class="ratings">${ratingNames.map((name) => `<label>${escapeHtml(name)}<input type="number" min="${name === "Overall Score" ? 1 : 0}" max="10" value="${escapeHtml(ratings[name] ?? (name === "Overall Score" ? 1 : 0))}" data-rating="${escapeHtml(name)}" ${locked}></label>`).join("")}</div><div class="save-row"><span class="save-state">${reviewed ? "Review saved." : mipsFinished ? "Ready to complete the Daily Review." : "Finish the task statuses before completing the review."}</span><button class="button primary" data-action="complete-review" ${reviewed || !mipsFinished ? "disabled" : ""}>Complete Daily Review</button></div>`;
+    };
+    const bindDraftInputs = () => {
+      view.querySelectorAll(".task-row").forEach((row) => {
+        const type = row.dataset.taskType; const index = Number(row.dataset.taskIndex);
+        row.querySelectorAll("[data-field]").forEach((input) => input.addEventListener("input", () => {
+          ensureDraft()[type === "top" ? "top_tasks" : "additional_items"][index][input.dataset.field] = input.value;
+        }));
+      });
+      view.querySelectorAll("[data-plan-field]").forEach((input) => input.addEventListener("input", () => {
+        ensureDraft().planning_data[input.dataset.planField] = input.value;
+      }));
+    };
+
+    const collectReview = () => {
+      const reviewData = {};
+      view.querySelectorAll("[data-review-field]").forEach((input) => { reviewData[input.dataset.reviewField] = input.value; });
+      const ratings = {};
+      view.querySelectorAll("[data-rating]").forEach((input) => { ratings[input.dataset.rating] = Number(input.value || 0); });
+      return {review_data:reviewData, ratings, tomorrow_intention:view.querySelector("[data-review-tomorrow]")?.value || ""};
+    };
+    const loadPlanner = async (workDate) => {
+      if (!state.token) return;
+      state.loading = true; state.dataStartedAt = performance.now(); state.draft = null; state.editingNew = false;
+      showSkeleton();
+      try {
+        const payload = await requestJson(`/api/os/daily-planner/bootstrap?date=${encodeURIComponent(workDate || isoToday())}`);
+        state.bundle = payload; state.initialLoadComplete = true; state.loading = false;
+        state.weeklyAnchor ||= payload.work_date;
+        statusText.textContent = "Saved planner state connected";
+        const clientMs = Math.round(performance.now() - state.dataStartedAt);
+        performanceText.textContent = `Shell ${Math.round(shellVisibleAt)} ms | Planner ${clientMs} ms | Server ${Math.round(payload.performance?.planner_data_ms || 0)} ms`;
+        renderCurrent(); scheduleStatus();
+        (payload.events || []).forEach((event) => {
+          const timer = event.timer || {};
+          const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
+          if (state.seenEvents.has(key)) return;
+          state.seenEvents.add(key);
+          if (event.event === "halfway") showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`, "info", 7000);
+          if (event.event === "expired") showOutcome({...timer, task:event.task || timer.task}, true);
+        });
+        if (activeTimer().outcome_required || activeTimer().status === "expired") showOutcome(activeTimer(), false);
+      } catch (error) {
+        state.loading = false; state.initialLoadComplete = true;
+        view.innerHTML = `<div class="notice error"><strong>Daily Planner could not load.</strong><br>${escapeHtml(error.message)}</div><button class="button" data-action="retry">Retry</button>`;
+        statusText.textContent = "Planner storage unavailable";
+      }
+    };
+    const mutate = async (payload) => {
+      const response = await requestJson("/api/os/daily-planner/mutate", {method:"POST", body:JSON.stringify(payload)});
+      return response.result;
+    };
+    const saveSheet = async () => {
+      const draft = ensureDraft();
+      const carry = [];
+      view.querySelectorAll("[data-carry-index]:checked").forEach((box) => {
+        const item = unfinishedFromSource()[Number(box.dataset.carryIndex)];
+        if (item) carry.push({key:item.carryKey, task:item.task, details:item.details || "", time_blocked:item.time_blocked || "", status:"", carried_from:state.bundle.source_sheet.sheet_date || ""});
+      });
+      const additional = [...carry, ...draft.additional_items];
+      const source = state.bundle.source_sheet || {};
+      const sourceReviewed = ["reviewed","completed","archived"].includes(String(source.status || "").toLowerCase());
+      const archiveSheetId = state.bundle.work_date > state.bundle.today && sourceReviewed ? source.id || "" : "";
+      state.saving = true; renderPlanner();
+      try {
+        await mutate({action:"save_sheet", work_date:state.bundle.work_date, top_tasks:draft.top_tasks, additional_items:additional, planning_data:{...draft.planning_data, carried_forward:carry}, archive_sheet_id:archiveSheetId});
+        showToast("Daily Planner saved.", "success");
+        await loadPlanner(state.bundle.work_date);
+      } catch (error) { state.saving = false; renderPlanner(); showToast(error.message,"error",8000); }
+    };
+    const timerAction = async (action, extra={}) => {
+      try {
+        if (action === "start_timer") await enableAudio();
+        await mutate({action, ...extra});
+        await loadPlanner(extra.work_date || state.bundle.work_date);
+      } catch (error) { showToast(error.message,"error",8000); }
+    };
+    const updateTimerDisplays = () => {
+      const timer = activeTimer();
+      document.querySelectorAll('[data-countdown="active"]').forEach((element) => { element.textContent = formatClock(timerRemaining(timer)); });
+      renderCompact();
+      if (timer.id && timer.status === "running" && timerRemaining(timer) <= 0 && !timer.outcome) {
+        timer.status = "expired"; timer.outcome_required = true; timer.remaining_seconds = 0;
+        showOutcome(timer, true); refreshStatus(true);
+      }
+    };
+    const showOutcome = (timer, sound) => {
+      if (!timer?.id || timer.outcome) { outcome.classList.add("hidden"); return; }
+      outcome.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="sound-row"><button class="button small" data-stop-sound>Stop Sound</button><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
+      outcome.classList.remove("hidden");
+      outcome.querySelector("[data-outcome]")?.focus();
+      outcome.querySelectorAll("[data-outcome]").forEach((button) => button.addEventListener("click", async () => {
+        stopAlarm();
+        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.outcome}); outcome.classList.add("hidden"); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
+        catch (error) { showToast(error.message,"error",8000); }
+      }));
+      outcome.querySelector("[data-stop-sound]").addEventListener("click", stopAlarm);
+      outcome.querySelector("[data-volume]").addEventListener("input", (event) => { state.volume = Number(event.target.value); localStorage.setItem("scPlannerVolume", String(state.volume)); });
+      const alarmKey = `alarm:${timer.id}:${timer.expiry_notified_at || timer.deadline_at || ""}`;
+      if (sound && !state.seenEvents.has(alarmKey)) { state.seenEvents.add(alarmKey); playAlarm(); }
+    };
+    const refreshStatus = async (immediate=false) => {
+      clearTimeout(state.statusTimer);
+      if (!state.token) return;
+      try {
+        const payload = await requestJson("/api/os/daily-planner/status");
+        const previousId = activeTimer().id;
+        if (state.bundle) state.bundle.active_timer = payload.timer || {};
+        (payload.events || []).forEach((event) => {
+          const timer = event.timer || {};
+          const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
+          if (state.seenEvents.has(key)) return;
+          state.seenEvents.add(key);
+          if (event.event === "halfway") showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`,"info",7000);
+          if (event.event === "expired") showOutcome({...timer, task:event.task || timer.task}, true);
+        });
+        const timer = activeTimer();
+        if (timer.outcome_required || timer.status === "expired") showOutcome(timer, previousId !== timer.id || immediate);
+        updateTimerDisplays();
+      } catch (_error) {}
+      scheduleStatus();
+    };
+    const scheduleStatus = () => {
+      clearTimeout(state.statusTimer);
+      const delay = activeTimer().id ? 10000 : 30000;
+      state.statusTimer = setTimeout(refreshStatus, delay);
+    };
+
+    const periodDates = (period) => {
+      const today = isoToday();
+      if (period === "7") return [addDays(today,-6),today];
+      if (period === "30") return [addDays(today,-29),today];
+      if (period === "custom") return [state.historyStart || addDays(today,-6), state.historyEnd || today];
+      return [today,today];
+    };
+    const loadHistory = async () => {
+      const [start,end] = periodDates(state.historyPeriod);
+      if (end < start) return showToast("End date must be on or after the start date.","error");
+      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      try {
+        const payload = await requestJson(`/api/os/daily-planner/history?start=${start}&end=${end}`);
+        state.historyRows = payload.rows || []; state.historyLoaded = true; renderHistory();
+      } catch (error) { view.innerHTML = `<div class="notice error">${escapeHtml(error.message)}</div>`; }
+    };
+    const renderHistory = () => {
+      const [start,end] = periodDates(state.historyPeriod);
+      const rows = state.historyRows || [];
+      view.innerHTML = `<div class="toolbar"><div class="segmented">${[["today","Today"],["7","Last 7 days"],["30","Last 30 days"],["custom","Custom"]].map(([value,label]) => `<button class="button ${state.historyPeriod === value ? "active" : ""}" data-period="${value}">${label}</button>`).join("")}</div>${state.historyPeriod === "custom" ? `<input class="date-input" type="date" id="history-start" value="${start}"><input class="date-input" type="date" id="history-end" value="${end}"><button class="button" data-action="apply-history">Apply</button>` : ""}<span class="header-spacer"></span><span>${rows.length} task record${rows.length === 1 ? "" : "s"}</span></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Work date</th><th>Task</th><th>Owner</th><th>Area</th><th>Allocated</th><th>Actual</th><th>Status</th><th>Outcome</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => `<tr data-row-id="${escapeHtml(row.row_id)}"><td>${escapeHtml(row.work_date)}</td><td>${escapeHtml(row.task)}</td><td>${escapeHtml(row.owner)}</td><td>${escapeHtml(row.category)}</td><td>${escapeHtml(row.allocated || formatClock(row.allocated_seconds))}</td><td>${escapeHtml(formatClock(row.timer?.actual_elapsed_seconds ?? row.timer?.elapsed_seconds))}</td><td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.outcome === "did_not_finish" ? "Did not finish" : row.outcome === "completed" ? "Completed" : "")}</td><td>${escapeHtml(row.notes)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No Daily Planner tasks</strong><span>No records exist for this period.</span></div></div>'}`;
+    };
+    const loadWeekly = async () => {
+      const anchor = state.weeklyAnchor || state.bundle?.work_date || isoToday();
+      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      try { state.weekly = await requestJson(`/api/os/daily-planner/weekly-review?date=${anchor}`); state.weeklyLoaded = true; renderWeekly(); }
+      catch (error) { view.innerHTML = `<div class="notice error">${escapeHtml(error.message)}</div>`; }
+    };
+    const renderWeekly = () => {
+      const data = state.weekly || {}; const summary = data.summary || {}; const sheets = data.sheets || [];
+      view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-week">&#8592; Previous</button><input class="date-input" type="date" id="weekly-date" value="${escapeHtml(state.weeklyAnchor || isoToday())}"><button class="button" data-action="next-week">Next &#8594;</button><span>${escapeHtml(formatDate(data.week_start))} - ${escapeHtml(formatDate(data.week_end))}</span></div><div class="planning-grid"><div class="notice info"><strong>${summary.days_planned || 0}</strong><br>Days planned</div><div class="notice info"><strong>${summary.days_reviewed || 0}</strong><br>Days reviewed</div><div class="notice info"><strong>${summary.mip_completed || 0}</strong><br>MIPs completed</div><div class="notice info"><strong>${summary.average_day_rating || "-"}</strong><br>Average rating</div></div><div class="section-title"><h2>Week summary</h2><span class="rule"></span></div><p><strong>Biggest wins:</strong> ${escapeHtml((summary.biggest_wins || []).join("; ") || "No wins recorded yet.")}</p><p><strong>Main blockers:</strong> ${escapeHtml((summary.main_blockers || []).join("; ") || "No blockers recorded yet.")}</p><p><strong>Repeated unfinished work:</strong> ${escapeHtml((summary.repeated_carryovers || []).join("; ") || "None repeated this week.")}</p>${sheets.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Owner</th><th>Status</th><th>MIPs closed</th><th>Tasks</th><th>Rating</th></tr></thead><tbody>${sheets.map((sheet) => `<tr><td>${escapeHtml(sheet.sheet_date)}</td><td>${escapeHtml(sheet.user_name)}</td><td>${escapeHtml(sheet.status)}</td><td>${(sheet.top_tasks || []).filter((task) => task.task && ["done","couldnt_finish"].includes(task.status)).length}</td><td>${(sheet.top_tasks || []).filter((task) => task.task).length}</td><td>${escapeHtml(sheet.ratings?.["Overall Score"] || "")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No planner records</strong><span>No Daily Planner records were found for this week.</span></div></div>'}`;
+    };
+    const renderCompact = () => {
+      if (!state.compact) return;
+      const timer = activeTimer();
+      if (!timer.id) {
+        compactView.innerHTML = '<div class="compact-task">No active timer</div><div class="compact-countdown">00:00</div><div class="compact-actions"><button class="button" data-action="toggle-compact">Restore full planner</button></div>';
+        return;
+      }
+      compactView.innerHTML = `<div class="compact-task">${escapeHtml(taskForTimer(timer))}</div><div class="compact-countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div><div class="compact-meta"><span>Allocated ${formatClock(timer.allocated_seconds)}</span><span>Elapsed ${formatClock(timerElapsed(timer))}</span></div><div class="compact-actions">${timer.status === "running" ? '<button class="button" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button" data-action="resume-timer">Resume</button>' : ""}<button class="button primary" data-compact-outcome="completed">Complete</button><button class="button" data-compact-outcome="did_not_finish">Did not finish</button><button class="button" data-action="toggle-compact">Restore full planner</button></div>`;
+      compactView.querySelectorAll("[data-compact-outcome]").forEach((button) => button.addEventListener("click", async () => {
+        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.compactOutcome}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
+        catch (error) { showToast(error.message,"error",8000); }
+      }));
+    };
+    const renderCurrent = () => {
+      document.querySelectorAll(".tab").forEach((button) => button.setAttribute("aria-selected", button.dataset.tab === state.tab ? "true" : "false"));
+      if (state.tab === "planner") renderPlanner();
+      else if (state.tab === "history") state.historyLoaded ? renderHistory() : loadHistory();
+      else state.weeklyLoaded ? renderWeekly() : loadWeekly();
+      renderCompact();
+    };
+
+    document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => { state.tab = button.dataset.tab; renderCurrent(); }));
+    document.querySelector("#test-sound").addEventListener("click", playAlarm);
+    document.querySelector("#compact-toggle").addEventListener("click", () => setCompact(!state.compact));
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (state.compact || window.outerWidth < 500 || window.outerHeight < 420) return;
+        state.fullBounds = {width:window.outerWidth, height:window.outerHeight};
+        localStorage.setItem("scPlannerFullBounds", JSON.stringify(state.fullBounds));
+      }, 180);
+    });
+    document.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+      const action = target.dataset.action;
+      const row = target.closest(".task-row");
+      const type = row?.dataset.taskType; const index = Number(row?.dataset.taskIndex || 0);
+      if (action === "retry") return loadPlanner(state.bundle?.work_date || isoToday());
+      if (action === "previous-day") return loadPlanner(addDays(state.bundle.work_date,-1));
+      if (action === "next-day") return loadPlanner(addDays(state.bundle.work_date,1));
+      if (action === "today") return loadPlanner(isoToday());
+      if (action === "plan-tomorrow") return loadPlanner(addDays(state.bundle.work_date,1));
+      if (action === "reopen-active") return loadPlanner(activeTimer().sheet_date);
+      if (action === "toggle-compact") return setCompact(!state.compact);
+      if (action === "create-sheet") { state.editingNew = true; state.draft = normalDraft({}); return renderPlanner(); }
+      if (action === "cancel-new") { state.editingNew = false; state.draft = null; return renderPlanner(); }
+      if (action === "add-task") { ensureDraft().additional_items.push({task:"",details:"",time_blocked:"",status:""}); return renderPlanner(); }
+      if (action === "remove-task") { ensureDraft().additional_items.splice(index,1); return renderPlanner(); }
+      if (action === "move-up" || action === "move-down") {
+        const list = ensureDraft()[type === "top" ? "top_tasks" : "additional_items"];
+        const next = index + (action === "move-up" ? -1 : 1);
+        if (next >= 0 && next < list.length) [list[index],list[next]] = [list[next],list[index]];
+        return renderPlanner();
+      }
+      if (action === "save-sheet") return saveSheet();
+      if (action === "complete-review") {
+        try { await mutate({action:"complete_review", sheet_id:state.bundle.sheet.id, review:collectReview()}); showToast("Daily Review complete.","success"); await loadPlanner(state.bundle.work_date); }
+        catch (error) { showToast(error.message,"error",8000); }
+        return;
+      }
+      if (action === "start-timer") {
+        await enableAudio();
+        const minutes = Number(row.querySelector(".duration-input")?.value || 0);
+        const running = activeTimer();
+        if (running.id && !activeMatches(type,index)) {
+          if (running.status === "expired" || running.outcome_required) {
+            showOutcome(running, false);
+            return;
+          }
+          if (window.confirm(`Another timer is active for ${taskForTimer(running)}. Choose OK to return to it, or Cancel to choose whether to stop it.`)) {
+            return loadPlanner(running.sheet_date || state.bundle.work_date);
+          }
+          if (!window.confirm("Stop the active timer and start this task? The active task status will not change.")) return;
+          await mutate({action:"reset_timer", timer_id:running.id});
+        }
+        return timerAction("start_timer", {sheet_id:state.bundle.sheet.id, task_type:type, task_index:index, allocated_seconds:Math.max(1,Math.round(minutes*60))});
+      }
+      if (action === "pause-timer") return timerAction("pause_timer", {timer_id:activeTimer().id});
+      if (action === "resume-timer") return timerAction("resume_timer", {timer_id:activeTimer().id});
+      if (action === "reset-timer") {
+        if (window.confirm("Reset this timer? The task completion status will not change.")) return timerAction("reset_timer", {timer_id:activeTimer().id});
+        return;
+      }
+      if (action === "apply-history") {
+        state.historyStart = document.querySelector("#history-start")?.value || "";
+        state.historyEnd = document.querySelector("#history-end")?.value || "";
+        return loadHistory();
+      }
+      if (action === "previous-week" || action === "next-week") { state.weeklyAnchor = addDays(state.weeklyAnchor || isoToday(), action === "previous-week" ? -7 : 7); state.weeklyLoaded = false; return loadWeekly(); }
+    });
+    document.addEventListener("change", (event) => {
+      if (event.target.id === "work-date") loadPlanner(event.target.value);
+      if (event.target.id === "weekly-date") { state.weeklyAnchor = event.target.value; state.weeklyLoaded = false; loadWeekly(); }
+      const periodButton = event.target.closest?.("[data-period]");
+      if (periodButton) { state.historyPeriod = periodButton.dataset.period; state.historyLoaded = false; loadHistory(); }
+    });
+    document.addEventListener("click", (event) => {
+      const periodButton = event.target.closest("[data-period]");
+      if (!periodButton) return;
+      state.historyPeriod = periodButton.dataset.period; state.historyLoaded = false; loadHistory();
+    });
+    state.countdownTimer = setInterval(updateTimerDisplays, 1000);
+    showSkeleton();
+    setCompact(state.compact);
+    postReady();
+    setTimeout(postReady, 250);
+    setTimeout(postReady, 900);
+  })();
+  </script>
+</body>
+</html>

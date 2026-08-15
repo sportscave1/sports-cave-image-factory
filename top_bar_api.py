@@ -99,13 +99,6 @@ _NOTIFICATION_EVENT_ALLOWLIST = {
     "mockup_pack_exported",
 }
 _NOTIFICATION_EXCLUDED_TERMS = (
-    "afterpay",
-    "cricket",
-    "golf",
-    "tennis",
-    "seasonal",
-    "campaign",
-    "sporting event",
     "metafield",
     "mirror",
     "sync",
@@ -117,7 +110,6 @@ _NOTIFICATION_EXCLUDED_TERMS = (
     "reconciliation",
     "debug",
     "downloaded file",
-    "activity",
 )
 
 
@@ -902,7 +894,12 @@ def load_daily_planner_status(claims):
 
         if supabase_backend.is_configured():
             events = supabase_backend.reconcile_daily_execution_timers(user_id)
-            timer = supabase_backend.get_daily_execution_active_timer(user_id)
+            try:
+                timer = supabase_backend.get_daily_execution_active_timer(
+                    user_id, reconcile=False
+                )
+            except TypeError:
+                timer = supabase_backend.get_daily_execution_active_timer(user_id)
     except Exception:
         events = []
         timer = {}

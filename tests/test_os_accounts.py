@@ -2527,7 +2527,8 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Active alerts", text)
+        self.assertIn("Active &amp; Upcoming Events", text)
+        self.assertIn("This Week&#x27;s Work", text)
         self.assertNotIn("Recent operational activity", text)
         self.assertNotIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
 
@@ -2608,22 +2609,18 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("This page failed to load", text)
         self.assertNotIn("**Other tasks**", text)
 
-    def test_daily_execution_renderer_has_admin_guard(self):
+    def test_daily_planner_route_has_signed_server_side_admin_guard(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        panel_source = source[
-            source.index("def render_daily_execution_panel") :
-            source.index("\n\ndef render_task_group")
-        ]
         dashboard_source = source[
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
-        self.assertIn("if not sports_cave_dashboard.can_manage_daily_planner(user):", panel_source)
-        self.assertIn("Access not approved", panel_source)
         self.assertNotIn("if sports_cave_dashboard.can_manage_daily_planner(user):", dashboard_source)
         self.assertNotIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", dashboard_source)
         planner_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
-        self.assertIn("if not sports_cave_dashboard.can_manage_daily_planner(user):", planner_source)
+        self.assertIn("validate_top_bar_token", planner_source)
+        self.assertIn('claims.get("can_manage_daily_planner")', planner_source)
+        self.assertIn("_require_daily_execution_admin", (ROOT / "sports_cave_dashboard.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

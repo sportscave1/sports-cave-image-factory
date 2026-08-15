@@ -4556,6 +4556,53 @@ def _select_daily_sheet_for_timer(cur, user_id, sheet_id, *, lock=True):
     return cur.fetchone() or {}
 
 
+def _expire_daily_timer_row(cur, timer_row, user_id, *, actor="sports_cave_os"):
+    """Expire a locked timer without granting time during a pause/resume race."""
+    timer = _timer_from_row(timer_row)
+    if not timer or timer.get("outcome"):
+        return timer_row
+    cur.execute(
+        """
+        UPDATE daily_execution_task_timers
+        SET status='expired',
+            remaining_seconds=0,
+            expiry_notified_at=COALESCE(expiry_notified_at, now()),
+            outcome_required=true,
+            actual_elapsed_seconds=allocated_seconds,
+            updated_at=now(),
+            version=version + 1
+        WHERE id=%s AND user_id=%s AND outcome IS NULL
+        RETURNING *
+        """,
+        (timer["id"], str(user_id or "").strip()),
+    )
+    updated = cur.fetchone() or timer_row
+    cur.execute(
+        """
+        SELECT * FROM daily_execution_sheets
+        WHERE id=%s AND user_id=%s
+        LIMIT 1
+        """,
+        (timer["sheet_id"], str(user_id or "").strip()),
+    )
+    sheet = cur.fetchone() or {}
+    task_name = _daily_timer_task_name(sheet, timer["task_type"], timer["task_index"])
+    _insert_daily_timer_activity_once(
+        cur,
+        event_type="daily_planner_task_time_up",
+        timer_id=timer["id"],
+        sheet_id=timer["sheet_id"],
+        message=f"Time up: {task_name}",
+        actor=actor,
+        metadata={
+            "task": task_name,
+            "actor_id": str(user_id or "").strip(),
+            "allocated_seconds": timer.get("allocated_seconds") or 0,
+        },
+    )
+    return updated
+
+
 def start_daily_execution_task_timer(
     user_id,
     sheet_id,
@@ -4679,6 +4726,7 @@ def pause_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os
     ensure_dashboard_schema()
     clean_user_id = str(user_id or "").strip()
     clean_timer_id = str(timer_id or "").strip()
+    reconcile_daily_execution_timers(clean_user_id, actor=actor)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -4699,6 +4747,10 @@ def pause_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os
                 conn.commit()
                 return _timer_from_row(timer)
             remaining = _daily_timer_remaining_seconds(timer)
+            if remaining <= 0:
+                row = _expire_daily_timer_row(cur, timer, clean_user_id, actor=actor)
+                conn.commit()
+                return _timer_from_row(row)
             cur.execute(
                 """
                 UPDATE daily_execution_task_timers
@@ -4755,7 +4807,11 @@ def resume_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_o
             )
             if cur.fetchone():
                 raise ValueError("A Daily Planner timer is already active.")
-            remaining = max(int(timer.get("remaining_seconds") or 0), 1)
+            remaining = max(int(timer.get("remaining_seconds") or 0), 0)
+            if remaining <= 0:
+                row = _expire_daily_timer_row(cur, timer, clean_user_id, actor=actor)
+                conn.commit()
+                return _timer_from_row(row)
             cur.execute(
                 """
                 UPDATE daily_execution_task_timers
@@ -4792,7 +4848,7 @@ def stop_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os"
                     updated_at=now(),
                     version=version + 1
                 WHERE id=%s AND user_id=%s
-                  AND status IN ('running', 'paused', 'expired')
+                  AND status IN ('running', 'paused')
                   AND outcome IS NULL
                 RETURNING *
                 """,
@@ -4903,8 +4959,9 @@ def reconcile_daily_execution_timers(user_id, *, actor="sports_cave_os", now_utc
     return events
 
 
-def get_daily_execution_active_timer(user_id):
-    reconcile_daily_execution_timers(user_id)
+def get_daily_execution_active_timer(user_id, *, reconcile=True):
+    if reconcile:
+        reconcile_daily_execution_timers(user_id)
     ensure_dashboard_schema()
     clean_user_id = str(user_id or "").strip()
     with connect() as conn:
@@ -4937,6 +4994,78 @@ def get_daily_execution_active_timer(user_id):
         }
     )
     return timer
+
+
+def load_daily_planner_date_bundle(user_id, work_date):
+    """Read one planner date, carry-forward source, timers, and active timer once."""
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_date = str(work_date or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                WITH selected AS (
+                    SELECT *
+                    FROM daily_execution_sheets
+                    WHERE user_id=%s AND sheet_date=%s::date
+                    LIMIT 1
+                ),
+                previous AS (
+                    SELECT *
+                    FROM daily_execution_sheets
+                    WHERE user_id=%s AND sheet_date=(%s::date - INTERVAL '1 day')::date
+                    LIMIT 1
+                ),
+                selected_timers AS (
+                    SELECT timer.*
+                    FROM daily_execution_task_timers timer
+                    JOIN selected sheet ON sheet.id=timer.sheet_id
+                    ORDER BY timer.updated_at DESC
+                ),
+                active AS (
+                    SELECT timer.*,
+                           sheet.sheet_date,
+                           sheet.top_tasks,
+                           sheet.additional_items
+                    FROM daily_execution_task_timers timer
+                    JOIN daily_execution_sheets sheet ON sheet.id=timer.sheet_id
+                    WHERE timer.user_id=%s
+                      AND timer.status IN ('running', 'paused', 'expired')
+                      AND timer.outcome IS NULL
+                    ORDER BY timer.updated_at DESC
+                    LIMIT 1
+                )
+                SELECT
+                    COALESCE((SELECT to_jsonb(sheet) FROM selected sheet), '{}'::jsonb) AS sheet,
+                    COALESCE((SELECT to_jsonb(sheet) FROM previous sheet), '{}'::jsonb) AS source_sheet,
+                    COALESCE((SELECT jsonb_agg(to_jsonb(timer)) FROM selected_timers timer), '[]'::jsonb) AS timers,
+                    COALESCE((SELECT to_jsonb(timer) FROM active timer), '{}'::jsonb) AS active_timer
+                """,
+                (clean_user_id, clean_date, clean_user_id, clean_date, clean_user_id),
+            )
+            row = cur.fetchone() or {}
+    active_row = dict(row.get("active_timer") or {})
+    active = _timer_from_row(active_row)
+    if active:
+        active.update(
+            {
+                "task": _daily_timer_task_name(
+                    active_row, active.get("task_type"), active.get("task_index")
+                ),
+                "sheet_date": str(active_row.get("sheet_date") or ""),
+                "remaining_seconds": _daily_timer_remaining_seconds(active),
+                "elapsed_seconds": _daily_timer_elapsed_seconds(active),
+            }
+        )
+    return {
+        "sheet": _daily_execution_sheet_from_row(row.get("sheet") or {}),
+        "source_sheet": _daily_execution_sheet_from_row(row.get("source_sheet") or {}),
+        "timers": [_timer_from_row(timer) for timer in row.get("timers") or []],
+        "active_timer": active,
+        "query_count": 1,
+    }
 
 
 def list_daily_execution_timers_for_sheets(user_id, sheet_ids):
@@ -4988,6 +5117,99 @@ def list_daily_execution_sheets_for_reporting(user_id, start_date, end_date, *, 
                 (*params, safe_limit),
             )
             return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+
+
+def load_home_weekly_work_bundle(
+    user_id,
+    week_start,
+    week_end,
+    start_utc,
+    end_utc,
+    *,
+    include_team=False,
+):
+    """Load the complete Home work snapshot with one current-week SQL statement."""
+    ensure_dashboard_schema()
+    from daily_activity_reporting import MEANINGFUL_WORK_ACTIONS
+
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        raise ValueError("A signed-in account is required.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                WITH permitted_users AS (
+                    SELECT id::text AS id,
+                           username,
+                           COALESCE(email, '') AS email,
+                           COALESCE(NULLIF(display_name, ''), username) AS display_name,
+                           role,
+                           timezone
+                    FROM os_users
+                    WHERE is_active IS TRUE
+                      AND account_status <> 'removed'
+                      AND (%s IS TRUE OR id::text=%s)
+                ),
+                selected_sheets AS (
+                    SELECT sheet.*
+                    FROM daily_execution_sheets sheet
+                    JOIN permitted_users person ON person.id=sheet.user_id
+                    WHERE sheet.sheet_date >= %s::date
+                      AND sheet.sheet_date <= %s::date
+                ),
+                selected_timers AS (
+                    SELECT timer.*
+                    FROM daily_execution_task_timers timer
+                    JOIN selected_sheets sheet ON sheet.id=timer.sheet_id
+                ),
+                selected_activity AS (
+                    SELECT activity.*
+                    FROM audit_logs activity
+                    WHERE activity.created_at >= %s
+                      AND activity.created_at <= %s
+                      AND activity.event_type = ANY(%s)
+                      AND (
+                          %s IS TRUE
+                          OR COALESCE(activity.new_value->'metadata'->>'actor_id', '')=%s
+                          OR EXISTS (
+                              SELECT 1
+                              FROM permitted_users person
+                              WHERE lower(COALESCE(activity.actor, '')) IN (
+                                  lower(person.username),
+                                  lower(person.email),
+                                  lower(person.display_name)
+                              )
+                          )
+                      )
+                )
+                SELECT
+                    COALESCE((SELECT jsonb_agg(to_jsonb(person)) FROM permitted_users person), '[]'::jsonb) AS users,
+                    COALESCE((SELECT jsonb_agg(to_jsonb(sheet)) FROM selected_sheets sheet), '[]'::jsonb) AS sheets,
+                    COALESCE((SELECT jsonb_agg(to_jsonb(timer)) FROM selected_timers timer), '[]'::jsonb) AS timers,
+                    COALESCE((SELECT jsonb_agg(to_jsonb(activity)) FROM selected_activity activity), '[]'::jsonb) AS activities
+                """,
+                (
+                    bool(include_team),
+                    clean_user_id,
+                    str(week_start),
+                    str(week_end),
+                    start_utc,
+                    end_utc,
+                    sorted(MEANINGFUL_WORK_ACTIONS),
+                    bool(include_team),
+                    clean_user_id,
+                ),
+            )
+            row = cur.fetchone() or {}
+    return {
+        "users": [dict(item or {}) for item in row.get("users") or []],
+        "sheets": [_daily_execution_sheet_from_row(item) for item in row.get("sheets") or []],
+        "timers": [_timer_from_row(item) for item in row.get("timers") or []],
+        "activities": [dict(item or {}) for item in row.get("activities") or []],
+        "query_count": 1,
+    }
 
 
 def apply_daily_execution_timer_outcome(user_id, timer_id, outcome, *, actor="sports_cave_os"):
