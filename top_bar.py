@@ -30,6 +30,7 @@ def top_bar_config(user, *, logo_src, current_route):
         allowed_routes=allowed_routes,
         can_view_activity=os_accounts.can_view_activity_log(user),
         can_view_all_activity=os_accounts.is_reporting_owner(user),
+        can_manage_daily_planner=os_accounts.is_admin(user),
     )
     return {
         "appName": "Sports Cave OS",
@@ -40,6 +41,8 @@ def top_bar_config(user, *, logo_src, current_route):
         "searchUrl": "/api/os/top-bar/search-index",
         "notificationsUrl": "/api/os/top-bar/notifications",
         "orderStatusUrl": "/api/os/top-bar/order-status",
+        "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
+        "dailyPlannerEnabled": os_accounts.is_admin(user),
         "ordersEnabled": "Orders" in allowed_routes,
         "authToken": token,
         "revision": str(time.time_ns()),

@@ -10,9 +10,14 @@ import daily_activity_reporting
 import email_service
 import os_accounts
 import reporting_store
+import sports_cave_dashboard
 
 
 ARCHIVE_PAGE_SIZE = 15
+PERIOD_KEY = "reporting-period"
+CUSTOM_START_KEY = "reporting-custom-start"
+CUSTOM_END_KEY = "reporting-custom-end"
+PERIOD_OPTIONS = ("Today", "Last 7 days", "Last 30 days", "Custom")
 
 
 def _format_timestamp(value, timezone_name=daily_activity_reporting.REPORT_TIMEZONE):
@@ -181,6 +186,170 @@ def _render_staff_summary(snapshot):
                 )
                 if social.get("weekly_headline"):
                     st.caption(f"Latest weekly check-in: {social['weekly_headline']}")
+
+
+def _period_bounds(user):
+    timezone_name = os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE
+    local_today = datetime.now(timezone.utc).astimezone(ZoneInfo(timezone_name)).date()
+    st.session_state.setdefault(PERIOD_KEY, "Today")
+    period = st.radio(
+        "Reporting period",
+        PERIOD_OPTIONS,
+        horizontal=True,
+        key=PERIOD_KEY,
+    )
+    if period == "Last 7 days":
+        return local_today - timedelta(days=6), local_today, "Last 7 days"
+    if period == "Last 30 days":
+        return local_today - timedelta(days=29), local_today, "Last 30 days"
+    if period == "Custom":
+        st.session_state.setdefault(CUSTOM_START_KEY, local_today - timedelta(days=6))
+        st.session_state.setdefault(CUSTOM_END_KEY, local_today)
+        if hasattr(st, "popover"):
+            with st.popover("Choose date range"):
+                start_value = st.date_input("Start date", key=CUSTOM_START_KEY)
+                end_value = st.date_input("End date", key=CUSTOM_END_KEY)
+        else:
+            cols = st.columns(2)
+            start_value = cols[0].date_input("Start date", key=CUSTOM_START_KEY)
+            end_value = cols[1].date_input("End date", key=CUSTOM_END_KEY)
+        if end_value < start_value:
+            st.warning("End date must be on or after the start date.")
+            end_value = start_value
+            st.session_state[CUSTOM_END_KEY] = start_value
+        st.caption(f"Custom range: {start_value.strftime('%d %b %Y')} - {end_value.strftime('%d %b %Y')}")
+        return start_value, end_value, "Custom"
+    return local_today, local_today, "Today"
+
+
+def _timer_timestamp(timer, key, user):
+    return _format_timestamp((timer or {}).get(key), os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE)
+
+
+def _render_daily_execution_history(user, start_date, end_date):
+    st.subheader("Daily Execution History")
+    try:
+        rows = sports_cave_dashboard.list_daily_execution_history(
+            user,
+            start_date,
+            end_date,
+            limit=5000,
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Daily Execution history could not load right now.")
+        return
+    if not rows:
+        st.caption("No Daily Planner tasks found for this period.")
+        return
+    table_rows = []
+    for row in rows:
+        timer = row.get("timer") or {}
+        actual_elapsed = timer.get("actual_elapsed_seconds") or timer.get("elapsed_seconds")
+        table_rows.append(
+            {
+                "Work date": row.get("work_date") or "",
+                "Task": row.get("task") or "",
+                "Owner": row.get("owner") or "",
+                "Category/area": row.get("category") or "",
+                "Allocated duration": row.get("allocated") or sports_cave_dashboard.format_duration_seconds(row.get("allocated_seconds")),
+                "Actual elapsed": sports_cave_dashboard.format_duration_seconds(actual_elapsed),
+                "Start time": _timer_timestamp(timer, "started_at", user),
+                "End time": _timer_timestamp(timer, "outcome_at", user) or _format_timestamp(row.get("completed_at") or row.get("finished_at"), os_accounts.timezone_for_user(user)),
+                "Status": row.get("status") or "Planned",
+                "Outcome": _outcome_display(row.get("outcome") or timer.get("outcome")),
+                "Notes": row.get("notes") or "",
+                "_row_id": row.get("row_id") or "",
+            }
+        )
+    st.caption(f"{len(table_rows)} task record(s) in range")
+    st.dataframe(
+        table_rows,
+        hide_index=True,
+        use_container_width=True,
+        height=min(520, max(360, 28 * (len(table_rows) + 1))),
+        row_height=28,
+        column_order=(
+            "Work date",
+            "Task",
+            "Owner",
+            "Category/area",
+            "Allocated duration",
+            "Actual elapsed",
+            "Start time",
+            "End time",
+            "Status",
+            "Outcome",
+            "Notes",
+        ),
+        key="reporting-daily-execution-history",
+    )
+
+
+def _outcome_display(value):
+    clean = str(value or "").strip().casefold()
+    if clean == sports_cave_dashboard.DAILY_TIMER_OUTCOME_COMPLETED:
+        return "Completed"
+    if clean == sports_cave_dashboard.DAILY_TIMER_OUTCOME_DID_NOT_FINISH:
+        return "Did not finish"
+    return ""
+
+
+def _render_operational_activity(user, local_now, start_date, end_date):
+    if not os_accounts.can_view_activity_log(user):
+        return
+    st.subheader("Recent Operational Activity")
+    try:
+        entries = sports_cave_dashboard.list_activity_entries(
+            sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+            local_now,
+            limit=None,
+            user=user,
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Operational activity could not load right now.")
+        return
+    timezone_name = os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE
+    try:
+        tzinfo = ZoneInfo(timezone_name)
+    except Exception:
+        tzinfo = daily_activity_reporting.SYDNEY_TZ
+    filtered = []
+    for entry in entries:
+        created = entry.get("created_at")
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+        if isinstance(created, datetime):
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            local_date = created.astimezone(tzinfo).date()
+            if not (start_date <= local_date <= end_date):
+                continue
+        filtered.append(entry)
+    if not filtered:
+        st.caption("No meaningful operational activity found for this period.")
+        return
+    records = [
+        sports_cave_dashboard.activity_table_record(entry, tzinfo)
+        for entry in sports_cave_dashboard.group_mockup_activity_entries(filtered, tzinfo)
+    ]
+    st.dataframe(
+        records,
+        hide_index=True,
+        use_container_width=True,
+        height=min(430, max(260, 28 * (len(records) + 1))),
+        row_height=28,
+        key="reporting-operational-activity",
+    )
+
+
+def _render_reporting_tables(user, now_utc):
+    local_now = now_utc.astimezone(ZoneInfo(os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE))
+    start_date, end_date, _label = _period_bounds(user)
+    _render_daily_execution_history(user, start_date, end_date)
+    _render_operational_activity(user, local_now, start_date, end_date)
 
 
 def _archive_label(row):
@@ -418,6 +587,7 @@ def render_page(user):
         storage_ready,
     )
     _render_staff_summary(snapshot)
+    _render_reporting_tables(user, now_utc)
     _render_sent_reports(user, storage_ready)
     _render_delivery_health(
         user,
@@ -427,3 +597,81 @@ def render_page(user):
         now_utc,
     )
     _render_test_email(user, storage_ready)
+
+
+def render_weekly_review_page(user):
+    if not sports_cave_dashboard.can_manage_daily_planner(user):
+        st.title("Access not approved")
+        st.caption("This page is not available for your account.")
+        return
+    local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(os_accounts.timezone_for_user(user) or "Australia/Sydney"))
+    st.title("Reporting")
+    st.subheader("Weekly Review")
+    current_start, _current_end = sports_cave_dashboard.daily_execution_week_bounds(local_now.date())
+    choice_cols = st.columns([1.8, 1])
+    view = choice_cols[0].radio(
+        "Review week",
+        ("This week", "Last week", "Select week"),
+        horizontal=True,
+        label_visibility="collapsed",
+        key="reporting-weekly-review-week-view",
+    )
+    if view == "Last week":
+        week_start = current_start - timedelta(days=7)
+    elif view == "Select week":
+        anchor = choice_cols[1].date_input(
+            "Week",
+            value=current_start,
+            label_visibility="collapsed",
+            key="reporting-weekly-review-week-date",
+        )
+        week_start, _unused = sports_cave_dashboard.daily_execution_week_bounds(anchor)
+    else:
+        week_start = current_start
+    week_end = week_start + timedelta(days=6)
+    choice_cols[1].caption(f"{week_start.strftime('%d %b')} - {week_end.strftime('%d %b %Y')}")
+    try:
+        sheets = sports_cave_dashboard.list_daily_execution_archive_summaries(
+            user,
+            week_start,
+            week_end,
+            limit=31,
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Weekly Review could not load right now.")
+        return
+    summary = sports_cave_dashboard.daily_execution_weekly_summary(sheets)
+    metrics = st.columns(4)
+    metrics[0].metric("Days planned", summary["days_planned"])
+    metrics[1].metric("Days reviewed", summary["days_reviewed"])
+    metrics[2].metric("MIPs completed", summary["mip_completed"])
+    metrics[3].metric("Average rating", summary["average_day_rating"] or "-")
+    st.caption(
+        f"MIPs not completed: {summary['mip_not_completed']} | Other tasks completed: {summary['other_completed']} | Planned hours: {summary['planned_hours']}"
+    )
+    st.markdown(f"**Biggest wins:** {'; '.join(summary['biggest_wins']) or 'No wins recorded yet.'}")
+    st.markdown(f"**Main blockers:** {'; '.join(summary['main_blockers']) or 'No blockers recorded yet.'}")
+    st.markdown(f"**Repeated unfinished work:** {'; '.join(summary['repeated_carryovers']) or 'None repeated this week.'}")
+    rows = []
+    for sheet in sheets:
+        rows.append(
+            {
+                "Date": sheet.get("sheet_date") or "",
+                "Owner": sheet.get("user_name") or "",
+                "Status": str(sheet.get("status") or "").title(),
+                "MIPs closed": sports_cave_dashboard.daily_execution_completed_count(sheet),
+                "Tasks": sports_cave_dashboard.daily_execution_filled_task_count(sheet),
+                "Rating": ((sheet.get("ratings") or {}).get("Overall Score") or ""),
+            }
+        )
+    if rows:
+        st.dataframe(
+            rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(360, max(220, 28 * (len(rows) + 1))),
+            row_height=28,
+            key="reporting-weekly-review-sheets",
+        )
+    else:
+        st.caption("No Daily Planner records found for this week.")

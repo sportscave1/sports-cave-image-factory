@@ -2271,7 +2271,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("Activity log", text)
         self.assertNotIn("dashboard-activity-view", text)
 
-    def test_worker_home_renders_activity_log_when_admin_approves_it(self):
+    def test_worker_home_does_not_render_activity_log_when_admin_approves_it(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["sports_cave_current_user"] = {
@@ -2290,7 +2290,7 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Recent operational activity", text)
+        self.assertNotIn("Recent operational activity", text)
         self.assertNotIn("Activity log", text)
         self.assertFalse(any(select.label == "User" for select in app_test.selectbox))
         self.assertNotIn("Daily Task Execution Sheet", text)
@@ -2498,10 +2498,10 @@ class AccountAccessTests(unittest.TestCase):
         }
 
         self.assertEqual(render_for(worker), 0)
-        self.assertEqual(render_for(approved_worker), 2)
-        self.assertEqual(render_for(admin), 2)
+        self.assertEqual(render_for(approved_worker), 1)
+        self.assertEqual(render_for(admin), 1)
 
-    def test_admin_home_renders_compact_operational_activity(self):
+    def test_admin_home_renders_alerts_without_planner_or_operational_activity(self):
         owner_email = "owner@sportscave.test"
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
@@ -2528,8 +2528,8 @@ class AccountAccessTests(unittest.TestCase):
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
         self.assertIn("Active alerts", text)
-        self.assertIn("Recent operational activity", text)
-        self.assertIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
+        self.assertNotIn("Recent operational activity", text)
+        self.assertNotIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
 
     def test_admin_home_renders_after_daily_execution_save_with_legacy_other_tasks(self):
         class DailyExecutionBackend:
@@ -2606,7 +2606,7 @@ class AccountAccessTests(unittest.TestCase):
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
         self.assertNotIn("This page failed to load", text)
-        self.assertIn("**Other tasks**", text)
+        self.assertNotIn("**Other tasks**", text)
 
     def test_daily_execution_renderer_has_admin_guard(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -2620,8 +2620,10 @@ class AccountAccessTests(unittest.TestCase):
         ]
         self.assertIn("if not sports_cave_dashboard.can_manage_daily_planner(user):", panel_source)
         self.assertIn("Access not approved", panel_source)
-        self.assertIn("if sports_cave_dashboard.can_manage_daily_planner(user):", dashboard_source)
-        self.assertIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", dashboard_source)
+        self.assertNotIn("if sports_cave_dashboard.can_manage_daily_planner(user):", dashboard_source)
+        self.assertNotIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", dashboard_source)
+        planner_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        self.assertIn("if not sports_cave_dashboard.can_manage_daily_planner(user):", planner_source)
 
 
 if __name__ == "__main__":

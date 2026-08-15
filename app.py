@@ -42,6 +42,7 @@ import streamlit as st
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
 import app_branding
 import dropbox_integration
+import daily_planner
 import mockup_storage
 import navigation_runtime
 import os_accounts
@@ -3221,6 +3222,7 @@ def inject_styles():
         section[data-testid="stSidebar"] .st-key-sidebar-row-orders,
         section[data-testid="stSidebar"] .st-key-sidebar-row-mockups,
         section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-seo"],
+        section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-reporting"],
         section[data-testid="stSidebar"] .st-key-sidebar-row-va_training,
         section[data-testid="stSidebar"] .st-key-sidebar-row-accounts_access {
             margin-top: 0.5rem;
@@ -3261,7 +3263,8 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-social-children,
-        section[data-testid="stSidebar"] .st-key-sidebar-seo-children {
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children,
+        section[data-testid="stSidebar"] .st-key-sidebar-reporting-children {
             border-left: 1px solid #C8A85F;
             box-sizing: border-box;
             margin: 0.08rem 0 0.18rem 1.15rem;
@@ -3271,13 +3274,16 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-social-children div[data-testid="stButton"] button,
-        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button {
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button,
+        section[data-testid="stSidebar"] .st-key-sidebar-reporting-children div[data-testid="stButton"] button {
             min-height: 2rem;
             padding: 0.3rem 0.52rem !important;
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button p,
-        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button span {
+        section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button span,
+        section[data-testid="stSidebar"] .st-key-sidebar-reporting-children div[data-testid="stButton"] button p,
+        section[data-testid="stSidebar"] .st-key-sidebar-reporting-children div[data-testid="stButton"] button span {
             font-size: 0.79rem;
             overflow: visible;
             text-overflow: clip;
@@ -8169,6 +8175,8 @@ SIDEBAR_ICON_BY_ROUTE = {
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
     "Reporting": ":material/bar_chart:",
+    os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
+    os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Accounts & Access": ":material/group:",
 }
 
@@ -8206,6 +8214,11 @@ def _active_sidebar_group(route):
         route,
         social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
         seo_routes=seo_nav.SEO_ROUTES,
+        reporting_routes={
+            "Reporting",
+            os_accounts.DAILY_PLANNER_ROUTE,
+            os_accounts.WEEKLY_REVIEW_ROUTE,
+        },
     )
 
 
@@ -8224,10 +8237,15 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             stored=None,
             social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
             seo_routes=seo_nav.SEO_ROUTES,
+            reporting_routes={
+                "Reporting",
+                os_accounts.DAILY_PLANNER_ROUTE,
+                os_accounts.WEEKLY_REVIEW_ROUTE,
+            },
         )
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
-    def disclosure(group, label, icon, overview_route):
+    def disclosure(group, label, icon, overview_route, *, can_open_overview=True):
         expanded = open_group == group
         container = st.container(
             key=f"sidebar-disclosure-{group}-{'open' if expanded else 'closed'}"
@@ -8249,7 +8267,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
         )
         if clicked:
             st.session_state[SIDEBAR_OPEN_GROUP_KEY] = group
-            if current_page != overview_route:
+            if can_open_overview and current_page != overview_route:
                 set_current_page(overview_route, source="sidebar")
             st.rerun(scope="app")
         container.markdown(
@@ -8316,6 +8334,79 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
     )
 
 
+@st.fragment
+def _render_sidebar_create_reporting(
+    current_page,
+    *,
+    reporting_overview_allowed,
+    reporting_daily_allowed,
+    reporting_weekly_allowed,
+):
+    if SIDEBAR_OPEN_GROUP_KEY not in st.session_state:
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = _active_sidebar_group(current_page)
+    open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
+    expanded = open_group == "reporting"
+    container = st.container(
+        key=f"sidebar-disclosure-reporting-{'open' if expanded else 'closed'}"
+    )
+    clicked = container.button(
+        "Reporting",
+        key="sidebar-disclosure::reporting",
+        use_container_width=True,
+        type="primary" if current_page in {"Reporting", os_accounts.WEEKLY_REVIEW_ROUTE} else "secondary",
+        icon=SIDEBAR_ICON_BY_ROUTE["Reporting"],
+        help="Open Reporting",
+    )
+    if clicked:
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
+        if reporting_overview_allowed and current_page != "Reporting":
+            set_current_page("Reporting", source="sidebar")
+        st.rerun(scope="app")
+    container.markdown(
+        f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}" '
+        f'aria-controls="sidebar-reporting-children">Reporting navigation</span>',
+        unsafe_allow_html=True,
+    )
+    if not expanded:
+        return
+    children = st.container(key="sidebar-reporting-children")
+    children.markdown('<span id="sidebar-reporting-children"></span>', unsafe_allow_html=True)
+    if reporting_overview_allowed:
+        if children.button(
+            "Overview",
+            key="sidebar-child::Reporting::Overview",
+            use_container_width=True,
+            type="primary" if current_page == "Reporting" else "secondary",
+            icon=SIDEBAR_ICON_BY_ROUTE["Reporting"],
+        ):
+            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
+            set_current_page("Reporting", source="sidebar")
+            st.rerun(scope="app")
+    if reporting_daily_allowed:
+        if children.button(
+            os_accounts.DAILY_PLANNER_ROUTE,
+            key=f"sidebar-child::{os_accounts.DAILY_PLANNER_ROUTE}",
+            use_container_width=True,
+            type="secondary",
+            icon=SIDEBAR_ICON_BY_ROUTE[os_accounts.DAILY_PLANNER_ROUTE],
+            help="Open Daily Planner",
+        ):
+            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
+            daily_planner.open_daily_planner()
+            st.rerun(scope="app")
+    if reporting_weekly_allowed:
+        if children.button(
+            os_accounts.WEEKLY_REVIEW_ROUTE,
+            key=f"sidebar-child::{os_accounts.WEEKLY_REVIEW_ROUTE}",
+            use_container_width=True,
+            type="primary" if current_page == os_accounts.WEEKLY_REVIEW_ROUTE else "secondary",
+            icon=SIDEBAR_ICON_BY_ROUTE[os_accounts.WEEKLY_REVIEW_ROUTE],
+        ):
+            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
+            set_current_page(os_accounts.WEEKLY_REVIEW_ROUTE, source="sidebar")
+            st.rerun(scope="app")
+
+
 def render_sidebar():
     user = current_os_user()
     current_page = get_current_page()
@@ -8338,7 +8429,19 @@ def render_sidebar():
         )
         with st.sidebar.container(key="files-window-launcher-slot"):
             _files_window_launcher_component()(key="files-window-launcher", default=None)
-    _sidebar_route_button("Reporting", current_page, allowed_routes)
+    reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
+    reporting_daily_allowed = os_accounts.can_access_page(user, os_accounts.DAILY_PLANNER_ROUTE)
+    reporting_weekly_allowed = os_accounts.can_access_page(user, os_accounts.WEEKLY_REVIEW_ROUTE)
+    if reporting_overview_allowed or reporting_daily_allowed or reporting_weekly_allowed:
+        with st.sidebar:
+            if st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) is None:
+                st.session_state[SIDEBAR_OPEN_GROUP_KEY] = _active_sidebar_group(current_page)
+            _render_sidebar_create_reporting(
+                current_page,
+                reporting_overview_allowed=reporting_overview_allowed,
+                reporting_daily_allowed=reporting_daily_allowed,
+                reporting_weekly_allowed=reporting_weekly_allowed,
+            )
 
     _sidebar_route_button(
         "Accounts & Access",
@@ -13461,12 +13564,6 @@ def render_lightweight_dashboard_page():
         unsafe_allow_html=True,
     )
     render_active_alerts(events, today)
-    if sports_cave_dashboard.can_manage_daily_planner(user):
-        render_daily_execution_panel(local_now, events, {}, show_denied=False)
-    render_home_recent_activity(local_now)
-    if sports_cave_dashboard.can_manage_daily_planner(user):
-        render_daily_execution_archive(local_now, show_denied=False)
-        render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
@@ -14800,6 +14897,12 @@ def render_selected_page(current_page):
         render_accounts_access_page()
     elif current_page == "Reporting":
         get_reporting_page().render_page(current_os_user())
+    elif current_page == os_accounts.DAILY_PLANNER_ROUTE:
+        daily_planner.open_daily_planner()
+        set_current_page("Dashboard", source="daily-planner-popup")
+        st.rerun()
+    elif current_page == os_accounts.WEEKLY_REVIEW_ROUTE:
+        get_reporting_page().render_weekly_review_page(current_os_user())
     elif current_page == "Files":
         render_files_page()
     elif current_page == "Products":
@@ -14908,6 +15011,7 @@ def main():
     log_startup_stage("PAGE RENDER START", current_page)
     try:
         render_selected_page(current_page)
+        daily_planner.render_daily_planner_overlays(current_os_user())
     except Exception as error:
         error_message = f"Page render failed for {current_page}: {error}"
         print(f"ERROR {error_message}", flush=True)

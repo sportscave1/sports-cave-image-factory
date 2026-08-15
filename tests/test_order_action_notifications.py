@@ -452,8 +452,11 @@ class OrderStatusUiContractTests(unittest.TestCase):
             current_route="Dashboard",
         )
         self.assertEqual("/api/os/top-bar/order-status", config["orderStatusUrl"])
+        self.assertEqual("/api/os/top-bar/daily-planner-status", config["dailyPlannerStatusUrl"])
         self.assertTrue(config["ordersEnabled"])
+        self.assertTrue(config["dailyPlannerEnabled"])
         self.assertEqual(1, [path for path, *_rest in top_bar_api.TOP_BAR_ROUTE_HANDLERS].count(config["orderStatusUrl"]))
+        self.assertEqual(1, [path for path, *_rest in top_bar_api.TOP_BAR_ROUTE_HANDLERS].count(config["dailyPlannerStatusUrl"]))
 
 
 if __name__ == "__main__":

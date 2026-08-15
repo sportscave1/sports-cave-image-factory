@@ -17,6 +17,7 @@
     const paths = {
       search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>',
       refresh: '<path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path>',
+      planner: '<rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M8 2v4"></path><path d="M16 2v4"></path><path d="M3 10h18"></path><path d="M12 14v3l2 1"></path>',
       bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
       user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
       settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>',
@@ -182,6 +183,27 @@
     }
     .sc-os-topbar-icon-button:hover,
     .sc-os-topbar-icon-button[aria-expanded="true"] { background: #292929; }
+    .sc-os-topbar-icon-button.sc-planner-active {
+      background: #231f17;
+      color: #f5d37e;
+      position: relative;
+    }
+    .sc-planner-timer-badge {
+      align-items: center;
+      background: #d4a54c;
+      border-radius: 999px;
+      color: #14110b;
+      display: inline-flex;
+      font-size: 9px;
+      font-weight: 780;
+      height: 15px;
+      line-height: 1;
+      min-width: 24px;
+      padding: 0 4px;
+      position: absolute;
+      right: 1px;
+      top: 2px;
+    }
     section[data-testid="stSidebar"] .st-key-sidebar-row-orders button {
       position: relative;
     }
@@ -213,6 +235,14 @@
       z-index: 1000001;
     }
     #sc-os-order-toast-region[hidden] { display: none !important; }
+    #sc-os-planner-toast-region {
+      position: fixed;
+      right: 16px;
+      top: calc(var(--sc-topbar-height) + 66px);
+      width: min(360px, calc(100vw - 32px));
+      z-index: 1000001;
+    }
+    #sc-os-planner-toast-region[hidden] { display: none !important; }
     .sc-os-order-toast {
       align-items: center;
       appearance: none;
@@ -245,6 +275,34 @@
       outline: 2px solid #d4a54c;
       outline-offset: 2px;
     }
+    .sc-os-planner-toast {
+      align-items: center;
+      appearance: none;
+      background: #171715;
+      border: 1px solid rgba(212, 165, 76, .66);
+      border-radius: 7px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .26);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 680;
+      gap: 10px;
+      min-height: 46px;
+      padding: 10px 13px;
+      text-align: left;
+      width: 100%;
+    }
+    .sc-os-planner-toast::before {
+      background: #d4a54c;
+      border-radius: 999px;
+      content: "";
+      flex: 0 0 auto;
+      height: 8px;
+      width: 8px;
+    }
+    .sc-os-planner-toast:hover { background: #22211e; }
     .sc-os-topbar-icon-button:focus-visible,
     .sc-os-topbar-result:focus-visible,
     .sc-os-topbar-action:focus-visible,
@@ -430,6 +488,7 @@
       <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
     </div>
     <div class="sc-os-topbar-actions">
+      <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}</button>
       <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
       <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Accounts and Access" title="Accounts and Access">${icon("user")}</button>
       <button id="sc-os-settings" class="sc-os-topbar-icon-button" type="button" aria-label="Open settings" aria-controls="sc-os-settings-panel" aria-expanded="false" title="Settings">${icon("settings")}</button>
@@ -437,6 +496,7 @@
       <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
     </div>
     <div id="sc-os-order-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <div id="sc-os-planner-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   `;
 
   const createController = () => {
@@ -468,18 +528,24 @@
       recordingStream: null,
       recordingChunks: [],
       orderStatusStarted: false,
+      plannerStatusStarted: false,
       orderToastTimer: null,
+      plannerToastTimer: null,
       shownOrderIds: new Set(),
+      shownPlannerEvents: new Set(),
+      plannerAudioContext: null,
     };
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
     const refreshButton = root.querySelector("#sc-os-refresh");
+    const plannerButton = root.querySelector("#sc-os-daily-planner");
     const notificationsButton = root.querySelector("#sc-os-notifications");
     const notificationsPanel = root.querySelector("#sc-os-notifications-panel");
     const profileButton = root.querySelector("#sc-os-profile");
     const settingsButton = root.querySelector("#sc-os-settings");
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
     const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
+    const plannerToastRegion = root.querySelector("#sc-os-planner-toast-region");
 
     const routeUrl = (routeKey, query, includeQuery = true) => {
       const url = new URL(parentWindow.location.href);
@@ -496,6 +562,11 @@
       doc.body.appendChild(link);
       link.click();
       link.remove();
+    };
+    const openDailyPlanner = () => {
+      const url = new URL(parentWindow.location.href);
+      url.searchParams.set("daily_planner", "open");
+      navigateDocument(url.toString());
     };
     const navigate = (result) => {
       if (!result || !result.route_key) return;
@@ -581,6 +652,66 @@
       orderToastRegion.hidden = true;
       orderToastRegion.replaceChildren();
     };
+    const dismissPlannerToast = () => {
+      if (state.plannerToastTimer) {
+        parentWindow.clearTimeout(state.plannerToastTimer);
+        state.plannerToastTimer = null;
+      }
+      plannerToastRegion.hidden = true;
+      plannerToastRegion.replaceChildren();
+    };
+    const enablePlannerAudio = async () => {
+      const AudioContext = parentWindow.AudioContext || parentWindow.webkitAudioContext;
+      if (!AudioContext) return false;
+      state.plannerAudioContext = state.plannerAudioContext || new AudioContext();
+      try {
+        await state.plannerAudioContext.resume();
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    };
+    const playPlannerAlarm = async () => {
+      if (!(await enablePlannerAudio())) return;
+      const audio = state.plannerAudioContext;
+      const playOne = (offset, duration, frequency) => {
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(frequency, audio.currentTime + offset);
+        gain.gain.setValueAtTime(0.0001, audio.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(0.15, audio.currentTime + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + offset + duration);
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.start(audio.currentTime + offset);
+        oscillator.stop(audio.currentTime + offset + duration + 0.05);
+      };
+      playOne(0, 0.2, 660);
+      playOne(0.27, 0.2, 880);
+      playOne(0.54, 0.25, 660);
+    };
+    const showPlannerToast = (message, {openPlanner = false, alarm = false, eventKey = ""} = {}) => {
+      const clean = String(message || "").trim();
+      if (!clean) return;
+      if (eventKey && state.shownPlannerEvents.has(eventKey)) return;
+      if (eventKey) state.shownPlannerEvents.add(eventKey);
+      dismissPlannerToast();
+      const toast = doc.createElement("button");
+      toast.type = "button";
+      toast.className = "sc-os-planner-toast";
+      toast.textContent = clean;
+      toast.setAttribute("aria-label", `${clean}. Open Daily Planner.`);
+      toast.addEventListener("click", () => {
+        dismissPlannerToast();
+        openDailyPlanner();
+      }, listenerOptions);
+      plannerToastRegion.appendChild(toast);
+      plannerToastRegion.hidden = false;
+      if (alarm) playPlannerAlarm();
+      if (openPlanner) later(openDailyPlanner, 120);
+      state.plannerToastTimer = later(dismissPlannerToast, 9000);
+    };
     const showOrderToast = (notification) => {
       const message = String(notification?.message || "").trim();
       const orderIds = Array.isArray(notification?.shopify_order_ids)
@@ -615,6 +746,62 @@
         // Keep the last visible local state when the lightweight status read is unavailable.
       } finally {
         later(refreshOrderStatus, 30000);
+      }
+    };
+    const compactTimerLabel = (seconds) => {
+      const remaining = Math.max(Number(seconds) || 0, 0);
+      if (!remaining) return "0m";
+      const minutes = Math.ceil(remaining / 60);
+      return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+    };
+    const updatePlannerButton = (timer) => {
+      if (!plannerButton) return;
+      plannerButton.querySelector(".sc-planner-timer-badge")?.remove();
+      const status = String(timer?.status || "");
+      const active = ["running", "paused", "expired"].includes(status) && !timer?.outcome;
+      plannerButton.classList.toggle("sc-planner-active", active);
+      plannerButton.hidden = !state.config.dailyPlannerEnabled;
+      if (!active) {
+        plannerButton.setAttribute("aria-label", "Open Daily Planner");
+        return;
+      }
+      const badge = doc.createElement("span");
+      badge.className = "sc-planner-timer-badge";
+      badge.textContent = status === "expired" ? "0m" : compactTimerLabel(timer.remaining_seconds);
+      badge.setAttribute("aria-hidden", "true");
+      plannerButton.appendChild(badge);
+      const task = String(timer.task || "Daily Planner task");
+      plannerButton.setAttribute("aria-label", `Open Daily Planner, ${task}, ${badge.textContent} remaining`);
+    };
+    const refreshPlannerStatus = async () => {
+      if (!state.config.dailyPlannerEnabled || !state.config.dailyPlannerStatusUrl) {
+        if (plannerButton) plannerButton.hidden = true;
+        return;
+      }
+      try {
+        const payload = await requestJson(state.config.dailyPlannerStatusUrl);
+        updatePlannerButton(payload.timer || {});
+        (payload.events || []).forEach((event) => {
+          const timer = event.timer || {};
+          const key = `${event.event || ""}:${timer.id || ""}:${timer.updated_at || ""}`;
+          if (event.event === "halfway") {
+            showPlannerToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"}`, {eventKey: key});
+          } else if (event.event === "expired") {
+            showPlannerToast("Time’s up — did you complete this task?", {openPlanner: true, alarm: true, eventKey: key});
+          }
+        });
+        const timer = payload.timer || {};
+        if (timer.outcome_required || timer.status === "expired") {
+          showPlannerToast("Time’s up — did you complete this task?", {
+            openPlanner: true,
+            alarm: true,
+            eventKey: `pending:${timer.id || ""}:${timer.expiry_notified_at || ""}`,
+          });
+        }
+      } catch (_error) {
+        updatePlannerButton({});
+      } finally {
+        later(refreshPlannerStatus, 15000);
       }
     };
     const loadSearchIndex = async () => {
@@ -819,6 +1006,10 @@
     refreshButton.addEventListener("click", () => {
       parentWindow.location.reload();
     }, listenerOptions);
+    plannerButton.addEventListener("click", () => {
+      enablePlannerAudio();
+      openDailyPlanner();
+    }, listenerOptions);
     searchInput.addEventListener("input", () => {
       if (state.activePanel !== "search") openPanel("search");
       renderSearchResults();
@@ -895,10 +1086,15 @@
           state.searchPromise = null;
           state.notifications = null;
         }
+        if (plannerButton) plannerButton.hidden = !state.config.dailyPlannerEnabled;
         updateSidebarWidth();
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
           refreshOrderStatus();
+        }
+        if (!state.plannerStatusStarted) {
+          state.plannerStatusStarted = true;
+          refreshPlannerStatus();
         }
       },
       destroy() {

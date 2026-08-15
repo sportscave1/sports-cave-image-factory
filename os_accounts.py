@@ -28,6 +28,10 @@ FILES_DELETE_CAPABILITY = "delete_files"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 EDIT_PROMPTS_CAPABILITY = "edit_prompts"
 REPORTING_PAGE_KEY = "reporting"
+DAILY_PLANNER_PAGE_KEY = "daily_planner"
+DAILY_PLANNER_ROUTE = "Daily Planner"
+WEEKLY_REVIEW_PAGE_KEY = "weekly_review"
+WEEKLY_REVIEW_ROUTE = "Weekly Review"
 ACTION_USER_REMOTE_LOGOUT = "account_remote_logout"
 ACTION_ACCOUNT_PERMANENTLY_REMOVED = "account_permanently_removed"
 ACTION_ADMIN_ACCOUNT_ACTION_DENIED = "account_admin_action_denied"
@@ -101,6 +105,22 @@ PAGE_REGISTRY = (
         "worker_assignable": False,
         "top_level": True,
         "sensitive": True,
+    },
+    {
+        "key": DAILY_PLANNER_PAGE_KEY,
+        "route": DAILY_PLANNER_ROUTE,
+        "label": DAILY_PLANNER_ROUTE,
+        "worker_assignable": False,
+        "parent_key": REPORTING_PAGE_KEY,
+        "navigation_child": True,
+    },
+    {
+        "key": WEEKLY_REVIEW_PAGE_KEY,
+        "route": WEEKLY_REVIEW_ROUTE,
+        "label": WEEKLY_REVIEW_ROUTE,
+        "worker_assignable": False,
+        "parent_key": REPORTING_PAGE_KEY,
+        "navigation_child": True,
     },
     {
         "key": "accounts_access",
@@ -319,6 +339,8 @@ def can_access_page(user, route_or_key):
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if page and page["key"] == REPORTING_PAGE_KEY:
         return can_access_reporting(user)
+    if page and page["key"] in {DAILY_PLANNER_PAGE_KEY, WEEKLY_REVIEW_PAGE_KEY}:
+        return is_admin(user)
     if page and page["key"] in {
         social_media.SOCIAL_MEDIA_PAGE_KEY,
         social_media.AI_REELS_PAGE_KEY,

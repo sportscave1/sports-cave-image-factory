@@ -1,18 +1,21 @@
-def active_disclosure_group(route, *, social_routes, seo_routes):
+def active_disclosure_group(route, *, social_routes, seo_routes, reporting_routes=()):
     if route in social_routes:
         return "social"
     if route in seo_routes:
         return "seo"
+    if route in reporting_routes:
+        return "reporting"
     return ""
 
 
-def initial_disclosure_group(route, *, stored, social_routes, seo_routes):
+def initial_disclosure_group(route, *, stored, social_routes, seo_routes, reporting_routes=()):
     if stored is not None:
         return str(stored or "")
     return active_disclosure_group(
         route,
         social_routes=social_routes,
         seo_routes=seo_routes,
+        reporting_routes=reporting_routes,
     )
 
 

@@ -795,6 +795,70 @@ def _safe_create_index(cur, sql, index_name):
         )
 
 
+def _ensure_daily_execution_timer_schema(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_execution_task_timers (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id TEXT NOT NULL,
+            sheet_id UUID NOT NULL REFERENCES daily_execution_sheets(id) ON DELETE CASCADE,
+            task_type TEXT NOT NULL,
+            task_index INTEGER NOT NULL,
+            allocated_seconds INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'idle',
+            started_at TIMESTAMPTZ,
+            deadline_at TIMESTAMPTZ,
+            paused_at TIMESTAMPTZ,
+            remaining_seconds INTEGER,
+            halfway_notified_at TIMESTAMPTZ,
+            expiry_notified_at TIMESTAMPTZ,
+            outcome_required BOOLEAN NOT NULL DEFAULT false,
+            outcome TEXT,
+            outcome_at TIMESTAMPTZ,
+            actual_elapsed_seconds INTEGER,
+            stopped_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            version INTEGER NOT NULL DEFAULT 0,
+            CHECK (task_type IN ('top', 'additional')),
+            CHECK (task_index >= 0),
+            CHECK (allocated_seconds >= 0),
+            CHECK (status IN ('idle', 'running', 'paused', 'expired', 'stopped', 'completed')),
+            CHECK (outcome IS NULL OR outcome IN ('completed', 'did_not_finish'))
+        )
+        """
+    )
+    _safe_create_index(
+        cur,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_task_timers_task
+        ON daily_execution_task_timers(sheet_id, task_type, task_index)
+        """,
+        "idx_daily_task_timers_task",
+    )
+    _safe_create_index(
+        cur,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_task_timers_one_active
+        ON daily_execution_task_timers(user_id)
+        WHERE status IN ('running', 'paused', 'expired') AND outcome IS NULL
+        """,
+        "idx_daily_task_timers_one_active",
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_daily_task_timers_user_updated
+        ON daily_execution_task_timers(user_id, updated_at DESC)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_daily_task_timers_sheet
+        ON daily_execution_task_timers(sheet_id, task_type, task_index)
+        """
+    )
+
+
 def _create_prompt_template_tables(cur):
     cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     cur.execute(
@@ -2106,6 +2170,7 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_handle ON audit_logs(shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
+            _ensure_daily_execution_timer_schema(cur)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_created_at ON dropbox_assets(created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_asset_type ON dropbox_assets(asset_type, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_path ON dropbox_assets(dropbox_path)")
@@ -2295,6 +2360,7 @@ def ensure_dashboard_schema():
                 cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ")
                 cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
                 cur.execute("ALTER TABLE dashboard_tasks ADD COLUMN IF NOT EXISTS design_style TEXT")
+                _ensure_daily_execution_timer_schema(cur)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_user_date ON daily_execution_sheets(user_id, sheet_date DESC)")
@@ -4332,6 +4398,730 @@ def get_daily_execution_archive_detail(user_id, sheet_id):
                 (str(sheet_id or "").strip(), str(user_id or "").strip()),
             )
             return _daily_execution_sheet_from_row(cur.fetchone())
+
+
+DAILY_TIMER_ACTIVE_STATUSES = ("running", "paused", "expired")
+DAILY_TIMER_OUTCOME_COMPLETED = "completed"
+DAILY_TIMER_OUTCOME_DID_NOT_FINISH = "did_not_finish"
+
+
+def _timer_from_row(row):
+    if not row:
+        return {}
+    return {
+        "id": str(row.get("id") or ""),
+        "user_id": str(row.get("user_id") or ""),
+        "sheet_id": str(row.get("sheet_id") or ""),
+        "task_type": str(row.get("task_type") or ""),
+        "task_index": int(row.get("task_index") or 0),
+        "allocated_seconds": int(row.get("allocated_seconds") or 0),
+        "status": str(row.get("status") or "idle"),
+        "started_at": row.get("started_at"),
+        "deadline_at": row.get("deadline_at"),
+        "paused_at": row.get("paused_at"),
+        "remaining_seconds": row.get("remaining_seconds"),
+        "halfway_notified_at": row.get("halfway_notified_at"),
+        "expiry_notified_at": row.get("expiry_notified_at"),
+        "outcome_required": bool(row.get("outcome_required")),
+        "outcome": row.get("outcome") or "",
+        "outcome_at": row.get("outcome_at"),
+        "actual_elapsed_seconds": row.get("actual_elapsed_seconds"),
+        "stopped_at": row.get("stopped_at"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "version": int(row.get("version") or 0),
+    }
+
+
+def _as_utc_datetime(value):
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _daily_timer_remaining_seconds(timer, now_utc=None):
+    timer = dict(timer or {})
+    now_utc = now_utc or datetime.now(timezone.utc)
+    status = str(timer.get("status") or "").casefold()
+    if status == "running":
+        deadline = _as_utc_datetime(timer.get("deadline_at"))
+        if not deadline:
+            return int(timer.get("allocated_seconds") or 0)
+        return max(int((deadline - now_utc).total_seconds()), 0)
+    if status == "paused":
+        return max(int(timer.get("remaining_seconds") or 0), 0)
+    if status == "expired":
+        return 0
+    return max(int(timer.get("remaining_seconds") or timer.get("allocated_seconds") or 0), 0)
+
+
+def _daily_timer_elapsed_seconds(timer, now_utc=None):
+    timer = dict(timer or {})
+    if timer.get("actual_elapsed_seconds") is not None:
+        return max(int(timer.get("actual_elapsed_seconds") or 0), 0)
+    allocated = max(int(timer.get("allocated_seconds") or 0), 0)
+    remaining = _daily_timer_remaining_seconds(timer, now_utc)
+    return max(allocated - remaining, 0)
+
+
+def _daily_sheet_task(sheet_row, task_type, task_index):
+    sheet = _daily_execution_sheet_from_row(sheet_row)
+    clean_type = str(task_type or "").strip()
+    safe_index = int(task_index or 0)
+    if clean_type == "top":
+        tasks = list(sheet.get("top_tasks") or [])
+        if safe_index < len(tasks):
+            task = dict(tasks[safe_index] or {})
+            task["details"] = task.get("why") or task.get("details") or ""
+            return task
+    if clean_type == "additional":
+        tasks = list(sheet.get("additional_items") or [])
+        if safe_index < len(tasks):
+            return dict(tasks[safe_index] or {})
+    return {}
+
+
+def _daily_timer_task_name(sheet_row, task_type, task_index):
+    task = _daily_sheet_task(sheet_row, task_type, task_index)
+    return str(task.get("task") or task.get("title") or task.get("details") or "Daily Planner task").strip()
+
+
+def _insert_daily_timer_activity_once(
+    cur,
+    *,
+    event_type,
+    timer_id,
+    sheet_id,
+    message,
+    actor,
+    metadata=None,
+):
+    clean_timer_id = str(timer_id or "").strip()
+    clean_event = str(event_type or "").strip()
+    event_key = f"{clean_event}:{clean_timer_id}"
+    cur.execute(
+        """
+        SELECT id
+        FROM audit_logs
+        WHERE event_type=%s
+          AND entity_type='daily_execution_timer'
+          AND entity_id=%s
+          AND new_value->'metadata'->>'event_key'=%s
+        LIMIT 1
+        """,
+        (clean_event, clean_timer_id, event_key),
+    )
+    if cur.fetchone():
+        return False
+    clean_metadata = dict(metadata or {})
+    clean_metadata["event_key"] = event_key
+    _insert_audit_log(
+        cur,
+        event_type=clean_event,
+        entity_type="daily_execution_timer",
+        entity_id=clean_timer_id,
+        new_value={
+            "message": str(message or "").strip(),
+            "page": "Daily Planner",
+            "action_type": clean_event,
+            "metadata": {
+                "sheet_id": str(sheet_id or "").strip(),
+                **clean_metadata,
+            },
+        },
+        reason=str(message or "").strip(),
+        actor=str(actor or "").strip() or "sports_cave_os",
+        source="Daily Planner",
+    )
+    return True
+
+
+def _select_daily_sheet_for_timer(cur, user_id, sheet_id, *, lock=True):
+    suffix = " FOR UPDATE" if lock else ""
+    cur.execute(
+        f"""
+        SELECT *
+        FROM daily_execution_sheets
+        WHERE id=%s AND user_id=%s AND status <> 'archived'
+        LIMIT 1{suffix}
+        """,
+        (str(sheet_id or "").strip(), str(user_id or "").strip()),
+    )
+    return cur.fetchone() or {}
+
+
+def start_daily_execution_task_timer(
+    user_id,
+    sheet_id,
+    task_type,
+    task_index,
+    allocated_seconds,
+    *,
+    actor="sports_cave_os",
+):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_sheet_id = str(sheet_id or "").strip()
+    clean_type = str(task_type or "").strip()
+    safe_index = max(int(task_index or 0), 0)
+    safe_allocated = max(int(allocated_seconds or 0), 1)
+    if clean_type not in {"top", "additional"}:
+        raise ValueError("Unknown Daily Planner task.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            sheet = _select_daily_sheet_for_timer(cur, clean_user_id, clean_sheet_id, lock=True)
+            if not sheet:
+                raise ValueError("Daily Planner task is not available for this account.")
+            task = _daily_sheet_task(sheet, clean_type, safe_index)
+            if not str(task.get("task") or task.get("details") or "").strip():
+                raise ValueError("Daily Planner task is empty.")
+            if str(task.get("status") or "").strip().casefold() in {"done", "couldnt_finish"}:
+                raise ValueError("This Daily Planner task is already closed.")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_task_timers
+                WHERE user_id=%s
+                  AND status IN ('running', 'paused', 'expired')
+                  AND outcome IS NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (clean_user_id,),
+            )
+            active = cur.fetchone() or {}
+            if active:
+                same_task = (
+                    str(active.get("sheet_id") or "") == clean_sheet_id
+                    and str(active.get("task_type") or "") == clean_type
+                    and int(active.get("task_index") or 0) == safe_index
+                )
+                if same_task:
+                    conn.commit()
+                    return _timer_from_row(active)
+                raise ValueError("A Daily Planner timer is already active.")
+            cur.execute(
+                """
+                INSERT INTO daily_execution_task_timers(
+                    user_id, sheet_id, task_type, task_index,
+                    allocated_seconds, status, started_at, deadline_at,
+                    remaining_seconds, outcome_required, created_at, updated_at
+                )
+                VALUES (
+                    %s, %s::uuid, %s, %s,
+                    %s, 'running', now(), now() + (%s * INTERVAL '1 second'),
+                    %s, false, now(), now()
+                )
+                ON CONFLICT (sheet_id, task_type, task_index)
+                DO UPDATE SET
+                    user_id=EXCLUDED.user_id,
+                    allocated_seconds=EXCLUDED.allocated_seconds,
+                    status='running',
+                    started_at=now(),
+                    deadline_at=now() + (EXCLUDED.allocated_seconds * INTERVAL '1 second'),
+                    paused_at=NULL,
+                    remaining_seconds=EXCLUDED.allocated_seconds,
+                    halfway_notified_at=NULL,
+                    expiry_notified_at=NULL,
+                    outcome_required=false,
+                    outcome=NULL,
+                    outcome_at=NULL,
+                    actual_elapsed_seconds=NULL,
+                    stopped_at=NULL,
+                    updated_at=now(),
+                    version=daily_execution_task_timers.version + 1
+                WHERE daily_execution_task_timers.status NOT IN ('running', 'paused', 'expired')
+                   OR daily_execution_task_timers.outcome IS NOT NULL
+                RETURNING *
+                """,
+                (
+                    clean_user_id,
+                    clean_sheet_id,
+                    clean_type,
+                    safe_index,
+                    safe_allocated,
+                    safe_allocated,
+                    safe_allocated,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("A Daily Planner timer is already active.")
+            task_name = _daily_timer_task_name(sheet, clean_type, safe_index)
+            _insert_daily_timer_activity_once(
+                cur,
+                event_type="daily_planner_task_started",
+                timer_id=row.get("id"),
+                sheet_id=clean_sheet_id,
+                message=f"Daily Planner task started: {task_name}",
+                actor=actor,
+                metadata={
+                    "task": task_name,
+                    "task_type": clean_type,
+                    "task_index": safe_index,
+                    "allocated_seconds": safe_allocated,
+                    "actor_id": clean_user_id,
+                },
+            )
+        conn.commit()
+    return _timer_from_row(row)
+
+
+def pause_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_timer_id = str(timer_id or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_task_timers
+                WHERE id=%s AND user_id=%s
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (clean_timer_id, clean_user_id),
+            )
+            timer = cur.fetchone() or {}
+            if not timer:
+                raise ValueError("Daily Planner timer was not found.")
+            if str(timer.get("status") or "").casefold() != "running":
+                conn.commit()
+                return _timer_from_row(timer)
+            remaining = _daily_timer_remaining_seconds(timer)
+            cur.execute(
+                """
+                UPDATE daily_execution_task_timers
+                SET status='paused',
+                    paused_at=now(),
+                    remaining_seconds=%s,
+                    updated_at=now(),
+                    version=version + 1
+                WHERE id=%s AND user_id=%s
+                RETURNING *
+                """,
+                (remaining, clean_timer_id, clean_user_id),
+            )
+            row = cur.fetchone() or timer
+        conn.commit()
+    return _timer_from_row(row)
+
+
+def resume_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_timer_id = str(timer_id or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_task_timers
+                WHERE id=%s AND user_id=%s
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (clean_timer_id, clean_user_id),
+            )
+            timer = cur.fetchone() or {}
+            if not timer:
+                raise ValueError("Daily Planner timer was not found.")
+            if str(timer.get("status") or "").casefold() != "paused":
+                conn.commit()
+                return _timer_from_row(timer)
+            cur.execute(
+                """
+                SELECT id
+                FROM daily_execution_task_timers
+                WHERE user_id=%s
+                  AND id<>%s
+                  AND status IN ('running', 'paused', 'expired')
+                  AND outcome IS NULL
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (clean_user_id, clean_timer_id),
+            )
+            if cur.fetchone():
+                raise ValueError("A Daily Planner timer is already active.")
+            remaining = max(int(timer.get("remaining_seconds") or 0), 1)
+            cur.execute(
+                """
+                UPDATE daily_execution_task_timers
+                SET status='running',
+                    deadline_at=now() + (%s * INTERVAL '1 second'),
+                    paused_at=NULL,
+                    remaining_seconds=%s,
+                    updated_at=now(),
+                    version=version + 1
+                WHERE id=%s AND user_id=%s
+                RETURNING *
+                """,
+                (remaining, remaining, clean_timer_id, clean_user_id),
+            )
+            row = cur.fetchone() or timer
+        conn.commit()
+    return _timer_from_row(row)
+
+
+def stop_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_timer_id = str(timer_id or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                UPDATE daily_execution_task_timers
+                SET status='stopped',
+                    stopped_at=now(),
+                    outcome_required=false,
+                    remaining_seconds=GREATEST(COALESCE(remaining_seconds, allocated_seconds), 0),
+                    updated_at=now(),
+                    version=version + 1
+                WHERE id=%s AND user_id=%s
+                  AND status IN ('running', 'paused', 'expired')
+                  AND outcome IS NULL
+                RETURNING *
+                """,
+                (clean_timer_id, clean_user_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return _timer_from_row(row)
+
+
+def reconcile_daily_execution_timers(user_id, *, actor="sports_cave_os", now_utc=None):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    now_utc = now_utc or datetime.now(timezone.utc)
+    events = []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT timer.*, sheet.top_tasks, sheet.additional_items, sheet.sheet_date
+                FROM daily_execution_task_timers timer
+                JOIN daily_execution_sheets sheet ON sheet.id=timer.sheet_id
+                WHERE timer.user_id=%s
+                  AND timer.status='running'
+                  AND timer.outcome IS NULL
+                ORDER BY timer.updated_at DESC
+                FOR UPDATE OF timer SKIP LOCKED
+                """,
+                (clean_user_id,),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                timer = _timer_from_row(row)
+                deadline = _as_utc_datetime(timer.get("deadline_at"))
+                started = _as_utc_datetime(timer.get("started_at"))
+                allocated = max(int(timer.get("allocated_seconds") or 0), 0)
+                task_name = _daily_timer_task_name(row, timer["task_type"], timer["task_index"])
+                if (
+                    started
+                    and allocated > 1
+                    and not timer.get("halfway_notified_at")
+                    and deadline
+                    and now_utc < deadline
+                    and now_utc >= started + timedelta(seconds=allocated / 2)
+                ):
+                    remaining = _daily_timer_remaining_seconds(timer, now_utc)
+                    cur.execute(
+                        """
+                        UPDATE daily_execution_task_timers
+                        SET halfway_notified_at=now(),
+                            updated_at=now(),
+                            version=version + 1
+                        WHERE id=%s AND halfway_notified_at IS NULL
+                        RETURNING *
+                        """,
+                        (timer["id"],),
+                    )
+                    updated = cur.fetchone() or row
+                    _insert_daily_timer_activity_once(
+                        cur,
+                        event_type="daily_planner_task_halfway",
+                        timer_id=timer["id"],
+                        sheet_id=timer["sheet_id"],
+                        message=f"Halfway through: {task_name}",
+                        actor=actor,
+                        metadata={
+                            "task": task_name,
+                            "remaining_seconds": remaining,
+                            "actor_id": clean_user_id,
+                        },
+                    )
+                    events.append({"event": "halfway", "timer": _timer_from_row(updated), "task": task_name})
+                    timer = _timer_from_row(updated)
+                if deadline and now_utc >= deadline and not timer.get("expiry_notified_at"):
+                    elapsed = allocated
+                    cur.execute(
+                        """
+                        UPDATE daily_execution_task_timers
+                        SET status='expired',
+                            remaining_seconds=0,
+                            expiry_notified_at=now(),
+                            outcome_required=true,
+                            actual_elapsed_seconds=%s,
+                            updated_at=now(),
+                            version=version + 1
+                        WHERE id=%s AND expiry_notified_at IS NULL
+                        RETURNING *
+                        """,
+                        (elapsed, timer["id"]),
+                    )
+                    updated = cur.fetchone() or row
+                    _insert_daily_timer_activity_once(
+                        cur,
+                        event_type="daily_planner_task_time_up",
+                        timer_id=timer["id"],
+                        sheet_id=timer["sheet_id"],
+                        message=f"Time up: {task_name}",
+                        actor=actor,
+                        metadata={
+                            "task": task_name,
+                            "actor_id": clean_user_id,
+                            "allocated_seconds": allocated,
+                        },
+                    )
+                    events.append({"event": "expired", "timer": _timer_from_row(updated), "task": task_name})
+        conn.commit()
+    return events
+
+
+def get_daily_execution_active_timer(user_id):
+    reconcile_daily_execution_timers(user_id)
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT timer.*, sheet.sheet_date, sheet.top_tasks, sheet.additional_items
+                FROM daily_execution_task_timers timer
+                JOIN daily_execution_sheets sheet ON sheet.id=timer.sheet_id
+                WHERE timer.user_id=%s
+                  AND timer.status IN ('running', 'paused', 'expired')
+                  AND timer.outcome IS NULL
+                ORDER BY timer.updated_at DESC
+                LIMIT 1
+                """,
+                (clean_user_id,),
+            )
+            row = cur.fetchone() or {}
+    if not row:
+        return {}
+    timer = _timer_from_row(row)
+    task_name = _daily_timer_task_name(row, timer["task_type"], timer["task_index"])
+    timer.update(
+        {
+            "task": task_name,
+            "sheet_date": str(row.get("sheet_date") or ""),
+            "remaining_seconds": _daily_timer_remaining_seconds(timer),
+            "elapsed_seconds": _daily_timer_elapsed_seconds(timer),
+        }
+    )
+    return timer
+
+
+def list_daily_execution_timers_for_sheets(user_id, sheet_ids):
+    ensure_dashboard_schema()
+    clean_ids = [str(value or "").strip() for value in (sheet_ids or []) if str(value or "").strip()]
+    if not clean_ids:
+        return []
+    params = [*clean_ids]
+    where = f"sheet_id IN ({', '.join(['%s::uuid'] * len(clean_ids))})"
+    clean_user_id = str(user_id or "").strip()
+    if clean_user_id:
+        where += " AND user_id=%s"
+        params.append(clean_user_id)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                f"""
+                SELECT *
+                FROM daily_execution_task_timers
+                WHERE {where}
+                ORDER BY updated_at DESC
+                """,
+                tuple(params),
+            )
+            return [_timer_from_row(row) for row in cur.fetchall()]
+
+
+def list_daily_execution_sheets_for_reporting(user_id, start_date, end_date, *, limit=1000):
+    ensure_dashboard_schema()
+    safe_limit = min(max(int(limit or 1000), 1), 5000)
+    clean_user_id = str(user_id or "").strip()
+    where = "sheet_date >= %s::date AND sheet_date <= %s::date"
+    params = [str(start_date or "").strip(), str(end_date or "").strip()]
+    if clean_user_id:
+        where = f"user_id=%s AND {where}"
+        params.insert(0, clean_user_id)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                f"""
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE {where}
+                ORDER BY sheet_date DESC, updated_at DESC
+                LIMIT %s
+                """,
+                (*params, safe_limit),
+            )
+            return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+
+
+def apply_daily_execution_timer_outcome(user_id, timer_id, outcome, *, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_timer_id = str(timer_id or "").strip()
+    clean_outcome = str(outcome or "").strip().casefold()
+    if clean_outcome not in {DAILY_TIMER_OUTCOME_COMPLETED, DAILY_TIMER_OUTCOME_DID_NOT_FINISH}:
+        raise ValueError("Choose a Daily Planner outcome.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_task_timers
+                WHERE id=%s AND user_id=%s
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (clean_timer_id, clean_user_id),
+            )
+            timer_row = cur.fetchone() or {}
+            if not timer_row:
+                raise ValueError("Daily Planner timer was not found.")
+            timer = _timer_from_row(timer_row)
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE id=%s AND user_id=%s AND status <> 'archived'
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (timer["sheet_id"], clean_user_id),
+            )
+            sheet_row = cur.fetchone() or {}
+            if not sheet_row:
+                raise ValueError("Daily Planner task is not available for this account.")
+            if timer.get("outcome"):
+                conn.commit()
+                return {
+                    "timer": timer,
+                    "sheet": _daily_execution_sheet_from_row(sheet_row),
+                    "already_applied": True,
+                }
+            sheet = _daily_execution_sheet_from_row(sheet_row)
+            task_type = timer["task_type"]
+            task_index = timer["task_index"]
+            tasks = list(sheet.get("top_tasks") if task_type == "top" else sheet.get("additional_items") or [])
+            if task_index >= len(tasks):
+                raise ValueError("Daily Planner task was not found.")
+            task = dict(tasks[task_index] or {})
+            task_name = str(task.get("task") or task.get("details") or "Daily Planner task").strip()
+            outcome_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            if clean_outcome == DAILY_TIMER_OUTCOME_COMPLETED:
+                task["status"] = "done"
+                task["completed"] = True
+                task["completed_at"] = outcome_at
+                task["outcome"] = "completed"
+                event_type = "daily_planner_task_completed"
+                message = f"Daily Planner task completed: {task_name}"
+            else:
+                task["status"] = "couldnt_finish"
+                task["completed"] = False
+                task["completed_at"] = None
+                task["finished_at"] = outcome_at
+                task["outcome"] = "did_not_finish"
+                event_type = "daily_planner_task_did_not_finish"
+                message = f"Daily Planner task did not finish: {task_name}"
+            tasks[task_index] = task
+            if task_type == "top":
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET top_tasks=%s::jsonb,
+                        updated_at=now()
+                    WHERE id=%s AND user_id=%s
+                    RETURNING *
+                    """,
+                    (json_dumps(tasks), timer["sheet_id"], clean_user_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET additional_items=%s::jsonb,
+                        updated_at=now()
+                    WHERE id=%s AND user_id=%s
+                    RETURNING *
+                    """,
+                    (json_dumps(tasks), timer["sheet_id"], clean_user_id),
+                )
+            updated_sheet = cur.fetchone() or sheet_row
+            elapsed = _daily_timer_elapsed_seconds(timer)
+            cur.execute(
+                """
+                UPDATE daily_execution_task_timers
+                SET status='completed',
+                    outcome=%s,
+                    outcome_required=false,
+                    outcome_at=now(),
+                    remaining_seconds=0,
+                    actual_elapsed_seconds=%s,
+                    updated_at=now(),
+                    version=version + 1
+                WHERE id=%s AND user_id=%s
+                RETURNING *
+                """,
+                (clean_outcome, elapsed, clean_timer_id, clean_user_id),
+            )
+            updated_timer = cur.fetchone() or timer_row
+            _insert_daily_timer_activity_once(
+                cur,
+                event_type=event_type,
+                timer_id=clean_timer_id,
+                sheet_id=timer["sheet_id"],
+                message=message,
+                actor=actor,
+                metadata={
+                    "task": task_name,
+                    "task_type": task_type,
+                    "task_index": task_index,
+                    "outcome": clean_outcome,
+                    "actual_elapsed_seconds": elapsed,
+                    "actor_id": clean_user_id,
+                },
+            )
+        conn.commit()
+    return {
+        "timer": _timer_from_row(updated_timer),
+        "sheet": _daily_execution_sheet_from_row(updated_sheet),
+        "already_applied": False,
+    }
 
 
 def start_sync_run(sync_type, *, ensure_schema_first=True):

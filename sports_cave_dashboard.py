@@ -1464,6 +1464,9 @@ DAILY_EXECUTION_REVIEWED_STATUSES = (
 DAILY_TASK_STATUS_DONE = "done"
 DAILY_TASK_STATUS_COULDNT_FINISH = "couldnt_finish"
 DAILY_TASK_FINISHED_STATUSES = (DAILY_TASK_STATUS_DONE, DAILY_TASK_STATUS_COULDNT_FINISH)
+DAILY_TIMER_OUTCOME_COMPLETED = "completed"
+DAILY_TIMER_OUTCOME_DID_NOT_FINISH = "did_not_finish"
+DAILY_TIMER_RUNNING_STATUSES = ("running", "paused", "expired")
 DAILY_RATING_FIELDS = (
     "Focus",
     "Attention",
@@ -1532,6 +1535,8 @@ def _normalise_top_tasks(items):
                 "completed": completed,
                 "status": status,
                 "completed_at": item.get("completed_at"),
+                "finished_at": item.get("finished_at"),
+                "outcome": _compact_text(item.get("outcome") or ""),
                 "carried_from": _compact_text(item.get("carried_from") or ""),
             }
         )
@@ -1561,6 +1566,8 @@ def _normalise_additional_items(items, *, include_blank=True):
             "completed": completed,
             "status": status,
             "completed_at": item.get("completed_at"),
+            "finished_at": item.get("finished_at"),
+            "outcome": _compact_text(item.get("outcome") or ""),
             "carried_from": _compact_text(item.get("carried_from") or ""),
         }
         if _daily_additional_item_has_content(row) or include_blank:
@@ -1594,6 +1601,8 @@ def _normalise_additional_items_for_save(items):
                     "completed": daily_execution_task_finished(item),
                     "status": item.get("status") or "",
                     "completed_at": item.get("completed_at"),
+                    "finished_at": item.get("finished_at"),
+                    "outcome": item.get("outcome") or "",
                     "carried_from": item.get("carried_from") or "",
                 }
             )
@@ -1975,6 +1984,308 @@ def get_daily_execution_archive_detail(user, sheet_id):
         return normalised
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
+
+
+def parse_daily_task_duration_seconds(value):
+    text = _compact_text(value or "").casefold()
+    if not text:
+        return 0
+    range_match = re.search(
+        r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
+        text,
+    )
+    if range_match:
+        start_hour = int(range_match.group(1))
+        start_minute = int(range_match.group(2) or 0)
+        start_ampm = range_match.group(3)
+        end_hour = int(range_match.group(4))
+        end_minute = int(range_match.group(5) or 0)
+        end_ampm = range_match.group(6) or start_ampm
+        if start_ampm == "pm" and start_hour < 12:
+            start_hour += 12
+        if start_ampm == "am" and start_hour == 12:
+            start_hour = 0
+        if end_ampm == "pm" and end_hour < 12:
+            end_hour += 12
+        if end_ampm == "am" and end_hour == 12:
+            end_hour = 0
+        start_total = start_hour * 60 + start_minute
+        end_total = end_hour * 60 + end_minute
+        if end_total <= start_total:
+            end_total += 24 * 60
+        return max((end_total - start_total) * 60, 0)
+    number_match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not number_match:
+        return 0
+    amount = float(number_match.group(1))
+    if "sec" in text or re.search(r"\b\d+(?:\.\d+)?s\b", text):
+        return max(int(round(amount)), 0)
+    if "min" in text or re.search(r"\b\d+(?:\.\d+)?m\b", text):
+        return max(int(round(amount * 60)), 0)
+    return max(int(round(amount * 3600)), 0)
+
+
+def format_duration_seconds(seconds):
+    try:
+        total = max(int(seconds or 0), 0)
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _daily_task_status_label(task, timer=None):
+    status = _normalise_daily_task_status(task)
+    timer_status = str((timer or {}).get("status") or "").strip().casefold()
+    outcome = str((task or {}).get("outcome") or (timer or {}).get("outcome") or "").strip().casefold()
+    if outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH or status == DAILY_TASK_STATUS_COULDNT_FINISH:
+        return "Did not finish"
+    if outcome == DAILY_TIMER_OUTCOME_COMPLETED or status == DAILY_TASK_STATUS_DONE:
+        return "Completed"
+    if timer_status == "expired" or (timer or {}).get("outcome_required"):
+        return "Time up - outcome required"
+    if timer_status == "running":
+        return "Timer running"
+    if timer_status == "paused":
+        return "Paused"
+    if timer_status == "stopped":
+        return "Stopped"
+    return "Planned"
+
+
+def daily_execution_task_rows(sheet, timers=None):
+    sheet = _normalise_daily_sheet(sheet)
+    timer_lookup = {
+        (str(timer.get("task_type") or ""), int(timer.get("task_index") or 0)): dict(timer)
+        for timer in (timers or [])
+    }
+    rows = []
+    for index, task in enumerate(sheet.get("top_tasks") or []):
+        if not task.get("task"):
+            continue
+        timer = timer_lookup.get(("top", index), {})
+        rows.append(
+            {
+                "row_id": f"{sheet.get('id')}::top::{index}",
+                "sheet_id": sheet.get("id") or "",
+                "work_date": sheet.get("sheet_date") or "",
+                "task_type": "top",
+                "task_index": index,
+                "task": task.get("task") or "",
+                "owner": sheet.get("user_name") or "",
+                "category": "MIP",
+                "details": task.get("why") or "",
+                "allocated": task.get("time_blocked") or "",
+                "allocated_seconds": parse_daily_task_duration_seconds(task.get("time_blocked")),
+                "status": _daily_task_status_label(task, timer),
+                "outcome": task.get("outcome") or timer.get("outcome") or "",
+                "notes": task.get("why") or "",
+                "completed_at": task.get("completed_at"),
+                "finished_at": task.get("finished_at"),
+                "timer": timer,
+            }
+        )
+    for index, task in enumerate(sheet.get("additional_items") or []):
+        if not _daily_additional_item_has_content(task):
+            continue
+        timer = timer_lookup.get(("additional", index), {})
+        rows.append(
+            {
+                "row_id": f"{sheet.get('id')}::additional::{index}",
+                "sheet_id": sheet.get("id") or "",
+                "work_date": sheet.get("sheet_date") or "",
+                "task_type": "additional",
+                "task_index": index,
+                "task": task.get("task") or task.get("details") or "",
+                "owner": sheet.get("user_name") or "",
+                "category": task.get("category") or "Other",
+                "details": task.get("details") or "",
+                "allocated": task.get("time_blocked") or "",
+                "allocated_seconds": parse_daily_task_duration_seconds(task.get("time_blocked")),
+                "status": _daily_task_status_label(task, timer),
+                "outcome": task.get("outcome") or timer.get("outcome") or "",
+                "notes": task.get("details") or "",
+                "completed_at": task.get("completed_at"),
+                "finished_at": task.get("finished_at"),
+                "timer": timer,
+            }
+        )
+    return rows
+
+
+def _normalise_timer(timer):
+    timer = dict(timer or {})
+    if not timer:
+        return {}
+    return {
+        **timer,
+        "id": str(timer.get("id") or ""),
+        "sheet_id": str(timer.get("sheet_id") or ""),
+        "task_type": str(timer.get("task_type") or ""),
+        "task_index": int(timer.get("task_index") or 0),
+        "allocated_seconds": int(timer.get("allocated_seconds") or 0),
+        "remaining_seconds": max(int(timer.get("remaining_seconds") or 0), 0),
+        "elapsed_seconds": max(int(timer.get("elapsed_seconds") or timer.get("actual_elapsed_seconds") or 0), 0),
+        "status": str(timer.get("status") or ""),
+        "outcome": str(timer.get("outcome") or ""),
+    }
+
+
+def reconcile_daily_planner_timers(user):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        backend = get_supabase_backend()
+        if not hasattr(backend, "reconcile_daily_execution_timers"):
+            return []
+        return backend.reconcile_daily_execution_timers(
+            user_id,
+            actor=daily_execution_user_name(user),
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def get_active_daily_planner_timer(user):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        backend = get_supabase_backend()
+        if not hasattr(backend, "get_daily_execution_active_timer"):
+            return {}
+        return _normalise_timer(backend.get_daily_execution_active_timer(user_id))
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def start_daily_planner_timer(user, sheet_id, task_type, task_index, allocated_seconds):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        backend = get_supabase_backend()
+        if not hasattr(backend, "start_daily_execution_task_timer"):
+            raise DashboardStorageError("Daily Planner timers are not available until the timer migration is applied.")
+        timer = backend.start_daily_execution_task_timer(
+            user_id,
+            sheet_id,
+            task_type,
+            task_index,
+            allocated_seconds,
+            actor=daily_execution_user_name(user),
+        )
+        clear_daily_execution_cache(user_id)
+        clear_activity_cache()
+        return _normalise_timer(timer)
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def pause_daily_planner_timer(user, timer_id):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        timer = get_supabase_backend().pause_daily_execution_task_timer(
+            user_id,
+            timer_id,
+            actor=daily_execution_user_name(user),
+        )
+        clear_daily_execution_cache(user_id)
+        return _normalise_timer(timer)
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def resume_daily_planner_timer(user, timer_id):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        timer = get_supabase_backend().resume_daily_execution_task_timer(
+            user_id,
+            timer_id,
+            actor=daily_execution_user_name(user),
+        )
+        clear_daily_execution_cache(user_id)
+        return _normalise_timer(timer)
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def stop_daily_planner_timer(user, timer_id):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        timer = get_supabase_backend().stop_daily_execution_task_timer(
+            user_id,
+            timer_id,
+            actor=daily_execution_user_name(user),
+        )
+        clear_daily_execution_cache(user_id)
+        return _normalise_timer(timer)
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def apply_daily_planner_timer_outcome(user, timer_id, outcome):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        result = get_supabase_backend().apply_daily_execution_timer_outcome(
+            user_id,
+            timer_id,
+            outcome,
+            actor=daily_execution_user_name(user),
+        )
+        sheet = _normalise_daily_sheet((result or {}).get("sheet") or {})
+        if sheet.get("sheet_date"):
+            clear_daily_execution_cache(user_id, [sheet.get("sheet_date")])
+        else:
+            clear_daily_execution_cache(user_id)
+        clear_activity_cache()
+        return {**(result or {}), "sheet": sheet, "timer": _normalise_timer((result or {}).get("timer") or {})}
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def list_daily_execution_history(user, start_date, end_date, *, limit=1000):
+    if os_accounts.can_access_reporting(user):
+        user_id = ""
+    else:
+        user_id = _require_daily_execution_admin(user)
+    clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
+    clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "list_daily_execution_sheets_for_reporting"):
+            sheets = backend.list_daily_execution_sheets_for_reporting(
+                user_id,
+                clean_start,
+                clean_end,
+                limit=limit,
+            )
+        else:
+            sheets = backend.list_daily_execution_sheets(user_id or daily_execution_user_id(user), clean_start, clean_end, limit=limit)
+        sheets = [_normalise_daily_sheet(sheet) for sheet in sheets or []]
+        sheet_ids = [sheet.get("id") for sheet in sheets if sheet.get("id")]
+        timers = (
+            backend.list_daily_execution_timers_for_sheets(user_id, sheet_ids)
+            if hasattr(backend, "list_daily_execution_timers_for_sheets")
+            else []
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    timers_by_sheet = {}
+    for timer in timers or []:
+        timers_by_sheet.setdefault(str(timer.get("sheet_id") or ""), []).append(_normalise_timer(timer))
+    rows = []
+    for sheet in sheets:
+        rows.extend(daily_execution_task_rows(sheet, timers_by_sheet.get(sheet.get("id") or "", [])))
+    return rows
 
 
 def daily_execution_completed_count(sheet):

@@ -23,6 +23,7 @@ LOCAL_PRODUCT_DB_PATH = BASE_DIR / "data" / "sports_cave_os.db"
 SEARCH_INDEX_PATH = "/api/os/top-bar/search-index"
 NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
 ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
+DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
 _TASK_SEARCH_FIELDS = ("title", "text", "section", "category", "status")
 _TASK_METADATA_FIELDS = (
     "sport",
@@ -74,6 +75,49 @@ _WARNING_TERMS = (
     "conflict",
     "blocked",
     "unavailable",
+)
+_NOTIFICATION_EVENT_ALLOWLIST = {
+    "new_order_received",
+    "order_fulfilled",
+    "order_fulfilled_certificate_generated",
+    "certificate_generated",
+    "certificate_uploaded",
+    "citation_import_failed",
+    "product_uploaded",
+    "design_task_completed",
+    "task_completed",
+    "dashboard_task_completed",
+    "daily_execution_mip_completed",
+    "daily_execution_mip_could_not_finish",
+    "daily_planner_task_started",
+    "daily_planner_task_halfway",
+    "daily_planner_task_time_up",
+    "daily_planner_task_completed",
+    "daily_planner_task_did_not_finish",
+    "mockup_generated",
+    "mockup_made",
+    "mockup_pack_exported",
+}
+_NOTIFICATION_EXCLUDED_TERMS = (
+    "afterpay",
+    "cricket",
+    "golf",
+    "tennis",
+    "seasonal",
+    "campaign",
+    "sporting event",
+    "metafield",
+    "mirror",
+    "sync",
+    "poll",
+    "webhook",
+    "health check",
+    "cache",
+    "migration",
+    "reconciliation",
+    "debug",
+    "downloaded file",
+    "activity",
 )
 
 
@@ -654,26 +698,83 @@ def _notification_text(row):
     return message
 
 
+def _notification_payload(row):
+    payload = (row or {}).get("new_value") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _notification_row_allowed(row):
+    row = dict(row or {})
+    payload = _notification_payload(row)
+    action_type = _text(payload.get("action_type") or row.get("event_type"), limit=120).casefold()
+    if action_type not in _NOTIFICATION_EVENT_ALLOWLIST:
+        return False
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    message = _notification_text(row)
+    combined = " ".join(
+        str(value or "").casefold()
+        for value in (
+            action_type,
+            message,
+            payload.get("page"),
+            row.get("source"),
+            metadata.get("page_area"),
+        )
+    )
+    return bool(message and not any(term in combined for term in _NOTIFICATION_EXCLUDED_TERMS))
+
+
+def _friendly_notification_text(row):
+    payload = _notification_payload(row)
+    action_type = _text(payload.get("action_type") or (row or {}).get("event_type"), limit=120)
+    message = _notification_text(row)
+    try:
+        import sports_cave_dashboard
+
+        return sports_cave_dashboard.clean_activity_message(
+            action_type,
+            message,
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+            entity_type=(row or {}).get("entity_type") or "",
+            entity_id=(row or {}).get("entity_id") or "",
+        )
+    except Exception:
+        return message
+
+
 def build_notifications(claims, *, activity_rows=(), alerts=()):
     if not claims.get("can_view_activity"):
         return []
     subject = str(claims.get("sub") or "")
     items = []
+    seen = set()
     for row in activity_rows or ():
-        payload = row.get("new_value") or {}
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                payload = {}
+        if not _notification_row_allowed(row):
+            continue
+        payload = _notification_payload(row)
         metadata = payload.get("metadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
         actor_id = str(metadata.get("actor_id") or "")
         if not claims.get("can_view_all_activity") and actor_id != subject:
             continue
-        message = _notification_text(row)
+        message = _friendly_notification_text(row)
         area = _text(payload.get("page") or row.get("source") or "Home")
+        dedupe_key = (
+            str(metadata.get("event_key") or ""),
+            str(row.get("event_type") or ""),
+            str(row.get("entity_type") or ""),
+            str(row.get("entity_id") or ""),
+            message.casefold(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         warning = any(term in message.casefold() for term in _WARNING_TERMS)
         items.append(
             {
@@ -684,18 +785,6 @@ def build_notifications(claims, *, activity_rows=(), alerts=()):
                 "priority": 0 if warning else 2,
             }
         )
-    for alert in alerts or ():
-        label = _text(alert.get("label") or alert.get("title"))
-        if label:
-            items.append(
-                {
-                    "title": label,
-                    "subtitle": "Active alert",
-                    "route_key": "dashboard",
-                    "created_at": "",
-                    "priority": 1,
-                }
-            )
     items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     items.sort(key=lambda item: int(item.get("priority") or 0))
     return [{key: value for key, value in item.items() if key != "priority"} for item in items[:10]]
@@ -726,19 +815,7 @@ def load_notification_sources(claims):
                         ]
     except Exception:
         activity_rows = []
-    alerts = []
-    try:
-        import sports_cave_dashboard
-
-        today = datetime.now(timezone.utc).date()
-        alerts = sports_cave_dashboard.build_active_alerts(
-            sports_cave_dashboard.load_calendar_events(),
-            today,
-            limit=4,
-        )
-    except Exception:
-        alerts = []
-    return activity_rows, alerts
+    return activity_rows, []
 
 
 async def top_bar_search_index(request: Request):
@@ -812,8 +889,40 @@ async def top_bar_order_status(request: Request):
     return _json({"ok": True, **load_order_status(claims)})
 
 
+def load_daily_planner_status(claims):
+    if not claims.get("can_manage_daily_planner"):
+        return {"enabled": False, "timer": {}, "events": []}
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        return {"enabled": False, "timer": {}, "events": []}
+    events = []
+    timer = {}
+    try:
+        import supabase_backend
+
+        if supabase_backend.is_configured():
+            events = supabase_backend.reconcile_daily_execution_timers(user_id)
+            timer = supabase_backend.get_daily_execution_active_timer(user_id)
+    except Exception:
+        events = []
+        timer = {}
+    return {
+        "enabled": True,
+        "timer": timer or {},
+        "events": events or [],
+    }
+
+
+async def top_bar_daily_planner_status(request: Request):
+    claims = _claims(request)
+    if not claims:
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    return _json({"ok": True, **load_daily_planner_status(claims)})
+
+
 TOP_BAR_ROUTE_HANDLERS = (
     (SEARCH_INDEX_PATH, top_bar_search_index, ("GET",)),
     (NOTIFICATIONS_PATH, top_bar_notifications, ("GET",)),
     (ORDER_STATUS_PATH, top_bar_order_status, ("GET",)),
+    (DAILY_PLANNER_STATUS_PATH, top_bar_daily_planner_status, ("GET",)),
 )

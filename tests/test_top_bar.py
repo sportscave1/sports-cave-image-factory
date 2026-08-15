@@ -241,7 +241,7 @@ class TopBarNotificationTests(unittest.TestCase):
         )
 
         self.assertEqual("Citation import failed", notifications[0]["title"])
-        self.assertIn("US Open tennis soon", json.dumps(notifications))
+        self.assertNotIn("US Open tennis soon", json.dumps(notifications))
         component = COMPONENT_PATH.read_text(encoding="utf-8")
         self.assertNotIn("unread-badge", component)
         self.assertIn("No new notifications", component)
@@ -276,12 +276,16 @@ class TopBarComponentTests(unittest.TestCase):
         markup = source[markup_start : source.index("`;", markup_start)]
         refresh = markup.index('id="sc-os-refresh"')
         search = markup.index('id="sc-os-global-search"')
-        notifications = source.index('id="sc-os-notifications"')
-        profile = source.index('id="sc-os-profile"')
-        settings = source.index('id="sc-os-settings"')
+        planner = markup.index('id="sc-os-daily-planner"')
+        notifications = markup.index('id="sc-os-notifications"')
+        profile = markup.index('id="sc-os-profile"')
+        settings = markup.index('id="sc-os-settings"')
         self.assertLess(refresh, search)
+        self.assertLess(planner, notifications)
         self.assertLess(notifications, profile)
         self.assertLess(profile, settings)
+        self.assertIn('aria-label="Open Daily Planner"', markup)
+        self.assertIn('title="Open Daily Planner"', markup)
         self.assertNotIn("Shopify", source)
 
     def test_refresh_button_performs_a_full_page_reload(self):
@@ -382,6 +386,7 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertEqual({"height": 0, "width": 0}, kwargs)
         self.assertIn('"authToken": "signed-token"', body)
         self.assertEqual(1, body.count('id="sc-os-refresh"'))
+        self.assertEqual(1, body.count('id="sc-os-daily-planner"'))
         self.assertEqual(1, body.count('id="sc-os-notifications"'))
         self.assertEqual(1, body.count('id="sc-os-profile"'))
         self.assertEqual(1, body.count('id="sc-os-settings"'))

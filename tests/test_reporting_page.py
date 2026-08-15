@@ -16,6 +16,7 @@ class ReportingPageContractTests(unittest.TestCase):
         for section in (
             'st.subheader("Today")',
             'st.subheader("Staff Summary")',
+            'st.subheader("Daily Execution History")',
             'st.subheader("Sent Reports")',
             'st.subheader("Delivery Health")',
             'st.subheader("Test Email")',
@@ -55,6 +56,16 @@ class ReportingPageContractTests(unittest.TestCase):
     def test_reporting_store_page_size_is_bounded(self):
         self.assertEqual(reporting_store._safe_limit(5000), reporting_store.MAX_PAGE_SIZE)
         self.assertEqual(reporting_store._safe_limit(0), 1)
+
+    def test_reporting_hosts_period_filters_history_activity_and_weekly_review(self):
+        source = (ROOT / "reporting_page.py").read_text(encoding="utf-8")
+
+        for label in ("Today", "Last 7 days", "Last 30 days", "Custom"):
+            self.assertIn(label, source)
+        self.assertIn("Australia/Sydney", source)
+        self.assertIn("sports_cave_dashboard.list_daily_execution_history", source)
+        self.assertIn("Recent Operational Activity", source)
+        self.assertIn("def render_weekly_review_page", source)
 
 
 if __name__ == "__main__":
