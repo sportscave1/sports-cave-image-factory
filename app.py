@@ -292,6 +292,11 @@ GLOBAL_SEARCH_QUERY_PARAM = "global_search"
 GLOBAL_SEARCH_CONSUMED_STATE_KEY = "global_search_consumed"
 CURRENT_PAGE_STATE_KEY = "current_page"
 LEGACY_PAGE_STATE_KEY = "selected_page"
+CURRENT_PAGE_QUERY_STATE_KEY = "current_page_query_value"
+NAVIGATION_EPOCH_STATE_KEY = "navigation_epoch"
+NAVIGATION_TRANSITION_STATE_KEY = "navigation_transition"
+NAVIGATION_LAST_READY_STATE_KEY = "navigation_last_ready_page"
+NAVIGATION_CLIENT_ROUTE_STATE_KEY = "navigation_client_route_pending"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
@@ -3924,14 +3929,18 @@ def normalise_app_page(page):
     return route if route in ALL_PAGE_OPTIONS else ""
 
 
-def page_from_query_params():
+def page_query_param_value():
     try:
         value = st.query_params.get(PAGE_QUERY_PARAM, "")
     except Exception:
         return ""
     if isinstance(value, (list, tuple)):
         value = value[0] if value else ""
-    value = str(value or "").strip()
+    return str(value or "").strip()
+
+
+def page_from_query_params():
+    value = page_query_param_value()
     if not value:
         return ""
     if value == social_media.LEGACY_REELS_PAGE_KEY:
@@ -3950,7 +3959,19 @@ def page_query_value(page):
     return os_accounts.page_key_for_route(route) or route
 
 
-def sync_current_page_to_query_params(page):
+def _set_page_query_snapshot(query_value):
+    try:
+        from streamlit.runtime.state import get_session_state
+
+        with get_session_state().query_params() as query_params:
+            query_params.set_with_no_forward_msg(PAGE_QUERY_PARAM, query_value)
+        return True
+    except Exception as error:
+        logging.debug("NAV query snapshot fallback error_type=%s", error.__class__.__name__)
+        return False
+
+
+def sync_current_page_to_query_params(page, *, update_browser=True):
     query_value = page_query_value(page)
     if not query_value:
         return
@@ -3958,8 +3979,11 @@ def sync_current_page_to_query_params(page):
         current = st.query_params.get(PAGE_QUERY_PARAM, "")
         if isinstance(current, (list, tuple)):
             current = current[0] if current else ""
-        if str(current or "") != query_value:
-            st.query_params[PAGE_QUERY_PARAM] = query_value
+        current = str(current or "")
+        st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
+        if current != query_value:
+            if update_browser or not _set_page_query_snapshot(query_value):
+                st.query_params[PAGE_QUERY_PARAM] = query_value
     except Exception:
         pass
 
@@ -4008,15 +4032,101 @@ def _store_current_page(route, *, source="restore"):
     st.session_state["current_page_source"] = str(source or "restore")
 
 
+def _begin_navigation_transition(route, *, source):
+    previous = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
+    if not previous or previous == route:
+        return
+    transition = navigation_runtime.route_transition(
+        st.session_state.get(NAVIGATION_EPOCH_STATE_KEY),
+        previous,
+        route,
+        source,
+    )
+    transition["started_at"] = time.monotonic()
+    st.session_state[NAVIGATION_EPOCH_STATE_KEY] = transition["epoch"]
+    st.session_state[NAVIGATION_TRANSITION_STATE_KEY] = transition
+    logging.info(
+        "NAV route_requested epoch=%s from=%s to=%s source=%s",
+        transition["epoch"],
+        transition["from"],
+        transition["to"],
+        transition["source"],
+    )
+
+
+def _finish_navigation_transition(route, *, status, error_type=""):
+    transition = dict(st.session_state.get(NAVIGATION_TRANSITION_STATE_KEY) or {})
+    if transition.get("to") != route:
+        if status == "ready":
+            st.session_state[NAVIGATION_LAST_READY_STATE_KEY] = route
+        return
+    started_at = float(transition.get("started_at") or time.monotonic())
+    duration_ms = max(0, int((time.monotonic() - started_at) * 1000))
+    transition.update(
+        status=status,
+        duration_ms=duration_ms,
+        error_type=str(error_type or ""),
+    )
+    st.session_state[NAVIGATION_TRANSITION_STATE_KEY] = transition
+    if status == "ready":
+        st.session_state[NAVIGATION_LAST_READY_STATE_KEY] = route
+    logging.info(
+        "NAV route_%s epoch=%s route=%s duration_ms=%s error_type=%s",
+        status,
+        transition.get("epoch") or 0,
+        route,
+        duration_ms,
+        str(error_type or "none"),
+    )
+
+
+def _render_navigation_failure(current_page, error):
+    _finish_navigation_transition(
+        current_page,
+        status="failed",
+        error_type=error.__class__.__name__,
+    )
+    st.error("This page failed to load, but Sports Cave OS is still available.")
+    st.caption("Retry this page or return to the last working page.")
+    retry_col, back_col, _ = st.columns([1, 1, 6])
+    transition = dict(st.session_state.get(NAVIGATION_TRANSITION_STATE_KEY) or {})
+    previous_page = normalise_app_page(transition.get("from"))
+    if not previous_page or previous_page == current_page:
+        previous_page = normalise_app_page(
+            st.session_state.get(NAVIGATION_LAST_READY_STATE_KEY)
+        ) or "Dashboard"
+    epoch = int(transition.get("epoch") or 0)
+    if retry_col.button("Retry", key=f"navigation-retry::{current_page}::{epoch}"):
+        logging.info("NAV route_retry epoch=%s route=%s", epoch, current_page)
+        st.rerun()
+    if back_col.button("Back", key=f"navigation-back::{current_page}::{epoch}"):
+        set_current_page(previous_page, source="error-back")
+        st.rerun()
+
+
 def get_current_page():
-    route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
-    if not route:
-        query_page = page_from_query_params()
-        legacy_page = normalise_app_page(st.session_state.get(LEGACY_PAGE_STATE_KEY))
-        route = query_page or legacy_page or "Dashboard"
-        _store_current_page(route, source="initial" if route == "Dashboard" else "restore")
+    session_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
+    legacy_page = normalise_app_page(st.session_state.get(LEGACY_PAGE_STATE_KEY))
+    query_value = page_query_param_value()
+    query_page = page_from_query_params()
+    client_route = normalise_app_page(
+        st.session_state.get(NAVIGATION_CLIENT_ROUTE_STATE_KEY)
+    )
+    if client_route:
+        route, source = client_route, "client-transition"
     else:
-        _store_current_page(route, source=st.session_state.get("current_page_source") or "restore")
+        route, source = navigation_runtime.resolve_route(
+            session_route=session_route,
+            query_route=query_page,
+            query_value=query_value,
+            last_synced_query=st.session_state.get(CURRENT_PAGE_QUERY_STATE_KEY),
+            legacy_route=legacy_page,
+            default_route="Dashboard",
+        )
+    if route != session_route:
+        _begin_navigation_transition(route, source=source)
+    _store_current_page(route, source=source)
+    st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
 
     # Access is checked separately so a denied route remains visible instead
     # of being replaced by the first allowed page or Home.
@@ -4027,9 +4137,15 @@ def set_current_page(page, *, source="user", sync_query=True):
     route = normalise_app_page(page)
     if not route:
         raise ValueError(f"Unknown Sports Cave page: {page}")
+    _begin_navigation_transition(route, source=source)
     _store_current_page(route, source=source)
+    st.session_state[NAVIGATION_CLIENT_ROUTE_STATE_KEY] = route
     if sync_query:
-        sync_current_page_to_query_params(route)
+        client_managed = source == "sidebar"
+        sync_current_page_to_query_params(
+            route,
+            update_browser=not client_managed,
+        )
     return route
 
 
@@ -4044,7 +4160,12 @@ def init_session_state():
         current_page = set_current_page(pending_page, source="pending", sync_query=False)
 
     _store_current_page(current_page, source=st.session_state.get("current_page_source") or "restore")
-    sync_current_page_to_query_params(current_page)
+    sync_current_page_to_query_params(
+        current_page,
+        update_browser=not bool(
+            normalise_app_page(st.session_state.get(NAVIGATION_CLIENT_ROUTE_STATE_KEY))
+        ),
+    )
 
     if "selected_product_id" not in st.session_state:
         st.session_state.selected_product_id = None
@@ -15313,6 +15434,7 @@ def main():
         current_os_user(),
         logo_src=asset_data_uri(str(APP_ICON_PATH)),
         current_route=current_page,
+        navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
     )
 
     log_startup_stage("SIDEBAR START")
@@ -15341,11 +15463,13 @@ def main():
         error_message = f"Page render failed for {current_page}: {error}"
         print(f"ERROR {error_message}", flush=True)
         logging.exception(error_message)
-        st.error("This page failed to load, but Sports Cave is still running.")
+        _render_navigation_failure(current_page, error)
         if os_accounts.is_admin(current_os_user()):
             st.exception(error)
         else:
             st.caption("Technical details are available in protected tools.")
+    else:
+        _finish_navigation_transition(current_page, status="ready")
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
 

@@ -39,3 +39,45 @@ def dispatch_selected(selected, handlers):
     except KeyError as error:
         raise ValueError(f"Unknown selected view: {selected}") from error
     return renderer()
+
+
+def resolve_route(
+    *,
+    session_route,
+    query_route,
+    query_value,
+    last_synced_query,
+    legacy_route="",
+    default_route="Dashboard",
+):
+    """Resolve one route without allowing stale session state to undo browser history."""
+    session_route = str(session_route or "")
+    query_route = str(query_route or "")
+    query_value = str(query_value or "")
+    legacy_route = str(legacy_route or "")
+
+    if last_synced_query is None:
+        if query_route:
+            return query_route, "url"
+        return session_route or legacy_route or default_route, "restore"
+
+    last_synced_query = str(last_synced_query or "")
+    if query_value != last_synced_query:
+        if query_route:
+            return query_route, "history"
+        if not query_value:
+            return default_route, "history"
+        return session_route or legacy_route or default_route, "invalid-url"
+
+    return session_route or query_route or legacy_route or default_route, "session"
+
+
+def route_transition(epoch, current_route, requested_route, source):
+    """Create a small, display-safe route transition diagnostic payload."""
+    return {
+        "epoch": max(0, int(epoch or 0)) + 1,
+        "from": str(current_route or ""),
+        "to": str(requested_route or ""),
+        "source": str(source or "user"),
+        "status": "pending",
+    }

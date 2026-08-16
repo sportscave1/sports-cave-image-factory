@@ -3,6 +3,7 @@ from unittest import mock
 import unittest
 
 import navigation_runtime
+import os_accounts
 import seo_navigation
 
 
@@ -93,6 +94,125 @@ class SidebarDisclosureTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("import seo_navigation as seo_nav", source)
         self.assertNotIn("import seo_workspace", source)
+
+
+class RouteReliabilityTests(unittest.TestCase):
+    def test_browser_history_route_overrides_stale_session_route(self):
+        route, source = navigation_runtime.resolve_route(
+            session_route="Orders",
+            query_route="Dashboard",
+            query_value="dashboard",
+            last_synced_query="orders",
+        )
+        self.assertEqual((route, source), ("Dashboard", "history"))
+
+    def test_browser_back_to_root_returns_home(self):
+        route, source = navigation_runtime.resolve_route(
+            session_route="Orders",
+            query_route="",
+            query_value="",
+            last_synced_query="orders",
+        )
+        self.assertEqual((route, source), ("Dashboard", "history"))
+
+    def test_normal_rerun_keeps_the_committed_session_route(self):
+        route, source = navigation_runtime.resolve_route(
+            session_route="Edition Ops",
+            query_route="Edition Ops",
+            query_value="edition_ops",
+            last_synced_query="edition_ops",
+        )
+        self.assertEqual((route, source), ("Edition Ops", "session"))
+
+    def test_invalid_url_cannot_replace_a_working_route(self):
+        route, source = navigation_runtime.resolve_route(
+            session_route="Orders",
+            query_route="",
+            query_value="unknown-page",
+            last_synced_query="orders",
+        )
+        self.assertEqual((route, source), ("Orders", "invalid-url"))
+
+    def test_latest_of_100_mixed_transitions_wins_on_desktop_and_mobile(self):
+        routes = tuple(page["route"] for page in os_accounts.PAGE_REGISTRY)
+        for surface in ("desktop", "mobile"):
+            session_route = "Dashboard"
+            last_query = "dashboard"
+            expected = session_route
+            for index in range(100):
+                expected = routes[(index + 1) % len(routes)]
+                query_value = os_accounts.page_key_for_route(expected)
+                resolved, source = navigation_runtime.resolve_route(
+                    session_route=session_route,
+                    query_route=expected,
+                    query_value=query_value,
+                    last_synced_query=last_query,
+                )
+                self.assertEqual(resolved, expected, f"{surface} transition {index}")
+                self.assertEqual(source, "history")
+                session_route = resolved
+                last_query = query_value
+            self.assertEqual(session_route, expected)
+
+    def test_transition_epochs_are_monotonic_and_display_safe(self):
+        first = navigation_runtime.route_transition(0, "Dashboard", "Orders", "sidebar")
+        second = navigation_runtime.route_transition(
+            first["epoch"],
+            first["to"],
+            "Design Studio",
+            "history",
+        )
+        self.assertEqual(first["epoch"], 1)
+        self.assertEqual(second["epoch"], 2)
+        self.assertEqual(second["status"], "pending")
+        self.assertNotIn("token", second)
+
+    def test_app_uses_history_aware_resolution_and_recoverable_error_actions(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("navigation_runtime.resolve_route(", source)
+        self.assertIn("CURRENT_PAGE_QUERY_STATE_KEY", source)
+        self.assertIn("query_params.set_with_no_forward_msg", source)
+        self.assertIn("NAVIGATION_CLIENT_ROUTE_STATE_KEY", source)
+        self.assertIn('source == "sidebar"', source)
+        self.assertIn('route, source = client_route, "client-transition"', source)
+        self.assertIn("update_browser=not bool(", source)
+        self.assertIn('retry_col.button("Retry"', source)
+        self.assertIn('back_col.button("Back"', source)
+        self.assertIn("_finish_navigation_transition(current_page, status=\"ready\")", source)
+
+    def test_top_bar_navigation_feedback_and_lifecycle_are_idempotent(self):
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("const timers = new Set();", source)
+        self.assertIn("timers.delete(timer);", source)
+        self.assertIn("state.reportingBindTimer", source)
+        self.assertIn("beginNavigation(intendedRouteKey);", source)
+        self.assertIn('body.sc-navigation-pending #${ROOT_ID}::after', source)
+        self.assertIn("listenerController.abort()", source)
+        self.assertIn("destroy({preserveDom = false} = {})", source)
+        self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
+        self.assertIn("statusCacheKey = (kind)", source)
+        self.assertIn("state.config.revision", source)
+        self.assertIn('readStatusCache("orders")', source)
+        self.assertIn("rememberPendingNavigation(routeKey)", source)
+        self.assertIn("reconcilePendingNavigation", source)
+        self.assertIn("handleHistoryNavigation", source)
+        self.assertIn("historyDuplicateSkips", source)
+        self.assertIn("visibleRoute === state.config.currentRouteKey", source)
+        self.assertIn("parentWindow.history.pushState(", source)
+        self.assertIn("bindPersistentSidebarRoutes", source)
+        self.assertIn("button.dataset.scRouteKey", source)
+        self.assertIn("h.dataset.configRevision", source)
+        self.assertIn("scRecoveryScheduled", source)
+        self.assertIn("stStatusWidget", source)
+        self.assertIn("liveNavigationEpoch > incomingNavigationEpoch", source)
+        self.assertIn("root.dataset.navigationEpoch", source)
+        self.assertIn("navigation_epoch=st.session_state.get", (ROOT / "app.py").read_text(encoding="utf-8"))
+        self.assertIn("navigationRouteKeys", (ROOT / "top_bar.py").read_text(encoding="utf-8"))
+        self.assertEqual(source.count('doc.addEventListener("click"'), 1)
+        self.assertEqual(source.count('parentWindow.addEventListener("popstate"'), 1)
+        self.assertIn("sidebarRouteButton(routeKey)", source)
 
 
 if __name__ == "__main__":

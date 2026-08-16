@@ -54,12 +54,15 @@ class MobileShellTests(unittest.TestCase):
         self.assertIn(".sc-os-planner-pill-time", source)
         self.assertIn("font-variant-numeric: tabular-nums", source)
 
-    def test_top_bar_controller_is_reused_without_duplicate_intervals_or_status_starts(self):
+    def test_top_bar_controller_rebinds_from_the_live_iframe_without_duplicates(self):
         source = TOP_BAR_CLIENT.read_text(encoding="utf-8")
 
-        self.assertIn('CONTROLLER_VERSION = "mobile-performance-v1"', source)
-        self.assertIn("SportsCaveTopBar?.version !== CONTROLLER_VERSION", source)
-        self.assertEqual(1, source.count("setInterval(updatePlannerMirror, 1000)"))
+        self.assertIn('CONTROLLER_VERSION = "navigation-reliability-v6"', source)
+        self.assertIn("root.dataset.controllerVersion !== CONTROLLER_VERSION", source)
+        self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
+        self.assertIn("parentWindow.SportsCaveTopBar = createController()", source)
+        self.assertEqual(1, source.count("setInterval(() =>"))
+        self.assertIn("reconcileDocumentRoute();", source)
         self.assertIn("if (!state.orderStatusStarted)", source)
         self.assertIn("if (!state.plannerStatusStarted)", source)
         self.assertIn("listenerController.abort()", source)

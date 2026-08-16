@@ -334,7 +334,7 @@ class TopBarComponentTests(unittest.TestCase):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("new parentWindow.AbortController()", source)
-        self.assertIn("SportsCaveTopBar?.destroy?.()", source)
+        self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
         self.assertIn("listenerController.abort()", source)
         self.assertNotIn("parentWindow.location.assign", source)
 
