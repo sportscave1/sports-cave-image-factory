@@ -11856,15 +11856,20 @@ def render_home_weekly_work(user, local_now):
         safe_startup_print(f"PERF Dashboard weekly unavailable={(time.perf_counter() - started):.3f}s")
         return
     metrics = snapshot.get("metrics") or {}
-    cards = st.columns(5)
-    cards[0].metric("Tasks completed", int(metrics.get("tasks_completed") or 0))
-    cards[1].metric("Did not finish", int(metrics.get("tasks_not_finished") or 0))
-    cards[2].metric("Focused time", _home_duration_label(metrics.get("actual_seconds")))
-    cards[3].metric("Meaningful actions", int(metrics.get("meaningful_actions") or 0))
-    cards[4].metric(
-        "Staff active" if snapshot.get("is_team_view") else "Work days active",
-        int(metrics.get("staff_active") or 0),
+    cards = st.columns(6)
+    completed = int(metrics.get("tasks_completed") or 0)
+    total = int(metrics.get("tasks_total") or 0)
+    cards[0].metric(
+        "Task completion",
+        f"{round(float(metrics.get('completion_percentage') or 0))}%",
+        f"{completed} of {total} completed",
+        delta_color="off",
     )
+    cards[1].metric("Tasks completed", completed)
+    cards[2].metric("Did not finish", int(metrics.get("tasks_not_finished") or 0))
+    cards[3].metric("Skipped", int(metrics.get("tasks_skipped") or 0))
+    cards[4].metric("Focused time", _home_duration_label(metrics.get("actual_seconds")))
+    cards[5].metric("Meaningful actions", int(metrics.get("meaningful_actions") or 0))
 
     if snapshot.get("is_team_view"):
         team_rows = []
@@ -11873,8 +11878,12 @@ def render_home_weekly_work(user, local_now):
                 {
                     "Staff member": row.get("staff") or "",
                     "Role": row.get("role") or "",
+                    "Completion %": f"{round(float(row.get('completion_percentage') or 0))}%",
                     "Completed tasks": int(row.get("completed_tasks") or 0),
                     "Did not finish": int(row.get("did_not_finish") or 0),
+                    "Skipped": int(row.get("skipped") or 0),
+                    "Remaining": int(row.get("unresolved") or 0),
+                    "Total planned": int(row.get("total_planned") or 0),
                     "Allocated time": _home_duration_label(row.get("allocated_seconds")),
                     "Focused time": _home_duration_label(row.get("actual_seconds")),
                     "Meaningful actions": int(row.get("meaningful_actions") or 0),

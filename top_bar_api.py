@@ -881,6 +881,33 @@ async def top_bar_order_status(request: Request):
     return _json({"ok": True, **load_order_status(claims)})
 
 
+def _daily_planner_timer_mirror(timer):
+    timer = dict(timer or {})
+    if not timer.get("id"):
+        return {}
+    return {
+        key: timer.get(key)
+        for key in (
+            "id",
+            "sheet_id",
+            "task_type",
+            "task_index",
+            "task",
+            "sheet_date",
+            "status",
+            "started_at",
+            "deadline_at",
+            "remaining_seconds",
+            "allocated_seconds",
+            "outcome_required",
+            "outcome",
+            "halfway_notified_at",
+            "expiry_notified_at",
+            "updated_at",
+        )
+    }
+
+
 def load_daily_planner_status(claims):
     if not claims.get("can_manage_daily_planner"):
         return {"enabled": False, "timer": {}, "events": []}
@@ -903,10 +930,19 @@ def load_daily_planner_status(claims):
     except Exception:
         events = []
         timer = {}
+    safe_events = [
+        {
+            "event": str(event.get("event") or ""),
+            "task": str(event.get("task") or "")[:500],
+            "timer": _daily_planner_timer_mirror(event.get("timer") or {}),
+        }
+        for event in events or []
+        if event.get("event") in {"halfway", "expired"}
+    ]
     return {
         "enabled": True,
-        "timer": timer or {},
-        "events": events or [],
+        "timer": _daily_planner_timer_mirror(timer),
+        "events": safe_events,
     }
 
 

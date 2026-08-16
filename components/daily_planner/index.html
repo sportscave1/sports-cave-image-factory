@@ -59,6 +59,8 @@
     }
     .button:hover { background: #f5f2eb; border-color: #a99d84; }
     .button.primary { background: var(--gold); border-color: var(--gold); color: #17130d; }
+    .button.finish { background: var(--success); border-color: var(--success); color: white; }
+    .button.skip { background: #f1eee7; border-color: #bbb4a8; color: #4f4b44; }
     .button.danger { color: var(--danger); }
     .button.small { height: 27px; padding: 0 8px; }
     .button:disabled { cursor: not-allowed; opacity: .45; }
@@ -67,7 +69,7 @@
     .section-title .rule { background: var(--line); flex: 1; height: 1px; }
     .meta-row { color: var(--muted); display: flex; flex-wrap: wrap; gap: 14px; margin: -3px 0 9px; }
     .task-header, .task-row {
-      display: grid; gap: 6px; grid-template-columns: 28px minmax(160px, 1.7fr) minmax(180px, 2fr) 96px 118px 210px;
+      display: grid; gap: 6px; grid-template-columns: 28px minmax(150px, 1.5fr) minmax(170px, 1.8fr) 88px 112px minmax(250px, auto);
     }
     .task-header { color: var(--muted); font-size: 10px; font-weight: 700; padding: 0 5px 4px; text-transform: uppercase; }
     .task-row {
@@ -108,6 +110,14 @@
     .active-strip .spacer { flex: 1; }
     .review-grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
     .review-grid .wide { grid-column: 1 / -1; }
+    .outcome-summary { display: grid; gap: 6px; grid-template-columns: repeat(6, minmax(0,1fr)); margin-bottom: 9px; }
+    .outcome-stat { background: white; border: 1px solid var(--line); border-radius: 5px; min-width: 0; padding: 7px 8px; }
+    .outcome-stat strong { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+    .outcome-stat span { color: var(--muted); display: block; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .outcome-lists { display: grid; gap: 8px; grid-template-columns: repeat(3,1fr); margin: 8px 0; }
+    .outcome-list { background: white; border: 1px solid var(--line); border-radius: 5px; padding: 8px; }
+    .outcome-list strong { display: block; margin-bottom: 4px; }
+    .outcome-list ul { margin: 0; padding-left: 17px; }
     .ratings { display: grid; gap: 6px; grid-template-columns: repeat(4, 1fr); margin-top: 8px; }
     .ratings label { color: var(--muted); font-size: 10px; }
     .ratings input { margin-top: 3px; }
@@ -137,11 +147,11 @@
     .sound-row { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
     .sound-row input { min-height: 0; width: 120px; }
     .hidden { display: none !important; }
-    .compact-only { display: none; }
+    .compact-only { display: none !important; }
     body.compact { min-height: 340px; }
     body.compact .shell { grid-template-rows: 42px minmax(0,1fr); }
     body.compact .tabs, body.compact .statusbar, body.compact .full-only { display: none !important; }
-    body.compact .compact-only { display: block; }
+    body.compact .compact-only { display: flex !important; }
     body.compact .main { align-items: stretch; display: flex; padding: 8px; }
     .compact-panel {
       align-items: center; background: #171613; border-radius: 7px; color: white; display: flex; flex: 1;
@@ -155,7 +165,7 @@
       .task-header { display: none; }
       .task-row { grid-template-columns: 24px 1fr; }
       .task-row > *:not(.task-index) { grid-column: 2; }
-      .planning-grid, .review-grid, .ratings { grid-template-columns: 1fr; }
+      .planning-grid, .review-grid, .ratings, .outcome-summary, .outcome-lists { grid-template-columns: 1fr; }
       .planning-grid .wide, .review-grid .wide { grid-column: auto; }
     }
   </style>
@@ -201,7 +211,11 @@
       alarmStopTimer: null, audio: null, volume: Number(localStorage.getItem("scPlannerVolume") || .75),
       compact: localStorage.getItem("scPlannerCompact") === "1",
       fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
+      pendingFocusActive: false, timerScope: "",
     };
+    const surfaceId = `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const timerChannel = "BroadcastChannel" in window ? new BroadcastChannel("sports-cave-daily-planner") : null;
+    const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.timerScope || "none"}`;
     const view = document.querySelector("#view");
     const compactView = document.querySelector("#compact-view");
     const statusText = document.querySelector("#connection-status");
@@ -257,6 +271,49 @@
     const showSkeleton = () => {
       view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     };
+    const timerMirror = (timer) => timer?.id ? {
+      id:String(timer.id), sheet_id:String(timer.sheet_id || ""), task_type:String(timer.task_type || ""),
+      task_index:Number(timer.task_index || 0), task:String(timer.task || "Daily Planner task"),
+      sheet_date:String(timer.sheet_date || ""), status:String(timer.status || ""),
+      started_at:timer.started_at || null, deadline_at:timer.deadline_at || null, remaining_seconds:Number(timer.remaining_seconds || 0),
+      allocated_seconds:Number(timer.allocated_seconds || 0), actual_elapsed_seconds:timer.actual_elapsed_seconds,
+      outcome_required:Boolean(timer.outcome_required), outcome:String(timer.outcome || ""),
+      halfway_notified_at:timer.halfway_notified_at || null, expiry_notified_at:timer.expiry_notified_at || null,
+      updated_at:timer.updated_at || null,
+    } : {};
+    const broadcastTimer = (timer, events=[]) => {
+      const payload = {type:"timer-state", source:surfaceId, scope:state.timerScope, timer:timerMirror(timer), events, sent_at:Date.now()};
+      try { timerChannel?.postMessage(payload); } catch (_error) {}
+      try { localStorage.setItem(timerStorageKey(), JSON.stringify(payload)); } catch (_error) {}
+      try { window.opener?.postMessage({...payload, type:"sports-cave-planner-timer-state"}, location.origin); } catch (_error) {}
+    };
+    const claimSideEffect = (kind, timer) => {
+      const eventStamp = kind === "alarm"
+        ? timer?.deadline_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const key = `scPlannerEffect:${state.timerScope || "none"}:${kind}:${timer?.id || "none"}:${eventStamp}`;
+      try {
+        const existing = JSON.parse(localStorage.getItem(key) || "null");
+        if (existing?.claimed_at && Date.now() - Number(existing.claimed_at) < 86400000) return false;
+        localStorage.setItem(key, JSON.stringify({owner:surfaceId, claimed_at:Date.now()}));
+        return JSON.parse(localStorage.getItem(key) || "{}").owner === surfaceId;
+      } catch (_error) { return true; }
+    };
+    const runClaimedSideEffect = (kind, timer, effect) => {
+      const stamp = kind === "alarm"
+        ? timer?.deadline_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const run = () => claimSideEffect(kind, timer) ? effect() : undefined;
+      if (navigator.locks?.request) {
+        navigator.locks.request(
+          `sports-cave-planner:${kind}:${timer?.id || "none"}:${stamp}`,
+          {mode:"exclusive"},
+          run,
+        ).catch(() => run());
+      } else {
+        run();
+      }
+    };
     const postReady = () => window.opener?.postMessage({type:"sports-cave-planner-ready"}, location.origin);
     window.addEventListener("message", (event) => {
       if (event.origin !== location.origin || event.data?.type !== "sports-cave-planner-auth") return;
@@ -264,8 +321,11 @@
       if (!token) return;
       const changed = token !== state.token;
       state.token = token;
+      state.timerScope = String(event.data.timer_scope || "");
+      state.pendingFocusActive = state.pendingFocusActive || Boolean(event.data.focus_active);
       statusText.textContent = "Secure session connected";
       if (changed && !state.initialLoadComplete) loadPlanner(isoToday());
+      else if (event.data.focus_active) focusActiveTask();
     });
 
     const timerRemaining = (timer) => {
@@ -287,6 +347,23 @@
       return timer.id && timer.sheet_id === state.bundle?.sheet?.id && timer.task_type === type && Number(timer.task_index) === index;
     };
     const taskForTimer = (timer) => timer?.task || "Daily Planner task";
+    const receiveTimerState = (payload) => {
+      if (!payload || payload.source === surfaceId || payload.type !== "timer-state") return;
+      if (!state.timerScope || payload.scope !== state.timerScope) return;
+      if (state.bundle) state.bundle.active_timer = payload.timer || {};
+      updateTimerDisplays();
+      if (payload.timer?.outcome_required || payload.timer?.status === "expired") {
+        showOutcomeClaimed(payload.timer);
+      } else if (!payload.timer?.id || payload.timer?.outcome) {
+        stopAlarm();
+        outcome.classList.add("hidden");
+      }
+    };
+    if (timerChannel) timerChannel.addEventListener("message", (event) => receiveTimerState(event.data));
+    window.addEventListener("storage", (event) => {
+      if (event.key !== timerStorageKey() || !event.newValue) return;
+      try { receiveTimerState(JSON.parse(event.newValue)); } catch (_error) {}
+    });
 
     const enableAudio = async () => {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -379,19 +456,33 @@
       return state.draft;
     };
     const statusOptions = (selected) => [
-      ["", "Open"], ["done", "Done"], ["couldnt_finish", "Couldn't finish"]
+      ["", "Open"], ["done", "Completed"], ["couldnt_finish", "Did not finish"], ["skipped", "Skipped"]
     ].map(([value,label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
+    const terminalOutcome = (task) => {
+      const status = String(task?.status || "").toLowerCase();
+      const result = String(task?.outcome || "").toLowerCase();
+      if (status === "done" || result === "completed") return "completed";
+      if (status === "skipped" || result === "skipped") return "skipped";
+      if (status === "couldnt_finish" || result === "did_not_finish") return "did_not_finish";
+      return "";
+    };
     const rowTimerControls = (type, index, task) => {
+      if (!String(task?.task || task?.details || "").trim()) return "";
       const timer = activeMatches(type,index) ? activeTimer() : timerForRow(type,index);
       const active = activeMatches(type,index);
       const defaultSeconds = Number(timer.allocated_seconds || 0) || parseDuration(task.time_blocked);
+      if (terminalOutcome(task)) {
+        return `<span class="save-state">${escapeHtml(terminalOutcome(task) === "completed" ? (task.completion_method === "finished_early" ? "Completed · Finished early" : "Completed") : terminalOutcome(task) === "skipped" ? "Skipped" : "Did not finish")}</span><button class="button small" data-action="reopen-task">Reopen</button>`;
+      }
       if (active && ["running","paused","expired"].includes(timer.status)) {
         const control = timer.status === "running"
           ? `<button class="button small" data-action="pause-timer">Pause</button>`
           : timer.status === "paused" ? `<button class="button small" data-action="resume-timer">Resume</button>` : "";
-        return `<div class="countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div>${control}<button class="button small danger" data-action="reset-timer">Reset</button>`;
+        const finish = timer.status === "expired" ? "" : '<button class="button small finish" data-action="finish-task">Finish</button>';
+        const reset = timer.status === "expired" ? "" : '<button class="button small danger" data-action="reset-timer">Reset</button>';
+        return `<div class="countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div>${control}${finish}<button class="button small skip" data-action="skip-task">Skip</button>${reset}`;
       }
-      return `<input class="duration-input" type="number" min="1" max="720" value="${Math.max(1,Math.round(defaultSeconds/60)||1)}" aria-label="Timer minutes"><button class="button small" data-action="start-timer" data-task-type="${type}" data-task-index="${index}">Start</button>`;
+      return `<input class="duration-input" type="number" min="1" max="720" value="${Math.max(1,Math.round(defaultSeconds/60)||1)}" aria-label="Timer minutes"><button class="button small" data-action="start-timer" data-task-type="${type}" data-task-index="${index}">Start</button><button class="button small finish" data-action="finish-task">Finish</button><button class="button small skip" data-action="skip-task">Skip</button>`;
     };
     const parseDuration = (value) => {
       const text = String(value || "").toLowerCase();
@@ -408,13 +499,15 @@
         <input data-field="task" value="${escapeHtml(task.task || "")}" aria-label="Task" ${readOnly ? "disabled" : ""}>
         <input data-field="${type === "top" ? "why" : "details"}" value="${escapeHtml((type === "top" ? task.why : task.details) || "")}" aria-label="Details or outcome required" ${readOnly ? "disabled" : ""}>
         <input data-field="time_blocked" value="${escapeHtml(task.time_blocked || "")}" aria-label="Time allocated" ${readOnly ? "disabled" : ""}>
-        <select data-field="status" aria-label="Task status" ${readOnly ? "disabled" : ""}>${statusOptions(task.status || "")}</select>
-        <div class="timer-cell">${readOnly ? '<span class="save-state">Review closed</span>' : rowTimerControls(type,index,task)}${type === "additional" && !readOnly ? '<button class="button small danger" data-action="remove-task" title="Remove task">Remove</button>' : ""}</div>
+        <select data-field="status" aria-label="Task status" ${readOnly || terminalOutcome(task) ? "disabled" : ""}>${statusOptions(task.status || "")}</select>
+        <div class="timer-cell">${readOnly ? (terminalOutcome(task) ? '<span class="save-state">Review closed</span><button class="button small" data-action="reopen-task">Reopen</button>' : '<span class="save-state">Review closed</span>') : rowTimerControls(type,index,task)}${type === "additional" && !readOnly ? '<button class="button small danger" data-action="remove-task" title="Remove task">Remove</button>' : ""}</div>
       </div>`;
     const activeStrip = () => {
       const timer = activeTimer();
       if (!timer.id || timer.outcome) return "";
-      return `<div class="active-strip"><span class="task-name">${escapeHtml(taskForTimer(timer))}</span><span class="time" data-countdown="active">${formatClock(timerRemaining(timer))}</span><span>${escapeHtml(timer.status || "")}</span><span class="spacer"></span>${timer.sheet_date && timer.sheet_date !== state.bundle?.work_date ? '<button class="button small" data-action="reopen-active">Reopen task</button>' : ""}<button class="button small" data-action="toggle-compact">Compact</button></div>`;
+      const pause = timer.status === "running" ? '<button class="button small" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button small" data-action="resume-timer">Resume</button>' : "";
+      const finish = timer.status === "expired" ? "" : '<button class="button small finish" data-action="finish-active">Finish</button>';
+      return `<div class="active-strip"><span class="task-name">${escapeHtml(taskForTimer(timer))}</span><span class="time" data-countdown="active">${formatClock(timerRemaining(timer))}</span><span>${escapeHtml(timer.status || "")}</span><span class="spacer"></span>${timer.sheet_date && timer.sheet_date !== state.bundle?.work_date ? '<button class="button small" data-action="reopen-active">Reopen task</button>' : ""}${pause}${finish}<button class="button small skip" data-action="skip-active">Skip</button><button class="button small" data-action="toggle-compact">Compact</button></div>`;
     };
     const carryoverMarkup = () => {
       if (state.bundle?.sheet?.id) return "";
@@ -452,6 +545,26 @@
         ${sheet.id ? reviewMarkup(sheet, reviewed) : ""}`;
       bindDraftInputs();
     };
+    const plannerOutcomeSummary = (sheet) => {
+      const source = state.draft || normalDraft(sheet || {});
+      const records = [];
+      (source.top_tasks || []).forEach((task,index) => { if (String(task.task || "").trim()) records.push({task,type:"top",index}); });
+      (source.additional_items || []).forEach((task,index) => { if (String(task.task || task.details || "").trim()) records.push({task,type:"additional",index}); });
+      const summary = {total:records.length, completed:0, didNotFinish:0, skipped:0, unresolved:0, actual:0, completedNames:[], didNotFinishNames:[], skippedNames:[], unresolvedNames:[]};
+      records.forEach(({task,type,index}) => {
+        const result = terminalOutcome(task);
+        const name = String(task.task || task.details || "Daily Planner task").trim();
+        if (result === "completed") { summary.completed += 1; summary.completedNames.push(name); }
+        else if (result === "did_not_finish") { summary.didNotFinish += 1; summary.didNotFinishNames.push(name); }
+        else if (result === "skipped") { summary.skipped += 1; summary.skippedNames.push(name); }
+        else { summary.unresolved += 1; summary.unresolvedNames.push(name); }
+        const timer = timerForRow(type,index);
+        summary.actual += Math.max(0, Number(timer.actual_elapsed_seconds ?? task.actual_elapsed_seconds ?? 0) || 0);
+      });
+      summary.percentage = summary.total ? summary.completed / summary.total * 100 : 0;
+      return summary;
+    };
+    const taskListMarkup = (title, names) => `<div class="outcome-list"><strong>${escapeHtml(title)}</strong>${names.length ? `<ul>${names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>` : '<span class="save-state">None</span>'}</div>`;
     const reviewMarkup = (sheet, reviewed) => {
       const review = sheet.review_data || sheet.no_grey_zone || {};
       const ratings = sheet.ratings || {};
@@ -462,16 +575,31 @@
         ["lesson","What lesson did today teach me?"], ["protected","What must be protected tomorrow?"],
       ];
       const ratingNames = ["Focus","Attention","Flow Awareness","Emotional Control","Execution","Vision Alignment","Overall Score"];
-      const mipsFinished = (sheet.top_tasks || []).filter((task) => task.task).length === 3 && (sheet.top_tasks || []).filter((task) => task.task && ["done","couldnt_finish"].includes(task.status)).length === 3;
+      const taskSummary = plannerOutcomeSummary(sheet);
+      const tasksResolved = taskSummary.total > 0 && taskSummary.unresolved === 0;
       const locked = reviewed ? "disabled" : "";
-      return `<div class="section-title"><h2>Daily Review</h2><span class="rule"></span></div><div class="review-grid">${fields.map(([key,label]) => `<label>${label}<textarea data-review-field="${key}" ${locked}>${escapeHtml(review[key] || (key === "completed" ? sheet.daily_summary : ""))}</textarea></label>`).join("")}<label class="wide">What is the ONE THING tomorrow must nail?<textarea data-review-tomorrow ${locked}>${escapeHtml(sheet.tomorrow_intention || "")}</textarea></label><label class="wide">Optional notes<textarea data-review-field="notes" ${locked}>${escapeHtml(review.notes || "")}</textarea></label></div><div class="ratings">${ratingNames.map((name) => `<label>${escapeHtml(name)}<input type="number" min="${name === "Overall Score" ? 1 : 0}" max="10" value="${escapeHtml(ratings[name] ?? (name === "Overall Score" ? 1 : 0))}" data-rating="${escapeHtml(name)}" ${locked}></label>`).join("")}</div><div class="save-row"><span class="save-state">${reviewed ? "Review saved." : mipsFinished ? "Ready to complete the Daily Review." : "Finish the task statuses before completing the review."}</span><button class="button primary" data-action="complete-review" ${reviewed || !mipsFinished ? "disabled" : ""}>Complete Daily Review</button></div>`;
+      const unresolved = taskSummary.unresolvedNames.length ? `<div class="notice info"><strong>Unresolved tasks</strong><br>${taskSummary.unresolvedNames.map(escapeHtml).join("; ")}</div>` : "";
+      const lists = reviewed ? `<div class="outcome-lists">${taskListMarkup("Completed tasks",taskSummary.completedNames)}${taskListMarkup("Skipped tasks",taskSummary.skippedNames)}${taskListMarkup("Tasks not completed",taskSummary.didNotFinishNames)}</div>` : "";
+      return `<div class="section-title"><h2>Daily Review</h2><span class="rule"></span></div><div class="outcome-summary"><div class="outcome-stat"><strong>${taskSummary.total}</strong><span>Total planned</span></div><div class="outcome-stat"><strong>${taskSummary.completed}</strong><span>Completed</span></div><div class="outcome-stat"><strong>${taskSummary.didNotFinish}</strong><span>Did not finish</span></div><div class="outcome-stat"><strong>${taskSummary.skipped}</strong><span>Skipped</span></div><div class="outcome-stat"><strong>${Math.round(taskSummary.percentage)}%</strong><span>Completion</span></div><div class="outcome-stat"><strong>${formatClock(taskSummary.actual)}</strong><span>Focused time</span></div></div>${unresolved}${lists}<div class="review-grid">${fields.map(([key,label]) => `<label>${label}<textarea data-review-field="${key}" ${locked}>${escapeHtml(review[key] || (key === "completed" ? sheet.daily_summary : ""))}</textarea></label>`).join("")}<label class="wide">What is the ONE THING tomorrow must nail?<textarea data-review-tomorrow ${locked}>${escapeHtml(sheet.tomorrow_intention || "")}</textarea></label><label class="wide">Optional notes<textarea data-review-field="notes" ${locked}>${escapeHtml(review.notes || "")}</textarea></label></div><div class="ratings">${ratingNames.map((name) => `<label>${escapeHtml(name)}<input type="number" min="${name === "Overall Score" ? 1 : 0}" max="10" value="${escapeHtml(ratings[name] ?? (name === "Overall Score" ? 1 : 0))}" data-rating="${escapeHtml(name)}" ${locked}></label>`).join("")}</div><div class="save-row"><span class="save-state">${reviewed ? "Review saved." : tasksResolved ? "Ready to complete the Daily Review." : "Resolve every planned task before completing the review."}</span><button class="button primary" data-action="complete-review" ${reviewed || !tasksResolved ? "disabled" : ""}>Complete Daily Review</button></div>`;
     };
     const bindDraftInputs = () => {
       view.querySelectorAll(".task-row").forEach((row) => {
         const type = row.dataset.taskType; const index = Number(row.dataset.taskIndex);
-        row.querySelectorAll("[data-field]").forEach((input) => input.addEventListener("input", () => {
-          ensureDraft()[type === "top" ? "top_tasks" : "additional_items"][index][input.dataset.field] = input.value;
-        }));
+        row.querySelectorAll("[data-field]").forEach((input) => {
+          if (input.dataset.field === "status") {
+            input.addEventListener("change", () => {
+              const selected = input.value;
+              if (!selected) return;
+              input.value = "";
+              const timer = activeMatches(type,index) ? activeTimer() : {};
+              applyTaskOutcome(type, index, selected === "done" ? "completed" : selected === "skipped" ? "skipped" : "did_not_finish", timer);
+            });
+            return;
+          }
+          input.addEventListener("input", () => {
+            ensureDraft()[type === "top" ? "top_tasks" : "additional_items"][index][input.dataset.field] = input.value;
+          });
+        });
       });
       view.querySelectorAll("[data-plan-field]").forEach((input) => input.addEventListener("input", () => {
         ensureDraft().planning_data[input.dataset.planField] = input.value;
@@ -485,6 +613,22 @@
       view.querySelectorAll("[data-rating]").forEach((input) => { ratings[input.dataset.rating] = Number(input.value || 0); });
       return {review_data:reviewData, ratings, tomorrow_intention:view.querySelector("[data-review-tomorrow]")?.value || ""};
     };
+    const focusActiveTask = () => {
+      const timer = activeTimer();
+      if (!timer?.id) return;
+      if (timer.sheet_date && timer.sheet_date !== state.bundle?.work_date) {
+        state.pendingFocusActive = true;
+        loadPlanner(timer.sheet_date);
+        return;
+      }
+      state.pendingFocusActive = false;
+      state.tab = "planner";
+      renderCurrent();
+      const row = view.querySelector(`.task-row[data-task-type="${timer.task_type}"][data-task-index="${Number(timer.task_index || 0)}"]`);
+      row?.scrollIntoView({block:"center", behavior:"smooth"});
+      row?.querySelector("button")?.focus({preventScroll:true});
+      if (timer.outcome_required || timer.status === "expired") showOutcomeClaimed(timer);
+    };
     const loadPlanner = async (workDate) => {
       if (!state.token) return;
       state.loading = true; state.dataStartedAt = performance.now(); state.draft = null; state.editingNew = false;
@@ -496,16 +640,21 @@
         statusText.textContent = "Saved planner state connected";
         const clientMs = Math.round(performance.now() - state.dataStartedAt);
         performanceText.textContent = `Shell ${Math.round(shellVisibleAt)} ms | Planner ${clientMs} ms | Server ${Math.round(payload.performance?.planner_data_ms || 0)} ms`;
+        broadcastTimer(payload.active_timer || {}, payload.events || []);
+        if (state.pendingFocusActive && payload.active_timer?.sheet_date && payload.active_timer.sheet_date !== payload.work_date) {
+          return loadPlanner(payload.active_timer.sheet_date);
+        }
         renderCurrent(); scheduleStatus();
         (payload.events || []).forEach((event) => {
           const timer = event.timer || {};
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
           if (state.seenEvents.has(key)) return;
           state.seenEvents.add(key);
-          if (event.event === "halfway") showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`, "info", 7000);
-          if (event.event === "expired") showOutcome({...timer, task:event.task || timer.task}, true);
+          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`, "info", 7000));
+          if (event.event === "expired") showOutcomeClaimed({...timer, task:event.task || timer.task});
         });
-        if (activeTimer().outcome_required || activeTimer().status === "expired") showOutcome(activeTimer(), false);
+        if (activeTimer().outcome_required || activeTimer().status === "expired") showOutcomeClaimed(activeTimer());
+        if (state.pendingFocusActive) setTimeout(focusActiveTask, 0);
       } catch (error) {
         state.loading = false; state.initialLoadComplete = true;
         view.innerHTML = `<div class="notice error"><strong>Daily Planner could not load.</strong><br>${escapeHtml(error.message)}</div><button class="button" data-action="retry">Retry</button>`;
@@ -516,6 +665,7 @@
       const response = await requestJson("/api/os/daily-planner/mutate", {method:"POST", body:JSON.stringify(payload)});
       return response.result;
     };
+    const invalidateReports = () => { state.historyLoaded = false; state.weeklyLoaded = false; };
     const saveSheet = async () => {
       const draft = ensureDraft();
       const carry = [];
@@ -537,9 +687,67 @@
     const timerAction = async (action, extra={}) => {
       try {
         if (action === "start_timer") await enableAudio();
-        await mutate({action, ...extra});
+        const result = await mutate({action, ...extra});
+        const mirror = ["reset_timer"].includes(action) ? {} : {
+          ...activeTimer(), ...(result || {}),
+          task:extra.display_task || result?.task || activeTimer().task || "Daily Planner task",
+          sheet_date:result?.sheet_date || activeTimer().sheet_date || state.bundle.work_date,
+        };
+        if (state.bundle) state.bundle.active_timer = mirror;
+        broadcastTimer(mirror);
         await loadPlanner(extra.work_date || state.bundle.work_date);
       } catch (error) { showToast(error.message,"error",8000); }
+    };
+    const applyTaskOutcome = async (taskType, taskIndex, selectedOutcome, timer={}, sheetId="") => {
+      let reason = "";
+      if (selectedOutcome === "completed" && !window.confirm("Finish this task now?")) return;
+      if (selectedOutcome === "skipped") {
+        const answer = window.prompt("Skip this task? It will be recorded as not completed.\n\nOptional reason:", "No time available");
+        if (answer === null) return;
+        reason = String(answer || "No time available").trim();
+      }
+      if (selectedOutcome === "did_not_finish" && !window.confirm("Mark this task as Did not finish?")) return;
+      if (selectedOutcome === "reopen" && !window.confirm("Reopen this task? It will return to Open and its timer will not restart.")) return;
+      const previousActive = {...activeTimer()};
+      const targetSheetId = sheetId || state.bundle?.sheet?.id;
+      const clearsActive = Boolean(
+        previousActive.id
+        && previousActive.sheet_id === targetSheetId
+        && previousActive.task_type === taskType
+        && Number(previousActive.task_index) === Number(taskIndex)
+        && selectedOutcome !== "reopen"
+      );
+      stopAlarm();
+      outcome.classList.add("hidden");
+      if (clearsActive && state.bundle) {
+        state.bundle.active_timer = {};
+        broadcastTimer({});
+        updateTimerDisplays();
+      }
+      try {
+        const result = await mutate({
+          action:"task_outcome", sheet_id:targetSheetId, task_type:taskType,
+          task_index:Number(taskIndex), timer_id:timer?.id || "", outcome:selectedOutcome, reason,
+        });
+        invalidateReports();
+        broadcastTimer(clearsActive ? {} : activeTimer());
+        const outcomeMessage = {
+          completed:"Task finished.",
+          skipped:"Task skipped.",
+          did_not_finish:"Task recorded as not completed.",
+          reopen:"Task reopened.",
+        }[selectedOutcome] || "Task updated.";
+        showToast(outcomeMessage, "success");
+        await loadPlanner(result?.sheet?.sheet_date || state.bundle.work_date);
+      } catch (error) {
+        if (clearsActive && state.bundle) {
+          state.bundle.active_timer = previousActive;
+          broadcastTimer(previousActive);
+          updateTimerDisplays();
+          if (previousActive.status === "expired" || previousActive.outcome_required) showOutcomeClaimed(previousActive);
+        }
+        showToast(error.message,"error",8000);
+      }
     };
     const updateTimerDisplays = () => {
       const timer = activeTimer();
@@ -547,23 +755,26 @@
       renderCompact();
       if (timer.id && timer.status === "running" && timerRemaining(timer) <= 0 && !timer.outcome) {
         timer.status = "expired"; timer.outcome_required = true; timer.remaining_seconds = 0;
-        showOutcome(timer, true); refreshStatus(true);
+        broadcastTimer(timer);
+        showOutcomeClaimed(timer); refreshStatus(true);
       }
     };
-    const showOutcome = (timer, sound) => {
+    const showOutcome = (timer) => {
       if (!timer?.id || timer.outcome) { outcome.classList.add("hidden"); return; }
       outcome.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="sound-row"><button class="button small" data-stop-sound>Stop Sound</button><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
       outcome.classList.remove("hidden");
       outcome.querySelector("[data-outcome]")?.focus();
       outcome.querySelectorAll("[data-outcome]").forEach((button) => button.addEventListener("click", async () => {
         stopAlarm();
-        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.outcome}); outcome.classList.add("hidden"); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
+        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.outcome}); invalidateReports(); outcome.classList.add("hidden"); if (state.bundle) state.bundle.active_timer = {}; broadcastTimer({}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
         catch (error) { showToast(error.message,"error",8000); }
       }));
       outcome.querySelector("[data-stop-sound]").addEventListener("click", stopAlarm);
       outcome.querySelector("[data-volume]").addEventListener("input", (event) => { state.volume = Number(event.target.value); localStorage.setItem("scPlannerVolume", String(state.volume)); });
-      const alarmKey = `alarm:${timer.id}:${timer.expiry_notified_at || timer.deadline_at || ""}`;
-      if (sound && !state.seenEvents.has(alarmKey)) { state.seenEvents.add(alarmKey); playAlarm(); }
+    };
+    const showOutcomeClaimed = (timer) => {
+      showOutcome(timer);
+      runClaimedSideEffect("alarm", timer, playAlarm);
     };
     const refreshStatus = async (immediate=false) => {
       clearTimeout(state.statusTimer);
@@ -572,16 +783,20 @@
         const payload = await requestJson("/api/os/daily-planner/status");
         const previousId = activeTimer().id;
         if (state.bundle) state.bundle.active_timer = payload.timer || {};
+        broadcastTimer(payload.timer || {}, payload.events || []);
         (payload.events || []).forEach((event) => {
           const timer = event.timer || {};
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
           if (state.seenEvents.has(key)) return;
           state.seenEvents.add(key);
-          if (event.event === "halfway") showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`,"info",7000);
-          if (event.event === "expired") showOutcome({...timer, task:event.task || timer.task}, true);
+          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`,"info",7000));
+          if (event.event === "expired") showOutcomeClaimed({...timer, task:event.task || timer.task});
         });
         const timer = activeTimer();
-        if (timer.outcome_required || timer.status === "expired") showOutcome(timer, previousId !== timer.id || immediate);
+        if (timer.outcome_required || timer.status === "expired") {
+          showOutcome(timer);
+          if (previousId !== timer.id || immediate) runClaimedSideEffect("alarm", timer, playAlarm);
+        }
         updateTimerDisplays();
       } catch (_error) {}
       scheduleStatus();
@@ -611,7 +826,7 @@
     const renderHistory = () => {
       const [start,end] = periodDates(state.historyPeriod);
       const rows = state.historyRows || [];
-      view.innerHTML = `<div class="toolbar"><div class="segmented">${[["today","Today"],["7","Last 7 days"],["30","Last 30 days"],["custom","Custom"]].map(([value,label]) => `<button class="button ${state.historyPeriod === value ? "active" : ""}" data-period="${value}">${label}</button>`).join("")}</div>${state.historyPeriod === "custom" ? `<input class="date-input" type="date" id="history-start" value="${start}"><input class="date-input" type="date" id="history-end" value="${end}"><button class="button" data-action="apply-history">Apply</button>` : ""}<span class="header-spacer"></span><span>${rows.length} task record${rows.length === 1 ? "" : "s"}</span></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Work date</th><th>Task</th><th>Owner</th><th>Area</th><th>Allocated</th><th>Actual</th><th>Status</th><th>Outcome</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => `<tr data-row-id="${escapeHtml(row.row_id)}"><td>${escapeHtml(row.work_date)}</td><td>${escapeHtml(row.task)}</td><td>${escapeHtml(row.owner)}</td><td>${escapeHtml(row.category)}</td><td>${escapeHtml(row.allocated || formatClock(row.allocated_seconds))}</td><td>${escapeHtml(formatClock(row.timer?.actual_elapsed_seconds ?? row.timer?.elapsed_seconds))}</td><td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.outcome === "did_not_finish" ? "Did not finish" : row.outcome === "completed" ? "Completed" : "")}</td><td>${escapeHtml(row.notes)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No Daily Planner tasks</strong><span>No records exist for this period.</span></div></div>'}`;
+      view.innerHTML = `<div class="toolbar"><div class="segmented">${[["today","Today"],["7","Last 7 days"],["30","Last 30 days"],["custom","Custom"]].map(([value,label]) => `<button class="button ${state.historyPeriod === value ? "active" : ""}" data-period="${value}">${label}</button>`).join("")}</div>${state.historyPeriod === "custom" ? `<input class="date-input" type="date" id="history-start" value="${start}"><input class="date-input" type="date" id="history-end" value="${end}"><button class="button" data-action="apply-history">Apply</button>` : ""}<span class="header-spacer"></span><span>${rows.length} task record${rows.length === 1 ? "" : "s"}</span></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Work date</th><th>Task</th><th>Owner</th><th>Allocated</th><th>Actual</th><th>Time saved</th><th>Status</th><th>Outcome / method</th><th>Skip reason</th><th>Completed at</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => { const method = row.completion_method === "finished_early" ? "Finished early" : String(row.completion_method || "").replaceAll("_"," ").replace(/\b\w/g,(value) => value.toUpperCase()); const result = row.outcome === "did_not_finish" ? "Did not finish" : row.outcome === "completed" ? "Completed" : row.outcome === "skipped" ? "Skipped" : ""; const actual = row.timer?.actual_elapsed_seconds ?? row.actual_elapsed_seconds ?? row.timer?.elapsed_seconds; const allocated = row.allocated || (row.allocated_seconds ? formatClock(row.allocated_seconds) : ""); return `<tr data-row-id="${escapeHtml(row.row_id)}"><td>${escapeHtml(row.work_date)}</td><td>${escapeHtml(row.task)}</td><td>${escapeHtml(row.owner)}</td><td>${escapeHtml(allocated)}</td><td>${actual === null || actual === undefined ? "" : escapeHtml(formatClock(actual))}</td><td>${row.time_saved_seconds ? escapeHtml(formatClock(row.time_saved_seconds)) : ""}</td><td>${escapeHtml(row.status)}</td><td>${escapeHtml([result,method].filter(Boolean).join(" · "))}</td><td>${escapeHtml(row.skip_reason || "")}</td><td>${escapeHtml(formatTimestamp(row.timer?.outcome_at || row.completed_at || row.finished_at))}</td><td>${escapeHtml(row.notes)}</td></tr>`; }).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No Daily Planner tasks</strong><span>No records exist for this period.</span></div></div>'}`;
     };
     const loadWeekly = async () => {
       const anchor = state.weeklyAnchor || state.bundle?.work_date || isoToday();
@@ -621,7 +836,8 @@
     };
     const renderWeekly = () => {
       const data = state.weekly || {}; const summary = data.summary || {}; const sheets = data.sheets || [];
-      view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-week">&#8592; Previous</button><input class="date-input" type="date" id="weekly-date" value="${escapeHtml(state.weeklyAnchor || isoToday())}"><button class="button" data-action="next-week">Next &#8594;</button><span>${escapeHtml(formatDate(data.week_start))} - ${escapeHtml(formatDate(data.week_end))}</span></div><div class="planning-grid"><div class="notice info"><strong>${summary.days_planned || 0}</strong><br>Days planned</div><div class="notice info"><strong>${summary.days_reviewed || 0}</strong><br>Days reviewed</div><div class="notice info"><strong>${summary.mip_completed || 0}</strong><br>MIPs completed</div><div class="notice info"><strong>${summary.average_day_rating || "-"}</strong><br>Average rating</div></div><div class="section-title"><h2>Week summary</h2><span class="rule"></span></div><p><strong>Biggest wins:</strong> ${escapeHtml((summary.biggest_wins || []).join("; ") || "No wins recorded yet.")}</p><p><strong>Main blockers:</strong> ${escapeHtml((summary.main_blockers || []).join("; ") || "No blockers recorded yet.")}</p><p><strong>Repeated unfinished work:</strong> ${escapeHtml((summary.repeated_carryovers || []).join("; ") || "None repeated this week.")}</p>${sheets.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Owner</th><th>Status</th><th>MIPs closed</th><th>Tasks</th><th>Rating</th></tr></thead><tbody>${sheets.map((sheet) => `<tr><td>${escapeHtml(sheet.sheet_date)}</td><td>${escapeHtml(sheet.user_name)}</td><td>${escapeHtml(sheet.status)}</td><td>${(sheet.top_tasks || []).filter((task) => task.task && ["done","couldnt_finish"].includes(task.status)).length}</td><td>${(sheet.top_tasks || []).filter((task) => task.task).length}</td><td>${escapeHtml(sheet.ratings?.["Overall Score"] || "")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No planner records</strong><span>No Daily Planner records were found for this week.</span></div></div>'}`;
+      const staff = summary.staff_completion || [];
+      view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-week">&#8592; Previous</button><input class="date-input" type="date" id="weekly-date" value="${escapeHtml(state.weeklyAnchor || isoToday())}"><button class="button" data-action="next-week">Next &#8594;</button><span>${escapeHtml(formatDate(data.week_start))} - ${escapeHtml(formatDate(data.week_end))}</span></div><div class="outcome-summary"><div class="outcome-stat"><strong>${Math.round(summary.completion_percentage || 0)}%</strong><span>Task completion</span></div><div class="outcome-stat"><strong>${summary.completed || 0}</strong><span>Completed</span></div><div class="outcome-stat"><strong>${summary.did_not_finish || 0}</strong><span>Did not finish</span></div><div class="outcome-stat"><strong>${summary.skipped || 0}</strong><span>Skipped</span></div><div class="outcome-stat"><strong>${summary.unresolved || 0}</strong><span>Remaining</span></div><div class="outcome-stat"><strong>${summary.total_planned || 0}</strong><span>Total planned</span></div></div><div class="meta-row"><span><strong>Focused time:</strong> ${formatClock(summary.actual_focused_seconds || 0)}</span><span><strong>Days reviewed:</strong> ${summary.days_reviewed || 0}</span><span><strong>Average rating:</strong> ${summary.average_day_rating || "-"}</span></div>${staff.length ? `<div class="table-wrap"><table><thead><tr><th>Staff</th><th>Completion</th><th>Completed</th><th>Did not finish</th><th>Skipped</th><th>Remaining</th><th>Total</th><th>Focused</th></tr></thead><tbody>${staff.map((row) => `<tr><td>${escapeHtml(row.staff)}</td><td>${Math.round(row.completion_percentage || 0)}%</td><td>${row.completed || 0}</td><td>${row.did_not_finish || 0}</td><td>${row.skipped || 0}</td><td>${row.unresolved || 0}</td><td>${row.total_planned || 0}</td><td>${formatClock(row.actual_focused_seconds || 0)}</td></tr>`).join("")}</tbody></table></div>` : ""}<div class="section-title"><h2>Week summary</h2><span class="rule"></span></div><p><strong>Biggest wins:</strong> ${escapeHtml((summary.biggest_wins || []).join("; ") || "No wins recorded yet.")}</p><p><strong>Main blockers:</strong> ${escapeHtml((summary.main_blockers || []).join("; ") || "No blockers recorded yet.")}</p><p><strong>Repeated unfinished work:</strong> ${escapeHtml((summary.repeated_carryovers || []).join("; ") || "None repeated this week.")}</p>${sheets.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Owner</th><th>Status</th><th>Completion</th><th>Tasks</th><th>Rating</th></tr></thead><tbody>${sheets.map((sheet) => { const result = (() => { const tasks = [...(sheet.top_tasks || []),...(sheet.additional_items || [])].filter((task) => String(task.task || task.details || "").trim()); const completed = tasks.filter((task) => terminalOutcome(task) === "completed").length; return {total:tasks.length, percentage:tasks.length ? completed/tasks.length*100 : 0}; })(); return `<tr><td>${escapeHtml(sheet.sheet_date)}</td><td>${escapeHtml(sheet.user_name)}</td><td>${escapeHtml(sheet.status)}</td><td>${Math.round(result.percentage)}%</td><td>${result.total}</td><td>${escapeHtml(sheet.ratings?.["Overall Score"] || "")}</td></tr>`; }).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No planner records</strong><span>No Daily Planner records were found for this week.</span></div></div>'}`;
     };
     const renderCompact = () => {
       if (!state.compact) return;
@@ -630,9 +846,9 @@
         compactView.innerHTML = '<div class="compact-task">No active timer</div><div class="compact-countdown">00:00</div><div class="compact-actions"><button class="button" data-action="toggle-compact">Restore full planner</button></div>';
         return;
       }
-      compactView.innerHTML = `<div class="compact-task">${escapeHtml(taskForTimer(timer))}</div><div class="compact-countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div><div class="compact-meta"><span>Allocated ${formatClock(timer.allocated_seconds)}</span><span>Elapsed ${formatClock(timerElapsed(timer))}</span></div><div class="compact-actions">${timer.status === "running" ? '<button class="button" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button" data-action="resume-timer">Resume</button>' : ""}<button class="button primary" data-compact-outcome="completed">Complete</button><button class="button" data-compact-outcome="did_not_finish">Did not finish</button><button class="button" data-action="toggle-compact">Restore full planner</button></div>`;
+      compactView.innerHTML = `<div class="compact-task">${escapeHtml(taskForTimer(timer))}</div><div class="compact-countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div><div class="compact-meta"><span>Allocated ${formatClock(timer.allocated_seconds)}</span><span>Elapsed ${formatClock(timerElapsed(timer))}</span></div><div class="compact-actions">${timer.status === "running" ? '<button class="button" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button" data-action="resume-timer">Resume</button>' : ""}${timer.status === "expired" ? "" : '<button class="button finish" data-action="finish-active">Finish</button>'}<button class="button skip" data-action="skip-active">Skip</button><button class="button" data-compact-outcome="did_not_finish">Did not finish</button><button class="button" data-action="toggle-compact">Restore full planner</button></div>`;
       compactView.querySelectorAll("[data-compact-outcome]").forEach((button) => button.addEventListener("click", async () => {
-        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.compactOutcome}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
+        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.compactOutcome}); invalidateReports(); if (state.bundle) state.bundle.active_timer = {}; broadcastTimer({}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
         catch (error) { showToast(error.message,"error",8000); }
       }));
     };
@@ -669,6 +885,14 @@
       if (action === "plan-tomorrow") return loadPlanner(addDays(state.bundle.work_date,1));
       if (action === "reopen-active") return loadPlanner(activeTimer().sheet_date);
       if (action === "toggle-compact") return setCompact(!state.compact);
+      if (action === "finish-active") {
+        const timer = activeTimer();
+        return applyTaskOutcome(timer.task_type, timer.task_index, "completed", timer, timer.sheet_id);
+      }
+      if (action === "skip-active") {
+        const timer = activeTimer();
+        return applyTaskOutcome(timer.task_type, timer.task_index, "skipped", timer, timer.sheet_id);
+      }
       if (action === "create-sheet") { state.editingNew = true; state.draft = normalDraft({}); return renderPlanner(); }
       if (action === "cancel-new") { state.editingNew = false; state.draft = null; return renderPlanner(); }
       if (action === "add-task") { ensureDraft().additional_items.push({task:"",details:"",time_blocked:"",status:""}); return renderPlanner(); }
@@ -680,6 +904,15 @@
         return renderPlanner();
       }
       if (action === "save-sheet") return saveSheet();
+      if (action === "finish-task") {
+        const timer = activeMatches(type,index) ? activeTimer() : {};
+        return applyTaskOutcome(type, index, "completed", timer);
+      }
+      if (action === "skip-task") {
+        const timer = activeMatches(type,index) ? activeTimer() : {};
+        return applyTaskOutcome(type, index, "skipped", timer);
+      }
+      if (action === "reopen-task") return applyTaskOutcome(type, index, "reopen");
       if (action === "complete-review") {
         try { await mutate({action:"complete_review", sheet_id:state.bundle.sheet.id, review:collectReview()}); showToast("Daily Review complete.","success"); await loadPlanner(state.bundle.work_date); }
         catch (error) { showToast(error.message,"error",8000); }
@@ -691,7 +924,7 @@
         const running = activeTimer();
         if (running.id && !activeMatches(type,index)) {
           if (running.status === "expired" || running.outcome_required) {
-            showOutcome(running, false);
+            showOutcome(running);
             return;
           }
           if (window.confirm(`Another timer is active for ${taskForTimer(running)}. Choose OK to return to it, or Cancel to choose whether to stop it.`)) {
@@ -700,7 +933,7 @@
           if (!window.confirm("Stop the active timer and start this task? The active task status will not change.")) return;
           await mutate({action:"reset_timer", timer_id:running.id});
         }
-        return timerAction("start_timer", {sheet_id:state.bundle.sheet.id, task_type:type, task_index:index, allocated_seconds:Math.max(1,Math.round(minutes*60))});
+        return timerAction("start_timer", {sheet_id:state.bundle.sheet.id, task_type:type, task_index:index, allocated_seconds:Math.max(1,Math.round(minutes*60)), display_task:ensureDraft()[type === "top" ? "top_tasks" : "additional_items"][index]?.task || "Daily Planner task"});
       }
       if (action === "pause-timer") return timerAction("pause_timer", {timer_id:activeTimer().id});
       if (action === "resume-timer") return timerAction("resume_timer", {timer_id:activeTimer().id});

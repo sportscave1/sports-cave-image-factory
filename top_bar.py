@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -26,6 +27,9 @@ def allowed_routes_for_user(user):
 
 def top_bar_config(user, *, logo_src, current_route):
     allowed_routes = allowed_routes_for_user(user)
+    planner_timer_scope = hashlib.sha256(
+        f"sports-cave-planner|{str((user or {}).get('id') or '').strip()}".encode("utf-8")
+    ).hexdigest()[:24]
     token = top_bar_security.create_top_bar_token(
         user,
         allowed_routes=allowed_routes,
@@ -44,6 +48,7 @@ def top_bar_config(user, *, logo_src, current_route):
         "orderStatusUrl": "/api/os/top-bar/order-status",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
+        "dailyPlannerTimerScope": planner_timer_scope,
         "dailyPlannerEnabled": os_accounts.is_admin(user),
         "ordersEnabled": "Orders" in allowed_routes,
         "authToken": token,

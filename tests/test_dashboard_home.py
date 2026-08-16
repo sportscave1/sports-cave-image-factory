@@ -1800,9 +1800,10 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(reloaded["top_tasks"][0]["status"], "")
         self.assertTrue(reloaded["top_tasks"][1]["completed"])
         self.assertEqual(reloaded["top_tasks"][1]["status"], "done")
-        self.assertTrue(reloaded["top_tasks"][2]["completed"])
+        self.assertFalse(reloaded["top_tasks"][2]["completed"])
         self.assertEqual(reloaded["top_tasks"][2]["status"], "couldnt_finish")
-        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(repeated), 2)
+        self.assertTrue(sports_cave_dashboard.daily_execution_task_finished(reloaded["top_tasks"][2]))
+        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(repeated), 1)
         self.assertEqual(len(backend.activity_rows), event_count)
 
     def test_daily_execution_data_helpers_allow_active_admins_and_reject_workers(self):
@@ -1871,7 +1872,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(backend.daily_calls, [])
 
-    def test_daily_execution_task_statuses_count_as_complete(self):
+    def test_daily_execution_terminal_statuses_are_resolved_but_only_done_is_completed(self):
         sheet = {
             "top_tasks": [
                 {"task": "One", "status": "done", "completed": True},
@@ -1880,7 +1881,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             ]
         }
 
-        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 2)
+        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 1)
         self.assertFalse(sports_cave_dashboard.daily_execution_all_tasks_complete(sheet))
 
     def test_daily_execution_old_done_records_still_count_as_complete(self):
@@ -1938,7 +1939,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertIn("Three major execution tasks", panel_source)
         self.assertIn("Other tasks", panel_source)
         self.assertIn("Save today's plan", panel_source)
-        self.assertIn("Finish the task statuses before completing the review.", panel_source)
+        self.assertIn("Resolve every planned task before completing the review.", panel_source)
         self.assertIn(">Timer</span>", panel_source)
         self.assertIn(">Start</button>", panel_source)
         self.assertNotIn("Save MIPs", panel_source)
@@ -2100,7 +2101,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertIn("get_daily_execution_archive_detail", route_source)
         self.assertIn("That Daily Planner sheet is not available for this account.", route_source)
-        self.assertIn("reviewed || !mipsFinished", client_source)
+        self.assertIn("reviewed || !tasksResolved", client_source)
         self.assertNotIn("_daily_execution_fragment_rerun()", route_source)
 
     def test_tomorrow_plan_upserts_one_sheet_and_archives_reviewed_today_once(self):
@@ -2263,9 +2264,13 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(summary["days_planned"], 2)
         self.assertEqual(summary["days_reviewed"], 2)
         self.assertEqual(summary["mip_completed"], 2)
-        self.assertEqual(summary["mip_not_completed"], 0)
+        self.assertEqual(summary["mip_not_completed"], 1)
         self.assertEqual(summary["other_completed"], 1)
-        self.assertEqual(summary["planned_hours"], 6.0)
+        self.assertEqual(summary["total_planned"], 4)
+        self.assertEqual(summary["completed"], 3)
+        self.assertEqual(summary["did_not_finish"], 1)
+        self.assertEqual(summary["completion_percentage"], 75.0)
+        self.assertEqual(summary["planned_hours"], 4.5)
         self.assertEqual(summary["average_day_rating"], 7.0)
         self.assertEqual(summary["repeated_carryovers"], ["B"])
 

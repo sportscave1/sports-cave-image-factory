@@ -244,19 +244,37 @@ def _render_daily_execution_history(user, start_date, end_date):
     table_rows = []
     for row in rows:
         timer = row.get("timer") or {}
-        actual_elapsed = timer.get("actual_elapsed_seconds") or timer.get("elapsed_seconds")
+        actual_elapsed = (
+            timer.get("actual_elapsed_seconds")
+            if timer.get("actual_elapsed_seconds") is not None
+            else row.get("actual_elapsed_seconds")
+        )
+        completion_method = str(
+            row.get("completion_method") or timer.get("completion_method") or ""
+        ).strip().casefold()
         table_rows.append(
             {
                 "Work date": row.get("work_date") or "",
                 "Task": row.get("task") or "",
                 "Owner": row.get("owner") or "",
                 "Category/area": row.get("category") or "",
-                "Allocated duration": row.get("allocated") or sports_cave_dashboard.format_duration_seconds(row.get("allocated_seconds")),
-                "Actual elapsed": sports_cave_dashboard.format_duration_seconds(actual_elapsed),
+                "Allocated duration": row.get("allocated") or (
+                    sports_cave_dashboard.format_duration_seconds(row.get("allocated_seconds"))
+                    if row.get("allocated_seconds")
+                    else ""
+                ),
+                "Actual elapsed": (
+                    sports_cave_dashboard.format_duration_seconds(actual_elapsed)
+                    if actual_elapsed is not None
+                    else ""
+                ),
+                "Time saved": sports_cave_dashboard.format_duration_seconds(row.get("time_saved_seconds")) if row.get("time_saved_seconds") else "",
                 "Start time": _timer_timestamp(timer, "started_at", user),
                 "End time": _timer_timestamp(timer, "outcome_at", user) or _format_timestamp(row.get("completed_at") or row.get("finished_at"), os_accounts.timezone_for_user(user)),
                 "Status": row.get("status") or "Planned",
                 "Outcome": _outcome_display(row.get("outcome") or timer.get("outcome")),
+                "Completion method": "Finished early" if completion_method == "finished_early" else completion_method.replace("_", " ").title(),
+                "Skip reason": row.get("skip_reason") or timer.get("skip_reason") or "",
                 "Notes": row.get("notes") or "",
                 "_row_id": row.get("row_id") or "",
             }
@@ -275,10 +293,13 @@ def _render_daily_execution_history(user, start_date, end_date):
             "Category/area",
             "Allocated duration",
             "Actual elapsed",
+            "Time saved",
             "Start time",
             "End time",
             "Status",
             "Outcome",
+            "Completion method",
+            "Skip reason",
             "Notes",
         ),
         key="reporting-daily-execution-history",
@@ -291,6 +312,8 @@ def _outcome_display(value):
         return "Completed"
     if clean == sports_cave_dashboard.DAILY_TIMER_OUTCOME_DID_NOT_FINISH:
         return "Did not finish"
+    if clean == sports_cave_dashboard.DAILY_TIMER_OUTCOME_SKIPPED:
+        return "Skipped"
     return ""
 
 
@@ -631,27 +654,53 @@ def render_weekly_review_page(user):
     week_end = week_start + timedelta(days=6)
     choice_cols[1].caption(f"{week_start.strftime('%d %b')} - {week_end.strftime('%d %b %Y')}")
     try:
-        sheets = sports_cave_dashboard.list_daily_execution_archive_summaries(
-            user,
-            week_start,
-            week_end,
-            limit=31,
+        weekly = sports_cave_dashboard.load_daily_execution_weekly_review(
+            user, week_start, week_end, limit=1000
         )
+        sheets = weekly["sheets"]
+        timers = weekly["timers"]
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Weekly Review could not load right now.")
         return
-    summary = sports_cave_dashboard.daily_execution_weekly_summary(sheets)
-    metrics = st.columns(4)
-    metrics[0].metric("Days planned", summary["days_planned"])
-    metrics[1].metric("Days reviewed", summary["days_reviewed"])
-    metrics[2].metric("MIPs completed", summary["mip_completed"])
-    metrics[3].metric("Average rating", summary["average_day_rating"] or "-")
+    summary = sports_cave_dashboard.daily_execution_weekly_summary(
+        sheets, timers, today=local_now.date()
+    )
+    metrics = st.columns(5)
+    metrics[0].metric("Task completion", f"{round(summary['completion_percentage'])}%")
+    metrics[1].metric("Completed", summary["completed"])
+    metrics[2].metric("Did not finish", summary["did_not_finish"])
+    metrics[3].metric("Skipped", summary["skipped"])
+    metrics[4].metric("Remaining", summary["unresolved"])
     st.caption(
-        f"MIPs not completed: {summary['mip_not_completed']} | Other tasks completed: {summary['other_completed']} | Planned hours: {summary['planned_hours']}"
+        f"{summary['completed']} of {summary['total_planned']} planned tasks completed | "
+        f"Focused time: {sports_cave_dashboard.format_duration_seconds(summary['actual_focused_seconds'])} | "
+        f"Days reviewed: {summary['days_reviewed']}"
     )
     st.markdown(f"**Biggest wins:** {'; '.join(summary['biggest_wins']) or 'No wins recorded yet.'}")
     st.markdown(f"**Main blockers:** {'; '.join(summary['main_blockers']) or 'No blockers recorded yet.'}")
     st.markdown(f"**Repeated unfinished work:** {'; '.join(summary['repeated_carryovers']) or 'None repeated this week.'}")
+    staff_rows = [
+        {
+            "Staff": row.get("staff") or "",
+            "Completion %": f"{round(float(row.get('completion_percentage') or 0))}%",
+            "Completed": int(row.get("completed") or 0),
+            "Did not finish": int(row.get("did_not_finish") or 0),
+            "Skipped": int(row.get("skipped") or 0),
+            "Remaining": int(row.get("unresolved") or 0),
+            "Total planned": int(row.get("total_planned") or 0),
+            "Focused time": sports_cave_dashboard.format_duration_seconds(row.get("actual_focused_seconds")),
+        }
+        for row in summary.get("staff_completion") or []
+    ]
+    if staff_rows:
+        st.dataframe(
+            staff_rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(300, max(120, 28 * (len(staff_rows) + 1))),
+            row_height=28,
+            key="reporting-weekly-review-staff",
+        )
     rows = []
     for sheet in sheets:
         rows.append(
@@ -659,8 +708,8 @@ def render_weekly_review_page(user):
                 "Date": sheet.get("sheet_date") or "",
                 "Owner": sheet.get("user_name") or "",
                 "Status": str(sheet.get("status") or "").title(),
-                "MIPs closed": sports_cave_dashboard.daily_execution_completed_count(sheet),
-                "Tasks": sports_cave_dashboard.daily_execution_filled_task_count(sheet),
+                "Completion %": f"{round(sports_cave_dashboard.daily_execution_outcome_summary(sheet)['completion_percentage'])}%",
+                "Tasks": sports_cave_dashboard.daily_execution_outcome_summary(sheet)["total_planned"],
                 "Rating": ((sheet.get("ratings") or {}).get("Overall Score") or ""),
             }
         )

@@ -188,22 +188,27 @@
       color: #f5d37e;
       position: relative;
     }
-    .sc-planner-timer-badge {
+    .sc-os-planner-timer-pill {
       align-items: center;
-      background: #d4a54c;
-      border-radius: 999px;
-      color: #14110b;
+      appearance: none;
+      background: #211e17;
+      border: 1px solid #514327;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
       display: inline-flex;
-      font-size: 9px;
-      font-weight: 780;
-      height: 15px;
-      line-height: 1;
-      min-width: 24px;
-      padding: 0 4px;
-      position: absolute;
-      right: 1px;
-      top: 2px;
+      gap: 6px;
+      height: 32px;
+      max-width: 220px;
+      min-width: 0;
+      padding: 0 8px;
     }
+    .sc-os-planner-timer-pill[hidden] { display: none !important; }
+    .sc-os-planner-timer-pill:hover { background: #2b261c; border-color: #80662f; }
+    .sc-os-planner-timer-pill svg { color: #d4a54c; flex: 0 0 auto; height: 15px !important; width: 15px !important; }
+    .sc-os-planner-pill-task { font-size: 11px; font-weight: 680; max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sc-os-planner-pill-state { color: #c9c3b7; font-size: 10px; white-space: nowrap; }
+    .sc-os-planner-pill-time { color: #f1ca6c; flex: 0 0 auto; font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 8ch; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
     section[data-testid="stSidebar"] .st-key-sidebar-row-orders button {
       position: relative;
     }
@@ -475,6 +480,8 @@
       .sc-os-topbar-search-wrap { padding-left: 12px; padding-right: 12px; }
       #sc-os-search-results { left: 12px; right: 12px; }
       .sc-os-topbar-shortcut { display: none; }
+      .sc-os-planner-timer-pill { max-width: 112px; }
+      .sc-os-planner-pill-task, .sc-os-planner-pill-state { display: none; }
     }
     @media (max-width: 760px) {
       .sc-os-topbar-subtitle { display: none; }
@@ -511,6 +518,7 @@
       <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
     </div>
     <div class="sc-os-topbar-actions">
+      <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
       <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}</button>
       <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
       <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Accounts and Access" title="Accounts and Access">${icon("user")}</button>
@@ -533,6 +541,10 @@
     }
     const listenerController = new parentWindow.AbortController();
     const listenerOptions = {signal: listenerController.signal};
+    const surfaceId = `topbar-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const plannerChannel = "BroadcastChannel" in parentWindow
+      ? new parentWindow.BroadcastChannel("sports-cave-daily-planner")
+      : null;
     const timers = [];
     const later = (callback, delay) => {
       const timer = parentWindow.setTimeout(callback, delay);
@@ -552,6 +564,7 @@
       recordingChunks: [],
       orderStatusStarted: false,
       plannerStatusStarted: false,
+      plannerCountdownStarted: false,
       orderToastTimer: null,
       plannerToastTimer: null,
       shownOrderIds: new Set(),
@@ -561,11 +574,21 @@
       plannerAlarmNodes: [],
       plannerAlarmStopTimer: null,
       plannerAlarmPlaying: false,
+      plannerTimer: {},
+      plannerStatusPending: false,
+      plannerStatusTimer: null,
+      plannerExpiryRequested: false,
+      plannerHalfwayRequested: false,
     };
+    const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.dailyPlannerTimerScope || "none"}`;
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
     const refreshButton = root.querySelector("#sc-os-refresh");
     const plannerButton = root.querySelector("#sc-os-daily-planner");
+    const plannerTimerPill = root.querySelector("#sc-os-planner-timer-pill");
+    const plannerTimerTask = plannerTimerPill?.querySelector(".sc-os-planner-pill-task");
+    const plannerTimerState = plannerTimerPill?.querySelector(".sc-os-planner-pill-state");
+    const plannerTimerTime = plannerTimerPill?.querySelector(".sc-os-planner-pill-time");
     const notificationsButton = root.querySelector("#sc-os-notifications");
     const notificationsPanel = root.querySelector("#sc-os-notifications-panel");
     const profileButton = root.querySelector("#sc-os-profile");
@@ -590,22 +613,26 @@
       link.click();
       link.remove();
     };
-    const sendPlannerAuth = (plannerWindow) => {
+    const sendPlannerAuth = (plannerWindow, {focusActive = false} = {}) => {
       try {
         if (plannerWindow && !plannerWindow.closed) {
           plannerWindow.postMessage({
             type: "sports-cave-planner-auth",
             token: state.config.authToken || "",
+            timer_scope: state.config.dailyPlannerTimerScope || "",
+            focus_active: Boolean(focusActive),
           }, parentWindow.location.origin);
         }
       } catch (_error) {}
     };
-    const openDailyPlanner = () => {
-      const existing = state.plannerWindow || parentWindow.SportsCaveDailyPlannerWindow;
+    const openDailyPlanner = ({focusActive = false} = {}) => {
+      const existing = state.plannerWindow && !state.plannerWindow.closed
+        ? state.plannerWindow
+        : parentWindow.SportsCaveDailyPlannerWindow;
       if (existing && !existing.closed) {
         state.plannerWindow = existing;
         try { existing.focus(); } catch (_error) {}
-        sendPlannerAuth(existing);
+        sendPlannerAuth(existing, {focusActive});
         return existing;
       }
       const url = new URL(state.config.dailyPlannerWindowUrl || "/daily-planner", parentWindow.location.origin);
@@ -618,10 +645,10 @@
       state.plannerWindow = plannerWindow;
       parentWindow.SportsCaveDailyPlannerWindow = plannerWindow;
       try { plannerWindow.focus(); } catch (_error) {}
-      sendPlannerAuth(plannerWindow);
-      later(() => sendPlannerAuth(plannerWindow), 120);
-      later(() => sendPlannerAuth(plannerWindow), 500);
-      later(() => sendPlannerAuth(plannerWindow), 1200);
+      sendPlannerAuth(plannerWindow, {focusActive});
+      later(() => sendPlannerAuth(plannerWindow, {focusActive}), 120);
+      later(() => sendPlannerAuth(plannerWindow, {focusActive}), 500);
+      later(() => sendPlannerAuth(plannerWindow, {focusActive}), 1200);
       return plannerWindow;
     };
     const navigate = (result) => {
@@ -860,60 +887,173 @@
       const minutes = Math.ceil(remaining / 60);
       return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
     };
-    const updatePlannerButton = (timer) => {
-      if (!plannerButton) return;
-      plannerButton.querySelector(".sc-planner-timer-badge")?.remove();
-      const status = String(timer?.status || "");
-      const active = ["running", "paused", "expired"].includes(status) && !timer?.outcome;
+    const toolbarTimerLabel = (seconds) => {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
+    };
+    const plannerRemaining = (timer) => {
+      if (timer?.status === "running" && timer.deadline_at) {
+        return Math.max(0, Math.ceil((new Date(timer.deadline_at).valueOf() - Date.now()) / 1000));
+      }
+      if (timer?.status === "paused") return Math.max(0, Number(timer.remaining_seconds) || 0);
+      return timer?.status === "expired" ? 0 : Math.max(0, Number(timer?.remaining_seconds) || 0);
+    };
+    const safePlannerTimer = (timer) => timer?.id ? {
+      id:String(timer.id), sheet_id:String(timer.sheet_id || ""), task_type:String(timer.task_type || ""),
+      task_index:Number(timer.task_index || 0), task:String(timer.task || "Daily Planner task"),
+      sheet_date:String(timer.sheet_date || ""), status:String(timer.status || ""),
+      started_at:timer.started_at || null, deadline_at:timer.deadline_at || null, remaining_seconds:Number(timer.remaining_seconds || 0),
+      allocated_seconds:Number(timer.allocated_seconds || 0), outcome_required:Boolean(timer.outcome_required),
+      outcome:String(timer.outcome || ""), halfway_notified_at:timer.halfway_notified_at || null,
+      expiry_notified_at:timer.expiry_notified_at || null, updated_at:timer.updated_at || null,
+    } : {};
+    const broadcastPlannerTimer = (timer, events=[]) => {
+      const payload = {type:"timer-state", source:surfaceId, scope:state.config.dailyPlannerTimerScope || "", timer:safePlannerTimer(timer), events, sent_at:Date.now()};
+      try { plannerChannel?.postMessage(payload); } catch (_error) {}
+      try { parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload)); } catch (_error) {}
+    };
+    const claimPlannerEffect = (kind, timer) => {
+      const stamp = kind === "alarm"
+        ? timer?.deadline_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const key = `scPlannerEffect:${state.config.dailyPlannerTimerScope || "none"}:${kind}:${timer?.id || "none"}:${stamp}`;
+      try {
+        const existing = JSON.parse(parentWindow.localStorage.getItem(key) || "null");
+        if (existing?.claimed_at && Date.now() - Number(existing.claimed_at) < 86400000) return false;
+        parentWindow.localStorage.setItem(key, JSON.stringify({owner:surfaceId, claimed_at:Date.now()}));
+        return JSON.parse(parentWindow.localStorage.getItem(key) || "{}").owner === surfaceId;
+      } catch (_error) { return true; }
+    };
+    const runClaimedPlannerEffect = (kind, timer, effect) => {
+      const stamp = kind === "alarm"
+        ? timer?.deadline_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const run = () => claimPlannerEffect(kind, timer) ? effect() : undefined;
+      if (parentWindow.navigator.locks?.request) {
+        parentWindow.navigator.locks.request(
+          `sports-cave-planner:${kind}:${timer?.id || "none"}:${stamp}`,
+          {mode:"exclusive"},
+          run,
+        ).catch(() => run());
+      } else {
+        run();
+      }
+    };
+    const updatePlannerMirror = () => {
+      if (!plannerButton || !plannerTimerPill) return;
+      const timer = state.plannerTimer || {};
+      const status = String(timer.status || "");
+      const active = ["running", "paused", "expired"].includes(status) && !timer.outcome;
       plannerButton.classList.toggle("sc-planner-active", active);
       plannerButton.hidden = !state.config.dailyPlannerEnabled;
+      plannerTimerPill.hidden = !state.config.dailyPlannerEnabled || !active;
       if (!active) {
         plannerButton.setAttribute("aria-label", "Open Daily Planner");
         return;
       }
-      const badge = doc.createElement("span");
-      badge.className = "sc-planner-timer-badge";
-      badge.textContent = status === "expired" ? "0m" : compactTimerLabel(timer.remaining_seconds);
-      badge.setAttribute("aria-hidden", "true");
-      plannerButton.appendChild(badge);
       const task = String(timer.task || "Daily Planner task");
-      plannerButton.setAttribute("aria-label", `Open Daily Planner, ${task}, ${badge.textContent} remaining`);
+      const remaining = plannerRemaining(timer);
+      if (status === "running" && remaining <= 0) {
+        timer.status = "expired";
+        timer.outcome_required = true;
+        timer.remaining_seconds = 0;
+        broadcastPlannerTimer(timer);
+        if (!state.plannerExpiryRequested) {
+          state.plannerExpiryRequested = true;
+          refreshPlannerStatus({immediate:true});
+        }
+      } else if (
+        status === "running"
+        && Number(timer.allocated_seconds || 0) > 1
+        && remaining <= Number(timer.allocated_seconds || 0) / 2
+        && !timer.halfway_notified_at
+        && !state.plannerHalfwayRequested
+      ) {
+        state.plannerHalfwayRequested = true;
+        refreshPlannerStatus({immediate:true});
+      }
+      const currentStatus = String(timer.status || "");
+      const timeLabel = timer.outcome_required
+        ? "Outcome required"
+        : currentStatus === "expired"
+          ? "Time’s up"
+          : toolbarTimerLabel(remaining);
+      plannerTimerTask.textContent = `${task} ·`;
+      plannerTimerState.textContent = currentStatus === "paused" && !timer.outcome_required ? "Paused ·" : "";
+      plannerTimerTime.textContent = timeLabel;
+      const spokenState = currentStatus === "paused" && !timer.outcome_required ? `Paused · ${timeLabel}` : timeLabel;
+      plannerTimerPill.title = `${task} · ${spokenState}`;
+      plannerTimerPill.setAttribute("aria-label", `${task}, ${spokenState}. Open Daily Planner.`);
+      plannerButton.setAttribute("aria-label", `Open Daily Planner, ${task}, ${spokenState}`);
     };
-    const refreshPlannerStatus = async () => {
+    const handlePlannerEvents = (events) => {
+      (events || []).forEach((event) => {
+        const timer = {...(event.timer || {}), task:event.task || event.timer?.task};
+        if (event.event === "halfway") {
+          runClaimedPlannerEffect("halfway", timer, () => showPlannerToast(`Halfway through: ${timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey:`halfway:${timer.id}:${timer.halfway_notified_at || timer.started_at || ""}`}));
+        } else if (event.event === "expired") {
+          runClaimedPlannerEffect("alarm", timer, () => showPlannerToast("Time’s up — did you complete this task?", {alarm:true, eventKey:`expired:${timer.id}:${timer.deadline_at || ""}`}));
+        }
+      });
+    };
+    const applyPlannerTimerState = (timer, events=[]) => {
+      state.plannerTimer = safePlannerTimer(timer);
+      if (!state.plannerTimer.id || state.plannerTimer.status !== "expired") state.plannerExpiryRequested = false;
+      if (!state.plannerTimer.id || state.plannerTimer.halfway_notified_at) state.plannerHalfwayRequested = false;
+      updatePlannerMirror();
+      handlePlannerEvents(events);
+    };
+    const schedulePlannerStatus = (delay=30000) => {
+      if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
+      state.plannerStatusTimer = parentWindow.setTimeout(() => refreshPlannerStatus(), delay);
+    };
+    const refreshPlannerStatus = async ({immediate=false} = {}) => {
       if (!state.config.dailyPlannerEnabled || !state.config.dailyPlannerStatusUrl) {
         if (plannerButton) plannerButton.hidden = true;
+        if (plannerTimerPill) plannerTimerPill.hidden = true;
         return;
       }
-      if (state.plannerWindow && !state.plannerWindow.closed) {
-        later(refreshPlannerStatus, 30000);
-        return;
-      }
+      if (state.plannerStatusPending) return;
+      state.plannerStatusPending = true;
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
-        updatePlannerButton(payload.timer || {});
-        (payload.events || []).forEach((event) => {
-          const timer = event.timer || {};
-          const key = `${event.event || ""}:${timer.id || ""}:${timer.updated_at || ""}`;
-          if (event.event === "halfway") {
-            showPlannerToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey: key});
-          } else if (event.event === "expired") {
-            showPlannerToast("Time’s up — did you complete this task?", {openPlanner: true, alarm: true, eventKey: key});
-          }
-        });
-        const timer = payload.timer || {};
+        applyPlannerTimerState(payload.timer || {}, payload.events || []);
+        broadcastPlannerTimer(payload.timer || {}, payload.events || []);
+        const timer = state.plannerTimer;
         if (timer.outcome_required || timer.status === "expired") {
-          showPlannerToast("Time’s up — did you complete this task?", {
-            openPlanner: true,
-            alarm: true,
-            eventKey: `pending:${timer.id || ""}:${timer.expiry_notified_at || ""}`,
-          });
+          runClaimedPlannerEffect("alarm", timer, () => showPlannerToast("Time’s up — did you complete this task?", {alarm:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
         }
       } catch (_error) {
-        updatePlannerButton({});
+        if (immediate) updatePlannerMirror();
       } finally {
-        later(refreshPlannerStatus, 15000);
+        state.plannerStatusPending = false;
+        schedulePlannerStatus(30000);
       }
     };
+    const receivePlannerTimerState = (payload) => {
+      if (!payload || payload.source === surfaceId) return;
+      if (!["timer-state", "sports-cave-planner-timer-state"].includes(payload.type)) return;
+      if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
+      applyPlannerTimerState(payload.timer || {}, payload.events || []);
+    };
+    plannerChannel?.addEventListener("message", (event) => receivePlannerTimerState(event.data));
+    parentWindow.addEventListener("storage", (event) => {
+      if (event.key !== timerStorageKey() || !event.newValue) return;
+      try { receivePlannerTimerState(JSON.parse(event.newValue)); } catch (_error) {}
+    }, listenerOptions);
+    doc.addEventListener("visibilitychange", () => {
+      if (!doc.hidden) {
+        updatePlannerMirror();
+        refreshPlannerStatus({immediate:true});
+      }
+    }, listenerOptions);
+    parentWindow.addEventListener("focus", () => {
+      updatePlannerMirror();
+      refreshPlannerStatus({immediate:true});
+    }, listenerOptions);
     const bindReportingPlannerButton = () => {
       const buttons = Array.from(doc.querySelectorAll('section[data-testid="stSidebar"] button'));
       const button = buttons.find((candidate) => candidate.textContent.trim() === "Daily Planner");
@@ -1135,6 +1275,10 @@
       enablePlannerAudio();
       openDailyPlanner();
     }, listenerOptions);
+    plannerTimerPill?.addEventListener("click", () => {
+      enablePlannerAudio();
+      openDailyPlanner({focusActive:true});
+    }, listenerOptions);
     searchInput.addEventListener("input", () => {
       if (state.activePanel !== "search") openPanel("search");
       renderSearchResults();
@@ -1194,13 +1338,19 @@
       {passive: true, signal: listenerController.signal},
     );
     parentWindow.addEventListener("message", (event) => {
-      if (event.origin !== parentWindow.location.origin || event.data?.type !== "sports-cave-planner-ready") return;
+      if (event.origin !== parentWindow.location.origin) return;
+      if (event.data?.type === "sports-cave-planner-timer-state") {
+        receivePlannerTimerState(event.data);
+        return;
+      }
+      if (event.data?.type !== "sports-cave-planner-ready") return;
       state.plannerWindow = event.source || state.plannerWindow;
       parentWindow.SportsCaveDailyPlannerWindow = state.plannerWindow;
       try {
         event.source?.postMessage({
           type: "sports-cave-planner-auth",
           token: state.config.authToken || "",
+          timer_scope: state.config.dailyPlannerTimerScope || "",
         }, parentWindow.location.origin);
       } catch (_error) {}
     }, listenerOptions);
@@ -1224,6 +1374,13 @@
           state.notifications = null;
         }
         if (plannerButton) plannerButton.hidden = !state.config.dailyPlannerEnabled;
+        if (!state.plannerTimer.id) {
+          try {
+            const cached = JSON.parse(parentWindow.localStorage.getItem(timerStorageKey()) || "null");
+            if (cached) receivePlannerTimerState(cached);
+          } catch (_error) {}
+        }
+        updatePlannerMirror();
         updateSidebarWidth();
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
@@ -1233,10 +1390,16 @@
           state.plannerStatusStarted = true;
           refreshPlannerStatus();
         }
+        if (!state.plannerCountdownStarted) {
+          state.plannerCountdownStarted = true;
+          timers.push(parentWindow.setInterval(updatePlannerMirror, 1000));
+        }
       },
       destroy() {
         listenerController.abort();
+        if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
         timers.forEach((timer) => parentWindow.clearTimeout(timer));
+        plannerChannel?.close();
         stopPlannerAlarm();
         if (state.recorder?.state && state.recorder.state !== "inactive") {
           state.recorder.stop();

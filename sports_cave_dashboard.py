@@ -1463,9 +1463,15 @@ DAILY_EXECUTION_REVIEWED_STATUSES = (
 )
 DAILY_TASK_STATUS_DONE = "done"
 DAILY_TASK_STATUS_COULDNT_FINISH = "couldnt_finish"
-DAILY_TASK_FINISHED_STATUSES = (DAILY_TASK_STATUS_DONE, DAILY_TASK_STATUS_COULDNT_FINISH)
+DAILY_TASK_STATUS_SKIPPED = "skipped"
+DAILY_TASK_FINISHED_STATUSES = (
+    DAILY_TASK_STATUS_DONE,
+    DAILY_TASK_STATUS_COULDNT_FINISH,
+    DAILY_TASK_STATUS_SKIPPED,
+)
 DAILY_TIMER_OUTCOME_COMPLETED = "completed"
 DAILY_TIMER_OUTCOME_DID_NOT_FINISH = "did_not_finish"
+DAILY_TIMER_OUTCOME_SKIPPED = "skipped"
 DAILY_TIMER_RUNNING_STATUSES = ("running", "paused", "expired")
 DAILY_RATING_FIELDS = (
     "Focus",
@@ -1526,7 +1532,7 @@ def _normalise_top_tasks(items):
         status = _compact_text(item.get("status") or "").casefold()
         if status not in DAILY_TASK_FINISHED_STATUSES:
             status = DAILY_TASK_STATUS_DONE if bool(item.get("completed")) else ""
-        completed = status in DAILY_TASK_FINISHED_STATUSES
+        completed = status == DAILY_TASK_STATUS_DONE
         rows.append(
             {
                 "task": _compact_text(item.get("task") or item.get("title") or ""),
@@ -1537,6 +1543,14 @@ def _normalise_top_tasks(items):
                 "completed_at": item.get("completed_at"),
                 "finished_at": item.get("finished_at"),
                 "outcome": _compact_text(item.get("outcome") or ""),
+                "completion_method": _compact_text(item.get("completion_method") or ""),
+                "skip_reason": _compact_text(item.get("skip_reason") or ""),
+                "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
+                "time_saved_seconds": item.get("time_saved_seconds"),
+                "completed_before_expiry": bool(item.get("completed_before_expiry")),
+                "outcome_version": max(int(item.get("outcome_version") or 0), 0),
+                "outcome_history": list(item.get("outcome_history") or [])[-20:],
+                "reopened_at": item.get("reopened_at"),
                 "carried_from": _compact_text(item.get("carried_from") or ""),
             }
         )
@@ -1558,7 +1572,7 @@ def _normalise_additional_items(items, *, include_blank=True):
     for item in _coerce_daily_item_rows(items):
         item = dict(item or {})
         status = _normalise_daily_task_status(item)
-        completed = status in DAILY_TASK_FINISHED_STATUSES
+        completed = status == DAILY_TASK_STATUS_DONE
         row = {
             "task": _compact_text(item.get("task") or item.get("note") or item.get("title") or ""),
             "details": _compact_text(item.get("details") or item.get("why") or item.get("outcome") or ""),
@@ -1568,6 +1582,14 @@ def _normalise_additional_items(items, *, include_blank=True):
             "completed_at": item.get("completed_at"),
             "finished_at": item.get("finished_at"),
             "outcome": _compact_text(item.get("outcome") or ""),
+            "completion_method": _compact_text(item.get("completion_method") or ""),
+            "skip_reason": _compact_text(item.get("skip_reason") or ""),
+            "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
+            "time_saved_seconds": item.get("time_saved_seconds"),
+            "completed_before_expiry": bool(item.get("completed_before_expiry")),
+            "outcome_version": max(int(item.get("outcome_version") or 0), 0),
+            "outcome_history": list(item.get("outcome_history") or [])[-20:],
+            "reopened_at": item.get("reopened_at"),
             "carried_from": _compact_text(item.get("carried_from") or ""),
         }
         if _daily_additional_item_has_content(row) or include_blank:
@@ -1598,11 +1620,19 @@ def _normalise_additional_items_for_save(items):
                     "task": item.get("task") or "",
                     "details": item.get("details") or "",
                     "time_blocked": item.get("time_blocked") or "",
-                    "completed": daily_execution_task_finished(item),
+                    "completed": _normalise_daily_task_status(item) == DAILY_TASK_STATUS_DONE,
                     "status": item.get("status") or "",
                     "completed_at": item.get("completed_at"),
                     "finished_at": item.get("finished_at"),
                     "outcome": item.get("outcome") or "",
+                    "completion_method": item.get("completion_method") or "",
+                    "skip_reason": item.get("skip_reason") or "",
+                    "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
+                    "time_saved_seconds": item.get("time_saved_seconds"),
+                    "completed_before_expiry": bool(item.get("completed_before_expiry")),
+                    "outcome_version": max(int(item.get("outcome_version") or 0), 0),
+                    "outcome_history": list(item.get("outcome_history") or [])[-20:],
+                    "reopened_at": item.get("reopened_at"),
                     "carried_from": item.get("carried_from") or "",
                 }
             )
@@ -1966,6 +1996,39 @@ def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=
         raise DashboardStorageError(_storage_error(error)) from error
 
 
+def load_daily_execution_weekly_review(user, start_date, end_date, *, limit=1000):
+    """Load authorised weekly sheets and timers without per-sheet queries."""
+    if not os_accounts.can_access_reporting(user):
+        _require_daily_execution_admin(user)
+    clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
+    clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
+    user_id = "" if os_accounts.is_admin(user) else daily_execution_user_id(user)
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "list_daily_execution_sheets_for_reporting"):
+            sheets = backend.list_daily_execution_sheets_for_reporting(
+                user_id, clean_start, clean_end, limit=limit
+            )
+        else:
+            sheets = backend.list_daily_execution_sheets(
+                user_id or daily_execution_user_id(user), clean_start, clean_end, limit=limit
+            )
+        sheets = [_normalise_daily_sheet(sheet) for sheet in sheets or []]
+        sheet_ids = [sheet.get("id") for sheet in sheets if sheet.get("id")]
+        timers = (
+            backend.list_daily_execution_timers_for_sheets(user_id, sheet_ids)
+            if sheet_ids and hasattr(backend, "list_daily_execution_timers_for_sheets")
+            else []
+        )
+        return {
+            "sheets": sheets,
+            "timers": [_normalise_timer(timer) for timer in timers or []],
+            "query_count": 2 if sheet_ids else 1,
+        }
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
 def get_daily_execution_archive_detail(user, sheet_id):
     user_id = _require_daily_execution_admin(user)
     clean_id = str(sheet_id or "").strip()
@@ -2041,6 +2104,8 @@ def _daily_task_status_label(task, timer=None):
     status = _normalise_daily_task_status(task)
     timer_status = str((timer or {}).get("status") or "").strip().casefold()
     outcome = str((task or {}).get("outcome") or (timer or {}).get("outcome") or "").strip().casefold()
+    if outcome == DAILY_TIMER_OUTCOME_SKIPPED or status == DAILY_TASK_STATUS_SKIPPED:
+        return "Skipped"
     if outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH or status == DAILY_TASK_STATUS_COULDNT_FINISH:
         return "Did not finish"
     if outcome == DAILY_TIMER_OUTCOME_COMPLETED or status == DAILY_TASK_STATUS_DONE:
@@ -2082,6 +2147,10 @@ def daily_execution_task_rows(sheet, timers=None):
                 "allocated_seconds": parse_daily_task_duration_seconds(task.get("time_blocked")),
                 "status": _daily_task_status_label(task, timer),
                 "outcome": task.get("outcome") or timer.get("outcome") or "",
+                "completion_method": task.get("completion_method") or timer.get("completion_method") or "",
+                "skip_reason": task.get("skip_reason") or timer.get("skip_reason") or "",
+                "actual_elapsed_seconds": timer.get("actual_elapsed_seconds") if timer else task.get("actual_elapsed_seconds"),
+                "time_saved_seconds": task.get("time_saved_seconds") if task.get("time_saved_seconds") is not None else timer.get("time_saved_seconds"),
                 "notes": task.get("why") or "",
                 "completed_at": task.get("completed_at"),
                 "finished_at": task.get("finished_at"),
@@ -2107,6 +2176,10 @@ def daily_execution_task_rows(sheet, timers=None):
                 "allocated_seconds": parse_daily_task_duration_seconds(task.get("time_blocked")),
                 "status": _daily_task_status_label(task, timer),
                 "outcome": task.get("outcome") or timer.get("outcome") or "",
+                "completion_method": task.get("completion_method") or timer.get("completion_method") or "",
+                "skip_reason": task.get("skip_reason") or timer.get("skip_reason") or "",
+                "actual_elapsed_seconds": timer.get("actual_elapsed_seconds") if timer else task.get("actual_elapsed_seconds"),
+                "time_saved_seconds": task.get("time_saved_seconds") if task.get("time_saved_seconds") is not None else timer.get("time_saved_seconds"),
                 "notes": task.get("details") or "",
                 "completed_at": task.get("completed_at"),
                 "finished_at": task.get("finished_at"),
@@ -2131,6 +2204,10 @@ def _normalise_timer(timer):
         "elapsed_seconds": max(int(timer.get("elapsed_seconds") or timer.get("actual_elapsed_seconds") or 0), 0),
         "status": str(timer.get("status") or ""),
         "outcome": str(timer.get("outcome") or ""),
+        "completion_method": str(timer.get("completion_method") or ""),
+        "skip_reason": str(timer.get("skip_reason") or ""),
+        "completed_before_expiry": bool(timer.get("completed_before_expiry")),
+        "time_saved_seconds": max(int(timer.get("time_saved_seconds") or 0), 0),
     }
 
 
@@ -2258,6 +2335,45 @@ def apply_daily_planner_timer_outcome(user, timer_id, outcome):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
+def apply_daily_planner_task_outcome(
+    user,
+    sheet_id,
+    task_type,
+    task_index,
+    outcome,
+    *,
+    timer_id=None,
+    reason="",
+):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        result = get_supabase_backend().apply_daily_execution_task_outcome(
+            user_id,
+            sheet_id,
+            task_type,
+            task_index,
+            outcome,
+            timer_id=timer_id,
+            reason=reason,
+            actor=daily_execution_user_name(user),
+        )
+        sheet = _normalise_daily_sheet((result or {}).get("sheet") or {})
+        if sheet.get("sheet_date"):
+            clear_daily_execution_cache(user_id, [sheet.get("sheet_date")])
+        else:
+            clear_daily_execution_cache(user_id)
+        clear_activity_cache()
+        return {
+            **(result or {}),
+            "sheet": sheet,
+            "timer": _normalise_timer((result or {}).get("timer") or {}),
+        }
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
 def list_daily_execution_history(user, start_date, end_date, *, limit=1000):
     if os_accounts.can_access_reporting(user):
         user_id = ""
@@ -2295,7 +2411,11 @@ def list_daily_execution_history(user, start_date, end_date, *, limit=1000):
 
 
 def daily_execution_completed_count(sheet):
-    return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task") and daily_execution_task_finished(task))
+    return sum(
+        1
+        for task in (sheet or {}).get("top_tasks") or []
+        if task.get("task") and _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE
+    )
 
 
 def daily_execution_filled_task_count(sheet):
@@ -2309,11 +2429,83 @@ def daily_execution_task_finished(task):
 
 
 def daily_execution_all_tasks_complete(sheet):
-    return daily_execution_filled_task_count(sheet) == 3 and daily_execution_completed_count(sheet) == 3
+    summary = daily_execution_outcome_summary(sheet)
+    return summary["total_planned"] > 0 and summary["unresolved"] == 0
 
 
 def daily_execution_all_mips_complete(sheet):
-    return daily_execution_all_tasks_complete(sheet)
+    tasks = [task for task in (sheet or {}).get("top_tasks") or [] if task.get("task")]
+    return len(tasks) == 3 and all(daily_execution_task_finished(task) for task in tasks)
+
+
+def _daily_execution_named_tasks(sheet):
+    normalised = _normalise_daily_sheet(sheet)
+    for index, task in enumerate(normalised.get("top_tasks") or []):
+        if _compact_text(task.get("task") or ""):
+            yield "top", index, dict(task)
+    for index, task in enumerate(normalised.get("additional_items") or []):
+        if _compact_text(task.get("task") or task.get("details") or ""):
+            yield "additional", index, dict(task)
+
+
+def _daily_task_outcome_key(task):
+    status = _normalise_daily_task_status(task)
+    outcome = _compact_text((task or {}).get("outcome") or "").casefold()
+    if status == DAILY_TASK_STATUS_DONE or outcome == DAILY_TIMER_OUTCOME_COMPLETED:
+        return "completed"
+    if status == DAILY_TASK_STATUS_SKIPPED or outcome == DAILY_TIMER_OUTCOME_SKIPPED:
+        return "skipped"
+    if status == DAILY_TASK_STATUS_COULDNT_FINISH or outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH:
+        return "did_not_finish"
+    return "unresolved"
+
+
+def daily_execution_outcome_summary(sheet, timers=None):
+    """Return the authoritative task denominator and outcomes for one sheet."""
+    timer_lookup = {
+        (str(timer.get("task_type") or ""), int(timer.get("task_index") or 0)): dict(timer)
+        for timer in (timers or [])
+    }
+    summary = {
+        "total_planned": 0,
+        "completed": 0,
+        "did_not_finish": 0,
+        "skipped": 0,
+        "unresolved": 0,
+        "completion_percentage": 0.0,
+        "actual_focused_seconds": 0,
+        "completed_tasks": [],
+        "did_not_finish_tasks": [],
+        "skipped_tasks": [],
+        "unresolved_tasks": [],
+    }
+    for task_type, task_index, task in _daily_execution_named_tasks(sheet):
+        timer = timer_lookup.get((task_type, task_index), {})
+        key = _daily_task_outcome_key(task)
+        name = _compact_text(task.get("task") or task.get("details") or "Daily Planner task")
+        summary["total_planned"] += 1
+        summary[key] += 1
+        if key == "completed":
+            summary["completed_tasks"].append(name)
+        elif key == "did_not_finish":
+            summary["did_not_finish_tasks"].append(name)
+        elif key == "skipped":
+            summary["skipped_tasks"].append(name)
+        else:
+            summary["unresolved_tasks"].append(name)
+        elapsed = timer.get("actual_elapsed_seconds")
+        if elapsed is None:
+            elapsed = task.get("actual_elapsed_seconds")
+        if elapsed is None and timer:
+            allocated = max(int(timer.get("allocated_seconds") or 0), 0)
+            remaining = max(int(timer.get("remaining_seconds") or 0), 0)
+            elapsed = max(allocated - remaining, 0)
+        summary["actual_focused_seconds"] += max(int(elapsed or 0), 0)
+    if summary["total_planned"]:
+        summary["completion_percentage"] = (
+            summary["completed"] / summary["total_planned"] * 100
+        )
+    return summary
 
 
 def daily_execution_review_complete(sheet):
@@ -2364,32 +2556,184 @@ def _planned_hours(value):
     return amount
 
 
-def daily_execution_weekly_summary(sheets):
-    rows = [_normalise_daily_sheet(sheet) for sheet in sheets or []]
-    mip_done = 0
-    mip_open = 0
-    other_done = 0
-    planned_hours = 0.0
+def daily_execution_weekly_task_instances(sheets, timers=None, *, today=None):
+    """Return deduplicated, non-future planned task instances for weekly analytics."""
+    local_today = today or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
+    if not isinstance(local_today, date):
+        local_today = date.fromisoformat(str(local_today))
+    rows = []
+    for raw in sheets or []:
+        sheet = _normalise_daily_sheet(raw)
+        try:
+            sheet_date = date.fromisoformat(str(sheet.get("sheet_date") or ""))
+        except ValueError:
+            continue
+        if sheet_date <= local_today:
+            rows.append(sheet)
+    rows.sort(key=lambda row: str(row.get("sheet_date") or ""))
+    timer_lookup = {
+        (
+            str(timer.get("sheet_id") or ""),
+            str(timer.get("task_type") or ""),
+            int(timer.get("task_index") or 0),
+        ): dict(timer)
+        for timer in (timers or [])
+    }
+    explicit_carry_names = {
+        (
+            str(sheet.get("user_id") or sheet.get("user_name") or ""),
+            _compact_text(task.get("task") or task.get("details") or "").casefold(),
+        )
+        for sheet in rows
+        for _task_type, _task_index, task in _daily_execution_named_tasks(sheet)
+        if task.get("carried_from")
+    }
+    legacy_carry_names = {
+        (
+            str(sheet.get("user_id") or sheet.get("user_name") or ""),
+            _compact_text(
+                (task.get("task") or task.get("details") or "")
+                if isinstance(task, dict)
+                else task
+            ).casefold(),
+        )
+        for sheet in rows
+        for task in ((sheet.get("planning_data") or {}).get("carried_forward") or [])
+        if _compact_text(
+            (task.get("task") or task.get("details") or "")
+            if isinstance(task, dict)
+            else task
+        )
+    } - explicit_carry_names
+    instances = {}
+    canonical_by_occurrence = {}
+    for sheet in rows:
+        owner_key = str(sheet.get("user_id") or sheet.get("user_name") or "")
+        sheet_date = str(sheet.get("sheet_date") or "")
+        for task_type, task_index, task in _daily_execution_named_tasks(sheet):
+            name = _compact_text(task.get("task") or task.get("details") or "Daily Planner task")
+            name_key = name.casefold()
+            carried_from = _compact_text(task.get("carried_from") or "")
+            if carried_from:
+                instance_key = canonical_by_occurrence.get(
+                    (owner_key, carried_from, name_key),
+                    (owner_key, "carry", carried_from, name_key),
+                )
+            elif (owner_key, name_key) in legacy_carry_names:
+                instance_key = (owner_key, "legacy-carry", name_key)
+            else:
+                instance_key = (
+                    owner_key,
+                    sheet_date,
+                    task_type,
+                    task_index,
+                )
+            timer = timer_lookup.get((sheet.get("id") or "", task_type, task_index), {})
+            actual = timer.get("actual_elapsed_seconds")
+            if actual is None:
+                actual = task.get("actual_elapsed_seconds")
+            if actual is None and timer:
+                remaining = int(timer.get("remaining_seconds") or 0)
+                if str(timer.get("status") or "").casefold() == "running" and timer.get("deadline_at"):
+                    try:
+                        deadline = datetime.fromisoformat(
+                            str(timer.get("deadline_at")).replace("Z", "+00:00")
+                        )
+                        if deadline.tzinfo is None:
+                            deadline = deadline.replace(tzinfo=timezone.utc)
+                        remaining = max(
+                            int((deadline.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds()),
+                            0,
+                        )
+                    except ValueError:
+                        pass
+                actual = max(
+                    int(timer.get("allocated_seconds") or 0)
+                    - remaining,
+                    0,
+                )
+            instances[instance_key] = {
+                "instance_key": "::".join(str(part) for part in instance_key),
+                "sheet_id": sheet.get("id") or "",
+                "work_date": sheet.get("sheet_date") or "",
+                "owner_id": str(sheet.get("user_id") or ""),
+                "owner": sheet.get("user_name") or "",
+                "task_type": task_type,
+                "task_index": task_index,
+                "task": name,
+                "outcome": _daily_task_outcome_key(task),
+                "allocated_seconds": parse_daily_task_duration_seconds(task.get("time_blocked")),
+                "actual_elapsed_seconds": max(int(actual or 0), 0),
+                "completion_method": task.get("completion_method") or timer.get("completion_method") or "",
+                "skip_reason": task.get("skip_reason") or timer.get("skip_reason") or "",
+                "completed_at": timer.get("outcome_at") or task.get("completed_at") or task.get("finished_at"),
+            }
+            canonical_by_occurrence[(owner_key, sheet_date, name_key)] = instance_key
+    return list(instances.values())
+
+
+def daily_execution_weekly_summary(sheets, timers=None, *, today=None):
+    local_today = today or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
+    if not isinstance(local_today, date):
+        local_today = date.fromisoformat(str(local_today))
+    rows = []
+    for raw in sheets or []:
+        sheet = _normalise_daily_sheet(raw)
+        try:
+            sheet_date = date.fromisoformat(str(sheet.get("sheet_date") or ""))
+        except ValueError:
+            continue
+        if sheet_date <= local_today:
+            rows.append(sheet)
+    instances = daily_execution_weekly_task_instances(rows, timers, today=local_today)
+    completed_count = sum(row["outcome"] == "completed" for row in instances)
+    did_not_finish_count = sum(row["outcome"] == "did_not_finish" for row in instances)
+    skipped_count = sum(row["outcome"] == "skipped" for row in instances)
+    unresolved_count = sum(row["outcome"] == "unresolved" for row in instances)
+    total_planned = len(instances)
+    completion_percentage = completed_count / total_planned * 100 if total_planned else 0.0
+    staff_completion = {}
+    for task in instances:
+        owner_key = task.get("owner_id") or task.get("owner") or "Current user"
+        member = staff_completion.setdefault(
+            owner_key,
+            {
+                "staff_id": task.get("owner_id") or "",
+                "staff": task.get("owner") or "Current user",
+                "completed": 0,
+                "did_not_finish": 0,
+                "skipped": 0,
+                "unresolved": 0,
+                "total_planned": 0,
+                "actual_focused_seconds": 0,
+            },
+        )
+        member["total_planned"] += 1
+        member[task["outcome"]] += 1
+        member["actual_focused_seconds"] += task["actual_elapsed_seconds"]
+    for member in staff_completion.values():
+        member["completion_percentage"] = (
+            member["completed"] / member["total_planned"] * 100
+            if member["total_planned"]
+            else 0.0
+        )
+    mip_done = sum(
+        row["task_type"] == "top" and row["outcome"] == "completed" for row in instances
+    )
+    mip_open = sum(
+        row["task_type"] == "top" and row["outcome"] != "completed" for row in instances
+    )
+    other_done = sum(
+        row["task_type"] == "additional" and row["outcome"] == "completed"
+        for row in instances
+    )
+    planned_hours = sum(row["allocated_seconds"] for row in instances) / 3600
     ratings = []
     reasons = []
     carried = []
     wins = []
     blockers = []
     for sheet in rows:
-        for task in sheet.get("top_tasks") or []:
-            if not task.get("task"):
-                continue
-            if _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE:
-                mip_done += 1
-            elif not daily_execution_task_finished(task):
-                mip_open += 1
-            planned_hours += _planned_hours(task.get("time_blocked"))
-        for task in sheet.get("additional_items") or []:
-            if not _daily_additional_item_has_content(task):
-                continue
-            if _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE:
-                other_done += 1
-            planned_hours += _planned_hours(task.get("time_blocked"))
         review = sheet.get("review_data") or {}
         no_grey = sheet.get("no_grey_zone") or {}
         reason = _compact_text(review.get("could_not_finish") or no_grey.get("avoided") or "")
@@ -2418,6 +2762,16 @@ def daily_execution_weekly_summary(sheets):
         "mip_completed": mip_done,
         "mip_not_completed": mip_open,
         "other_completed": other_done,
+        "total_planned": total_planned,
+        "completed": completed_count,
+        "did_not_finish": did_not_finish_count,
+        "skipped": skipped_count,
+        "unresolved": unresolved_count,
+        "completion_percentage": completion_percentage,
+        "actual_focused_seconds": sum(row["actual_elapsed_seconds"] for row in instances),
+        "staff_completion": sorted(
+            staff_completion.values(), key=lambda row: row["staff"].casefold()
+        ),
         "planned_hours": round(planned_hours, 1),
         "unfinished_reasons": [name for name, _count in reason_counts.most_common(3)],
         "average_day_rating": round(sum(ratings) / len(ratings), 1) if ratings else 0,
@@ -3752,8 +4106,12 @@ def build_home_weekly_work_snapshot(user, local_now=None):
             "staff_id": str(row.get("id") or ""),
             "staff": _compact_text(row.get("display_name") or row.get("username") or "Staff member"),
             "role": _compact_text(row.get("role") or "worker").title(),
+            "total_planned": 0,
             "completed_tasks": 0,
             "did_not_finish": 0,
+            "skipped": 0,
+            "unresolved": 0,
+            "completion_percentage": 0.0,
             "allocated_seconds": 0,
             "actual_seconds": 0,
             "meaningful_actions": 0,
@@ -3761,69 +4119,62 @@ def build_home_weekly_work_snapshot(user, local_now=None):
         }
         for row in users
     }
-    timers = {
-        (str(timer.get("sheet_id") or ""), str(timer.get("task_type") or ""), int(timer.get("task_index") or 0)): dict(timer)
-        for timer in bundle.get("timers") or []
-    }
+    timer_rows = [dict(timer or {}) for timer in bundle.get("timers") or []]
     completed_work = []
-    for sheet in bundle.get("sheets") or []:
-        sheet = _normalise_daily_sheet(sheet)
-        owner_id = str(sheet.get("user_id") or "")
-        if owner_id not in user_ids or owner_id not in staff:
+    task_instances = daily_execution_weekly_task_instances(
+        [
+            sheet
+            for sheet in bundle.get("sheets") or []
+            if str((sheet or {}).get("user_id") or "") in user_ids
+        ],
+        timer_rows,
+        today=sydney_now.date(),
+    )
+    for task in task_instances:
+        owner_id = str(task.get("owner_id") or "")
+        if owner_id not in staff:
             continue
         fallback = datetime.combine(
-            date.fromisoformat(sheet.get("sheet_date")),
+            date.fromisoformat(task.get("work_date")),
             time(hour=12),
             tzinfo=sports_sales_calendar.SYDNEY_TIMEZONE,
         ).astimezone(timezone.utc)
-        for task_type, tasks in (
-            ("top", sheet.get("top_tasks") or []),
-            ("additional", sheet.get("additional_items") or []),
-        ):
-            for index, task in enumerate(tasks):
-                task = dict(task or {})
-                if not _compact_text(task.get("task") or task.get("details") or ""):
-                    continue
-                status = _normalise_daily_task_status(task)
-                outcome = _compact_text(task.get("outcome") or "").casefold()
-                if status not in DAILY_TASK_FINISHED_STATUSES and outcome not in {
-                    DAILY_TIMER_OUTCOME_COMPLETED,
-                    DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
-                }:
-                    continue
-                timer = timers.get((sheet.get("id") or "", task_type, index), {})
-                completed_at = _weekly_work_timestamp(
-                    timer.get("outcome_at") or task.get("completed_at") or task.get("finished_at"),
-                    fallback,
-                )
-                if not (start_local.astimezone(timezone.utc) <= completed_at <= sydney_now.astimezone(timezone.utc)):
-                    continue
-                did_not_finish = bool(
-                    status == DAILY_TASK_STATUS_COULDNT_FINISH
-                    or outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH
-                    or timer.get("outcome") == DAILY_TIMER_OUTCOME_DID_NOT_FINISH
-                )
-                allocated = parse_daily_task_duration_seconds(task.get("time_blocked"))
-                actual = max(int(timer.get("actual_elapsed_seconds") or timer.get("elapsed_seconds") or 0), 0)
-                member = staff[owner_id]
-                member["did_not_finish" if did_not_finish else "completed_tasks"] += 1
-                member["allocated_seconds"] += allocated
-                member["actual_seconds"] += actual
-                member["last_activity"] = max(
-                    filter(None, (member["last_activity"], completed_at)), default=completed_at
-                )
-                completed_work.append(
-                    {
-                        "timestamp": completed_at,
-                        "staff": member["staff"],
-                        "staff_id": owner_id,
-                        "work": _compact_text(task.get("task") or task.get("details") or "Daily Planner task"),
-                        "area": "Daily Planner",
-                        "status": "Did not finish" if did_not_finish else "Completed",
-                        "actual_seconds": actual,
-                        "row_id": f"planner:{sheet.get('id')}:{task_type}:{index}",
-                    }
-                )
+        member = staff[owner_id]
+        member["total_planned"] += 1
+        member["allocated_seconds"] += max(int(task.get("allocated_seconds") or 0), 0)
+        member["actual_seconds"] += max(int(task.get("actual_elapsed_seconds") or 0), 0)
+        outcome = task.get("outcome") or "unresolved"
+        if outcome == "completed":
+            member["completed_tasks"] += 1
+        elif outcome == "did_not_finish":
+            member["did_not_finish"] += 1
+        elif outcome == "skipped":
+            member["skipped"] += 1
+        else:
+            member["unresolved"] += 1
+            continue
+        completed_at = _weekly_work_timestamp(task.get("completed_at"), fallback)
+        if not (start_local.astimezone(timezone.utc) <= completed_at <= sydney_now.astimezone(timezone.utc)):
+            continue
+        member["last_activity"] = max(
+            filter(None, (member["last_activity"], completed_at)), default=completed_at
+        )
+        completed_work.append(
+            {
+                "timestamp": completed_at,
+                "staff": member["staff"],
+                "staff_id": owner_id,
+                "work": task.get("task") or "Daily Planner task",
+                "area": "Daily Planner",
+                "status": {
+                    "completed": "Completed",
+                    "did_not_finish": "Did not finish",
+                    "skipped": "Skipped",
+                }[outcome],
+                "actual_seconds": max(int(task.get("actual_elapsed_seconds") or 0), 0),
+                "row_id": f"planner:{task.get('instance_key')}",
+            }
+        )
 
     import daily_activity_reporting
 
@@ -3883,19 +4234,31 @@ def build_home_weekly_work_snapshot(user, local_now=None):
         )
 
     team = sorted(staff.values(), key=lambda row: row["staff"].casefold())
+    for member in team:
+        member["completion_percentage"] = (
+            member["completed_tasks"] / member["total_planned"] * 100
+            if member["total_planned"]
+            else 0.0
+        )
     completed_work.sort(key=lambda row: row["timestamp"], reverse=True)
+    total_planned = sum(row["total_planned"] for row in team)
+    tasks_completed = sum(row["completed_tasks"] for row in team)
     return {
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
         "covered_until": sydney_now.isoformat(),
         "is_team_view": os_accounts.is_admin(user),
         "metrics": {
-            "tasks_completed": sum(row["completed_tasks"] for row in team),
+            "tasks_completed": tasks_completed,
             "tasks_not_finished": sum(row["did_not_finish"] for row in team),
+            "tasks_skipped": sum(row["skipped"] for row in team),
+            "tasks_unresolved": sum(row["unresolved"] for row in team),
+            "tasks_total": total_planned,
+            "completion_percentage": tasks_completed / total_planned * 100 if total_planned else 0.0,
             "actual_seconds": sum(row["actual_seconds"] for row in team),
             "meaningful_actions": sum(row["meaningful_actions"] for row in team),
             "staff_active": sum(
-                bool(row["completed_tasks"] or row["did_not_finish"] or row["meaningful_actions"])
+                bool(row["total_planned"] or row["meaningful_actions"])
                 for row in team
             ),
         },

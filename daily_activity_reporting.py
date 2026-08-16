@@ -75,6 +75,7 @@ MEANINGFUL_WORK_ACTIONS = frozenset(
         "dashboard_task_completed",
         "daily_planner_task_completed",
         "daily_planner_task_did_not_finish",
+        "daily_planner_task_skipped",
     }
 )
 SECRET_PATTERN = re.compile(
@@ -104,6 +105,8 @@ ACTION_CATEGORIES = {
     "daily_execution_task_completed": "Daily Execution",
     "daily_planner_task_completed": "Daily Execution",
     "daily_planner_task_did_not_finish": "Daily Execution",
+    "daily_planner_task_skipped": "Daily Execution",
+    "daily_planner_task_reopened": "Daily Execution",
     "design_task_completed": "Prompts and creative work",
     "collection_created": "Products",
     "collection_updated": "Products",

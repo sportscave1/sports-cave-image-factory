@@ -10,6 +10,7 @@ import daily_activity_reporting
 import daily_planner
 import sports_cave_dashboard
 import supabase_backend
+import top_bar
 import top_bar_api
 import top_bar_security
 from starlette.requests import Request
@@ -164,6 +165,16 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
                     "metadata": {"actor_id": "admin-1"},
                 },
             },
+            {
+                "event_type": "daily_planner_task_skipped",
+                "created_at": "2026-08-15T01:04:00Z",
+                "source": "Daily Planner",
+                "new_value": {
+                    "message": "Daily Planner task skipped: Optional filing",
+                    "action_type": "daily_planner_task_skipped",
+                    "metadata": {"actor_id": "admin-1"},
+                },
+            },
         ]
 
         notifications = top_bar_api.build_notifications(
@@ -178,6 +189,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertTrue(any("Cricket campaign artwork" in row["title"] for row in notifications))
         self.assertNotIn("Afterpay Day soon", serialised)
         self.assertNotIn("Metafield", serialised)
+        self.assertNotIn("Optional filing", serialised)
         self.assertNotIn('"Activity"', serialised)
 
     def test_duration_and_history_helpers_reuse_existing_daily_execution_rows(self):
@@ -261,9 +273,12 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertEqual(2, len(admin_snapshot["team"]))
         self.assertEqual(1, admin_snapshot["metrics"]["tasks_completed"])
         self.assertEqual(1, admin_snapshot["metrics"]["tasks_not_finished"])
+        self.assertEqual(2, admin_snapshot["metrics"]["tasks_total"])
+        self.assertEqual(50.0, admin_snapshot["metrics"]["completion_percentage"])
         self.assertEqual(1, admin_snapshot["metrics"]["meaningful_actions"])
         self.assertEqual(3, len(admin_snapshot["completed_work"]))
         self.assertEqual(["Reina"], [row["staff"] for row in worker_snapshot["team"]])
+        self.assertEqual(0.0, worker_snapshot["metrics"]["completion_percentage"])
         self.assertTrue(all(row["staff_id"] == "worker-1" for row in worker_snapshot["completed_work"]))
         self.assertFalse(backend.calls[1][-1])
 
@@ -299,6 +314,233 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("_expire_daily_timer_row", pause_source)
         self.assertIn("status IN ('running', 'paused')", stop_source)
         self.assertNotIn("'expired'", stop_source)
+
+    def test_finish_skip_reopen_are_atomic_idempotent_outcomes(self):
+        backend_source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        route_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+        migration = (ROOT / "migrations" / "20260815_daily_execution_task_outcomes.sql").read_text(encoding="utf-8")
+
+        outcome_body = backend_source[
+            backend_source.index("def apply_daily_execution_task_outcome") :
+            backend_source.index("\n\ndef apply_daily_execution_timer_outcome")
+        ]
+        self.assertIn("FOR UPDATE", outcome_body)
+        transition_body = backend_source[
+            backend_source.index("def _daily_task_terminal_transition") :
+            backend_source.index("\n\ndef apply_daily_execution_task_outcome")
+        ]
+        self.assertIn("_daily_timer_elapsed_seconds(timer, now_utc)", transition_body)
+        self.assertIn('"finished_early"', transition_body)
+        self.assertIn('"skipped"', transition_body)
+        self.assertIn('"reopen"', outcome_body)
+        self.assertIn('"already_applied": True', outcome_body)
+        self.assertIn("outcome_version", outcome_body)
+        self.assertIn('status=CASE WHEN %s THEN \'active\' ELSE status END', outcome_body)
+        self.assertIn('action == "task_outcome"', route_source)
+        self.assertIn('window.confirm("Finish this task now?")', client_source)
+        self.assertIn("Skip this task? It will be recorded as not completed.", client_source)
+        self.assertIn('data-action="reopen-task"', client_source)
+        self.assertIn('data-action="finish-active"', client_source)
+        self.assertIn('data-action="skip-active"', client_source)
+        self.assertIn("state.bundle.active_timer = {};", client_source)
+        self.assertIn("broadcastTimer({});", client_source)
+        self.assertIn("state.bundle.active_timer = previousActive;", client_source)
+        self.assertIn('if (!String(task?.task || task?.details || "").trim()) return "";', client_source)
+        self.assertIn("ADD COLUMN IF NOT EXISTS completion_method", migration)
+        self.assertIn("'completed', 'did_not_finish', 'skipped'", migration)
+
+    def test_finish_transition_uses_real_running_paused_and_unstarted_elapsed_time(self):
+        now = datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc)
+        task = {"task": "Prepare campaign", "time_blocked": "2 minutes"}
+
+        running = supabase_backend._daily_task_terminal_transition(
+            task,
+            {
+                "status": "running",
+                "allocated_seconds": 120,
+                "deadline_at": now + timedelta(seconds=65),
+            },
+            "completed",
+            now_utc=now,
+        )["task"]
+        paused = supabase_backend._daily_task_terminal_transition(
+            task,
+            {"status": "paused", "allocated_seconds": 120, "remaining_seconds": 45},
+            "completed",
+            now_utc=now,
+        )["task"]
+        unstarted = supabase_backend._daily_task_terminal_transition(
+            task,
+            {},
+            "completed",
+            now_utc=now,
+        )["task"]
+
+        self.assertEqual("done", running["status"])
+        self.assertTrue(running["completed"])
+        self.assertEqual("finished_early", running["completion_method"])
+        self.assertEqual(55, running["actual_elapsed_seconds"])
+        self.assertEqual(65, running["time_saved_seconds"])
+        self.assertEqual(75, paused["actual_elapsed_seconds"])
+        self.assertEqual(45, paused["time_saved_seconds"])
+        self.assertEqual("completed_manually", unstarted["completion_method"])
+        self.assertNotIn("actual_elapsed_seconds", unstarted)
+        self.assertEqual("2 minutes", unstarted["time_blocked"])
+
+    def test_skip_transition_preserves_real_elapsed_and_reason_without_completion(self):
+        now = datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc)
+        task = {"task": "Upload range"}
+        running = supabase_backend._daily_task_terminal_transition(
+            task,
+            {
+                "status": "running",
+                "allocated_seconds": 120,
+                "deadline_at": now + timedelta(seconds=90),
+            },
+            "skipped",
+            reason="Supplier files unavailable",
+            now_utc=now,
+        )["task"]
+        paused = supabase_backend._daily_task_terminal_transition(
+            task,
+            {"status": "paused", "allocated_seconds": 120, "remaining_seconds": 80},
+            "skipped",
+            now_utc=now,
+        )["task"]
+        unstarted = supabase_backend._daily_task_terminal_transition(
+            task,
+            {},
+            "skipped",
+            now_utc=now,
+        )["task"]
+
+        self.assertEqual("skipped", running["status"])
+        self.assertFalse(running["completed"])
+        self.assertEqual(30, running["actual_elapsed_seconds"])
+        self.assertEqual("Supplier files unavailable", running["skip_reason"])
+        self.assertEqual(40, paused["actual_elapsed_seconds"])
+        self.assertEqual("No time available", paused["skip_reason"])
+        self.assertNotIn("actual_elapsed_seconds", unstarted)
+        self.assertEqual("No time available", unstarted["skip_reason"])
+
+    def test_daily_review_summary_counts_all_non_empty_terminal_outcomes(self):
+        sheet = {
+            "id": "sheet-1",
+            "sheet_date": "2026-08-15",
+            "top_tasks": [
+                {"task": "Complete", "status": "done", "actual_elapsed_seconds": 120},
+                {"task": "Attempted", "status": "couldnt_finish", "actual_elapsed_seconds": 60},
+                {"task": "Skipped", "status": "skipped"},
+            ],
+            "additional_items": [
+                {"task": "Open task", "status": ""},
+                {"task": "", "details": "", "time_blocked": ""},
+            ],
+        }
+
+        summary = sports_cave_dashboard.daily_execution_outcome_summary(sheet)
+
+        self.assertEqual(4, summary["total_planned"])
+        self.assertEqual(1, summary["completed"])
+        self.assertEqual(1, summary["did_not_finish"])
+        self.assertEqual(1, summary["skipped"])
+        self.assertEqual(1, summary["unresolved"])
+        self.assertEqual(25.0, summary["completion_percentage"])
+        self.assertEqual(["Open task"], summary["unresolved_tasks"])
+        self.assertFalse(sports_cave_dashboard.daily_execution_all_tasks_complete(sheet))
+        sheet["additional_items"][0]["status"] = "skipped"
+        self.assertTrue(sports_cave_dashboard.daily_execution_all_tasks_complete(sheet))
+
+    def test_weekly_completion_excludes_future_and_deduplicates_carry_forward(self):
+        sheets = [
+            {
+                "id": "monday", "user_id": "staff-1", "user_name": "Reina", "sheet_date": "2026-08-10",
+                "top_tasks": [{"task": "Campaign", "status": "couldnt_finish"}], "additional_items": [],
+            },
+            {
+                "id": "tuesday", "user_id": "staff-1", "user_name": "Reina", "sheet_date": "2026-08-11",
+                "top_tasks": [{"task": "Product upload", "status": "done"}],
+                "additional_items": [
+                    {"task": "Campaign", "status": "done", "carried_from": "2026-08-10"},
+                    {"task": "No time", "status": "skipped"},
+                ],
+            },
+            {
+                "id": "wednesday", "user_id": "staff-1", "user_name": "Reina", "sheet_date": "2026-08-12",
+                "top_tasks": [{"task": "Campaign", "status": ""}], "additional_items": [],
+            },
+            {
+                "id": "future", "user_id": "staff-1", "user_name": "Reina", "sheet_date": "2026-08-16",
+                "top_tasks": [{"task": "Future task", "status": "done"}], "additional_items": [],
+            },
+        ]
+
+        summary = sports_cave_dashboard.daily_execution_weekly_summary(
+            sheets, today=date(2026, 8, 15)
+        )
+
+        self.assertEqual(4, summary["total_planned"])
+        self.assertEqual(2, summary["completed"])
+        self.assertEqual(1, summary["skipped"])
+        self.assertEqual(0, summary["did_not_finish"])
+        self.assertEqual(1, summary["unresolved"])
+        self.assertEqual(50.0, summary["completion_percentage"])
+        self.assertEqual(1, len(summary["staff_completion"]))
+        self.assertAlmostEqual(
+            summary["completion_percentage"],
+            summary["staff_completion"][0]["completion_percentage"],
+        )
+
+    def test_black_panel_is_removed_at_the_compact_layout_source(self):
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn(".compact-only { display: none !important; }", client_source)
+        self.assertIn("body.compact .compact-only { display: flex !important; }", client_source)
+        self.assertIn('id="compact-view"', client_source)
+        self.assertNotIn("<audio", client_source)
+        self.assertNotIn("<canvas", client_source)
+        self.assertIn("setTimeout(stopAlarm, 5050)", client_source)
+
+    def test_toolbar_countdown_mirror_is_client_side_and_cross_window(self):
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(encoding="utf-8")
+        planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+        admin_config = top_bar.top_bar_config(
+            {"id": "admin-1", "role": "admin", "is_active": True, "page_permissions": []},
+            logo_src="logo",
+            current_route="Dashboard",
+        )
+        other_config = top_bar.top_bar_config(
+            {"id": "admin-2", "role": "admin", "is_active": True, "page_permissions": []},
+            logo_src="logo",
+            current_route="Dashboard",
+        )
+        safe = top_bar_api._daily_planner_timer_mirror(
+            {
+                "id": "timer-1", "user_id": "private-user", "task": "Gym", "status": "running",
+                "deadline_at": "2026-08-15T02:00:00Z", "remaining_seconds": 60,
+            }
+        )
+
+        self.assertIn('id="sc-os-planner-timer-pill"', source)
+        self.assertIn("BroadcastChannel(\"sports-cave-daily-planner\")", source)
+        self.assertIn("scSportsCavePlannerTimerState", source)
+        self.assertIn("setInterval(updatePlannerMirror, 1000)", source)
+        self.assertIn("schedulePlannerStatus(30000)", source)
+        self.assertIn("openDailyPlanner({focusActive:true})", source)
+        self.assertIn("plannerChannel?.close()", source)
+        self.assertIn("parentWindow.navigator.locks.request", source)
+        self.assertIn("payload.scope !== state.config.dailyPlannerTimerScope", source)
+        self.assertIn("broadcastTimer(mirror)", planner_source)
+        self.assertIn("navigator.locks.request", planner_source)
+        self.assertIn("payload.scope !== state.timerScope", planner_source)
+        self.assertNotEqual(
+            admin_config["dailyPlannerTimerScope"],
+            other_config["dailyPlannerTimerScope"],
+        )
+        self.assertNotIn("admin-1", admin_config["dailyPlannerTimerScope"])
+        self.assertNotIn("user_id", safe)
+        self.assertEqual("Gym", safe["task"])
 
     def test_planner_api_requires_signed_planner_permission(self):
         user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}

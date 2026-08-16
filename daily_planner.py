@@ -191,6 +191,14 @@ def _clean_tasks(value, *, top=False):
                 "completed_at": row.get("completed_at"),
                 "finished_at": row.get("finished_at"),
                 "outcome": str(row.get("outcome") or "").strip().casefold()[:40],
+                "completion_method": str(row.get("completion_method") or "").strip().casefold()[:40],
+                "skip_reason": str(row.get("skip_reason") or "").strip()[:500],
+                "actual_elapsed_seconds": row.get("actual_elapsed_seconds"),
+                "time_saved_seconds": row.get("time_saved_seconds"),
+                "completed_before_expiry": bool(row.get("completed_before_expiry")),
+                "outcome_version": max(int(row.get("outcome_version") or 0), 0),
+                "outcome_history": list(row.get("outcome_history") or [])[-20:],
+                "reopened_at": row.get("reopened_at"),
                 "carried_from": str(row.get("carried_from") or "").strip()[:20],
             }
         )
@@ -250,7 +258,12 @@ async def planner_mutation(request: Request):
             if not sheet or sheet.get("id") != sheet_id:
                 raise ValueError("That Daily Planner sheet is not available for this account.")
             if not sports_cave_dashboard.daily_execution_all_tasks_complete(sheet):
-                raise ValueError("Finish all three MIP task outcomes before completing the Daily Review.")
+                unresolved = sports_cave_dashboard.daily_execution_outcome_summary(sheet)[
+                    "unresolved_tasks"
+                ]
+                names = ", ".join(unresolved[:5])
+                suffix = f": {names}" if names else "."
+                raise ValueError(f"Resolve every planned task before completing the Daily Review{suffix}")
             review = dict(payload.get("review") or {})
             ratings = {
                 label: max(0, min(int((review.get("ratings") or {}).get(label) or 0), 10))
@@ -263,6 +276,9 @@ async def planner_mutation(request: Request):
                     "revenue", "noise", "lesson", "protected", "notes",
                 )
             }
+            review_data["task_outcome_summary"] = sports_cave_dashboard.daily_execution_outcome_summary(
+                sheet
+            )
             result = sports_cave_dashboard.complete_daily_execution_review(
                 sheet_id,
                 {
@@ -293,6 +309,16 @@ async def planner_mutation(request: Request):
                 user,
                 payload.get("timer_id"),
                 str(payload.get("outcome") or ""),
+            )
+        elif action == "task_outcome":
+            result = sports_cave_dashboard.apply_daily_planner_task_outcome(
+                user,
+                str(payload.get("sheet_id") or ""),
+                str(payload.get("task_type") or ""),
+                int(payload.get("task_index") or 0),
+                str(payload.get("outcome") or ""),
+                timer_id=str(payload.get("timer_id") or "").strip() or None,
+                reason=str(payload.get("reason") or "").strip()[:500],
             )
         else:
             return _json({"ok": False, "error": "Unknown Daily Planner action."}, 400)
@@ -355,10 +381,16 @@ async def planner_weekly_review(request: Request):
         import sports_cave_dashboard
 
         week_start, week_end = sports_cave_dashboard.daily_execution_week_bounds(anchor)
-        sheets = sports_cave_dashboard.list_daily_execution_archive_summaries(
-            _user(claims), week_start, week_end, limit=31
+        weekly = sports_cave_dashboard.load_daily_execution_weekly_review(
+            _user(claims), week_start, week_end, limit=1000
         )
-        summary = sports_cave_dashboard.daily_execution_weekly_summary(sheets)
+        sheets = weekly["sheets"]
+        timers = weekly["timers"]
+        summary = sports_cave_dashboard.daily_execution_weekly_summary(
+            sheets,
+            timers,
+            today=datetime.now(SYDNEY_TZ).date(),
+        )
     except Exception as error:
         return _json({"ok": False, "error": _safe_error(error)}, 503)
     return _json(
