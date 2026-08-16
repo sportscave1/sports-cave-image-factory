@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import traceback
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -451,6 +452,8 @@ def webhook_schema_error_message(error):
 
 
 DAILY_EXECUTION_OUTCOME_MIGRATION = "20260815_daily_execution_task_outcomes.sql"
+DAILY_EXECUTION_TIMER_MIGRATION = "20260815_daily_execution_task_timers.sql"
+DAILY_EXECUTION_SHEETS_MIGRATION = "20260722_daily_execution_sheets.sql"
 DAILY_EXECUTION_OUTCOME_COLUMNS = frozenset(
     {
         "completion_method",
@@ -489,6 +492,32 @@ def daily_execution_outcome_schema_error_message(error):
         "Daily Planner outcome storage is out of date. Apply migration "
         f"{DAILY_EXECUTION_OUTCOME_MIGRATION}, then retry."
     )
+
+
+def daily_planner_schema_error_message(error):
+    """Map known planner schema failures to safe, actionable migration messages."""
+    outcome_message = daily_execution_outcome_schema_error_message(error)
+    if outcome_message:
+        return outcome_message
+    sqlstate = str(
+        getattr(error, "sqlstate", "")
+        or getattr(error, "pgcode", "")
+        or ""
+    ).upper()
+    lowered = str(error or "").casefold()
+    if sqlstate != "42P01" and "does not exist" not in lowered:
+        return ""
+    if "daily_execution_task_timers" in lowered:
+        return (
+            "Daily Planner timer storage is missing. Apply migration "
+            f"{DAILY_EXECUTION_TIMER_MIGRATION}, then retry."
+        )
+    if "daily_execution_sheets" in lowered:
+        return (
+            "Daily Planner sheet storage is missing. Apply migration "
+            f"{DAILY_EXECUTION_SHEETS_MIGRATION}, then retry."
+        )
+    return ""
 
 
 def _database_url_with_ssl():
@@ -3150,6 +3179,7 @@ def list_activity_logs(
     limit=200,
     actor_user_id=None,
     actor_email=None,
+    offset=0,
 ):
     ensure_dashboard_schema()
     clauses = []
@@ -3205,9 +3235,13 @@ def list_activity_logs(
             safe_limit = min(max(int(limit), 1), 5000)
         except (TypeError, ValueError):
             safe_limit = 200
-    limit_sql = "LIMIT %s" if safe_limit is not None else ""
+    try:
+        safe_offset = max(int(offset or 0), 0)
+    except (TypeError, ValueError):
+        safe_offset = 0
+    limit_sql = "LIMIT %s OFFSET %s" if safe_limit is not None else ""
     if safe_limit is not None:
-        params.append(safe_limit)
+        params.extend((safe_limit, safe_offset))
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -5546,6 +5580,519 @@ def list_daily_execution_sheets_for_reporting(user_id, start_date, end_date, *, 
                 (*params, safe_limit),
             )
             return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+
+
+DAILY_PLANNER_WEEK_PLAN_MIGRATION = "20260816_daily_planner_week_plans.sql"
+
+
+def _weekly_plan_schema_error(error):
+    message = " ".join(str(error or "").split()).strip()
+    lowered = message.casefold()
+    schema_markers = (
+        "daily_planner_cycles",
+        "daily_planner_weekly_plans",
+        "daily_planner_weekly_objectives",
+        "daily_planner_weekly_tactics",
+        "undefinedtable",
+        "does not exist",
+    )
+    if any(marker in lowered for marker in schema_markers):
+        return RuntimeError(
+            "Weekly planning storage requires migration "
+            f"`{DAILY_PLANNER_WEEK_PLAN_MIGRATION}`."
+        )
+    return error
+
+
+def _weekly_plan_week_start(value):
+    parsed = value if isinstance(value, date) else date.fromisoformat(str(value or ""))
+    return parsed - timedelta(days=parsed.weekday())
+
+
+def _weekly_plan_bundle_from_rows(cycle, plan, objectives, tactics):
+    cycle = dict(cycle or {})
+    plan = dict(plan or {})
+    objective_rows = [dict(row or {}) for row in objectives or [] if row and not row.get("deleted_at")]
+    tactic_rows = [dict(row or {}) for row in tactics or [] if row and not row.get("deleted_at")]
+    by_objective = {}
+    for tactic in tactic_rows:
+        tactic["id"] = str(tactic.get("id") or "")
+        tactic["objective_id"] = str(tactic.get("objective_id") or "")
+        tactic["plan_id"] = str(tactic.get("plan_id") or "")
+        tactic["linked_sheet_id"] = str(tactic.get("linked_sheet_id") or "")
+        by_objective.setdefault(tactic["objective_id"], []).append(tactic)
+    for rows in by_objective.values():
+        rows.sort(key=lambda row: int(row.get("position") or 0))
+    clean_objectives = []
+    for objective in objective_rows:
+        objective["id"] = str(objective.get("id") or "")
+        objective["plan_id"] = str(objective.get("plan_id") or "")
+        objective["tactics"] = by_objective.get(objective["id"], [])
+        clean_objectives.append(objective)
+    clean_objectives.sort(key=lambda row: int(row.get("position") or 0))
+    if cycle:
+        cycle["id"] = str(cycle.get("id") or "")
+    if plan:
+        plan["id"] = str(plan.get("id") or "")
+        plan["cycle_id"] = str(plan.get("cycle_id") or "")
+        plan["objectives"] = clean_objectives
+        plan["review_data"] = dict(plan.get("review_data") or {})
+    return {"cycle": cycle, "plan": plan}
+
+
+def _load_week_plan_rows(cur, user_id, week_start, *, cycle_id=None):
+    clean_user_id = str(user_id or "").strip()
+    if cycle_id:
+        cur.execute(
+            "SELECT * FROM daily_planner_cycles WHERE id=%s::uuid AND user_id=%s LIMIT 1",
+            (str(cycle_id), clean_user_id),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT *
+            FROM daily_planner_cycles
+            WHERE user_id=%s
+              AND start_date <= %s::date
+              AND (start_date + 83) >= %s::date
+            ORDER BY start_date DESC
+            LIMIT 1
+            """,
+            (clean_user_id, str(week_start), str(week_start)),
+        )
+    cycle = cur.fetchone() or {}
+    if not cycle:
+        return {}, {}, [], []
+    cur.execute(
+        """
+        SELECT *
+        FROM daily_planner_weekly_plans
+        WHERE user_id=%s AND cycle_id=%s AND week_start=%s::date
+        LIMIT 1
+        """,
+        (clean_user_id, cycle.get("id"), str(week_start)),
+    )
+    plan = cur.fetchone() or {}
+    if not plan:
+        return cycle, {}, [], []
+    cur.execute(
+        """
+        SELECT * FROM daily_planner_weekly_objectives
+        WHERE plan_id=%s AND user_id=%s AND deleted_at IS NULL
+        ORDER BY position
+        """,
+        (plan.get("id"), clean_user_id),
+    )
+    objectives = cur.fetchall()
+    cur.execute(
+        """
+        SELECT * FROM daily_planner_weekly_tactics
+        WHERE plan_id=%s AND user_id=%s AND deleted_at IS NULL
+        ORDER BY objective_id, position
+        """,
+        (plan.get("id"), clean_user_id),
+    )
+    return cycle, plan, objectives, cur.fetchall()
+
+
+def load_daily_planner_week_plan(user_id, anchor_date):
+    clean_user_id = str(user_id or "").strip()
+    week_start = _weekly_plan_week_start(anchor_date)
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                rows = _load_week_plan_rows(cur, clean_user_id, week_start)
+    except Exception as error:
+        raise _weekly_plan_schema_error(error) from error
+    bundle = _weekly_plan_bundle_from_rows(*rows)
+    cycle = bundle.get("cycle") or {}
+    week_number = (
+        ((week_start - cycle.get("start_date")).days // 7) + 1
+        if cycle and isinstance(cycle.get("start_date"), date)
+        else 0
+    )
+    return {
+        **bundle,
+        "week_start": week_start.isoformat(),
+        "week_end": (week_start + timedelta(days=6)).isoformat(),
+        "week_number": week_number if 1 <= week_number <= 12 else 0,
+        "query_count": 4 if bundle.get("plan") else 2,
+    }
+
+
+def create_daily_planner_cycle(user_id, name, overall_objective, start_date, *, actor=""):
+    clean_user_id = str(user_id or "").strip()
+    clean_start = _weekly_plan_week_start(start_date)
+    if not clean_user_id:
+        raise ValueError("A signed-in account is required.")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                cur.execute(
+                    """
+                    INSERT INTO daily_planner_cycles(
+                        user_id, name, overall_objective, start_date, timezone, created_by
+                    ) VALUES (%s, %s, %s, %s, 'Australia/Sydney', %s)
+                    ON CONFLICT (user_id, start_date) DO NOTHING
+                    RETURNING *
+                    """,
+                    (
+                        clean_user_id,
+                        " ".join(str(name or "").split())[:160],
+                        str(overall_objective or "").strip()[:2000],
+                        clean_start,
+                        str(actor or "")[:200],
+                    ),
+                )
+                cycle = cur.fetchone()
+                if not cycle:
+                    cur.execute(
+                        "SELECT * FROM daily_planner_cycles WHERE user_id=%s AND start_date=%s LIMIT 1",
+                        (clean_user_id, clean_start),
+                    )
+                    cycle = cur.fetchone() or {}
+            conn.commit()
+    except Exception as error:
+        raise _weekly_plan_schema_error(error) from error
+    cycle = dict(cycle or {})
+    cycle["id"] = str(cycle.get("id") or "")
+    return cycle
+
+
+def _clean_weekly_objectives(objectives, week_start):
+    clean = []
+    for position, raw in enumerate((objectives or [])[:3]):
+        raw = dict(raw or {})
+        title = " ".join(str(raw.get("title") or "").split()).strip()[:500]
+        if not title:
+            continue
+        deadline = str(raw.get("deadline") or "").strip()
+        if deadline:
+            parsed = date.fromisoformat(deadline)
+            if not week_start <= parsed <= week_start + timedelta(days=6):
+                raise ValueError("Objective deadlines must fall within the selected week.")
+        tactics = []
+        for tactic_position, item in enumerate((raw.get("tactics") or [])[:50]):
+            item = dict(item or {})
+            action = " ".join(str(item.get("action") or "").split()).strip()[:800]
+            if not action:
+                continue
+            status = str(item.get("status") or "open").strip().casefold()
+            if status not in {"open", "completed", "not_completed"}:
+                raise ValueError("Choose a valid weekly tactic status.")
+            tactics.append(
+                {
+                    "id": str(item.get("id") or "").strip(),
+                    "position": tactic_position,
+                    "action": action,
+                    "due_day": max(0, min(int(item.get("due_day") or 0), 6)),
+                    "status": status,
+                    "estimated_minutes": max(0, min(int(item.get("estimated_minutes") or 0), 10080)),
+                    "linked_sheet_id": str(item.get("linked_sheet_id") or "").strip(),
+                    "linked_task_type": str(item.get("linked_task_type") or "").strip() or None,
+                    "linked_task_index": item.get("linked_task_index"),
+                }
+            )
+        clean.append(
+            {
+                "id": str(raw.get("id") or "").strip(),
+                "position": position,
+                "title": title,
+                "measurable_target": str(raw.get("measurable_target") or "").strip()[:1000],
+                "deadline": deadline or None,
+                "result": str(raw.get("result") or "").strip().casefold() or None,
+                "tactics": tactics,
+            }
+        )
+    return clean
+
+
+def save_daily_planner_week_plan(
+    user_id,
+    cycle_id,
+    week_start,
+    theme,
+    quote_text,
+    quote_author,
+    objectives,
+    *,
+    expected_version=0,
+    request_id="",
+    actor="",
+):
+    clean_user_id = str(user_id or "").strip()
+    clean_cycle_id = str(cycle_id or "").strip()
+    clean_week_start = _weekly_plan_week_start(week_start)
+    clean_request_id = str(request_id or "").strip()[:160] or uuid.uuid4().hex
+    clean_objectives = _clean_weekly_objectives(objectives, clean_week_start)
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                cur.execute(
+                    "SELECT * FROM daily_planner_cycles WHERE id=%s::uuid AND user_id=%s FOR UPDATE",
+                    (clean_cycle_id, clean_user_id),
+                )
+                cycle = cur.fetchone() or {}
+                if not cycle:
+                    raise ValueError("That 12 Week Year cycle is not available for this account.")
+                week_number = ((clean_week_start - cycle["start_date"]).days // 7) + 1
+                if not 1 <= week_number <= 12:
+                    raise ValueError("The selected week is outside this 12-week cycle.")
+                cur.execute(
+                    """
+                    SELECT * FROM daily_planner_weekly_plans
+                    WHERE user_id=%s AND cycle_id=%s AND week_start=%s
+                    FOR UPDATE
+                    """,
+                    (clean_user_id, clean_cycle_id, clean_week_start),
+                )
+                plan = cur.fetchone() or {}
+                if plan and plan.get("last_request_id") == clean_request_id:
+                    rows = _load_week_plan_rows(
+                        cur, clean_user_id, clean_week_start, cycle_id=clean_cycle_id
+                    )
+                    conn.commit()
+                    return _weekly_plan_bundle_from_rows(*rows)
+                if plan and plan.get("review_submitted_at"):
+                    raise ValueError("A submitted Weekly Review keeps this plan read-only.")
+                if plan and int(expected_version or 0) != int(plan.get("version") or 0):
+                    raise ValueError("This Week Plan changed in another window. Reload it before saving.")
+                if plan:
+                    cur.execute(
+                        """
+                        UPDATE daily_planner_weekly_plans
+                        SET theme=%s, quote_text=%s, quote_author=%s,
+                            version=version + 1, last_request_id=%s, updated_at=now()
+                        WHERE id=%s AND user_id=%s
+                        RETURNING *
+                        """,
+                        (
+                            str(theme or "").strip()[:500],
+                            str(quote_text or "").strip()[:1000],
+                            str(quote_author or "").strip()[:300],
+                            clean_request_id,
+                            plan["id"],
+                            clean_user_id,
+                        ),
+                    )
+                    plan = cur.fetchone() or plan
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO daily_planner_weekly_plans(
+                            cycle_id, user_id, week_start, week_number, theme,
+                            quote_text, quote_author, last_request_id, created_by
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            clean_cycle_id,
+                            clean_user_id,
+                            clean_week_start,
+                            week_number,
+                            str(theme or "").strip()[:500],
+                            str(quote_text or "").strip()[:1000],
+                            str(quote_author or "").strip()[:300],
+                            clean_request_id,
+                            str(actor or "")[:200],
+                        ),
+                    )
+                    plan = cur.fetchone() or {}
+                plan_id = plan["id"]
+                cur.execute(
+                    "UPDATE daily_planner_weekly_objectives SET deleted_at=now(), updated_at=now() WHERE plan_id=%s",
+                    (plan_id,),
+                )
+                cur.execute(
+                    "UPDATE daily_planner_weekly_tactics SET deleted_at=now(), updated_at=now() WHERE plan_id=%s",
+                    (plan_id,),
+                )
+                for objective in clean_objectives:
+                    cur.execute(
+                        """
+                        SELECT id FROM daily_planner_weekly_objectives
+                        WHERE plan_id=%s AND position=%s
+                        LIMIT 1
+                        """,
+                        (plan_id, objective["position"]),
+                    )
+                    existing_objective = cur.fetchone() or {}
+                    if existing_objective:
+                        objective_id = existing_objective["id"]
+                        cur.execute(
+                            """
+                            UPDATE daily_planner_weekly_objectives
+                            SET title=%s, measurable_target=%s, deadline=%s,
+                                result=%s, deleted_at=NULL, updated_at=now()
+                            WHERE id=%s AND user_id=%s
+                            """,
+                            (
+                                objective["title"], objective["measurable_target"],
+                                objective["deadline"], objective["result"],
+                                objective_id, clean_user_id,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO daily_planner_weekly_objectives(
+                                plan_id, user_id, position, title, measurable_target, deadline, result
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (
+                                plan_id, clean_user_id, objective["position"],
+                                objective["title"], objective["measurable_target"],
+                                objective["deadline"], objective["result"],
+                            ),
+                        )
+                        objective_id = cur.fetchone()["id"]
+                    for tactic in objective["tactics"]:
+                        cur.execute(
+                            """
+                            SELECT id FROM daily_planner_weekly_tactics
+                            WHERE objective_id=%s AND position=%s
+                            LIMIT 1
+                            """,
+                            (objective_id, tactic["position"]),
+                        )
+                        existing_tactic = cur.fetchone() or {}
+                        values = (
+                            tactic["action"], tactic["due_day"], tactic["status"],
+                            tactic["estimated_minutes"], tactic["linked_sheet_id"] or None,
+                            tactic["linked_task_type"], tactic["linked_task_index"],
+                        )
+                        if existing_tactic:
+                            cur.execute(
+                                """
+                                UPDATE daily_planner_weekly_tactics
+                                SET action=%s, due_day=%s, status=%s, estimated_minutes=%s,
+                                    linked_sheet_id=%s, linked_task_type=%s, linked_task_index=%s,
+                                    completed_at=CASE WHEN %s='completed' THEN COALESCE(completed_at, now()) ELSE NULL END,
+                                    deleted_at=NULL, updated_at=now()
+                                WHERE id=%s AND user_id=%s
+                                """,
+                                (*values, tactic["status"], existing_tactic["id"], clean_user_id),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                INSERT INTO daily_planner_weekly_tactics(
+                                    objective_id, plan_id, user_id, position, action, due_day,
+                                    status, estimated_minutes, linked_sheet_id, linked_task_type,
+                                    linked_task_index, completed_at
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                    CASE WHEN %s='completed' THEN now() ELSE NULL END)
+                                """,
+                                (
+                                    objective_id, plan_id, clean_user_id, tactic["position"],
+                                    *values, tactic["status"],
+                                ),
+                            )
+                rows = _load_week_plan_rows(
+                    cur, clean_user_id, clean_week_start, cycle_id=clean_cycle_id
+                )
+            conn.commit()
+    except Exception as error:
+        mapped = _weekly_plan_schema_error(error)
+        if mapped is error:
+            raise
+        raise mapped from error
+    return _weekly_plan_bundle_from_rows(*rows)
+
+
+def list_daily_planner_cycle_archive(user_id, anchor_date=None):
+    clean_user_id = str(user_id or "").strip()
+    anchor = _weekly_plan_week_start(anchor_date or datetime.now(ZoneInfo("Australia/Sydney")).date())
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                cur.execute(
+                    """
+                    SELECT * FROM daily_planner_cycles
+                    WHERE user_id=%s
+                    ORDER BY (start_date <= %s::date AND start_date + 83 >= %s::date) DESC,
+                             start_date DESC
+                    LIMIT 1
+                    """,
+                    (clean_user_id, anchor, anchor),
+                )
+                cycle = cur.fetchone() or {}
+                if not cycle:
+                    return {"cycle": {}, "plans": [], "monthly_reviews": [], "query_count": 1}
+                cur.execute(
+                    """
+                    SELECT * FROM daily_planner_weekly_plans
+                    WHERE user_id=%s AND cycle_id=%s
+                    ORDER BY week_number
+                    """,
+                    (clean_user_id, cycle["id"]),
+                )
+                plans = cur.fetchall()
+                plan_ids = [row["id"] for row in plans]
+                objectives = []
+                tactics = []
+                if plan_ids:
+                    cur.execute(
+                        """
+                        SELECT * FROM daily_planner_weekly_objectives
+                        WHERE plan_id = ANY(%s) AND deleted_at IS NULL
+                        ORDER BY plan_id, position
+                        """,
+                        (plan_ids,),
+                    )
+                    objectives = cur.fetchall()
+                    cur.execute(
+                        """
+                        SELECT * FROM daily_planner_weekly_tactics
+                        WHERE plan_id = ANY(%s) AND deleted_at IS NULL
+                        ORDER BY plan_id, objective_id, position
+                        """,
+                        (plan_ids,),
+                    )
+                    tactics = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT * FROM daily_planner_monthly_reviews
+                    WHERE user_id=%s AND cycle_id=%s
+                    ORDER BY month_start
+                    """,
+                    (clean_user_id, cycle["id"]),
+                )
+                monthly = [dict(row or {}) for row in cur.fetchall()]
+    except Exception as error:
+        raise _weekly_plan_schema_error(error) from error
+    objective_by_plan = {}
+    tactic_by_objective = {}
+    for tactic in tactics:
+        tactic_by_objective.setdefault(str(tactic.get("objective_id")), []).append(tactic)
+    for objective in objectives:
+        objective = dict(objective or {})
+        objective["tactics"] = tactic_by_objective.get(str(objective.get("id")), [])
+        objective_by_plan.setdefault(str(objective.get("plan_id")), []).append(objective)
+    clean_plans = []
+    for plan in plans:
+        plan = dict(plan or {})
+        plan["id"] = str(plan.get("id") or "")
+        plan["cycle_id"] = str(plan.get("cycle_id") or "")
+        plan["objectives"] = objective_by_plan.get(plan["id"], [])
+        clean_plans.append(plan)
+    cycle = dict(cycle)
+    cycle["id"] = str(cycle.get("id") or "")
+    for row in monthly:
+        row["id"] = str(row.get("id") or "")
+        row["cycle_id"] = str(row.get("cycle_id") or "")
+        row["summary"] = dict(row.get("summary") or {})
+    return {
+        "cycle": cycle,
+        "plans": clean_plans,
+        "monthly_reviews": monthly,
+        "query_count": 4 if plan_ids else 2,
+    }
 
 
 def load_home_weekly_work_bundle(

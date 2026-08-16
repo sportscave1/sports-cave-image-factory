@@ -299,6 +299,14 @@ def get_supabase_backend():
 def _storage_error(error):
     if isinstance(error, DashboardStorageError):
         return str(error)
+    try:
+        import supabase_backend
+
+        schema_message = supabase_backend.daily_planner_schema_error_message(error)
+    except Exception:
+        schema_message = ""
+    if schema_message:
+        return schema_message
     return "Dashboard saving is unavailable right now."
 
 
@@ -308,7 +316,7 @@ def _daily_outcome_storage_error(error):
     try:
         import supabase_backend
 
-        schema_message = supabase_backend.daily_execution_outcome_schema_error_message(error)
+        schema_message = supabase_backend.daily_planner_schema_error_message(error)
     except Exception:
         schema_message = ""
     if schema_message:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import logging
 import time
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,7 @@ PLANNER_WEEKLY_REVIEW_PATH = "/api/os/daily-planner/weekly-review"
 PLANNER_STATUS_PATH = "/api/os/daily-planner/status"
 PLANNER_TIMEZONE = "Australia/Sydney"
 SYDNEY_TZ = ZoneInfo(PLANNER_TIMEZONE)
+LOGGER = logging.getLogger(__name__)
 
 
 def _json_safe(value):
@@ -101,6 +103,31 @@ def _mutation_error_payload(error, *, retryable):
         "error": message,
         "error_code": code,
         "retryable": bool(retryable),
+    }
+
+
+def _bootstrap_error_payload(error):
+    message = _safe_error(error)
+    migration = "20260815_daily_execution_task_outcomes.sql"
+    if migration.casefold() in message.casefold():
+        code = "daily_planner_outcome_migration_required"
+    elif "migration" in message.casefold() and "daily planner" in message.casefold():
+        code = "daily_planner_schema_migration_required"
+    else:
+        code = "daily_planner_bootstrap_storage_failed"
+        if message in {
+            "Dashboard saving is unavailable right now.",
+            "Daily Planner storage is unavailable right now.",
+        }:
+            message = (
+                "Daily Planner storage could not be reached. Retry now. "
+                "If it continues, contact an administrator."
+            )
+    return {
+        "ok": False,
+        "error": message,
+        "error_code": code,
+        "retryable": True,
     }
 
 
@@ -182,7 +209,8 @@ async def planner_bootstrap(request: Request):
         selected_date = _request_date(request)
         payload = _load_sheet_bundle(_user(claims), selected_date)
     except Exception as error:
-        return _json({"ok": False, "error": _safe_error(error)}, 503)
+        LOGGER.exception("Daily Planner bootstrap failed")
+        return _json(_bootstrap_error_payload(error), 503)
     return _json(
         {
             "ok": True,
