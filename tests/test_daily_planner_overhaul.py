@@ -375,7 +375,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('data-action="finish-active"', client_source)
         self.assertIn('data-action="skip-active"', client_source)
         self.assertIn("state.bundle.active_timer = {};", client_source)
-        self.assertIn("broadcastTimer(clearsActive ? {} : activeTimer())", client_source)
+        self.assertIn(
+            "broadcastTimer(clearsActive ? {} : activeTimer(), [], terminalTimerId)",
+            client_source,
+        )
         self.assertNotIn("state.bundle.active_timer = previousActive;", client_source)
         self.assertIn('action:"task_outcome"', client_source)
         self.assertNotIn('action:"timer_outcome"', client_source)
@@ -751,6 +754,61 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertTrue(body["retryable"])
         self.assertEqual(message, body["error"])
 
+    def test_did_not_finish_api_returns_authoritative_terminal_sheet(self):
+        user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}
+        token = top_bar_security.create_top_bar_token(
+            user,
+            can_manage_daily_planner=True,
+            now=1_786_742_400,
+            seconds=3600,
+        )
+        saved_result = {
+            "sheet": {
+                "id": "sheet-1",
+                "sheet_date": "2026-08-15",
+                "top_tasks": [{
+                    "task": "Pack orders",
+                    "status": "couldnt_finish",
+                    "outcome": "did_not_finish",
+                    "actual_elapsed_seconds": 120,
+                    "outcome_version": 1,
+                }],
+                "additional_items": [],
+            },
+            "timer": {
+                "id": "timer-1",
+                "status": "completed",
+                "outcome": "did_not_finish",
+                "outcome_required": False,
+            },
+            "already_applied": False,
+        }
+        request = planner_api_request(
+            daily_planner.PLANNER_MUTATION_PATH,
+            token,
+            method="POST",
+            payload={
+                "action": "task_outcome",
+                "sheet_id": "sheet-1",
+                "task_type": "top",
+                "task_index": 0,
+                "timer_id": "timer-1",
+                "outcome": "did_not_finish",
+            },
+        )
+        with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
+            sports_cave_dashboard,
+            "apply_daily_planner_task_outcome",
+            return_value=saved_result,
+        ) as save:
+            response = asyncio.run(daily_planner.planner_mutation(request))
+
+        body = json.loads(response.body)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("couldnt_finish", body["result"]["sheet"]["top_tasks"][0]["status"])
+        self.assertEqual("did_not_finish", body["result"]["timer"]["outcome"])
+        self.assertEqual("did_not_finish", save.call_args.args[4])
+
     def test_outcome_client_waits_for_server_and_uses_one_shot_chimes(self):
         planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(
             encoding="utf-8"
@@ -764,7 +822,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         ]
 
         self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index("stopChime()"))
-        self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index('outcome.classList.add("hidden")'))
+        self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index("closeOutcomeModal()"))
         self.assertIn("state.outcomeSaving", outcome_source)
         self.assertIn('trigger.textContent = "Saving\\u2026"', planner_source)
         self.assertIn("data-outcome-retry", planner_source)
@@ -784,6 +842,87 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('["dashboard", "reporting", "weekly review"].includes(route)', topbar_source)
         self.assertIn("offset:.31, duration:.40", planner_source)
         self.assertIn("playOne(0.31, 0.40", topbar_source)
+
+    def test_confirmed_outcome_fully_closes_and_cannot_be_reopened_by_stale_timer_state(self):
+        planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        topbar_source = (
+            ROOT / "components" / "sports_cave_top_bar" / "index.html"
+        ).read_text(encoding="utf-8")
+        close_source = planner_source[
+            planner_source.index("const focusPlannerControls") :
+            planner_source.index("const escapeHtml")
+        ]
+        outcome_source = planner_source[
+            planner_source.index("const applyTaskOutcome") :
+            planner_source.index("const updateTimerDisplays")
+        ]
+        show_source = planner_source[
+            planner_source.index("const showOutcome =") :
+            planner_source.index("const refreshStatus")
+        ]
+        receive_source = planner_source[
+            planner_source.index("const receiveTimerState") :
+            planner_source.index("const enableAudio")
+        ]
+        status_source = planner_source[
+            planner_source.index("const refreshStatus") :
+            planner_source.index("const scheduleStatus")
+        ]
+
+        self.assertIn("outcome?.remove()", close_source)
+        self.assertIn("outcome = null", close_source)
+        self.assertIn('document.querySelectorAll("[data-planner-outcome-backdrop]")', close_source)
+        self.assertIn("view.inert = false", close_source)
+        self.assertIn("compactView.inert = false", close_source)
+        self.assertIn("requestAnimationFrame", close_source)
+        self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index("state.bundle.sheet = result.sheet"))
+        self.assertLess(outcome_source.index("state.bundle.sheet = result.sheet"), outcome_source.index("closeOutcomeModal()"))
+        self.assertIn("markTimerTerminal(terminalTimerId)", outcome_source)
+        self.assertIn("clearTimerEffectClaims(terminalTimerId)", outcome_source)
+        self.assertIn("renderCurrent()", outcome_source)
+        self.assertIn("{preserveView:true, restoreFocus:true}", outcome_source)
+        self.assertIn('showToast(outcomeMessage, "success", 3500)', outcome_source)
+        self.assertIn('data-outcome="completed"', show_source)
+        self.assertIn('data-outcome="did_not_finish"', show_source)
+        self.assertIn("if (showOutcome(timer))", show_source)
+        self.assertIn("terminalTimerIds", planner_source)
+        self.assertIn("timerEpoch !== state.timerEpoch", planner_source)
+        self.assertIn("currentTimerPayload(payload.timer)", status_source)
+        self.assertIn("terminal_timer_id", receive_source)
+        self.assertIn("if (payload.terminal_timer_id) localStorage.setItem", planner_source)
+        self.assertIn("const outcomeVisible = showOutcome(timer)", status_source)
+        self.assertIn("plannerTimerWasTerminated(payload.timer)", topbar_source)
+        self.assertIn("terminalPlannerTimerIds", topbar_source)
+        self.assertIn("dismissPlannerToast()", topbar_source)
+        self.assertIn("if (payload.terminal_timer_id) parentWindow.localStorage.setItem", topbar_source)
+        self.assertIn("parentWindow.localStorage.removeItem(timerStorageKey())", topbar_source)
+
+    def test_failed_outcome_keeps_retry_and_double_submit_is_suppressed(self):
+        planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        outcome_source = planner_source[
+            planner_source.index("const applyTaskOutcome") :
+            planner_source.index("const updateTimerDisplays")
+        ]
+        failure_source = outcome_source[
+            outcome_source.index("} catch (error) {") :
+            outcome_source.index("if (!result?.sheet?.id)")
+        ]
+        toast_source = planner_source[
+            planner_source.index("const showToast") :
+            planner_source.index("const showSkeleton")
+        ]
+
+        self.assertIn("if (state.outcomeSaving) return null", outcome_source)
+        self.assertIn("showOutcomeError(error)", failure_source)
+        self.assertIn("showTaskOutcomeRetry(error)", failure_source)
+        self.assertNotIn("closeOutcomeModal", failure_source)
+        self.assertIn("data-outcome-retry", planner_source)
+        self.assertIn("clearTimeout(state.toastTimer)", toast_source)
+        self.assertIn("setTimeout(() => toast.classList.add(\"hidden\"), duration)", toast_source)
 
     def test_legacy_expiry_route_delegates_to_canonical_locked_outcome(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")

@@ -217,7 +217,8 @@
       outcomeSaving: false, pendingOutcome: null, outcomeTimerId: "",
       compact: localStorage.getItem("scPlannerCompact") === "1",
       fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
-      pendingFocusActive: false, timerScope: "",
+      pendingFocusActive: false, timerScope: "", terminalTimerIds: new Set(),
+      timerEpoch: 0, plannerLoadId: 0, outcomeFocusReturn: null,
     };
     const surfaceId = `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timerChannel = "BroadcastChannel" in window ? new BroadcastChannel("sports-cave-daily-planner") : null;
@@ -227,7 +228,43 @@
     const statusText = document.querySelector("#connection-status");
     const performanceText = document.querySelector("#performance-status");
     const toast = document.querySelector("#toast");
-    const outcome = document.querySelector("#outcome");
+    let outcome = document.querySelector("#outcome");
+    const ensureOutcomeModal = () => {
+      if (outcome?.isConnected) return outcome;
+      outcome = document.createElement("div");
+      outcome.id = "outcome";
+      outcome.className = "outcome hidden";
+      outcome.setAttribute("role", "alertdialog");
+      outcome.setAttribute("aria-modal", "true");
+      outcome.setAttribute("aria-labelledby", "outcome-title");
+      document.body.appendChild(outcome);
+      return outcome;
+    };
+    const focusPlannerControls = (preferred=null) => {
+      const applyFocus = () => {
+        const fallback = document.querySelector("#work-date, [data-action='today'], #compact-toggle");
+        const target = preferred?.isConnected ? preferred : fallback;
+        target?.focus?.({preventScroll:true});
+      };
+      applyFocus();
+      requestAnimationFrame(applyFocus);
+    };
+    const closeOutcomeModal = ({restoreFocus=true}={}) => {
+      const wasOpen = Boolean(outcome?.isConnected && !outcome.classList.contains("hidden"));
+      const focusReturn = state.outcomeFocusReturn;
+      state.outcomeFocusReturn = null;
+      state.outcomeSaving = false;
+      state.pendingOutcome = null;
+      state.outcomeTimerId = "";
+      view.inert = false;
+      compactView.inert = false;
+      document.body.classList.remove("outcome-open");
+      document.querySelectorAll("[data-planner-outcome-backdrop]").forEach((element) => element.remove());
+      outcome?.remove();
+      outcome = null;
+      if (!restoreFocus || !wasOpen) return;
+      focusPlannerControls(focusReturn);
+    };
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
       "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;"
     })[char]);
@@ -293,12 +330,40 @@
       halfway_notified_at:timer.halfway_notified_at || null, expiry_notified_at:timer.expiry_notified_at || null,
       updated_at:timer.updated_at || null,
     } : {};
-    const broadcastTimer = (timer, events=[]) => {
-      const payload = {type:"timer-state", source:surfaceId, scope:state.timerScope, timer:timerMirror(timer), events, sent_at:Date.now()};
+    const broadcastTimer = (timer, events=[], terminalTimerId="") => {
+      const payload = {type:"timer-state", source:surfaceId, scope:state.timerScope, timer:timerMirror(timer), events, terminal_timer_id:String(terminalTimerId || ""), sent_at:Date.now()};
       try { timerChannel?.postMessage(payload); } catch (_error) {}
-      try { localStorage.setItem(timerStorageKey(), JSON.stringify(payload)); } catch (_error) {}
+      try {
+        if (payload.timer.id) localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+        else {
+          if (payload.terminal_timer_id) localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+          localStorage.removeItem(timerStorageKey());
+        }
+      } catch (_error) {}
       try { window.opener?.postMessage({...payload, type:"sports-cave-planner-timer-state"}, location.origin); } catch (_error) {}
     };
+    const markTimerTerminal = (timerId) => {
+      const cleanId = String(timerId || "");
+      if (!cleanId || state.terminalTimerIds.has(cleanId)) return false;
+      state.terminalTimerIds.add(cleanId);
+      state.timerEpoch += 1;
+      clearTimeout(state.statusTimer);
+      return true;
+    };
+    const timerWasTerminated = (timer) => Boolean(timer?.id && state.terminalTimerIds.has(String(timer.id)));
+    const clearTimerEffectClaims = (timerId) => {
+      const cleanId = String(timerId || "");
+      if (!cleanId) return;
+      const prefix = `scPlannerEffect:${state.timerScope || "none"}:`;
+      try {
+        Object.keys(localStorage).forEach((key) => {
+          if (key.startsWith(prefix) && key.includes(`:${cleanId}:`)) localStorage.removeItem(key);
+        });
+        localStorage.removeItem(timerStorageKey());
+      } catch (_error) {}
+    };
+    const currentTimerPayload = (timer) => timerWasTerminated(timer) ? {} : (timer || {});
+    const currentTimerEvents = (events) => (events || []).filter((event) => !timerWasTerminated(event?.timer));
     const claimSideEffect = (kind, timer) => {
       const eventStamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
@@ -366,20 +431,25 @@
     const receiveTimerState = (payload) => {
       if (!payload || payload.source === surfaceId || payload.type !== "timer-state") return;
       if (!state.timerScope || payload.scope !== state.timerScope) return;
-      if (state.bundle) state.bundle.active_timer = payload.timer || {};
+      const terminalTimerId = String(payload.terminal_timer_id || "");
+      if (terminalTimerId) markTimerTerminal(terminalTimerId);
+      const timer = currentTimerPayload(payload.timer);
+      if (state.bundle) state.bundle.active_timer = timer;
       updateTimerDisplays();
-      if (payload.timer?.outcome_required || payload.timer?.status === "expired") {
-        showOutcomeClaimed(payload.timer);
-      } else if (!payload.timer?.id || payload.timer?.outcome) {
+      if (timer.outcome_required || timer.status === "expired") {
+        showOutcomeClaimed(timer);
+      } else if (!timer.id || timer.outcome) {
         stopChime();
-        outcome.classList.add("hidden");
-        state.outcomeTimerId = "";
-        if (!state.outcomeSaving) state.pendingOutcome = null;
+        if (terminalTimerId || (!state.outcomeSaving && !state.pendingOutcome)) closeOutcomeModal();
       }
     };
     if (timerChannel) timerChannel.addEventListener("message", (event) => receiveTimerState(event.data));
     window.addEventListener("storage", (event) => {
-      if (event.key !== timerStorageKey() || !event.newValue) return;
+      if (event.key !== timerStorageKey()) return;
+      if (!event.newValue) {
+        receiveTimerState({type:"timer-state", source:"storage", scope:state.timerScope, timer:{}});
+        return;
+      }
       try { receiveTimerState(JSON.parse(event.newValue)); } catch (_error) {}
     });
 
@@ -648,7 +718,7 @@
     };
     const focusActiveTask = () => {
       const timer = activeTimer();
-      if (!timer?.id) return;
+      if (!timer?.id || timerWasTerminated(timer)) return;
       if (timer.sheet_date && timer.sheet_date !== state.bundle?.work_date) {
         state.pendingFocusActive = true;
         loadPlanner(timer.sheet_date);
@@ -662,18 +732,27 @@
       row?.querySelector("button")?.focus({preventScroll:true});
       if (timer.outcome_required || timer.status === "expired") showOutcomeClaimed(timer);
     };
-    const loadPlanner = async (workDate) => {
+    const loadPlanner = async (workDate, {preserveView=false, restoreFocus=false}={}) => {
       if (!state.token) return;
-      state.loading = true; state.dataStartedAt = performance.now(); state.draft = null; state.editingNew = false;
-      showSkeleton();
+      const loadId = ++state.plannerLoadId;
+      const timerEpoch = state.timerEpoch;
+      state.dataStartedAt = performance.now();
+      if (!preserveView) {
+        state.loading = true; state.draft = null; state.editingNew = false;
+        showSkeleton();
+      }
       try {
         const payload = await requestJson(`/api/os/daily-planner/bootstrap?date=${encodeURIComponent(workDate || isoToday())}`);
+        if (loadId !== state.plannerLoadId || timerEpoch !== state.timerEpoch) return false;
+        payload.active_timer = currentTimerPayload(payload.active_timer);
+        payload.events = currentTimerEvents(payload.events);
         state.bundle = payload; state.initialLoadComplete = true; state.loading = false;
+        if (preserveView) state.draft = normalDraft(payload.sheet || {});
         state.weeklyAnchor ||= payload.work_date;
         statusText.textContent = "Saved planner state connected";
         const clientMs = Math.round(performance.now() - state.dataStartedAt);
         performanceText.textContent = `Shell ${Math.round(shellVisibleAt)} ms | Planner ${clientMs} ms | Server ${Math.round(payload.performance?.planner_data_ms || 0)} ms`;
-        broadcastTimer(payload.active_timer || {}, payload.events || []);
+        broadcastTimer(payload.active_timer, payload.events);
         if (state.pendingFocusActive && payload.active_timer?.sheet_date && payload.active_timer.sheet_date !== payload.work_date) {
           return loadPlanner(payload.active_timer.sheet_date);
         }
@@ -688,7 +767,15 @@
         });
         if (activeTimer().outcome_required || activeTimer().status === "expired") showOutcomeClaimed(activeTimer());
         if (state.pendingFocusActive) setTimeout(focusActiveTask, 0);
+        else if (restoreFocus) focusPlannerControls();
       } catch (error) {
+        if (loadId !== state.plannerLoadId || timerEpoch !== state.timerEpoch) return false;
+        if (preserveView) {
+          state.loading = false;
+          statusText.textContent = "Task saved; planner refresh pending";
+          if (restoreFocus) focusPlannerControls();
+          return false;
+        }
         state.loading = false; state.initialLoadComplete = true;
         view.innerHTML = `<div class="notice error"><strong>Daily Planner could not load.</strong><br>${escapeHtml(error.message)}</div><button class="button" data-action="retry">Retry</button>`;
         statusText.textContent = "Planner storage unavailable";
@@ -736,7 +823,7 @@
       return Array.isArray(tasks) ? tasks[Number(taskIndex)] || {} : {};
     };
     const setOutcomeSavingState = (saving, trigger) => {
-      outcome.querySelectorAll("[data-outcome], [data-outcome-retry]").forEach((button) => { button.disabled = saving; });
+      outcome?.querySelectorAll("[data-outcome], [data-outcome-retry]").forEach((button) => { button.disabled = saving; });
       if (!trigger) return;
       if (saving) {
         trigger.dataset.savedLabel = trigger.textContent;
@@ -747,7 +834,7 @@
       }
     };
     const showOutcomeError = (error) => {
-      const box = outcome.querySelector("[data-outcome-error]");
+      const box = outcome?.querySelector("[data-outcome-error]");
       if (!box) return;
       box.querySelector("span").textContent = error.message || "Daily Planner could not save this outcome.";
       box.classList.remove("hidden");
@@ -765,10 +852,11 @@
       );
     };
     const showTaskOutcomeRetry = (error) => {
-      outcome.innerHTML = `<h2 id="outcome-title">Task outcome was not saved</h2><div class="notice error outcome-error" data-outcome-error role="alert"><span>${escapeHtml(error.message || "Daily Planner could not save this outcome.")}</span><button class="button small" data-outcome-retry>Retry</button></div>`;
-      outcome.classList.remove("hidden");
-      outcome.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
-      outcome.querySelector("[data-outcome-retry]").focus();
+      const modal = ensureOutcomeModal();
+      modal.innerHTML = `<h2 id="outcome-title">Task outcome was not saved</h2><div class="notice error outcome-error" data-outcome-error role="alert"><span>${escapeHtml(error.message || "Daily Planner could not save this outcome.")}</span><button class="button small" data-outcome-retry>Retry</button></div>`;
+      modal.classList.remove("hidden");
+      modal.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
+      modal.querySelector("[data-outcome-retry]").focus();
     };
     const notifyPlannerDataUpdated = (sheet) => {
       const payload = {type:"sports-cave-planner-data-updated", source:surfaceId, scope:state.timerScope, sheet_date:sheet?.sheet_date || "", sent_at:Date.now()};
@@ -805,7 +893,7 @@
       state.pendingOutcome = {...request, timer, options:{confirm:false, outcomeModal:Boolean(options.outcomeModal)}};
       setOutcomeSavingState(true, options.trigger);
       if (options.outcomeModal) {
-        outcome.querySelector("[data-outcome-error]")?.classList.add("hidden");
+        outcome?.querySelector("[data-outcome-error]")?.classList.add("hidden");
       }
       let result;
       try {
@@ -821,15 +909,33 @@
         }
         return null;
       }
-      state.outcomeSaving = false;
-      state.pendingOutcome = null;
-      setOutcomeSavingState(false, options.trigger);
+      if (!result?.sheet?.id) {
+        state.outcomeSaving = false;
+        setOutcomeSavingState(false, options.trigger);
+        const responseError = new Error("The task was saved, but the server did not return the updated planner. Retry to confirm the saved state.");
+        if (options.outcomeModal) showOutcomeError(responseError);
+        else showTaskOutcomeRetry(responseError);
+        return null;
+      }
+      const terminalTimerId = selectedOutcome === "reopen"
+        ? ""
+        : String(result?.timer?.id || timer?.id || (clearsActive ? previousActive.id : "") || "");
+      if (terminalTimerId) markTimerTerminal(terminalTimerId);
+      if (state.bundle) {
+        state.bundle.sheet = result.sheet;
+        state.bundle.work_date = result.sheet.sheet_date || state.bundle.work_date;
+        state.draft = normalDraft(result.sheet);
+        state.editingNew = false;
+        state.loading = false;
+        if (clearsActive || timerWasTerminated(state.bundle.active_timer)) state.bundle.active_timer = {};
+      }
+      state.tab = "planner";
       stopChime();
-      outcome.classList.add("hidden");
-      state.outcomeTimerId = "";
+      clearTimerEffectClaims(terminalTimerId);
+      closeOutcomeModal();
       invalidateReports();
-      if (clearsActive && state.bundle) state.bundle.active_timer = {};
-      broadcastTimer(clearsActive ? {} : activeTimer());
+      renderCurrent();
+      broadcastTimer(clearsActive ? {} : activeTimer(), [], terminalTimerId);
       notifyPlannerDataUpdated(result?.sheet || {});
       if (selectedOutcome === "completed") {
         const savedTask = savedTaskFor(result?.sheet, taskType, taskIndex);
@@ -844,16 +950,18 @@
         did_not_finish:"Task recorded as not completed.",
         reopen:"Task reopened.",
       }[selectedOutcome] || "Task updated.";
-      showToast(outcomeMessage, "success");
-      try {
-        await loadPlanner(result?.sheet?.sheet_date || state.bundle.work_date);
-      } catch (_error) {
-        showToast("Task saved, but the planner view could not refresh. Reopen the planner to reload it.", "error", 9000);
-      }
+      showToast(outcomeMessage, "success", 3500);
+      await loadPlanner(result.sheet.sheet_date || state.bundle.work_date, {preserveView:true, restoreFocus:true});
       return result;
     };
     const updateTimerDisplays = () => {
       const timer = activeTimer();
+      if (timerWasTerminated(timer)) {
+        if (state.bundle) state.bundle.active_timer = {};
+        closeOutcomeModal();
+        renderCompact();
+        return;
+      }
       document.querySelectorAll('[data-countdown="active"]').forEach((element) => { element.textContent = formatClock(timerRemaining(timer)); });
       renderCompact();
       if (timer.id && timer.status === "running" && timerRemaining(timer) <= 0 && !timer.outcome) {
@@ -863,35 +971,56 @@
       }
     };
     const showOutcome = (timer) => {
-      if (!timer?.id || timer.outcome) { outcome.classList.add("hidden"); return; }
-      if (!outcome.classList.contains("hidden") && state.outcomeTimerId === timer.id) return;
+      if (!timer?.id || timer.outcome || timerWasTerminated(timer)) {
+        if (!state.outcomeSaving) closeOutcomeModal();
+        return false;
+      }
+      const savedTask = savedTaskFor(state.bundle?.sheet, timer.task_type, timer.task_index);
+      if (terminalOutcome(savedTask)) {
+        markTimerTerminal(timer.id);
+        if (state.bundle) state.bundle.active_timer = {};
+        broadcastTimer({}, [], timer.id);
+        closeOutcomeModal();
+        return false;
+      }
+      const modal = ensureOutcomeModal();
+      if (!modal.classList.contains("hidden") && state.outcomeTimerId === timer.id) return true;
       state.outcomeTimerId = timer.id;
-      outcome.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="notice error outcome-error hidden" data-outcome-error role="alert"><span></span><button class="button small" data-outcome-retry>Retry</button></div><div class="sound-row"><label><input type="checkbox" data-sound-enabled ${state.soundEnabled ? "checked" : ""}> Sound</label><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
-      outcome.classList.remove("hidden");
-      outcome.querySelector("[data-outcome]")?.focus();
-      outcome.querySelectorAll("[data-outcome]").forEach((button) => button.addEventListener("click", async () => {
+      state.outcomeFocusReturn = document.activeElement;
+      view.inert = true;
+      compactView.inert = true;
+      document.body.classList.add("outcome-open");
+      modal.dataset.timerId = String(timer.id);
+      modal.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="notice error outcome-error hidden" data-outcome-error role="alert"><span></span><button class="button small" data-outcome-retry>Retry</button></div><div class="sound-row"><label><input type="checkbox" data-sound-enabled ${state.soundEnabled ? "checked" : ""}> Sound</label><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
+      modal.classList.remove("hidden");
+      modal.querySelector("[data-outcome]")?.focus();
+      modal.querySelectorAll("[data-outcome]").forEach((button) => button.addEventListener("click", async () => {
         await applyTaskOutcome(timer.task_type, timer.task_index, button.dataset.outcome, timer, timer.sheet_id, {confirm:false, outcomeModal:true, trigger:button});
       }));
-      outcome.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
-      outcome.querySelector("[data-sound-enabled]").addEventListener("change", (event) => {
+      modal.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
+      modal.querySelector("[data-sound-enabled]").addEventListener("change", (event) => {
         state.soundEnabled = Boolean(event.target.checked);
         localStorage.setItem("scPlannerSoundEnabled", state.soundEnabled ? "1" : "0");
         syncSoundButton();
       });
-      outcome.querySelector("[data-volume]").addEventListener("input", (event) => { state.volume = Number(event.target.value); localStorage.setItem("scPlannerVolume", String(state.volume)); });
+      modal.querySelector("[data-volume]").addEventListener("input", (event) => { state.volume = Number(event.target.value); localStorage.setItem("scPlannerVolume", String(state.volume)); });
+      return true;
     };
     const showOutcomeClaimed = (timer) => {
-      showOutcome(timer);
-      runClaimedSideEffect("time-up", timer, playTimeUpChime);
+      if (showOutcome(timer)) runClaimedSideEffect("time-up", timer, playTimeUpChime);
     };
     const refreshStatus = async (immediate=false) => {
       clearTimeout(state.statusTimer);
       if (!state.token) return;
+      const timerEpoch = state.timerEpoch;
       try {
         const payload = await requestJson("/api/os/daily-planner/status");
+        if (timerEpoch !== state.timerEpoch) return;
+        payload.timer = currentTimerPayload(payload.timer);
+        payload.events = currentTimerEvents(payload.events);
         const previousId = activeTimer().id;
-        if (state.bundle) state.bundle.active_timer = payload.timer || {};
-        broadcastTimer(payload.timer || {}, payload.events || []);
+        if (state.bundle) state.bundle.active_timer = payload.timer;
+        broadcastTimer(payload.timer, payload.events);
         (payload.events || []).forEach((event) => {
           const timer = event.timer || {};
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
@@ -902,12 +1031,14 @@
         });
         const timer = activeTimer();
         if (timer.outcome_required || timer.status === "expired") {
-          showOutcome(timer);
-          if (previousId !== timer.id || immediate) runClaimedSideEffect("time-up", timer, playTimeUpChime);
+          const outcomeVisible = showOutcome(timer);
+          if (outcomeVisible && (previousId !== timer.id || immediate)) {
+            runClaimedSideEffect("time-up", timer, playTimeUpChime);
+          }
         }
         updateTimerDisplays();
       } catch (_error) {}
-      scheduleStatus();
+      if (timerEpoch === state.timerEpoch) scheduleStatus();
     };
     const scheduleStatus = () => {
       clearTimeout(state.statusTimer);

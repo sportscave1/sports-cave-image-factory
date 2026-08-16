@@ -567,6 +567,7 @@
       plannerExpiryRequested: false,
       plannerHalfwayRequested: false,
       plannerDataRefreshPending: false,
+      terminalPlannerTimerIds: new Set(),
     };
     const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.dailyPlannerTimerScope || "none"}`;
     const plannerDataStorageKey = () => `scPlannerDataUpdated:${state.config.dailyPlannerTimerScope || "none"}`;
@@ -895,11 +896,23 @@
       outcome:String(timer.outcome || ""), halfway_notified_at:timer.halfway_notified_at || null,
       expiry_notified_at:timer.expiry_notified_at || null, updated_at:timer.updated_at || null,
     } : {};
-    const broadcastPlannerTimer = (timer, events=[]) => {
-      const payload = {type:"timer-state", source:surfaceId, scope:state.config.dailyPlannerTimerScope || "", timer:safePlannerTimer(timer), events, sent_at:Date.now()};
+    const broadcastPlannerTimer = (timer, events=[], terminalTimerId="") => {
+      const payload = {type:"timer-state", source:surfaceId, scope:state.config.dailyPlannerTimerScope || "", timer:safePlannerTimer(timer), events, terminal_timer_id:String(terminalTimerId || ""), sent_at:Date.now()};
       try { plannerChannel?.postMessage(payload); } catch (_error) {}
-      try { parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload)); } catch (_error) {}
+      try {
+        if (payload.timer.id) parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+        else {
+          if (payload.terminal_timer_id) parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+          parentWindow.localStorage.removeItem(timerStorageKey());
+        }
+      } catch (_error) {}
     };
+    const plannerTimerWasTerminated = (timer) => Boolean(
+      timer?.id && state.terminalPlannerTimerIds.has(String(timer.id))
+    );
+    const currentPlannerEvents = (events) => (events || []).filter(
+      (event) => !plannerTimerWasTerminated(event?.timer)
+    );
     const claimPlannerEffect = (kind, timer) => {
       const stamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
@@ -975,7 +988,7 @@
       plannerButton.setAttribute("aria-label", `Open Daily Planner, ${task}, ${spokenState}`);
     };
     const handlePlannerEvents = (events) => {
-      (events || []).forEach((event) => {
+      currentPlannerEvents(events).forEach((event) => {
         const timer = {...(event.timer || {}), task:event.task || event.timer?.task};
         if (event.event === "halfway") {
           runClaimedPlannerEffect("halfway", timer, () => showPlannerToast(`Halfway through: ${timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey:`halfway:${timer.id}:${timer.halfway_notified_at || timer.started_at || ""}`}));
@@ -985,7 +998,7 @@
       });
     };
     const applyPlannerTimerState = (timer, events=[]) => {
-      state.plannerTimer = safePlannerTimer(timer);
+      state.plannerTimer = plannerTimerWasTerminated(timer) ? {} : safePlannerTimer(timer);
       if (!state.plannerTimer.id || state.plannerTimer.outcome) stopPlannerChime();
       if (!state.plannerTimer.id || state.plannerTimer.status !== "expired") state.plannerExpiryRequested = false;
       if (!state.plannerTimer.id || state.plannerTimer.halfway_notified_at) state.plannerHalfwayRequested = false;
@@ -1006,8 +1019,9 @@
       state.plannerStatusPending = true;
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
-        applyPlannerTimerState(payload.timer || {}, payload.events || []);
-        broadcastPlannerTimer(payload.timer || {}, payload.events || []);
+        const events = currentPlannerEvents(payload.events);
+        applyPlannerTimerState(payload.timer || {}, events);
+        broadcastPlannerTimer(state.plannerTimer, events);
         const timer = state.plannerTimer;
         if (timer.outcome_required || timer.status === "expired") {
           runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
@@ -1023,6 +1037,16 @@
       if (!payload || payload.source === surfaceId) return;
       if (!["timer-state", "sports-cave-planner-timer-state"].includes(payload.type)) return;
       if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
+      const terminalTimerId = String(payload.terminal_timer_id || "");
+      if (terminalTimerId) {
+        state.terminalPlannerTimerIds.add(terminalTimerId);
+        dismissPlannerToast();
+        stopPlannerChime();
+        if (String(state.plannerTimer?.id || "") === terminalTimerId) {
+          applyPlannerTimerState({});
+        }
+      }
+      if (plannerTimerWasTerminated(payload.timer)) return;
       applyPlannerTimerState(payload.timer || {}, payload.events || []);
     };
     const handlePlannerDataUpdated = (payload) => {
@@ -1037,10 +1061,12 @@
     };
     plannerChannel?.addEventListener("message", (event) => receivePlannerTimerState(event.data));
     parentWindow.addEventListener("storage", (event) => {
-      if (!event.newValue) return;
       try {
-        if (event.key === timerStorageKey()) receivePlannerTimerState(JSON.parse(event.newValue));
-        if (event.key === plannerDataStorageKey()) handlePlannerDataUpdated(JSON.parse(event.newValue));
+        if (event.key === timerStorageKey()) {
+          if (event.newValue) receivePlannerTimerState(JSON.parse(event.newValue));
+          else applyPlannerTimerState({});
+        }
+        if (event.key === plannerDataStorageKey() && event.newValue) handlePlannerDataUpdated(JSON.parse(event.newValue));
       } catch (_error) {}
     }, listenerOptions);
     doc.addEventListener("visibilitychange", () => {
