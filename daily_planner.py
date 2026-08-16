@@ -281,8 +281,20 @@ async def planner_mutation(request: Request):
 
         if action == "save_sheet":
             selected_date = date.fromisoformat(str(payload.get("work_date") or ""))
-            top_tasks = _clean_tasks(payload.get("top_tasks"), top=True)
-            if not any(row["task"] for row in top_tasks):
+            top_rows = _clean_tasks(payload.get("top_tasks"), top=True)
+            incomplete_top = next(
+                (
+                    row
+                    for row in top_rows
+                    if not row["task"]
+                    and (row.get("why") or row.get("time_blocked") or row.get("status"))
+                ),
+                None,
+            )
+            if incomplete_top:
+                raise ValueError("Add a task name for every major task row you fill.")
+            top_tasks = [row for row in top_rows if row["task"]]
+            if not top_tasks:
                 raise ValueError("Add at least one major execution task before saving the plan.")
             planning = dict(payload.get("planning_data") or {})
             planning_data = {

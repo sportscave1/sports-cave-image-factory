@@ -55,7 +55,7 @@ _MANIFEST_LINK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _MANAGED_META_PATTERN = re.compile(
-    r"\s*<meta\b(?=[^>]*\bname\s*=\s*['\"](?:theme-color|application-name|mobile-web-app-capable|apple-mobile-web-app-capable|apple-mobile-web-app-title|msapplication-TileColor|msapplication-TileImage|msapplication-starturl)['\"])[^>]*?/?>",
+    r"\s*<meta\b(?=[^>]*\bname\s*=\s*['\"](?:viewport|theme-color|application-name|mobile-web-app-capable|apple-mobile-web-app-capable|apple-mobile-web-app-title|apple-mobile-web-app-status-bar-style|msapplication-TileColor|msapplication-TileImage|msapplication-starturl)['\"])[^>]*?/?>",
     re.IGNORECASE,
 )
 _MANAGED_BLOCK_PATTERN = re.compile(
@@ -73,11 +73,13 @@ def initial_document_metadata_html() -> str:
     return dedent(
         f"""
         {_INITIAL_METADATA_START}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="{APP_THEME_COLOR}" />
         <meta name="application-name" content="{APP_NAME}" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content="{APP_NAME}" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="msapplication-TileColor" content="{APP_THEME_COLOR}" />
         <meta name="msapplication-TileImage" content="{APP_MS_TILE_ICON_URL}" />
         <meta name="msapplication-starturl" content="/?page=dashboard" />
@@ -145,6 +147,12 @@ def install_metadata_html() -> str:
             if (doc.title !== {APP_NAME!r}) doc.title = {APP_NAME!r};
 
             upsertHeadElement({{
+              id: "sports-cave-os-viewport",
+              selector: 'meta[name="viewport"]',
+              tag: "meta",
+              attrs: {{ name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }},
+            }});
+            upsertHeadElement({{
               id: "sports-cave-os-manifest",
               selector: 'link[rel="manifest"]',
               tag: "link",
@@ -179,6 +187,12 @@ def install_metadata_html() -> str:
               selector: 'meta[name="apple-mobile-web-app-title"]',
               tag: "meta",
               attrs: {{ name: "apple-mobile-web-app-title", content: {APP_NAME!r} }},
+            }});
+            upsertHeadElement({{
+              id: "sports-cave-os-apple-status-bar",
+              selector: 'meta[name="apple-mobile-web-app-status-bar-style"]',
+              tag: "meta",
+              attrs: {{ name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" }},
             }});
             upsertHeadElement({{
               id: "sports-cave-os-shortcut-icon",

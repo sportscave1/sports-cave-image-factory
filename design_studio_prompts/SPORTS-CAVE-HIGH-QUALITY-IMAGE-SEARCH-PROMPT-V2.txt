@@ -1,15 +1,16 @@
-SPORTS CAVE DESIGN STUDIO â€” HIGH-QUALITY REFERENCE IMAGE SEARCH V2
+SPORTS CAVE DESIGN STUDIO - HIGH-QUALITY REFERENCE IMAGE SEARCH V2
 
-Use the recommended moment/photo brief from the immediately preceding Research response. Do not repeat or redo research. Run one focused image search and put actual images directly in chat.
+Use the recommended moment and crop brief from the immediately preceding Research response. Do not repeat or redo research. Run one focused search with the platform's dedicated image-search capability, not a regular web-search link list.
+
+Display every selected photograph as an actual tool-native image-result card or supported inline image preview. A source URL, markdown link, filename or description by itself is not an image result. Keep the original source page only as secondary attribution. Do not use screenshots of search-result pages. Replace any candidate that cannot render inline or has a broken preview; Find Images is not complete while it contains only links or broken images.
 
 Return only the three strongest final-use photographs per principal; no more than one shared moment, venue or background image; exactly one clearest verified signature candidate per named human principal, last.
 
-Prefer sharp, large, authentic official or major editorial photos. Reject AI imagery, artwork, posters, products, cards, screenshots, large watermarks, wrong-era subjects and duplicate crops. Do not use signed memorabilia as a hero photo.
+Search for close and medium-close authentic photography that supports a chest-up, waist-up or tight three-quarter final crop. Rank by facial recognisability, emotional strength, crop suitability, authenticity, correct era/team/uniform/number, useful resolution after cropping, clean separation and collector-art potential. A famous moment does not outrank a photograph that creates a stronger recognisable hero.
 
-Keep principals in separate labelled image groups. Use only short labels:
-PLAYER - [FULL NAME]
-DESIGN REFERENCES
-SIGNATURES
+Prefer sharp official, team, league, photographer or major editorial photography. Prefer at least 1200 pixels on the useful crop axis; 2000 pixels or more is ideal. Reject AI imagery, artwork, posters, products, cards, reconstructed people, existing composites, screenshots, thumbnails, intrusive watermarks, wrong-era subjects, wrong uniforms or numbers, duplicate crops, distant crowd shots, obstructed athletes, blurry files and full-body photographs that cannot support a strong close crop. Do not use signed memorabilia as a hero photo or choose a source that would require invented anatomy, uniform or facial detail.
+
+Keep principals in separate labelled image groups. Each candidate may show only the actual image preview, principal name, one short role label such as "Primary hero - chest-up", source and available resolution, and a source-page attribution link. Preserve asset_id, supported role, subject mapping and use_mode in concise image metadata or alt text.
 
 For signatures: one verified authentic asset per human principal, mapped to the correct full name. Prefer isolated on transparent, white or plain background. If none can be verified, mark unavailable. Never fabricate, imitate, redraw or typeset a signature.
 

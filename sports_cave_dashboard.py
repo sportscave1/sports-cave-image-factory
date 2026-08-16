@@ -1586,6 +1586,11 @@ def _normalise_top_tasks(items):
     return rows
 
 
+def _normalise_top_tasks_for_save(items):
+    """Keep editor-only blank slots out of persisted task JSON."""
+    return [row for row in _normalise_top_tasks(items) if _compact_text(row.get("task") or "")]
+
+
 def _normalise_daily_task_status(item):
     item = dict(item or {})
     status = _compact_text(item.get("status") or "").casefold()
@@ -1957,7 +1962,7 @@ def save_daily_execution_plan(
                 user_name=daily_execution_user_name(user),
                 sheet_date=clean_date,
                 timezone_name=timezone_name,
-                top_tasks=_normalise_top_tasks(top_tasks),
+                top_tasks=_normalise_top_tasks_for_save(top_tasks),
                 additional_items=_normalise_additional_items_for_save(additional_items),
                 planning_data=dict(planning_data or {}),
                 archive_sheet_id=str(archive_sheet_id or "").strip() or None,
@@ -1968,7 +1973,7 @@ def save_daily_execution_plan(
             if existing:
                 raw = backend.update_daily_execution_top_tasks(
                     existing.get("id"),
-                    _normalise_top_tasks(top_tasks),
+                    _normalise_top_tasks_for_save(top_tasks),
                     _normalise_additional_items_for_save(additional_items),
                     user_id=user_id,
                 )
@@ -1982,7 +1987,7 @@ def save_daily_execution_plan(
                 )
                 raw = backend.update_daily_execution_top_tasks(
                     raw.get("id"),
-                    _normalise_top_tasks(top_tasks),
+                    _normalise_top_tasks_for_save(top_tasks),
                     _normalise_additional_items_for_save(additional_items),
                     user_id=user_id,
                 )

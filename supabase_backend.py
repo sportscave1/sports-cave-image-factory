@@ -4072,64 +4072,82 @@ def save_daily_execution_plan(
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
-                "SELECT id, status FROM daily_execution_sheets WHERE user_id=%s AND sheet_date=%s::date LIMIT 1 FOR UPDATE",
+                "SELECT * FROM daily_execution_sheets WHERE user_id=%s AND sheet_date=%s::date LIMIT 1 FOR UPDATE",
                 (clean_user_id, clean_date),
             )
             existing = cur.fetchone() or {}
             if str(existing.get("status") or "").casefold() == "archived":
                 raise ValueError("Archived execution sheets are read-only.")
-            cur.execute(
-                """
-                INSERT INTO daily_execution_sheets(
-                    user_id, user_name, sheet_date, timezone, status,
-                    top_tasks, additional_items, planning_data,
-                    no_grey_zone, ratings, review_data
-                )
-                VALUES (%s, %s, %s::date, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
-                        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
-                ON CONFLICT (user_id, sheet_date)
-                DO UPDATE SET
-                    user_name=EXCLUDED.user_name,
-                    timezone=EXCLUDED.timezone,
-                    status=CASE
-                        WHEN daily_execution_sheets.status IN ('reviewed', 'completed') THEN daily_execution_sheets.status
-                        ELSE EXCLUDED.status
-                    END,
-                    top_tasks=EXCLUDED.top_tasks,
-                    additional_items=EXCLUDED.additional_items,
-                    planning_data=EXCLUDED.planning_data,
-                    updated_at=now()
-                RETURNING *
-                """,
+            expected_status = (
+                str(existing.get("status") or "")
+                if str(existing.get("status") or "").casefold() in {"reviewed", "completed"}
+                else target_status
+            )
+            duplicate_save = bool(existing) and all(
                 (
-                    clean_user_id,
-                    clean_user_name,
-                    clean_date,
-                    clean_timezone,
-                    target_status,
-                    json_dumps(top_tasks or []),
-                    json_dumps(additional_items or []),
-                    json_dumps(planning_data or {}),
-                ),
+                    str(existing.get("user_name") or "") == clean_user_name,
+                    str(existing.get("timezone") or "Australia/Sydney") == clean_timezone,
+                    str(existing.get("status") or "") == expected_status,
+                    (existing.get("top_tasks") or []) == (top_tasks or []),
+                    (existing.get("additional_items") or []) == (additional_items or []),
+                    (existing.get("planning_data") or {}) == (planning_data or {}),
+                )
             )
-            saved_row = cur.fetchone() or {}
-            event_type = "daily_execution_tomorrow_planned" if target_status == "planned" else "daily_execution_created"
-            message = f"Tomorrow planned: {clean_date}" if target_status == "planned" else f"Daily sheet created: {clean_date}"
-            _insert_audit_log(
-                cur,
-                event_type=event_type,
-                entity_type="daily_execution_sheet",
-                entity_id=str(saved_row.get("id") or ""),
-                new_value={
-                    "message": message,
-                    "page": "Dashboard",
-                    "action_type": event_type,
-                    "metadata": {"sheet_date": clean_date, "updated_existing": bool(existing)},
-                },
-                reason=message,
-                actor=str(actor or "").strip() or clean_user_name,
-                source="Dashboard",
-            )
+            if duplicate_save:
+                saved_row = existing
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO daily_execution_sheets(
+                        user_id, user_name, sheet_date, timezone, status,
+                        top_tasks, additional_items, planning_data,
+                        no_grey_zone, ratings, review_data
+                    )
+                    VALUES (%s, %s, %s::date, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
+                            '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
+                    ON CONFLICT (user_id, sheet_date)
+                    DO UPDATE SET
+                        user_name=EXCLUDED.user_name,
+                        timezone=EXCLUDED.timezone,
+                        status=CASE
+                            WHEN daily_execution_sheets.status IN ('reviewed', 'completed') THEN daily_execution_sheets.status
+                            ELSE EXCLUDED.status
+                        END,
+                        top_tasks=EXCLUDED.top_tasks,
+                        additional_items=EXCLUDED.additional_items,
+                        planning_data=EXCLUDED.planning_data,
+                        updated_at=now()
+                    RETURNING *
+                    """,
+                    (
+                        clean_user_id,
+                        clean_user_name,
+                        clean_date,
+                        clean_timezone,
+                        target_status,
+                        json_dumps(top_tasks or []),
+                        json_dumps(additional_items or []),
+                        json_dumps(planning_data or {}),
+                    ),
+                )
+                saved_row = cur.fetchone() or {}
+                event_type = "daily_execution_tomorrow_planned" if target_status == "planned" else "daily_execution_created"
+                message = f"Tomorrow planned: {clean_date}" if target_status == "planned" else f"Daily sheet created: {clean_date}"
+                _insert_audit_log(
+                    cur,
+                    event_type=event_type,
+                    entity_type="daily_execution_sheet",
+                    entity_id=str(saved_row.get("id") or ""),
+                    new_value={
+                        "message": message,
+                        "page": "Dashboard",
+                        "action_type": event_type,
+                        "metadata": {"sheet_date": clean_date, "updated_existing": bool(existing)},
+                    },
+                    reason=message,
+                    actor=str(actor or "").strip() or clean_user_name,
+                    source="Dashboard",
+                )
             clean_archive_id = str(archive_sheet_id or "").strip()
             if clean_archive_id:
                 cur.execute(

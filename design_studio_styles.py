@@ -106,6 +106,52 @@ HUMAN_PRINCIPAL_ASSET_ROLES = frozenset(
 )
 
 
+HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT_MARKER = (
+    "SPORTS CAVE HERO PHOTOGRAPHIC DOMINANCE CONTRACT - MANDATORY"
+)
+HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT = f"""
+{HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT_MARKER}
+
+The authentic principal athlete or athletes must dominate the final collector artwork. Apply this same contract while researching, finding images, selecting assets, generating and reviewing.
+
+HERO CROP AND IDENTITY
+For most Sports Cave designs, select a chest-up, waist-up or tight three-quarter crop according to the real pose and sporting action. Preserve the recognisable face, authentic expression, helmet or headwear when worn, shoulders, jersey, available jersey number, upper-body pose and relevant equipment. Do not force every source into an identical crop and do not crop away information that makes the moment authentic. An explicit rear-jersey, whole-moment or archival style may use the genuine wider source when that treatment is essential, but its principals must still read as the heroes.
+
+SCALE AND COMPOSITION
+For one athlete, make that person the immediate visual focus and normally about 60-80% of the usable artwork height. The face must remain recognisable at Shopify-thumbnail size. Reject empty compositions built around a small distant or unnecessary full-body figure.
+
+For two athletes, keep both principals dominant with comparable facial importance unless the task explicitly names a primary hero. Use compatible chest-up, waist-up or tight three-quarter crops, preserve clear separation, keep both faces unobscured and keep both subjects fully inside the Sports Cave border. Never reduce one rival to a small background ghost or shrink either principal to make room for scenery, text or effects.
+
+SOURCE SUITABILITY
+Judge resolution on the intended crop, not only the uncropped file. Prefer at least 1200 pixels on the useful crop axis; 2000 pixels or more is ideal. Reject distant crowd shots, obstructed athletes, blurry or heavily compressed files, thumbnails, duplicate crops and full-body sources that cannot support a strong close crop. If a real source cannot create a dominant hero at print quality, return to Find Images and replace that source rather than reconstructing it.
+
+IMMUTABLE AUTHENTIC SOURCE
+Allowed: non-generative cropping, positioning, proportional scaling, masking or cutout extraction, colour grading, lighting integration, background separation and subtle edge blending.
+
+Never redraw or regenerate a face, face-swap, change an expression, re-pose a person, invent missing limbs, extend a body with generated anatomy, rebuild a uniform, jersey number, helmet or equipment, or combine a face from one source with a body from another. Build the composition around what the selected photograph genuinely contains.
+""".strip()
+
+
+FIND_IMAGES_INLINE_RESULT_CONTRACT = """
+INLINE IMAGE RESULT CONTRACT - FIND IMAGES IS NOT COMPLETE WITHOUT VISIBLE PHOTOGRAPHS
+
+Use the platform's dedicated image-search capability, not a regular web-search link list. Display every selected candidate as an actual tool-native image-result card or supported inline image preview in the chat response. A source URL, markdown link, filename or text description by itself is not an image result. Do not use screenshots of search-result pages.
+
+If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate that can be displayed. Never declare Find Images complete when the response contains only links or broken previews. Keep the original source page as secondary attribution, not the primary result.
+
+Keep each principal in a separate labelled image group. Return no more than the three strongest final-use photographs per principal, no more than one relevant venue or shared-moment image, and exactly one clearest verified signature candidate per named human principal, placed last.
+
+Each candidate may show only: the actual image preview; principal name; one short role label such as "Primary hero - chest-up"; source and available resolution; and a source-page attribution link. Preserve asset_id, supported role, subject mapping and use_mode in the image card metadata or concise alt text so later stages can reference the exact asset. Do not turn that metadata into an essay or expose a raw URL as the primary output.
+""".strip()
+
+
+GENERATION_ASSET_VALIDATION_CONTRACT = """
+VISIBLE PRE-GENERATION ASSET VALIDATION
+
+Before generating, show one concise PASS/REPLACE line per selected hero asset. Confirm that the exact principal and role mapping are correct, the authentic source supports the intended crop, useful crop resolution is sufficient, no principal will be distant, full-body or accidentally secondary, no face or body must be reconstructed, and the proposed composition fits inside the landscape 4:3 Sports Cave border. Replace an unsuitable source through Find Images before generating.
+""".strip()
+
+
 @dataclass(frozen=True)
 class DesignStyle:
     slug: str
@@ -773,7 +819,7 @@ A winning design starts with one confident commercial concept and a clear photo 
 Return this concise handoff:
 1. Recommended defining moment, season, rivalry or identity
 2. Why fans would buy that moment
-3. Best photographic treatment for each principal
+3. Final photo brief for each principal: required chest-up, waist-up or three-quarter crop; desired expression and emotional tone; correct uniform, number, equipment and era; preferred viewing angle; primary or secondary asset role; minimum useful resolution after the intended crop; details that must remain visible; and distant or unsuitable full-body treatments to reject
 4. Exact era, uniform, equipment, vehicle and venue requirements
 5. Recommended hero image type and pose
 6. One optional supporting image or background reference
@@ -788,11 +834,13 @@ For rivalry or group designs, choose photographs that can coexist naturally in o
 COMMON_FIND_IMAGES_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
 
-Use the recommended moment and photo brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass and put actual image results directly into this chat.
+Use the recommended moment and crop brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for close and medium-close authentic photography that can produce the intended final composition.
 
 Return only the three strongest final-use photographs per principal, no more than one relevant shared-moment or venue image, and exactly one clearest verified signature candidate per named human principal last. Keep principals in separate labelled image groups. Use very short labels.
 
-Prefer sharp, large, authentic official or major editorial photographs. Reject AI imagery, artwork, posters, products, cards, screenshots, large watermarks, wrong-era subjects and duplicate crops. A signature must be a verified authentic asset, never typed, invented or guessed. If unavailable, mark unavailable.
+Rank final-use candidates in this order: facial recognisability; emotional strength; crop suitability; authenticity; correct era, team, uniform and number; useful resolution after cropping; clean separation from other people; premium collector-art potential. A famous historical moment does not outrank a photograph that produces a stronger recognisable hero.
+
+Prefer authentic official, team, league, photographer or major editorial photographs. Reject AI-generated or AI-reconstructed people, artwork, posters, trading cards, products, existing composites, screenshots, thumbnails, intrusive watermarks, wrong eras, wrong teams, wrong uniforms, wrong jersey numbers, duplicate crops, blurry or compressed files, obstructed athletes, distant crowd shots, small full-body figures and sources that would require invented anatomy, uniforms or faces. A signature must be one verified authentic asset, never typed, invented or guessed. If unavailable, mark unavailable.
 
 The visible response should be almost entirely images: no essay, long source commentary or repeated warnings.
 """.strip()
@@ -817,7 +865,9 @@ LIMITED-EDITION PLAQUE
 Use the exact Sports Cave limited-edition plaque asset from the plaque mapping section whenever available. Preserve its proportions and wording. Do not retype, regenerate or fake a serial number.
 
 SPORTS CAVE LOOK AND CONTAINMENT
-Use a deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, strong negative space, subtle relevant venue/track/stadium/era texture and one thin border fully inside the canvas. Background detail must support the story without generated players, recognisable crowds, random logos, oversized text, excessive smoke or clutter. Keep every subject, word, signature, plaque and effect fully inside the border and safe area.
+Build the background around the available hero crop. Use a deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, strong negative space, subtle relevant venue/track/stadium/era texture and one thin border fully inside the canvas. Let the authentic hero photography carry the emotion. Do not shrink principals to make room for unnecessary scenery, text or effects. Background detail must support the story without generated players, recognisable crowds, random logos, oversized text, excessive smoke or clutter. Keep every subject, word, signature, plaque and effect fully inside the border and safe area.
+
+Keep the title readable at Shopify-thumbnail size. Keep printed names and verified signatures readable but secondary to the heroes and title. Keep the exact limited-edition plaque subtle and contained. Do not add extra people or generated crowd figures.
 
 Style-specific composition may guide hierarchy, but it cannot suppress source-photo preservation, required names, verified signatures, plaque treatment, landscape 4:3, border containment, human-figure limits or text accuracy.
 """.strip()
@@ -837,11 +887,13 @@ Keep names and signatures fully inside the safe area and border. Never place sig
 COMMON_REVIEW_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - HARSH REVIEW
 
-Give a deliberately harsh commercial review of the supplied finished design using only the current task variables, names and asset mappings below. Ignore stale names, signatures or research details from previous tasks. Score it out of 10, identify visible failures, then give one precise correction brief.
+Give a direct commercial review of the supplied finished design using only the current task variables, names and asset mappings below. Ignore stale names, signatures or research details from previous tasks. Score it out of 10, identify visible failures, then give one precise correction brief. A polished, premium result that satisfies the contracts and needs only minimal changes may score 10/10; do not invent trivial faults merely to avoid a high score.
 
-Check: every named principal appears correctly; every human principal has the correct verified signature; signatures are authentic, correctly mapped, elegant and not oversized; the exact plaque is present, subtle and correctly positioned; title and names are readable at Shopify-thumbnail size; principal subjects remain original photographic assets; no AI reconstruction is visible; background detail is relevant and restrained; no extra people or generated crowd figures appear; composition resembles premium Sports Cave best-seller discipline; landscape 4:3, border containment, print readiness and framed collector appeal.
+Check: actual source photographs were used; every principal is clearly recognisable; faces are large and readable at Shopify-thumbnail size; heroes dominate; no principal is unnecessarily distant or full-body; background has not forced the subjects to become too small; rivalry subjects have comparable visual importance unless the task says otherwise; face, expression, uniform, number, equipment and anatomy remain authentic; no AI reconstruction is visible; every required name and verified signature is present, authentic, correctly mapped and readable; the exact plaque is present, subtle and correctly positioned; title and names are readable; no extra people or generated crowd figures appear; composition follows premium Sports Cave best-seller discipline; landscape 4:3, border containment, print readiness and framed collector appeal are intact.
 
-Hard-cap the score at 6/10 if any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable. The correction brief must preserve the existing artwork and identify the smallest exact edit needed.
+Hard-cap the score at 6/10 if a required principal is too small to recognise at thumbnail size; a distant or full-body source materially weakens the hero treatment; one of two principals is a minor background element; an unsuitable crop makes the face, jersey or sporting identity unclear; the Find Images response contained only links instead of visible candidates; or any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
+
+The correction brief must preserve the existing artwork and specify the smallest exact crop, proportional scale or positioning correction. If the authentic source itself is unsuitable, require replacing only that source photograph through Find Images. Never propose rebuilding the person.
 """.strip()
 
 
@@ -854,6 +906,7 @@ def build_research_prompt(style_slug, task_text, details=None):
     return "\n\n".join(
         (
             COMMON_RESEARCH_RULES,
+            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
             _task_variables(task_text, details, subjects),
             f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
             _adapter_block(adapter),
@@ -872,6 +925,8 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     return "\n\n".join(
         (
             COMMON_FIND_IMAGES_RULES,
+            FIND_IMAGES_INLINE_RESULT_CONTRACT,
+            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
             _task_variables(task_text, details, subjects),
             f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
             f"IMAGE ROLE CONTRACT\nRequired: {roles}. Optional: {optional}. Assign one supported role and use mode to every selected asset.",
@@ -891,6 +946,8 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
     return "\n\n".join(
         (
             COMMON_GENERATION_RULES,
+            GENERATION_ASSET_VALIDATION_CONTRACT,
+            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
             (
                 f"STYLE-SPECIFIC COMPOSITION - {style.label}\n"
                 f"Maximum distinct principal people: {style.maximum_distinct_human_subjects}. "
@@ -937,6 +994,7 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
     return "\n\n".join(
         (
             COMMON_REVIEW_RULES,
+            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
             _task_variables(task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),

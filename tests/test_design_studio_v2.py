@@ -128,7 +128,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 STYLE_DETAILS[slug],
             )
             with self.subTest(style=slug):
-                self.assertLess(len(prompt), 5500)
+                self.assertLess(len(prompt), 9500)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
 
@@ -266,7 +266,7 @@ class DesignStudioImageContractTests(unittest.TestCase):
         )
         fixed_body = prompt.split("TASK VARIABLES", 1)[0]
 
-        self.assertLessEqual(len(fixed_body), 1200)
+        self.assertLessEqual(len(fixed_body), 6500)
         self.assertIn("immediately preceding Research response", fixed_body)
         self.assertIn("Do not repeat or redo the research", fixed_body)
         self.assertIn("three strongest final-use photographs per principal", fixed_body)

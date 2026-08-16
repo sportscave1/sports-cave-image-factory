@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-import time
 
 import os_accounts
 import top_bar_security
@@ -27,6 +26,19 @@ def allowed_routes_for_user(user):
 
 def top_bar_config(user, *, logo_src, current_route):
     allowed_routes = allowed_routes_for_user(user)
+    planner_enabled = os_accounts.is_admin(user)
+    revision_payload = {
+        "user_id": str((user or {}).get("id") or ""),
+        "session_version": int((user or {}).get("session_version") or 1),
+        "role": str((user or {}).get("role") or ""),
+        "allowed_routes": allowed_routes,
+        "planner_enabled": planner_enabled,
+        "can_view_activity": os_accounts.can_view_activity_log(user),
+        "can_view_all_activity": os_accounts.is_reporting_owner(user),
+    }
+    revision = hashlib.sha256(
+        json.dumps(revision_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
     planner_timer_scope = hashlib.sha256(
         f"sports-cave-planner|{str((user or {}).get('id') or '').strip()}".encode("utf-8")
     ).hexdigest()[:24]
@@ -35,7 +47,7 @@ def top_bar_config(user, *, logo_src, current_route):
         allowed_routes=allowed_routes,
         can_view_activity=os_accounts.can_view_activity_log(user),
         can_view_all_activity=os_accounts.is_reporting_owner(user),
-        can_manage_daily_planner=os_accounts.is_admin(user),
+        can_manage_daily_planner=planner_enabled,
     )
     return {
         "appName": "Sports Cave OS",
@@ -49,10 +61,10 @@ def top_bar_config(user, *, logo_src, current_route):
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
         "dailyPlannerTimerScope": planner_timer_scope,
-        "dailyPlannerEnabled": os_accounts.is_admin(user),
+        "dailyPlannerEnabled": planner_enabled,
         "ordersEnabled": "Orders" in allowed_routes,
         "authToken": token,
-        "revision": str(time.time_ns()),
+        "revision": revision,
     }
 
 

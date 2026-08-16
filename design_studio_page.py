@@ -659,7 +659,7 @@ For every featured player, athlete, driver, rider, fighter, team or other princi
 * A clear, realistic and unobstructed face when the subject is human
 * Front-facing and three-quarter facial angles
 * Authentic action poses
-* Full-body or three-quarter-body views showing the uniform and equipment
+* Chest-up, waist-up or tight three-quarter views that keep the face, uniform, available number and equipment clear
 * The correct team, season, era, jersey, helmet, livery and colours
 * Strong hero compositions suitable for premium collector artwork
 * The best available resolution and photographic realism
@@ -679,6 +679,8 @@ Do not use these as normal player or hero references:
 * Heavily altered faces
 * Low-resolution thumbnails
 * Images where the face is obscured
+* Distant crowd shots or photographs where the principal occupies only a small part of the frame
+* Full-body photographs that cannot support a strong close crop at print quality
 * Repeated copies or alternate crops of the same photograph
 
 VENUE / BACKGROUND REFERENCES - SECOND PRIORITY
@@ -1777,7 +1779,7 @@ Use current web research to choose one strongest commercial concept and guide th
 Return this concise handoff:
 1. Recommended defining moment, season, rivalry or identity
 2. Why fans would buy that moment
-3. Best photographic treatment for each principal
+3. Final photo brief for each principal: chest-up, waist-up or three-quarter crop; expression and emotional tone; required uniform, number, equipment and era; viewing angle; primary or secondary asset role; minimum useful resolution after cropping; details that must remain visible; and distant or unsuitable full-body treatments to reject
 4. Exact era, uniform, equipment, vehicle and venue requirements
 5. Recommended hero image type and pose
 6. One optional supporting image or background reference
@@ -2569,7 +2571,7 @@ Premium limited-edition sports wall art for fans who collect moments, not poster
 """
 
 
-HARSH_REVIEW_PROMPT = """
+HARSH_REVIEW_PROMPT = f"""
 Give me a harsh truth review of this Sports Cave design.
 
 Rate it out of 10 as a premium limited-edition collector artwork.
@@ -2594,9 +2596,13 @@ Be commercially honest.
 Judge it like it needs to become a bestseller.
 
 Rule:
-Hard-cap the score at 6/10 if any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
+Hard-cap the score at 6/10 if a required principal is too small to recognise at thumbnail size; a distant or full-body source materially weakens the hero treatment; one of two principals is reduced to a minor background element; an unsuitable crop makes the face, jersey or sporting identity unclear; the Find Images response contains only links instead of visible candidates; or any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
 
-Do not stop just because it looks good enough. Preserve the existing artwork and recommend the smallest surgical edit that makes it premium, emotional, collector-worthy and ready to sell.
+A premium result that satisfies the full contract and needs only minimal changes may score 10/10. Do not invent trivial faults simply to avoid a high score.
+
+Preserve the existing artwork and recommend the smallest exact crop, proportional scale or positioning edit that makes it premium, emotional, collector-worthy and ready to sell. If the source itself is unsuitable, require replacing only that source photograph through Find Images.
+
+{design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT}
 """
 
 
@@ -3639,17 +3645,20 @@ def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
 
 
 def build_design_research_prompt(task_text: str) -> str:
-    return _clean_prompt(DESIGN_RESEARCH_PROMPT_TEMPLATE).replace(
+    prompt = _clean_prompt(DESIGN_RESEARCH_PROMPT_TEMPLATE).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
+    )
+    return "\n\n".join(
+        (prompt, design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT)
     )
 
 
 def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, design_context=None) -> str:
     prompt = _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
-    if design_studio_prompt_has_signature_image_search_rules(prompt):
-        return prompt
     image_search_sections = [
+        design_studio_styles.FIND_IMAGES_INLINE_RESULT_CONTRACT,
+        design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
         _clean_prompt(SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2),
         build_high_quality_image_search_context(
             task_text,
@@ -3674,7 +3683,14 @@ def build_design_generation_prompt(task_text: str, *, design_context=None) -> st
         design_context=design_context,
     )
     return "\n\n".join(
-        section for section in (prompt, asset_context) if str(section or "").strip()
+        section
+        for section in (
+            prompt,
+            design_studio_styles.GENERATION_ASSET_VALIDATION_CONTRACT,
+            design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            asset_context,
+        )
+        if str(section or "").strip()
     )
 
 

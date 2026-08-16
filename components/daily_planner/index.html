@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Sports Cave Daily Planner</title>
   <style>
     :root {
@@ -92,6 +92,7 @@
     .planning-grid .wide { grid-column: 1 / -1; }
     .save-row { align-items: center; display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
     .save-state { color: var(--muted); margin-right: auto; }
+    .save-state.error { color: var(--danger); }
     .empty {
       align-items: center; background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
       display: flex; justify-content: space-between; min-height: 74px; padding: 14px;
@@ -187,6 +188,7 @@
     .coach-facts ul { margin: 4px 0 0; padding-left: 18px; }
     .status-pill { background: #ece9e2; border-radius: 999px; display: inline-block; font-size: 10px; padding: 2px 7px; }
     .hidden { display: none !important; }
+    .mobile-only { display: none !important; }
     .compact-only { display: none !important; }
     body.compact { min-height: 340px; }
     body.compact .shell { grid-template-rows: 42px minmax(0,1fr); }
@@ -201,22 +203,159 @@
     .compact-countdown { color: #f2ce76; font-size: 58px; font-variant-numeric: tabular-nums; font-weight: 760; line-height: 1.2; }
     .compact-meta { color: #bcb7aa; display: flex; gap: 16px; font-size: 11px; }
     .compact-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
-    @media (max-width: 760px) {
+    @media (max-width: 820px), (max-width: 940px) and (max-height: 520px) {
+      body { font-size: 14px; }
+      body.planner-modal-open .main { overflow: hidden; }
+      .shell { grid-template-rows: 56px 46px minmax(0, 1fr) 24px; }
+      .header {
+        gap: 4px;
+        padding-left: max(4px, env(safe-area-inset-left));
+        padding-right: max(4px, env(safe-area-inset-right));
+      }
+      .mobile-only { display: inline-flex !important; }
+      .brand-mark { font-size: 20px; }
+      .header-title { font-size: 13px; }
+      .header-subtitle { display: none; }
+      .icon-button {
+        height: 44px;
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0 7px;
+      }
+      .tabs {
+        gap: 2px;
+        overflow-x: auto;
+        padding: 0 max(4px, env(safe-area-inset-left));
+        scrollbar-width: none;
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab {
+        flex: 1 0 auto;
+        min-height: 44px;
+        min-width: 92px;
+        padding: 0 10px;
+      }
+      .main {
+        overscroll-behavior: contain;
+        padding: 9px max(8px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+      }
+      .statusbar {
+        padding-left: max(8px, env(safe-area-inset-left));
+        padding-right: max(8px, env(safe-area-inset-right));
+      }
+      button,
+      .button {
+        min-height: 44px;
+      }
+      .button.small { height: 44px; min-height: 44px; }
+      input,
+      textarea,
+      select { font-size: 16px; min-height: 44px; }
+      .toolbar {
+        align-items: stretch;
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) 44px minmax(74px, auto);
+      }
+      .toolbar .date-input { width: 100%; }
+      .toolbar .spacer { display: none; }
+      .toolbar > .button:last-child { grid-column: 1 / -1; justify-self: end; }
+      .meta-row { gap: 7px 12px; }
       .task-header { display: none; }
-      .task-row { grid-template-columns: 24px 1fr; }
+      .task-row { grid-template-columns: 22px minmax(0, 1fr); padding: 8px 6px 10px; }
       .task-row > *:not(.task-index) { grid-column: 2; }
+      .task-row input,
+      .task-row select,
+      .task-row textarea { min-width: 0; }
+      .timer-cell {
+        border-top: 1px solid var(--line);
+        margin-top: 2px;
+        padding-top: 7px;
+      }
+      .timer-cell .button { flex: 1 1 6.5rem; }
+      .duration-input { flex: 0 1 82px; width: 82px; }
+      .countdown { align-self: center; min-width: 72px; padding-top: 0; }
+      .active-strip {
+        position: sticky;
+        top: -9px;
+        z-index: 8;
+      }
+      .active-strip .button { flex: 1 1 6.5rem; }
       .planning-grid, .review-grid, .ratings, .outcome-summary, .outcome-lists { grid-template-columns: 1fr; }
       .week-grid, .coach-grid { grid-template-columns: 1fr; }
       .week-grid .wide, .coach-grid .wide { grid-column: auto; }
       .tactic-row { grid-template-columns: 1fr 90px; }
       .tactic-row > *:nth-child(n+3) { grid-column: auto; }
       .planning-grid .wide, .review-grid .wide { grid-column: auto; }
+      .save-row {
+        flex-wrap: wrap;
+      }
+      .mobile-sticky-actions {
+        background: var(--soft);
+        bottom: -1px;
+        padding: 8px 0 max(4px, env(safe-area-inset-bottom));
+        position: sticky;
+        z-index: 7;
+      }
+      .save-row .button { margin-left: auto; }
+      .move-buttons button { min-width: 44px; }
+      .table-wrap {
+        max-height: min(58dvh, 500px);
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      .outcome {
+        border-radius: 10px 10px 0 0;
+        bottom: 0;
+        left: 0;
+        max-height: calc(100dvh - env(safe-area-inset-top));
+        max-width: none;
+        overflow-y: auto;
+        padding: 16px max(14px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+        top: auto;
+        transform: none;
+        width: 100%;
+      }
+      .outcome-actions { grid-template-columns: 1fr; }
+      .planner-modal-layer { align-items: flex-end; padding: 0; }
+      .planner-modal,
+      .planner-modal.compact-modal {
+        border-radius: 10px 10px 0 0;
+        height: min(94dvh, 760px);
+        max-height: calc(100dvh - env(safe-area-inset-top));
+        max-width: none;
+        width: 100%;
+      }
+      .planner-modal-header,
+      .planner-modal-footer {
+        flex-wrap: wrap;
+        min-height: 52px;
+        padding-left: max(10px, env(safe-area-inset-left));
+        padding-right: max(10px, env(safe-area-inset-right));
+      }
+      .planner-modal-footer {
+        padding-bottom: max(9px, env(safe-area-inset-bottom));
+      }
+      .planner-modal-footer .button { flex: 1 1 8.5rem; }
+      .planner-modal-body {
+        overscroll-behavior: contain;
+        padding: 10px max(10px, env(safe-area-inset-right)) 12px max(10px, env(safe-area-inset-left));
+      }
+      .toast {
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: max(8px, env(safe-area-inset-left));
+        max-width: none;
+        right: max(8px, env(safe-area-inset-right));
+      }
+      .rollover-notice { align-items: stretch; flex-wrap: wrap; }
+      .rollover-notice span { flex-basis: 100%; min-width: 0; }
+      .compact-countdown { font-size: 48px; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
     <header class="header">
+      <button class="icon-button mobile-only" id="mobile-back" title="Back to Sports Cave OS" aria-label="Back to Sports Cave OS">&#8592;</button>
       <div class="brand-mark">SC</div>
       <div><span class="header-title">Daily Planner</span><span class="header-subtitle">Daily Task Execution Sheet</span></div>
       <div class="header-spacer"></div>
@@ -250,7 +389,9 @@
     })();
     const state = {
       token: "", tab: "planner", bundle: null, draft: null, editingNew: false,
-      loading: true, saving: false, historyLoaded: false, weeklyLoaded: false,
+      loading: true, saving: false, saveError: "", saveRequestId: 0, saveController: null,
+      lastSaveSignature: "", lastSaveAt: 0,
+      historyLoaded: false, weeklyLoaded: false,
       historyPeriod: "today", historyStart: "", historyEnd: "", historyRows: [],
       weeklyAnchor: "", weekly: null, statusTimer: null, countdownTimer: null,
       toastTimer: null, seenEvents: new Set(), chimePlaying: false, chimeNodes: [],
@@ -449,17 +590,20 @@
       }
     };
     const postReady = () => window.opener?.postMessage({type:"sports-cave-planner-ready"}, location.origin);
-    window.addEventListener("message", (event) => {
-      if (event.origin !== location.origin || event.data?.type !== "sports-cave-planner-auth") return;
-      const token = String(event.data.token || "");
+    const acceptPlannerAuth = ({token="", timer_scope="", focus_active=false}={}) => {
+      token = String(token || "");
       if (!token) return;
       const changed = token !== state.token;
       state.token = token;
-      state.timerScope = String(event.data.timer_scope || "");
-      state.pendingFocusActive = state.pendingFocusActive || Boolean(event.data.focus_active);
+      state.timerScope = String(timer_scope || "");
+      state.pendingFocusActive = state.pendingFocusActive || Boolean(focus_active);
       statusText.textContent = "Secure session connected";
       if (changed && !state.initialLoadComplete) loadPlanner(isoToday());
-      else if (event.data.focus_active) focusActiveTask();
+      else if (focus_active) focusActiveTask();
+    };
+    window.addEventListener("message", (event) => {
+      if (event.origin !== location.origin || event.data?.type !== "sports-cave-planner-auth") return;
+      acceptPlannerAuth(event.data);
     });
 
     const timerRemaining = (timer) => {
@@ -589,12 +733,17 @@
       renderCompact();
     };
 
-    const blankTop = () => Array.from({length:3}, () => ({task:"", why:"", time_blocked:"", status:""}));
+    let draftRowSequence = 0;
+    const draftRow = (type, row={}) => ({
+      ...row,
+      _client_key: row._client_key || `${type}-${++draftRowSequence}-${Math.random().toString(36).slice(2,8)}`,
+    });
+    const blankTop = () => Array.from({length:3}, () => draftRow("top", {task:"", why:"", time_blocked:"", status:""}));
     const normalDraft = (sheet) => {
-      const additional = (sheet?.additional_items || []).filter((row) => row.task || row.details || row.time_blocked).map((row) => ({...row}));
+      const additional = (sheet?.additional_items || []).filter((row) => row.task || row.details || row.time_blocked).map((row) => draftRow("additional", row));
       return {
-        top_tasks: (sheet?.top_tasks?.length ? sheet.top_tasks : blankTop()).map((row) => ({...row})).slice(0,3),
-        additional_items: additional.length ? additional : [{task:"", details:"", time_blocked:"", status:""}],
+        top_tasks: (sheet?.top_tasks?.length ? sheet.top_tasks : blankTop()).map((row) => draftRow("top", row)).slice(0,3),
+        additional_items: additional.length ? additional : [draftRow("additional", {task:"", details:"", time_blocked:"", status:""})],
         planning_data: {...(sheet?.planning_data || {})},
       };
     };
@@ -613,6 +762,15 @@
       if (!state.draft) state.draft = normalDraft(state.bundle?.sheet || {});
       while (state.draft.top_tasks.length < 3) state.draft.top_tasks.push(blankTop()[0]);
       return state.draft;
+    };
+    const fieldIdentity = (task, type, field) => {
+      const dateKey = String(state.bundle?.work_date || "date").replace(/[^a-z0-9-]/gi,"-");
+      const rowKey = String(task?._client_key || `${type}-row`).replace(/[^a-z0-9-]/gi,"-");
+      return `planner-${dateKey}-${type}-${rowKey}-${field}`;
+    };
+    const fieldAttributes = (task, type, field) => {
+      const identity = fieldIdentity(task,type,field);
+      return `id="${identity}" name="${identity}" autocomplete="off"`;
     };
     const statusOptions = (selected) => [
       ["", "Open"], ["done", "Completed"], ["couldnt_finish", "Did not finish"], ["skipped", "Skipped"]
@@ -641,7 +799,7 @@
         const reset = timer.status === "expired" ? "" : '<button class="button small danger" data-action="reset-timer">Reset</button>';
         return `<div class="countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div>${control}${finish}<button class="button small skip" data-action="skip-task">Skip</button>${reset}`;
       }
-      return `<input class="duration-input" type="number" min="1" max="720" value="${Math.max(1,Math.round(defaultSeconds/60)||1)}" aria-label="Timer minutes"><button class="button small" data-action="start-timer" data-task-type="${type}" data-task-index="${index}">Start</button><button class="button small finish" data-action="finish-task">Finish</button><button class="button small skip" data-action="skip-task">Skip</button>`;
+      return `<input class="duration-input" type="number" min="1" max="720" value="${Math.max(1,Math.round(defaultSeconds/60)||1)}" ${fieldAttributes(task,type,"timer-minutes")} inputmode="numeric" aria-label="Timer minutes"><button class="button small" data-action="start-timer" data-task-type="${type}" data-task-index="${index}">Start</button><button class="button small finish" data-action="finish-task">Finish</button><button class="button small skip" data-action="skip-task">Skip</button>`;
     };
     const parseDuration = (value) => {
       const text = String(value || "").toLowerCase();
@@ -655,10 +813,10 @@
     const taskRow = (task, type, index, readOnly=false) => `
       <div class="task-row" data-task-type="${type}" data-task-index="${index}">
         <div class="task-index">${type === "top" ? index + 1 : "+"}${readOnly ? "" : '<div class="move-buttons"><button data-action="move-up" title="Move up" aria-label="Move task up">&#8593;</button><button data-action="move-down" title="Move down" aria-label="Move task down">&#8595;</button></div>'}</div>
-        <input data-field="task" value="${escapeHtml(task.task || "")}" aria-label="Task" ${readOnly ? "disabled" : ""}>
-        <input data-field="${type === "top" ? "why" : "details"}" value="${escapeHtml((type === "top" ? task.why : task.details) || "")}" aria-label="Details or outcome required" ${readOnly ? "disabled" : ""}>
-        <input data-field="time_blocked" value="${escapeHtml(task.time_blocked || "")}" aria-label="Time allocated" ${readOnly ? "disabled" : ""}>
-        <select data-field="status" aria-label="Task status" ${readOnly || terminalOutcome(task) ? "disabled" : ""}>${statusOptions(task.status || "")}</select>
+        <input data-field="task" value="${escapeHtml(task.task || "")}" ${fieldAttributes(task,type,"task")} aria-label="Task" ${readOnly ? "disabled" : ""}>
+        <input data-field="${type === "top" ? "why" : "details"}" value="${escapeHtml((type === "top" ? task.why : task.details) || "")}" ${fieldAttributes(task,type,type === "top" ? "why" : "details")} aria-label="Details or outcome required" ${readOnly ? "disabled" : ""}>
+        <input data-field="time_blocked" value="${escapeHtml(task.time_blocked || "")}" ${fieldAttributes(task,type,"time-blocked")} inputmode="decimal" aria-label="Time allocated" ${readOnly ? "disabled" : ""}>
+        <select data-field="status" ${fieldAttributes(task,type,"status")} aria-label="Task status" ${readOnly || terminalOutcome(task) ? "disabled" : ""}>${statusOptions(task.status || "")}</select>
         <div class="timer-cell">${readOnly ? (terminalOutcome(task) ? '<span class="save-state">Review closed</span><button class="button small" data-action="reopen-task">Reopen</button>' : '<span class="save-state">Review closed</span>') : rowTimerControls(type,index,task)}${type === "additional" && !readOnly ? '<button class="button small danger" data-action="remove-task" title="Remove task">Remove</button>' : ""}</div>
       </div>`;
     const activeStrip = () => {
@@ -690,12 +848,14 @@
     const closePlannerModal = () => {
       if (!modalRoot.firstElementChild) return;
       modalRoot.innerHTML = "";
+      document.body.classList.remove("planner-modal-open");
       const target = modalFocusReturn;
       modalFocusReturn = null;
       target?.focus?.({preventScroll:true});
     };
     const renderModal = (title, body, footer, {compact=false, headerAction=""}={}) => {
       if (!modalRoot.firstElementChild) modalFocusReturn = document.activeElement;
+      document.body.classList.add("planner-modal-open");
       modalRoot.innerHTML = `<div class="planner-modal-layer" data-modal-layer><section class="planner-modal ${compact ? "compact-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="planner-modal-title"><header class="planner-modal-header"><h2 id="planner-modal-title">${escapeHtml(title)}</h2><span class="header-spacer"></span>${headerAction}<button class="button small modal-close" data-action="close-planner-modal" aria-label="Close" title="Close">&times;</button></header><div class="planner-modal-body">${body}</div><footer class="planner-modal-footer">${footer}</footer></section></div>`;
       requestAnimationFrame(() => modalRoot.querySelector("input, textarea, select, button")?.focus());
     };
@@ -829,7 +989,10 @@
       const sheet = bundle.sheet || {};
       const reviewed = ["reviewed","completed","archived"].includes(String(sheet.status || "").toLowerCase());
       const planLocked = reviewed || String(sheet.status || "").toLowerCase() === "finalised";
-      const saveLabel = bundle.work_date === bundle.today ? "Save today's plan" : bundle.work_date === addDays(bundle.today,1) ? "Save tomorrow's plan" : "Save plan";
+      const saveLabel = bundle.work_date === bundle.today ? "Save today's plan" : "Save plan";
+      const saveMessage = state.saveError
+        ? `<span class="save-state error" id="save-state" role="alert">${escapeHtml(state.saveError)}</span><button class="button" data-action="retry-save" ${state.saving ? "disabled" : ""}>Retry</button>`
+        : `<span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : planLocked ? "This plan was automatically finalised. Complete its Daily Review below." : "Changes are saved only when you choose Save."}</span>`;
       view.innerHTML = `
         ${reviewReminderMarkup()}<div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date)}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button><span class="header-spacer"></span><button class="button" data-action="plan-tomorrow">Plan tomorrow</button></div>
         ${activeStrip()}${carryoverMarkup()}
@@ -845,7 +1008,7 @@
           <label>Appointment, deadline or fixed event<input data-plan-field="fixed_event" value="${escapeHtml(draft.planning_data.fixed_event || "")}" ${planLocked ? "disabled" : ""}></label>
           <label class="wide">Planning notes<textarea data-plan-field="notes" ${planLocked ? "disabled" : ""}>${escapeHtml(draft.planning_data.notes || "")}</textarea></label>
         </div>
-        <div class="save-row"><span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : planLocked ? "This plan was automatically finalised. Complete its Daily Review below." : "Changes are saved only when you choose Save."}</span>${state.editingNew ? '<button class="button" data-action="cancel-new">Cancel</button>' : ""}${planLocked ? "" : `<button class="button primary" data-action="save-sheet" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving..." : saveLabel}</button>`}</div>
+        <div class="save-row mobile-sticky-actions">${saveMessage}${state.editingNew ? '<button class="button" data-action="cancel-new">Cancel</button>' : ""}${planLocked ? "" : `<button class="button primary" data-action="save-sheet" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving..." : saveLabel}</button>`}</div>
         ${sheet.id ? reviewMarkup(sheet, reviewed) : ""}`;
       bindDraftInputs();
     };
@@ -933,8 +1096,18 @@
       row?.querySelector("button")?.focus({preventScroll:true});
       if (timer.outcome_required || timer.status === "expired") showOutcomeClaimed(timer);
     };
+    const resetSaveLifecycle = ({abort=false, clearError=false}={}) => {
+      state.saveRequestId += 1;
+      if (abort) state.saveController?.abort();
+      state.saveController = null;
+      state.saving = false;
+      if (clearError) state.saveError = "";
+    };
     const loadPlanner = async (workDate, {preserveView=false, restoreFocus=false}={}) => {
       if (!state.token) return;
+      if (!preserveView || String(workDate || "") !== String(state.bundle?.work_date || "")) {
+        resetSaveLifecycle({abort:true, clearError:true});
+      }
       const loadId = ++state.plannerLoadId;
       const timerEpoch = state.timerEpoch;
       state.dataStartedAt = performance.now();
@@ -994,29 +1167,91 @@
         statusText.textContent = "Planner storage unavailable";
       }
     };
-    const mutate = async (payload) => {
-      const response = await requestJson("/api/os/daily-planner/mutate", {method:"POST", body:JSON.stringify(payload)});
+    const mutate = async (payload, options={}) => {
+      const response = await requestJson("/api/os/daily-planner/mutate", {method:"POST", body:JSON.stringify(payload), ...options});
       return response.result;
     };
     const invalidateReports = () => { state.historyLoaded = false; state.weeklyLoaded = false; };
+    const taskPayload = (task) => {
+      const payload = {...task};
+      delete payload._client_key;
+      return payload;
+    };
+    const hasTaskRowContent = (task, type) => Boolean(
+      String(task?.task || "").trim()
+      || String(type === "top" ? task?.why || "" : task?.details || "").trim()
+      || String(task?.time_blocked || "").trim()
+    );
     const saveSheet = async () => {
+      if (state.saving) return false;
       const draft = ensureDraft();
+      const targetDate = String(state.bundle?.work_date || "");
+      const topRows = draft.top_tasks.map(taskPayload);
+      const incompleteTop = topRows.find((task) => hasTaskRowContent(task,"top") && !String(task.task || "").trim());
+      if (incompleteTop) {
+        state.saveError = "Add a task name for every major task row you fill.";
+        renderPlanner();
+        return false;
+      }
+      const topTasks = topRows.filter((task) => String(task.task || "").trim());
+      if (!topTasks.length) {
+        state.saveError = "Add at least one major execution task before saving the plan.";
+        renderPlanner();
+        return false;
+      }
       const carry = [];
       view.querySelectorAll("[data-carry-index]:checked").forEach((box) => {
         const item = unfinishedFromSource()[Number(box.dataset.carryIndex)];
         if (item) carry.push({key:item.carryKey, task:item.task, details:item.details || "", time_blocked:item.time_blocked || "", status:"", carried_from:state.bundle.source_sheet.sheet_date || ""});
       });
-      const additional = [...carry, ...draft.additional_items];
+      const additional = [...carry, ...draft.additional_items.map(taskPayload)].filter((task) => hasTaskRowContent(task,"additional"));
       const source = state.bundle.source_sheet || {};
       const sourceReviewed = ["reviewed","completed","archived"].includes(String(source.status || "").toLowerCase());
       const archiveSheetId = state.bundle.work_date > state.bundle.today && sourceReviewed ? source.id || "" : "";
-      state.saving = true; renderPlanner();
+      const requestPayload = {action:"save_sheet", work_date:targetDate, top_tasks:topTasks, additional_items:additional, planning_data:{...draft.planning_data, carried_forward:carry}, archive_sheet_id:archiveSheetId};
+      const saveSignature = JSON.stringify(requestPayload);
+      if (saveSignature === state.lastSaveSignature && Date.now() - state.lastSaveAt < 1200) return false;
+      const requestId = ++state.saveRequestId;
+      const controller = new AbortController();
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+      state.saveController = controller;
+      state.saveError = "";
+      state.saving = true;
+      renderPlanner();
       try {
-        await mutate({action:"save_sheet", work_date:state.bundle.work_date, top_tasks:draft.top_tasks, additional_items:additional, planning_data:{...draft.planning_data, carried_forward:carry}, archive_sheet_id:archiveSheetId});
-        showToast("Daily Planner saved.", "success");
-        await loadPlanner(state.bundle.work_date);
+        const savedSheet = await mutate(
+          requestPayload,
+          {signal:controller.signal},
+        );
+        if (requestId !== state.saveRequestId || targetDate !== String(state.bundle?.work_date || "")) return false;
+        if (!savedSheet?.id || (savedSheet.sheet_date && String(savedSheet.sheet_date) !== targetDate)) {
+          throw new Error("The planner returned an invalid save response. Please retry.");
+        }
+        state.bundle = {...state.bundle, sheet:savedSheet};
+        state.draft = normalDraft(savedSheet);
+        state.editingNew = false;
+        state.saveError = "";
+        state.lastSaveSignature = saveSignature;
+        state.lastSaveAt = Date.now();
+        invalidateReports();
+        statusText.textContent = "Saved planner state connected";
+        showToast("Plan saved.", "success", 3500);
         return true;
-      } catch (error) { state.saving = false; renderPlanner(); showToast(error.message,"error",8000); return false; }
+      } catch (error) {
+        if (requestId !== state.saveRequestId || targetDate !== String(state.bundle?.work_date || "")) return false;
+        state.saveError = timedOut
+          ? "Saving timed out. Your changes are still here. Retry the save."
+          : `${error.message || "The plan could not be saved."} Your changes are still here.`;
+        return false;
+      } finally {
+        clearTimeout(timeout);
+        if (requestId === state.saveRequestId) {
+          state.saveController = null;
+          state.saving = false;
+          if (targetDate === String(state.bundle?.work_date || "")) renderPlanner();
+        }
+      }
     };
     const timerAction = async (action, extra={}) => {
       try {
@@ -1414,6 +1649,10 @@
     });
     syncSoundButton();
     document.querySelector("#compact-toggle").addEventListener("click", () => setCompact(!state.compact));
+    document.querySelector("#mobile-back").addEventListener("click", () => {
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = "/?page=dashboard";
+    });
     let resizeTimer = null;
     window.addEventListener("resize", () => {
       clearTimeout(resizeTimer);
@@ -1462,9 +1701,9 @@
         const timer = activeTimer();
         return applyTaskOutcome(timer.task_type, timer.task_index, "did_not_finish", timer, timer.sheet_id, {trigger:target});
       }
-      if (action === "create-sheet") { state.editingNew = true; state.draft = normalDraft({}); return renderPlanner(); }
-      if (action === "cancel-new") { state.editingNew = false; state.draft = null; return renderPlanner(); }
-      if (action === "add-task") { ensureDraft().additional_items.push({task:"",details:"",time_blocked:"",status:""}); return renderPlanner(); }
+      if (action === "create-sheet") { state.editingNew = true; state.saveError = ""; state.draft = normalDraft({}); return renderPlanner(); }
+      if (action === "cancel-new") { resetSaveLifecycle({abort:true,clearError:true}); state.editingNew = false; state.draft = null; return renderPlanner(); }
+      if (action === "add-task") { ensureDraft().additional_items.push(draftRow("additional", {task:"",details:"",time_blocked:"",status:""})); return renderPlanner(); }
       if (action === "remove-task") { ensureDraft().additional_items.splice(index,1); return renderPlanner(); }
       if (action === "move-up" || action === "move-down") {
         const list = ensureDraft()[type === "top" ? "top_tasks" : "additional_items"];
@@ -1473,6 +1712,7 @@
         return renderPlanner();
       }
       if (action === "save-sheet") return saveSheet();
+      if (action === "retry-save") return saveSheet();
       if (action === "finish-task") {
         const timer = activeMatches(type,index) ? activeTimer() : {};
         return applyTaskOutcome(type, index, "completed", timer, "", {trigger:target});
@@ -1522,8 +1762,16 @@
       state.historyPeriod = periodButton.dataset.period; state.historyLoaded = false; loadHistory();
     });
     state.countdownTimer = setInterval(updateTimerDisplays, 1000);
+    window.addEventListener("pagehide", () => resetSaveLifecycle({abort:true}));
     showSkeleton();
     setCompact(state.compact);
+    try {
+      const launchAuth = JSON.parse(sessionStorage.getItem("scSportsCavePlannerLaunchAuth") || "null");
+      sessionStorage.removeItem("scSportsCavePlannerLaunchAuth");
+      if (launchAuth?.token && Date.now() - Number(launchAuth.created_at || 0) < 300000) {
+        setTimeout(() => acceptPlannerAuth(launchAuth), 0);
+      }
+    } catch (_error) {}
     postReady();
     setTimeout(postReady, 250);
     setTimeout(postReady, 900);

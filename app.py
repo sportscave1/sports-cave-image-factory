@@ -3724,6 +3724,195 @@ def inject_styles():
                 font-size: 0.6rem;
             }
         }
+
+        /* Mobile presentation only. Business components and desktop density stay unchanged. */
+        @media (max-width: 820px), (max-width: 940px) and (max-height: 520px) {
+            :root {
+                --sc-topbar-height: 56px;
+            }
+
+            html,
+            body,
+            [data-testid="stAppViewContainer"],
+            [data-testid="stMain"] {
+                max-width: 100%;
+                overflow-x: hidden !important;
+            }
+
+            body.sc-mobile-nav-open {
+                overflow: hidden !important;
+            }
+
+            section[data-testid="stSidebar"] {
+                box-shadow: 12px 0 28px rgba(0, 0, 0, 0.2);
+                height: calc(100dvh - var(--sc-topbar-height)) !important;
+                left: 0 !important;
+                max-width: 20rem !important;
+                min-width: min(88vw, 20rem) !important;
+                top: var(--sc-topbar-height) !important;
+                transform: translateX(-102%);
+                transition: transform 160ms ease, visibility 160ms ease;
+                visibility: hidden;
+                width: min(88vw, 20rem) !important;
+                z-index: 999998 !important;
+            }
+
+            body.sc-mobile-nav-open section[data-testid="stSidebar"] {
+                transform: translateX(0);
+                visibility: visible;
+            }
+
+            section[data-testid="stSidebar"] > div {
+                padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
+                overscroll-behavior: contain;
+            }
+
+            section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+                min-height: 44px !important;
+            }
+
+            div[data-testid="stAppViewContainer"] > .main .block-container {
+                max-width: 100%;
+                padding-left: max(0.75rem, env(safe-area-inset-left));
+                padding-right: max(0.75rem, env(safe-area-inset-right));
+                padding-top: calc(var(--sc-topbar-height) + 0.8rem);
+            }
+
+            div[data-testid="stHorizontalBlock"] {
+                align-items: stretch;
+                flex-wrap: wrap;
+                gap: 0.5rem !important;
+                max-width: 100%;
+            }
+
+            div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+                flex: 1 1 10.5rem !important;
+                min-width: min(100%, 10.5rem) !important;
+                width: auto !important;
+            }
+
+            div[data-testid="stHorizontalBlock"]:has(textarea, [data-baseweb="select"], input[type="text"], input[type="date"], input[type="number"]) > div[data-testid="stColumn"] {
+                flex-basis: min(100%, 17rem) !important;
+                min-width: min(100%, 17rem) !important;
+            }
+
+            div[data-testid="stButton"] > button,
+            div[data-testid="stDownloadButton"] > button,
+            div[data-testid="stFormSubmitButton"] > button,
+            div[data-testid="stPopover"] button,
+            div[data-testid="stTabs"] button,
+            button[data-testid="stBaseButton-secondary"],
+            button[data-testid="stBaseButton-primary"] {
+                min-height: 44px !important;
+            }
+
+            button[data-testid="stBaseButton-elementToolbar"] {
+                height: 44px !important;
+                min-height: 44px !important;
+                min-width: 44px !important;
+                width: 44px !important;
+            }
+
+            button[data-testid^="stBaseButton-segmented_control"],
+            button[data-testid="stBaseButton-tertiary"],
+            button[aria-label^="Help for "] {
+                min-height: 44px !important;
+            }
+
+            button[aria-label^="Help for "] {
+                min-width: 44px !important;
+            }
+
+            input[type="text"][aria-label^="Search"] {
+                min-height: 44px !important;
+            }
+
+            input:not([role="combobox"]):not([type="checkbox"]):not([type="radio"]),
+            textarea,
+            select,
+            button[aria-label="Show password text"],
+            button[aria-label="Hide password text"] {
+                min-height: 44px !important;
+            }
+
+            button[aria-label="Show password text"],
+            button[aria-label="Hide password text"] {
+                min-width: 44px !important;
+            }
+
+            input,
+            textarea,
+            select,
+            [data-baseweb="input"] input,
+            [data-baseweb="textarea"] textarea,
+            [data-baseweb="select"] input {
+                font-size: 16px !important;
+            }
+
+            [data-testid="stDataFrame"],
+            [data-testid="stTable"],
+            [data-testid="stElementContainer"],
+            .element-container {
+                max-width: 100% !important;
+                min-width: 0 !important;
+            }
+
+            [data-testid="stDataFrame"] {
+                overflow: hidden;
+                width: 100% !important;
+            }
+
+            .sc-activity-table-wrap,
+            .st-key-files-details-list {
+                max-width: 100%;
+                overflow-x: auto;
+                overscroll-behavior-inline: contain;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            table.sc-activity-table {
+                min-width: 44rem;
+            }
+
+            [data-testid="stDialog"] {
+                align-items: flex-end !important;
+                padding: 0 !important;
+            }
+
+            [data-testid="stDialog"] [role="dialog"],
+            [data-testid="stDialog"] > div {
+                border-radius: 10px 10px 0 0 !important;
+                margin: 0 !important;
+                max-height: calc(100dvh - env(safe-area-inset-top)) !important;
+                max-width: 100vw !important;
+                width: 100vw !important;
+            }
+
+            [data-testid="stDialog"] [data-testid="stVerticalBlock"] {
+                gap: 0.65rem;
+            }
+
+            [data-testid="stDialog"] [data-testid="stDialogContent"] {
+                overscroll-behavior: contain;
+                padding-bottom: max(1rem, env(safe-area-inset-bottom));
+            }
+
+            [data-testid="stTooltipContent"],
+            [data-baseweb="popover"] {
+                max-width: calc(100vw - 1rem) !important;
+            }
+
+            img,
+            video,
+            canvas,
+            iframe {
+                max-width: 100%;
+            }
+
+            :focus-visible {
+                scroll-margin: calc(var(--sc-topbar-height) + 0.75rem);
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
