@@ -115,6 +115,8 @@ def _load_sheet_bundle(user, selected_date):
     import sports_cave_dashboard
 
     started = time.perf_counter()
+    local_today = datetime.now(SYDNEY_TZ).date()
+    rollover = sports_cave_dashboard.finalise_overdue_daily_planner_days(user, local_today)
     events = sports_cave_dashboard.reconcile_daily_planner_timers(user)
     backend = sports_cave_dashboard.get_supabase_backend()
     user_id = sports_cave_dashboard.daily_execution_user_id(user)
@@ -138,18 +140,20 @@ def _load_sheet_bundle(user, selected_date):
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     return {
         "work_date": selected_date.isoformat(),
-        "today": datetime.now(SYDNEY_TZ).date().isoformat(),
+        "today": local_today.isoformat(),
         "timezone": PLANNER_TIMEZONE,
         "sheet": selected or {},
         "source_sheet": previous or {},
         "tasks": _task_rows(selected, timers) if selected else [],
         "active_timer": active or {},
         "events": events or [],
+        "rollover": rollover or {},
+        "review_reminder": (rollover or {}).get("review_reminder") or {},
         "server_now": datetime.now(timezone.utc).isoformat(),
         "performance": {
             "planner_data_ms": elapsed_ms,
             "initial_api_calls": 1,
-            "database_transactions": 1 + read_queries,
+            "database_transactions": 2 + read_queries,
         },
     }
 
@@ -210,6 +214,7 @@ def _clean_tasks(value, *, top=False):
                 "outcome": str(row.get("outcome") or "").strip().casefold()[:40],
                 "completion_method": str(row.get("completion_method") or "").strip().casefold()[:40],
                 "skip_reason": str(row.get("skip_reason") or "").strip()[:500],
+                "outcome_reason": str(row.get("outcome_reason") or "").strip()[:500],
                 "actual_elapsed_seconds": row.get("actual_elapsed_seconds"),
                 "time_saved_seconds": row.get("time_saved_seconds"),
                 "completed_before_expiry": bool(row.get("completed_before_expiry")),
@@ -239,6 +244,10 @@ async def planner_mutation(request: Request):
     user = _user(claims)
     try:
         import sports_cave_dashboard
+
+        local_today = datetime.now(SYDNEY_TZ).date()
+        if action != "start_timer":
+            sports_cave_dashboard.finalise_overdue_daily_planner_days(user, local_today)
 
         if action == "save_sheet":
             selected_date = date.fromisoformat(str(payload.get("work_date") or ""))
@@ -314,6 +323,7 @@ async def planner_mutation(request: Request):
                 str(payload.get("task_type") or ""),
                 int(payload.get("task_index") or 0),
                 int(payload.get("allocated_seconds") or 0),
+                local_today=local_today,
             )
         elif action == "pause_timer":
             result = sports_cave_dashboard.pause_daily_planner_timer(user, payload.get("timer_id"))

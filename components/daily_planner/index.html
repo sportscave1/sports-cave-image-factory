@@ -101,6 +101,12 @@
     .notice.info { background: #f1ead9; color: #5d471f; }
     .notice.error { background: #f8e7e5; color: #782b25; }
     .notice.success { background: #e3f1e8; color: #1f5b3c; }
+    .rollover-notice {
+      align-items: center; background: #f1ead9; border: 1px solid #d9c695; color: #4f3d1c;
+      display: flex; gap: 8px; margin: 0 0 10px; padding: 7px 8px;
+    }
+    .rollover-notice span { flex: 1; min-width: 180px; }
+    .rollover-notice .dismiss { font-size: 18px; padding: 0; width: 27px; }
     .active-strip {
       align-items: center; background: #1c1a16; border: 1px solid #3f3829; border-radius: 6px; color: white;
       display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding: 8px 10px;
@@ -218,7 +224,7 @@
       compact: localStorage.getItem("scPlannerCompact") === "1",
       fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
       pendingFocusActive: false, timerScope: "", terminalTimerIds: new Set(),
-      timerEpoch: 0, plannerLoadId: 0, outcomeFocusReturn: null,
+      timerEpoch: 0, plannerLoadId: 0, outcomeFocusReturn: null, pendingReviewFocus: "",
     };
     const surfaceId = `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timerChannel = "BroadcastChannel" in window ? new BroadcastChannel("sports-cave-daily-planner") : null;
@@ -283,6 +289,11 @@
       const parsed = new Date(`${value}T12:00:00+10:00`);
       return new Intl.DateTimeFormat("en-AU", {timeZone:"Australia/Sydney", weekday:"short", day:"numeric", month:"short", year:"numeric"}).format(parsed);
     };
+    const formatLongDate = (value) => {
+      if (!value) return "";
+      const parsed = new Date(`${value}T12:00:00+10:00`);
+      return new Intl.DateTimeFormat("en-AU", {timeZone:"Australia/Sydney", weekday:"long", day:"numeric", month:"long"}).format(parsed);
+    };
     const formatTimestamp = (value) => {
       if (!value) return "";
       const parsed = new Date(value);
@@ -330,8 +341,9 @@
       halfway_notified_at:timer.halfway_notified_at || null, expiry_notified_at:timer.expiry_notified_at || null,
       updated_at:timer.updated_at || null,
     } : {};
-    const broadcastTimer = (timer, events=[], terminalTimerId="") => {
-      const payload = {type:"timer-state", source:surfaceId, scope:state.timerScope, timer:timerMirror(timer), events, terminal_timer_id:String(terminalTimerId || ""), sent_at:Date.now()};
+    const broadcastTimer = (timer, events=[], terminalTimerId="", terminalTimerIds=[], reactivatedTimerId="") => {
+      const terminalIds = [...new Set([terminalTimerId, ...(terminalTimerIds || [])].map((value) => String(value || "")).filter(Boolean))];
+      const payload = {type:"timer-state", source:surfaceId, scope:state.timerScope, timer:timerMirror(timer), events, terminal_timer_id:terminalIds[0] || "", terminal_timer_ids:terminalIds, reactivated_timer_id:String(reactivatedTimerId || ""), sent_at:Date.now()};
       try { timerChannel?.postMessage(payload); } catch (_error) {}
       try {
         if (payload.timer.id) localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
@@ -432,7 +444,10 @@
       if (!payload || payload.source === surfaceId || payload.type !== "timer-state") return;
       if (!state.timerScope || payload.scope !== state.timerScope) return;
       const terminalTimerId = String(payload.terminal_timer_id || "");
-      if (terminalTimerId) markTimerTerminal(terminalTimerId);
+      const terminalTimerIds = [...new Set([terminalTimerId, ...(payload.terminal_timer_ids || [])].map((value) => String(value || "")).filter(Boolean))];
+      terminalTimerIds.forEach(markTimerTerminal);
+      const reactivatedTimerId = String(payload.reactivated_timer_id || "");
+      if (reactivatedTimerId) state.terminalTimerIds.delete(reactivatedTimerId);
       const timer = currentTimerPayload(payload.timer);
       if (state.bundle) state.bundle.active_timer = timer;
       updateTimerDisplays();
@@ -618,33 +633,45 @@
       if (!items.length) return "";
       return `<div class="notice info"><strong>Carryover from ${escapeHtml(formatDate(state.bundle.source_sheet.sheet_date))}</strong>${items.map((item,index) => `<label><input type="checkbox" data-carry-index="${index}"> ${escapeHtml(item.task)}</label>`).join(" ")}</div>`;
     };
+    const reviewReminderMarkup = () => {
+      const reminder = state.bundle?.review_reminder || {};
+      const reviewDate = String(reminder.sheet_date || "");
+      if (!reminder.id || !reviewDate || ["reviewed","completed","archived"].includes(String(reminder.status || "").toLowerCase())) return "";
+      const dismissalKey = `scPlannerReviewReminderDismissed:${state.timerScope || "none"}:${reviewDate}`;
+      try { if (sessionStorage.getItem(dismissalKey) === "1") return ""; } catch (_error) {}
+      const lead = reviewDate === addDays(state.bundle?.today || isoToday(), -1)
+        ? "Yesterday was automatically finalised."
+        : `${formatLongDate(reviewDate)} was automatically finalised.`;
+      return `<div class="notice rollover-notice" role="status" data-review-reminder="${escapeHtml(reviewDate)}"><span>${escapeHtml(lead)} Complete the review for ${escapeHtml(formatLongDate(reviewDate))}.</span><button class="button small" data-action="complete-overdue-review">Complete review</button><button class="button small dismiss" data-action="dismiss-review-reminder" aria-label="Dismiss review reminder" title="Dismiss">&times;</button></div>`;
+    };
     const renderPlanner = () => {
       if (state.loading) return showSkeleton();
       const bundle = state.bundle || {};
       if (!bundle.sheet?.id && !state.editingNew) {
-        view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date || isoToday())}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button></div>${activeStrip()}<div class="empty"><div><strong>No execution sheet for ${escapeHtml(formatDate(bundle.work_date))}</strong><span>Create the complete three-MIP plan for this work date.</span></div><button class="button primary" data-action="create-sheet">Create ${bundle.work_date === bundle.today ? "today's" : "this day's"} sheet</button></div>`;
+        view.innerHTML = `${reviewReminderMarkup()}<div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date || isoToday())}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button></div>${activeStrip()}<div class="empty"><div><strong>No execution sheet for ${escapeHtml(formatDate(bundle.work_date))}</strong><span>Create the complete three-MIP plan for this work date.</span></div><button class="button primary" data-action="create-sheet">Create ${bundle.work_date === bundle.today ? "today's" : "this day's"} sheet</button></div>`;
         return;
       }
       const draft = ensureDraft();
       const sheet = bundle.sheet || {};
       const reviewed = ["reviewed","completed","archived"].includes(String(sheet.status || "").toLowerCase());
+      const planLocked = reviewed || String(sheet.status || "").toLowerCase() === "finalised";
       const saveLabel = bundle.work_date === bundle.today ? "Save today's plan" : bundle.work_date === addDays(bundle.today,1) ? "Save tomorrow's plan" : "Save plan";
       view.innerHTML = `
-        <div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date)}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button><span class="header-spacer"></span><button class="button" data-action="plan-tomorrow">Plan tomorrow</button></div>
+        ${reviewReminderMarkup()}<div class="toolbar"><button class="button" data-action="previous-day">&#8592;</button><input class="date-input" type="date" id="work-date" value="${escapeHtml(bundle.work_date)}"><button class="button" data-action="next-day">&#8594;</button><button class="button" data-action="today">Today</button><span class="header-spacer"></span><button class="button" data-action="plan-tomorrow">Plan tomorrow</button></div>
         ${activeStrip()}${carryoverMarkup()}
         <div class="meta-row"><span><strong>Work date:</strong> ${escapeHtml(formatDate(bundle.work_date))}</span><span><strong>Owner:</strong> ${escapeHtml(sheet.user_name || bundle.user?.display_name || "Current user")}</span><span><strong>Status:</strong> ${escapeHtml(sheet.status || "New plan")}</span></div>
         <div class="section-title"><h2>Three major execution tasks</h2><span class="rule"></span></div>
         <div class="task-header"><span></span><span>Task</span><span>Details / outcome required</span><span>Allocated</span><span>Status</span><span>Timer</span></div>
-        <div id="top-tasks">${draft.top_tasks.map((task,index) => taskRow(task,"top",index,reviewed)).join("")}</div>
-        <div class="section-title"><h2>Other tasks</h2><span class="rule"></span>${reviewed ? "" : '<button class="button small" data-action="add-task">Add task</button>'}</div>
-        <div id="additional-tasks">${draft.additional_items.map((task,index) => taskRow(task,"additional",index,reviewed)).join("") || '<div class="notice info">No additional tasks.</div>'}</div>
+        <div id="top-tasks">${draft.top_tasks.map((task,index) => taskRow(task,"top",index,planLocked)).join("")}</div>
+        <div class="section-title"><h2>Other tasks</h2><span class="rule"></span>${planLocked ? "" : '<button class="button small" data-action="add-task">Add task</button>'}</div>
+        <div id="additional-tasks">${draft.additional_items.map((task,index) => taskRow(task,"additional",index,planLocked)).join("") || '<div class="notice info">No additional tasks.</div>'}</div>
         <div class="section-title"><h2>Daily plan</h2><span class="rule"></span></div>
         <div class="planning-grid">
-          <label>Main outcome for the day<input data-plan-field="main_outcome" value="${escapeHtml(draft.planning_data.main_outcome || "")}" ${reviewed ? "disabled" : ""}></label>
-          <label>Appointment, deadline or fixed event<input data-plan-field="fixed_event" value="${escapeHtml(draft.planning_data.fixed_event || "")}" ${reviewed ? "disabled" : ""}></label>
-          <label class="wide">Planning notes<textarea data-plan-field="notes" ${reviewed ? "disabled" : ""}>${escapeHtml(draft.planning_data.notes || "")}</textarea></label>
+          <label>Main outcome for the day<input data-plan-field="main_outcome" value="${escapeHtml(draft.planning_data.main_outcome || "")}" ${planLocked ? "disabled" : ""}></label>
+          <label>Appointment, deadline or fixed event<input data-plan-field="fixed_event" value="${escapeHtml(draft.planning_data.fixed_event || "")}" ${planLocked ? "disabled" : ""}></label>
+          <label class="wide">Planning notes<textarea data-plan-field="notes" ${planLocked ? "disabled" : ""}>${escapeHtml(draft.planning_data.notes || "")}</textarea></label>
         </div>
-        <div class="save-row"><span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : "Changes are saved only when you choose Save."}</span>${state.editingNew ? '<button class="button" data-action="cancel-new">Cancel</button>' : ""}${reviewed ? "" : `<button class="button primary" data-action="save-sheet" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving..." : saveLabel}</button>`}</div>
+        <div class="save-row"><span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : planLocked ? "This plan was automatically finalised. Complete its Daily Review below." : "Changes are saved only when you choose Save."}</span>${state.editingNew ? '<button class="button" data-action="cancel-new">Cancel</button>' : ""}${planLocked ? "" : `<button class="button primary" data-action="save-sheet" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving..." : saveLabel}</button>`}</div>
         ${sheet.id ? reviewMarkup(sheet, reviewed) : ""}`;
       bindDraftInputs();
     };
@@ -746,17 +773,29 @@
         if (loadId !== state.plannerLoadId || timerEpoch !== state.timerEpoch) return false;
         payload.active_timer = currentTimerPayload(payload.active_timer);
         payload.events = currentTimerEvents(payload.events);
+        const rolloverTimerIds = [...new Set((payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean))];
+        rolloverTimerIds.forEach((timerId) => { markTimerTerminal(timerId); clearTimerEffectClaims(timerId); });
         state.bundle = payload; state.initialLoadComplete = true; state.loading = false;
         if (preserveView) state.draft = normalDraft(payload.sheet || {});
         state.weeklyAnchor ||= payload.work_date;
         statusText.textContent = "Saved planner state connected";
         const clientMs = Math.round(performance.now() - state.dataStartedAt);
         performanceText.textContent = `Shell ${Math.round(shellVisibleAt)} ms | Planner ${clientMs} ms | Server ${Math.round(payload.performance?.planner_data_ms || 0)} ms`;
-        broadcastTimer(payload.active_timer, payload.events);
+        if (payload.active_timer?.id) state.terminalTimerIds.delete(String(payload.active_timer.id));
+        else if (rolloverTimerIds.length) { stopChime(); closeOutcomeModal({restoreFocus:false}); }
+        broadcastTimer(payload.active_timer, payload.events, "", rolloverTimerIds, payload.active_timer?.id || "");
         if (state.pendingFocusActive && payload.active_timer?.sheet_date && payload.active_timer.sheet_date !== payload.work_date) {
           return loadPlanner(payload.active_timer.sheet_date);
         }
         renderCurrent(); scheduleStatus();
+        if (state.pendingReviewFocus && state.pendingReviewFocus === payload.work_date) {
+          state.pendingReviewFocus = "";
+          requestAnimationFrame(() => {
+            const heading = [...view.querySelectorAll("h2")].find((element) => element.textContent.trim() === "Daily Review");
+            heading?.scrollIntoView({block:"start", behavior:"smooth"});
+            view.querySelector("[data-review-field]:not([disabled])")?.focus({preventScroll:true});
+          });
+        }
         (payload.events || []).forEach((event) => {
           const timer = event.timer || {};
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
@@ -808,13 +847,20 @@
       try {
         if (action === "start_timer") await enableAudio();
         const result = await mutate({action, ...extra});
+        const resultTimer = result?.timer || result?.active_timer || result || {};
+        const replacedTimerIds = (result?.replaced_timers || []).map((row) => String(row?.timer?.id || "")).filter(Boolean);
+        const rolloverTimerIds = (result?.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
+        const terminalTimerIds = [...new Set([...replacedTimerIds, ...rolloverTimerIds])];
+        terminalTimerIds.forEach((timerId) => { markTimerTerminal(timerId); clearTimerEffectClaims(timerId); });
         const mirror = ["reset_timer"].includes(action) ? {} : {
-          ...activeTimer(), ...(result || {}),
-          task:extra.display_task || result?.task || activeTimer().task || "Daily Planner task",
-          sheet_date:result?.sheet_date || activeTimer().sheet_date || state.bundle.work_date,
+          ...activeTimer(), ...resultTimer,
+          task:resultTimer?.task || extra.display_task || activeTimer().task || "Daily Planner task",
+          sheet_date:resultTimer?.sheet_date || activeTimer().sheet_date || state.bundle.work_date,
         };
+        if (mirror.id) state.terminalTimerIds.delete(String(mirror.id));
         if (state.bundle) state.bundle.active_timer = mirror;
-        broadcastTimer(mirror);
+        stopChime(); closeOutcomeModal({restoreFocus:false});
+        broadcastTimer(mirror, [], "", terminalTimerIds, action === "start_timer" ? mirror.id : "");
         await loadPlanner(extra.work_date || state.bundle.work_date);
       } catch (error) { showToast(error.message,"error",8000); }
     };
@@ -1013,14 +1059,19 @@
       clearTimeout(state.statusTimer);
       if (!state.token) return;
       const timerEpoch = state.timerEpoch;
+      let reconciledEpoch = timerEpoch;
       try {
         const payload = await requestJson("/api/os/daily-planner/status");
         if (timerEpoch !== state.timerEpoch) return;
+        const rolloverTimerIds = (payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
+        rolloverTimerIds.forEach((timerId) => { markTimerTerminal(timerId); clearTimerEffectClaims(timerId); });
+        reconciledEpoch = state.timerEpoch;
         payload.timer = currentTimerPayload(payload.timer);
         payload.events = currentTimerEvents(payload.events);
         const previousId = activeTimer().id;
         if (state.bundle) state.bundle.active_timer = payload.timer;
-        broadcastTimer(payload.timer, payload.events);
+        if (!payload.timer?.id && rolloverTimerIds.length) { stopChime(); closeOutcomeModal(); }
+        broadcastTimer(payload.timer, payload.events, "", rolloverTimerIds, payload.timer?.id || "");
         (payload.events || []).forEach((event) => {
           const timer = event.timer || {};
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
@@ -1038,7 +1089,7 @@
         }
         updateTimerDisplays();
       } catch (_error) {}
-      if (timerEpoch === state.timerEpoch) scheduleStatus();
+      if (reconciledEpoch === state.timerEpoch) scheduleStatus();
     };
     const scheduleStatus = () => {
       clearTimeout(state.statusTimer);
@@ -1126,6 +1177,19 @@
       if (action === "today") return loadPlanner(isoToday());
       if (action === "plan-tomorrow") return loadPlanner(addDays(state.bundle.work_date,1));
       if (action === "reopen-active") return loadPlanner(activeTimer().sheet_date);
+      if (action === "dismiss-review-reminder") {
+        const reviewDate = String(target.closest("[data-review-reminder]")?.dataset.reviewReminder || "");
+        try { sessionStorage.setItem(`scPlannerReviewReminderDismissed:${state.timerScope || "none"}:${reviewDate}`, "1"); } catch (_error) {}
+        target.closest("[data-review-reminder]")?.remove();
+        return;
+      }
+      if (action === "complete-overdue-review") {
+        const reviewDate = String(target.closest("[data-review-reminder]")?.dataset.reviewReminder || state.bundle?.review_reminder?.sheet_date || "");
+        if (!reviewDate) return;
+        state.pendingReviewFocus = reviewDate;
+        state.tab = "planner";
+        return loadPlanner(reviewDate);
+      }
       if (action === "toggle-compact") return setCompact(!state.compact);
       if (action === "finish-active") {
         const timer = activeTimer();
@@ -1160,25 +1224,18 @@
       }
       if (action === "reopen-task") return applyTaskOutcome(type, index, "reopen", {}, "", {trigger:target});
       if (action === "complete-review") {
-        try { await mutate({action:"complete_review", sheet_id:state.bundle.sheet.id, review:collectReview()}); showToast("Daily Review complete.","success"); await loadPlanner(state.bundle.work_date); }
+        try {
+          await mutate({action:"complete_review", sheet_id:state.bundle.sheet.id, review:collectReview()});
+          if (state.bundle.review_reminder?.sheet_date === state.bundle.work_date) state.bundle.review_reminder = {};
+          showToast("Daily Review complete.","success");
+          await loadPlanner(state.bundle.work_date);
+        }
         catch (error) { showToast(error.message,"error",8000); }
         return;
       }
       if (action === "start-timer") {
         await enableAudio();
         const minutes = Number(row.querySelector(".duration-input")?.value || 0);
-        const running = activeTimer();
-        if (running.id && !activeMatches(type,index)) {
-          if (running.status === "expired" || running.outcome_required) {
-            showOutcome(running);
-            return;
-          }
-          if (window.confirm(`Another timer is active for ${taskForTimer(running)}. Choose OK to return to it, or Cancel to choose whether to stop it.`)) {
-            return loadPlanner(running.sheet_date || state.bundle.work_date);
-          }
-          if (!window.confirm("Stop the active timer and start this task? The active task status will not change.")) return;
-          await mutate({action:"reset_timer", timer_id:running.id});
-        }
         return timerAction("start_timer", {sheet_id:state.bundle.sheet.id, task_type:type, task_index:index, allocated_seconds:Math.max(1,Math.round(minutes*60)), display_task:ensureDraft()[type === "top" ? "top_tasks" : "additional_items"][index]?.task || "Daily Planner task"});
       }
       if (action === "pause-timer") return timerAction("pause_timer", {timer_id:activeTimer().id});

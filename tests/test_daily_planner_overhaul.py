@@ -367,7 +367,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('"reopen"', outcome_body)
         self.assertIn('"already_applied": True', outcome_body)
         self.assertIn("outcome_version", outcome_body)
-        self.assertIn('status=CASE WHEN %s THEN \'active\' ELSE status END', outcome_body)
+        self.assertIn("WHEN %s AND status='finalised' THEN 'reopened'", outcome_body)
         self.assertIn('action == "task_outcome"', route_source)
         self.assertIn('window.confirm("Finish this task now?")', client_source)
         self.assertIn("Skip this task? It will be recorded as not completed.", client_source)
@@ -592,7 +592,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("plannerChannel?.close()", source)
         self.assertIn("parentWindow.navigator.locks.request", source)
         self.assertIn("payload.scope !== state.config.dailyPlannerTimerScope", source)
-        self.assertIn("broadcastTimer(mirror)", planner_source)
+        self.assertIn('broadcastTimer(mirror, [], "", terminalTimerIds, action === "start_timer" ? mirror.id : "")', planner_source)
         self.assertIn("navigator.locks.request", planner_source)
         self.assertIn("payload.scope !== state.timerScope", planner_source)
         self.assertNotEqual(
@@ -681,6 +681,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         )
         with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
             sports_cave_dashboard,
+            "finalise_overdue_daily_planner_days",
+            return_value={"finalised_sheets": [], "review_reminder": {}},
+        ), patch.object(
+            sports_cave_dashboard,
             "apply_daily_planner_task_outcome",
             return_value=saved_result,
         ) as save:
@@ -743,6 +747,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         )
         with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
             sports_cave_dashboard,
+            "finalise_overdue_daily_planner_days",
+            return_value={"finalised_sheets": [], "review_reminder": {}},
+        ), patch.object(
+            sports_cave_dashboard,
             "apply_daily_planner_task_outcome",
             side_effect=sports_cave_dashboard.DashboardStorageError(message),
         ):
@@ -797,6 +805,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
             },
         )
         with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
+            sports_cave_dashboard,
+            "finalise_overdue_daily_planner_days",
+            return_value={"finalised_sheets": [], "review_reminder": {}},
+        ), patch.object(
             sports_cave_dashboard,
             "apply_daily_planner_task_outcome",
             return_value=saved_result,
@@ -993,6 +1005,187 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertEqual(200, allowed_response.status_code)
         self.assertEqual(403, denied_response.status_code)
         self.assertEqual("admin-local", json.loads(allowed_response.body)["user"]["id"])
+
+    def test_start_timer_replaces_prior_lock_in_one_authoritative_transaction(self):
+        backend_source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        client_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+        start_body = backend_source[
+            backend_source.index("def start_daily_execution_task_timer") :
+            backend_source.index("\n\ndef pause_daily_execution_task_timer")
+        ]
+        start_handler = client_source[
+            client_source.index('if (action === "start-timer")') :
+            client_source.index('if (action === "pause-timer")')
+        ]
+
+        self.assertIn("pg_advisory_xact_lock", start_body)
+        self.assertIn("_finalise_overdue_daily_execution_sheets_locked", start_body)
+        self.assertIn("FOR UPDATE", start_body)
+        self.assertIn("replaced_by_next_task", start_body)
+        self.assertIn('"preserved_terminal": preserved_terminal', start_body)
+        self.assertIn('"replaced_timers": replaced', start_body)
+        self.assertIn('"already_started": True', start_body)
+        self.assertNotIn("A Daily Planner timer is already active.", start_body)
+        self.assertNotIn("window.confirm", start_handler)
+        self.assertNotIn('action:"reset_timer"', start_handler)
+        self.assertIn('timerAction("start_timer"', start_handler)
+
+    def test_start_timer_route_returns_previous_resolution_and_new_timer(self):
+        user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}
+        token = top_bar_security.create_top_bar_token(
+            user,
+            can_manage_daily_planner=True,
+            now=1_786_828_800,
+            seconds=3600,
+        )
+        authoritative = {
+            "timer": {"id": "timer-b", "status": "running", "task": "Task B"},
+            "active_timer": {"id": "timer-b", "status": "running", "task": "Task B"},
+            "replaced_timers": [{
+                "timer": {"id": "timer-a", "status": "completed", "outcome": "did_not_finish"},
+                "outcome": "did_not_finish",
+                "audit_reason": "replaced_by_next_task",
+            }],
+            "rollover": {"finalised_dates": []},
+        }
+        request = planner_api_request(
+            daily_planner.PLANNER_MUTATION_PATH,
+            token,
+            method="POST",
+            payload={
+                "action": "start_timer",
+                "sheet_id": "sheet-today",
+                "task_type": "top",
+                "task_index": 1,
+                "allocated_seconds": 120,
+            },
+        )
+        with patch("top_bar_security.time.time", return_value=1_786_828_900), patch.object(
+            sports_cave_dashboard,
+            "start_daily_planner_timer",
+            return_value=authoritative,
+        ) as start:
+            response = asyncio.run(daily_planner.planner_mutation(request))
+
+        body = json.loads(response.body)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("timer-b", body["result"]["active_timer"]["id"])
+        self.assertEqual("did_not_finish", body["result"]["replaced_timers"][0]["outcome"])
+        self.assertEqual(date(2026, 8, 16), start.call_args.kwargs["local_today"])
+
+    def test_overdue_rollover_preserves_terminal_tasks_and_is_idempotent(self):
+        sheets = [
+            {
+                "id": "sheet-15",
+                "user_id": "admin-1",
+                "user_name": "Nathan",
+                "sheet_date": date(2026, 8, 15),
+                "status": "active",
+                "completed_at": None,
+                "top_tasks": [
+                    {"task": "Completed", "status": "done", "outcome": "completed"},
+                    {"task": "Skipped", "status": "skipped", "outcome": "skipped"},
+                    {"task": "Still open", "status": ""},
+                ],
+                "additional_items": [
+                    {"task": "Already unfinished", "status": "couldnt_finish", "outcome": "did_not_finish"},
+                    {"task": "Paused work", "status": ""},
+                    {"task": "", "details": "", "status": ""},
+                ],
+            }
+        ]
+        timers = [
+            {
+                "id": "timer-open", "user_id": "admin-1", "sheet_id": "sheet-15",
+                "task_type": "top", "task_index": 2, "status": "running",
+                "allocated_seconds": 120, "deadline_at": "2026-08-15T05:00:00+00:00",
+                "outcome": None,
+            },
+            {
+                "id": "timer-paused", "user_id": "admin-1", "sheet_id": "sheet-15",
+                "task_type": "additional", "task_index": 1, "status": "paused",
+                "allocated_seconds": 180, "remaining_seconds": 60, "outcome": None,
+            },
+        ]
+
+        class Cursor:
+            def __init__(self):
+                self.rows = []
+                self.audit_inserts = 0
+
+            def execute(self, sql, params=()):
+                compact = " ".join(sql.split())
+                self.rows = []
+                if "FROM daily_execution_sheets" in compact and "status IN ('active', 'planned')" in compact:
+                    self.rows = [row for row in sheets if row["status"] in {"active", "planned"}]
+                elif "FROM daily_execution_task_timers" in compact and "sheet_id=ANY" in compact:
+                    self.rows = list(timers)
+                elif "UPDATE daily_execution_task_timers" in compact:
+                    timer_id = str(params[-2])
+                    for timer in timers:
+                        if timer["id"] == timer_id and not timer.get("outcome"):
+                            timer.update({"status": "completed", "outcome": params[0], "outcome_required": False})
+                elif "UPDATE daily_execution_sheets" in compact and "status='finalised'" in compact:
+                    sheet_id = str(params[2])
+                    for sheet in sheets:
+                        if sheet["id"] == sheet_id:
+                            sheet["top_tasks"] = json.loads(params[0])
+                            sheet["additional_items"] = json.loads(params[1])
+                            sheet["status"] = "finalised"
+                            self.rows = [sheet]
+                elif "FROM audit_logs" in compact:
+                    self.rows = []
+                elif "INSERT INTO audit_logs" in compact:
+                    self.audit_inserts += 1
+                elif "FROM daily_execution_sheets" in compact and "status='finalised'" in compact:
+                    self.rows = [row for row in reversed(sheets) if row["status"] == "finalised" and not row.get("completed_at")][:1]
+
+            def fetchall(self):
+                return list(self.rows)
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+        cursor = Cursor()
+        now = datetime(2026, 8, 15, 14, 5, tzinfo=timezone.utc)
+        first = supabase_backend._finalise_overdue_daily_execution_sheets_locked(
+            cursor, "admin-1", date(2026, 8, 16), now_utc=now
+        )
+        second = supabase_backend._finalise_overdue_daily_execution_sheets_locked(
+            cursor, "admin-1", date(2026, 8, 16), now_utc=now
+        )
+
+        top = sheets[0]["top_tasks"]
+        additional = sheets[0]["additional_items"]
+        self.assertEqual("done", top[0]["status"])
+        self.assertEqual("skipped", top[1]["status"])
+        self.assertEqual("couldnt_finish", top[2]["status"])
+        self.assertEqual("couldnt_finish", additional[0]["status"])
+        self.assertEqual("couldnt_finish", additional[1]["status"])
+        self.assertEqual("", additional[2]["status"])
+        self.assertEqual(120, additional[1]["actual_elapsed_seconds"])
+        self.assertEqual("finalised", sheets[0]["status"])
+        self.assertEqual(["timer-open", "timer-paused"], first["cleared_timer_ids"])
+        self.assertEqual("2026-08-15", first["review_reminder"]["sheet_date"])
+        self.assertEqual([], second["finalised_dates"])
+        self.assertEqual("2026-08-15", second["review_reminder"]["sheet_date"])
+
+    def test_sydney_midnight_and_review_reminder_client_contract(self):
+        utc_before = datetime(2026, 8, 15, 13, 59, tzinfo=timezone.utc)
+        utc_after = datetime(2026, 8, 15, 14, 1, tzinfo=timezone.utc)
+        self.assertEqual(date(2026, 8, 15), utc_before.astimezone(ZoneInfo("Australia/Sydney")).date())
+        self.assertEqual(date(2026, 8, 16), utc_after.astimezone(ZoneInfo("Australia/Sydney")).date())
+
+        client = (ROOT / "components" / "daily_planner" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Yesterday was automatically finalised.", client)
+        self.assertIn("Complete the review for", client)
+        self.assertIn('data-action="complete-overdue-review"', client)
+        self.assertIn('data-action="dismiss-review-reminder"', client)
+        self.assertIn("sessionStorage.setItem", client)
+        self.assertIn("state.pendingReviewFocus = reviewDate", client)
+        self.assertIn('String(sheet.status || "").toLowerCase() === "finalised"', client)
+        self.assertIn("rolloverTimerIds", client)
+        self.assertIn("terminal_timer_ids", client)
 
 
 if __name__ == "__main__":

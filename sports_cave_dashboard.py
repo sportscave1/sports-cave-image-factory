@@ -1473,6 +1473,7 @@ DAILY_EXECUTION_STATUS_ACTIVE = "active"
 DAILY_EXECUTION_STATUS_COMPLETED = "completed"
 DAILY_EXECUTION_STATUS_REVIEWED = "reviewed"
 DAILY_EXECUTION_STATUS_ARCHIVED = "archived"
+DAILY_EXECUTION_STATUS_FINALISED = "finalised"
 DAILY_EXECUTION_REVIEWED_STATUSES = (
     DAILY_EXECUTION_STATUS_COMPLETED,
     DAILY_EXECUTION_STATUS_REVIEWED,
@@ -1562,6 +1563,7 @@ def _normalise_top_tasks(items):
                 "outcome": _compact_text(item.get("outcome") or ""),
                 "completion_method": _compact_text(item.get("completion_method") or ""),
                 "skip_reason": _compact_text(item.get("skip_reason") or ""),
+                "outcome_reason": _compact_text(item.get("outcome_reason") or ""),
                 "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
                 "time_saved_seconds": item.get("time_saved_seconds"),
                 "completed_before_expiry": bool(item.get("completed_before_expiry")),
@@ -1601,6 +1603,7 @@ def _normalise_additional_items(items, *, include_blank=True):
             "outcome": _compact_text(item.get("outcome") or ""),
             "completion_method": _compact_text(item.get("completion_method") or ""),
             "skip_reason": _compact_text(item.get("skip_reason") or ""),
+            "outcome_reason": _compact_text(item.get("outcome_reason") or ""),
             "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
             "time_saved_seconds": item.get("time_saved_seconds"),
             "completed_before_expiry": bool(item.get("completed_before_expiry")),
@@ -1644,6 +1647,7 @@ def _normalise_additional_items_for_save(items):
                     "outcome": item.get("outcome") or "",
                     "completion_method": item.get("completion_method") or "",
                     "skip_reason": item.get("skip_reason") or "",
+                    "outcome_reason": item.get("outcome_reason") or "",
                     "actual_elapsed_seconds": item.get("actual_elapsed_seconds"),
                     "time_saved_seconds": item.get("time_saved_seconds"),
                     "completed_before_expiry": bool(item.get("completed_before_expiry")),
@@ -2259,23 +2263,86 @@ def get_active_daily_planner_timer(user, *, reconcile=True):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def start_daily_planner_timer(user, sheet_id, task_type, task_index, allocated_seconds):
+def finalise_overdue_daily_planner_days(user, local_today):
+    user_id = _require_daily_execution_admin(user)
+    clean_today = local_today.isoformat() if isinstance(local_today, date) else str(local_today or "")
+    try:
+        backend = get_supabase_backend()
+        if not hasattr(backend, "finalise_overdue_daily_execution_sheets"):
+            return {"finalised_sheets": [], "finalised_dates": [], "review_reminder": {}}
+        result = backend.finalise_overdue_daily_execution_sheets(
+            user_id,
+            clean_today,
+            actor=daily_execution_user_name(user),
+        )
+        normalised = {
+            **(result or {}),
+            "finalised_sheets": [
+                _normalise_daily_sheet(sheet)
+                for sheet in (result or {}).get("finalised_sheets") or []
+            ],
+            "review_reminder": _normalise_daily_sheet(
+                (result or {}).get("review_reminder") or {}
+            ),
+        }
+        if normalised["finalised_sheets"]:
+            clear_daily_execution_cache(user_id)
+            clear_activity_cache()
+        return normalised
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def start_daily_planner_timer(
+    user,
+    sheet_id,
+    task_type,
+    task_index,
+    allocated_seconds,
+    *,
+    local_today=None,
+):
     user_id = _require_daily_execution_admin(user)
     try:
         backend = get_supabase_backend()
         if not hasattr(backend, "start_daily_execution_task_timer"):
             raise DashboardStorageError("Daily Planner timers are not available until the timer migration is applied.")
-        timer = backend.start_daily_execution_task_timer(
+        result = backend.start_daily_execution_task_timer(
             user_id,
             sheet_id,
             task_type,
             task_index,
             allocated_seconds,
             actor=daily_execution_user_name(user),
+            local_today=(
+                local_today.isoformat()
+                if isinstance(local_today, date)
+                else str(local_today or "") or None
+            ),
         )
         clear_daily_execution_cache(user_id)
         clear_activity_cache()
-        return _normalise_timer(timer)
+        if isinstance(result, dict) and ("timer" in result or "active_timer" in result):
+            return {
+                **result,
+                "timer": _normalise_timer(result.get("timer") or result.get("active_timer") or {}),
+                "active_timer": _normalise_timer(result.get("active_timer") or result.get("timer") or {}),
+                "replaced_timers": [
+                    {**row, "timer": _normalise_timer((row or {}).get("timer") or {})}
+                    for row in result.get("replaced_timers") or []
+                ],
+                "rollover": {
+                    **(result.get("rollover") or {}),
+                    "finalised_sheets": [
+                        _normalise_daily_sheet(sheet)
+                        for sheet in (result.get("rollover") or {}).get("finalised_sheets") or []
+                    ],
+                    "review_reminder": _normalise_daily_sheet(
+                        (result.get("rollover") or {}).get("review_reminder") or {}
+                    ),
+                },
+            }
+        return {"timer": _normalise_timer(result), "active_timer": _normalise_timer(result)}
     except ValueError as error:
         raise DashboardStorageError(str(error)) from error
     except Exception as error:

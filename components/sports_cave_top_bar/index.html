@@ -896,8 +896,9 @@
       outcome:String(timer.outcome || ""), halfway_notified_at:timer.halfway_notified_at || null,
       expiry_notified_at:timer.expiry_notified_at || null, updated_at:timer.updated_at || null,
     } : {};
-    const broadcastPlannerTimer = (timer, events=[], terminalTimerId="") => {
-      const payload = {type:"timer-state", source:surfaceId, scope:state.config.dailyPlannerTimerScope || "", timer:safePlannerTimer(timer), events, terminal_timer_id:String(terminalTimerId || ""), sent_at:Date.now()};
+    const broadcastPlannerTimer = (timer, events=[], terminalTimerId="", terminalTimerIds=[], reactivatedTimerId="") => {
+      const terminalIds = [...new Set([terminalTimerId, ...(terminalTimerIds || [])].map((value) => String(value || "")).filter(Boolean))];
+      const payload = {type:"timer-state", source:surfaceId, scope:state.config.dailyPlannerTimerScope || "", timer:safePlannerTimer(timer), events, terminal_timer_id:terminalIds[0] || "", terminal_timer_ids:terminalIds, reactivated_timer_id:String(reactivatedTimerId || ""), sent_at:Date.now()};
       try { plannerChannel?.postMessage(payload); } catch (_error) {}
       try {
         if (payload.timer.id) parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
@@ -1019,9 +1020,12 @@
       state.plannerStatusPending = true;
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
+        const rolloverTimerIds = (payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
+        rolloverTimerIds.forEach((timerId) => state.terminalPlannerTimerIds.add(timerId));
         const events = currentPlannerEvents(payload.events);
         applyPlannerTimerState(payload.timer || {}, events);
-        broadcastPlannerTimer(state.plannerTimer, events);
+        if (!payload.timer?.id && rolloverTimerIds.length) { dismissPlannerToast(); stopPlannerChime(); }
+        broadcastPlannerTimer(state.plannerTimer, events, "", rolloverTimerIds, payload.timer?.id || "");
         const timer = state.plannerTimer;
         if (timer.outcome_required || timer.status === "expired") {
           runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
@@ -1038,13 +1042,16 @@
       if (!["timer-state", "sports-cave-planner-timer-state"].includes(payload.type)) return;
       if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
       const terminalTimerId = String(payload.terminal_timer_id || "");
-      if (terminalTimerId) {
-        state.terminalPlannerTimerIds.add(terminalTimerId);
+      const terminalTimerIds = [...new Set([terminalTimerId, ...(payload.terminal_timer_ids || [])].map((value) => String(value || "")).filter(Boolean))];
+      terminalTimerIds.forEach((timerId) => {
+        state.terminalPlannerTimerIds.add(timerId);
+        if (String(state.plannerTimer?.id || "") === timerId) applyPlannerTimerState({});
+      });
+      const reactivatedTimerId = String(payload.reactivated_timer_id || "");
+      if (reactivatedTimerId) state.terminalPlannerTimerIds.delete(reactivatedTimerId);
+      if (terminalTimerIds.length) {
         dismissPlannerToast();
         stopPlannerChime();
-        if (String(state.plannerTimer?.id || "") === terminalTimerId) {
-          applyPlannerTimerState({});
-        }
       }
       if (plannerTimerWasTerminated(payload.timer)) return;
       applyPlannerTimerState(payload.timer || {}, payload.events || []);

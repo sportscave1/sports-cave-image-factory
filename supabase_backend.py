@@ -4607,6 +4607,237 @@ def _select_daily_sheet_for_timer(cur, user_id, sheet_id, *, lock=True):
     return cur.fetchone() or {}
 
 
+def _daily_task_terminal_outcome(task):
+    task = dict(task or {})
+    status = str(task.get("status") or "").strip().casefold()
+    outcome = str(task.get("outcome") or "").strip().casefold()
+    mapped = {
+        "done": DAILY_TIMER_OUTCOME_COMPLETED,
+        "couldnt_finish": DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+        "skipped": DAILY_TIMER_OUTCOME_SKIPPED,
+    }.get(status)
+    if mapped:
+        return mapped
+    if outcome in {
+        DAILY_TIMER_OUTCOME_COMPLETED,
+        DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+        DAILY_TIMER_OUTCOME_SKIPPED,
+    }:
+        return outcome
+    return ""
+
+
+def _daily_task_has_content(task, task_type=""):
+    task = dict(task or {})
+    name = str(task.get("task") or task.get("title") or "").strip()
+    if str(task_type or "").casefold() == "top":
+        return bool(name)
+    return bool(name or str(task.get("details") or "").strip())
+
+
+def _finalise_overdue_daily_execution_sheets_locked(
+    cur,
+    user_id,
+    local_today,
+    *,
+    actor="sports_cave_os",
+    now_utc=None,
+):
+    """Finalise overdue plans while the caller owns the account transaction lock."""
+    clean_user_id = str(user_id or "").strip()
+    today = local_today if isinstance(local_today, date) else date.fromisoformat(str(local_today))
+    now_utc = now_utc or datetime.now(timezone.utc)
+    cur.execute(
+        """
+        SELECT *
+        FROM daily_execution_sheets
+        WHERE user_id=%s
+          AND sheet_date < %s::date
+          AND status IN ('active', 'planned')
+        ORDER BY sheet_date ASC
+        FOR UPDATE
+        """,
+        (clean_user_id, today.isoformat()),
+    )
+    sheet_rows = list(cur.fetchall() or [])
+    sheet_ids = [str(row.get("id") or "") for row in sheet_rows if row.get("id")]
+    timer_rows = []
+    if sheet_ids:
+        cur.execute(
+            """
+            SELECT *
+            FROM daily_execution_task_timers
+            WHERE user_id=%s AND sheet_id=ANY(%s::uuid[])
+            ORDER BY updated_at DESC
+            FOR UPDATE
+            """,
+            (clean_user_id, sheet_ids),
+        )
+        timer_rows = list(cur.fetchall() or [])
+
+    timers_by_sheet = {}
+    for row in timer_rows:
+        timers_by_sheet.setdefault(str(row.get("sheet_id") or ""), []).append(row)
+
+    finalised = []
+    cleared_timer_ids = []
+    for sheet_row in sheet_rows:
+        sheet_id = str(sheet_row.get("id") or "")
+        top_tasks = [dict(item or {}) for item in (sheet_row.get("top_tasks") or [])]
+        additional_items = [dict(item or {}) for item in (sheet_row.get("additional_items") or [])]
+        sheet_timers = timers_by_sheet.get(sheet_id, [])
+        timer_lookup = {}
+        for timer_row in sheet_timers:
+            key = (str(timer_row.get("task_type") or ""), int(timer_row.get("task_index") or 0))
+            timer_lookup.setdefault(key, timer_row)
+
+        transitioned = []
+        for task_type, tasks in (("top", top_tasks), ("additional", additional_items)):
+            for task_index, task in enumerate(tasks):
+                if not _daily_task_has_content(task, task_type):
+                    continue
+                terminal = _daily_task_terminal_outcome(task)
+                timer_row = timer_lookup.get((task_type, task_index), {})
+                timer = _timer_from_row(timer_row)
+                if terminal:
+                    continue
+                transition = _daily_task_terminal_transition(
+                    task,
+                    timer,
+                    DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+                    reason="Automatically finalised after the work date ended.",
+                    now_utc=now_utc,
+                )
+                tasks[task_index] = transition["task"]
+                transitioned.append((task_type, task_index, transition, timer))
+
+        task_lookup = {
+            (task_type, index): task
+            for task_type, tasks in (("top", top_tasks), ("additional", additional_items))
+            for index, task in enumerate(tasks)
+        }
+        for timer_row in sheet_timers:
+            timer = _timer_from_row(timer_row)
+            if not timer or timer.get("outcome") or str(timer.get("status") or "").casefold() not in DAILY_TIMER_ACTIVE_STATUSES:
+                continue
+            task = task_lookup.get((timer.get("task_type"), int(timer.get("task_index") or 0)), {})
+            outcome = _daily_task_terminal_outcome(task) or DAILY_TIMER_OUTCOME_DID_NOT_FINISH
+            elapsed = task.get("actual_elapsed_seconds")
+            if elapsed is None:
+                elapsed = _daily_timer_elapsed_seconds(timer, now_utc)
+            elapsed = max(int(elapsed or 0), 0)
+            remaining = max(int(timer.get("allocated_seconds") or 0) - elapsed, 0)
+            cur.execute(
+                """
+                UPDATE daily_execution_task_timers
+                SET status='completed',
+                    outcome=%s,
+                    outcome_required=false,
+                    outcome_at=COALESCE(outcome_at, %s),
+                    remaining_seconds=%s,
+                    actual_elapsed_seconds=%s,
+                    completion_method=COALESCE(NULLIF(completion_method, ''), %s),
+                    skip_reason=COALESCE(skip_reason, %s),
+                    stopped_at=COALESCE(stopped_at, %s),
+                    updated_at=now(),
+                    version=version + 1
+                WHERE id=%s AND user_id=%s AND outcome IS NULL
+                """,
+                (
+                    outcome,
+                    now_utc,
+                    remaining,
+                    elapsed,
+                    str(task.get("completion_method") or outcome),
+                    str(task.get("skip_reason") or "") or None,
+                    now_utc,
+                    timer.get("id"),
+                    clean_user_id,
+                ),
+            )
+            cleared_timer_ids.append(str(timer.get("id") or ""))
+
+        cur.execute(
+            """
+            UPDATE daily_execution_sheets
+            SET top_tasks=%s::jsonb,
+                additional_items=%s::jsonb,
+                status='finalised',
+                updated_at=now()
+            WHERE id=%s AND user_id=%s
+            RETURNING *
+            """,
+            (json_dumps(top_tasks), json_dumps(additional_items), sheet_id, clean_user_id),
+        )
+        updated_sheet = cur.fetchone() or sheet_row
+        for task_type, task_index, transition, timer in transitioned:
+            task = transition["task"]
+            event_entity = timer.get("id") or f"task:{sheet_id}:{task_type}:{task_index}"
+            _insert_daily_timer_activity_once(
+                cur,
+                event_type="daily_planner_task_auto_finalised",
+                timer_id=event_entity,
+                sheet_id=sheet_id,
+                message=f"Daily Planner task automatically marked did not finish: {task.get('task') or task.get('details') or 'Task'}",
+                actor=actor,
+                event_key=f"daily_planner_task_auto_finalised:{event_entity}:v{transition['outcome_version']}",
+                metadata={
+                    "task": task.get("task") or task.get("details") or "Daily Planner task",
+                    "task_type": task_type,
+                    "task_index": task_index,
+                    "outcome": DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+                    "audit_reason": "overdue_day_rollover",
+                    "actor_id": clean_user_id,
+                },
+            )
+        finalised.append(_daily_execution_sheet_from_row(updated_sheet))
+
+    cur.execute(
+        """
+        SELECT *
+        FROM daily_execution_sheets
+        WHERE user_id=%s
+          AND sheet_date < %s::date
+          AND status='finalised'
+          AND completed_at IS NULL
+        ORDER BY sheet_date DESC
+        LIMIT 1
+        """,
+        (clean_user_id, today.isoformat()),
+    )
+    reminder = _daily_execution_sheet_from_row(cur.fetchone() or {})
+    return {
+        "finalised_sheets": finalised,
+        "finalised_dates": [sheet.get("sheet_date") for sheet in finalised],
+        "cleared_timer_ids": [timer_id for timer_id in cleared_timer_ids if timer_id],
+        "review_reminder": reminder,
+    }
+
+
+def finalise_overdue_daily_execution_sheets(
+    user_id,
+    local_today,
+    *,
+    actor="sports_cave_os",
+    now_utc=None,
+):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (clean_user_id,))
+            result = _finalise_overdue_daily_execution_sheets_locked(
+                cur,
+                clean_user_id,
+                local_today,
+                actor=actor,
+                now_utc=now_utc,
+            )
+        conn.commit()
+    return result
+
+
 def _expire_daily_timer_row(cur, timer_row, user_id, *, actor="sports_cave_os"):
     """Expire a locked timer without granting time during a pause/resume race."""
     timer = _timer_from_row(timer_row)
@@ -4662,6 +4893,7 @@ def start_daily_execution_task_timer(
     allocated_seconds,
     *,
     actor="sports_cave_os",
+    local_today=None,
 ):
     ensure_dashboard_schema()
     clean_user_id = str(user_id or "").strip()
@@ -4671,17 +4903,32 @@ def start_daily_execution_task_timer(
     safe_allocated = max(int(allocated_seconds or 0), 1)
     if clean_type not in {"top", "additional"}:
         raise ValueError("Unknown Daily Planner task.")
+    today = local_today if isinstance(local_today, date) else date.fromisoformat(
+        str(local_today or datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat())
+    )
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (clean_user_id,))
+            rollover = _finalise_overdue_daily_execution_sheets_locked(
+                cur,
+                clean_user_id,
+                today,
+                actor=actor,
+            )
             sheet = _select_daily_sheet_for_timer(cur, clean_user_id, clean_sheet_id, lock=True)
             if not sheet:
                 raise ValueError("Daily Planner task is not available for this account.")
             task = _daily_sheet_task(sheet, clean_type, safe_index)
             if not str(task.get("task") or task.get("details") or "").strip():
                 raise ValueError("Daily Planner task is empty.")
-            if str(task.get("status") or "").strip().casefold() in {"done", "couldnt_finish", "skipped"}:
+            if _daily_task_terminal_outcome(task):
                 raise ValueError("This Daily Planner task is already closed.")
+            sheet_date = sheet.get("sheet_date")
+            if isinstance(sheet_date, str):
+                sheet_date = date.fromisoformat(sheet_date)
+            if sheet_date and sheet_date < today and not task.get("reopened_at"):
+                raise ValueError("Reopen this historical task before starting its timer.")
             cur.execute(
                 """
                 SELECT *
@@ -4690,22 +4937,134 @@ def start_daily_execution_task_timer(
                   AND status IN ('running', 'paused', 'expired')
                   AND outcome IS NULL
                 ORDER BY updated_at DESC
-                LIMIT 1
                 FOR UPDATE
                 """,
                 (clean_user_id,),
             )
-            active = cur.fetchone() or {}
-            if active:
+            active_rows = list(cur.fetchall() or [])
+            same_active = {}
+            replaced = []
+            for active in active_rows:
                 same_task = (
                     str(active.get("sheet_id") or "") == clean_sheet_id
                     and str(active.get("task_type") or "") == clean_type
                     and int(active.get("task_index") or 0) == safe_index
                 )
-                if same_task:
-                    conn.commit()
-                    return _timer_from_row(active)
-                raise ValueError("A Daily Planner timer is already active.")
+                active_timer = _timer_from_row(active)
+                if same_task and str(active_timer.get("status") or "").casefold() in {"running", "paused"}:
+                    same_active = active
+                    continue
+                previous_sheet = _select_daily_sheet_for_timer(
+                    cur,
+                    clean_user_id,
+                    active_timer.get("sheet_id"),
+                    lock=True,
+                )
+                previous_task = _daily_sheet_task(
+                    previous_sheet,
+                    active_timer.get("task_type"),
+                    active_timer.get("task_index"),
+                )
+                previous_outcome = _daily_task_terminal_outcome(previous_task)
+                preserved_terminal = bool(previous_outcome)
+                if not previous_outcome:
+                    transition = _daily_task_terminal_transition(
+                        previous_task,
+                        active_timer,
+                        DAILY_TIMER_OUTCOME_DID_NOT_FINISH,
+                        reason="Replaced by the next Daily Planner task.",
+                    )
+                    previous_task = transition["task"]
+                    previous_outcome = DAILY_TIMER_OUTCOME_DID_NOT_FINISH
+                    previous_sheet_data = _daily_execution_sheet_from_row(previous_sheet)
+                    column = "top_tasks" if active_timer.get("task_type") == "top" else "additional_items"
+                    tasks = list(previous_sheet_data.get(column) or [])
+                    previous_index = int(active_timer.get("task_index") or 0)
+                    if previous_index < len(tasks):
+                        tasks[previous_index] = previous_task
+                        cur.execute(
+                            f"""
+                            UPDATE daily_execution_sheets
+                            SET {column}=%s::jsonb, updated_at=now()
+                            WHERE id=%s AND user_id=%s
+                            """,
+                            (json_dumps(tasks), active_timer.get("sheet_id"), clean_user_id),
+                        )
+                    event_entity = active_timer.get("id") or f"task:{active_timer.get('sheet_id')}:{active_timer.get('task_type')}:{previous_index}"
+                    _insert_daily_timer_activity_once(
+                        cur,
+                        event_type="daily_planner_task_replaced",
+                        timer_id=event_entity,
+                        sheet_id=active_timer.get("sheet_id"),
+                        message=f"Daily Planner task replaced by the next task: {previous_task.get('task') or previous_task.get('details') or 'Task'}",
+                        actor=actor,
+                        event_key=f"daily_planner_task_replaced:{event_entity}:v{transition['outcome_version']}",
+                        metadata={
+                            "task": previous_task.get("task") or previous_task.get("details") or "Daily Planner task",
+                            "outcome": previous_outcome,
+                            "audit_reason": "replaced_by_next_task",
+                            "actor_id": clean_user_id,
+                        },
+                    )
+                elapsed = previous_task.get("actual_elapsed_seconds")
+                if elapsed is None:
+                    elapsed = _daily_timer_elapsed_seconds(active_timer)
+                elapsed = max(int(elapsed or 0), 0)
+                remaining = max(int(active_timer.get("allocated_seconds") or 0) - elapsed, 0)
+                cur.execute(
+                    """
+                    UPDATE daily_execution_task_timers
+                    SET status='completed',
+                        outcome=%s,
+                        outcome_required=false,
+                        outcome_at=COALESCE(outcome_at, now()),
+                        remaining_seconds=%s,
+                        actual_elapsed_seconds=%s,
+                        completion_method=COALESCE(NULLIF(completion_method, ''), %s),
+                        skip_reason=COALESCE(skip_reason, %s),
+                        stopped_at=COALESCE(stopped_at, now()),
+                        updated_at=now(),
+                        version=version + 1
+                    WHERE id=%s AND user_id=%s AND outcome IS NULL
+                    RETURNING *
+                    """,
+                    (
+                        previous_outcome,
+                        remaining,
+                        elapsed,
+                        str(previous_task.get("completion_method") or previous_outcome),
+                        str(previous_task.get("skip_reason") or "") or None,
+                        active_timer.get("id"),
+                        clean_user_id,
+                    ),
+                )
+                stopped = cur.fetchone() or active
+                replaced.append(
+                    {
+                        "timer": _timer_from_row(stopped),
+                        "outcome": previous_outcome,
+                        "preserved_terminal": preserved_terminal,
+                        "audit_reason": "stale_terminal_lock_cleared" if preserved_terminal else "replaced_by_next_task",
+                    }
+                )
+            if same_active:
+                active_timer = _timer_from_row(same_active)
+                active_timer.update(
+                    {
+                        "task": _daily_timer_task_name(sheet, clean_type, safe_index),
+                        "sheet_date": str(sheet.get("sheet_date") or ""),
+                        "remaining_seconds": _daily_timer_remaining_seconds(active_timer),
+                        "elapsed_seconds": _daily_timer_elapsed_seconds(active_timer),
+                    }
+                )
+                conn.commit()
+                return {
+                    "timer": active_timer,
+                    "active_timer": active_timer,
+                    "replaced_timers": replaced,
+                    "rollover": rollover,
+                    "already_started": True,
+                }
             cur.execute(
                 """
                 INSERT INTO daily_execution_task_timers(
@@ -4756,7 +5115,7 @@ def start_daily_execution_task_timer(
             )
             row = cur.fetchone()
             if not row:
-                raise ValueError("A Daily Planner timer is already active.")
+                raise RuntimeError("Daily Planner could not acquire the timer lock for this task.")
             task_name = _daily_timer_task_name(sheet, clean_type, safe_index)
             _insert_daily_timer_activity_once(
                 cur,
@@ -4774,7 +5133,22 @@ def start_daily_execution_task_timer(
                 },
             )
         conn.commit()
-    return _timer_from_row(row)
+    timer = _timer_from_row(row)
+    timer.update(
+        {
+            "task": task_name,
+            "sheet_date": str(sheet.get("sheet_date") or ""),
+            "remaining_seconds": _daily_timer_remaining_seconds(timer),
+            "elapsed_seconds": _daily_timer_elapsed_seconds(timer),
+        }
+    )
+    return {
+        "timer": timer,
+        "active_timer": timer,
+        "replaced_timers": replaced,
+        "rollover": rollover,
+        "already_started": False,
+    }
 
 
 def pause_daily_execution_task_timer(user_id, timer_id, *, actor="sports_cave_os"):
@@ -5337,7 +5711,8 @@ def _daily_task_terminal_transition(task, timer, outcome, *, reason="", now_utc=
             "finished_at": finished_at,
             "outcome": clean_outcome,
             "completion_method": completion_method,
-            "skip_reason": clean_reason,
+            "skip_reason": clean_reason if clean_outcome == DAILY_TIMER_OUTCOME_SKIPPED else "",
+            "outcome_reason": clean_reason if clean_outcome == DAILY_TIMER_OUTCOME_DID_NOT_FINISH else "",
             "completed_before_expiry": before_expiry,
             "time_saved_seconds": (
                 max(allocated - int(elapsed or 0), 0)
@@ -5474,6 +5849,7 @@ def apply_daily_execution_task_outcome(
                         "outcome": current_terminal,
                         "completion_method": task.get("completion_method") or "",
                         "skip_reason": task.get("skip_reason") or "",
+                        "outcome_reason": task.get("outcome_reason") or "",
                         "actual_elapsed_seconds": task.get("actual_elapsed_seconds"),
                         "recorded_at": task.get("completed_at") or task.get("finished_at"),
                         "reopened_at": outcome_at,
@@ -5488,6 +5864,7 @@ def apply_daily_execution_task_outcome(
                         "outcome": "",
                         "completion_method": "",
                         "skip_reason": "",
+                        "outcome_reason": "",
                         "completed_before_expiry": False,
                         "time_saved_seconds": None,
                         "actual_elapsed_seconds": None,
@@ -5526,13 +5903,18 @@ def apply_daily_execution_task_outcome(
                 f"""
                 UPDATE daily_execution_sheets
                 SET {column}=%s::jsonb,
-                    status=CASE WHEN %s THEN 'active' ELSE status END,
+                    status=CASE
+                        WHEN %s AND status='finalised' THEN 'reopened'
+                        WHEN %s THEN 'active'
+                        ELSE status
+                    END,
                     updated_at=now()
                 WHERE id=%s AND user_id=%s
                 RETURNING *
                 """,
                 (
                     json_dumps(tasks),
+                    clean_outcome == "reopen",
                     clean_outcome == "reopen",
                     clean_sheet_id,
                     clean_user_id,
@@ -5591,6 +5973,7 @@ def apply_daily_execution_task_outcome(
                     "outcome": clean_outcome,
                     "completion_method": task.get("completion_method") or "",
                     "skip_reason": task.get("skip_reason") or "",
+                    "outcome_reason": task.get("outcome_reason") or "",
                     "actual_elapsed_seconds": task.get("actual_elapsed_seconds"),
                     "actor_id": clean_user_id,
                 },
