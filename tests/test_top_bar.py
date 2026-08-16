@@ -275,18 +275,61 @@ class TopBarComponentTests(unittest.TestCase):
         markup_start = source.index("const markup = `")
         markup = source[markup_start : source.index("`;", markup_start)]
         refresh = markup.index('id="sc-os-refresh"')
+        greeting = markup.index('id="sc-os-topbar-greeting"')
         search = markup.index('id="sc-os-global-search"')
         planner = markup.index('id="sc-os-daily-planner"')
         notifications = markup.index('id="sc-os-notifications"')
         profile = markup.index('id="sc-os-profile"')
         settings = markup.index('id="sc-os-settings"')
         self.assertLess(refresh, search)
+        self.assertLess(refresh, greeting)
+        self.assertLess(greeting, search)
         self.assertLess(planner, notifications)
         self.assertLess(notifications, profile)
         self.assertLess(profile, settings)
         self.assertIn('aria-label="Open Daily Planner"', markup)
         self.assertIn('title="Open Daily Planner"', markup)
         self.assertNotIn("Shopify", source)
+
+    def test_top_bar_greeting_uses_browser_time_display_name_and_no_smiley(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(1, source.count('id="sc-os-topbar-greeting"'))
+        self.assertIn("state.config.userDisplayName", source)
+        self.assertIn("topBarGreetingForDate(new Date())", source)
+        self.assertIn('if (hour >= 5 && hour < 12) return "Good morning";', source)
+        self.assertIn('if (hour >= 12 && hour < 17) return "Good afternoon";', source)
+        self.assertIn('return "Good night";', source)
+        self.assertIn(
+            "topbarGreeting.textContent = `${topBarGreetingForDate(new Date())}, ${displayName}`",
+            source,
+        )
+        self.assertNotIn("Good morning, Nathan", source)
+        self.assertNotIn(":)", source)
+
+    def test_top_bar_config_projects_authenticated_display_name(self):
+        user = {
+            "id": "worker-1",
+            "display_name": "Reina",
+            "username": "worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard"],
+        }
+
+        with mock.patch.object(
+            top_bar_security,
+            "create_top_bar_token",
+            return_value="signed-token",
+        ):
+            config = top_bar.top_bar_config(
+                user,
+                logo_src="logo",
+                current_route="Dashboard",
+            )
+
+        self.assertEqual(config["userDisplayName"], "Reina")
+        self.assertNotEqual(config["userDisplayName"], "Nathan")
 
     def test_refresh_button_performs_a_full_page_reload(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
@@ -385,7 +428,9 @@ class TopBarComponentTests(unittest.TestCase):
         body, kwargs = components.calls[0]
         self.assertEqual({"height": 0, "width": 0}, kwargs)
         self.assertIn('"authToken": "signed-token"', body)
+        self.assertIn('"userDisplayName": "Admin"', body)
         self.assertEqual(1, body.count('id="sc-os-refresh"'))
+        self.assertEqual(1, body.count('id="sc-os-topbar-greeting"'))
         self.assertEqual(1, body.count('id="sc-os-daily-planner"'))
         self.assertEqual(1, body.count('id="sc-os-notifications"'))
         self.assertEqual(1, body.count('id="sc-os-profile"'))

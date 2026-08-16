@@ -4287,25 +4287,6 @@ def list_existing_edition_products(limit=1000):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def greeting_for_datetime(local_dt):
-    hour = int(local_dt.hour)
-    if 5 <= hour < 12:
-        return "Good morning :)"
-    if 12 <= hour < 17:
-        return "Good afternoon :)"
-    return "Good night :)"
-
-
-def greeting_for_account(local_dt, user):
-    base = greeting_for_datetime(local_dt).replace(" :)", "").strip()
-    name = _compact_text(
-        (user or {}).get("display_name")
-        or (user or {}).get("email")
-        or (user or {}).get("username")
-    )
-    return f"{base}, {name} :)" if name else base
-
-
 def load_calendar_events(path=SPORTING_CALENDAR_PATH):
     path = Path(path)
     try:

@@ -57,7 +57,7 @@ class MobileShellTests(unittest.TestCase):
     def test_top_bar_controller_rebinds_from_the_live_iframe_without_duplicates(self):
         source = TOP_BAR_CLIENT.read_text(encoding="utf-8")
 
-        self.assertIn('CONTROLLER_VERSION = "navigation-reliability-v6"', source)
+        self.assertIn('CONTROLLER_VERSION = "navigation-reliability-v7"', source)
         self.assertIn("root.dataset.controllerVersion !== CONTROLLER_VERSION", source)
         self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
         self.assertIn("parentWindow.SportsCaveTopBar = createController()", source)
@@ -66,6 +66,18 @@ class MobileShellTests(unittest.TestCase):
         self.assertIn("if (!state.orderStatusStarted)", source)
         self.assertIn("if (!state.plannerStatusStarted)", source)
         self.assertIn("listenerController.abort()", source)
+
+    def test_top_bar_greeting_cannot_overlap_mobile_toolbar_controls(self):
+        source = TOP_BAR_CLIENT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "grid-template-columns: var(--sc-sidebar-width) minmax(0, auto) minmax(260px, 1fr) auto",
+            source,
+        )
+        self.assertIn(".sc-os-topbar-greeting", source)
+        self.assertIn("max-width: min(22vw, 220px)", source)
+        self.assertIn("text-overflow: ellipsis", source)
+        self.assertIn(".sc-os-topbar-greeting { display: none; }", source)
 
     def test_top_bar_revision_is_stable_until_identity_or_permissions_change(self):
         admin = {

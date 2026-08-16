@@ -61,6 +61,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
     return {
         "appName": "Sports Cave OS",
         "appSubtitle": "Operations System",
+        "userDisplayName": str((user or {}).get("display_name") or "").strip(),
         "logoSrc": str(logo_src or ""),
         "currentRoute": str(current_route or ""),
         "currentRouteKey": os_accounts.page_key_for_route(current_route) or "",

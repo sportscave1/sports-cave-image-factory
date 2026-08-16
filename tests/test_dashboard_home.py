@@ -2584,43 +2584,23 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(entry["message"], "Order #SC1234 fulfilled + certificate generated")
 
-    def test_home_greeting_includes_signed_in_user_name(self):
-        local_now = datetime(2026, 7, 21, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+    def test_home_no_longer_owns_greeting_state(self):
+        dashboard_source = (ROOT / "sports_cave_dashboard.py").read_text(encoding="utf-8")
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        render_body = app_source[
+            app_source.index("def render_lightweight_dashboard_page") :
+            app_source.index("\n\ndef page_uses_local_database")
+        ]
 
-        greeting = sports_cave_dashboard.greeting_for_account(
-            local_now,
-            {"display_name": "Nathan", "email": "nathan@sportscave.test"},
-        )
-
-        self.assertEqual(greeting, "Good morning, Nathan :)")
-
-    def test_admin_greeting_uses_australia_sydney_time(self):
-        utc_now = datetime(2026, 7, 21, 20, 30, tzinfo=timezone.utc)
-        admin = {
-            "role": os_accounts.ROLE_ADMIN,
-            "display_name": "Nathan",
-            "timezone": os_accounts.ADMIN_TIMEZONE,
-        }
-        local_now = utc_now.astimezone(ZoneInfo(os_accounts.timezone_for_user(admin)))
-
-        self.assertEqual(
-            sports_cave_dashboard.greeting_for_account(local_now, admin),
-            "Good morning, Nathan :)",
-        )
-
-    def test_worker_greeting_uses_asia_manila_time(self):
-        utc_now = datetime(2026, 7, 21, 20, 30, tzinfo=timezone.utc)
-        worker = {
-            "role": os_accounts.ROLE_WORKER,
-            "display_name": "Maria",
-            "timezone": os_accounts.WORKER_TIMEZONE,
-        }
-        local_now = utc_now.astimezone(ZoneInfo(os_accounts.timezone_for_user(worker)))
-
-        self.assertEqual(
-            sports_cave_dashboard.greeting_for_account(local_now, worker),
-            "Good night, Maria :)",
-        )
+        self.assertNotIn("greeting_for_account", dashboard_source)
+        self.assertNotIn("greeting_for_datetime", dashboard_source)
+        self.assertNotIn("greeting_for_account", render_body)
+        self.assertNotIn("sc-home-header", render_body)
+        self.assertNotIn("sc-home-kicker", render_body)
+        self.assertNotIn("Good morning", render_body)
+        self.assertNotIn("Good afternoon", render_body)
+        self.assertNotIn("Good night", render_body)
+        self.assertNotIn(":)", render_body)
 
     def test_activity_table_record_displays_actor_name(self):
         record = sports_cave_dashboard.activity_table_record(
@@ -3191,6 +3171,25 @@ class SportsCaveCalendarTests(unittest.TestCase):
         self.assertEqual(sports_cave_dashboard.build_active_alerts([tbc_event], today), [])
         self.assertEqual(sports_sales_calendar.confirmed_upcoming_events([tbc_event], today), [])
 
+    def test_home_event_rows_keep_operational_date_labels(self):
+        rows = sports_cave_dashboard.build_home_event_rows(
+            [
+                {
+                    "id": "us-open-2026",
+                    "importance": 4,
+                    "markets": ["US"],
+                    "sport": "Tennis",
+                    "start_date": "2026-08-23",
+                    "end_date": "2026-09-13",
+                    "title": "US Open",
+                }
+            ],
+            date(2026, 8, 1),
+            limit=1,
+        )
+
+        self.assertEqual(rows[0]["date_label"], "23 Aug - 13 Sep 2026")
+
     def test_current_calendar_month_uses_australia_sydney_time(self):
         utc_now = datetime(2026, 7, 31, 14, 30, tzinfo=timezone.utc)
 
@@ -3284,6 +3283,11 @@ class DashboardRenderContractTests(unittest.TestCase):
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
+        self.assertNotIn("Good morning", rendered)
+        self.assertNotIn("Good afternoon", rendered)
+        self.assertNotIn("Good night", rendered)
+        self.assertNotIn(":)", rendered)
+        self.assertNotIn("Sports Cave</div>", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("MIP Task 1", rendered)
         self.assertNotIn("Other tasks", rendered)
@@ -3318,6 +3322,10 @@ class DashboardRenderContractTests(unittest.TestCase):
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
+        self.assertNotIn("Good morning", rendered)
+        self.assertNotIn("Good afternoon", rendered)
+        self.assertNotIn("Good night", rendered)
+        self.assertNotIn(":)", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("Daily Execution Archive", rendered)
         self.assertNotIn("Sports & Sales Calendar", rendered)
@@ -3810,6 +3818,15 @@ class DashboardRenderContractTests(unittest.TestCase):
         ]
         self.assertIn("render_active_upcoming_events(events, today)", render_body)
         self.assertIn("render_home_weekly_work(user, local_now)", render_body)
+        self.assertLess(
+            render_body.index("render_active_upcoming_events(events, today)"),
+            render_body.index("render_home_weekly_work(user, local_now)"),
+        )
+        self.assertIn('st.container(key="home-ops-dashboard")', render_body)
+        self.assertNotIn("st.title(", render_body)
+        self.assertNotIn("st.header(", render_body)
+        self.assertNotIn("st.caption(today", render_body)
+        self.assertNotIn("strftime", render_body)
         self.assertNotIn("render_home_recent_activity(local_now)", render_body)
         self.assertNotIn("can_manage_daily_planner(user)", render_body)
         self.assertNotIn("render_daily_execution_panel", render_body)
@@ -3824,6 +3841,38 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn("get_reporting_page().render_page", reporting_route)
         self.assertIn("render_weekly_review_page", reporting_route)
         self.assertIn("os_accounts.DAILY_PLANNER_ROUTE", reporting_route)
+
+    def test_home_layout_is_compact_and_scoped_to_dashboard(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        style_source = source[
+            source.index('div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard)') :
+            source.index(".st-key-files-window-launcher-slot")
+        ]
+        events_source = source[
+            source.index("def render_active_upcoming_events") :
+            source.index("\n\ndef _home_duration_label")
+        ]
+        weekly_source = source[
+            source.index("def render_home_weekly_work") :
+            source.index("\n\ndef render_home_recent_activity")
+        ]
+
+        self.assertIn("padding-top: calc(var(--sc-topbar-height) + 1rem) !important", style_source)
+        self.assertIn("padding-left: clamp(20px, 2vw, 32px) !important", style_source)
+        self.assertIn('[data-testid="stMainBlockContainer"]', style_source)
+        self.assertIn("gap: 0 !important", style_source)
+        self.assertIn("gap: 0.55rem !important", style_source)
+        self.assertIn("min-height: 64px !important", style_source)
+        self.assertIn("overflow-x: hidden", style_source)
+        self.assertIn("height=min(318, 42 + len(records) * 34)", events_source)
+        self.assertIn("row_height=34", events_source)
+        self.assertIn("cards = st.columns(6)", weekly_source)
+        self.assertIn("height=min(286, 42 + len(team_rows) * 34)", weekly_source)
+        self.assertIn("height=min(360, max(190, 42 + len(work_rows) * 34))", weekly_source)
+        self.assertGreater(
+            weekly_source.index('render_html_section_title("Completed Work This Week")'),
+            weekly_source.index("if snapshot.get(\"is_team_view\"):"),
+        )
 
     def test_calendar_helper_has_no_backend_or_network_imports(self):
         source = (ROOT / "sports_sales_calendar.py").read_text(encoding="utf-8")

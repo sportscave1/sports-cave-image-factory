@@ -2151,8 +2151,7 @@ def inject_styles():
             box-shadow: 0 18px 50px rgba(11, 11, 13, 0.08);
         }
 
-        .sc-login-kicker,
-        .sc-home-kicker {
+        .sc-login-kicker {
             color: #8A6828 !important;
             font-size: 0.75rem;
             font-weight: 760;
@@ -2172,21 +2171,6 @@ def inject_styles():
             color: #58524A !important;
             font-size: 0.92rem;
             margin-bottom: 0.9rem;
-        }
-
-        .sc-home-header {
-            border-bottom: 1px solid #E6DFD1;
-            margin: 0 0 0.85rem;
-            padding-bottom: 0.75rem;
-        }
-
-        .sc-home-header h1 {
-            color: #0B0B0D;
-            font-size: clamp(2rem, 4vw, 3.2rem);
-            font-weight: 860;
-            letter-spacing: 0;
-            line-height: 1;
-            margin: 0.1rem 0 0;
         }
 
         .sc-section-title {
@@ -2223,6 +2207,74 @@ def inject_styles():
             color: #5D574E !important;
             font-size: 0.9rem;
             padding: 0.75rem 0.85rem;
+        }
+
+        div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard) {
+            overflow-x: hidden !important;
+        }
+
+        div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard) [data-testid="stMainBlockContainer"] {
+            max-width: 100%;
+            padding-left: clamp(20px, 2vw, 32px) !important;
+            padding-right: clamp(20px, 2vw, 32px) !important;
+            padding-top: calc(var(--sc-topbar-height) + 1rem) !important;
+        }
+
+        div[data-testid="stMainBlockContainer"]:has(.st-key-home-ops-dashboard) > div[data-testid="stVerticalBlock"] {
+            gap: 0 !important;
+        }
+
+        .st-key-home-ops-dashboard {
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
+        .st-key-home-ops-dashboard div[data-testid="stVerticalBlock"] {
+            gap: 0.55rem !important;
+        }
+
+        .st-key-home-ops-dashboard div[data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"]:first-child .sc-section-title {
+            margin-top: 0;
+        }
+
+        .st-key-home-ops-dashboard .sc-section-title {
+            font-size: 1rem;
+            margin: 0.45rem 0 0.3rem;
+        }
+
+        .st-key-home-ops-dashboard div[data-testid="stHorizontalBlock"] {
+            gap: 0.5rem !important;
+        }
+
+        .st-key-home-ops-dashboard [data-testid="stMetric"] {
+            border-radius: 8px !important;
+            border-top-width: 1px !important;
+            min-height: 64px !important;
+            padding: 0.48rem 0.62rem !important;
+        }
+
+        .st-key-home-ops-dashboard [data-testid="stMetricLabel"],
+        .st-key-home-ops-dashboard [data-testid="stMetricLabel"] * {
+            font-size: 0.68rem !important;
+            line-height: 1.15 !important;
+        }
+
+        .st-key-home-ops-dashboard [data-testid="stMetricValue"],
+        .st-key-home-ops-dashboard [data-testid="stMetricValue"] * {
+            font-size: 1.05rem !important;
+            line-height: 1.05 !important;
+        }
+
+        .st-key-home-ops-dashboard [data-testid="stMetricDelta"],
+        .st-key-home-ops-dashboard [data-testid="stMetricDelta"] * {
+            font-size: 0.72rem !important;
+            line-height: 1.1 !important;
+        }
+
+        .st-key-home-ops-dashboard [data-testid="stDataFrame"] {
+            max-width: 100%;
+            overflow: hidden;
+            width: 100% !important;
         }
 
         .st-key-files-window-launcher-slot {
@@ -3781,6 +3833,12 @@ def inject_styles():
                 padding-left: max(0.75rem, env(safe-area-inset-left));
                 padding-right: max(0.75rem, env(safe-area-inset-right));
                 padding-top: calc(var(--sc-topbar-height) + 0.8rem);
+            }
+
+            div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard) [data-testid="stMainBlockContainer"] {
+                padding-left: max(0.75rem, env(safe-area-inset-left)) !important;
+                padding-right: max(0.75rem, env(safe-area-inset-right)) !important;
+                padding-top: calc(var(--sc-topbar-height) + 0.75rem) !important;
             }
 
             div[data-testid="stHorizontalBlock"] {
@@ -12138,8 +12196,8 @@ def render_active_upcoming_events(events, today):
         records,
         hide_index=True,
         width="stretch",
-        height=min(340, 42 + len(records) * 34),
-        row_height=32,
+        height=min(318, 42 + len(records) * 34),
+        row_height=34,
         key="home-active-upcoming-events",
     )
 
@@ -12205,8 +12263,8 @@ def render_home_weekly_work(user, local_now):
                 team_rows,
                 hide_index=True,
                 width="stretch",
-                height=min(300, 42 + len(team_rows) * 34),
-                row_height=32,
+                height=min(286, 42 + len(team_rows) * 34),
+                row_height=34,
                 key="home-weekly-team-summary",
             )
 
@@ -12227,8 +12285,8 @@ def render_home_weekly_work(user, local_now):
             work_rows,
             hide_index=True,
             width="stretch",
-            height=min(390, max(220, 42 + len(work_rows) * 34)),
-            row_height=32,
+            height=min(360, max(190, 42 + len(work_rows) * 34)),
+            row_height=34,
             key="home-completed-work-week",
         )
     else:
@@ -13995,23 +14053,13 @@ def render_lightweight_dashboard_page():
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
     events = sports_cave_dashboard.load_calendar_events()
-    greeting = sports_cave_dashboard.greeting_for_account(local_now, user)
-
-    st.markdown(
-        f"""
-        <div class="sc-home-header">
-            <div class="sc-home-kicker">Sports Cave</div>
-            <h1>{html.escape(greeting)}</h1>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    events_render_started = time.perf_counter()
-    render_active_upcoming_events(events, today)
-    safe_startup_print(
-        f"PERF Dashboard events={(time.perf_counter() - events_render_started):.3f}s"
-    )
-    render_home_weekly_work(user, local_now)
+    with st.container(key="home-ops-dashboard"):
+        events_render_started = time.perf_counter()
+        render_active_upcoming_events(events, today)
+        safe_startup_print(
+            f"PERF Dashboard events={(time.perf_counter() - events_render_started):.3f}s"
+        )
+        render_home_weekly_work(user, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
