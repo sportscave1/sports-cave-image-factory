@@ -25,6 +25,10 @@ DROP_CONSTRAINT_PATTERN = re.compile(
     r"DROP\s+CONSTRAINT\s+IF\s+EXISTS\s+(?P<constraint>[a-z_][a-z0-9_]*)\s*;",
     re.IGNORECASE,
 )
+REFERENTIAL_DELETE_PATTERN = re.compile(
+    r"\bON\s+DELETE\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)\b",
+    re.IGNORECASE,
+)
 ALLOWED_CONSTRAINT_REPLACEMENTS = frozenset(
     {
         (
@@ -49,6 +53,7 @@ def safe_migration_sql(sql):
         return "" if key in ALLOWED_CONSTRAINT_REPLACEMENTS else match.group(0)
 
     reviewed_sql = DROP_CONSTRAINT_PATTERN.sub(remove_reviewed_constraint_drop, sql)
+    reviewed_sql = REFERENTIAL_DELETE_PATTERN.sub("", reviewed_sql)
     return not UNSAFE_SQL_PATTERN.search(reviewed_sql)
 
 

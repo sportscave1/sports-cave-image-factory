@@ -2058,6 +2058,243 @@ def load_daily_execution_weekly_review(user, start_date, end_date, *, limit=1000
         raise DashboardStorageError(_storage_error(error)) from error
 
 
+def weekly_tactic_execution_summary(plan):
+    tactics = [
+        dict(tactic or {})
+        for objective in (plan or {}).get("objectives") or []
+        for tactic in (objective or {}).get("tactics") or []
+        if _compact_text((tactic or {}).get("action") or "")
+    ]
+    completed = sum(
+        str(tactic.get("status") or "open").strip().casefold() == "completed"
+        for tactic in tactics
+    )
+    return {
+        "total": len(tactics),
+        "completed": completed,
+        "open": sum(
+            str(tactic.get("status") or "open").strip().casefold() == "open"
+            for tactic in tactics
+        ),
+        "not_completed": sum(
+            str(tactic.get("status") or "").strip().casefold() == "not_completed"
+            for tactic in tactics
+        ),
+        "percentage": completed / len(tactics) * 100 if tactics else 0.0,
+    }
+
+
+def load_daily_planner_week_plan(user, anchor_date):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        bundle = get_supabase_backend().load_daily_planner_week_plan(user_id, anchor_date)
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    plan = dict(bundle.get("plan") or {})
+    return {
+        **bundle,
+        "plan": plan,
+        "execution": weekly_tactic_execution_summary(plan),
+    }
+
+
+def create_daily_planner_cycle(user, name, overall_objective, start_date):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        return get_supabase_backend().create_daily_planner_cycle(
+            user_id,
+            name,
+            overall_objective,
+            start_date,
+            actor=daily_execution_user_name(user),
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def save_daily_planner_week_plan(
+    user,
+    cycle_id,
+    week_start,
+    theme,
+    quote_text,
+    quote_author,
+    objectives,
+    *,
+    expected_version=0,
+    request_id="",
+):
+    user_id = _require_daily_execution_admin(user)
+    try:
+        bundle = get_supabase_backend().save_daily_planner_week_plan(
+            user_id,
+            cycle_id,
+            week_start,
+            theme,
+            quote_text,
+            quote_author,
+            objectives,
+            expected_version=expected_version,
+            request_id=request_id,
+            actor=daily_execution_user_name(user),
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    plan = dict(bundle.get("plan") or {})
+    clear_activity_cache()
+    return {
+        **bundle,
+        "plan": plan,
+        "execution": weekly_tactic_execution_summary(plan),
+    }
+
+
+def _cycle_week_daily_rows(sheets, timers, week_start, today):
+    timer_by_sheet = {}
+    for timer in timers or []:
+        timer_by_sheet.setdefault(str(timer.get("sheet_id") or ""), []).append(timer)
+    rows = []
+    for offset in range(7):
+        work_date = week_start + timedelta(days=offset)
+        day_sheets = [
+            sheet for sheet in sheets or []
+            if str(sheet.get("sheet_date") or "") == work_date.isoformat()
+        ]
+        day_timers = [
+            timer
+            for sheet in day_sheets
+            for timer in timer_by_sheet.get(str(sheet.get("id") or ""), [])
+        ]
+        summary = daily_execution_weekly_summary(
+            day_sheets,
+            day_timers,
+            today=today,
+        )
+        rows.append(
+            {
+                "day": work_date.strftime("%a"),
+                "date": work_date.isoformat(),
+                "major_tasks": sum(
+                    bool(_compact_text(task.get("task") or ""))
+                    for sheet in day_sheets
+                    for task in (sheet.get("top_tasks") or [])
+                ),
+                "completed": summary["completed"],
+                "did_not_finish": summary["did_not_finish"],
+                "skipped": summary["skipped"],
+                "completion_percentage": summary["completion_percentage"],
+                "focused_seconds": summary["actual_focused_seconds"],
+                "review": "Completed" if any(daily_execution_review_complete(sheet) for sheet in day_sheets) else "Not completed",
+                "sheet_ids": [str(sheet.get("id") or "") for sheet in day_sheets],
+            }
+        )
+    return rows
+
+
+def load_twelve_week_progress(user, anchor_date=None):
+    user_id = daily_execution_user_id(user)
+    if not user_id or not os_accounts.can_access_reporting(user):
+        raise DashboardStorageError("Reporting access is not approved.")
+    anchor = anchor_date or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
+    try:
+        backend = get_supabase_backend()
+        archive = backend.list_daily_planner_cycle_archive(user_id, anchor)
+        cycle = dict(archive.get("cycle") or {})
+        if not cycle:
+            return {"cycle": {}, "weeks": [], "months": [], "query_count": archive.get("query_count", 1)}
+        cycle_start = cycle.get("start_date")
+        if not isinstance(cycle_start, date):
+            cycle_start = date.fromisoformat(str(cycle_start))
+        cycle_end = cycle_start + timedelta(days=83)
+        sheets = backend.list_daily_execution_sheets_for_reporting(
+            user_id, cycle_start.isoformat(), cycle_end.isoformat(), limit=5000
+        )
+        sheets = [_normalise_daily_sheet(sheet) for sheet in sheets or []]
+        sheet_ids = [sheet.get("id") for sheet in sheets if sheet.get("id")]
+        timers = backend.list_daily_execution_timers_for_sheets(user_id, sheet_ids) if sheet_ids else []
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    plans = {int(plan.get("week_number") or 0): dict(plan) for plan in archive.get("plans") or []}
+    today = datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
+    weeks = []
+    for week_number in range(1, 13):
+        week_start = cycle_start + timedelta(days=(week_number - 1) * 7)
+        week_end = week_start + timedelta(days=6)
+        plan = plans.get(week_number, {})
+        selected_sheets = [
+            sheet for sheet in sheets
+            if week_start.isoformat() <= str(sheet.get("sheet_date") or "") <= week_end.isoformat()
+        ]
+        selected_ids = {str(sheet.get("id") or "") for sheet in selected_sheets}
+        selected_timers = [timer for timer in timers if str(timer.get("sheet_id") or "") in selected_ids]
+        daily = daily_execution_weekly_summary(selected_sheets, selected_timers, today=today)
+        tactic = weekly_tactic_execution_summary(plan)
+        weeks.append(
+            {
+                "week_number": week_number,
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+                "theme": plan.get("theme") or "",
+                "quote_text": plan.get("quote_text") or "",
+                "quote_author": plan.get("quote_author") or "",
+                "objectives": plan.get("objectives") or [],
+                "objective_count": len(plan.get("objectives") or []),
+                "tactic_count": tactic["total"],
+                "tactic_score": tactic["percentage"],
+                "daily_score": daily["completion_percentage"],
+                "focused_seconds": daily["actual_focused_seconds"],
+                "completed": daily["completed"],
+                "did_not_finish": daily["did_not_finish"],
+                "skipped": daily["skipped"],
+                "review": "Completed" if plan.get("review_submitted_at") else "Not completed",
+                "plan_id": str(plan.get("id") or ""),
+                "days": _cycle_week_daily_rows(selected_sheets, selected_timers, week_start, today),
+                "daily_summary": daily,
+                "review_data": dict(plan.get("review_data") or {}),
+            }
+        )
+    monthly_reviews = {
+        str(row.get("month_start") or "")[:7]: row for row in archive.get("monthly_reviews") or []
+    }
+    month_groups = {}
+    for week in weeks:
+        month_groups.setdefault(week["week_start"][:7], []).append(week)
+    months = []
+    for month_key, month_weeks in sorted(month_groups.items()):
+        total_daily = sum(week["daily_summary"]["total_planned"] for week in month_weeks)
+        completed_daily = sum(week["completed"] for week in month_weeks)
+        total_tactics = sum(week["tactic_count"] for week in month_weeks)
+        completed_tactics = sum(
+            weekly_tactic_execution_summary(plans.get(week["week_number"], {}))["completed"]
+            for week in month_weeks
+        )
+        review = monthly_reviews.get(month_key, {})
+        months.append(
+            {
+                "month": date.fromisoformat(f"{month_key}-01").strftime("%B %Y"),
+                "month_start": f"{month_key}-01",
+                "weeks_included": ", ".join(f"Week {week['week_number']}" for week in month_weeks),
+                "daily_completion": completed_daily / total_daily * 100 if total_daily else 0.0,
+                "tactic_execution": completed_tactics / total_tactics * 100 if total_tactics else 0.0,
+                "focused_seconds": sum(week["focused_seconds"] for week in month_weeks),
+                "objectives_achieved": sum(
+                    str(objective.get("result") or "") == "achieved"
+                    for week in month_weeks for objective in week["objectives"]
+                ),
+                "reviews_complete": sum(week["review"] == "Completed" for week in month_weeks),
+                "review": "Completed" if review.get("submitted_at") else "Not completed",
+                "review_id": str(review.get("id") or ""),
+                "summary": dict(review.get("summary") or {}),
+            }
+        )
+    return {
+        "cycle": cycle,
+        "weeks": weeks,
+        "months": months,
+        "query_count": int(archive.get("query_count") or 0) + 1 + bool(sheet_ids),
+    }
+
+
 def get_daily_execution_archive_detail(user, sheet_id):
     user_id = _require_daily_execution_admin(user)
     clean_id = str(sheet_id or "").strip()
@@ -2420,7 +2657,22 @@ def apply_daily_planner_timer_outcome(user, timer_id, outcome):
         else:
             clear_daily_execution_cache(user_id)
         clear_activity_cache()
-        return {**(result or {}), "sheet": sheet, "timer": _normalise_timer((result or {}).get("timer") or {})}
+        timer = _normalise_timer((result or {}).get("timer") or {})
+        if str(outcome or "").strip().casefold() == DAILY_TIMER_OUTCOME_COMPLETED and timer:
+            try:
+                backend = get_supabase_backend()
+                if hasattr(backend, "complete_linked_weekly_tactics"):
+                    backend.complete_linked_weekly_tactics(
+                        user_id,
+                        timer.get("sheet_id"),
+                        timer.get("task_type"),
+                        timer.get("task_index"),
+                    )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Optional weekly tactic link sync failed after timer outcome"
+                )
+        return {**(result or {}), "sheet": sheet, "timer": timer}
     except ValueError as error:
         raise DashboardStorageError(str(error)) from error
     except Exception as error:
@@ -2455,6 +2707,17 @@ def apply_daily_planner_task_outcome(
         else:
             clear_daily_execution_cache(user_id)
         clear_activity_cache()
+        if str(outcome or "").strip().casefold() == DAILY_TIMER_OUTCOME_COMPLETED:
+            try:
+                backend = get_supabase_backend()
+                if hasattr(backend, "complete_linked_weekly_tactics"):
+                    backend.complete_linked_weekly_tactics(
+                        user_id, sheet_id, task_type, task_index
+                    )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Optional weekly tactic link sync failed after daily outcome"
+                )
         return {
             **(result or {}),
             "sheet": sheet,
@@ -2500,6 +2763,63 @@ def list_daily_execution_history(user, start_date, end_date, *, limit=1000):
     for sheet in sheets:
         rows.extend(daily_execution_task_rows(sheet, timers_by_sheet.get(sheet.get("id") or "", [])))
     return rows
+
+
+def list_daily_execution_history_page(
+    user, start_date, end_date, *, page=1, page_size=40
+):
+    """Load one complete page of sheets, then expand only those sheets to task rows."""
+    if os_accounts.can_access_reporting(user):
+        user_id = ""
+    else:
+        user_id = _require_daily_execution_admin(user)
+    clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
+    clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
+    safe_page = max(int(page or 1), 1)
+    safe_page_size = min(max(int(page_size or 40), 10), 100)
+    try:
+        backend = get_supabase_backend()
+        sheets = backend.list_daily_execution_sheets_for_reporting(
+            user_id,
+            clean_start,
+            clean_end,
+            limit=safe_page_size + 1,
+            offset=(safe_page - 1) * safe_page_size,
+        )
+        has_next = len(sheets or []) > safe_page_size
+        sheets = [
+            _normalise_daily_sheet(sheet)
+            for sheet in (sheets or [])[:safe_page_size]
+        ]
+        sheet_ids = [sheet.get("id") for sheet in sheets if sheet.get("id")]
+        timers = (
+            backend.list_daily_execution_timers_for_sheets(user_id, sheet_ids)
+            if sheet_ids
+            else []
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    timers_by_sheet = {}
+    for timer in timers or []:
+        timers_by_sheet.setdefault(str(timer.get("sheet_id") or ""), []).append(
+            _normalise_timer(timer)
+        )
+    rows = []
+    for sheet in sheets:
+        rows.extend(
+            daily_execution_task_rows(
+                sheet, timers_by_sheet.get(sheet.get("id") or "", [])
+            )
+        )
+    return {
+        "rows": rows,
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "sheet_count": len(sheets),
+        "has_previous": safe_page > 1,
+        "has_next": has_next,
+        "query_count": 1 + bool(sheet_ids),
+    }
 
 
 def daily_execution_completed_count(sheet):
@@ -3742,6 +4062,97 @@ def list_activity_entries(
         return _cache_set(_ACTIVITY_CACHE, cache_key, entries, ACTIVITY_CACHE_TTL_SECONDS)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
+
+
+def list_activity_entries_page(start_date, end_date, *, page=1, page_size=25, user=None):
+    access_scope = activity_log_access_scope(user)
+    if access_scope is None:
+        raise DashboardStorageError("Activity Log access is not available for this account.")
+    try:
+        start_day = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date))
+        end_day = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date))
+        timezone_name = os_accounts.timezone_for_user(user) or "Australia/Sydney"
+        zone = ZoneInfo(timezone_name)
+        start_at = datetime.combine(start_day, time.min, tzinfo=zone).astimezone(timezone.utc)
+        end_at = datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
+        safe_page_size = min(max(int(page_size or 25), 10), 100)
+        safe_page = max(int(page or 1), 1)
+        backend = get_supabase_backend()
+        rows = backend.list_activity_logs(
+            start_at=start_at,
+            end_at=end_at,
+            limit=safe_page_size + 1,
+            offset=(safe_page - 1) * safe_page_size,
+            actor_user_id=None if access_scope["all_users"] else access_scope["actor_user_id"],
+            actor_email=None if access_scope["all_users"] else access_scope["actor_email"],
+        )
+        entries = [
+            activity_from_audit_row(row)
+            for row in rows
+            if home_activity_row_is_visible(row)
+        ]
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    return {
+        "rows": entries[:safe_page_size],
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "has_previous": safe_page > 1,
+        "has_next": len(rows) > safe_page_size,
+        "query_count": 1,
+    }
+
+
+def build_reporting_staff_week_snapshot(user, anchor_date=None):
+    zone = sports_sales_calendar.SYDNEY_TIMEZONE
+    anchor = anchor_date or datetime.now(zone).date()
+    week_start, week_end = daily_execution_week_bounds(anchor)
+    now_local = datetime.now(zone)
+    covered_until = min(now_local, datetime.combine(week_end, time.max, tzinfo=zone))
+    snapshot = build_home_weekly_work_snapshot(user, covered_until)
+    days = [week_start + timedelta(days=offset) for offset in range(7)]
+    rows_by_staff = {
+        row["staff_id"]: {
+            "Account": row["staff"],
+            "staff_id": row["staff_id"],
+            **{day.strftime("%a"): 0 for day in days},
+            "Weekly total": 0,
+            "Last activity": row.get("last_activity"),
+            "Details": "View",
+        }
+        for row in snapshot.get("team") or []
+    }
+    details = []
+    for work in snapshot.get("completed_work") or []:
+        staff_id = str(work.get("staff_id") or "")
+        if staff_id not in rows_by_staff:
+            continue
+        timestamp = _weekly_work_timestamp(work.get("timestamp"), covered_until.astimezone(timezone.utc))
+        local_timestamp = timestamp.astimezone(zone)
+        if not week_start <= local_timestamp.date() <= week_end:
+            continue
+        day_name = local_timestamp.strftime("%a")
+        rows_by_staff[staff_id][day_name] += 1
+        rows_by_staff[staff_id]["Weekly total"] += 1
+        details.append(
+            {
+                "staff_id": staff_id,
+                "day": day_name,
+                "Time": local_timestamp.strftime("%d %b, %I:%M %p"),
+                "Task/action": work.get("work") or "Work completed",
+                "Area": work.get("area") or "Sports Cave",
+                "Record/reference": work.get("row_id") or "",
+                "Outcome": work.get("status") or "Completed",
+                "Source": "Daily Planner" if str(work.get("row_id") or "").startswith("planner:") else "Activity log",
+            }
+        )
+    return {
+        **snapshot,
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "staff_rows": list(rows_by_staff.values()),
+        "details": details,
+    }
 
 
 def activity_filter_options(records, field):

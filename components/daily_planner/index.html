@@ -156,6 +156,36 @@
     .sound-row label { align-items: center; display: inline-flex; gap: 6px; }
     .sound-row input[type="checkbox"] { min-height: 0; width: auto; }
     .sound-row input { min-height: 0; width: 120px; }
+    .planner-modal-layer {
+      align-items: center; background: rgba(20,19,16,.34); display: flex; inset: 0; justify-content: center;
+      padding: 20px; position: fixed; z-index: 45;
+    }
+    .planner-modal {
+      background: var(--paper); border: 1px solid #8e887d; border-radius: 7px; box-shadow: 0 18px 54px rgba(0,0,0,.28);
+      display: grid; grid-template-rows: auto minmax(0,1fr) auto; max-height: calc(100vh - 40px); max-width: 920px; width: min(920px, calc(100vw - 40px));
+    }
+    .planner-modal.compact-modal { max-width: 690px; }
+    .planner-modal-header, .planner-modal-footer {
+      align-items: center; background: #f4f1ea; display: flex; gap: 8px; padding: 9px 11px; position: sticky; z-index: 2;
+    }
+    .planner-modal-header { border-bottom: 1px solid var(--line); top: 0; }
+    .planner-modal-footer { border-top: 1px solid var(--line); bottom: 0; justify-content: flex-end; }
+    .planner-modal-header h2 { font-size: 15px; margin: 0; }
+    .planner-modal-body { min-height: 0; overflow: auto; padding: 11px; }
+    .modal-close { font-size: 19px; padding: 0; width: 29px; }
+    .week-grid, .coach-grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+    .week-grid label, .coach-grid label { color: var(--muted); display: grid; font-size: 11px; gap: 4px; }
+    .week-grid .wide, .coach-grid .wide { grid-column: 1 / -1; }
+    .objective-editor { background: white; border: 1px solid var(--line); border-radius: 6px; margin-top: 8px; padding: 8px; }
+    .objective-editor h3 { font-size: 12px; margin: 0 0 7px; }
+    .tactic-row { align-items: center; display: grid; gap: 5px; grid-template-columns: minmax(170px,1fr) 104px 98px 74px 28px; margin-top: 5px; }
+    .tactic-row .button { padding: 0; }
+    .coach-question { margin: 8px 0 12px; }
+    .coach-draft { display: grid; gap: 8px; }
+    .coach-draft textarea { min-height: 46px; }
+    .coach-facts { background: #f1ead9; border-radius: 5px; color: #58431e; padding: 8px; }
+    .coach-facts ul { margin: 4px 0 0; padding-left: 18px; }
+    .status-pill { background: #ece9e2; border-radius: 999px; display: inline-block; font-size: 10px; padding: 2px 7px; }
     .hidden { display: none !important; }
     .compact-only { display: none !important; }
     body.compact { min-height: 340px; }
@@ -176,6 +206,10 @@
       .task-row { grid-template-columns: 24px 1fr; }
       .task-row > *:not(.task-index) { grid-column: 2; }
       .planning-grid, .review-grid, .ratings, .outcome-summary, .outcome-lists { grid-template-columns: 1fr; }
+      .week-grid, .coach-grid { grid-template-columns: 1fr; }
+      .week-grid .wide, .coach-grid .wide { grid-column: auto; }
+      .tactic-row { grid-template-columns: 1fr 90px; }
+      .tactic-row > *:nth-child(n+3) { grid-column: auto; }
       .planning-grid .wide, .review-grid .wide { grid-column: auto; }
     }
   </style>
@@ -186,6 +220,7 @@
       <div class="brand-mark">SC</div>
       <div><span class="header-title">Daily Planner</span><span class="header-subtitle">Daily Task Execution Sheet</span></div>
       <div class="header-spacer"></div>
+      <button class="icon-button full-only" id="week-plan-toggle" title="Open Week Plan" aria-label="Open Week Plan">Week Plan</button>
       <button class="icon-button" id="test-sound" title="Toggle sound" aria-label="Toggle planner sound" aria-pressed="true">Sound on</button>
       <button class="icon-button" id="compact-toggle" title="Compact timer mode" aria-label="Compact timer mode">Compact</button>
     </header>
@@ -202,6 +237,7 @@
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="outcome" class="outcome hidden" role="alertdialog" aria-modal="true" aria-labelledby="outcome-title"></div>
+  <div id="planner-modal-root"></div>
   <script>
   (() => {
     "use strict";
@@ -225,6 +261,7 @@
       fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
       pendingFocusActive: false, timerScope: "", terminalTimerIds: new Set(),
       timerEpoch: 0, plannerLoadId: 0, outcomeFocusReturn: null, pendingReviewFocus: "",
+      weekPlan: null, weekPlanAnchor: "", weekPlanLoading: false, coach: null,
     };
     const surfaceId = `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timerChannel = "BroadcastChannel" in window ? new BroadcastChannel("sports-cave-daily-planner") : null;
@@ -304,6 +341,10 @@
       const parsed = new Date(`${value}T12:00:00Z`);
       parsed.setUTCDate(parsed.getUTCDate() + amount);
       return parsed.toISOString().slice(0,10);
+    };
+    const mondayOf = (value) => {
+      const day = new Date(`${value}T12:00:00Z`).getUTCDay();
+      return addDays(value, -((day + 6) % 7));
     };
     const requestJson = async (path, options={}) => {
       const response = await fetch(path, {
@@ -644,6 +685,139 @@
         : `${formatLongDate(reviewDate)} was automatically finalised.`;
       return `<div class="notice rollover-notice" role="status" data-review-reminder="${escapeHtml(reviewDate)}"><span>${escapeHtml(lead)} Complete the review for ${escapeHtml(formatLongDate(reviewDate))}.</span><button class="button small" data-action="complete-overdue-review">Complete review</button><button class="button small dismiss" data-action="dismiss-review-reminder" aria-label="Dismiss review reminder" title="Dismiss">&times;</button></div>`;
     };
+    const modalRoot = document.querySelector("#planner-modal-root");
+    let modalFocusReturn = null;
+    const closePlannerModal = () => {
+      if (!modalRoot.firstElementChild) return;
+      modalRoot.innerHTML = "";
+      const target = modalFocusReturn;
+      modalFocusReturn = null;
+      target?.focus?.({preventScroll:true});
+    };
+    const renderModal = (title, body, footer, {compact=false, headerAction=""}={}) => {
+      if (!modalRoot.firstElementChild) modalFocusReturn = document.activeElement;
+      modalRoot.innerHTML = `<div class="planner-modal-layer" data-modal-layer><section class="planner-modal ${compact ? "compact-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="planner-modal-title"><header class="planner-modal-header"><h2 id="planner-modal-title">${escapeHtml(title)}</h2><span class="header-spacer"></span>${headerAction}<button class="button small modal-close" data-action="close-planner-modal" aria-label="Close" title="Close">&times;</button></header><div class="planner-modal-body">${body}</div><footer class="planner-modal-footer">${footer}</footer></section></div>`;
+      requestAnimationFrame(() => modalRoot.querySelector("input, textarea, select, button")?.focus());
+    };
+    const trapModalKey = (event) => {
+      const dialog = modalRoot.querySelector(".planner-modal");
+      if (!dialog) return;
+      if (event.key === "Escape") { event.preventDefault(); closePlannerModal(); return; }
+      if (event.key !== "Tab") return;
+      const controls = [...dialog.querySelectorAll("button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex]:not([tabindex='-1'])")];
+      if (!controls.length) return;
+      const first = controls[0]; const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", trapModalKey);
+    const blankObjective = () => ({title:"", measurable_target:"", deadline:"", result:"", tactics:[]});
+    const normalWeekPlan = (value={}) => ({
+      id:String(value.id || ""), cycle_id:String(value.cycle_id || state.weekPlan?.cycle?.id || ""),
+      week_start:String(value.week_start || state.weekPlanAnchor || isoToday()), version:Number(value.version || 0),
+      theme:String(value.theme || ""), quote_text:String(value.quote_text || ""), quote_author:String(value.quote_author || ""),
+      objectives:(value.objectives || []).slice(0,3).map((objective) => ({...blankObjective(),...objective,tactics:(objective.tactics || []).map((tactic) => ({status:"open",due_day:0,estimated_minutes:0,...tactic}))})),
+    });
+    const weekTaskLinkOptions = (selected="") => {
+      const rows = state.bundle?.tasks || [];
+      return `<option value="">No daily-task link</option>${rows.map((row) => { const value = `${row.sheet_id}|${row.task_type}|${row.task_index}`; return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(row.task)}</option>`; }).join("")}`;
+    };
+    const renderWeekPlan = () => {
+      const data = state.weekPlan || {};
+      if (state.weekPlanLoading) return renderModal("Week Plan", '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>');
+      const cycle = data.cycle || {};
+      if (!cycle.id) {
+        return renderModal("Week Plan", `<div class="notice info">Set up one 12-week cycle. Existing daily tasks remain independent.</div><div class="week-grid"><label>Cycle name<input data-cycle-field="name" value=""></label><label>First Monday<input type="date" data-cycle-field="start_date" value="${escapeHtml(mondayOf(isoToday()))}"></label><label class="wide">Overall 12-week objective<textarea data-cycle-field="overall_objective"></textarea></label></div>`, '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button primary" data-action="create-cycle">Create cycle</button>');
+      }
+      const plan = normalWeekPlan(data.plan || {cycle_id:cycle.id,week_start:data.week_start});
+      state.weekPlan.plan = plan;
+      const dayNames = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+      const objectives = plan.objectives.map((objective,index) => `<section class="objective-editor" data-objective-index="${index}"><h3>Objective ${index+1}</h3><div class="week-grid"><label>Objective title<input data-week-field="title" value="${escapeHtml(objective.title)}"></label><label>Measurable outcome/target<input data-week-field="measurable_target" value="${escapeHtml(objective.measurable_target)}"></label><label>Deadline<input type="date" data-week-field="deadline" value="${escapeHtml(objective.deadline || "")}"></label><span></span></div>${objective.tactics.map((tactic,tacticIndex) => { const link = tactic.linked_sheet_id ? `${tactic.linked_sheet_id}|${tactic.linked_task_type}|${tactic.linked_task_index}` : ""; return `<div class="tactic-row" data-tactic-index="${tacticIndex}"><input data-tactic-field="action" value="${escapeHtml(tactic.action || "")}" aria-label="Tactic action"><select data-tactic-field="due_day" aria-label="Due day">${dayNames.map((day,dayIndex) => `<option value="${dayIndex}" ${Number(tactic.due_day) === dayIndex ? "selected" : ""}>${day}</option>`).join("")}</select><select data-tactic-field="status" aria-label="Tactic status">${[["open","Open"],["completed","Completed"],["not_completed","Not completed"]].map(([value,label]) => `<option value="${value}" ${tactic.status === value ? "selected" : ""}>${label}</option>`).join("")}</select><input type="number" min="0" max="600" data-tactic-field="estimated_minutes" value="${Number(tactic.estimated_minutes || 0)}" aria-label="Estimated minutes"><button class="button danger" data-action="remove-tactic" title="Remove tactic" aria-label="Remove tactic">&times;</button><select data-tactic-link class="wide" aria-label="Optional daily task link">${weekTaskLinkOptions(link)}</select></div>`; }).join("")}<div class="save-row"><button class="button small" data-action="add-tactic" ${objective.tactics.length >= 50 ? "disabled" : ""}>Add tactic</button><button class="button small danger" data-action="remove-objective">Remove objective</button></div></section>`).join("");
+      const body = `<div class="toolbar"><div class="segmented"><button class="button ${data.view !== "next" ? "active" : ""}" data-action="week-this">This week</button><button class="button ${data.view === "next" ? "active" : ""}" data-action="week-next">Plan next week</button></div><span><strong>${escapeHtml(formatDate(data.week_start))}</strong> - ${escapeHtml(formatDate(data.week_end))}</span><span class="status-pill">Week ${Number(data.week_number || 0)} of 12</span></div><div class="week-grid"><label>Weekly theme<input data-week-plan-field="theme" value="${escapeHtml(plan.theme)}"></label><label>Quote author (optional)<input data-week-plan-field="quote_author" value="${escapeHtml(plan.quote_author)}"></label><label class="wide">Quote for the week<input data-week-plan-field="quote_text" value="${escapeHtml(plan.quote_text)}"></label></div>${objectives || '<div class="notice info">Add up to three measurable objectives.</div>'}<div class="save-row"><button class="button small" data-action="add-objective" ${plan.objectives.length >= 3 ? "disabled" : ""}>Add objective</button><span class="save-state">${Math.round((data.execution || {}).percentage || 0)}% tactic execution</span></div>`;
+      const weeklyHelp = '<button class="button small" data-action="open-weekly-coach">Weekly planning help</button>';
+      renderModal("Week Plan", body, '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button primary" data-action="save-week-plan">Save Week Plan</button>', {headerAction:weeklyHelp});
+    };
+    const loadWeekPlan = async (anchor=isoToday(), view="this") => {
+      state.weekPlanLoading = true; state.weekPlanAnchor = anchor; renderWeekPlan();
+      try {
+        const payload = await requestJson(`/api/os/daily-planner/week-plan?date=${encodeURIComponent(anchor)}`);
+        state.weekPlan = {...payload,view}; state.weekPlanLoading = false; renderWeekPlan();
+      } catch (error) {
+        state.weekPlanLoading = false;
+        renderModal("Week Plan", `<div class="notice error">${escapeHtml(error.message)}</div>`, '<button class="button" data-action="close-planner-modal">Close</button><button class="button" data-action="retry-week-plan">Retry</button>');
+      }
+    };
+    const saveWeekPlan = async () => {
+      const plan = state.weekPlan?.plan || {};
+      try {
+        const payload = await requestJson("/api/os/daily-planner/week-plan", {method:"POST",body:JSON.stringify({action:"save",cycle_id:state.weekPlan.cycle.id,week_start:state.weekPlan.week_start,theme:plan.theme,quote_text:plan.quote_text,quote_author:plan.quote_author,objectives:plan.objectives,expected_version:plan.version || 0,request_id:crypto.randomUUID()})});
+        state.weekPlan = {...state.weekPlan,...payload};
+        showToast("Week Plan saved.","success"); closePlannerModal(); return true;
+      } catch (error) { showToast(error.message,"error",8000); return false; }
+    };
+    const openCoach = async (kind) => {
+      const targetDate = kind === "weekly"
+        ? (state.weekPlan?.week_start || mondayOf(isoToday()))
+        : (state.bundle?.work_date || isoToday());
+      state.coach = {kind,targetDate,questions:[],index:0,answers:{},draft:null,loading:true,error:"",errorStage:"questions"};
+      renderCoach();
+      try {
+        const payload = await requestJson("/api/os/daily-planner/planning-help", {method:"POST",body:JSON.stringify({kind,action:"questions",target_date:targetDate})});
+        state.coach.questions = payload.questions || []; state.coach.loading = false; renderCoach();
+      } catch (error) { state.coach.loading = false; state.coach.error = error.message; state.coach.errorStage = "questions"; renderCoach(); }
+    };
+    const coachDraftMarkup = (coach) => {
+      const draft = coach.draft || {};
+      const facts = draft.influencing_facts || [];
+      if (coach.kind === "daily") {
+        const supporting = draft.supporting_tasks || [];
+        const deferrals = draft.defer_delegate_remove || [];
+        const existingMajor = (state.bundle?.tasks || []).filter((row) => row.task_type === "top" && row.task).length;
+        const existingOther = (state.bundle?.tasks || []).filter((row) => row.task_type === "additional" && row.task).length;
+        return `<div class="coach-draft"><div class="notice info">Applying this draft will replace ${existingMajor} existing major task(s) and ${existingOther} supporting task(s) for ${escapeHtml(formatDate(coach.targetDate))}.</div><label>Main outcome<input data-coach-field="main_outcome" value="${escapeHtml(draft.main_outcome || "")}"></label>${(draft.mips || []).map((mip,index) => `<section class="objective-editor" data-coach-mip="${index}"><strong>MIP ${index+1}</strong><div class="coach-grid"><label>Task<input data-coach-mip-field="title" value="${escapeHtml(mip.title)}"></label><label>Minutes<input type="number" data-coach-mip-field="allocated_minutes" value="${Number(mip.allocated_minutes || 0)}"></label><label class="wide">Outcome required<input data-coach-mip-field="outcome_required" value="${escapeHtml(mip.outcome_required)}"></label><label class="wide">Weekly alignment<input data-coach-mip-field="weekly_alignment" value="${escapeHtml(mip.weekly_alignment)}"></label></div></section>`).join("")}${supporting.length ? `<section class="objective-editor"><strong>Supporting tasks</strong><ul>${supporting.map((item) => `<li>${escapeHtml(item.task)} - ${Number(item.allocated_minutes || 0)} minutes</li>`).join("")}</ul></section>` : ""}${deferrals.length ? `<section class="objective-editor"><strong>Defer, delegate or remove</strong><ul>${deferrals.map((item) => `<li><strong>${escapeHtml(item.recommendation)}</strong>: ${escapeHtml(item.task)} - ${escapeHtml(item.reason)}</li>`).join("")}</ul></section>` : ""}${(draft.reasoning_summary || []).length ? `<section class="objective-editor"><strong>Reasoning</strong><ul>${draft.reasoning_summary.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>` : ""}<div class="notice ${draft.capacity?.warning ? "info" : "success"}"><strong>Capacity:</strong> ${escapeHtml(draft.capacity?.warning || `${draft.capacity?.planned_minutes || 0} planned minutes with ${draft.capacity?.reserve_percentage || 0}% reserve.`)}</div><div class="coach-facts"><strong>Saved facts used</strong><ul>${facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul></div></div>`;
+      }
+      const deferrals = draft.defer_delegate_remove || [];
+      return `<div class="coach-draft"><div class="notice info">Draft for the week starting ${escapeHtml(formatDate(coach.targetDate))}. Nothing is saved until Apply plan.</div><div class="coach-grid"><label>Weekly theme<input data-coach-field="theme" value="${escapeHtml(draft.theme || "")}"></label><label>Quote author<input data-coach-quote="author" value="${escapeHtml(draft.quote?.author || "")}"></label><label class="wide">Quote<input data-coach-quote="text" value="${escapeHtml(draft.quote?.text || "")}"></label></div>${(draft.objectives || []).map((objective,index) => `<section class="objective-editor" data-coach-objective="${index}"><strong>Objective ${index+1}</strong><div class="coach-grid"><label>Objective<input data-coach-objective-field="title" value="${escapeHtml(objective.title)}"></label><label>Measurable target<input data-coach-objective-field="measurable_target" value="${escapeHtml(objective.measurable_target)}"></label><label class="wide">12-week alignment<input data-coach-objective-field="alignment" value="${escapeHtml(objective.alignment)}"></label></div>${(objective.tactics || []).map((tactic,tacticIndex) => `<div class="tactic-row" data-coach-tactic="${tacticIndex}"><input data-coach-tactic-field="action" value="${escapeHtml(tactic.action)}"><input data-coach-tactic-field="due_day" value="${escapeHtml(tactic.due_day)}"><input type="number" data-coach-tactic-field="estimated_minutes" value="${Number(tactic.estimated_minutes || 0)}"></div>`).join("")}</section>`).join("")}${deferrals.length ? `<section class="objective-editor"><strong>Defer, delegate or remove</strong><ul>${deferrals.map((item) => `<li><strong>${escapeHtml(item.recommendation)}</strong>: ${escapeHtml(item.task)} - ${escapeHtml(item.reason)}</li>`).join("")}</ul></section>` : ""}<div class="notice info"><strong>Capacity:</strong> ${escapeHtml(draft.capacity?.assessment || "")} Expected execution: ${Number(draft.expected_execution_score || 0)}%.</div><div class="coach-facts"><strong>Saved facts used</strong><ul>${facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul></div></div>`;
+    };
+    const renderCoach = () => {
+      const coach = state.coach || {};
+      const title = coach.kind === "weekly" ? "Weekly planning help" : "Daily planning help";
+      if (coach.loading) return renderModal(title, '<div class="skeleton short"></div><div class="skeleton"></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>', {compact:true});
+      if (coach.error) return renderModal(title, `<div class="notice error">${escapeHtml(coach.error)}</div>`, `<button class="button" data-action="close-planner-modal">Cancel</button><button class="button" data-action="${coach.errorStage === "questions" ? "retry-coach-questions" : "regenerate-coach"}">Retry</button>`, {compact:true});
+      if (coach.draft) return renderModal(title, coachDraftMarkup(coach), '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button" data-action="edit-coach">Edit</button><button class="button" data-action="regenerate-coach">Regenerate</button><button class="button primary" data-action="apply-coach">Apply plan</button>', {compact:true});
+      const question = coach.questions[coach.index];
+      return renderModal(title, `<p>Answer only what is missing. No planner data changes until Apply plan.</p><label class="coach-question"><strong>${escapeHtml(question?.label || "Ready to build the draft?")}</strong><textarea data-coach-answer>${escapeHtml(coach.answers[question?.key] || "")}</textarea></label>`, '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button primary" data-action="coach-continue">Continue</button>', {compact:true});
+    };
+    const generateCoach = async () => {
+      state.coach.loading = true; state.coach.error = ""; renderCoach();
+      try {
+        const payload = await requestJson("/api/os/daily-planner/planning-help", {method:"POST",body:JSON.stringify({kind:state.coach.kind,action:"generate",target_date:state.coach.targetDate,answers:state.coach.answers})});
+        if (!payload.draft && payload.next_question) {
+          state.coach.questions.push(payload.next_question); state.coach.loading = false; return renderCoach();
+        }
+        state.coach.draft = payload.draft; state.coach.loading = false; state.coach.errorStage = "generate"; renderCoach();
+      } catch (error) { state.coach.loading = false; state.coach.error = error.message; state.coach.errorStage = "generate"; renderCoach(); }
+    };
+    const applyCoach = async () => {
+      const coach = state.coach; const draft = coach?.draft;
+      if (!draft) return;
+      if (coach.kind === "daily") {
+        if (!window.confirm("Apply this draft? The proposed tasks shown here will replace the editable Daily Plan fields.")) return;
+        const current = ensureDraft();
+        current.top_tasks = (draft.mips || []).slice(0,3).map((mip) => ({task:mip.title,why:mip.outcome_required,time_blocked:`${Number(mip.allocated_minutes || 0)} minutes`,status:""}));
+        while (current.top_tasks.length < 3) current.top_tasks.push(blankTop()[0]);
+        current.additional_items = (draft.supporting_tasks || []).map((task) => ({task:task.task,details:"",time_blocked:`${Number(task.allocated_minutes || 0)} minutes`,status:""}));
+        current.planning_data.main_outcome = draft.main_outcome || "";
+        renderPlanner();
+        if (await saveSheet()) closePlannerModal();
+        return;
+      }
+      if (!state.weekPlan?.cycle?.id) { showToast("Create a 12-week cycle before applying the weekly draft.","error",7000); return; }
+      if (!window.confirm("Apply this draft to the selected Week Plan? The proposed changes shown here will replace its editable fields.")) return;
+      const dayIndex = {Monday:0,Tuesday:1,Wednesday:2,Thursday:3,Friday:4,Saturday:5,Sunday:6};
+      state.weekPlan.plan = normalWeekPlan({...(state.weekPlan.plan || {}),theme:draft.theme,quote_text:draft.quote?.text || "",quote_author:draft.quote?.author || "",objectives:(draft.objectives || []).map((objective) => ({title:objective.title,measurable_target:objective.measurable_target,deadline:"",tactics:(objective.tactics || []).map((tactic) => ({action:tactic.action,due_day:dayIndex[tactic.due_day] ?? 0,status:"open",estimated_minutes:tactic.estimated_minutes}))}))});
+      if (await saveWeekPlan()) closePlannerModal();
+    };
     const renderPlanner = () => {
       if (state.loading) return showSkeleton();
       const bundle = state.bundle || {};
@@ -665,7 +839,7 @@
         <div id="top-tasks">${draft.top_tasks.map((task,index) => taskRow(task,"top",index,planLocked)).join("")}</div>
         <div class="section-title"><h2>Other tasks</h2><span class="rule"></span>${planLocked ? "" : '<button class="button small" data-action="add-task">Add task</button>'}</div>
         <div id="additional-tasks">${draft.additional_items.map((task,index) => taskRow(task,"additional",index,planLocked)).join("") || '<div class="notice info">No additional tasks.</div>'}</div>
-        <div class="section-title"><h2>Daily plan</h2><span class="rule"></span></div>
+        <div class="section-title"><h2>Daily plan</h2><span class="rule"></span>${planLocked ? "" : '<button class="button small" data-action="open-daily-coach">Daily planning help</button>'}</div>
         <div class="planning-grid">
           <label>Main outcome for the day<input data-plan-field="main_outcome" value="${escapeHtml(draft.planning_data.main_outcome || "")}" ${planLocked ? "disabled" : ""}></label>
           <label>Appointment, deadline or fixed event<input data-plan-field="fixed_event" value="${escapeHtml(draft.planning_data.fixed_event || "")}" ${planLocked ? "disabled" : ""}></label>
@@ -841,7 +1015,8 @@
         await mutate({action:"save_sheet", work_date:state.bundle.work_date, top_tasks:draft.top_tasks, additional_items:additional, planning_data:{...draft.planning_data, carried_forward:carry}, archive_sheet_id:archiveSheetId});
         showToast("Daily Planner saved.", "success");
         await loadPlanner(state.bundle.work_date);
-      } catch (error) { state.saving = false; renderPlanner(); showToast(error.message,"error",8000); }
+        return true;
+      } catch (error) { state.saving = false; renderPlanner(); showToast(error.message,"error",8000); return false; }
     };
     const timerAction = async (action, extra={}) => {
       try {
@@ -1127,7 +1302,10 @@
     const renderWeekly = () => {
       const data = state.weekly || {}; const summary = data.summary || {}; const sheets = data.sheets || [];
       const staff = summary.staff_completion || [];
+      const weekPlanData = data.week_plan || {}; const weekPlan = weekPlanData.plan || {}; const objectives = weekPlan.objectives || [];
+      const weekPlanMarkup = weekPlan.id ? `<div class="section-title"><h2>Week Plan</h2><span class="rule"></span><span class="status-pill">${Math.round(weekPlanData.execution?.percentage || 0)}% tactics</span></div><p><strong>${escapeHtml(weekPlan.theme || "No theme")}</strong>${weekPlan.quote_text ? ` · ${escapeHtml(weekPlan.quote_text)}${weekPlan.quote_author ? ` — ${escapeHtml(weekPlan.quote_author)}` : ""}` : ""}</p><div class="table-wrap"><table><thead><tr><th>Objective</th><th>Target</th><th>Result</th><th>Tactics</th><th>Completed</th></tr></thead><tbody>${objectives.map((objective) => `<tr><td>${escapeHtml(objective.title)}</td><td>${escapeHtml(objective.measurable_target)}</td><td>${escapeHtml(String(objective.result || "Not reviewed").replaceAll("_"," "))}</td><td>${(objective.tactics || []).length}</td><td>${(objective.tactics || []).filter((tactic) => tactic.status === "completed").length}</td></tr>`).join("")}</tbody></table></div>` : (weekPlanData.error ? `<div class="notice info">${escapeHtml(weekPlanData.error)}</div>` : "");
       view.innerHTML = `<div class="toolbar"><button class="button" data-action="previous-week">&#8592; Previous</button><input class="date-input" type="date" id="weekly-date" value="${escapeHtml(state.weeklyAnchor || isoToday())}"><button class="button" data-action="next-week">Next &#8594;</button><span>${escapeHtml(formatDate(data.week_start))} - ${escapeHtml(formatDate(data.week_end))}</span></div><div class="outcome-summary"><div class="outcome-stat"><strong>${Math.round(summary.completion_percentage || 0)}%</strong><span>Task completion</span></div><div class="outcome-stat"><strong>${summary.completed || 0}</strong><span>Completed</span></div><div class="outcome-stat"><strong>${summary.did_not_finish || 0}</strong><span>Did not finish</span></div><div class="outcome-stat"><strong>${summary.skipped || 0}</strong><span>Skipped</span></div><div class="outcome-stat"><strong>${summary.unresolved || 0}</strong><span>Remaining</span></div><div class="outcome-stat"><strong>${summary.total_planned || 0}</strong><span>Total planned</span></div></div><div class="meta-row"><span><strong>Focused time:</strong> ${formatClock(summary.actual_focused_seconds || 0)}</span><span><strong>Days reviewed:</strong> ${summary.days_reviewed || 0}</span><span><strong>Average rating:</strong> ${summary.average_day_rating || "-"}</span></div>${staff.length ? `<div class="table-wrap"><table><thead><tr><th>Staff</th><th>Completion</th><th>Completed</th><th>Did not finish</th><th>Skipped</th><th>Remaining</th><th>Total</th><th>Focused</th></tr></thead><tbody>${staff.map((row) => `<tr><td>${escapeHtml(row.staff)}</td><td>${Math.round(row.completion_percentage || 0)}%</td><td>${row.completed || 0}</td><td>${row.did_not_finish || 0}</td><td>${row.skipped || 0}</td><td>${row.unresolved || 0}</td><td>${row.total_planned || 0}</td><td>${formatClock(row.actual_focused_seconds || 0)}</td></tr>`).join("")}</tbody></table></div>` : ""}<div class="section-title"><h2>Week summary</h2><span class="rule"></span></div><p><strong>Biggest wins:</strong> ${escapeHtml((summary.biggest_wins || []).join("; ") || "No wins recorded yet.")}</p><p><strong>Main blockers:</strong> ${escapeHtml((summary.main_blockers || []).join("; ") || "No blockers recorded yet.")}</p><p><strong>Repeated unfinished work:</strong> ${escapeHtml((summary.repeated_carryovers || []).join("; ") || "None repeated this week.")}</p>${sheets.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Owner</th><th>Status</th><th>Completion</th><th>Tasks</th><th>Rating</th></tr></thead><tbody>${sheets.map((sheet) => { const result = (() => { const tasks = [...(sheet.top_tasks || []),...(sheet.additional_items || [])].filter((task) => String(task.task || task.details || "").trim()); const completed = tasks.filter((task) => terminalOutcome(task) === "completed").length; return {total:tasks.length, percentage:tasks.length ? completed/tasks.length*100 : 0}; })(); return `<tr><td>${escapeHtml(sheet.sheet_date)}</td><td>${escapeHtml(sheet.user_name)}</td><td>${escapeHtml(sheet.status)}</td><td>${Math.round(result.percentage)}%</td><td>${result.total}</td><td>${escapeHtml(sheet.ratings?.["Overall Score"] || "")}</td></tr>`; }).join("")}</tbody></table></div>` : '<div class="empty"><div><strong>No planner records</strong><span>No Daily Planner records were found for this week.</span></div></div>'}`;
+      if (weekPlanMarkup) view.querySelector(".toolbar")?.insertAdjacentHTML("afterend", weekPlanMarkup);
     };
     const renderCompact = () => {
       if (!state.compact) return;
@@ -1147,6 +1325,86 @@
     };
 
     document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => { state.tab = button.dataset.tab; renderCurrent(); }));
+    document.querySelector("#week-plan-toggle").addEventListener("click", () => loadWeekPlan(isoToday(),"this"));
+    modalRoot.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target) {
+        if (event.target.matches("[data-modal-layer]")) closePlannerModal();
+        return;
+      }
+      const action = target.dataset.action;
+      if (action === "close-planner-modal") return closePlannerModal();
+      if (action === "retry-week-plan") return loadWeekPlan(state.weekPlanAnchor || isoToday(), state.weekPlan?.view || "this");
+      if (action === "week-this") return loadWeekPlan(isoToday(),"this");
+      if (action === "week-next") return loadWeekPlan(addDays(mondayOf(isoToday()),7),"next");
+      if (action === "create-cycle") {
+        const fields = Object.fromEntries([...modalRoot.querySelectorAll("[data-cycle-field]")].map((input) => [input.dataset.cycleField,input.value]));
+        try {
+          const payload = await requestJson("/api/os/daily-planner/week-plan", {method:"POST",body:JSON.stringify({action:"create_cycle",...fields})});
+          state.weekPlan = {...payload,view:"this"}; showToast("12-week cycle created.","success"); renderWeekPlan();
+        } catch (error) { showToast(error.message,"error",8000); }
+        return;
+      }
+      if (action === "add-objective") { state.weekPlan.plan.objectives.push(blankObjective()); return renderWeekPlan(); }
+      const objectiveElement = target.closest("[data-objective-index]");
+      const objectiveIndex = Number(objectiveElement?.dataset.objectiveIndex || 0);
+      if (action === "remove-objective") { state.weekPlan.plan.objectives.splice(objectiveIndex,1); return renderWeekPlan(); }
+      if (action === "add-tactic") { state.weekPlan.plan.objectives[objectiveIndex].tactics.push({action:"",due_day:0,status:"open",estimated_minutes:0}); return renderWeekPlan(); }
+      if (action === "remove-tactic") {
+        const tacticIndex = Number(target.closest("[data-tactic-index]")?.dataset.tacticIndex || 0);
+        state.weekPlan.plan.objectives[objectiveIndex].tactics.splice(tacticIndex,1); return renderWeekPlan();
+      }
+      if (action === "save-week-plan") return saveWeekPlan();
+      if (action === "open-weekly-coach") return openCoach("weekly");
+      if (action === "retry-coach-questions") return openCoach(state.coach?.kind || "daily");
+      if (action === "coach-continue") {
+        const question = state.coach.questions[state.coach.index];
+        if (question) {
+          const answer = String(modalRoot.querySelector("[data-coach-answer]")?.value || "").trim();
+          if (!answer) { showToast("Add a short answer to continue.","error",5000); return; }
+          state.coach.answers[question.key] = answer;
+          state.coach.index += 1;
+        }
+        if (state.coach.index >= state.coach.questions.length) return generateCoach();
+        return renderCoach();
+      }
+      if (action === "regenerate-coach") return generateCoach();
+      if (action === "edit-coach") return modalRoot.querySelector("[data-coach-field], [data-coach-mip-field], [data-coach-objective-field]")?.focus();
+      if (action === "apply-coach") return applyCoach();
+    });
+    modalRoot.addEventListener("input", (event) => {
+      const input = event.target;
+      const plan = state.weekPlan?.plan;
+      if (input.dataset.weekPlanField && plan) plan[input.dataset.weekPlanField] = input.value;
+      const objectiveElement = input.closest?.("[data-objective-index]");
+      if (objectiveElement && plan) {
+        const objective = plan.objectives[Number(objectiveElement.dataset.objectiveIndex || 0)];
+        if (input.dataset.weekField) objective[input.dataset.weekField] = input.value;
+        const tacticElement = input.closest("[data-tactic-index]");
+        if (tacticElement && input.dataset.tacticField) objective.tactics[Number(tacticElement.dataset.tacticIndex || 0)][input.dataset.tacticField] = input.type === "number" ? Number(input.value || 0) : input.value;
+        if (tacticElement && input.matches("[data-tactic-link]")) {
+          const tactic = objective.tactics[Number(tacticElement.dataset.tacticIndex || 0)];
+          const [sheetId,taskType,taskIndex] = String(input.value || "").split("|");
+          tactic.linked_sheet_id = sheetId || ""; tactic.linked_task_type = taskType || ""; tactic.linked_task_index = taskIndex === undefined ? null : Number(taskIndex);
+        }
+      }
+      const coach = state.coach;
+      if (!coach?.draft) return;
+      if (input.dataset.coachField) coach.draft[input.dataset.coachField] = input.value;
+      if (input.dataset.coachQuote) coach.draft.quote[input.dataset.coachQuote] = input.value;
+      const mipElement = input.closest?.("[data-coach-mip]");
+      if (mipElement && input.dataset.coachMipField) coach.draft.mips[Number(mipElement.dataset.coachMip)][input.dataset.coachMipField] = input.type === "number" ? Number(input.value || 0) : input.value;
+      const coachObjective = input.closest?.("[data-coach-objective]");
+      if (coachObjective) {
+        const objective = coach.draft.objectives[Number(coachObjective.dataset.coachObjective)];
+        if (input.dataset.coachObjectiveField) objective[input.dataset.coachObjectiveField] = input.value;
+        const coachTactic = input.closest("[data-coach-tactic]");
+        if (coachTactic && input.dataset.coachTacticField) objective.tactics[Number(coachTactic.dataset.coachTactic)][input.dataset.coachTacticField] = input.type === "number" ? Number(input.value || 0) : input.value;
+      }
+    });
+    modalRoot.addEventListener("change", (event) => {
+      event.target.dispatchEvent(new Event("input", {bubbles:true}));
+    });
     document.querySelector("#test-sound").addEventListener("click", async () => {
       state.soundEnabled = !state.soundEnabled;
       localStorage.setItem("scPlannerSoundEnabled", state.soundEnabled ? "1" : "0");
@@ -1172,6 +1430,7 @@
       const row = target.closest(".task-row");
       const type = row?.dataset.taskType; const index = Number(row?.dataset.taskIndex || 0);
       if (action === "retry") return loadPlanner(state.bundle?.work_date || isoToday());
+      if (action === "open-daily-coach") return openCoach("daily");
       if (action === "previous-day") return loadPlanner(addDays(state.bundle.work_date,-1));
       if (action === "next-day") return loadPlanner(addDays(state.bundle.work_date,1));
       if (action === "today") return loadPlanner(isoToday());

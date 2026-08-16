@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -14,6 +14,8 @@ import sports_cave_dashboard
 
 
 ARCHIVE_PAGE_SIZE = 15
+ACTIVITY_PAGE_SIZE = 25
+HISTORY_SHEET_PAGE_SIZE = 40
 PERIOD_KEY = "reporting-period"
 CUSTOM_START_KEY = "reporting-custom-start"
 CUSTOM_END_KEY = "reporting-custom-end"
@@ -144,48 +146,38 @@ def _render_staff_summary(snapshot):
     if not snapshot:
         return
     st.subheader("Staff Summary")
+    rows = []
     for member in snapshot["staff"]:
-        title = (
-            f"{member['display_name']} | {member['role'].title()} | "
-            f"{member['total_actions']} actions"
+        daily = member.get("daily_execution") or {}
+        social = member.get("social_media") or {}
+        rows.append(
+            {
+                "Staff": member.get("display_name") or "Staff member",
+                "Role": str(member.get("role") or "").title(),
+                "Meaningful": int(member.get("total_actions") or 0),
+                "Completed": int(member.get("completed_actions") or 0),
+                "Failed": int(member.get("failed_actions") or 0),
+                "Daily execution": (
+                    f"{daily.get('completed_count', 0)}/{daily.get('task_count', 0)}"
+                    if daily.get("exists") else "No sheet"
+                ),
+                "Social MIPs": int(social.get("mips_completed") or 0),
+                "Last activity": _format_timestamp(
+                    member.get("last_activity_at"), member.get("timezone")
+                ) if member.get("last_activity_at") else "None",
+            }
         )
-        with st.expander(title, expanded=False):
-            cols = st.columns(4)
-            cols[0].metric("Meaningful", member["total_actions"])
-            cols[1].metric("Completed", member["completed_actions"])
-            cols[2].metric("Failed", member["failed_actions"])
-            cols[3].metric(
-                "Last activity",
-                _format_timestamp(member.get("last_activity_at"), member.get("timezone"))
-                if member.get("last_activity_at")
-                else "None",
-            )
-            if member["work_lines"]:
-                for line in member["work_lines"]:
-                    st.write(f"- {line['label']}")
-            else:
-                st.caption("No recorded activity for this report period")
-            if member.get("is_owner"):
-                daily = member.get("daily_execution") or {}
-                if not daily.get("exists"):
-                    st.caption("Daily Execution: no sheet created for today.")
-                else:
-                    st.caption(
-                        "Daily Execution: "
-                        f"{daily['completed_count']} of {daily['task_count']} closed "
-                        f"({daily['completion_percentage']}%)."
-                    )
-            social = member.get("social_media") or {}
-            if social:
-                st.caption(
-                    "Social Media: "
-                    f"{str(social.get('plan_status') or 'not_started').replace('_', ' ').title()} | "
-                    f"{int(social.get('mips_completed') or 0)} MIPs complete | "
-                    f"{int(social.get('posts_live') or 0)} posts live | "
-                    f"{float(social.get('score') or 0):.1f}/10"
-                )
-                if social.get("weekly_headline"):
-                    st.caption(f"Latest weekly check-in: {social['weekly_headline']}")
+    if rows:
+        st.dataframe(
+            rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(300, max(120, 29 * (len(rows) + 1))),
+            row_height=28,
+            key="reporting-staff-summary-table",
+        )
+    else:
+        st.caption("No authorised staff activity was recorded for this report date.")
 
 
 def _period_bounds(user):
@@ -228,19 +220,25 @@ def _timer_timestamp(timer, key, user):
 
 def _render_daily_execution_history(user, start_date, end_date):
     st.subheader("Daily Execution History")
+    signature = f"{start_date}:{end_date}"
+    if st.session_state.get("reporting-history-range") != signature:
+        st.session_state["reporting-history-range"] = signature
+        st.session_state["reporting-history-page"] = 1
+    page = max(int(st.session_state.get("reporting-history-page") or 1), 1)
     try:
-        rows = sports_cave_dashboard.list_daily_execution_history(
+        result = sports_cave_dashboard.list_daily_execution_history_page(
             user,
             start_date,
             end_date,
-            limit=5000,
+            page=page,
+            page_size=HISTORY_SHEET_PAGE_SIZE,
         )
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Daily Execution history could not load right now.")
         return
+    rows = result.get("rows") or []
     if not rows:
-        st.caption("No Daily Planner tasks found for this period.")
-        return
+        st.caption("No Daily Planner tasks found on this page.")
     table_rows = []
     for row in rows:
         timer = row.get("timer") or {}
@@ -279,30 +277,51 @@ def _render_daily_execution_history(user, start_date, end_date):
                 "_row_id": row.get("row_id") or "",
             }
         )
-    st.caption(f"{len(table_rows)} task record(s) in range")
-    st.dataframe(
-        table_rows,
-        hide_index=True,
-        use_container_width=True,
-        height=min(520, max(360, 28 * (len(table_rows) + 1))),
-        row_height=28,
-        column_order=(
-            "Work date",
-            "Task",
-            "Owner",
-            "Category/area",
-            "Allocated duration",
-            "Actual elapsed",
-            "Time saved",
-            "Start time",
-            "End time",
-            "Status",
-            "Outcome",
-            "Completion method",
-            "Skip reason",
-            "Notes",
-        ),
-        key="reporting-daily-execution-history",
+    if table_rows:
+        st.caption(
+            f"{len(table_rows)} task record(s) from {result.get('sheet_count', 0)} sheet(s) on page {page}"
+        )
+        st.dataframe(
+            table_rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(520, max(240, 28 * (len(table_rows) + 1))),
+            row_height=28,
+            column_order=(
+                "Work date",
+                "Task",
+                "Owner",
+                "Category/area",
+                "Allocated duration",
+                "Actual elapsed",
+                "Time saved",
+                "Start time",
+                "End time",
+                "Status",
+                "Outcome",
+                "Completion method",
+                "Skip reason",
+                "Notes",
+            ),
+            key=f"reporting-daily-execution-history-{page}",
+        )
+    controls = st.columns([1, 1, 5])
+    if controls[0].button(
+        "Previous",
+        disabled=not result.get("has_previous"),
+        key="reporting-history-previous",
+    ):
+        st.session_state["reporting-history-page"] = max(page - 1, 1)
+        st.rerun()
+    if controls[1].button(
+        "Next",
+        disabled=not result.get("has_next"),
+        key="reporting-history-next",
+    ):
+        st.session_state["reporting-history-page"] = page + 1
+        st.rerun()
+    controls[2].caption(
+        f"Page {page} | Up to {HISTORY_SHEET_PAGE_SIZE} sheets per page"
     )
 
 
@@ -317,62 +336,322 @@ def _outcome_display(value):
     return ""
 
 
-def _render_operational_activity(user, local_now, start_date, end_date):
+def _render_twelve_week_progress(user):
+    st.subheader("Twelve Week Progress")
+    try:
+        progress = sports_cave_dashboard.load_twelve_week_progress(user)
+    except sports_cave_dashboard.DashboardStorageError as error:
+        st.info(str(error))
+        return
+    cycle = progress.get("cycle") or {}
+    weeks = progress.get("weeks") or []
+    if not cycle or not weeks:
+        st.caption("No 12-week cycle has been set up for this account.")
+        return
+    st.caption(
+        f"{cycle.get('name') or '12 Week Year'} | "
+        f"{cycle.get('start_date')} - "
+        f"{(date.fromisoformat(str(cycle.get('start_date'))) + timedelta(days=83)).isoformat()}"
+    )
+    table_rows = [
+        {
+            "Week": f"Week {week['week_number']}",
+            "Date range": f"{date.fromisoformat(week['week_start']).strftime('%d/%m/%Y')}-{date.fromisoformat(week['week_end']).strftime('%d/%m/%Y')}",
+            "Theme": week.get("theme") or "Not planned",
+            "Objectives": f"{week.get('objective_count', 0)}/3",
+            "Tactics": week.get("tactic_count", 0),
+            "Tactic score": f"{round(week.get('tactic_score', 0))}%",
+            "Daily score": f"{round(week.get('daily_score', 0))}%",
+            "Focused time": sports_cave_dashboard.format_duration_seconds(week.get("focused_seconds")),
+            "Completed": week.get("completed", 0),
+            "Did not finish": week.get("did_not_finish", 0),
+            "Skipped": week.get("skipped", 0),
+            "Review": week.get("review") or "Not completed",
+            "Details": "View week",
+        }
+        for week in weeks
+    ]
+    st.dataframe(
+        table_rows,
+        hide_index=True,
+        use_container_width=True,
+        height=390,
+        row_height=28,
+        key="reporting-twelve-week-progress",
+    )
+    selector_cols = st.columns([1.5, 1, 1, 1, 3])
+    selected_label = selector_cols[0].selectbox(
+        "Week details",
+        tuple(f"Week {week['week_number']}" for week in weeks),
+        label_visibility="collapsed",
+        key="reporting-twelve-week-selected",
+    )
+    selected_week = weeks[int(selected_label.split()[-1]) - 1]
+    if selector_cols[1].button("View week", key="reporting-view-week"):
+        st.session_state["reporting-show-week-detail"] = selected_week["week_number"]
+    if selector_cols[2].button("Weekly review", key="reporting-open-weekly-review"):
+        st.session_state["reporting-weekly-review-week-date"] = date.fromisoformat(selected_week["week_start"])
+        st.session_state["reporting-weekly-plan-id"] = selected_week.get("plan_id") or ""
+        st.session_state["current_page"] = os_accounts.WEEKLY_REVIEW_ROUTE
+        st.rerun()
+    selected_month = next(
+        (
+            row
+            for row in progress.get("months") or []
+            if f"Week {selected_week['week_number']}" in str(row.get("weeks_included") or "")
+        ),
+        {},
+    )
+    if selector_cols[3].button(
+        "Monthly review",
+        disabled=not bool(selected_month.get("review_id")),
+        key="reporting-open-monthly-review",
+    ):
+        st.session_state["reporting-monthly-review-id"] = selected_month["review_id"]
+    if st.session_state.get("reporting-show-week-detail") == selected_week["week_number"]:
+        st.markdown(
+            f"**{selected_week.get('theme') or 'No weekly theme'}**  "
+            f"{selected_week.get('quote_text') or 'No quote saved'}"
+            + (f" - {selected_week.get('quote_author')}" if selected_week.get("quote_author") else "")
+        )
+        day_rows = [
+            {
+                "Day": row["day"],
+                "Date": row["date"],
+                "Major tasks": row["major_tasks"],
+                "Completed": row["completed"],
+                "Did not finish": row["did_not_finish"],
+                "Skipped": row["skipped"],
+                "Completion": f"{round(row['completion_percentage'])}%",
+                "Focused time": sports_cave_dashboard.format_duration_seconds(row["focused_seconds"]),
+                "Review": row["review"],
+            }
+            for row in selected_week.get("days") or []
+        ]
+        st.dataframe(
+            day_rows,
+            hide_index=True,
+            use_container_width=True,
+            height=245,
+            row_height=28,
+            key=f"reporting-week-days-{selected_week['week_number']}",
+        )
+        objective_rows = []
+        for objective in selected_week.get("objectives") or []:
+            tactics = objective.get("tactics") or []
+            objective_rows.append(
+                {
+                    "Objective": objective.get("title") or "",
+                    "Target": objective.get("measurable_target") or "",
+                    "Result": str(objective.get("result") or "Not reviewed").replace("_", " ").title(),
+                    "Tactics": len(tactics),
+                    "Completed tactics": sum(str(tactic.get("status")) == "completed" for tactic in tactics),
+                }
+            )
+        if objective_rows:
+            st.dataframe(
+                objective_rows,
+                hide_index=True,
+                use_container_width=True,
+                height=min(180, 29 * (len(objective_rows) + 1)),
+                row_height=28,
+                key=f"reporting-week-objectives-{selected_week['week_number']}",
+            )
+        day_options = {
+            row["date"]: row for row in selected_week.get("days") or [] if row.get("sheet_ids")
+        }
+        if day_options:
+            detail_date = st.selectbox(
+                "Daily Plan and Review",
+                tuple(day_options),
+                key=f"reporting-week-day-detail-{selected_week['week_number']}",
+            )
+            if st.button("Open day details", key=f"reporting-open-day-{selected_week['week_number']}"):
+                sheet_id = day_options[detail_date]["sheet_ids"][0]
+                try:
+                    sheet = sports_cave_dashboard.get_daily_execution_archive_detail(user, sheet_id)
+                except sports_cave_dashboard.DashboardStorageError:
+                    sheet = {}
+                if sheet:
+                    st.session_state["reporting-day-detail"] = sheet
+            detail = st.session_state.get("reporting-day-detail") or {}
+            if detail and str(detail.get("sheet_date")) == detail_date:
+                detail_rows = sports_cave_dashboard.daily_execution_task_rows(detail, [])
+                st.dataframe(
+                    [{"Task": row["task"], "Area": row["category"], "Allocated": row["allocated"], "Status": row["status"], "Notes": row["notes"]} for row in detail_rows],
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(260, max(100, 29 * (len(detail_rows) + 1))),
+                    row_height=28,
+                    key=f"reporting-day-drawer-{detail_date}",
+                )
+                review = detail.get("review_data") or {}
+                if review:
+                    st.caption(
+                        " | ".join(
+                            f"{label}: {review.get(key)}"
+                            for key, label in (("worked_well", "Win"), ("could_not_finish", "Blocker"), ("lesson", "Lesson"))
+                            if review.get(key)
+                        )
+                    )
+    st.markdown("#### Monthly Review")
+    month_rows = [
+        {
+            "Month": row["month"],
+            "Weeks included": row["weeks_included"],
+            "Daily completion": f"{round(row['daily_completion'])}%",
+            "Tactic execution": f"{round(row['tactic_execution'])}%",
+            "Focused time": sports_cave_dashboard.format_duration_seconds(row["focused_seconds"]),
+            "Objectives achieved": row["objectives_achieved"],
+            "Reviews complete": row["reviews_complete"],
+            "Monthly review": row["review"],
+        }
+        for row in progress.get("months") or []
+    ]
+    if month_rows:
+        st.dataframe(
+            month_rows,
+            hide_index=True,
+            use_container_width=True,
+            height=min(240, max(100, 29 * (len(month_rows) + 1))),
+            row_height=28,
+            key="reporting-monthly-review-table",
+        )
+        saved_months = {
+            row["review_id"]: row
+            for row in progress.get("months") or []
+            if row.get("review_id")
+        }
+        selected_review_id = st.session_state.get("reporting-monthly-review-id")
+        if selected_review_id in saved_months:
+            monthly = saved_months[selected_review_id]
+            st.markdown(f"**{monthly['month']} monthly review**")
+            st.caption(f"Weeks included: {monthly['weeks_included']}")
+            summary_rows = [
+                {"Field": str(key).replace("_", " ").title(), "Saved value": value}
+                for key, value in (monthly.get("summary") or {}).items()
+                if value not in (None, "", [], {})
+            ]
+            if summary_rows:
+                st.dataframe(
+                    summary_rows,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(260, max(100, 29 * (len(summary_rows) + 1))),
+                    row_height=28,
+                    key=f"reporting-monthly-review-detail-{selected_review_id}",
+                )
+            else:
+                st.caption("This saved monthly review has no written summary fields.")
+
+
+def _render_staff_week_activity(user, anchor_date):
     if not os_accounts.can_view_activity_log(user):
         return
-    st.subheader("Recent Operational Activity")
+    st.subheader("Staff Weekly Activity")
     try:
-        entries = sports_cave_dashboard.list_activity_entries(
-            sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
-            local_now,
-            limit=None,
+        snapshot = sports_cave_dashboard.build_reporting_staff_week_snapshot(
+            user, anchor_date
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Staff activity could not load right now.")
+        return
+    rows = snapshot.get("staff_rows") or []
+    if not rows:
+        st.caption("No authorised staff activity was found for this week.")
+        return
+    st.dataframe(
+        rows,
+        hide_index=True,
+        use_container_width=True,
+        height=min(280, max(120, 29 * (len(rows) + 1))),
+        row_height=28,
+        column_order=("Account", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Weekly total", "Last activity", "Details"),
+        key="reporting-staff-week-activity",
+    )
+    details = snapshot.get("details") or []
+    account_options = {row["Account"]: row["staff_id"] for row in rows}
+    filter_cols = st.columns([1.4, 1, 1.4, 1.4])
+    account = filter_cols[0].selectbox("Account", tuple(account_options), key="reporting-staff-detail-account")
+    day = filter_cols[1].selectbox("Day", ("All", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), key="reporting-staff-detail-day")
+    areas = ("All", *sorted({str(row.get("Area") or "") for row in details if row.get("Area")}))
+    area = filter_cols[2].selectbox("Area", areas, key="reporting-staff-detail-area")
+    sources = ("All", *sorted({str(row.get("Source") or "") for row in details if row.get("Source")}))
+    source = filter_cols[3].selectbox("Activity type", sources, key="reporting-staff-detail-source")
+    selected = [
+        {key: value for key, value in row.items() if key not in {"staff_id", "day"}}
+        for row in details
+        if row.get("staff_id") == account_options[account]
+        and (day == "All" or row.get("day") == day)
+        and (area == "All" or row.get("Area") == area)
+        and (source == "All" or row.get("Source") == source)
+    ]
+    if selected:
+        st.dataframe(
+            selected,
+            hide_index=True,
+            use_container_width=True,
+            height=min(300, max(120, 29 * (len(selected) + 1))),
+            row_height=28,
+            key="reporting-staff-day-detail",
+        )
+    else:
+        st.caption("No matching work records for this account and day.")
+
+
+def _render_operational_activity(user, start_date, end_date):
+    if not os_accounts.can_view_activity_log(user):
+        return
+    st.subheader("All Operational Activity")
+    signature = f"{start_date}:{end_date}"
+    if st.session_state.get("reporting-activity-range") != signature:
+        st.session_state["reporting-activity-range"] = signature
+        st.session_state["reporting-activity-page"] = 1
+    page = max(int(st.session_state.get("reporting-activity-page") or 1), 1)
+    try:
+        result = sports_cave_dashboard.list_activity_entries_page(
+            start_date,
+            end_date,
+            page=page,
+            page_size=ACTIVITY_PAGE_SIZE,
             user=user,
         )
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Operational activity could not load right now.")
         return
     timezone_name = os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE
-    try:
-        tzinfo = ZoneInfo(timezone_name)
-    except Exception:
-        tzinfo = daily_activity_reporting.SYDNEY_TZ
-    filtered = []
-    for entry in entries:
-        created = entry.get("created_at")
-        if isinstance(created, str):
-            try:
-                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            except ValueError:
-                created = None
-        if isinstance(created, datetime):
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            local_date = created.astimezone(tzinfo).date()
-            if not (start_date <= local_date <= end_date):
-                continue
-        filtered.append(entry)
-    if not filtered:
-        st.caption("No meaningful operational activity found for this period.")
-        return
+    tzinfo = ZoneInfo(timezone_name)
     records = [
         sports_cave_dashboard.activity_table_record(entry, tzinfo)
-        for entry in sports_cave_dashboard.group_mockup_activity_entries(filtered, tzinfo)
+        for entry in sports_cave_dashboard.group_mockup_activity_entries(result.get("rows") or [], tzinfo)
     ]
-    st.dataframe(
-        records,
-        hide_index=True,
-        use_container_width=True,
-        height=min(430, max(260, 28 * (len(records) + 1))),
-        row_height=28,
-        key="reporting-operational-activity",
-    )
+    if records:
+        st.dataframe(
+            records,
+            hide_index=True,
+            use_container_width=True,
+            height=min(430, max(180, 29 * (len(records) + 1))),
+            row_height=28,
+            key=f"reporting-operational-activity-{page}",
+        )
+    else:
+        st.caption("No meaningful operational activity found for this page.")
+    controls = st.columns([1, 1, 5])
+    if controls[0].button("Previous", disabled=not result.get("has_previous"), key="reporting-activity-previous"):
+        st.session_state["reporting-activity-page"] = max(page - 1, 1)
+        st.rerun()
+    if controls[1].button("Next", disabled=not result.get("has_next"), key="reporting-activity-next"):
+        st.session_state["reporting-activity-page"] = page + 1
+        st.rerun()
+    controls[2].caption(f"Page {page} | Up to {ACTIVITY_PAGE_SIZE} records per page")
 
 
 def _render_reporting_tables(user, now_utc):
-    local_now = now_utc.astimezone(ZoneInfo(os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE))
     start_date, end_date, _label = _period_bounds(user)
+    _render_twelve_week_progress(user)
     _render_daily_execution_history(user, start_date, end_date)
-    _render_operational_activity(user, local_now, start_date, end_date)
+    _render_staff_week_activity(user, end_date)
+    _render_operational_activity(user, start_date, end_date)
 
 
 def _archive_label(row):
@@ -665,6 +944,44 @@ def render_weekly_review_page(user):
     summary = sports_cave_dashboard.daily_execution_weekly_summary(
         sheets, timers, today=local_now.date()
     )
+    try:
+        week_plan_bundle = sports_cave_dashboard.load_daily_planner_week_plan(
+            user, week_start
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        week_plan_bundle = {"plan": {}, "execution": {}}
+    week_plan = week_plan_bundle.get("plan") or {}
+    if week_plan:
+        st.markdown(
+            f"**{week_plan.get('theme') or 'No weekly theme'}**  "
+            f"{week_plan.get('quote_text') or ''}"
+            + (f" - {week_plan.get('quote_author')}" if week_plan.get("quote_author") else "")
+        )
+        objective_rows = [
+            {
+                "Objective": objective.get("title") or "",
+                "Measurable target": objective.get("measurable_target") or "",
+                "Result": str(objective.get("result") or "Not reviewed").replace("_", " ").title(),
+                "Tactics": len(objective.get("tactics") or []),
+                "Completed tactics": sum(
+                    str(tactic.get("status") or "") == "completed"
+                    for tactic in objective.get("tactics") or []
+                ),
+            }
+            for objective in week_plan.get("objectives") or []
+        ]
+        if objective_rows:
+            st.dataframe(
+                objective_rows,
+                hide_index=True,
+                use_container_width=True,
+                height=min(180, 29 * (len(objective_rows) + 1)),
+                row_height=28,
+                key="reporting-weekly-plan-objectives",
+            )
+        st.caption(
+            f"Weekly tactic execution: {round((week_plan_bundle.get('execution') or {}).get('percentage') or 0)}%"
+        )
     metrics = st.columns(5)
     metrics[0].metric("Task completion", f"{round(summary['completion_percentage'])}%")
     metrics[1].metric("Completed", summary["completed"])

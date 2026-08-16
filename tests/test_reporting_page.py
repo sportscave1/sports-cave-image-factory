@@ -23,7 +23,7 @@ class ReportingPageContractTests(unittest.TestCase):
         ):
             self.assertIn(section, source)
         self.assertIn("ARCHIVE_PAGE_SIZE = 15", source)
-        self.assertIn("st.expander(title, expanded=False)", source)
+        self.assertIn('key="reporting-staff-summary-table"', source)
 
     def test_archive_detail_and_csv_are_loaded_through_authorized_helpers(self):
         source = inspect.getsource(reporting_page._render_sent_reports)
@@ -64,7 +64,8 @@ class ReportingPageContractTests(unittest.TestCase):
             self.assertIn(label, source)
         self.assertIn("Australia/Sydney", source)
         self.assertIn("sports_cave_dashboard.list_daily_execution_history", source)
-        self.assertIn("Recent Operational Activity", source)
+        self.assertIn("Staff Weekly Activity", source)
+        self.assertIn("All Operational Activity", source)
         self.assertIn("def render_weekly_review_page", source)
 
 

@@ -22,6 +22,8 @@ PLANNER_BOOTSTRAP_PATH = "/api/os/daily-planner/bootstrap"
 PLANNER_MUTATION_PATH = "/api/os/daily-planner/mutate"
 PLANNER_HISTORY_PATH = "/api/os/daily-planner/history"
 PLANNER_WEEKLY_REVIEW_PATH = "/api/os/daily-planner/weekly-review"
+PLANNER_WEEK_PLAN_PATH = "/api/os/daily-planner/week-plan"
+PLANNER_PLANNING_HELP_PATH = "/api/os/daily-planner/planning-help"
 PLANNER_STATUS_PATH = "/api/os/daily-planner/status"
 PLANNER_TIMEZONE = "Australia/Sydney"
 SYDNEY_TZ = ZoneInfo(PLANNER_TIMEZONE)
@@ -280,8 +282,8 @@ async def planner_mutation(request: Request):
         if action == "save_sheet":
             selected_date = date.fromisoformat(str(payload.get("work_date") or ""))
             top_tasks = _clean_tasks(payload.get("top_tasks"), top=True)
-            if any(not row["task"] for row in top_tasks):
-                raise ValueError("Add all three MIP tasks before saving the plan.")
+            if not any(row["task"] for row in top_tasks):
+                raise ValueError("Add at least one major execution task before saving the plan.")
             planning = dict(payload.get("planning_data") or {})
             planning_data = {
                 "main_outcome": str(planning.get("main_outcome") or "").strip()[:1000],
@@ -446,6 +448,12 @@ async def planner_weekly_review(request: Request):
             timers,
             today=datetime.now(SYDNEY_TZ).date(),
         )
+        try:
+            week_plan = sports_cave_dashboard.load_daily_planner_week_plan(
+                _user(claims), week_start
+            )
+        except sports_cave_dashboard.DashboardStorageError as week_plan_error:
+            week_plan = {"plan": {}, "execution": {}, "error": str(week_plan_error)}
     except Exception as error:
         return _json({"ok": False, "error": _safe_error(error)}, 503)
     return _json(
@@ -455,8 +463,131 @@ async def planner_weekly_review(request: Request):
             "week_end": week_end,
             "summary": summary,
             "sheets": sheets,
+            "week_plan": week_plan,
         }
     )
+
+
+async def planner_week_plan(request: Request):
+    claims = _claims(request)
+    if not claims:
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    user = _user(claims)
+    try:
+        import sports_cave_dashboard
+
+        if request.method == "GET":
+            anchor = _request_date(request)
+            bundle = sports_cave_dashboard.load_daily_planner_week_plan(user, anchor)
+            return _json({"ok": True, **bundle})
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("The Week Plan request was not valid.")
+        action = str(payload.get("action") or "save").strip().casefold()
+        if action == "create_cycle":
+            cycle = sports_cave_dashboard.create_daily_planner_cycle(
+                user,
+                str(payload.get("name") or "").strip(),
+                str(payload.get("overall_objective") or "").strip(),
+                date.fromisoformat(str(payload.get("start_date") or "")),
+            )
+            bundle = sports_cave_dashboard.load_daily_planner_week_plan(
+                user, payload.get("start_date")
+            )
+            return _json({"ok": True, "cycle": cycle, **bundle})
+        bundle = sports_cave_dashboard.save_daily_planner_week_plan(
+            user,
+            str(payload.get("cycle_id") or ""),
+            str(payload.get("week_start") or ""),
+            str(payload.get("theme") or ""),
+            str(payload.get("quote_text") or ""),
+            str(payload.get("quote_author") or ""),
+            list(payload.get("objectives") or []),
+            expected_version=int(payload.get("expected_version") or 0),
+            request_id=str(payload.get("request_id") or ""),
+        )
+        return _json({"ok": True, **bundle})
+    except (TypeError, ValueError) as error:
+        return _json({"ok": False, "error": _safe_error(error), "retryable": False}, 400)
+    except Exception as error:
+        return _json({"ok": False, "error": _safe_error(error), "retryable": True}, 503)
+
+
+async def planner_planning_help(request: Request):
+    claims = _claims(request)
+    if not claims:
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    try:
+        payload = await request.json()
+    except Exception:
+        return _json({"ok": False, "error": "The planning-help request was not valid."}, 400)
+    kind = str((payload or {}).get("kind") or "").strip().casefold()
+    action = str((payload or {}).get("action") or "questions").strip().casefold()
+    if kind not in {"daily", "weekly"}:
+        return _json({"ok": False, "error": "Choose daily or weekly planning help."}, 400)
+    try:
+        import planning_ai
+        import sports_cave_dashboard
+
+        user = _user(claims)
+        if not sports_cave_dashboard.can_manage_daily_planner(user):
+            return _json({"ok": False, "error": "Access not approved."}, 403)
+        target_date = date.fromisoformat(
+            str((payload or {}).get("target_date") or datetime.now(SYDNEY_TZ).date())
+        )
+        answers = dict((payload or {}).get("answers") or {})
+        context = planning_ai.build_planning_context(
+            user,
+            kind,
+            answers,
+            target_date=target_date,
+        )
+
+        if action == "questions":
+            questions = planning_ai.questions_for_context(kind, context, answers)
+            return _json(
+                {
+                    "ok": True,
+                    "kind": kind,
+                    "target_date": target_date,
+                    "questions": questions,
+                    "draft": None,
+                }
+            )
+        missing = planning_ai.questions_for_context(kind, context, answers)
+        if missing:
+            return _json({"ok": True, "kind": kind, "next_question": missing[0], "draft": None})
+        draft = planning_ai.generate_planning_draft(kind, context)
+        return _json(
+            {
+                "ok": True,
+                "kind": kind,
+                "draft": draft,
+                "facts": list(draft.get("influencing_facts") or []),
+                "saved": False,
+            }
+        )
+    except planning_ai.PlanningAIError as error:
+        return _json(
+            {
+                "ok": False,
+                "error": str(error),
+                "error_code": error.code,
+                "retryable": error.retryable,
+            },
+            503 if error.retryable else 400,
+        )
+    except Exception as error:
+        LOGGER.exception("Daily Planner planning help failed")
+        return _json(
+            {
+                "ok": False,
+                "error": _safe_error(error),
+                "error_code": "planning_context_failed",
+                "retryable": True,
+            },
+            503,
+        )
 
 
 DAILY_PLANNER_ROUTE_HANDLERS = (
@@ -465,5 +596,7 @@ DAILY_PLANNER_ROUTE_HANDLERS = (
     (PLANNER_MUTATION_PATH, planner_mutation, ("POST",)),
     (PLANNER_HISTORY_PATH, planner_history, ("GET",)),
     (PLANNER_WEEKLY_REVIEW_PATH, planner_weekly_review, ("GET",)),
+    (PLANNER_WEEK_PLAN_PATH, planner_week_plan, ("GET", "POST")),
+    (PLANNER_PLANNING_HELP_PATH, planner_planning_help, ("POST",)),
     (PLANNER_STATUS_PATH, planner_status, ("GET",)),
 )

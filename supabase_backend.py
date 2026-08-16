@@ -454,6 +454,7 @@ def webhook_schema_error_message(error):
 DAILY_EXECUTION_OUTCOME_MIGRATION = "20260815_daily_execution_task_outcomes.sql"
 DAILY_EXECUTION_TIMER_MIGRATION = "20260815_daily_execution_task_timers.sql"
 DAILY_EXECUTION_SHEETS_MIGRATION = "20260722_daily_execution_sheets.sql"
+DAILY_PLANNER_WEEK_PLAN_MIGRATION = "20260816_daily_planner_week_plans.sql"
 DAILY_EXECUTION_OUTCOME_COLUMNS = frozenset(
     {
         "completion_method",
@@ -516,6 +517,20 @@ def daily_planner_schema_error_message(error):
         return (
             "Daily Planner sheet storage is missing. Apply migration "
             f"{DAILY_EXECUTION_SHEETS_MIGRATION}, then retry."
+        )
+    if any(
+        table in lowered
+        for table in (
+            "daily_planner_cycles",
+            "daily_planner_weekly_plans",
+            "daily_planner_weekly_objectives",
+            "daily_planner_weekly_tactics",
+            "daily_planner_monthly_reviews",
+        )
+    ) or DAILY_PLANNER_WEEK_PLAN_MIGRATION.casefold() in lowered:
+        return (
+            "Week Plan storage is missing. Apply migration "
+            f"{DAILY_PLANNER_WEEK_PLAN_MIGRATION}, then retry."
         )
     return ""
 
@@ -5557,9 +5572,12 @@ def list_daily_execution_timers_for_sheets(user_id, sheet_ids):
             return [_timer_from_row(row) for row in cur.fetchall()]
 
 
-def list_daily_execution_sheets_for_reporting(user_id, start_date, end_date, *, limit=1000):
+def list_daily_execution_sheets_for_reporting(
+    user_id, start_date, end_date, *, limit=1000, offset=0
+):
     ensure_dashboard_schema()
     safe_limit = min(max(int(limit or 1000), 1), 5000)
+    safe_offset = max(int(offset or 0), 0)
     clean_user_id = str(user_id or "").strip()
     where = "sheet_date >= %s::date AND sheet_date <= %s::date"
     params = [str(start_date or "").strip(), str(end_date or "").strip()]
@@ -5575,14 +5593,11 @@ def list_daily_execution_sheets_for_reporting(user_id, start_date, end_date, *, 
                 FROM daily_execution_sheets
                 WHERE {where}
                 ORDER BY sheet_date DESC, updated_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (*params, safe_limit),
+                (*params, safe_limit, safe_offset),
             )
             return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
-
-
-DAILY_PLANNER_WEEK_PLAN_MIGRATION = "20260816_daily_planner_week_plans.sql"
 
 
 def _weekly_plan_schema_error(error):
@@ -6093,6 +6108,37 @@ def list_daily_planner_cycle_archive(user_id, anchor_date=None):
         "monthly_reviews": monthly,
         "query_count": 4 if plan_ids else 2,
     }
+
+
+def complete_linked_weekly_tactics(user_id, sheet_id, task_type, task_index):
+    """Complete optional tactic links after the daily task commit has succeeded."""
+    clean_user_id = str(user_id or "").strip()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                cur.execute(
+                    """
+                    UPDATE daily_planner_weekly_tactics
+                    SET status='completed', completed_at=COALESCE(completed_at, now()), updated_at=now()
+                    WHERE user_id=%s
+                      AND linked_sheet_id=%s::uuid
+                      AND linked_task_type=%s
+                      AND linked_task_index=%s
+                      AND deleted_at IS NULL
+                      AND status<>'completed'
+                    RETURNING id, plan_id
+                    """,
+                    (clean_user_id, str(sheet_id), str(task_type), int(task_index)),
+                )
+                rows = [dict(row or {}) for row in cur.fetchall()]
+            conn.commit()
+    except Exception as error:
+        lowered = str(error or "").casefold()
+        if "daily_planner_weekly_tactics" in lowered and "does not exist" in lowered:
+            return []
+        raise
+    return rows
 
 
 def load_home_weekly_work_bundle(

@@ -156,7 +156,8 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("height=min(520", source)
         self.assertIn("row_height=28", source)
         self.assertIn('"Daily Execution History"', source)
-        self.assertIn('"Recent Operational Activity"', source)
+        self.assertIn('"Staff Weekly Activity"', source)
+        self.assertIn('"All Operational Activity"', source)
 
     def test_notification_bell_allowlist_excludes_alerts_and_generic_activity(self):
         claims = {
