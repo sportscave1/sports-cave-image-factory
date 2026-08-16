@@ -302,6 +302,23 @@ def _storage_error(error):
     return "Dashboard saving is unavailable right now."
 
 
+def _daily_outcome_storage_error(error):
+    if isinstance(error, DashboardStorageError):
+        return str(error)
+    try:
+        import supabase_backend
+
+        schema_message = supabase_backend.daily_execution_outcome_schema_error_message(error)
+    except Exception:
+        schema_message = ""
+    if schema_message:
+        return schema_message
+    return (
+        "Daily Planner could not save this task outcome. Retry. "
+        "If it continues, contact an administrator."
+    )
+
+
 def _normalise_task(task):
     task = dict(task or {})
     metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
@@ -2332,7 +2349,7 @@ def apply_daily_planner_timer_outcome(user, timer_id, outcome):
     except ValueError as error:
         raise DashboardStorageError(str(error)) from error
     except Exception as error:
-        raise DashboardStorageError(_storage_error(error)) from error
+        raise DashboardStorageError(_daily_outcome_storage_error(error)) from error
 
 
 def apply_daily_planner_task_outcome(
@@ -2371,7 +2388,7 @@ def apply_daily_planner_task_outcome(
     except ValueError as error:
         raise DashboardStorageError(str(error)) from error
     except Exception as error:
-        raise DashboardStorageError(_storage_error(error)) from error
+        raise DashboardStorageError(_daily_outcome_storage_error(error)) from error
 
 
 def list_daily_execution_history(user, start_date, end_date, *, limit=1000):

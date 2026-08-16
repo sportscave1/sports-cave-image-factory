@@ -144,7 +144,11 @@
     }
     .outcome h2 { font-size: 18px; margin: 0 0 8px; }
     .outcome-actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin-top: 14px; }
+    .outcome-error { align-items: center; display: flex; gap: 8px; justify-content: space-between; margin-top: 10px; }
+    .outcome-error span { flex: 1; }
     .sound-row { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
+    .sound-row label { align-items: center; display: inline-flex; gap: 6px; }
+    .sound-row input[type="checkbox"] { min-height: 0; width: auto; }
     .sound-row input { min-height: 0; width: 120px; }
     .hidden { display: none !important; }
     .compact-only { display: none !important; }
@@ -176,7 +180,7 @@
       <div class="brand-mark">SC</div>
       <div><span class="header-title">Daily Planner</span><span class="header-subtitle">Daily Task Execution Sheet</span></div>
       <div class="header-spacer"></div>
-      <button class="icon-button" id="test-sound" title="Test Sound" aria-label="Test Sound">Sound</button>
+      <button class="icon-button" id="test-sound" title="Toggle sound" aria-label="Toggle planner sound" aria-pressed="true">Sound on</button>
       <button class="icon-button" id="compact-toggle" title="Compact timer mode" aria-label="Compact timer mode">Compact</button>
     </header>
     <nav class="tabs full-only" aria-label="Daily Planner sections">
@@ -207,8 +211,10 @@
       loading: true, saving: false, historyLoaded: false, weeklyLoaded: false,
       historyPeriod: "today", historyStart: "", historyEnd: "", historyRows: [],
       weeklyAnchor: "", weekly: null, statusTimer: null, countdownTimer: null,
-      toastTimer: null, seenEvents: new Set(), alarmPlaying: false, alarmNodes: [],
-      alarmStopTimer: null, audio: null, volume: Number(localStorage.getItem("scPlannerVolume") || .75),
+      toastTimer: null, seenEvents: new Set(), chimePlaying: false, chimeNodes: [],
+      chimeStopTimer: null, audio: null, volume: Number(localStorage.getItem("scPlannerVolume") || .75),
+      soundEnabled: localStorage.getItem("scPlannerSoundEnabled") !== "0",
+      outcomeSaving: false, pendingOutcome: null, outcomeTimerId: "",
       compact: localStorage.getItem("scPlannerCompact") === "1",
       fullBounds: storedFullBounds, dataStartedAt: 0, initialLoadComplete: false,
       pendingFocusActive: false, timerScope: "",
@@ -259,7 +265,13 @@
       });
       let payload = {};
       try { payload = await response.json(); } catch (_error) {}
-      if (!response.ok || payload.ok === false) throw new Error(payload.error || "Daily Planner request failed.");
+      if (!response.ok || payload.ok === false) {
+        const error = new Error(payload.error || "Daily Planner request failed.");
+        error.code = String(payload.error_code || "");
+        error.retryable = Boolean(payload.retryable);
+        error.status = response.status;
+        throw error;
+      }
       return payload;
     };
     const showToast = (message, type="info", duration=5000) => {
@@ -288,8 +300,10 @@
       try { window.opener?.postMessage({...payload, type:"sports-cave-planner-timer-state"}, location.origin); } catch (_error) {}
     };
     const claimSideEffect = (kind, timer) => {
-      const eventStamp = kind === "alarm"
+      const eventStamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
+        : kind === "success"
+        ? timer?.updated_at || timer?.outcome_at || timer?.id || "event"
         : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
       const key = `scPlannerEffect:${state.timerScope || "none"}:${kind}:${timer?.id || "none"}:${eventStamp}`;
       try {
@@ -300,8 +314,10 @@
       } catch (_error) { return true; }
     };
     const runClaimedSideEffect = (kind, timer, effect) => {
-      const stamp = kind === "alarm"
+      const stamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
+        : kind === "success"
+        ? timer?.updated_at || timer?.outcome_at || timer?.id || "event"
         : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
       const run = () => claimSideEffect(kind, timer) ? effect() : undefined;
       if (navigator.locks?.request) {
@@ -355,8 +371,10 @@
       if (payload.timer?.outcome_required || payload.timer?.status === "expired") {
         showOutcomeClaimed(payload.timer);
       } else if (!payload.timer?.id || payload.timer?.outcome) {
-        stopAlarm();
+        stopChime();
         outcome.classList.add("hidden");
+        state.outcomeTimerId = "";
+        if (!state.outcomeSaving) state.pendingOutcome = null;
       }
     };
     if (timerChannel) timerChannel.addEventListener("message", (event) => receiveTimerState(event.data));
@@ -376,41 +394,56 @@
         await state.audio.resume();
         return state.audio.state === "running";
       } catch (_error) {
-        showToast("Sound is blocked. Allow audio for Sports Cave OS, then use Test Sound.", "error", 9000);
+        showToast("Sound is blocked. Allow audio for Sports Cave OS, then turn Sound off and on again.", "error", 9000);
         return false;
       }
     };
-    const stopAlarm = () => {
-      clearTimeout(state.alarmStopTimer);
-      state.alarmNodes.forEach((node) => { try { node.stop(); } catch (_error) {} });
-      state.alarmNodes = [];
-      state.alarmPlaying = false;
+    const stopChime = () => {
+      clearTimeout(state.chimeStopTimer);
+      state.chimeNodes.forEach((node) => { try { node.stop(); } catch (_error) {} });
+      state.chimeNodes = [];
+      state.chimePlaying = false;
     };
-    const playAlarm = async () => {
-      if (state.alarmPlaying) return;
+    const playToneSequence = async (tones) => {
+      if (!state.soundEnabled || state.chimePlaying) return false;
       if (!(await enableAudio())) return;
-      stopAlarm();
-      state.alarmPlaying = true;
+      stopChime();
+      state.chimePlaying = true;
       const audio = state.audio;
       const volume = Math.max(.05, Math.min(1, state.volume));
       const started = audio.currentTime + .03;
-      for (let pulse = 0; pulse < 6; pulse += 1) {
-        const at = started + pulse * .83;
-        [660, 880].forEach((frequency, offset) => {
-          const oscillator = audio.createOscillator();
-          const gain = audio.createGain();
-          oscillator.type = offset ? "triangle" : "sine";
-          oscillator.frequency.setValueAtTime(frequency, at);
-          gain.gain.setValueAtTime(.0001, at);
-          gain.gain.exponentialRampToValueAtTime((offset ? .13 : .22) * volume, at + .05);
-          gain.gain.setValueAtTime((offset ? .13 : .22) * volume, at + .48);
-          gain.gain.exponentialRampToValueAtTime(.0001, at + .68);
-          oscillator.connect(gain); gain.connect(audio.destination);
-          oscillator.start(at + offset * .025); oscillator.stop(at + .72);
-          state.alarmNodes.push(oscillator);
-        });
-      }
-      state.alarmStopTimer = setTimeout(stopAlarm, 5050);
+      let endAt = started;
+      tones.forEach(({offset, duration, frequency, level=.09, type="sine"}) => {
+        const at = started + offset;
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, at);
+        gain.gain.setValueAtTime(.0001, at);
+        gain.gain.exponentialRampToValueAtTime(level * volume, at + .035);
+        gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+        oscillator.connect(gain); gain.connect(audio.destination);
+        oscillator.start(at); oscillator.stop(at + duration + .03);
+        state.chimeNodes.push(oscillator);
+        endAt = Math.max(endAt, at + duration + .03);
+      });
+      state.chimeStopTimer = setTimeout(stopChime, Math.min(1200, Math.ceil((endAt - audio.currentTime) * 1000) + 30));
+      return true;
+    };
+    const playTimeUpChime = () => playToneSequence([
+      {offset:0, duration:.30, frequency:523.25, level:.085, type:"sine"},
+      {offset:.31, duration:.40, frequency:659.25, level:.075, type:"triangle"},
+    ]);
+    const playSuccessChime = () => playToneSequence([
+      {offset:0, duration:.22, frequency:392, level:.065, type:"sine"},
+      {offset:.20, duration:.28, frequency:523.25, level:.075, type:"sine"},
+      {offset:.44, duration:.38, frequency:659.25, level:.08, type:"triangle"},
+    ]);
+    const syncSoundButton = () => {
+      const button = document.querySelector("#test-sound");
+      button.textContent = state.soundEnabled ? "Sound on" : "Sound off";
+      button.setAttribute("aria-pressed", state.soundEnabled ? "true" : "false");
+      button.title = state.soundEnabled ? "Sound is on. Click to turn it off." : "Sound is off. Click to enable and test it.";
     };
 
     const setCompact = (enabled) => {
@@ -698,16 +731,63 @@
         await loadPlanner(extra.work_date || state.bundle.work_date);
       } catch (error) { showToast(error.message,"error",8000); }
     };
-    const applyTaskOutcome = async (taskType, taskIndex, selectedOutcome, timer={}, sheetId="") => {
-      let reason = "";
-      if (selectedOutcome === "completed" && !window.confirm("Finish this task now?")) return;
-      if (selectedOutcome === "skipped") {
-        const answer = window.prompt("Skip this task? It will be recorded as not completed.\n\nOptional reason:", "No time available");
-        if (answer === null) return;
-        reason = String(answer || "No time available").trim();
+    const savedTaskFor = (sheet, taskType, taskIndex) => {
+      const tasks = taskType === "top" ? sheet?.top_tasks : sheet?.additional_items;
+      return Array.isArray(tasks) ? tasks[Number(taskIndex)] || {} : {};
+    };
+    const setOutcomeSavingState = (saving, trigger) => {
+      outcome.querySelectorAll("[data-outcome], [data-outcome-retry]").forEach((button) => { button.disabled = saving; });
+      if (!trigger) return;
+      if (saving) {
+        trigger.dataset.savedLabel = trigger.textContent;
+        trigger.textContent = "Saving\u2026";
+      } else if (trigger.dataset.savedLabel) {
+        trigger.textContent = trigger.dataset.savedLabel;
+        delete trigger.dataset.savedLabel;
       }
-      if (selectedOutcome === "did_not_finish" && !window.confirm("Mark this task as Did not finish?")) return;
-      if (selectedOutcome === "reopen" && !window.confirm("Reopen this task? It will return to Open and its timer will not restart.")) return;
+    };
+    const showOutcomeError = (error) => {
+      const box = outcome.querySelector("[data-outcome-error]");
+      if (!box) return;
+      box.querySelector("span").textContent = error.message || "Daily Planner could not save this outcome.";
+      box.classList.remove("hidden");
+    };
+    const retryPendingOutcome = async (event) => {
+      const pending = state.pendingOutcome;
+      if (!pending) return;
+      await applyTaskOutcome(
+        pending.task_type,
+        pending.task_index,
+        pending.outcome,
+        pending.timer,
+        pending.sheet_id,
+        {...pending.options, reason:pending.reason, trigger:event.currentTarget},
+      );
+    };
+    const showTaskOutcomeRetry = (error) => {
+      outcome.innerHTML = `<h2 id="outcome-title">Task outcome was not saved</h2><div class="notice error outcome-error" data-outcome-error role="alert"><span>${escapeHtml(error.message || "Daily Planner could not save this outcome.")}</span><button class="button small" data-outcome-retry>Retry</button></div>`;
+      outcome.classList.remove("hidden");
+      outcome.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
+      outcome.querySelector("[data-outcome-retry]").focus();
+    };
+    const notifyPlannerDataUpdated = (sheet) => {
+      const payload = {type:"sports-cave-planner-data-updated", source:surfaceId, scope:state.timerScope, sheet_date:sheet?.sheet_date || "", sent_at:Date.now()};
+      try { localStorage.setItem(`scPlannerDataUpdated:${state.timerScope || "none"}`, JSON.stringify(payload)); } catch (_error) {}
+      try { window.opener?.postMessage(payload, location.origin); } catch (_error) {}
+    };
+    const applyTaskOutcome = async (taskType, taskIndex, selectedOutcome, timer={}, sheetId="", options={}) => {
+      if (state.outcomeSaving) return null;
+      let reason = String(options.reason || "").trim();
+      if (options.confirm !== false) {
+        if (selectedOutcome === "completed" && !window.confirm("Finish this task now?")) return null;
+        if (selectedOutcome === "skipped") {
+          const answer = window.prompt("Skip this task? It will be recorded as not completed.\n\nOptional reason:", "No time available");
+          if (answer === null) return null;
+          reason = String(answer || "No time available").trim();
+        }
+        if (selectedOutcome === "did_not_finish" && !window.confirm("Mark this task as Did not finish?")) return null;
+        if (selectedOutcome === "reopen" && !window.confirm("Reopen this task? It will return to Open and its timer will not restart.")) return null;
+      }
       const previousActive = {...activeTimer()};
       const targetSheetId = sheetId || state.bundle?.sheet?.id;
       const clearsActive = Boolean(
@@ -717,37 +797,60 @@
         && Number(previousActive.task_index) === Number(taskIndex)
         && selectedOutcome !== "reopen"
       );
-      stopAlarm();
-      outcome.classList.add("hidden");
-      if (clearsActive && state.bundle) {
-        state.bundle.active_timer = {};
-        broadcastTimer({});
-        updateTimerDisplays();
+      const request = {
+        action:"task_outcome", sheet_id:targetSheetId, task_type:taskType,
+        task_index:Number(taskIndex), timer_id:timer?.id || "", outcome:selectedOutcome, reason,
+      };
+      state.outcomeSaving = true;
+      state.pendingOutcome = {...request, timer, options:{confirm:false, outcomeModal:Boolean(options.outcomeModal)}};
+      setOutcomeSavingState(true, options.trigger);
+      if (options.outcomeModal) {
+        outcome.querySelector("[data-outcome-error]")?.classList.add("hidden");
       }
+      let result;
       try {
-        const result = await mutate({
-          action:"task_outcome", sheet_id:targetSheetId, task_type:taskType,
-          task_index:Number(taskIndex), timer_id:timer?.id || "", outcome:selectedOutcome, reason,
-        });
-        invalidateReports();
-        broadcastTimer(clearsActive ? {} : activeTimer());
-        const outcomeMessage = {
-          completed:"Task finished.",
-          skipped:"Task skipped.",
-          did_not_finish:"Task recorded as not completed.",
-          reopen:"Task reopened.",
-        }[selectedOutcome] || "Task updated.";
-        showToast(outcomeMessage, "success");
-        await loadPlanner(result?.sheet?.sheet_date || state.bundle.work_date);
+        result = await mutate(request);
       } catch (error) {
-        if (clearsActive && state.bundle) {
-          state.bundle.active_timer = previousActive;
-          broadcastTimer(previousActive);
-          updateTimerDisplays();
-          if (previousActive.status === "expired" || previousActive.outcome_required) showOutcomeClaimed(previousActive);
+        state.outcomeSaving = false;
+        if (options.outcomeModal) {
+          setOutcomeSavingState(false, options.trigger);
+          showOutcomeError(error);
+        } else {
+          setOutcomeSavingState(false, options.trigger);
+          showTaskOutcomeRetry(error);
         }
-        showToast(error.message,"error",8000);
+        return null;
       }
+      state.outcomeSaving = false;
+      state.pendingOutcome = null;
+      setOutcomeSavingState(false, options.trigger);
+      stopChime();
+      outcome.classList.add("hidden");
+      state.outcomeTimerId = "";
+      invalidateReports();
+      if (clearsActive && state.bundle) state.bundle.active_timer = {};
+      broadcastTimer(clearsActive ? {} : activeTimer());
+      notifyPlannerDataUpdated(result?.sheet || {});
+      if (selectedOutcome === "completed") {
+        const savedTask = savedTaskFor(result?.sheet, taskType, taskIndex);
+        runClaimedSideEffect("success", {
+          id:timer?.id || `task:${targetSheetId}:${taskType}:${Number(taskIndex)}`,
+          updated_at:`${result?.sheet?.updated_at || "saved"}:v${savedTask.outcome_version || 0}`,
+        }, playSuccessChime);
+      }
+      const outcomeMessage = {
+        completed:"Task finished.",
+        skipped:"Task skipped.",
+        did_not_finish:"Task recorded as not completed.",
+        reopen:"Task reopened.",
+      }[selectedOutcome] || "Task updated.";
+      showToast(outcomeMessage, "success");
+      try {
+        await loadPlanner(result?.sheet?.sheet_date || state.bundle.work_date);
+      } catch (_error) {
+        showToast("Task saved, but the planner view could not refresh. Reopen the planner to reload it.", "error", 9000);
+      }
+      return result;
     };
     const updateTimerDisplays = () => {
       const timer = activeTimer();
@@ -761,20 +864,25 @@
     };
     const showOutcome = (timer) => {
       if (!timer?.id || timer.outcome) { outcome.classList.add("hidden"); return; }
-      outcome.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="sound-row"><button class="button small" data-stop-sound>Stop Sound</button><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
+      if (!outcome.classList.contains("hidden") && state.outcomeTimerId === timer.id) return;
+      state.outcomeTimerId = timer.id;
+      outcome.innerHTML = `<h2 id="outcome-title">Time\u2019s up \u2014 did you complete this task?</h2><strong>${escapeHtml(taskForTimer(timer))}</strong><p>Elapsed: ${formatClock(timerElapsed(timer))}</p><div class="outcome-actions"><button class="button primary" data-outcome="completed">Completed</button><button class="button" data-outcome="did_not_finish">Half complete / Did not finish</button></div><div class="notice error outcome-error hidden" data-outcome-error role="alert"><span></span><button class="button small" data-outcome-retry>Retry</button></div><div class="sound-row"><label><input type="checkbox" data-sound-enabled ${state.soundEnabled ? "checked" : ""}> Sound</label><label>Volume <input type="range" min="0.05" max="1" step="0.05" value="${state.volume}" data-volume></label></div>`;
       outcome.classList.remove("hidden");
       outcome.querySelector("[data-outcome]")?.focus();
       outcome.querySelectorAll("[data-outcome]").forEach((button) => button.addEventListener("click", async () => {
-        stopAlarm();
-        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.outcome}); invalidateReports(); outcome.classList.add("hidden"); if (state.bundle) state.bundle.active_timer = {}; broadcastTimer({}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
-        catch (error) { showToast(error.message,"error",8000); }
+        await applyTaskOutcome(timer.task_type, timer.task_index, button.dataset.outcome, timer, timer.sheet_id, {confirm:false, outcomeModal:true, trigger:button});
       }));
-      outcome.querySelector("[data-stop-sound]").addEventListener("click", stopAlarm);
+      outcome.querySelector("[data-outcome-retry]").addEventListener("click", retryPendingOutcome);
+      outcome.querySelector("[data-sound-enabled]").addEventListener("change", (event) => {
+        state.soundEnabled = Boolean(event.target.checked);
+        localStorage.setItem("scPlannerSoundEnabled", state.soundEnabled ? "1" : "0");
+        syncSoundButton();
+      });
       outcome.querySelector("[data-volume]").addEventListener("input", (event) => { state.volume = Number(event.target.value); localStorage.setItem("scPlannerVolume", String(state.volume)); });
     };
     const showOutcomeClaimed = (timer) => {
       showOutcome(timer);
-      runClaimedSideEffect("alarm", timer, playAlarm);
+      runClaimedSideEffect("time-up", timer, playTimeUpChime);
     };
     const refreshStatus = async (immediate=false) => {
       clearTimeout(state.statusTimer);
@@ -795,7 +903,7 @@
         const timer = activeTimer();
         if (timer.outcome_required || timer.status === "expired") {
           showOutcome(timer);
-          if (previousId !== timer.id || immediate) runClaimedSideEffect("alarm", timer, playAlarm);
+          if (previousId !== timer.id || immediate) runClaimedSideEffect("time-up", timer, playTimeUpChime);
         }
         updateTimerDisplays();
       } catch (_error) {}
@@ -846,11 +954,7 @@
         compactView.innerHTML = '<div class="compact-task">No active timer</div><div class="compact-countdown">00:00</div><div class="compact-actions"><button class="button" data-action="toggle-compact">Restore full planner</button></div>';
         return;
       }
-      compactView.innerHTML = `<div class="compact-task">${escapeHtml(taskForTimer(timer))}</div><div class="compact-countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div><div class="compact-meta"><span>Allocated ${formatClock(timer.allocated_seconds)}</span><span>Elapsed ${formatClock(timerElapsed(timer))}</span></div><div class="compact-actions">${timer.status === "running" ? '<button class="button" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button" data-action="resume-timer">Resume</button>' : ""}${timer.status === "expired" ? "" : '<button class="button finish" data-action="finish-active">Finish</button>'}<button class="button skip" data-action="skip-active">Skip</button><button class="button" data-compact-outcome="did_not_finish">Did not finish</button><button class="button" data-action="toggle-compact">Restore full planner</button></div>`;
-      compactView.querySelectorAll("[data-compact-outcome]").forEach((button) => button.addEventListener("click", async () => {
-        try { await mutate({action:"timer_outcome", timer_id:timer.id, outcome:button.dataset.compactOutcome}); invalidateReports(); if (state.bundle) state.bundle.active_timer = {}; broadcastTimer({}); await loadPlanner(timer.sheet_date || state.bundle.work_date); }
-        catch (error) { showToast(error.message,"error",8000); }
-      }));
+      compactView.innerHTML = `<div class="compact-task">${escapeHtml(taskForTimer(timer))}</div><div class="compact-countdown" data-countdown="active">${formatClock(timerRemaining(timer))}</div><div class="compact-meta"><span>Allocated ${formatClock(timer.allocated_seconds)}</span><span>Elapsed ${formatClock(timerElapsed(timer))}</span></div><div class="compact-actions">${timer.status === "running" ? '<button class="button" data-action="pause-timer">Pause</button>' : timer.status === "paused" ? '<button class="button" data-action="resume-timer">Resume</button>' : ""}${timer.status === "expired" ? "" : '<button class="button finish" data-action="finish-active">Finish</button>'}<button class="button skip" data-action="skip-active">Skip</button><button class="button" data-action="did-not-finish-active">Did not finish</button><button class="button" data-action="toggle-compact">Restore full planner</button></div>`;
     };
     const renderCurrent = () => {
       document.querySelectorAll(".tab").forEach((button) => button.setAttribute("aria-selected", button.dataset.tab === state.tab ? "true" : "false"));
@@ -861,7 +965,14 @@
     };
 
     document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => { state.tab = button.dataset.tab; renderCurrent(); }));
-    document.querySelector("#test-sound").addEventListener("click", playAlarm);
+    document.querySelector("#test-sound").addEventListener("click", async () => {
+      state.soundEnabled = !state.soundEnabled;
+      localStorage.setItem("scPlannerSoundEnabled", state.soundEnabled ? "1" : "0");
+      syncSoundButton();
+      if (state.soundEnabled) await playTimeUpChime();
+      else stopChime();
+    });
+    syncSoundButton();
     document.querySelector("#compact-toggle").addEventListener("click", () => setCompact(!state.compact));
     let resizeTimer = null;
     window.addEventListener("resize", () => {
@@ -887,11 +998,15 @@
       if (action === "toggle-compact") return setCompact(!state.compact);
       if (action === "finish-active") {
         const timer = activeTimer();
-        return applyTaskOutcome(timer.task_type, timer.task_index, "completed", timer, timer.sheet_id);
+        return applyTaskOutcome(timer.task_type, timer.task_index, "completed", timer, timer.sheet_id, {trigger:target});
       }
       if (action === "skip-active") {
         const timer = activeTimer();
-        return applyTaskOutcome(timer.task_type, timer.task_index, "skipped", timer, timer.sheet_id);
+        return applyTaskOutcome(timer.task_type, timer.task_index, "skipped", timer, timer.sheet_id, {trigger:target});
+      }
+      if (action === "did-not-finish-active") {
+        const timer = activeTimer();
+        return applyTaskOutcome(timer.task_type, timer.task_index, "did_not_finish", timer, timer.sheet_id, {trigger:target});
       }
       if (action === "create-sheet") { state.editingNew = true; state.draft = normalDraft({}); return renderPlanner(); }
       if (action === "cancel-new") { state.editingNew = false; state.draft = null; return renderPlanner(); }
@@ -906,13 +1021,13 @@
       if (action === "save-sheet") return saveSheet();
       if (action === "finish-task") {
         const timer = activeMatches(type,index) ? activeTimer() : {};
-        return applyTaskOutcome(type, index, "completed", timer);
+        return applyTaskOutcome(type, index, "completed", timer, "", {trigger:target});
       }
       if (action === "skip-task") {
         const timer = activeMatches(type,index) ? activeTimer() : {};
-        return applyTaskOutcome(type, index, "skipped", timer);
+        return applyTaskOutcome(type, index, "skipped", timer, "", {trigger:target});
       }
-      if (action === "reopen-task") return applyTaskOutcome(type, index, "reopen");
+      if (action === "reopen-task") return applyTaskOutcome(type, index, "reopen", {}, "", {trigger:target});
       if (action === "complete-review") {
         try { await mutate({action:"complete_review", sheet_id:state.bundle.sheet.id, review:collectReview()}); showToast("Daily Review complete.","success"); await loadPlanner(state.bundle.work_date); }
         catch (error) { showToast(error.message,"error",8000); }

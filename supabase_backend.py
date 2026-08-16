@@ -450,6 +450,47 @@ def webhook_schema_error_message(error):
     return ""
 
 
+DAILY_EXECUTION_OUTCOME_MIGRATION = "20260815_daily_execution_task_outcomes.sql"
+DAILY_EXECUTION_OUTCOME_COLUMNS = frozenset(
+    {
+        "completion_method",
+        "skip_reason",
+        "completed_before_expiry",
+        "time_saved_seconds",
+    }
+)
+
+
+def daily_execution_outcome_schema_error_message(error):
+    """Return an actionable message for the additive task-outcome schema."""
+    sqlstate = str(
+        getattr(error, "sqlstate", "")
+        or getattr(error, "pgcode", "")
+        or ""
+    ).upper()
+    diag = getattr(error, "diag", None)
+    column = str(getattr(diag, "column_name", "") or "").casefold()
+    constraint = str(getattr(diag, "constraint_name", "") or "").casefold()
+    lowered = str(error or "").casefold()
+    missing_column = sqlstate == "42703" and (
+        column in DAILY_EXECUTION_OUTCOME_COLUMNS
+        or any(name in lowered for name in DAILY_EXECUTION_OUTCOME_COLUMNS)
+    )
+    stale_constraint = (
+        sqlstate == "23514"
+        and (
+            constraint == "daily_execution_task_timers_outcome_check"
+            or "daily_execution_task_timers_outcome_check" in lowered
+        )
+    )
+    if not (missing_column or stale_constraint):
+        return ""
+    return (
+        "Daily Planner outcome storage is out of date. Apply migration "
+        f"{DAILY_EXECUTION_OUTCOME_MIGRATION}, then retry."
+    )
+
+
 def _database_url_with_ssl():
     url = get_database_url()
     if not url:
@@ -5563,6 +5604,7 @@ def apply_daily_execution_task_outcome(
 
 
 def apply_daily_execution_timer_outcome(user_id, timer_id, outcome, *, actor="sports_cave_os"):
+    """Compatibility entry point backed by the canonical task outcome transaction."""
     ensure_dashboard_schema()
     clean_user_id = str(user_id or "").strip()
     clean_timer_id = str(timer_id or "").strip()
@@ -5574,152 +5616,25 @@ def apply_daily_execution_timer_outcome(user_id, timer_id, outcome, *, actor="sp
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
                 """
-                SELECT *
+                SELECT sheet_id, task_type, task_index
                 FROM daily_execution_task_timers
                 WHERE id=%s AND user_id=%s
                 LIMIT 1
-                FOR UPDATE
                 """,
                 (clean_timer_id, clean_user_id),
             )
             timer_row = cur.fetchone() or {}
             if not timer_row:
                 raise ValueError("Daily Planner timer was not found.")
-            timer = _timer_from_row(timer_row)
-            cur.execute(
-                """
-                SELECT *
-                FROM daily_execution_sheets
-                WHERE id=%s AND user_id=%s AND status <> 'archived'
-                LIMIT 1
-                FOR UPDATE
-                """,
-                (timer["sheet_id"], clean_user_id),
-            )
-            sheet_row = cur.fetchone() or {}
-            if not sheet_row:
-                raise ValueError("Daily Planner task is not available for this account.")
-            if timer.get("outcome"):
-                conn.commit()
-                return {
-                    "timer": timer,
-                    "sheet": _daily_execution_sheet_from_row(sheet_row),
-                    "already_applied": True,
-                }
-            sheet = _daily_execution_sheet_from_row(sheet_row)
-            task_type = timer["task_type"]
-            task_index = timer["task_index"]
-            tasks = list(
-                (sheet.get("top_tasks") or [])
-                if task_type == "top"
-                else (sheet.get("additional_items") or [])
-            )
-            if task_index >= len(tasks):
-                raise ValueError("Daily Planner task was not found.")
-            task = dict(tasks[task_index] or {})
-            task_name = str(task.get("task") or task.get("details") or "Daily Planner task").strip()
-            outcome_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            elapsed = _daily_timer_elapsed_seconds(timer)
-            outcome_version = max(int(task.get("outcome_version") or 0), 0) + 1
-            if clean_outcome == DAILY_TIMER_OUTCOME_COMPLETED:
-                task["status"] = "done"
-                task["completed"] = True
-                task["completed_at"] = outcome_at
-                task["finished_at"] = None
-                task["outcome"] = "completed"
-                task["completion_method"] = "completed_after_expiry"
-                event_type = "daily_planner_task_completed"
-                message = f"Daily Planner task completed: {task_name}"
-            else:
-                task["status"] = "couldnt_finish"
-                task["completed"] = False
-                task["completed_at"] = None
-                task["finished_at"] = outcome_at
-                task["outcome"] = "did_not_finish"
-                task["completion_method"] = "did_not_finish"
-                event_type = "daily_planner_task_did_not_finish"
-                message = f"Daily Planner task did not finish: {task_name}"
-            task["skip_reason"] = ""
-            task["completed_before_expiry"] = False
-            task["time_saved_seconds"] = None
-            task["actual_elapsed_seconds"] = elapsed
-            task["outcome_version"] = outcome_version
-            task["outcome_history"] = list(task.get("outcome_history") or [])[-20:]
-            tasks[task_index] = task
-            if task_type == "top":
-                cur.execute(
-                    """
-                    UPDATE daily_execution_sheets
-                    SET top_tasks=%s::jsonb,
-                        updated_at=now()
-                    WHERE id=%s AND user_id=%s
-                    RETURNING *
-                    """,
-                    (json_dumps(tasks), timer["sheet_id"], clean_user_id),
-                )
-            else:
-                cur.execute(
-                    """
-                    UPDATE daily_execution_sheets
-                    SET additional_items=%s::jsonb,
-                        updated_at=now()
-                    WHERE id=%s AND user_id=%s
-                    RETURNING *
-                    """,
-                    (json_dumps(tasks), timer["sheet_id"], clean_user_id),
-                )
-            updated_sheet = cur.fetchone() or sheet_row
-            cur.execute(
-                """
-                UPDATE daily_execution_task_timers
-                SET status='completed',
-                    outcome=%s,
-                    outcome_required=false,
-                    outcome_at=now(),
-                    remaining_seconds=0,
-                    actual_elapsed_seconds=%s,
-                    completion_method=%s,
-                    skip_reason=NULL,
-                    completed_before_expiry=false,
-                    time_saved_seconds=NULL,
-                    updated_at=now(),
-                    version=version + 1
-                WHERE id=%s AND user_id=%s
-                RETURNING *
-                """,
-                (
-                    clean_outcome,
-                    elapsed,
-                    task.get("completion_method"),
-                    clean_timer_id,
-                    clean_user_id,
-                ),
-            )
-            updated_timer = cur.fetchone() or timer_row
-            _insert_daily_timer_activity_once(
-                cur,
-                event_type=event_type,
-                timer_id=clean_timer_id,
-                sheet_id=timer["sheet_id"],
-                message=message,
-                actor=actor,
-                event_key=f"{event_type}:{clean_timer_id}:v{outcome_version}",
-                metadata={
-                    "task": task_name,
-                    "task_type": task_type,
-                    "task_index": task_index,
-                    "outcome": clean_outcome,
-                    "completion_method": task.get("completion_method"),
-                    "actual_elapsed_seconds": elapsed,
-                    "actor_id": clean_user_id,
-                },
-            )
-        conn.commit()
-    return {
-        "timer": _timer_from_row(updated_timer),
-        "sheet": _daily_execution_sheet_from_row(updated_sheet),
-        "already_applied": False,
-    }
+    return apply_daily_execution_task_outcome(
+        clean_user_id,
+        str(timer_row.get("sheet_id") or ""),
+        str(timer_row.get("task_type") or ""),
+        int(timer_row.get("task_index") or 0),
+        clean_outcome,
+        timer_id=clean_timer_id,
+        actor=actor,
+    )
 
 
 def start_sync_run(sync_type, *, ensure_schema_first=True):

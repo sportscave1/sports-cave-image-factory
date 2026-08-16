@@ -87,6 +87,23 @@ def _safe_error(error):
     return message[:240]
 
 
+def _mutation_error_payload(error, *, retryable):
+    message = _safe_error(error)
+    migration = "20260815_daily_execution_task_outcomes.sql"
+    if migration.casefold() in message.casefold():
+        code = "daily_planner_outcome_migration_required"
+    elif retryable:
+        code = "daily_planner_outcome_save_failed"
+    else:
+        code = "daily_planner_validation_failed"
+    return {
+        "ok": False,
+        "error": message,
+        "error_code": code,
+        "retryable": bool(retryable),
+    }
+
+
 def _task_rows(sheet, timers):
     import sports_cave_dashboard
 
@@ -323,9 +340,9 @@ async def planner_mutation(request: Request):
         else:
             return _json({"ok": False, "error": "Unknown Daily Planner action."}, 400)
     except (TypeError, ValueError) as error:
-        return _json({"ok": False, "error": _safe_error(error)}, 400)
+        return _json(_mutation_error_payload(error, retryable=False), 400)
     except Exception as error:
-        return _json({"ok": False, "error": _safe_error(error)}, 503)
+        return _json(_mutation_error_payload(error, retryable=True), 503)
     return _json({"ok": True, "result": result})
 
 

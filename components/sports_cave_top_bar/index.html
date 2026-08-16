@@ -310,18 +310,6 @@
       width: 8px;
     }
     .sc-os-planner-toast:hover { background: #22211e; }
-    .sc-os-planner-stop-sound {
-      background: #fff;
-      border: 1px solid #c9b57f;
-      border-radius: 5px;
-      color: #241d10;
-      cursor: pointer;
-      font: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      justify-self: end;
-      padding: 5px 9px;
-    }
     .sc-os-planner-sound-warning {
       background: #fff3d7;
       border: 1px solid #d4a54c;
@@ -333,7 +321,6 @@
     .sc-os-topbar-icon-button:focus-visible,
     .sc-os-topbar-result:focus-visible,
     .sc-os-topbar-action:focus-visible,
-    .sc-os-planner-stop-sound:focus-visible,
     .sc-os-theme-option:focus-visible {
       outline: 2px solid #d4a54c;
       outline-offset: 2px;
@@ -571,16 +558,18 @@
       shownPlannerEvents: new Set(),
       plannerAudioContext: null,
       plannerWindow: parentWindow.SportsCaveDailyPlannerWindow || null,
-      plannerAlarmNodes: [],
-      plannerAlarmStopTimer: null,
-      plannerAlarmPlaying: false,
+      plannerChimeNodes: [],
+      plannerChimeStopTimer: null,
+      plannerChimePlaying: false,
       plannerTimer: {},
       plannerStatusPending: false,
       plannerStatusTimer: null,
       plannerExpiryRequested: false,
       plannerHalfwayRequested: false,
+      plannerDataRefreshPending: false,
     };
     const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.dailyPlannerTimerScope || "none"}`;
+    const plannerDataStorageKey = () => `scPlannerDataUpdated:${state.config.dailyPlannerTimerScope || "none"}`;
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
     const refreshButton = root.querySelector("#sc-os-refresh");
@@ -754,28 +743,34 @@
         return false;
       }
     };
-    const stopPlannerAlarm = () => {
-      if (state.plannerAlarmStopTimer) {
-        parentWindow.clearTimeout(state.plannerAlarmStopTimer);
-        state.plannerAlarmStopTimer = null;
+    const stopPlannerChime = () => {
+      if (state.plannerChimeStopTimer) {
+        parentWindow.clearTimeout(state.plannerChimeStopTimer);
+        state.plannerChimeStopTimer = null;
       }
-      state.plannerAlarmNodes.forEach((node) => {
+      state.plannerChimeNodes.forEach((node) => {
         try { node.stop(); } catch (_error) {}
       });
-      state.plannerAlarmNodes = [];
-      state.plannerAlarmPlaying = false;
+      state.plannerChimeNodes = [];
+      state.plannerChimePlaying = false;
     };
-    const playPlannerAlarm = async () => {
-      if (state.plannerAlarmPlaying) return;
+    const playPlannerTimeUpChime = async () => {
+      let soundEnabled = true;
+      let volume = 0.75;
+      try {
+        soundEnabled = parentWindow.localStorage.getItem("scPlannerSoundEnabled") !== "0";
+        volume = Math.max(0.05, Math.min(1, Number(parentWindow.localStorage.getItem("scPlannerVolume") || 0.75)));
+      } catch (_error) {}
+      if (!soundEnabled || state.plannerChimePlaying) return;
       if (!(await enablePlannerAudio())) {
         const warning = doc.createElement("div");
         warning.className = "sc-os-planner-sound-warning";
-        warning.textContent = "Sound is blocked. Allow audio for Sports Cave OS, then use Test Sound in Daily Planner.";
+        warning.textContent = "Sound is blocked. Allow audio for Sports Cave OS, then turn Sound off and on in Daily Planner.";
         plannerToastRegion.appendChild(warning);
         return;
       }
       const audio = state.plannerAudioContext;
-      state.plannerAlarmPlaying = true;
+      state.plannerChimePlaying = true;
       const playOne = (offset, duration, frequency, volume) => {
         const oscillator = audio.createOscillator();
         const gain = audio.createGain();
@@ -789,17 +784,15 @@
         gain.connect(audio.destination);
         oscillator.start(audio.currentTime + offset);
         oscillator.stop(audio.currentTime + offset + duration + 0.05);
-        state.plannerAlarmNodes.push(oscillator);
+        state.plannerChimeNodes.push(oscillator);
       };
-      for (let pulse = 0; pulse < 6; pulse += 1) {
-        playOne(pulse * 0.83, 0.68, 660, 0.22);
-        playOne(pulse * 0.83 + 0.025, 0.68, 880, 0.13);
-      }
-      state.plannerAlarmStopTimer = later(() => {
-        state.plannerAlarmNodes = [];
-        state.plannerAlarmPlaying = false;
-        state.plannerAlarmStopTimer = null;
-      }, 5050);
+      playOne(0, 0.30, 523.25, 0.085 * volume);
+      playOne(0.31, 0.40, 659.25, 0.075 * volume);
+      state.plannerChimeStopTimer = later(() => {
+        state.plannerChimeNodes = [];
+        state.plannerChimePlaying = false;
+        state.plannerChimeStopTimer = null;
+      }, 820);
     };
     const showPlannerPopupBlocked = (url) => {
       dismissPlannerToast();
@@ -816,7 +809,7 @@
       plannerToastRegion.hidden = false;
       state.plannerToastTimer = later(dismissPlannerToast, 12000);
     };
-    const showPlannerToast = (message, {openPlanner = false, alarm = false, eventKey = ""} = {}) => {
+    const showPlannerToast = (message, {openPlanner = false, chime = false, eventKey = ""} = {}) => {
       const clean = String(message || "").trim();
       if (!clean) return;
       if (eventKey && state.shownPlannerEvents.has(eventKey)) return;
@@ -832,16 +825,8 @@
         openDailyPlanner();
       }, listenerOptions);
       plannerToastRegion.appendChild(toast);
-      if (alarm) {
-        const stopSound = doc.createElement("button");
-        stopSound.type = "button";
-        stopSound.className = "sc-os-planner-stop-sound";
-        stopSound.textContent = "Stop Sound";
-        stopSound.addEventListener("click", stopPlannerAlarm, listenerOptions);
-        plannerToastRegion.appendChild(stopSound);
-      }
       plannerToastRegion.hidden = false;
-      if (alarm) playPlannerAlarm();
+      if (chime) playPlannerTimeUpChime();
       if (openPlanner) later(openDailyPlanner, 120);
       state.plannerToastTimer = later(dismissPlannerToast, 9000);
     };
@@ -916,7 +901,7 @@
       try { parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload)); } catch (_error) {}
     };
     const claimPlannerEffect = (kind, timer) => {
-      const stamp = kind === "alarm"
+      const stamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
         : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
       const key = `scPlannerEffect:${state.config.dailyPlannerTimerScope || "none"}:${kind}:${timer?.id || "none"}:${stamp}`;
@@ -928,7 +913,7 @@
       } catch (_error) { return true; }
     };
     const runClaimedPlannerEffect = (kind, timer, effect) => {
-      const stamp = kind === "alarm"
+      const stamp = kind === "time-up"
         ? timer?.deadline_at || timer?.id || "event"
         : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
       const run = () => claimPlannerEffect(kind, timer) ? effect() : undefined;
@@ -995,12 +980,13 @@
         if (event.event === "halfway") {
           runClaimedPlannerEffect("halfway", timer, () => showPlannerToast(`Halfway through: ${timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey:`halfway:${timer.id}:${timer.halfway_notified_at || timer.started_at || ""}`}));
         } else if (event.event === "expired") {
-          runClaimedPlannerEffect("alarm", timer, () => showPlannerToast("Time’s up — did you complete this task?", {alarm:true, eventKey:`expired:${timer.id}:${timer.deadline_at || ""}`}));
+          runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`expired:${timer.id}:${timer.deadline_at || ""}`}));
         }
       });
     };
     const applyPlannerTimerState = (timer, events=[]) => {
       state.plannerTimer = safePlannerTimer(timer);
+      if (!state.plannerTimer.id || state.plannerTimer.outcome) stopPlannerChime();
       if (!state.plannerTimer.id || state.plannerTimer.status !== "expired") state.plannerExpiryRequested = false;
       if (!state.plannerTimer.id || state.plannerTimer.halfway_notified_at) state.plannerHalfwayRequested = false;
       updatePlannerMirror();
@@ -1024,7 +1010,7 @@
         broadcastPlannerTimer(payload.timer || {}, payload.events || []);
         const timer = state.plannerTimer;
         if (timer.outcome_required || timer.status === "expired") {
-          runClaimedPlannerEffect("alarm", timer, () => showPlannerToast("Time’s up — did you complete this task?", {alarm:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
+          runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
         }
       } catch (_error) {
         if (immediate) updatePlannerMirror();
@@ -1039,10 +1025,23 @@
       if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
       applyPlannerTimerState(payload.timer || {}, payload.events || []);
     };
+    const handlePlannerDataUpdated = (payload) => {
+      if (!payload || payload.type !== "sports-cave-planner-data-updated") return;
+      if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
+      refreshPlannerStatus({immediate:true});
+      const route = String(state.config.currentRoute || "").toLocaleLowerCase();
+      if (!["dashboard", "reporting", "weekly review"].includes(route)) return;
+      if (state.plannerDataRefreshPending) return;
+      state.plannerDataRefreshPending = true;
+      later(() => parentWindow.location.reload(), 120);
+    };
     plannerChannel?.addEventListener("message", (event) => receivePlannerTimerState(event.data));
     parentWindow.addEventListener("storage", (event) => {
-      if (event.key !== timerStorageKey() || !event.newValue) return;
-      try { receivePlannerTimerState(JSON.parse(event.newValue)); } catch (_error) {}
+      if (!event.newValue) return;
+      try {
+        if (event.key === timerStorageKey()) receivePlannerTimerState(JSON.parse(event.newValue));
+        if (event.key === plannerDataStorageKey()) handlePlannerDataUpdated(JSON.parse(event.newValue));
+      } catch (_error) {}
     }, listenerOptions);
     doc.addEventListener("visibilitychange", () => {
       if (!doc.hidden) {
@@ -1343,6 +1342,10 @@
         receivePlannerTimerState(event.data);
         return;
       }
+      if (event.data?.type === "sports-cave-planner-data-updated") {
+        handlePlannerDataUpdated(event.data);
+        return;
+      }
       if (event.data?.type !== "sports-cave-planner-ready") return;
       state.plannerWindow = event.source || state.plannerWindow;
       parentWindow.SportsCaveDailyPlannerWindow = state.plannerWindow;
@@ -1400,7 +1403,7 @@
         if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
         timers.forEach((timer) => parentWindow.clearTimeout(timer));
         plannerChannel?.close();
-        stopPlannerAlarm();
+        stopPlannerChime();
         if (state.recorder?.state && state.recorder.state !== "inactive") {
           state.recorder.stop();
         }

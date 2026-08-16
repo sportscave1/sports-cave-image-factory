@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import daily_activity_reporting
 import daily_planner
+import run_migrations
 import sports_cave_dashboard
 import supabase_backend
 import top_bar
@@ -17,6 +18,34 @@ from starlette.requests import Request
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def planner_api_request(path, token, *, method="GET", payload=None, query_string=b""):
+    body = json.dumps(payload or {}).encode() if payload is not None else b""
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": query_string,
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8501),
+        },
+        receive,
+    )
 
 
 class DailyPlannerOverhaulContractTests(unittest.TestCase):
@@ -79,15 +108,17 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("daily_planner_task_halfway", backend_source)
         self.assertIn("daily_planner_task_time_up", backend_source)
         self.assertIn("elapsed = allocated", backend_source)
-        self.assertIn("if timer.get(\"outcome\"):", backend_source)
+        self.assertIn("if current_terminal:", backend_source)
         self.assertIn("DAILY_TIMER_OUTCOME_COMPLETED", backend_source)
         self.assertIn("DAILY_TIMER_OUTCOME_DID_NOT_FINISH", backend_source)
-        self.assertIn('task["status"] = "couldnt_finish"', backend_source)
+        self.assertIn('task_status = "couldnt_finish"', backend_source)
         self.assertIn(r"Time\u2019s up \u2014 did you complete this task?", planner_client)
         self.assertIn(">Completed</button>", planner_client)
         self.assertIn(">Half complete / Did not finish</button>", planner_client)
-        self.assertIn("if (state.alarmPlaying) return", planner_client)
-        self.assertIn("setTimeout(stopAlarm, 5050)", planner_client)
+        self.assertIn("if (!state.soundEnabled || state.chimePlaying) return false", planner_client)
+        self.assertIn("const playTimeUpChime", planner_client)
+        self.assertNotIn("for (let pulse", planner_client)
+        self.assertNotIn("5050", planner_client)
         self.assertIn("Sound is blocked. Allow audio for Sports Cave OS", planner_client)
 
     def test_lightweight_client_restores_original_sheet_and_lazy_sections(self):
@@ -344,8 +375,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('data-action="finish-active"', client_source)
         self.assertIn('data-action="skip-active"', client_source)
         self.assertIn("state.bundle.active_timer = {};", client_source)
-        self.assertIn("broadcastTimer({});", client_source)
-        self.assertIn("state.bundle.active_timer = previousActive;", client_source)
+        self.assertIn("broadcastTimer(clearsActive ? {} : activeTimer())", client_source)
+        self.assertNotIn("state.bundle.active_timer = previousActive;", client_source)
+        self.assertIn('action:"task_outcome"', client_source)
+        self.assertNotIn('action:"timer_outcome"', client_source)
         self.assertIn('if (!String(task?.task || task?.details || "").trim()) return "";', client_source)
         self.assertIn("ADD COLUMN IF NOT EXISTS completion_method", migration)
         self.assertIn("'completed', 'did_not_finish', 'skipped'", migration)
@@ -370,6 +403,12 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
             "completed",
             now_utc=now,
         )["task"]
+        expired = supabase_backend._daily_task_terminal_transition(
+            task,
+            {"status": "expired", "allocated_seconds": 120, "remaining_seconds": 0},
+            "completed",
+            now_utc=now,
+        )["task"]
         unstarted = supabase_backend._daily_task_terminal_transition(
             task,
             {},
@@ -384,6 +423,10 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertEqual(65, running["time_saved_seconds"])
         self.assertEqual(75, paused["actual_elapsed_seconds"])
         self.assertEqual(45, paused["time_saved_seconds"])
+        self.assertEqual("completed_after_expiry", expired["completion_method"])
+        self.assertEqual(120, expired["actual_elapsed_seconds"])
+        self.assertFalse(expired["completed_before_expiry"])
+        self.assertIsNone(expired["time_saved_seconds"])
         self.assertEqual("completed_manually", unstarted["completion_method"])
         self.assertNotIn("actual_elapsed_seconds", unstarted)
         self.assertEqual("2 minutes", unstarted["time_blocked"])
@@ -423,6 +466,20 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertEqual("No time available", paused["skip_reason"])
         self.assertNotIn("actual_elapsed_seconds", unstarted)
         self.assertEqual("No time available", unstarted["skip_reason"])
+
+    def test_did_not_finish_transition_is_terminal_without_completion(self):
+        task = supabase_backend._daily_task_terminal_transition(
+            {"task": "Prepare campaign"},
+            {"status": "paused", "allocated_seconds": 120, "remaining_seconds": 35},
+            "did_not_finish",
+            now_utc=datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc),
+        )["task"]
+
+        self.assertEqual("couldnt_finish", task["status"])
+        self.assertEqual("did_not_finish", task["outcome"])
+        self.assertEqual("did_not_finish", task["completion_method"])
+        self.assertFalse(task["completed"])
+        self.assertEqual(85, task["actual_elapsed_seconds"])
 
     def test_daily_review_summary_counts_all_non_empty_terminal_outcomes(self):
         sheet = {
@@ -500,7 +557,8 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('id="compact-view"', client_source)
         self.assertNotIn("<audio", client_source)
         self.assertNotIn("<canvas", client_source)
-        self.assertIn("setTimeout(stopAlarm, 5050)", client_source)
+        self.assertIn("setTimeout(stopChime", client_source)
+        self.assertNotIn("Stop Sound", client_source)
 
     def test_toolbar_countdown_mirror_is_client_side_and_cross_window(self):
         source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(encoding="utf-8")
@@ -541,6 +599,208 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertNotIn("admin-1", admin_config["dailyPlannerTimerScope"])
         self.assertNotIn("user_id", safe)
         self.assertEqual("Gym", safe["task"])
+
+    def test_outcome_migration_is_targetable_idempotent_and_runner_safe(self):
+        filename = "20260815_daily_execution_task_outcomes.sql"
+        path = ROOT / "migrations" / filename
+        sql = path.read_text(encoding="utf-8")
+
+        self.assertEqual([path], run_migrations.migration_files(filename))
+        self.assertTrue(run_migrations.safe_migration_sql(sql))
+        self.assertIn("ADD COLUMN IF NOT EXISTS completion_method", sql)
+        self.assertIn("DROP CONSTRAINT IF EXISTS daily_execution_task_timers_outcome_check", sql)
+        self.assertFalse(run_migrations.safe_migration_sql("DROP TABLE daily_execution_sheets;"))
+
+    def test_missing_outcome_schema_returns_specific_actionable_error(self):
+        class Diagnostic:
+            column_name = "completion_method"
+            constraint_name = ""
+
+        class MissingColumnError(Exception):
+            sqlstate = "42703"
+            diag = Diagnostic()
+
+        message = supabase_backend.daily_execution_outcome_schema_error_message(
+            MissingColumnError('column "completion_method" does not exist')
+        )
+
+        self.assertIn("20260815_daily_execution_task_outcomes.sql", message)
+        self.assertNotIn("Dashboard saving is unavailable", message)
+        self.assertEqual(message, sports_cave_dashboard._daily_outcome_storage_error(MissingColumnError()))
+
+    def test_expired_completion_api_persists_and_refresh_reads_saved_state(self):
+        user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}
+        token = top_bar_security.create_top_bar_token(
+            user,
+            can_manage_daily_planner=True,
+            now=1_786_742_400,
+            seconds=3600,
+        )
+        saved_sheet = {
+            "id": "sheet-1",
+            "sheet_date": "2026-08-15",
+            "top_tasks": [{
+                "task": "Pack orders",
+                "status": "done",
+                "outcome": "completed",
+                "completion_method": "completed_after_expiry",
+                "actual_elapsed_seconds": 120,
+                "outcome_version": 1,
+            }],
+            "additional_items": [],
+        }
+        saved_result = {
+            "sheet": saved_sheet,
+            "timer": {
+                "id": "timer-1",
+                "status": "completed",
+                "outcome": "completed",
+                "outcome_required": False,
+                "actual_elapsed_seconds": 120,
+                "allocated_seconds": 120,
+                "completion_method": "completed_after_expiry",
+                "completed_before_expiry": False,
+            },
+            "already_applied": False,
+        }
+        request = planner_api_request(
+            daily_planner.PLANNER_MUTATION_PATH,
+            token,
+            method="POST",
+            payload={
+                "action": "task_outcome",
+                "sheet_id": "sheet-1",
+                "task_type": "top",
+                "task_index": 0,
+                "timer_id": "timer-1",
+                "outcome": "completed",
+            },
+        )
+        with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
+            sports_cave_dashboard,
+            "apply_daily_planner_task_outcome",
+            return_value=saved_result,
+        ) as save:
+            response = asyncio.run(daily_planner.planner_mutation(request))
+
+        body = json.loads(response.body)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("done", body["result"]["sheet"]["top_tasks"][0]["status"])
+        self.assertFalse(body["result"]["timer"]["outcome_required"])
+        self.assertEqual("timer-1", save.call_args.kwargs["timer_id"])
+
+        bundle = {
+            "work_date": "2026-08-15",
+            "today": "2026-08-15",
+            "timezone": "Australia/Sydney",
+            "sheet": saved_sheet,
+            "source_sheet": {},
+            "tasks": [],
+            "active_timer": {},
+            "events": [],
+            "server_now": "2026-08-15T00:00:00+00:00",
+            "performance": {"planner_data_ms": 0.1, "initial_api_calls": 1, "database_transactions": 2},
+        }
+        refresh_request = planner_api_request(
+            daily_planner.PLANNER_BOOTSTRAP_PATH,
+            token,
+            query_string=b"date=2026-08-15",
+        )
+        with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
+            daily_planner, "_load_sheet_bundle", return_value=bundle
+        ):
+            refresh = asyncio.run(daily_planner.planner_bootstrap(refresh_request))
+        self.assertEqual("completed", json.loads(refresh.body)["sheet"]["top_tasks"][0]["outcome"])
+        self.assertEqual({}, json.loads(refresh.body)["active_timer"])
+
+    def test_outcome_api_failure_keeps_action_retryable_and_names_migration(self):
+        user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}
+        token = top_bar_security.create_top_bar_token(
+            user,
+            can_manage_daily_planner=True,
+            now=1_786_742_400,
+            seconds=3600,
+        )
+        request = planner_api_request(
+            daily_planner.PLANNER_MUTATION_PATH,
+            token,
+            method="POST",
+            payload={
+                "action": "task_outcome",
+                "sheet_id": "sheet-1",
+                "task_type": "top",
+                "task_index": 0,
+                "timer_id": "timer-1",
+                "outcome": "completed",
+            },
+        )
+        message = (
+            "Daily Planner outcome storage is out of date. Apply migration "
+            "20260815_daily_execution_task_outcomes.sql, then retry."
+        )
+        with patch("top_bar_security.time.time", return_value=1_786_742_500), patch.object(
+            sports_cave_dashboard,
+            "apply_daily_planner_task_outcome",
+            side_effect=sports_cave_dashboard.DashboardStorageError(message),
+        ):
+            response = asyncio.run(daily_planner.planner_mutation(request))
+
+        body = json.loads(response.body)
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("daily_planner_outcome_migration_required", body["error_code"])
+        self.assertTrue(body["retryable"])
+        self.assertEqual(message, body["error"])
+
+    def test_outcome_client_waits_for_server_and_uses_one_shot_chimes(self):
+        planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        topbar_source = (
+            ROOT / "components" / "sports_cave_top_bar" / "index.html"
+        ).read_text(encoding="utf-8")
+        outcome_source = planner_source[
+            planner_source.index("const applyTaskOutcome") :
+            planner_source.index("const updateTimerDisplays")
+        ]
+
+        self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index("stopChime()"))
+        self.assertLess(outcome_source.index("result = await mutate(request)"), outcome_source.index('outcome.classList.add("hidden")'))
+        self.assertIn("state.outcomeSaving", outcome_source)
+        self.assertIn('trigger.textContent = "Saving\\u2026"', planner_source)
+        self.assertIn("data-outcome-retry", planner_source)
+        self.assertIn("showOutcomeError(error)", outcome_source)
+        self.assertIn('runClaimedSideEffect("success"', outcome_source)
+        self.assertNotIn('action:"timer_outcome"', planner_source)
+        self.assertNotIn("Stop Sound", planner_source)
+        self.assertNotIn("Stop Sound", topbar_source)
+        self.assertNotIn("for (let pulse", planner_source)
+        self.assertNotIn("for (let pulse", topbar_source)
+        self.assertNotIn("5050", planner_source)
+        self.assertNotIn("5050", topbar_source)
+        self.assertIn('runClaimedSideEffect("time-up"', planner_source)
+        self.assertIn('runClaimedPlannerEffect("time-up"', topbar_source)
+        self.assertIn("if (!state.plannerTimer.id || state.plannerTimer.outcome) stopPlannerChime()", topbar_source)
+        self.assertIn('payload.type !== "sports-cave-planner-data-updated"', topbar_source)
+        self.assertIn('["dashboard", "reporting", "weekly review"].includes(route)', topbar_source)
+        self.assertIn("offset:.31, duration:.40", planner_source)
+        self.assertIn("playOne(0.31, 0.40", topbar_source)
+
+    def test_legacy_expiry_route_delegates_to_canonical_locked_outcome(self):
+        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        legacy = source[
+            source.index("def apply_daily_execution_timer_outcome") :
+            source.index("\n\ndef start_sync_run")
+        ]
+        canonical = source[
+            source.index("def apply_daily_execution_task_outcome") :
+            source.index("\n\ndef apply_daily_execution_timer_outcome")
+        ]
+
+        self.assertIn("return apply_daily_execution_task_outcome(", legacy)
+        self.assertNotIn("UPDATE daily_execution_sheets", legacy)
+        self.assertIn("FOR UPDATE", canonical)
+        self.assertIn('"already_applied": True', canonical)
+        self.assertIn("event_key=f\"{event_type}:{event_entity}:v{outcome_version}\"", canonical)
 
     def test_planner_api_requires_signed_planner_permission(self):
         user = {"id": "admin-local", "username": "nathan", "display_name": "Nathan", "role": "admin"}
