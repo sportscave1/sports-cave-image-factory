@@ -14,6 +14,7 @@ import top_bar_security
 ROOT = Path(__file__).resolve().parents[1]
 TOP_BAR_CLIENT = ROOT / "components" / "sports_cave_top_bar" / "index.html"
 PLANNER_CLIENT = ROOT / "components" / "daily_planner" / "index.html"
+HOME_PLANNER_CLIENT = ROOT / "components" / "home_daily_planner" / "index.html"
 
 
 class MobileShellTests(unittest.TestCase):
@@ -144,6 +145,18 @@ class MobilePlannerTests(unittest.TestCase):
         ):
             self.assertIn(action, source)
         self.assertIn("new Date(timer.deadline_at).valueOf() - Date.now()", source)
+
+    def test_home_planner_panel_is_compact_and_mobile_safe(self):
+        source = HOME_PLANNER_CLIENT.read_text(encoding="utf-8")
+
+        self.assertIn("max-height: 280px", source)
+        self.assertIn("max-height: 146px", source)
+        self.assertIn("overflow-y: auto", source)
+        self.assertIn("@media (max-width: 820px)", source)
+        self.assertIn("grid-template-columns: minmax(0, 1fr)", source)
+        self.assertIn("min-height: 40px", source)
+        self.assertNotIn("overflow-x: auto", source)
+        self.assertNotIn("<input", source)
 
     def test_authenticated_planner_json_is_never_cacheable(self):
         response = daily_planner._json({"ok": True})

@@ -13,13 +13,32 @@ from streamlit.testing.v1 import AppTest
 import sc_auth
 import design_schedule
 import os_accounts
+import home_daily_planner
 import sports_cave_dashboard
 import sports_sales_calendar
 import supabase_backend
+import top_bar_security
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNER_EMAIL = "owner@sportscave.test"
+HOME_PLANNER_CLIENT = ROOT / "components" / "home_daily_planner" / "index.html"
+
+
+class _MarkdownRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def markdown(self, body, **kwargs):
+        self.calls.append((body, kwargs))
+
+
+class _ComponentsRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def html(self, body, **kwargs):
+        self.calls.append((body, kwargs))
 
 
 def owner_user():
@@ -2602,6 +2621,80 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertNotIn("Good night", render_body)
         self.assertNotIn(":)", render_body)
 
+    def test_compact_home_planner_bridge_renders_admin_host_only(self):
+        st_recorder = _MarkdownRecorder()
+        components = _ComponentsRecorder()
+
+        with patch.object(
+            top_bar_security,
+            "create_top_bar_token",
+            return_value="signed-token",
+        ):
+            rendered = home_daily_planner.render_panel(
+                st_recorder,
+                components,
+                owner_user(),
+            )
+
+        self.assertTrue(rendered)
+        self.assertEqual(1, len(st_recorder.calls))
+        self.assertIn(home_daily_planner.ROOT_ID, st_recorder.calls[0][0])
+        self.assertEqual({"height": 0, "width": 0}, components.calls[0][1])
+        self.assertIn('"authToken": "signed-token"', components.calls[0][0])
+        self.assertIn('"timerScope"', components.calls[0][0])
+        self.assertNotIn("__SPORTS_CAVE_HOME_PLANNER_CONFIG__", components.calls[0][0])
+
+        staff = {**owner_user(), "id": "staff-1", "role": "worker", "page_permissions": ["dashboard"]}
+        st_recorder = _MarkdownRecorder()
+        components = _ComponentsRecorder()
+
+        self.assertFalse(home_daily_planner.render_panel(st_recorder, components, staff))
+        self.assertEqual([], st_recorder.calls)
+        self.assertEqual([], components.calls)
+
+    def test_compact_home_planner_component_reuses_canonical_timer_and_has_no_editing_fields(self):
+        source = HOME_PLANNER_CLIENT.read_text(encoding="utf-8")
+        bridge_source = (ROOT / "home_daily_planner.py").read_text(encoding="utf-8")
+
+        self.assertIn("Today's Plan", source)
+        self.assertIn("No tasks planned for today.", source)
+        self.assertIn("new Date(timer.deadline_at).valueOf() - Date.now()", source)
+        self.assertIn('BroadcastChannel("sports-cave-daily-planner")', source)
+        self.assertIn("scSportsCavePlannerTimerState", source)
+        self.assertIn("scPlannerEffect", source)
+        self.assertIn("plannerPopupOpen", source)
+        self.assertIn("sports-cave-planner-open-request", source)
+        self.assertIn("state.expiryRequestedFor", source)
+        self.assertIn("state.actionPending", source)
+        self.assertIn("task_outcome", source)
+        self.assertIn("timer_id:timer.id", source)
+        self.assertIn("notifyPlannerDataUpdated", source)
+        self.assertIn("SportsCaveHomeDailyPlanner?.destroy?.({preserveDom: true})", source)
+        self.assertIn("listenerController.abort()", source)
+        self.assertIn("channel?.close()", source)
+        self.assertIn("parentWindow.setInterval(updateCountdowns, 1000)", source)
+        self.assertIn("scPlannerSoundEnabled", source)
+        self.assertIn("soundBlocked", source)
+        self.assertIn("PLANNER_BOOTSTRAP_PATH", bridge_source)
+        self.assertIn("PLANNER_MUTATION_PATH", bridge_source)
+        self.assertIn("PLANNER_STATUS_PATH", bridge_source)
+
+        for forbidden in (
+            "<input",
+            "<textarea",
+            "<select",
+            "data-field",
+            "save_sheet",
+            "save_tasks",
+            "complete_review",
+            "weekly-review",
+            "history?",
+            "reopen-task",
+            "plan-tomorrow",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
     def test_activity_table_record_displays_actor_name(self):
         record = sports_cave_dashboard.activity_table_record(
             {
@@ -3816,8 +3909,13 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
+        self.assertIn("home_daily_planner.render_panel(st, get_components_module(), user)", render_body)
         self.assertIn("render_active_upcoming_events(events, today)", render_body)
         self.assertIn("render_home_weekly_work(user, local_now)", render_body)
+        self.assertLess(
+            render_body.index("home_daily_planner.render_panel(st, get_components_module(), user)"),
+            render_body.index("render_active_upcoming_events(events, today)"),
+        )
         self.assertLess(
             render_body.index("render_active_upcoming_events(events, today)"),
             render_body.index("render_home_weekly_work(user, local_now)"),

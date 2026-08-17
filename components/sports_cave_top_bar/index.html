@@ -1411,7 +1411,7 @@
         if (event.event === "halfway") {
           runClaimedPlannerEffect("halfway", timer, () => showPlannerToast(`Halfway through: ${timer.task || "Daily Planner task"} — ${compactTimerLabel(timer.remaining_seconds)} remaining.`, {eventKey:`halfway:${timer.id}:${timer.halfway_notified_at || timer.started_at || ""}`}));
         } else if (event.event === "expired") {
-          runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`expired:${timer.id}:${timer.deadline_at || ""}`}));
+          showPlannerToast("Time’s up — did you complete this task?", {eventKey:`expired:${timer.id}:${timer.deadline_at || ""}`});
         }
       });
     };
@@ -1447,7 +1447,7 @@
         broadcastPlannerTimer(state.plannerTimer, events, "", rolloverTimerIds, payload.timer?.id || "");
         const timer = state.plannerTimer;
         if (timer.outcome_required || timer.status === "expired") {
-          runClaimedPlannerEffect("time-up", timer, () => showPlannerToast("Time’s up — did you complete this task?", {chime:true, eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`}));
+          showPlannerToast("Time’s up — did you complete this task?", {eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`});
         }
       } catch (_error) {
         if (immediate) updatePlannerMirror();
@@ -1833,6 +1833,13 @@
       }
       if (event.data?.type === "sports-cave-planner-data-updated") {
         handlePlannerDataUpdated(event.data);
+        return;
+      }
+      if (
+        event.data?.type === "sports-cave-planner-open-request"
+        && event.data?.scope === state.config.dailyPlannerTimerScope
+      ) {
+        openDailyPlanner({focusActive: Boolean(event.data?.focus_active)});
         return;
       }
       if (event.data?.type !== "sports-cave-planner-ready") return;

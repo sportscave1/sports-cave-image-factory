@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sports Cave Home Daily Planner</title>
+</head>
+<body>
+<script>
+(() => {
+  "use strict";
+  const config = __SPORTS_CAVE_HOME_PLANNER_CONFIG__;
+  const parentWindow = window.parent || window;
+  const doc = parentWindow.document;
+  const ROOT_ID = "sports-cave-home-daily-planner-root";
+  const STYLE_ID = "sports-cave-home-daily-planner-styles";
+  const CONTROLLER_VERSION = "home-daily-planner-v1";
+
+  const installStyles = () => {
+    let style = doc.getElementById(STYLE_ID);
+    if (!style) {
+      style = doc.createElement("style");
+      style.id = STYLE_ID;
+      doc.head.appendChild(style);
+    }
+    style.textContent = `
+      .sc-home-daily-planner-host {
+        margin: 0 0 0.55rem;
+        max-width: 100%;
+        overflow: hidden;
+      }
+      .sc-home-planner {
+        background: #fffefa;
+        border: 1px solid #e6dfd1;
+        border-radius: 8px;
+        box-shadow: none;
+        color: #171715;
+        display: flex;
+        flex-direction: column;
+        font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        max-height: 280px;
+        min-height: 178px;
+        overflow: hidden;
+        width: 100%;
+      }
+      .sc-home-planner * { box-sizing: border-box; }
+      .sc-home-planner-header {
+        align-items: center;
+        background: #f8f5ee;
+        border-bottom: 1px solid #e6dfd1;
+        display: grid;
+        gap: 0.55rem;
+        grid-template-columns: minmax(9rem, auto) minmax(0, 1fr) auto auto;
+        min-height: 42px;
+        padding: 0.45rem 0.65rem;
+      }
+      .sc-home-planner-title {
+        align-items: baseline;
+        display: flex;
+        gap: 0.45rem;
+        min-width: 0;
+      }
+      .sc-home-planner-title h2 {
+        font-size: 0.98rem;
+        line-height: 1.1;
+        margin: 0;
+        white-space: nowrap;
+      }
+      .sc-home-planner-progress {
+        color: #5d574e;
+        font-size: 0.78rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sc-home-planner-next {
+        color: #4f4a43;
+        font-size: 0.78rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sc-home-planner-status {
+        background: #f1ead9;
+        border: 1px solid #dfcf9a;
+        border-radius: 999px;
+        color: #60491e;
+        font-size: 0.72rem;
+        font-weight: 700;
+        line-height: 1;
+        padding: 0.3rem 0.5rem;
+        white-space: nowrap;
+      }
+      .sc-home-planner-button {
+        align-items: center;
+        background: #ffffff;
+        border: 1px solid #d6cfc1;
+        border-radius: 6px;
+        color: #171715;
+        cursor: pointer;
+        display: inline-flex;
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 700;
+        gap: 0.25rem;
+        height: 30px;
+        justify-content: center;
+        line-height: 1;
+        padding: 0 0.6rem;
+        white-space: nowrap;
+      }
+      .sc-home-planner-button:hover {
+        background: #f5f1e7;
+        border-color: #bcae87;
+      }
+      .sc-home-planner-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+      }
+      .sc-home-planner-button.primary {
+        background: #d4a54c;
+        border-color: #d4a54c;
+        color: #17130d;
+      }
+      .sc-home-planner-button.finish {
+        background: #28724b;
+        border-color: #28724b;
+        color: #ffffff;
+      }
+      .sc-home-planner-button.skip {
+        background: #f1eee7;
+        color: #4f4b44;
+      }
+      .sc-home-planner-body {
+        display: grid;
+        flex: 1 1 auto;
+        gap: 0.55rem;
+        grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.05fr);
+        min-height: 0;
+        padding: 0.55rem 0.65rem 0.4rem;
+      }
+      .sc-home-planner-active,
+      .sc-home-planner-standby,
+      .sc-home-planner-empty {
+        background: #ffffff;
+        border: 1px solid #e8e1d4;
+        border-radius: 7px;
+        min-width: 0;
+        padding: 0.58rem 0.65rem;
+      }
+      .sc-home-planner-active {
+        display: grid;
+        gap: 0.45rem;
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+      .sc-home-planner-task-main {
+        min-width: 0;
+      }
+      .sc-home-planner-task-main strong,
+      .sc-home-planner-row-main strong {
+        display: block;
+        font-size: 0.86rem;
+        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sc-home-planner-task-main span,
+      .sc-home-planner-row-main span,
+      .sc-home-planner-standby span,
+      .sc-home-planner-empty span {
+        color: #6c665d;
+        display: block;
+        font-size: 0.72rem;
+        line-height: 1.25;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sc-home-planner-clock {
+        color: #171715;
+        font-size: 1.55rem;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        line-height: 1;
+        min-width: 5.8rem;
+        text-align: right;
+      }
+      .sc-home-planner-bar {
+        background: #ede8de;
+        border-radius: 999px;
+        grid-column: 1 / -1;
+        height: 7px;
+        overflow: hidden;
+      }
+      .sc-home-planner-bar span {
+        background: #d4a54c;
+        display: block;
+        height: 100%;
+        min-width: 2px;
+        transition: width 180ms linear;
+      }
+      .sc-home-planner-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        grid-column: 1 / -1;
+      }
+      .sc-home-planner-completion-alert,
+      .sc-home-planner-notice {
+        background: #f1ead9;
+        border: 1px solid #dcc996;
+        border-radius: 6px;
+        color: #58431e;
+        font-size: 0.76rem;
+        grid-column: 1 / -1;
+        line-height: 1.25;
+        padding: 0.42rem 0.5rem;
+      }
+      .sc-home-planner-notice.error {
+        background: #f8e7e5;
+        border-color: #e4b8b4;
+        color: #782b25;
+      }
+      .sc-home-planner-list-shell {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .sc-home-planner-list-head {
+        align-items: center;
+        color: #5d574e;
+        display: flex;
+        font-size: 0.72rem;
+        font-weight: 750;
+        justify-content: space-between;
+        margin: 0 0 0.3rem;
+        text-transform: uppercase;
+      }
+      .sc-home-planner-list {
+        display: grid;
+        gap: 0.35rem;
+        max-height: 146px;
+        min-height: 0;
+        overflow-y: auto;
+        padding-right: 0.15rem;
+      }
+      .sc-home-planner-row {
+        align-items: center;
+        background: #ffffff;
+        border: 1px solid #e8e1d4;
+        border-radius: 7px;
+        display: grid;
+        gap: 0.45rem;
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-height: 38px;
+        padding: 0.38rem 0.45rem 0.38rem 0.55rem;
+      }
+      .sc-home-planner-row.next {
+        border-left: 3px solid #d4a54c;
+      }
+      .sc-home-planner-footer {
+        align-items: center;
+        border-top: 1px solid #e6dfd1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem 0.7rem;
+        min-height: 36px;
+        padding: 0.35rem 0.65rem;
+      }
+      .sc-home-planner-stat {
+        color: #5d574e;
+        font-size: 0.74rem;
+        white-space: nowrap;
+      }
+      .sc-home-planner-stat strong {
+        color: #171715;
+        font-variant-numeric: tabular-nums;
+        margin-right: 0.18rem;
+      }
+      @media (max-width: 820px), (max-width: 940px) and (max-height: 520px) {
+        .sc-home-planner {
+          max-height: none;
+          min-height: 0;
+        }
+        .sc-home-planner-header {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .sc-home-planner-next {
+          grid-column: 1 / -1;
+          order: 3;
+        }
+        .sc-home-planner-status {
+          justify-self: end;
+        }
+        .sc-home-planner-body {
+          grid-template-columns: minmax(0, 1fr);
+          padding: 0.5rem;
+        }
+        .sc-home-planner-active {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .sc-home-planner-clock {
+          font-size: 1.35rem;
+          min-width: 0;
+          text-align: left;
+        }
+        .sc-home-planner-button {
+          min-height: 40px;
+        }
+        .sc-home-planner-list {
+          max-height: 172px;
+        }
+      }
+      @media (max-width: 460px) {
+        .sc-home-planner-title {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 0.1rem;
+        }
+        .sc-home-planner-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .sc-home-planner-row .sc-home-planner-button {
+          justify-self: start;
+        }
+      }
+    `;
+  };
+
+  const createController = (root, initialConfig) => {
+    const listenerController = new parentWindow.AbortController();
+    const listenerOptions = {signal: listenerController.signal};
+    const timers = new Set();
+    const surfaceId = `home-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const channel = "BroadcastChannel" in parentWindow
+      ? new parentWindow.BroadcastChannel("sports-cave-daily-planner")
+      : null;
+    const state = {
+      config: {...initialConfig},
+      bundle: null,
+      activeTimer: {},
+      loading: true,
+      error: "",
+      notice: "",
+      soundBlocked: false,
+      actionPending: "",
+      statusPending: false,
+      statusTimer: null,
+      countdownTimer: null,
+      startedAt: Date.now(),
+      seenEvents: new Set(),
+      terminalTimerIds: new Set(),
+      expiryRequestedFor: "",
+      completionAlertTimerId: "",
+      audio: null,
+      chimeNodes: [],
+      chimeStopTimer: null,
+      chimePlaying: false,
+      destroyed: false,
+    };
+    const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.timerScope || "none"}`;
+    const plannerDataStorageKey = () => `scPlannerDataUpdated:${state.config.timerScope || "none"}`;
+    const later = (callback, delay) => {
+      const timer = parentWindow.setTimeout(() => {
+        timers.delete(timer);
+        callback();
+      }, delay);
+      timers.add(timer);
+      return timer;
+    };
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;"
+    })[char]);
+    const isoToday = () => new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(new Date());
+    const formatClock = (seconds) => {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      return hours
+        ? `${hours}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`
+        : `${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
+    };
+    const compactDuration = (seconds, fallback="") => {
+      const total = Math.max(0, Math.round(Number(seconds) || 0));
+      if (!total) return String(fallback || "").trim() || "No time set";
+      if (total < 60) return `${total}s`;
+      const minutes = Math.round(total / 60);
+      return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+    };
+    const requestJson = async (path, options={}) => {
+      const response = await parentWindow.fetch(path, {
+        ...options,
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.config.authToken || ""}`,
+          ...(options.headers || {}),
+        },
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch (_error) {}
+      if (!response.ok || payload.ok === false) {
+        const error = new Error(payload.error || "Daily Planner request failed.");
+        error.retryable = Boolean(payload.retryable);
+        error.status = response.status;
+        throw error;
+      }
+      return payload;
+    };
+    const timerRemaining = (timer) => {
+      if (!timer?.id) return 0;
+      if (timer.status === "running" && timer.deadline_at) {
+        return Math.max(0, Math.ceil((new Date(timer.deadline_at).valueOf() - Date.now()) / 1000));
+      }
+      if (timer.status === "paused") return Math.max(0, Number(timer.remaining_seconds) || 0);
+      return timer.status === "expired" ? 0 : Math.max(0, Number(timer.remaining_seconds) || 0);
+    };
+    const timerElapsed = (timer) => Math.max(
+      0,
+      Number(timer?.actual_elapsed_seconds ?? timer?.elapsed_seconds ?? ((timer?.allocated_seconds || 0) - timerRemaining(timer))) || 0,
+    );
+    const safeTimer = (timer) => timer?.id ? {
+      id:String(timer.id), sheet_id:String(timer.sheet_id || ""), task_type:String(timer.task_type || ""),
+      task_index:Number(timer.task_index || 0), task:String(timer.task || "Daily Planner task"),
+      sheet_date:String(timer.sheet_date || ""), status:String(timer.status || ""),
+      started_at:timer.started_at || null, deadline_at:timer.deadline_at || null,
+      remaining_seconds:Number(timer.remaining_seconds || 0),
+      allocated_seconds:Number(timer.allocated_seconds || 0),
+      actual_elapsed_seconds:timer.actual_elapsed_seconds,
+      outcome_required:Boolean(timer.outcome_required), outcome:String(timer.outcome || ""),
+      halfway_notified_at:timer.halfway_notified_at || null,
+      expiry_notified_at:timer.expiry_notified_at || null,
+      updated_at:timer.updated_at || null,
+    } : {};
+    const timerWasTerminated = (timer) => Boolean(timer?.id && state.terminalTimerIds.has(String(timer.id)));
+    const currentTimerPayload = (timer) => timerWasTerminated(timer) ? {} : safeTimer(timer || {});
+    const taskForTimer = (timer) => String(timer?.task || "Daily Planner task");
+    const terminalOutcome = (row) => {
+      const outcome = String(row?.outcome || row?.timer?.outcome || "").toLowerCase();
+      const status = String(row?.status || "").toLowerCase();
+      if (outcome === "completed" || status === "completed") return "completed";
+      if (outcome === "skipped" || status === "skipped") return "skipped";
+      if (outcome === "did_not_finish" || status === "did not finish") return "did_not_finish";
+      return "";
+    };
+    const rowMatchesTimer = (row, timer) => Boolean(
+      row && timer?.id
+      && String(row.sheet_id || "") === String(timer.sheet_id || "")
+      && String(row.task_type || "") === String(timer.task_type || "")
+      && Number(row.task_index || 0) === Number(timer.task_index || 0)
+    );
+    const activeTimer = () => currentTimerPayload(state.activeTimer || state.bundle?.active_timer || {});
+    const rows = () => Array.isArray(state.bundle?.tasks) ? state.bundle.tasks : [];
+    const activeRow = () => rows().find((row) => rowMatchesTimer(row, activeTimer())) || {};
+    const plannerPopupOpen = () => {
+      const plannerWindow = parentWindow.SportsCaveDailyPlannerWindow;
+      try { return Boolean(plannerWindow && plannerWindow !== parentWindow && !plannerWindow.closed); }
+      catch (_error) { return false; }
+    };
+    const broadcastTimer = (timer, events=[], terminalTimerId="", terminalTimerIds=[], reactivatedTimerId="") => {
+      const terminalIds = [...new Set([terminalTimerId, ...(terminalTimerIds || [])].map((value) => String(value || "")).filter(Boolean))];
+      const payload = {
+        type:"timer-state", source:surfaceId, scope:state.config.timerScope || "",
+        timer:safeTimer(timer), events, terminal_timer_id:terminalIds[0] || "",
+        terminal_timer_ids:terminalIds, reactivated_timer_id:String(reactivatedTimerId || ""),
+        sent_at:Date.now(),
+      };
+      try { channel?.postMessage(payload); } catch (_error) {}
+      try {
+        if (payload.timer.id) parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+        else {
+          if (payload.terminal_timer_id) parentWindow.localStorage.setItem(timerStorageKey(), JSON.stringify(payload));
+          parentWindow.localStorage.removeItem(timerStorageKey());
+        }
+      } catch (_error) {}
+      try { parentWindow.postMessage({...payload, type:"sports-cave-planner-timer-state"}, parentWindow.location.origin); } catch (_error) {}
+    };
+    const notifyPlannerDataUpdated = (sheet) => {
+      const payload = {
+        type:"sports-cave-planner-data-updated", source:surfaceId,
+        scope:state.config.timerScope || "", sheet_date:sheet?.sheet_date || "",
+        sent_at:Date.now(),
+      };
+      try { parentWindow.localStorage.setItem(plannerDataStorageKey(), JSON.stringify(payload)); } catch (_error) {}
+      try { parentWindow.postMessage(payload, parentWindow.location.origin); } catch (_error) {}
+    };
+    const claimSideEffect = (kind, timer) => {
+      if (kind === "time-up" && plannerPopupOpen()) return false;
+      const stamp = kind === "time-up"
+        ? timer?.deadline_at || timer?.id || "event"
+        : kind === "success"
+        ? timer?.updated_at || timer?.outcome_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const key = `scPlannerEffect:${state.config.timerScope || "none"}:${kind}:${timer?.id || "none"}:${stamp}`;
+      try {
+        const existing = JSON.parse(parentWindow.localStorage.getItem(key) || "null");
+        if (existing?.claimed_at && Date.now() - Number(existing.claimed_at) < 86400000) return false;
+        parentWindow.localStorage.setItem(key, JSON.stringify({owner:surfaceId, claimed_at:Date.now()}));
+        return JSON.parse(parentWindow.localStorage.getItem(key) || "{}").owner === surfaceId;
+      } catch (_error) { return true; }
+    };
+    const runClaimedSideEffect = (kind, timer, effect) => {
+      const stamp = kind === "time-up"
+        ? timer?.deadline_at || timer?.id || "event"
+        : kind === "success"
+        ? timer?.updated_at || timer?.outcome_at || timer?.id || "event"
+        : timer?.halfway_notified_at || timer?.started_at || timer?.id || "event";
+      const run = () => claimSideEffect(kind, timer) ? effect() : undefined;
+      if (parentWindow.navigator.locks?.request) {
+        parentWindow.navigator.locks.request(
+          `sports-cave-planner:${kind}:${timer?.id || "none"}:${stamp}`,
+          {mode:"exclusive"},
+          run,
+        ).catch(() => run());
+      } else {
+        run();
+      }
+    };
+    const syncSoundSettings = () => {
+      try {
+        state.soundEnabled = parentWindow.localStorage.getItem("scPlannerSoundEnabled") !== "0";
+        state.volume = Math.max(0.05, Math.min(1, Number(parentWindow.localStorage.getItem("scPlannerVolume") || 0.75)));
+      } catch (_error) {
+        state.soundEnabled = true;
+        state.volume = 0.75;
+      }
+    };
+    const enableAudio = async () => {
+      const AudioContext = parentWindow.AudioContext || parentWindow.webkitAudioContext;
+      if (!AudioContext) return false;
+      state.audio = state.audio || new AudioContext();
+      try {
+        await state.audio.resume();
+        return state.audio.state === "running";
+      } catch (_error) {
+        return false;
+      }
+    };
+    const stopChime = () => {
+      if (state.chimeStopTimer) {
+        parentWindow.clearTimeout(state.chimeStopTimer);
+        state.chimeStopTimer = null;
+      }
+      state.chimeNodes.forEach((node) => { try { node.stop(); } catch (_error) {} });
+      state.chimeNodes = [];
+      state.chimePlaying = false;
+    };
+    const playTimeUpChime = async () => {
+      syncSoundSettings();
+      if (!state.soundEnabled) return true;
+      if (state.chimePlaying) return true;
+      if (!(await enableAudio())) {
+        state.soundBlocked = true;
+        render();
+        return false;
+      }
+      stopChime();
+      state.chimePlaying = true;
+      const audio = state.audio;
+      const volume = state.volume || 0.75;
+      const playOne = (offset, duration, frequency, level, type) => {
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, audio.currentTime + offset);
+        gain.gain.setValueAtTime(0.0001, audio.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(level * volume, audio.currentTime + offset + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + offset + duration);
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.start(audio.currentTime + offset);
+        oscillator.stop(audio.currentTime + offset + duration + 0.05);
+        state.chimeNodes.push(oscillator);
+      };
+      playOne(0, 0.30, 523.25, 0.085, "sine");
+      playOne(0.31, 0.40, 659.25, 0.075, "triangle");
+      state.chimeStopTimer = later(stopChime, 820);
+      return true;
+    };
+    const openPlanner = (focusActive=false) => {
+      try {
+        parentWindow.postMessage({
+          type:"sports-cave-planner-open-request",
+          scope:state.config.timerScope || "",
+          focus_active:Boolean(focusActive),
+        }, parentWindow.location.origin);
+      } catch (_error) {}
+    };
+    const progressPercent = (timer) => {
+      const allocated = Math.max(Number(timer?.allocated_seconds || 0), 1);
+      return Math.max(0, Math.min(100, Math.round((timerElapsed(timer) / allocated) * 100)));
+    };
+    const summary = () => {
+      const taskRows = rows();
+      const timer = activeTimer();
+      const counts = {completed:0, skipped:0, didNotFinish:0, remaining:0, focusedSeconds:0};
+      taskRows.forEach((row) => {
+        const outcome = terminalOutcome(row);
+        if (outcome === "completed") counts.completed += 1;
+        else if (outcome === "skipped") counts.skipped += 1;
+        else if (outcome === "did_not_finish") counts.didNotFinish += 1;
+        else counts.remaining += 1;
+        const rowTimer = rowMatchesTimer(row, timer) ? timer : (row.timer || {});
+        const actual = rowMatchesTimer(row, timer)
+          ? timerElapsed(timer)
+          : Number(row.actual_elapsed_seconds ?? rowTimer.actual_elapsed_seconds ?? 0);
+        counts.focusedSeconds += Math.max(0, actual || 0);
+      });
+      counts.total = taskRows.length;
+      return counts;
+    };
+    const statusLabel = () => {
+      const counts = summary();
+      const timer = activeTimer();
+      if (timer.id && timer.status === "paused") return "Paused";
+      if (timer.id && (timer.status === "expired" || timer.outcome_required)) return "Action needed";
+      if (timer.id && timer.status === "running") return "Active";
+      if (counts.total && counts.remaining === 0) return "Complete";
+      if (counts.total) return "Not started";
+      return "No plan";
+    };
+    const remainingRows = () => {
+      const timer = activeTimer();
+      return rows().filter((row) => !terminalOutcome(row) && !rowMatchesTimer(row, timer));
+    };
+    const renderActive = () => {
+      const timer = activeTimer();
+      if (!timer.id || timer.outcome) {
+        const next = remainingRows()[0];
+        if (!rows().length) {
+          return `<div class="sc-home-planner-empty"><strong>No tasks planned for today.</strong><span>Open Planner to create today's plan.</span></div>`;
+        }
+        return `<div class="sc-home-planner-standby"><strong>${next ? `Next: ${escapeHtml(next.task || "Daily Planner task")}` : "All planned tasks are resolved."}</strong><span>${next ? "Start the next planned task when you are ready." : "Today's execution list is complete."}</span></div>`;
+      }
+      const row = activeRow();
+      const detail = [row.category || "", row.details || ""].filter(Boolean).join(" · ");
+      const pauseResume = timer.status === "running"
+        ? '<button class="sc-home-planner-button" data-home-planner-action="pause">Pause</button>'
+        : timer.status === "paused"
+        ? '<button class="sc-home-planner-button" data-home-planner-action="resume">Resume</button>'
+        : "";
+      const expired = timer.status === "expired" || timer.outcome_required;
+      return `<div class="sc-home-planner-active">
+        <div class="sc-home-planner-task-main"><strong>${escapeHtml(taskForTimer(timer))}</strong><span>${escapeHtml(detail || timer.status || "In progress")}</span></div>
+        <div class="sc-home-planner-clock" data-home-planner-countdown>${formatClock(timerRemaining(timer))}</div>
+        <div class="sc-home-planner-bar" aria-hidden="true"><span data-home-planner-progress style="width:${progressPercent(timer)}%"></span></div>
+        ${expired ? `<div class="sc-home-planner-completion-alert" role="alert">Time's up. Finish or skip this task to update today's reporting.${state.soundBlocked ? " Sound was blocked by the browser." : ""}</div>` : ""}
+        <div class="sc-home-planner-actions">
+          ${pauseResume}
+          <button class="sc-home-planner-button finish" data-home-planner-action="finish">Finish</button>
+          <button class="sc-home-planner-button skip" data-home-planner-action="skip">Skip</button>
+          <button class="sc-home-planner-button" data-home-planner-action="open" data-focus-active="1">Open Planner</button>
+        </div>
+      </div>`;
+    };
+    const renderRemainingList = () => {
+      const timer = activeTimer();
+      const taskRows = remainingRows();
+      const activeExists = Boolean(timer.id && !timer.outcome && ["running","paused","expired"].includes(String(timer.status || "")));
+      if (!taskRows.length) {
+        return '<div class="sc-home-planner-row"><div class="sc-home-planner-row-main"><strong>No remaining tasks</strong><span>Completed, skipped and unfinished items are summarised below.</span></div></div>';
+      }
+      return taskRows.map((row, index) => {
+        const allocatedSeconds = Number(row.allocated_seconds || 0);
+        const canStart = !activeExists && allocatedSeconds > 0;
+        const label = `${compactDuration(allocatedSeconds, row.allocated)} · ${row.status || "Planned"}`;
+        return `<div class="sc-home-planner-row ${index === 0 ? "next" : ""}" data-task-type="${escapeHtml(row.task_type)}" data-task-index="${Number(row.task_index || 0)}">
+          <div class="sc-home-planner-row-main"><strong>${escapeHtml(row.task || "Daily Planner task")}</strong><span>${escapeHtml(label)}</span></div>
+          <button class="sc-home-planner-button primary" data-home-planner-action="start" ${canStart ? "" : "disabled"} title="${canStart ? "Start task" : activeExists ? "Pause or finish the active task first" : "Set an allocated time in Planner first"}">Start</button>
+        </div>`;
+      }).join("");
+    };
+    const render = () => {
+      if (state.destroyed) return;
+      if (!state.config.enabled) {
+        root.replaceChildren();
+        return;
+      }
+      const counts = summary();
+      const next = remainingRows()[0];
+      const headerProgress = `${counts.completed} of ${counts.total || 0} completed`;
+      root.innerHTML = `<section class="sc-home-planner" aria-label="Today's Daily Planner execution panel">
+        <header class="sc-home-planner-header">
+          <div class="sc-home-planner-title"><h2>Today's Plan</h2><span class="sc-home-planner-progress">${escapeHtml(headerProgress)}</span></div>
+          <div class="sc-home-planner-next">${next ? `Next: ${escapeHtml(next.task || "Daily Planner task")}` : ""}</div>
+          <span class="sc-home-planner-status">${escapeHtml(statusLabel())}</span>
+          <button class="sc-home-planner-button" data-home-planner-action="open">Open Planner</button>
+        </header>
+        <div class="sc-home-planner-body">
+          ${state.loading ? '<div class="sc-home-planner-standby"><strong>Loading today\'s plan...</strong><span>Connecting to saved planner state.</span></div>' : renderActive()}
+          <div class="sc-home-planner-list-shell">
+            <div class="sc-home-planner-list-head"><span>Remaining</span><span>${counts.remaining} open</span></div>
+            <div class="sc-home-planner-list">${state.loading ? "" : renderRemainingList()}</div>
+          </div>
+          ${state.error ? `<div class="sc-home-planner-notice error" role="alert">${escapeHtml(state.error)}</div>` : ""}
+          ${state.notice ? `<div class="sc-home-planner-notice" role="status">${escapeHtml(state.notice)}</div>` : ""}
+        </div>
+        <footer class="sc-home-planner-footer">
+          <span class="sc-home-planner-stat"><strong>${counts.completed}</strong>Completed</span>
+          <span class="sc-home-planner-stat"><strong>${counts.remaining}</strong>Remaining</span>
+          <span class="sc-home-planner-stat"><strong>${counts.skipped + counts.didNotFinish}</strong>Skipped/unfinished</span>
+          <span class="sc-home-planner-stat"><strong>${formatClock(counts.focusedSeconds)}</strong>Focused</span>
+        </footer>
+      </section>`;
+    };
+    const updateCountdowns = () => {
+      const timer = activeTimer();
+      root.querySelectorAll("[data-home-planner-countdown]").forEach((element) => {
+        element.textContent = formatClock(timerRemaining(timer));
+      });
+      root.querySelectorAll("[data-home-planner-progress]").forEach((element) => {
+        element.style.width = `${progressPercent(timer)}%`;
+      });
+      if (timer.id && timer.status === "running" && timerRemaining(timer) <= 0 && !timer.outcome) {
+        timer.status = "expired";
+        timer.outcome_required = true;
+        timer.remaining_seconds = 0;
+        state.activeTimer = timer;
+        if (state.bundle) state.bundle.active_timer = timer;
+        broadcastTimer(timer);
+        showOutcomeClaimed(timer);
+        if (state.expiryRequestedFor !== timer.id) {
+          state.expiryRequestedFor = timer.id;
+          refreshStatus({immediate:true});
+        }
+      }
+    };
+    const showOutcomeClaimed = (timer) => {
+      if (!timer?.id || timer.outcome || timerWasTerminated(timer)) return;
+      state.completionAlertTimerId = String(timer.id);
+      render();
+      runClaimedSideEffect("time-up", timer, playTimeUpChime);
+    };
+    const receiveTimerState = (payload, {allowStale=false}={}) => {
+      if (state.destroyed || !payload || payload.source === surfaceId) return;
+      if (!["timer-state", "sports-cave-planner-timer-state"].includes(payload.type)) return;
+      if (!payload.scope || payload.scope !== state.config.timerScope) return;
+      if (!allowStale && payload.sent_at && Number(payload.sent_at) < state.startedAt - 5000) return;
+      const terminalIds = [...new Set([
+        payload.terminal_timer_id,
+        ...(payload.terminal_timer_ids || []),
+      ].map((value) => String(value || "")).filter(Boolean))];
+      terminalIds.forEach((timerId) => state.terminalTimerIds.add(timerId));
+      const reactivatedTimerId = String(payload.reactivated_timer_id || "");
+      if (reactivatedTimerId) state.terminalTimerIds.delete(reactivatedTimerId);
+      const incomingTimer = currentTimerPayload(payload.timer || {});
+      state.activeTimer = incomingTimer;
+      if (state.bundle) state.bundle.active_timer = incomingTimer;
+      if (terminalIds.length) {
+        stopChime();
+        state.completionAlertTimerId = "";
+        later(() => loadToday({silent:true}), 180);
+      }
+      (payload.events || []).forEach((event) => {
+        const timer = {...(event.timer || {}), task:event.task || event.timer?.task};
+        if (event.event === "expired") showOutcomeClaimed(timer);
+      });
+      render();
+      updateCountdowns();
+    };
+    const scheduleStatus = (delay=30000) => {
+      if (state.statusTimer) parentWindow.clearTimeout(state.statusTimer);
+      state.statusTimer = later(() => refreshStatus(), delay);
+    };
+    const refreshStatus = async ({immediate=false}={}) => {
+      if (state.statusPending || !state.config.statusUrl) return;
+      state.statusPending = true;
+      try {
+        const payload = await requestJson(state.config.statusUrl);
+        const timer = currentTimerPayload(payload.timer || {});
+        state.activeTimer = timer;
+        if (state.bundle) state.bundle.active_timer = timer;
+        broadcastTimer(timer, payload.events || [], "", [], timer?.id || "");
+        (payload.events || []).forEach((event) => {
+          const eventTimer = {...(event.timer || {}), task:event.task || event.timer?.task};
+          const key = `${event.event}:${eventTimer.id}:${eventTimer.updated_at || eventTimer.deadline_at || ""}`;
+          if (state.seenEvents.has(key)) return;
+          state.seenEvents.add(key);
+          if (event.event === "expired") showOutcomeClaimed(eventTimer);
+        });
+        if (timer.outcome_required || timer.status === "expired") showOutcomeClaimed(timer);
+        state.error = "";
+        render();
+      } catch (error) {
+        if (immediate) {
+          state.error = error.message || "Daily Planner status could not refresh.";
+          render();
+        }
+      } finally {
+        state.statusPending = false;
+        scheduleStatus(activeTimer().id ? 10000 : 30000);
+      }
+    };
+    const loadToday = async ({silent=false}={}) => {
+      if (!silent) {
+        state.loading = true;
+        state.error = "";
+        render();
+      }
+      try {
+        const payload = await requestJson(`${state.config.bootstrapUrl}?date=${encodeURIComponent(isoToday())}`);
+        state.bundle = payload;
+        state.activeTimer = currentTimerPayload(payload.active_timer || {});
+        state.loading = false;
+        state.error = "";
+        broadcastTimer(state.activeTimer, payload.events || [], "", [], state.activeTimer?.id || "");
+        (payload.events || []).forEach((event) => {
+          const timer = {...(event.timer || {}), task:event.task || event.timer?.task};
+          if (event.event === "expired") showOutcomeClaimed(timer);
+        });
+        if (state.activeTimer.outcome_required || state.activeTimer.status === "expired") {
+          showOutcomeClaimed(state.activeTimer);
+        }
+        render();
+        scheduleStatus(activeTimer().id ? 10000 : 30000);
+      } catch (error) {
+        state.loading = false;
+        state.error = error.message || "Daily Planner could not load.";
+        render();
+        scheduleStatus(30000);
+      }
+    };
+    const mutate = async (payload) => {
+      const response = await requestJson(state.config.mutationUrl, {
+        method:"POST",
+        body:JSON.stringify(payload),
+      });
+      return response.result;
+    };
+    const setPending = (label) => {
+      state.actionPending = label;
+      root.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    };
+    const clearPending = () => {
+      state.actionPending = "";
+      render();
+    };
+    const timerAction = async (action, extra={}) => {
+      if (state.actionPending) return;
+      setPending(action);
+      state.notice = "";
+      state.error = "";
+      try {
+        if (action === "start_timer") await enableAudio();
+        const result = await mutate({action, ...extra});
+        const resultTimer = result?.timer || result?.active_timer || result || {};
+        const replacedTimerIds = (result?.replaced_timers || []).map((row) => String(row?.timer?.id || "")).filter(Boolean);
+        replacedTimerIds.forEach((timerId) => state.terminalTimerIds.add(timerId));
+        const mirror = {
+          ...activeTimer(), ...resultTimer,
+          task:resultTimer?.task || extra.display_task || activeTimer().task || "Daily Planner task",
+          sheet_date:resultTimer?.sheet_date || activeTimer().sheet_date || state.bundle?.work_date || isoToday(),
+        };
+        if (mirror.id) state.terminalTimerIds.delete(String(mirror.id));
+        state.activeTimer = mirror;
+        if (state.bundle) state.bundle.active_timer = mirror;
+        broadcastTimer(mirror, [], "", replacedTimerIds, action === "start_timer" ? mirror.id : "");
+        await loadToday({silent:true});
+      } catch (error) {
+        state.error = error.message || "Daily Planner action failed.";
+        render();
+      } finally {
+        clearPending();
+      }
+    };
+    const applyTaskOutcome = async (selectedOutcome) => {
+      const timer = activeTimer();
+      if (!timer.id || state.actionPending) return;
+      let reason = "";
+      if (selectedOutcome === "completed" && !parentWindow.confirm("Finish this task now?")) return;
+      if (selectedOutcome === "skipped") {
+        const answer = parentWindow.prompt("Skip this task? It will be recorded as not completed.\n\nOptional reason:", "No time available");
+        if (answer === null) return;
+        reason = String(answer || "No time available").trim();
+      }
+      setPending(selectedOutcome);
+      try {
+        const result = await mutate({
+          action:"task_outcome",
+          sheet_id:timer.sheet_id,
+          task_type:timer.task_type,
+          task_index:Number(timer.task_index || 0),
+          timer_id:timer.id,
+          outcome:selectedOutcome,
+          reason,
+        });
+        const terminalTimerId = String(result?.timer?.id || timer.id || "");
+        if (terminalTimerId) state.terminalTimerIds.add(terminalTimerId);
+        state.activeTimer = {};
+        if (state.bundle) state.bundle.active_timer = {};
+        stopChime();
+        broadcastTimer({}, [], terminalTimerId);
+        notifyPlannerDataUpdated(result?.sheet || {});
+        state.notice = selectedOutcome === "completed" ? "Task finished." : "Task skipped.";
+        await loadToday({silent:true});
+      } catch (error) {
+        state.error = error.message || "Daily Planner outcome could not be saved.";
+        render();
+      } finally {
+        clearPending();
+      }
+    };
+    const handleClick = (event) => {
+      const button = event.target.closest?.("[data-home-planner-action]");
+      if (!button || !root.contains(button)) return;
+      const action = button.dataset.homePlannerAction;
+      if (action === "open") return openPlanner(button.dataset.focusActive === "1");
+      if (action === "pause") return timerAction("pause_timer", {timer_id:activeTimer().id});
+      if (action === "resume") return timerAction("resume_timer", {timer_id:activeTimer().id});
+      if (action === "finish") return applyTaskOutcome("completed");
+      if (action === "skip") return applyTaskOutcome("skipped");
+      if (action === "start") {
+        const rowElement = button.closest(".sc-home-planner-row");
+        const taskType = rowElement?.dataset.taskType || "";
+        const taskIndex = Number(rowElement?.dataset.taskIndex || 0);
+        const row = rows().find((item) => item.task_type === taskType && Number(item.task_index || 0) === taskIndex);
+        if (!row) return;
+        return timerAction("start_timer", {
+          sheet_id:row.sheet_id,
+          task_type:taskType,
+          task_index:taskIndex,
+          allocated_seconds:Math.max(1, Number(row.allocated_seconds || 0)),
+          display_task:row.task || "Daily Planner task",
+        });
+      }
+    };
+    const handlePlannerDataUpdated = (payload) => {
+      if (!payload || payload.source === surfaceId) return;
+      if (payload.type !== "sports-cave-planner-data-updated") return;
+      if (!payload.scope || payload.scope !== state.config.timerScope) return;
+      loadToday({silent:true});
+    };
+
+    return {
+      install(nextConfig) {
+        state.config = {...nextConfig};
+        root.dataset.controllerVersion = CONTROLLER_VERSION;
+        root.addEventListener("click", handleClick, listenerOptions);
+        channel?.addEventListener("message", (event) => receiveTimerState(event.data), listenerOptions);
+        parentWindow.addEventListener("storage", (event) => {
+          try {
+            if (event.key === timerStorageKey()) {
+              if (event.newValue) receiveTimerState(JSON.parse(event.newValue), {allowStale:true});
+              else receiveTimerState({type:"timer-state", source:"storage", scope:state.config.timerScope, timer:{}}, {allowStale:true});
+            }
+            if (event.key === plannerDataStorageKey() && event.newValue) {
+              handlePlannerDataUpdated(JSON.parse(event.newValue));
+            }
+          } catch (_error) {}
+        }, listenerOptions);
+        parentWindow.addEventListener("message", (event) => {
+          if (event.origin !== parentWindow.location.origin) return;
+          if (event.data?.type === "sports-cave-planner-timer-state") receiveTimerState(event.data);
+          if (event.data?.type === "sports-cave-planner-data-updated") handlePlannerDataUpdated(event.data);
+        }, listenerOptions);
+        doc.addEventListener("visibilitychange", () => {
+          if (!doc.hidden) refreshStatus({immediate:true});
+        }, listenerOptions);
+        parentWindow.addEventListener("focus", () => refreshStatus({immediate:true}), listenerOptions);
+        try {
+          const cached = JSON.parse(parentWindow.localStorage.getItem(timerStorageKey()) || "null");
+          if (cached) receiveTimerState(cached, {allowStale:true});
+        } catch (_error) {}
+        render();
+        loadToday();
+        state.countdownTimer = parentWindow.setInterval(updateCountdowns, 1000);
+        timers.add(state.countdownTimer);
+      },
+      destroy({preserveDom=false}={}) {
+        state.destroyed = true;
+        listenerController.abort();
+        if (state.statusTimer) parentWindow.clearTimeout(state.statusTimer);
+        timers.forEach((timer) => {
+          parentWindow.clearTimeout(timer);
+          parentWindow.clearInterval(timer);
+        });
+        timers.clear();
+        channel?.close();
+        stopChime();
+        if (!preserveDom) root.replaceChildren();
+      },
+    };
+  };
+
+  const install = (attempt=0) => {
+    const root = doc.getElementById(ROOT_ID);
+    if (!root) {
+      if (attempt < 20) parentWindow.setTimeout(() => install(attempt + 1), 50);
+      return;
+    }
+    installStyles();
+    parentWindow.SportsCaveHomeDailyPlanner?.destroy?.({preserveDom: true});
+    const controller = createController(root, config);
+    parentWindow.SportsCaveHomeDailyPlanner = controller;
+    controller.install(config);
+  };
+
+  install();
+})();
+</script>
+</body>
+</html>

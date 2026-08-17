@@ -18,6 +18,7 @@ from starlette.requests import Request
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HOME_PLANNER_CLIENT = ROOT / "components" / "home_daily_planner" / "index.html"
 
 
 def planner_api_request(path, token, *, method="GET", payload=None, query_string=b""):
@@ -120,6 +121,24 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertNotIn("for (let pulse", planner_client)
         self.assertNotIn("5050", planner_client)
         self.assertIn("Sound is blocked. Allow audio for Sports Cave OS", planner_client)
+
+    def test_home_surface_takes_alarm_only_when_planner_popup_is_closed(self):
+        home_client = HOME_PLANNER_CLIENT.read_text(encoding="utf-8")
+        planner_client = (ROOT / "components" / "daily_planner" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        top_bar_client = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("const plannerPopupOpen", home_client)
+        self.assertIn('if (kind === "time-up" && plannerPopupOpen()) return false;', home_client)
+        self.assertIn('runClaimedSideEffect("time-up", timer, playTimeUpChime)', home_client)
+        self.assertIn("state.completionAlertTimerId", home_client)
+        self.assertIn("soundBlocked", home_client)
+        self.assertIn("showOutcomeClaimed(timer)", planner_client)
+        self.assertNotIn('runClaimedPlannerEffect("time-up"', top_bar_client)
+        self.assertNotIn("chime:true", top_bar_client)
 
     def test_lightweight_client_restores_original_sheet_and_lazy_sections(self):
         planner_client = (ROOT / "components" / "daily_planner" / "index.html").read_text(
@@ -850,12 +869,13 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertNotIn("5050", planner_source)
         self.assertNotIn("5050", topbar_source)
         self.assertIn('runClaimedSideEffect("time-up"', planner_source)
-        self.assertIn('runClaimedPlannerEffect("time-up"', topbar_source)
+        self.assertNotIn('runClaimedPlannerEffect("time-up"', topbar_source)
+        self.assertNotIn("chime:true", topbar_source)
+        self.assertIn("sports-cave-planner-open-request", topbar_source)
         self.assertIn("if (!state.plannerTimer.id || state.plannerTimer.outcome) stopPlannerChime()", topbar_source)
         self.assertIn('payload.type !== "sports-cave-planner-data-updated"', topbar_source)
         self.assertIn('["dashboard", "reporting", "weekly review"].includes(route)', topbar_source)
         self.assertIn("offset:.31, duration:.40", planner_source)
-        self.assertIn("playOne(0.31, 0.40", topbar_source)
 
     def test_confirmed_outcome_fully_closes_and_cannot_be_reopened_by_stale_timer_state(self):
         planner_source = (ROOT / "components" / "daily_planner" / "index.html").read_text(
@@ -1062,7 +1082,14 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
                 "allocated_seconds": 120,
             },
         )
-        with patch("top_bar_security.time.time", return_value=1_786_828_900), patch.object(
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 8, 16, 12, 0, tzinfo=tz)
+
+        with patch.object(daily_planner, "datetime", FixedDatetime), patch(
+            "top_bar_security.time.time", return_value=1_786_828_900
+        ), patch.object(
             sports_cave_dashboard,
             "start_daily_planner_timer",
             return_value=authoritative,

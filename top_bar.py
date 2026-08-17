@@ -25,6 +25,12 @@ def allowed_routes_for_user(user):
     )
 
 
+def daily_planner_timer_scope(user):
+    return hashlib.sha256(
+        f"sports-cave-planner|{str((user or {}).get('id') or '').strip()}".encode("utf-8")
+    ).hexdigest()[:24]
+
+
 def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
     allowed_routes = allowed_routes_for_user(user)
     navigation_route_keys = {
@@ -48,9 +54,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
     revision = hashlib.sha256(
         json.dumps(revision_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]
-    planner_timer_scope = hashlib.sha256(
-        f"sports-cave-planner|{str((user or {}).get('id') or '').strip()}".encode("utf-8")
-    ).hexdigest()[:24]
+    planner_timer_scope = daily_planner_timer_scope(user)
     token = top_bar_security.create_top_bar_token(
         user,
         allowed_routes=allowed_routes,

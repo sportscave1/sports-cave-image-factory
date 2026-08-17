@@ -51,6 +51,7 @@ import shared_credentials
 import social_media
 import seo_navigation as seo_nav
 import sports_cave_dashboard
+import home_daily_planner
 import design_studio_styles
 import sports_cave_pricing
 import sports_sales_calendar
@@ -14054,6 +14055,7 @@ def render_lightweight_dashboard_page():
     today = sports_sales_calendar.sydney_date(local_now)
     events = sports_cave_dashboard.load_calendar_events()
     with st.container(key="home-ops-dashboard"):
+        home_daily_planner.render_panel(st, get_components_module(), user)
         events_render_started = time.perf_counter()
         render_active_upcoming_events(events, today)
         safe_startup_print(

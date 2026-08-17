@@ -307,6 +307,14 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertNotIn("Good morning, Nathan", source)
         self.assertNotIn(":)", source)
 
+    def test_top_bar_opens_planner_for_home_without_claiming_alarm_ownership(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("sports-cave-planner-open-request", source)
+        self.assertIn("openDailyPlanner({focusActive: Boolean(event.data?.focus_active)})", source)
+        self.assertNotIn('runClaimedPlannerEffect("time-up"', source)
+        self.assertNotIn("chime:true", source)
+
     def test_top_bar_config_projects_authenticated_display_name(self):
         user = {
             "id": "worker-1",
