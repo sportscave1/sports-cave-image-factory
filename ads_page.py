@@ -109,7 +109,19 @@ ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4"
+INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = 6
+INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = 28
+INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_WORDS = 12
+INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_CHARACTERS = 70
+INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_WORDS = 4
+INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_CHARACTERS = 24
+INSTANT_EXPERIENCE_APPROVED_ON_IMAGE_CTAS = (
+    "CLAIM YOUR EDITION",
+    "SECURE YOUR EDITION",
+    "CLAIM THIS EDITION",
+    "SECURE THIS EDITION",
+)
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -3340,6 +3352,178 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
     return f"{shared_rules}\n\n{route_rules}"
 
 
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1 = """SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 21–23% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area."""
+
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1 = """SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Use no more than six words and no more than 28 characters including spaces and punctuation.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
+- Valid: ONLY 100 WILL EVER EXIST
+- Invalid and requiring correction: THE WARNE EDITION STOPS AT 100
+
+SUPPORTING LINE
+- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
+- Express one clean supporting thought on exactly one line at the existing supporting-copy size.
+- Never wrap or compress the supporting typography.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line and use an approved collector-led action: CLAIM YOUR EDITION, SECURE YOUR EDITION, CLAIM THIS EDITION or SECURE THIS EDITION.
+- Do not use a longer explanatory CTA.
+
+The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned."""
+
+
+def _normalise_instant_experience_on_image_line(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _instant_experience_on_image_line_errors(
+    value,
+    *,
+    label,
+    max_words,
+    max_characters,
+):
+    raw = str(value or "")
+    clean = _normalise_instant_experience_on_image_line(raw)
+    errors = []
+    if not clean:
+        errors.append(f"{label} is required.")
+        return errors
+    if "\n" in raw or "\r" in raw:
+        errors.append(f"{label} must remain on one line.")
+    if len(clean.split()) > max_words:
+        errors.append(f"{label} exceeds {max_words} words.")
+    if len(clean) > max_characters:
+        errors.append(f"{label} exceeds {max_characters} characters.")
+    return errors
+
+
+def instant_experience_on_image_headline_errors(headline):
+    return tuple(
+        _instant_experience_on_image_line_errors(
+            headline,
+            label="Instant Experience on-image headline",
+            max_words=INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS,
+            max_characters=INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS,
+        )
+    )
+
+
+def instant_experience_on_image_headline_is_valid(headline):
+    return not instant_experience_on_image_headline_errors(headline)
+
+
+def shorten_instant_experience_on_image_headline(
+    headline,
+    *,
+    fallback="COLLECTOR EDITION",
+):
+    clean = _normalise_instant_experience_on_image_line(headline)
+    if instant_experience_on_image_headline_is_valid(clean):
+        return clean
+    quantities = re.findall(r"\b\d[\d,]*\b", clean)
+    if quantities:
+        for candidate in (
+            f"ONLY {quantities[-1]} WILL EVER EXIST",
+            f"ONLY {quantities[-1]} EXIST",
+        ):
+            if instant_experience_on_image_headline_is_valid(candidate):
+                return candidate
+    clean_fallback = _normalise_instant_experience_on_image_line(fallback)
+    if instant_experience_on_image_headline_is_valid(clean_fallback):
+        return clean_fallback
+    raise ValueError("A concise Instant Experience on-image headline could not be resolved.")
+
+
+def validate_instant_experience_on_image_copy(headline, supporting_line, cta):
+    errors = list(instant_experience_on_image_headline_errors(headline))
+    errors.extend(
+        _instant_experience_on_image_line_errors(
+            supporting_line,
+            label="Instant Experience on-image supporting line",
+            max_words=INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_WORDS,
+            max_characters=INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_CHARACTERS,
+        )
+    )
+    errors.extend(
+        _instant_experience_on_image_line_errors(
+            cta,
+            label="Instant Experience on-image CTA",
+            max_words=INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_WORDS,
+            max_characters=INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_CHARACTERS,
+        )
+    )
+    clean_cta = _normalise_instant_experience_on_image_line(cta).upper()
+    if clean_cta and clean_cta not in INSTANT_EXPERIENCE_APPROVED_ON_IMAGE_CTAS:
+        errors.append("Instant Experience on-image CTA must use an approved collector-led action.")
+    return tuple(errors)
+
+
+def resolve_instant_experience_on_image_copy(headline, supporting_line, cta):
+    resolved = {
+        "headline_text": shorten_instant_experience_on_image_headline(headline),
+        "supporting_line": _normalise_instant_experience_on_image_line(supporting_line),
+        "cta_text": _normalise_instant_experience_on_image_line(cta).upper(),
+    }
+    errors = validate_instant_experience_on_image_copy(
+        resolved["headline_text"],
+        resolved["supporting_line"],
+        resolved["cta_text"],
+    )
+    if errors:
+        raise ValueError(" ".join(errors))
+    return resolved
+
+
+def build_instant_experience_fixed_opaque_footer_rules():
+    return SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+
+
+def build_instant_experience_on_image_copy_fit_rules():
+    return SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+
+
 SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
 SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2"
 
@@ -3371,13 +3555,22 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - a secondary prop competes with the product
 - the gold underline floats away from the edition number or becomes an arbitrary decorative dash
 - the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
-- the lower conversion panel exceeds 25% of the canvas or differs from the required 24%
+- the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
+- the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
+- the fixed black footer falls outside approximately 21–23% of the canvas height
+- the on-image headline exceeds six words or 28 characters, wraps, is squeezed, is stretched or is abnormally reduced
+- the supporting line exceeds 12 words or 70 characters, wraps or becomes too small
+- the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
+- any footer wording approaches or crosses the 64–72 px safe margins
+- Australia or another country changes the established country-invariant Instant Experience footer template
 - the three routes use the same camera angle, identical wall colour, identical cue or effectively identical room composition
 - the left route is merely a mirrored version of the right route
 - the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
 - the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
 
 If native generation returns another square size, resize the approved square composition deterministically to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image; regenerate or correct its square composition first.
+
+When footer geometry or copy fit is the only failure, correct only the footer and wording fit. Preserve the product, room, camera angle, lighting, typography character and every other successful element. Shorten overlong wording; never shrink, condense or stretch the existing typography to force it into the footer.
 
 Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Revise every hard failure and anything below the intended production-ready 10/10 standard. Do not print the score, checklist result or reasoning. The workflow must correct failures, not merely claim the checks passed."""
 
@@ -10235,7 +10428,16 @@ def _ads_clear_directory_cache(*paths):
         cache.pop(dropbox_integration.normalize_dropbox_path(path), None)
 
 
-def _render_ads_folder_picker(access_token, root_path, result, workflow):
+def _render_ads_folder_picker(
+    access_token,
+    root_path,
+    result,
+    workflow,
+    *,
+    state_key=ADS_IMAGE_STATE_KEY,
+    key_prefix="ads-picker",
+    container_key="ads-dropbox-picker",
+):
     default_path = dropbox_integration.normalize_dropbox_path(
         f"{root_path}/{ADS_PRODUCT_IMAGES_FOLDER}"
     )
@@ -10250,14 +10452,14 @@ def _render_ads_folder_picker(access_token, root_path, result, workflow):
         root_path=root_path,
     )
     workflow["picker_path"] = current_path
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[state_key] = workflow
     folders = [
         entry
         for entry in _ads_directory_entries(access_token, current_path)
         if str(entry.get(".tag") or "").casefold() == "folder"
     ]
 
-    with st.container(key="ads-dropbox-picker"):
+    with st.container(key=container_key):
         st.markdown('<div class="sc-mockups-dropbox-picker">', unsafe_allow_html=True)
         breadcrumb = dropbox_integration.breadcrumb_items(current_path, root_path)
         breadcrumb_columns = st.columns([1] * max(1, len(breadcrumb)))
@@ -10266,11 +10468,11 @@ def _render_ads_folder_picker(access_token, root_path, result, workflow):
             with breadcrumb_columns[index]:
                 if st.button(
                     str(label),
-                    key=f"ads-picker-crumb::{result['context_key']}::{index}::{target}",
+                    key=f"{key_prefix}-crumb::{result['context_key']}::{index}::{target}",
                     use_container_width=True,
                 ):
                     workflow["picker_path"] = target
-                    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                    st.session_state[state_key] = workflow
                     st.rerun()
 
         if folders:
@@ -10281,11 +10483,11 @@ def _render_ads_folder_picker(access_token, root_path, result, workflow):
                 if st.button(
                     str(folder.get("name") or "Folder"),
                     icon=":material/folder:",
-                    key=f"ads-picker-folder::{result['context_key']}::{path}",
+                    key=f"{key_prefix}-folder::{result['context_key']}::{path}",
                     use_container_width=True,
                 ):
                     workflow["picker_path"] = path
-                    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                    st.session_state[state_key] = workflow
                     st.rerun()
         else:
             st.caption("No subfolders here.")
@@ -10293,11 +10495,11 @@ def _render_ads_folder_picker(access_token, root_path, result, workflow):
         with st.popover("New folder", icon=":material/create_new_folder:"):
             folder_name = st.text_input(
                 "Folder name",
-                key=f"ads-picker-new-name::{result['context_key']}::{current_path}",
+                key=f"{key_prefix}-new-name::{result['context_key']}::{current_path}",
             )
             if st.button(
                 "Create",
-                key=f"ads-picker-new-submit::{result['context_key']}::{current_path}",
+                key=f"{key_prefix}-new-submit::{result['context_key']}::{current_path}",
                 use_container_width=True,
             ):
                 try:
@@ -10314,7 +10516,7 @@ def _render_ads_folder_picker(access_token, root_path, result, workflow):
                             or metadata.get("path_lower")
                             or current_path
                         )
-                        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                        st.session_state[state_key] = workflow
                         record_activity_log(
                             "files_folder_created",
                             "Ads",

@@ -4,6 +4,7 @@ import uuid
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
+import ads_navigation
 from shared_credentials import CREDENTIAL_PERMISSION_KEYS
 import social_media
 import seo_navigation as seo_workspace
@@ -73,7 +74,20 @@ PAGE_REGISTRY = (
         "label": "Design Studio",
         "worker_assignable": True,
     },
-    {"key": "ads", "route": "Ads", "label": "Ads", "worker_assignable": True},
+    {
+        "key": ads_navigation.ADS_PAGE_KEY,
+        "route": ads_navigation.ADS_CREATE_ROUTE,
+        "label": "Ads",
+        "worker_assignable": True,
+    },
+    {
+        "key": ads_navigation.CREATIVE_REFRESH_PAGE_KEY,
+        "route": ads_navigation.CREATIVE_REFRESH_ROUTE,
+        "label": ads_navigation.CREATIVE_REFRESH_ROUTE,
+        "worker_assignable": False,
+        "parent_key": ads_navigation.ADS_PAGE_KEY,
+        "navigation_child": True,
+    },
     {
         "key": seo_workspace.SEO_PAGE_KEY,
         "route": seo_workspace.SEO_OVERVIEW_ROUTE,
@@ -355,6 +369,13 @@ def can_access_page(user, route_or_key):
         if is_admin(user):
             return True
         return seo_workspace.SEO_PAGE_KEY in permission_keys(user)
+    if page and (
+        page["key"] == ads_navigation.ADS_PAGE_KEY
+        or page.get("parent_key") == ads_navigation.ADS_PAGE_KEY
+    ):
+        if is_admin(user):
+            return True
+        return ads_navigation.ADS_PAGE_KEY in permission_keys(user)
     if page and page["key"] == "accounts_access":
         return True
     if is_admin(user):

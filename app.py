@@ -41,6 +41,7 @@ import streamlit as st
 
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
 import app_branding
+import ads_navigation as ads_nav
 import dropbox_integration
 import mockup_storage
 import navigation_runtime
@@ -67,6 +68,7 @@ design_studio_page_module = None
 social_media_reels_studio_page_module = None
 social_media_page_module = None
 ads_page_module = None
+ads_creative_refresh_module = None
 reporting_page_module = None
 seo_page_module = None
 requests_module = None
@@ -200,6 +202,15 @@ def get_ads_page():
         ads_page_module = importlib.import_module("ads_page")
         log_startup_stage("ADS PAGE IMPORT DONE")
     return ads_page_module
+
+
+def get_ads_creative_refresh_page():
+    global ads_creative_refresh_module
+    if ads_creative_refresh_module is None:
+        log_startup_stage("ADS CREATIVE REFRESH IMPORT START")
+        ads_creative_refresh_module = importlib.import_module("ads_creative_refresh")
+        log_startup_stage("ADS CREATIVE REFRESH IMPORT DONE")
+    return ads_creative_refresh_module
 
 
 def get_marketing_factory_page():
@@ -8553,6 +8564,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Product Uploads": ":material/upload_file:",
     "Design Studio": ":material/palette:",
     "Ads": ":material/ads_click:",
+    ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
     "Reporting": ":material/bar_chart:",
@@ -8600,6 +8612,7 @@ def _active_sidebar_group(route):
             os_accounts.DAILY_PLANNER_ROUTE,
             os_accounts.WEEKLY_REVIEW_ROUTE,
         },
+        ads_routes=ads_nav.ADS_ROUTES,
     )
 
 
@@ -8623,6 +8636,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
                 os_accounts.DAILY_PLANNER_ROUTE,
                 os_accounts.WEEKLY_REVIEW_ROUTE,
             },
+            ads_routes=ads_nav.ADS_ROUTES,
         )
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
@@ -8687,8 +8701,25 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
                 social_media.AI_REELS_ROUTE,
                 icon=SIDEBAR_ICON_BY_ROUTE[social_media.AI_REELS_ROUTE],
             )
-    for route in ("Product Uploads", "Design Studio", "Ads"):
+    for route in ("Product Uploads", "Design Studio"):
         _sidebar_route_button(route, current_page, allowed_routes, root=st)
+
+    if ads_nav.ADS_CREATE_ROUTE in allowed_routes:
+        if disclosure(
+            "ads",
+            "Ads",
+            SIDEBAR_ICON_BY_ROUTE[ads_nav.ADS_CREATE_ROUTE],
+            ads_nav.ADS_CREATE_ROUTE,
+        ):
+            children = st.container(key="sidebar-ads-children")
+            children.markdown('<span id="sidebar-ads-children"></span>', unsafe_allow_html=True)
+            for route in ads_nav.ADS_ROUTES:
+                child_button(
+                    children,
+                    route,
+                    ads_nav.ADS_NAV_LABELS[route],
+                    icon=SIDEBAR_ICON_BY_ROUTE.get(route),
+                )
 
     if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:
         if disclosure(
@@ -8831,6 +8862,7 @@ def render_sidebar():
         current_page not in MENU_OPTIONS
         and current_page != social_media.AI_REELS_ROUTE
         and current_page not in seo_nav.SEO_ROUTES
+        and current_page not in ads_nav.ADS_ROUTES
         and current_page != "Accounts & Access"
         and os_accounts.is_admin(user)
     ):
@@ -15458,6 +15490,8 @@ def render_selected_page(current_page):
         render_product_uploads_page()
     elif current_page in {"Ads", "Marketing Factory"}:
         get_ads_page().render_page()
+    elif current_page == ads_nav.CREATIVE_REFRESH_ROUTE:
+        get_ads_creative_refresh_page().render_page()
     elif current_page in {"Settings", "Developer"}:
         render_settings_page()
     else:
