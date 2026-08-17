@@ -653,8 +653,8 @@ class AdsPageTests(unittest.TestCase):
                 self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                 self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
-                self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
-                self.assertIn("Lower conversion panel: exactly 24%", prompt)
+                self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
+                self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
                 self.assertIn("META URL PARAMETERS", prompt)
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
@@ -729,8 +729,8 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
                         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
-                        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
-                        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+                        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
+                        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
                         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
@@ -755,8 +755,8 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Football collector wall art", prompt)
         self.assertIn("Route key: premium_scarcity_left", prompt)
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
-        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
-        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
         self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
@@ -3207,8 +3207,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", contract)
         self.assertEqual(contract.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"), 3)
         self.assertEqual(contract.count("MANDATORY SEAMLESS WALL SYSTEM"), 3)
-        self.assertEqual(contract.count("Upper photographed residential room scene: exactly 76%"), 3)
-        self.assertEqual(contract.count("Lower conversion panel: exactly 24%"), 3)
+        self.assertEqual(contract.count("Upper photographed residential room scene: approximately 77–79%"), 3)
+        self.assertEqual(contract.count("Fixed opaque black footer: approximately the bottom 21–23%"), 3)
         self.assertIn("camera 4-6 degrees to the viewer's right of centre", contract)
         self.assertIn("predominantly straight-on camera with maximum 0-2 degree natural offset", contract)
         self.assertIn("camera 4-6 degrees to the viewer's left of centre", contract)
@@ -3265,7 +3265,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn(modern[0]["room_profile_key"], {"collector_lounge", "modern_man_cave"})
         self.assertEqual(missing[0]["product_sport"], "safe universal fallback")
         self.assertEqual(missing[0]["artwork_mood"], "clean")
-        self.assertEqual(missing[0]["headline_text"], "SPORTS CAVE COLLECTOR RELEASE")
+        self.assertEqual(missing[0]["headline_text"], "SPORTS CAVE COLLECTOR")
         self.assertEqual(missing[0]["edition_limit_used"], "not verified")
         self.assertEqual(missing[0]["room_profile_key"], "collector_lounge")
         self.assertEqual(missing[0]["wall_colour"], "warm taupe seamless mineral-plaster wall")
@@ -4297,8 +4297,8 @@ PRIMARY TEXT VARIATIONS
         ):
             self.assertIn(f"Route key: {route_key}", prompt)
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4", prompt)
-        self.assertIn("Upper photographed residential room scene: exactly 76%", prompt)
-        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
         self.assertNotIn("FRAMED GREATNESS SCARCITY HYBRID", prompt)
         self.assertNotIn("PURE LIMITED-RELEASE SCARCITY", prompt)
@@ -4459,7 +4459,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
         self.assertIn("Route key: premium_scarcity_left", prompt)
-        self.assertIn("Lower conversion panel: exactly 24%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
         self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
@@ -4756,8 +4756,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Sport/category: AFL", contract)
         self.assertIn("Country/market: Australia", contract)
         self.assertIn("1024 x 1024", contract)
-        self.assertIn("Upper photographed residential room scene: exactly 76%", contract)
-        self.assertIn("Lower conversion panel: exactly 24%", contract)
+        self.assertIn("Upper photographed residential room scene: approximately 77–79%", contract)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", contract)
         self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Social Media Reels", contract)
         self.assertNotIn("Six Laps Ahead", contract)
@@ -4876,7 +4876,7 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
         self.assertIn("Route key: premium_scarcity_right", refreshed["master_prompt"])
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4", refreshed["master_prompt"])
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4", refreshed["master_prompt"])
         self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
 
     def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
@@ -4997,7 +4997,7 @@ PRIMARY TEXT VARIATIONS
         for expected in restored_effects:
             self.assertEqual(contract.count(expected), 3, expected)
         self.assertEqual(contract.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4", contract)
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4", contract)
 
     def test_instant_experience_route_wording_and_typography_are_route_specific(self):
         prompt = ads_page.build_ads_prompt(
@@ -5045,8 +5045,8 @@ PRIMARY TEXT VARIATIONS
         left_start = contract.index("Route key: premium_scarcity_left")
         front_prompt = contract[front_start:left_start]
 
-        self.assertIn("Upper photographed residential room scene: exactly 76%", front_prompt)
-        self.assertIn("Lower conversion panel: exactly 24%", front_prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 77–79%", front_prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", front_prompt)
         self.assertIn("one 1-pixel muted-gold boundary line", front_prompt)
         self.assertIn("approximately 82-88% of the canvas", front_prompt)
         self.assertIn("ONLY 100 WILL EVER EXIST", front_prompt)

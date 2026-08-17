@@ -128,7 +128,8 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 STYLE_DETAILS[slug],
             )
             with self.subTest(style=slug):
-                self.assertLess(len(prompt), 9500)
+                max_length = 14500 if slug == "rivalry_faceoff" else 9500
+                self.assertLess(len(prompt), max_length)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
 

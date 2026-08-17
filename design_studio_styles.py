@@ -115,7 +115,7 @@ HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT = f"""
 The authentic principal athlete or athletes must dominate the final collector artwork. Apply this same contract while researching, finding images, selecting assets, generating and reviewing.
 
 HERO CROP AND IDENTITY
-For most Sports Cave designs, select a chest-up, waist-up or tight three-quarter crop according to the real pose and sporting action. Preserve the recognisable face, authentic expression, helmet or headwear when worn, shoulders, jersey, available jersey number, upper-body pose and relevant equipment. Do not force every source into an identical crop and do not crop away information that makes the moment authentic. An explicit rear-jersey, whole-moment or archival style may use the genuine wider source when that treatment is essential, but its principals must still read as the heroes.
+For most Sports Cave designs, select a chest-up, waist-up or tight three-quarter crop according to the real pose and sporting action. Preserve the recognisable face, authentic expression, helmet or headwear when worn, shoulders, jersey, available jersey number, upper-body pose and relevant equipment. Do not force every source into an identical crop and do not crop away information that makes the moment authentic. A dedicated rear-jersey, whole-moment or archival style may use the genuine wider source when that treatment is essential, but its principals must still read as the heroes.
 
 SCALE AND COMPOSITION
 For one athlete, make that person the immediate visual focus and normally about 60-80% of the usable artwork height. The face must remain recognisable at Shopify-thumbnail size. Reject empty compositions built around a small distant or unnecessary full-body figure.
@@ -211,6 +211,104 @@ def _style(
     )
 
 
+RIVALRY_FACE_OFF_CORE_PRINCIPLES_MARKER = (
+    "SPORTS CAVE RIVALRY FACE-OFF CORE PRINCIPLES V2"
+)
+
+RIVALRY_FACE_OFF_RESEARCH_RULES = """
+Identify what makes these two named principals a meaningful rivalry before selecting the title, atmosphere or composition. Verify both full names, sport, teams or countries, overlapping era, defining competitive story, correct uniforms and equipment, and the strongest factual contrast: for example generation against generation, champion against challenger, offence against defence, power against precision, speed against strength, discipline against instinct, club or national rivalry, or a debate fans still argue about. Do not force every rivalry into the same emotional story.
+
+Treat THE MENTALITY only as a benchmark for close-up emotional tension, authentic photographic realism, premium restraint and collector appeal. Do not reuse its title, portrait positions, smoke pattern, border geometry or layout measurements. Internally consider several original one-to-four-word collector titles, then return only the single strongest rivalry-specific title. Do not automatically begin with THE, use VS, use the principals' names, or reuse an example title.
+
+Return one factual rivalry brief with: the verified rivalry hook; the single selected collector title and why it fits; one compatible close-portrait photo direction for each principal; correct era, team/country, uniform and equipment requirements; and the restrained visual mood that makes this artwork unique. Do not return a menu of competing concepts.
+""".strip()
+
+RIVALRY_FACE_OFF_RESEARCH_BASE_RULES = """
+SPORTS CAVE DESIGN STUDIO V2 - RIVALRY FACE-OFF RESEARCH
+
+Use reliable current and archival research to verify the two named principals, their sport, teams or countries, shared era, defining meetings, uniforms, equipment and rivalry context. Do not find or display images yet. Do not generate artwork.
+
+Return one concise handoff in this order:
+1. Verified rivalry-specific emotional foundation.
+2. Why fans care and would collect this rivalry.
+3. The single selected original collector title.
+4. Principal One close-portrait brief: expression, natural angle, crop, correct uniform/equipment/era and minimum useful resolution.
+5. Principal Two close-portrait brief using the same criteria and compatible visual scale.
+6. Pairing requirements for natural eye-line tension and equal authority without mirroring or reconstruction.
+7. Minimal background, lighting, colour and border direction created around the two photographs; no separate background or venue asset.
+8. Exact full names requiring one verified signature each.
+9. Three focused portrait-search phrases per principal and one verified-signature search phrase per principal.
+
+Return one recommendation, not a concept menu or multiple visible title options.
+""".strip()
+
+RIVALRY_FACE_OFF_FIND_IMAGES_RULES = """
+This stricter Rivalry Face-Off search contract overrides the general allowance for a shared moment, venue or background reference.
+
+Search only for:
+1. Clear final-use photographs of Principal One.
+2. Clear final-use photographs of Principal Two.
+3. Exactly one verified signature candidate for each principal.
+
+Return only two separately labelled principal groups. In each group show the three strongest compatible final-use photographs, followed by that principal's one clearest verified signature candidate last. Use very short captions. Do not return stadiums, venues, crowds, shared moments, trophies, backgrounds, team logos, supporting players, vehicles, decorative textures, unrelated action photographs or extra reference assets. Do not pad a group with an unsuitable or unverified image; state the shortfall when three compliant candidates genuinely cannot be found.
+
+Prioritise large sharp recognisable faces, visible eyes, authentic skin texture, serious or competitive expressions, head-and-shoulders or upper-torso crops, natural profile or three-quarter angles, correct team and era, minimal obstruction, high useful resolution and official or major editorial sources. Select the photographs as a compatible pair: comparable sharpness and crop depth, similar facial scale, approximately aligned eye lines, equal visual importance and natural inward tension where the real photographs support it.
+
+Reject distant or full-body images, wide running/action shots, small or obstructed faces, subjects strongly facing away, exaggerated celebrations, low-resolution or compressed files, AI athletes, illustrations, paintings, trading cards, posters, merchandise, screenshots, intrusive watermarks, wrong-team or wrong-era sources, duplicate crops and any photograph requiring facial reconstruction, invented anatomy or fact-reversing mirroring. Never manufacture eye contact by rotating, regenerating or reconstructing a principal.
+""".strip()
+
+RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES = """
+SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
+
+Use the recommended rivalry hook and close-portrait brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for the two named principals and their verified signatures only.
+
+INLINE IMAGE RESULT CONTRACT - FIND IMAGES IS NOT COMPLETE WITHOUT VISIBLE PHOTOGRAPHS
+
+Use the platform's dedicated image-search capability, not a regular web-search link list. Display every selected candidate as an actual tool-native image-result card or supported inline image preview. A source URL, markdown link, filename or text description by itself is not an image result. Do not use screenshots of search-result pages.
+
+If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate. Keep the original source page as secondary attribution. Each short candidate label may include only the actual image preview, principal name, concise crop role, source, available resolution and source-page attribution. Preserve asset_id, supported role, subject mapping and use_mode in metadata or concise alt text. Follow the exact two-group candidate and signature limits in the style photo targets below; return no separate supporting-asset group.
+""".strip()
+
+RIVALRY_FACE_OFF_GENERATION_RULES = f"""
+{RIVALRY_FACE_OFF_CORE_PRINCIPLES_MARKER}
+
+Create one original Sports Cave Rivalry Face-Off collector artwork around the verified rivalry-specific emotional hook. THE MENTALITY is a benchmark only for emotional tension, close-up realism, premium restraint and collector appeal. Do not recreate, duplicate or reskin it. Do not reuse its title, exact portrait positions, smoke pattern, border geometry or layout measurements. The result must belong to the same premium Sports Cave collector family while having its own title, atmosphere, identity and emotional reason to exist.
+
+TWO OPPOSING CO-EQUAL HEROES
+Two opposing co-equal heroes carry the artwork. Use exactly two principal rivals. No third person. Both must be visually dominant, recognisable at Shopify-thumbnail size and balanced in importance. Prefer close portrait, head-and-shoulders or upper-torso presentation with comparable facial scale, aligned eye lines where natural, controlled central negative space and immediate psychological confrontation. Adapt positioning, crop depth and central spacing to the authentic sources and rivalry story. Never reduce either rival to a ghost, background figure or secondary action image.
+
+AUTHENTIC SOURCE PHOTOGRAPHS
+Use exactly one selected real final-use photograph for each principal as an immutable source asset. Composite the actual photographs. Preserve identity, facial structure, expression, eye direction, skin texture, hair, body proportions, pose, uniform, equipment, era and photographic characteristics. Do not mirror, rotate, repose or reconstruct either person. Never regenerate a face, face-swap, turn a head, manufacture eye contact, combine a face from one source with another body, change a uniform or jersey number, remove authentic equipment or invent missing anatomy. Build and simplify the artwork around the available crops. Never create a generated jersey-back replacement. Jersey-back artwork belongs to the separate Legends Jersey Display style.
+
+ONE ORIGINAL COLLECTOR TITLE ONLY
+Use the single strongest rivalry-specific collector title selected from the research. It should usually contain one to four words, feel like a memorable film title or legendary chapter, remain readable at thumbnail size and avoid advertising language. Do not automatically start with THE, use VS, use the principals' names or reuse a benchmark/example title. Show no subtitle, Legacy Edition, Rivalry Edition, Collector's Edition, tagline, supporting line, descriptive sentence or second headline unless the user explicitly requests a special-release secondary line.
+
+UNIQUE RESTRAINED VISUAL IDENTITY
+Use a deep-black or charcoal foundation with minimal rivalry-supporting atmosphere: controlled shadow, faint dust or smoke, gentle central haze, restrained team-colour undertones, subtle historic texture or minimal sport-relevant environmental detail. The two authentic faces and uniforms provide the meaningful colour. Vary the portrait relationship, crop balance, central divide, lighting direction, atmospheric treatment, border/divider detail, nameplate proportions and signature placement according to this rivalry. Do not reuse one smoke, split-colour, subject-placement or lighting template. Avoid bright split backgrounds, giant stadium lights, explosions, lightning, flames, excessive particles, generated crowds, extra players, large logos, generic AI sports scenery and clutter.
+
+SPORTS CAVE COLLECTOR ARCHITECTURE
+Keep the finished artwork landscape 4:3, framed-first and photographically realistic. Use cinematic contrast while preserving natural skin tones, facial detail, uniforms and equipment. Apply only restrained edge integration, rim light and global grading needed to blend the real photographs. Use one thin refined symmetrical gold border fully inside the canvas. Gold remains secondary and may be used sparingly for the title, border, full principal names, thin dividers, signature treatment and exact plaque details.
+
+Use both correctly spelled full principal names with similar visual weight, clearly mapped and secondary to the title and portraits. Use one authentic signature for each principal rival. Preserve the genuine strokes, map each signature correctly, keep both restrained and inside the border, and never type, invent, approximate or generate either signature.
+
+Use the exact supplied official Sports Cave plaque asset. Preserve its emblem, SPORTS CAVE COLLECTOR SERIES wording, LIMITED EDITION wording, 001 / 100 numbering, typeface, gold-and-black finish, texture, borders, spacing and proportions. Keep it readable, uncropped, undistorted, inside the border and secondary to the rivals and title. Never recreate, redraw, retype or replace it. If either verified signature or the exact plaque asset is missing, state that the collector artwork is incomplete rather than fabricating it.
+""".strip()
+
+RIVALRY_FACE_OFF_REVIEW_RULES = """
+Require exactly two recognisable co-equal rivals, two correctly mapped full names, one verified authentic signature per rival, the exact unchanged Sports Cave plaque, one original rivalry-specific title only, a thin contained border, landscape 4:3 presentation and authentic photographic realism.
+
+Reject the artwork if it resembles a reskin of THE MENTALITY; repeats that benchmark's title, portrait placement, smoke pattern, border geometry or measurements; uses a generic rivalry story; includes a subtitle, edition label, tagline, supporting line or second headline without an explicit special-release request; adds a third person or competing scenery; makes either face small or secondary; reconstructs a face, pose, uniform or anatomy; swaps signatures; recreates the plaque; or uses a busy generic AI sports background.
+
+Confirm that the title, emotional hook, source-photo relationship, crop balance, team-colour atmosphere, background texture, lighting mood, border/divider detail, names, signatures and final collector personality are genuinely specific to this rivalry. Recommend the smallest correction that preserves both authentic source photographs and every successful element.
+""".strip()
+
+RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES = """
+RIVALRY FACE-OFF SIGNATURE PLACEMENT
+
+Use exactly one verified authentic signature for each principal. Keep each signature on its correctly mapped principal's side, comparable in visual importance, smaller than the corresponding full name and portrait, and fully inside the border and safe area. Preserve each genuine stroke path and natural proportions. Do not cross the central rivalry space, cover a face, body, uniform detail, title or plaque, force both signatures to identical widths, or swap the principal-to-signature mapping.
+""".strip()
+
+
 _STYLES = (
     _style(
         "ultimate_moment",
@@ -240,17 +338,11 @@ Use one definitive authentic photograph of the exact moment as the artwork found
         2,
         2,
         ("rival_one_photo", "rival_two_photo"),
-        ("vehicle_exact_photo", "venue_reference", "historical_reference", "signature_asset"),
-        """
-Verify the rivals' shared history, overlapping era, defining meetings, correct teams or equipment and strongest source-photo directions. Build a factual two-sided brief with equal status and believable competitive tension.
-""",
-        """
-Return separate groups in this order: RIVAL ONE final-use candidates; RIVAL TWO final-use candidates; shared rivalry, venue or era references; SIGNATURES with one per rival last. Never mix both rivals into one candidate carousel or return a third person.
-""",
-        """
-Use exactly one selected real photograph for each rival. Give both equal scale, status and visual weight with natural opposing orientation where the sources support it. Never mirror text, uniforms, equipment or liveries. No third person. A matching car may support each motorsport rival only when the design remains minimal.
-""",
-        "Require exactly two rivals, no third person, equal scale, equal authority and correct left/right asset and signature mapping.",
+        ("signature_asset",),
+        RIVALRY_FACE_OFF_RESEARCH_RULES,
+        RIVALRY_FACE_OFF_FIND_IMAGES_RULES,
+        RIVALRY_FACE_OFF_GENERATION_RULES,
+        RIVALRY_FACE_OFF_REVIEW_RULES,
         minimum=2,
         exact=2,
     ),
@@ -807,6 +899,34 @@ def _task_variables(task_text, details, subjects):
     return "\n".join(lines)
 
 
+def _style_task_variables(style, task_text, details, subjects):
+    base = _task_variables(task_text, details, subjects)
+    if style.slug != "rivalry_faceoff":
+        return base
+    details = dict(details or {})
+    rivalry_story = " ".join(
+        value
+        for value in (
+            " ".join(str(details.get("event_moment") or "").split()),
+            " ".join(str(details.get("special_instructions") or "").split()),
+        )
+        if value
+    )
+    lines = [
+        "RIVALRY FACE-OFF VARIABLE MAP",
+        f"PRINCIPAL ONE: {subjects[0] if len(subjects) > 0 else '[FULL NAME REQUIRED]'}",
+        f"PRINCIPAL TWO: {subjects[1] if len(subjects) > 1 else '[FULL NAME REQUIRED]'}",
+        f"SPORT: {' '.join(str(details.get('sport') or '').split()) or '[SPORT REQUIRED]'}",
+        f"TEAMS / COUNTRIES: {' '.join(str(details.get('team_country') or '').split()) or '[VERIFY FROM TASK OR RESEARCH]'}",
+        f"RIVALRY ERA: {' '.join(str(details.get('season_era') or '').split()) or '[VERIFY FROM TASK OR RESEARCH]'}",
+        f"RIVALRY STORY: {rivalry_story or '[IDENTIFY THE STRONGEST VERIFIED RIVALRY-SPECIFIC STORY]'}",
+        "VERIFIED SIGNATURES: use only the exact assets in the signature mapping below",
+        "OFFICIAL SPORTS CAVE PLAQUE: use only the exact supplied asset in the plaque mapping below",
+    ]
+    rivalry_variables = "\n".join(lines)
+    return f"{base}\n\n{rivalry_variables}"
+
+
 def _adapter_block(adapter_key):
     return f"SPORT ADAPTER - {adapter_key.upper()}\n{SPORT_ADAPTERS[adapter_key]}"
 
@@ -903,11 +1023,16 @@ def build_research_prompt(style_slug, task_text, details=None):
         return STYLE_REQUIRED_LABEL
     subjects = _principal_subjects_for_prompt(details, task_text)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
+    base_rules = (
+        RIVALRY_FACE_OFF_RESEARCH_BASE_RULES
+        if style.slug == "rivalry_faceoff"
+        else COMMON_RESEARCH_RULES
+    )
     return "\n\n".join(
         (
-            COMMON_RESEARCH_RULES,
+            base_rules,
             HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
-            _task_variables(task_text, details, subjects),
+            _style_task_variables(style, task_text, details, subjects),
             f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
             _adapter_block(adapter),
         )
@@ -922,12 +1047,15 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     roles = ", ".join(style.required_image_roles)
     optional = ", ".join(style.optional_image_roles) or "none"
+    base_rules = (
+        (RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES,)
+        if style.slug == "rivalry_faceoff"
+        else (COMMON_FIND_IMAGES_RULES, FIND_IMAGES_INLINE_RESULT_CONTRACT)
+    )
     return "\n\n".join(
-        (
-            COMMON_FIND_IMAGES_RULES,
-            FIND_IMAGES_INLINE_RESULT_CONTRACT,
+        (*base_rules,
             HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
-            _task_variables(task_text, details, subjects),
+            _style_task_variables(style, task_text, details, subjects),
             f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
             f"IMAGE ROLE CONTRACT\nRequired: {roles}. Optional: {optional}. Assign one supported role and use mode to every selected asset.",
             _adapter_block(adapter),
@@ -957,7 +1085,7 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
                 f"{style.generation_rules}\n\n"
                 f"{_adapter_block(adapter)}"
             ),
-            _task_variables(task_text, details, subjects),
+            _style_task_variables(style, task_text, details, subjects),
             _selected_asset_use_plan(assets, signatures),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
@@ -973,14 +1101,22 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
     assets = normalise_selected_assets(selected_assets)
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     signatures = verified_signature_assets(assets, subjects)
+    style_signature_rules = (
+        RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES
+        if style.slug == "rivalry_faceoff"
+        else ""
+    )
     return "\n\n".join(
-        (
+        section
+        for section in (
             COMMON_SIGNATURE_PLACEMENT_RULES,
-            _task_variables(task_text, details, subjects),
+            style_signature_rules,
+            _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
             _plaque_mapping_block(assets),
         )
+        if section
     )
 
 
@@ -995,7 +1131,7 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
         (
             COMMON_REVIEW_RULES,
             HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
-            _task_variables(task_text, details, subjects),
+            _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
             _plaque_mapping_block(assets),

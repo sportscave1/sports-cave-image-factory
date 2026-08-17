@@ -763,7 +763,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "on_image_message_type": "Exact three-line bottom scarcity strip.",
         "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
-        "cover_composition": "Full-width upper lifestyle/product image region approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%.",
+        "cover_composition": "Full-width upper lifestyle/product image region approximately 77-79% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 21-23%.",
         "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
         "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
         "room_family": "Current premium collector-room control.",
@@ -2872,10 +2872,10 @@ The artwork must remain the unmistakable hero.
 
 APPROVED COMPOSITION
 
-Use a stacked full-width square composition with two visually connected sections:
+Use a stacked full-width square composition with two precisely separated sections:
 
-Upper lifestyle/product image region: approximately 76-78% of the square canvas.
-Bottom scarcity strip: approximately 22-24% of the square canvas.
+Upper lifestyle/product image region: approximately 77-79% of the square canvas.
+Fixed black footer: approximately 21-23% of the square canvas.
 
 Do not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.
 Do not allow the bottom strip to overpower the product.
@@ -3048,9 +3048,9 @@ Avoid:
 * Perfect front-facing artificial symmetry.
 * Camera positions that make the artwork appear small.
 
-BOTTOM SCARCITY STRIP
+FIXED BLACK FOOTER
 
-Add an integrated collector-grade full-width matte-black scarcity strip across the bottom 22-24% of the square canvas.
+Add an integrated collector-grade full-width matte-black footer across the bottom 21-23% of the square canvas.
 
 The strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.
 
@@ -3058,12 +3058,11 @@ Strip styling:
 
 * Deep matte black.
 * Subtle black material texture.
-* Restrained vignette.
 * Refined dark tonal variation.
 * Very subtle metallic-gold detailing.
 * Clean spacing.
 * No excessive shine.
-* No loud gradients.
+* No gradient, transparency, feathering, vignette or fade.
 * No neon effects.
 * No discount-store styling.
 
@@ -3198,7 +3197,7 @@ def build_default_instant_experience_cover_prompt_requirements(product_name, cat
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
     country = _normalise_option_label(country) or "selected market"
-    return (
+    base_prompt = (
         INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE.replace(
             "{{PRODUCT_NAME}}",
             product_name,
@@ -3208,6 +3207,13 @@ def build_default_instant_experience_cover_prompt_requirements(product_name, cat
         .replace(
             "{{UPLOADED_FRAMED_PRODUCT_IMAGE}}",
             INSTANT_EXPERIENCE_REFERENCE_IMAGE_INSTRUCTION,
+        )
+    )
+    return "\n\n".join(
+        (
+            base_prompt,
+            build_instant_experience_fixed_opaque_footer_rules(),
+            build_instant_experience_on_image_copy_fit_rules(),
         )
     )
 
@@ -3398,7 +3404,7 @@ HEADLINE
 - Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
 - If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
 - Valid: ONLY 100 WILL EVER EXIST
-- Invalid and requiring correction: THE WARNE EDITION STOPS AT 100
+- Reject and shorten any longer product-specific scarcity wording before it reaches an image-generation prompt.
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
@@ -3547,7 +3553,7 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the on-image CTA is not exactly CLAIM YOUR EDITION
 - a CTA field is outside the approved direct edition-acquisition family
 - another route's Headline, CTA or supporting wording appears
-- typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as deterministic flat overlay
+- typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as a deterministic flat post-production layer inside the fixed footer
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
 - essential wording is not immediately readable in an approximately 256 x 256 preview
 - any essential wording sits within 64 pixels of a canvas edge or touches the product, furniture or an architectural line
@@ -3601,10 +3607,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft side daylight from camera-left with restrained ambient fill",
         "time_of_day": "quiet late morning",
-        "overlay_position": "lower 24% conversion panel only",
-        "product_position": "dominant and centred in the upper 76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
+        "product_position": "dominant and centred in the upper 77–79% room scene",
         "architectural_cue": "architectural doorway near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -3631,10 +3637,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "75mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with slightly brighter room falloff",
         "time_of_day": "clean midday daylight",
-        "overlay_position": "lower 24% conversion panel only",
-        "product_position": "dominant and centred in the upper 76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
+        "product_position": "dominant and centred in the upper 77–79% room scene",
         "architectural_cue": "partial bookcase near one outer edge",
-        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -3661,10 +3667,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with quieter peripheral furniture",
         "time_of_day": "soft afternoon daylight",
-        "overlay_position": "lower 24% conversion panel only",
-        "product_position": "dominant and centred in the upper 76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
+        "product_position": "dominant and centred in the upper 77–79% room scene",
         "architectural_cue": "window edge with natural curtains near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene exactly 76%, lower conversion panel exactly 24%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
         "typography_mode": "premium_room_panel",
     },
 )
@@ -4574,7 +4580,7 @@ def _wall_palette_key(context):
 def _resolved_overlay_copy(context, route):
     edition_limit = context.get("edition_limit")
     if edition_limit:
-        return {
+        resolved = {
             "headline_text": f"ONLY {edition_limit} WILL EVER EXIST",
             "supporting_line": route["fomo_line"],
             "cta_text": "CLAIM YOUR EDITION",
@@ -4582,14 +4588,23 @@ def _resolved_overlay_copy(context, route):
             "edition_limit_source": context.get("edition_limit_source") or "verified product metadata",
             "scarcity_verified": True,
         }
-    return {
-        "headline_text": "SPORTS CAVE COLLECTOR RELEASE",
-        "supporting_line": "Premium collector-home presentation for the selected product.",
-        "cta_text": "CLAIM YOUR EDITION",
-        "edition_limit_used": "not verified",
-        "edition_limit_source": "safe evidence-gated fallback",
-        "scarcity_verified": False,
-    }
+    else:
+        resolved = {
+            "headline_text": "SPORTS CAVE COLLECTOR",
+            "supporting_line": "Premium collector-home presentation for the selected product.",
+            "cta_text": "CLAIM YOUR EDITION",
+            "edition_limit_used": "not verified",
+            "edition_limit_source": "safe evidence-gated fallback",
+            "scarcity_verified": False,
+        }
+    resolved.update(
+        resolve_instant_experience_on_image_copy(
+            resolved["headline_text"],
+            resolved["supporting_line"],
+            resolved["cta_text"],
+        )
+    )
+    return resolved
 
 
 def resolve_standard_instant_experience_visuals(
@@ -4712,6 +4727,8 @@ def build_instant_experience_image_quality_contract(visual):
     return "\n\n".join(
         (
             SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
+            build_instant_experience_fixed_opaque_footer_rules(),
+            build_instant_experience_on_image_copy_fit_rules(),
             build_instant_experience_creative_cta_rules(visual["concept_id"]),
             build_instant_experience_typography_quality_rules(visual),
             build_instant_experience_set_differentiation_rules(visual),
@@ -4724,15 +4741,14 @@ def build_instant_experience_typography_quality_rules(visual):
     return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
 INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 
-- Add promotional typography as a deterministic post-production overlay using real fonts after the room/product photograph is composed. Do not rely on the image model to invent text organically inside the room.
-- Lower conversion panel is exactly 24% of the 1024 x 1024 canvas, deep matte charcoal near #101112 or #121314 with an extremely subtle premium paper or fine-grain texture.
-- Separate the 76% room scene and 24% panel with one 1-pixel muted-gold boundary line. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
+- Add promotional typography as a deterministic post-production layer inside the fixed opaque footer after the room/product photograph is composed. Do not rely on the image model to invent text organically inside the room.
+- Use the fixed footer geometry and opacity contract exactly. Keep its one thin 1-pixel muted-gold top separator. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
 - Use a premium Sports Cave editorial serif for the headline, Montserrat Regular or Medium for the supporting line and Montserrat SemiBold or Bold for the CTA.
 - Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
 - Exact resolved headline: {visual.get("headline_text")}.
 - Exact resolved supporting line: {visual.get("supporting_line")}.
 - Exact resolved CTA: {visual.get("cta_text")}.
-- Keep the headline on one clean line wherever technically possible and maintain 64-72 px safe margins.
+- Keep the headline, supporting line and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
 - Ensure all essential wording is clearly readable in a 256 x 256 preview.
 
 MEANINGFUL SPORTS CAVE GOLD UNDERLINE
@@ -4787,7 +4803,7 @@ Resolved sibling fingerprints supplied for comparison:
 {chr(10).join(sibling_lines)}
 
 Within one three-image package:
-- Every route keeps the same exact product, Sports Cave identity, 76% room scene, 24% conversion panel, product dominance, black timber frame, realistic glazing and one CTA.
+- Every route keeps the same exact product, Sports Cave identity, upper room scene, fixed bottom 21–23% opaque footer, product dominance, black timber frame, realistic glazing and one CTA.
 - The three routes must differ in camera angle, room profile, wall colour, environmental cue, furniture crop and natural light direction or intensity.
 - Never use the same exact wall colour twice.
 - Never use the same primary environmental cue twice.
@@ -4812,7 +4828,7 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "sub_angle": visual["copy_row"],
         "hook_family": visual["purpose"],
         "cover_layout": visual["composition"],
-        "urgency_placement": "lower 24% conversion panel",
+        "urgency_placement": "fixed opaque footer across bottom 21–23%",
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
         "room_profile": visual.get("room_profile", visual["room_type"]),
@@ -4969,7 +4985,7 @@ RESOLVED ROUTE VARIABLES — FOLLOW EXACTLY
 - Time of day: {visual["time_of_day"]}
 - Product dominance: {visual["shot_distance"]}
 - Lens character: {visual["lens"]}
-- Conversion panel: {visual["overlay_position"]}
+- Fixed footer: {visual["overlay_position"]}
 
 Resolved prompt metadata:
 {resolved_json}
@@ -4986,8 +5002,8 @@ The final image must be:
 - clear and readable at a 256 x 256 preview
 
 Composition is locked:
-- Upper photographed residential room scene: exactly 76% of the canvas.
-- Lower conversion panel: exactly 24% of the canvas.
+- Upper photographed residential room scene: approximately 77–79% of the canvas.
+- Fixed opaque black footer: approximately the bottom 21–23% of the canvas.
 - Framed product width: approximately 82-88% of the canvas.
 - Complete frame visible with no cropped outer frame edges.
 - Safe margins: 64-72 pixels.
@@ -5081,15 +5097,15 @@ Use one physically consistent source of soft daylight with restrained interior a
 
 Never use a spotlight directly above the frame, glowing outlines, rim lighting, fog, smoke, light rays, heavy vignettes, conflicting light directions or excessive golden lighting.
 
-CONVERSION PANEL AND DETERMINISTIC OVERLAY
+FIXED BLACK FOOTER AND DETERMINISTIC TYPOGRAPHY
 
-Use the same exact 24% lower panel in all three routes:
+Use the centralized fixed opaque footer and on-image copy-fit contracts below without altering the existing typography hierarchy:
 - deep matte charcoal near #101112 or #121314
 - extremely subtle premium paper or fine-grain texture
 - one 1-pixel muted-gold boundary line across the scene transition
 - no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
 
-Add all promotional typography as a deterministic flat overlay using real fonts after the room/product photograph is composed. Do not rely on the image-generation model to organically render copy in the photographed scene.
+Add all promotional typography as a deterministic flat post-production layer inside the footer using real fonts after the room/product photograph is composed. Do not rely on the image-generation model to organically render copy in the photographed scene.
 
 Resolved on-image copy:
 HEADLINE: {visual.get("headline_text")}
@@ -5132,7 +5148,7 @@ FINAL ROUTE CHECK
 - Wall colour and cues differ from the other routes.
 - Room variation remains subtle and product-led.
 - The room never becomes a themed sports bar.
-- The lower panel remains exactly 24%.
+- The fixed black footer remains within approximately 21–23% of the canvas height.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
 
@@ -5496,8 +5512,8 @@ Use these exact cover lines:
 {overlay_lines}
 
 Cover:
-- Full-width upper lifestyle/product image region across approximately 76-78% of the square canvas.
-- Shallow full-width matte-black scarcity strip across the bottom approximately 22-24% of the square canvas.
+- Full-width upper lifestyle/product image region across approximately 77-79% of the square canvas.
+- Fixed full-width opaque matte-black footer across the bottom approximately 21-23% of the square canvas.
 - Thin restrained metallic-gold divider across the top edge of the black strip.
 - No left/right split, no right sidebar and no vertical scarcity panel.
 - Current black-and-gold visual treatment.
@@ -5801,7 +5817,7 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 - Premium Scarcity — Right Angle uses the slight right-angle camera role and its route FOMO line when edition-limit data is verified.
 - Premium Scarcity — Straight On uses the straight-on camera role and its route FOMO line when edition-limit data is verified.
 - Premium Scarcity — Left Angle uses the slight left-angle camera role and its route FOMO line when edition-limit data is verified.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, exact 76/24 layout, deterministic overlay wording and no automatic image generation.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, the country-invariant fixed 21–23% opaque footer, deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)

@@ -3331,6 +3331,7 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-social-children,
+        section[data-testid="stSidebar"] .st-key-sidebar-ads-children,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children,
         section[data-testid="stSidebar"] .st-key-sidebar-reporting-children {
             border-left: 1px solid #C8A85F;
@@ -3342,12 +3343,15 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-social-children div[data-testid="stButton"] button,
+        section[data-testid="stSidebar"] .st-key-sidebar-ads-children div[data-testid="stButton"] button,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button,
         section[data-testid="stSidebar"] .st-key-sidebar-reporting-children div[data-testid="stButton"] button {
             min-height: 2rem;
             padding: 0.3rem 0.52rem !important;
         }
 
+        section[data-testid="stSidebar"] .st-key-sidebar-ads-children div[data-testid="stButton"] button p,
+        section[data-testid="stSidebar"] .st-key-sidebar-ads-children div[data-testid="stButton"] button span,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button p,
         section[data-testid="stSidebar"] .st-key-sidebar-seo-children div[data-testid="stButton"] button span,
         section[data-testid="stSidebar"] .st-key-sidebar-reporting-children div[data-testid="stButton"] button p,
@@ -8661,9 +8665,11 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             help=f"Open {label}",
         )
         if clicked:
-            st.session_state[SIDEBAR_OPEN_GROUP_KEY] = group
             if can_open_overview and current_page != overview_route:
+                st.session_state[SIDEBAR_OPEN_GROUP_KEY] = group
                 set_current_page(overview_route, source="sidebar")
+            else:
+                _toggle_sidebar_group(group)
             st.rerun(scope="app")
         container.markdown(
             f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}" '
@@ -8713,7 +8719,10 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
         ):
             children = st.container(key="sidebar-ads-children")
             children.markdown('<span id="sidebar-ads-children"></span>', unsafe_allow_html=True)
-            for route in ads_nav.ADS_ROUTES:
+            for route in navigation_runtime.disclosure_child_routes(
+                ads_nav.ADS_ROUTES,
+                ads_nav.ADS_CREATE_ROUTE,
+            ):
                 child_button(
                     children,
                     route,

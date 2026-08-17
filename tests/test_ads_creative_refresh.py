@@ -13,6 +13,7 @@ import ads_navigation
 import ads_page
 import navigation_runtime
 import os_accounts
+import seo_navigation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,17 +116,80 @@ def sample_inputs(campaign_type="Instant Experience"):
 
 
 class CreativeRefreshNavigationTests(unittest.TestCase):
-    def test_ads_submenu_metadata_contains_create_ads_and_creative_refresh(self):
+    def test_ads_registry_has_one_top_level_parent_and_one_explicit_child(self):
         self.assertEqual(
             ads_navigation.ADS_ROUTES,
             ("Ads", "Creative Refresh"),
         )
-        self.assertEqual(ads_navigation.ADS_NAV_LABELS["Ads"], "Create Ads")
+        parent = os_accounts.PAGE_BY_KEY[ads_navigation.ADS_PAGE_KEY]
+        child = os_accounts.PAGE_BY_KEY[ads_navigation.CREATIVE_REFRESH_PAGE_KEY]
+        top_level_routes = tuple(page["route"] for page in os_accounts.navigation_pages())
+
+        self.assertEqual(parent["route"], ads_navigation.ADS_CREATE_ROUTE)
+        self.assertEqual(child["parent_key"], parent["key"])
+        self.assertTrue(child["navigation_child"])
+        self.assertFalse(child["worker_assignable"])
+        self.assertEqual(top_level_routes.count(ads_navigation.ADS_CREATE_ROUTE), 1)
+        self.assertNotIn(ads_navigation.CREATIVE_REFRESH_ROUTE, top_level_routes)
+
+    def test_ads_submenu_uses_shared_child_filter_and_never_renders_create_ads(self):
+        self.assertEqual(
+            navigation_runtime.disclosure_child_routes(
+                ads_navigation.ADS_ROUTES,
+                ads_navigation.ADS_CREATE_ROUTE,
+            ),
+            (ads_navigation.CREATIVE_REFRESH_ROUTE,),
+        )
         self.assertEqual(
             navigation_runtime.active_disclosure_group(
                 "Creative Refresh",
                 social_routes=(),
                 seo_routes=(),
+                ads_routes=ads_navigation.ADS_ROUTES,
+            ),
+            "ads",
+        )
+
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        ads_start = source.index("    if ads_nav.ADS_CREATE_ROUTE in allowed_routes:")
+        seo_start = source.index("    if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:", ads_start)
+        ads_source = source[ads_start:seo_start]
+        self.assertIn("navigation_runtime.disclosure_child_routes(", ads_source)
+        self.assertIn("ads_nav.ADS_CREATE_ROUTE,", ads_source)
+        self.assertNotIn("for route in ads_nav.ADS_ROUTES:", ads_source)
+        self.assertLess(
+            source.index('key="sidebar-ads-children"'),
+            source.index('key="sidebar-seo-children"'),
+        )
+
+    def test_ads_disclosure_uses_shared_toggle_and_submenu_layout_contract(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        disclosure_start = source.index("    def disclosure(")
+        disclosure_end = source.index("    def child_button(", disclosure_start)
+        disclosure_source = source[disclosure_start:disclosure_end]
+
+        self.assertIn("_toggle_sidebar_group(group)", disclosure_source)
+        self.assertEqual(navigation_runtime.toggle_disclosure_group("", "ads"), "ads")
+        self.assertEqual(navigation_runtime.toggle_disclosure_group("ads", "ads"), "")
+        self.assertEqual(navigation_runtime.toggle_disclosure_group("seo", "ads"), "ads")
+        for selector in (
+            ".st-key-sidebar-ads-children,",
+            '.st-key-sidebar-ads-children div[data-testid="stButton"] button,',
+        ):
+            self.assertIn(selector, source)
+        self.assertIn("max-width: calc(100% - 1.15rem);", source)
+        self.assertIn("width: calc(100% - 1.15rem);", source)
+
+    def test_seo_cannot_claim_the_creative_refresh_route(self):
+        self.assertNotIn(
+            ads_navigation.CREATIVE_REFRESH_ROUTE,
+            seo_navigation.SEO_ROUTES,
+        )
+        self.assertEqual(
+            navigation_runtime.active_disclosure_group(
+                ads_navigation.CREATIVE_REFRESH_ROUTE,
+                social_routes=("Social Media", "AI Reels"),
+                seo_routes=seo_navigation.SEO_ROUTES,
                 ads_routes=ads_navigation.ADS_ROUTES,
             ),
             "ads",
@@ -146,15 +210,46 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
     def test_creative_refresh_route_loads_directly(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
-        app_test.session_state["selected_page"] = "Creative Refresh"
+        app_test.query_params["page"] = ads_navigation.CREATIVE_REFRESH_PAGE_KEY
         app_test.session_state["startup_shell_loaded"] = True
         app_test.run(timeout=30)
         self.assertFalse(app_test.exception)
         self.assertEqual([title.value for title in app_test.title], ["Creative Refresh"])
+        sidebar_buttons = [(button.label, button.key) for button in app_test.sidebar.button]
+        self.assertIn(("Ads", "sidebar-disclosure::ads"), sidebar_buttons)
+        self.assertIn(
+            ("Creative Refresh", "sidebar-child::Creative Refresh"),
+            sidebar_buttons,
+        )
+        self.assertNotIn(("Create Ads", "sidebar-child::Ads"), sidebar_buttons)
+        self.assertEqual(app_test.session_state["sidebar-open-group"], "ads")
         labels = [button.label for button in app_test.button]
-        self.assertIn("Create Ads", labels)
-        self.assertIn("Creative Refresh", labels)
         self.assertIn("Generate Creative Refresh Package", labels)
+
+        next(
+            button
+            for button in app_test.sidebar.button
+            if button.key == "sidebar-disclosure::ads"
+        ).click()
+        app_test.run(timeout=30)
+        self.assertFalse(app_test.exception)
+        self.assertEqual([title.value for title in app_test.title], ["Ads"])
+        self.assertIn(
+            "sidebar-child::Creative Refresh",
+            {button.key for button in app_test.sidebar.button},
+        )
+
+        next(
+            button
+            for button in app_test.sidebar.button
+            if button.key == "sidebar-disclosure::ads"
+        ).click()
+        app_test.run(timeout=30)
+        self.assertFalse(app_test.exception)
+        self.assertNotIn(
+            "sidebar-child::Creative Refresh",
+            {button.key for button in app_test.sidebar.button},
+        )
 
     def test_existing_ads_route_and_renderer_remain_in_place(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -162,6 +257,14 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertIn('elif current_page in {"Ads", "Marketing Factory"}:', route_source)
         self.assertIn("get_ads_page().render_page()", route_source)
         self.assertIn('st.title("Ads")', (ROOT / "ads_page.py").read_text(encoding="utf-8"))
+        self.assertEqual(
+            os_accounts.PAGE_BY_KEY[ads_navigation.ADS_PAGE_KEY]["key"],
+            "ads",
+        )
+        self.assertEqual(
+            os_accounts.PAGE_BY_KEY[ads_navigation.CREATIVE_REFRESH_PAGE_KEY]["key"],
+            "ads_creative_refresh",
+        )
 
 
 class CreativeRefreshMetricTests(unittest.TestCase):

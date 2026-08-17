@@ -24,7 +24,7 @@ class DesignStudioInlineImageContractTests(unittest.TestCase):
         self.assertIn("asset_id", prompt)
         self.assertIn("use_mode", prompt)
 
-    def test_principal_venue_and_signature_result_limits_remain_exact(self):
+    def test_rivalry_principal_and_signature_result_limits_remain_exact(self):
         prompt = design_studio_styles.build_find_images_prompt(
             "rivalry_faceoff",
             "Peter Brock vs Allan Moffat",
@@ -35,13 +35,13 @@ class DesignStudioInlineImageContractTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Keep each principal in a separate labelled image group", prompt)
-        self.assertIn("three strongest final-use photographs per principal", prompt)
-        self.assertIn("no more than one relevant venue or shared-moment image", prompt)
-        self.assertIn("exactly one clearest verified signature candidate per named human principal", prompt)
-        self.assertIn("RIVAL ONE final-use candidates", prompt)
-        self.assertIn("RIVAL TWO final-use candidates", prompt)
-        self.assertLess(prompt.index("RIVAL ONE final-use candidates"), prompt.index("SIGNATURES with one per rival last"))
+        self.assertIn("exact two-group candidate and signature limits", prompt)
+        self.assertIn("three strongest compatible final-use photographs", prompt)
+        self.assertIn("one clearest verified signature candidate last", prompt)
+        self.assertIn("Do not return stadiums, venues, crowds, shared moments", prompt)
+        self.assertIn("Required: rival_one_photo, rival_two_photo. Optional: signature_asset", prompt)
+        self.assertNotIn("no more than one relevant venue or shared-moment image", prompt)
+        self.assertNotIn("Optional: venue_reference", prompt)
 
     def test_legacy_find_images_builder_carries_the_same_inline_contract(self):
         prompt = design_studio_page.build_design_image_carousel_prompt(

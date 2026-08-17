@@ -322,7 +322,7 @@ The finished design must look like one precisely contained, professionally print
 
 
 SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER = "SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1"
-SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1 = f"""
+_LEGACY_SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1 = f"""
 {SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER}
 
 MANDATORY WHEN THE DESIGN IS A RIVALRY, VERSUS, FACE-OFF OR TWO-LEGEND CONCEPT
@@ -816,6 +816,13 @@ Never assign one player's signature to another player.
 
 If no sufficiently reliable signature can be found for a subject, state or mark that signature asset as unavailable using the existing internal workflow metadata or unavailable state. Do not fabricate or approximate one, do not return several uncertain examples, and do not replace it with signed merchandise. Continue with the other valid player, venue and factual-detail reference images.
 """
+
+SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_V1 = "\n\n".join(
+    (
+        SPORTS_CAVE_RIVALRY_COMPOSITION_RULES_MARKER,
+        design_studio_styles.RIVALRY_FACE_OFF_GENERATION_RULES,
+    )
+)
 
 
 SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2 = (
