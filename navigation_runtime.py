@@ -1,10 +1,11 @@
 def active_disclosure_group(
     route,
     *,
-    social_routes,
-    seo_routes,
+    social_routes=(),
+    seo_routes=(),
     reporting_routes=(),
     ads_routes=(),
+    analytics_routes=(),
 ):
     if route in social_routes:
         return "social"
@@ -14,6 +15,8 @@ def active_disclosure_group(
         return "reporting"
     if route in ads_routes:
         return "ads"
+    if route in analytics_routes:
+        return "analytics"
     return ""
 
 
@@ -21,10 +24,11 @@ def initial_disclosure_group(
     route,
     *,
     stored,
-    social_routes,
-    seo_routes,
+    social_routes=(),
+    seo_routes=(),
     reporting_routes=(),
     ads_routes=(),
+    analytics_routes=(),
 ):
     if stored is not None:
         return str(stored or "")
@@ -34,6 +38,7 @@ def initial_disclosure_group(
         seo_routes=seo_routes,
         reporting_routes=reporting_routes,
         ads_routes=ads_routes,
+        analytics_routes=analytics_routes,
     )
 
 
@@ -43,12 +48,31 @@ def toggle_disclosure_group(current_group, clicked_group):
     return "" if current == clicked else clicked
 
 
-def disclosure_parent_is_active(route, overview_route):
-    return str(route or "") == str(overview_route or "")
+def disclosure_group_is_expanded(
+    route,
+    *,
+    group,
+    stored_group,
+    force_open_routes=(),
+):
+    """Keep a route's owning disclosure visible across reruns and history changes."""
+    if route in force_open_routes:
+        return True
+    return str(stored_group or "") == str(group or "")
 
 
-def disclosure_child_routes(routes, overview_route):
-    return tuple(route for route in routes if route != overview_route)
+def disclosure_parent_is_active(route, overview_route, *, family_routes=()):
+    return (
+        str(route or "") == str(overview_route or "")
+        or route in tuple(family_routes or ())
+    )
+
+
+def disclosure_child_routes(routes, overview_route, *, include_overview=False):
+    return tuple(
+        route for route in routes
+        if include_overview or route != overview_route
+    )
 
 
 def dispatch_selected(selected, handlers):

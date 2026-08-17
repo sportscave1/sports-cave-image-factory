@@ -169,7 +169,21 @@ class GoogleAPIContractTests(unittest.TestCase):
             result = client.fetch_gsc_date("https://example.test/", date(2026, 8, 10))
         self.assertEqual([row["query"] for row in result["details"]], ["one", "two", "three"])
         self.assertEqual(result["total"]["clicks"], 8)
-        self.assertEqual([body["startRow"] for body in calls if "dimensions" in body], [0, 2])
+        detail_calls = [
+            body for body in calls
+            if tuple(body.get("dimensions") or ()) == importer.GSC_DETAIL_DIMENSIONS
+        ]
+        self.assertEqual([body["startRow"] for body in detail_calls], [0, 2])
+        self.assertEqual(
+            {tuple(body.get("dimensions") or ()) for body in calls if "dimensions" in body},
+            {
+                importer.GSC_DETAIL_DIMENSIONS,
+                ("query", "country", "device"),
+                ("page", "country", "device"),
+                ("query", "page"),
+                ("searchAppearance",),
+            },
+        )
         self.assertTrue(all(body.get("dataState") == "final" for body in calls))
         self.assertTrue(all(body.get("type") == "web" for body in calls))
 
@@ -259,10 +273,13 @@ class DurableImportTests(unittest.TestCase):
             def discover_gsc_range(self, _site):
                 return date(2026, 8, 1), date(2026, 8, 3)
 
-            def fetch_gsc_date(self, _site, day):
+            def fetch_gsc_date(self, _site, day, *, search_type="web"):
                 if day == self.fail_day:
                     raise importer.SEOImportError("Temporary import failure.", code="temporary")
-                return {"date": day, "details": [{"query": day.isoformat()}], "total": {}, "rows_received": 2}
+                return {
+                    "date": day, "search_type": search_type,
+                    "details": [{"query": day.isoformat()}], "total": {}, "rows_received": 2,
+                }
 
         first_run = {
             "id": "run-1", "source": "GSC", "mode": "historical", "status": "running",
@@ -309,7 +326,7 @@ class DurableImportTests(unittest.TestCase):
             def discover_gsc_range(self, _site):
                 return day, day
 
-            def fetch_gsc_date(self, _site, _day):
+            def fetch_gsc_date(self, _site, _day, *, search_type="web"):
                 raise importer.SEOImportError("Fetch failed.", code="fetch_failed")
 
         self._worker(store, Client())._process(run)
@@ -336,25 +353,55 @@ class DurableImportTests(unittest.TestCase):
             def discover_gsc_range(self, _site):
                 return day, day
 
-            def fetch_gsc_date(self, _site, _day):
-                return {"date": day, "details": [{"query": "new"}], "total": {}, "rows_received": 2}
+            def fetch_gsc_date(self, _site, _day, *, search_type="web"):
+                return {
+                    "date": day, "search_type": search_type,
+                    "details": [{"query": "new"}], "total": {}, "rows_received": 2,
+                }
 
         self._worker(store, Client())._process(run)
         self.assertEqual(store.gsc[day], [{"query": "previous-valid"}])
         self.assertEqual(store.failed["error_code"], "date_replace_failed")
 
-    def test_daily_range_rechecks_seven_completed_days_and_catches_new_dates(self):
+    def test_daily_range_rechecks_fourteen_completed_days_and_catches_new_dates(self):
         start, end = importer.daily_refresh_range(
             date(2026, 1, 1),
             date(2026, 8, 12),
             date(2026, 8, 10),
         )
-        self.assertEqual(start, date(2026, 8, 6))
+        self.assertEqual(start, date(2026, 7, 30))
         self.assertEqual(end, date(2026, 8, 12))
         missed_start, _ = importer.daily_refresh_range(
             date(2026, 1, 1), date(2026, 8, 12), date(2026, 7, 31)
         )
-        self.assertEqual(missed_start, date(2026, 8, 1))
+        self.assertEqual(missed_start, date(2026, 7, 30))
+
+    def test_fresh_search_console_import_uses_separate_preliminary_state(self):
+        store = Mock()
+        store.replace_gsc_date.return_value = {"inserted": 2, "replaced": 0}
+        connection = Mock()
+        client = Mock()
+        client.fetch_gsc_date.return_value = {
+            "date": date(2026, 8, 17),
+            "data_state": "all",
+            "rows_received": 2,
+        }
+        with patch.object(google_seo, "access_token_for_connection", return_value=("token", {"gsc_site_url": "https://example.test/"})), patch.object(
+            google_seo, "load_config", return_value={}
+        ), patch.object(importer, "GoogleSEOReportingClient", return_value=client):
+            result = importer.refresh_gsc_fresh_data(
+                import_store=store,
+                connection_store=connection,
+                today=date(2026, 8, 17),
+            )
+        self.assertEqual(client.fetch_gsc_date.call_count, len(importer.GSC_SEARCH_TYPES))
+        self.assertEqual(
+            [call.kwargs["search_type"] for call in client.fetch_gsc_date.call_args_list],
+            list(importer.GSC_SEARCH_TYPES),
+        )
+        self.assertTrue(all(call.kwargs["data_state"] == "all" for call in client.fetch_gsc_date.call_args_list))
+        self.assertEqual(result["status"], "preliminary")
+        self.assertEqual(result["written"], 2 * len(importer.GSC_SEARCH_TYPES))
 
     def test_queue_is_idempotent_per_source_and_non_admin_is_rejected(self):
         store = MemoryImportStore()

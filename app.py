@@ -42,6 +42,7 @@ import streamlit as st
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
 import app_branding
 import ads_navigation as ads_nav
+import analytics_navigation as analytics_nav
 import dropbox_integration
 import mockup_storage
 import navigation_runtime
@@ -71,6 +72,7 @@ ads_page_module = None
 ads_creative_refresh_module = None
 reporting_page_module = None
 seo_page_module = None
+analytics_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -233,6 +235,15 @@ def get_seo_page():
         seo_page_module = importlib.import_module("seo_page")
         log_startup_stage("SEO PAGE IMPORT DONE")
     return seo_page_module
+
+
+def get_analytics_page():
+    global analytics_page_module
+    if analytics_page_module is None:
+        log_startup_stage("ANALYTICS PAGE IMPORT START")
+        analytics_page_module = importlib.import_module("analytics_page")
+        log_startup_stage("ANALYTICS PAGE IMPORT DONE")
+    return analytics_page_module
 
 
 def get_requests_module():
@@ -8569,6 +8580,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Design Studio": ":material/palette:",
     "Ads": ":material/ads_click:",
     ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
+    analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
     "Reporting": ":material/bar_chart:",
@@ -8617,6 +8629,7 @@ def _active_sidebar_group(route):
             os_accounts.WEEKLY_REVIEW_ROUTE,
         },
         ads_routes=ads_nav.ADS_ROUTES,
+        analytics_routes=analytics_nav.ANALYTICS_ROUTES,
     )
 
 
@@ -8641,11 +8654,25 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
                 os_accounts.WEEKLY_REVIEW_ROUTE,
             },
             ads_routes=ads_nav.ADS_ROUTES,
+            analytics_routes=analytics_nav.ANALYTICS_ROUTES,
         )
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
-    def disclosure(group, label, icon, overview_route, *, can_open_overview=True):
-        expanded = open_group == group
+    def disclosure(
+        group,
+        label,
+        icon,
+        overview_route,
+        *,
+        can_open_overview=True,
+        force_open_routes=(),
+    ):
+        expanded = navigation_runtime.disclosure_group_is_expanded(
+            current_page,
+            group=group,
+            stored_group=open_group,
+            force_open_routes=force_open_routes,
+        )
         container = st.container(
             key=f"sidebar-disclosure-{group}-{'open' if expanded else 'closed'}"
         )
@@ -8658,6 +8685,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
                 if navigation_runtime.disclosure_parent_is_active(
                     current_page,
                     overview_route,
+                    family_routes=force_open_routes,
                 )
                 else "secondary"
             ),
@@ -8716,6 +8744,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             "Ads",
             SIDEBAR_ICON_BY_ROUTE[ads_nav.ADS_CREATE_ROUTE],
             ads_nav.ADS_CREATE_ROUTE,
+            force_open_routes=ads_nav.ADS_ROUTES,
         ):
             children = st.container(key="sidebar-ads-children")
             children.markdown('<span id="sidebar-ads-children"></span>', unsafe_allow_html=True)
@@ -8730,18 +8759,40 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
                     icon=SIDEBAR_ICON_BY_ROUTE.get(route),
                 )
 
+    if analytics_nav.ANALYTICS_OVERVIEW_ROUTE in allowed_routes:
+        if disclosure(
+            "analytics",
+            "Analytics",
+            SIDEBAR_ICON_BY_ROUTE[analytics_nav.ANALYTICS_OVERVIEW_ROUTE],
+            analytics_nav.ANALYTICS_OVERVIEW_ROUTE,
+            force_open_routes=analytics_nav.ANALYTICS_ROUTES,
+        ):
+            children = st.container(key="sidebar-analytics-children")
+            children.markdown(
+                '<span id="sidebar-analytics-children"></span>',
+                unsafe_allow_html=True,
+            )
+            for route in navigation_runtime.disclosure_child_routes(
+                analytics_nav.ANALYTICS_ROUTES,
+                analytics_nav.ANALYTICS_OVERVIEW_ROUTE,
+                include_overview=True,
+            ):
+                child_button(children, route, analytics_nav.ANALYTICS_NAV_LABELS[route])
+
     if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:
         if disclosure(
             "seo",
             "SEO",
             SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
             seo_nav.SEO_OVERVIEW_ROUTE,
+            force_open_routes=seo_nav.SEO_ROUTES,
         ):
             children = st.container(key="sidebar-seo-children")
             children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
             for route in navigation_runtime.disclosure_child_routes(
                 seo_nav.SEO_ROUTES,
                 seo_nav.SEO_OVERVIEW_ROUTE,
+                include_overview=True,
             ):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
     email_container = st.container(key="sidebar-email-soon")
@@ -8870,6 +8921,7 @@ def render_sidebar():
     if (
         current_page not in MENU_OPTIONS
         and current_page != social_media.AI_REELS_ROUTE
+        and current_page not in analytics_nav.ANALYTICS_ROUTES
         and current_page not in seo_nav.SEO_ROUTES
         and current_page not in ads_nav.ADS_ROUTES
         and current_page != "Accounts & Access"
@@ -15467,6 +15519,12 @@ def render_selected_page(current_page):
     elif current_page == social_media.AI_REELS_ROUTE:
         get_social_media_reels_studio_page().render_page(
             can_edit_prompts=prompt_editing_allowed()
+        )
+    elif current_page in analytics_nav.ANALYTICS_ROUTES:
+        get_analytics_page().render_page(
+            current_os_user(),
+            current_page,
+            navigate=lambda route: set_current_page(route, source="analytics"),
         )
     elif current_page in seo_nav.SEO_ROUTES:
         get_seo_page().render_page(

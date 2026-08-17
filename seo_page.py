@@ -3,6 +3,7 @@ import html
 import json
 import os
 import re
+import uuid
 
 import streamlit as st
 
@@ -13,19 +14,43 @@ import google_seo_phase4
 import navigation_runtime
 import os_accounts
 import seo_growth_intelligence
+import seo_blog_workflow
 import seo_live_analytics
+import seo_metrics
+import seo_navigation as seo_nav
 import seo_sync_progress
+import seo_technical_audit
 import seo_workspace as seo
 
 
 SEO_OVERVIEW_CACHE_TTL_SECONDS = 15
 SEO_PROGRESS_POLL_SECONDS = 15
 SEO_ADMIN_OPEN_STATE_KEY = "seo-data-connections-open"
+DATABASE_URL_ENV_KEYS = (
+    "DATABASE_URL",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_DB_URL",
+    "POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_PUBLIC_URL",
+    "RENDER_DATABASE_URL",
+)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_blog_shopify_targets():
+    return seo_blog_workflow.PostgresBlogProjectStore().list_shopify_targets()
 
 
 PAGE_SUBTITLES = {
-    seo.SEO_OVERVIEW_ROUTE: "Saved store and organic performance, with each source shown as soon as its data is available.",
-    seo.SEO_KEYWORDS_ROUTE: "Turn real Google Search Console queries into buyer-focused page and content opportunities.",
+    seo.SEO_OVERVIEW_ROUTE: "Google Search Console visibility, rankings and opportunities from saved source data.",
+    seo.SEO_KEYWORDS_ROUTE: "Review one canonical row per Google Search Console query.",
+    seo_nav.SEO_OPPORTUNITIES_ROUTE: "Prioritise explainable opportunities from observed search evidence.",
+    seo_nav.SEO_LANDING_PAGES_ROUTE: "Review canonical pages using Search Console clicks, impressions, CTR and position.",
+    seo_nav.SEO_MAPPING_ROUTE: "Map approved queries to one canonical target page and track conflicts.",
+    seo_nav.SEO_HEALTH_ROUTE: "Review saved technical findings and administrator-only sync controls.",
     seo.SEO_REPORTS_ROUTE: "Prepare evidence-based growth reports, review recommendations and build strategy from saved data.",
     seo.SEO_TASKS_ROUTE: "Turn approved SEO recommendations into assigned work and measure results over time.",
     seo.SEO_CITATIONS_ROUTE: "Track reputable external profiles and business listings that display the Sports Cave brand and website.",
@@ -383,6 +408,10 @@ def _cached_default_reporting_snapshot(
     market,
     device,
     compare,
+    comparison,
+    search_type,
+    query_class,
+    source_scope,
     custom_start,
     custom_end,
     source_health,
@@ -393,6 +422,10 @@ def _cached_default_reporting_snapshot(
         market=market,
         device=device,
         compare=compare,
+        comparison=comparison,
+        search_type=search_type,
+        query_class=query_class,
+        source_scope=source_scope,
         custom_start=custom_start,
         custom_end=custom_end,
         source_health=source_health,
@@ -1038,27 +1071,45 @@ def _load_reporting_health(phase4_store=None):
 
 
 def _reporting_filters():
-    columns = st.columns([1.35, 1, 1, 1.2])
+    columns = st.columns([1.25, 1, 1, 1, 1, 1.2])
     preset = columns[0].selectbox(
         "Period",
-        ("Last 28 days", "Last 90 days", "Last 12 months", "Custom range"),
+        (
+            "Today", "Yesterday", "Last 7 days", "Last 28 days", "Last 30 days",
+            "Last 90 days", "Last 16 months", "Custom range",
+        ),
+        index=3,
         key="seo-phase4-period",
     )
     market = columns[1].selectbox(
         "Market",
-        ("All markets", "Australia", "United States", "United Kingdom"),
+        ("All markets", "Australia", "United States", "United Kingdom", "Canada", "New Zealand"),
         key="seo-phase4-market",
     )
     device = columns[2].selectbox(
         "Device",
-        ("All devices", "Desktop", "Mobile"),
+        ("All devices", "Desktop", "Mobile", "Tablet"),
         key="seo-phase4-device",
     )
-    compare = columns[3].toggle(
-        "Previous matching period",
-        value=True,
+    search_type = columns[3].selectbox(
+        "Search type",
+        ("web", "image", "video", "news"),
+        key="seo-phase4-search-type",
+    )
+    query_class = columns[4].selectbox(
+        "Queries",
+        ("All known queries", "Branded", "Non-branded"),
+        key="seo-phase4-query-class",
+    )
+    comparison = columns[5].selectbox(
+        "Compare",
+        ("Off", "Previous period", "Previous year"),
+        index=1,
         key="seo-phase4-compare",
     )
+    if preset == "Today":
+        comparison = "Off"
+        st.caption("Preliminary - Search Console may still update today's data; comparison badges are disabled.")
     custom_start = custom_end = None
     if preset == "Custom range":
         date_columns = st.columns(2)
@@ -1068,25 +1119,40 @@ def _reporting_filters():
         "preset": preset,
         "market": market,
         "device": device,
-        "compare": compare,
+        "compare": comparison != "Off",
+        "comparison": comparison,
+        "search_type": search_type,
+        "query_class": query_class,
         "custom_start": custom_start,
         "custom_end": custom_end,
     }
 
 
-def _load_reporting_snapshot(filters, *, phase4_store=None, reporting_reader=None, source_health=None):
+def _load_reporting_snapshot(
+    filters,
+    *,
+    phase4_store=None,
+    reporting_reader=None,
+    source_health=None,
+    source_scope="seo",
+):
     arguments = {
         "preset": filters["preset"],
         "market": filters["market"],
         "device": filters["device"],
         "compare": filters["compare"],
+        "comparison": filters["comparison"],
+        "search_type": filters["search_type"],
+        "query_class": filters["query_class"],
+        "source_scope": source_scope,
         "custom_start": filters["custom_start"],
         "custom_end": filters["custom_end"],
     }
     if reporting_reader is not None:
         if isinstance(reporting_reader, seo_live_analytics.PostgresSEOLiveAnalyticsReader):
             return reporting_reader.snapshot(**arguments, source_health=source_health)
-        return reporting_reader.snapshot(**arguments)
+        legacy_arguments = {key: value for key, value in arguments.items() if key != "source_scope"}
+        return reporting_reader.snapshot(**legacy_arguments)
     if phase4_store is not None:
         return seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store).snapshot(
             **arguments, source_health=source_health
@@ -1096,6 +1162,10 @@ def _load_reporting_snapshot(filters, *, phase4_store=None, reporting_reader=Non
         arguments["market"],
         arguments["device"],
         arguments["compare"],
+        arguments["comparison"],
+        arguments["search_type"],
+        arguments["query_class"],
+        arguments["source_scope"],
         arguments["custom_start"],
         arguments["custom_end"],
         source_health or {},
@@ -1637,19 +1707,21 @@ def _render_data_connections_admin(
     phase4_store=None,
     reporting_reader=None,
     growth_store=None,
+    embedded=False,
 ):
-    st.divider()
-    is_open = bool(st.session_state.get(SEO_ADMIN_OPEN_STATE_KEY, False))
-    if st.button(
-        "Data Connections & Sync Settings",
-        icon=":material/expand_less:" if is_open else ":material/expand_more:",
-        key="seo-data-connections-toggle",
-        use_container_width=True,
-    ):
-        st.session_state[SEO_ADMIN_OPEN_STATE_KEY] = not is_open
-        st.rerun()
-    if not is_open:
-        return
+    if not embedded:
+        st.divider()
+        is_open = bool(st.session_state.get(SEO_ADMIN_OPEN_STATE_KEY, False))
+        if st.button(
+            "Data Connections & Sync Settings",
+            icon=":material/expand_less:" if is_open else ":material/expand_more:",
+            key="seo-data-connections-toggle",
+            use_container_width=True,
+        ):
+            st.session_state[SEO_ADMIN_OPEN_STATE_KEY] = not is_open
+            st.rerun()
+        if not is_open:
+            return
 
     config_status = google_seo.configuration_status()
     using_default_google_store = google_store is None
@@ -2840,6 +2912,848 @@ def _render_tasks_results(user, *, growth_store=None):
     )
 
 
+def _saved_search_snapshot(
+    *,
+    phase4_store=None,
+    reporting_reader=None,
+    include_organic_ga4=False,
+):
+    filters = _reporting_filters()
+    if (
+        phase4_store is None
+        and reporting_reader is None
+        and not any(str(os.getenv(key) or "").strip() for key in DATABASE_URL_ENV_KEYS)
+    ):
+        return {
+            "ready": False,
+            "reason": "database_not_configured",
+            "health": {
+                "gsc": {
+                    "available": False,
+                    "status": "configuration_required",
+                    "through_date": "",
+                }
+            },
+            "current": {},
+            "previous": {},
+            "daily_trend": [],
+            "top_queries": [],
+            "top_pages": [],
+        }
+    try:
+        return _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo_landing" if include_organic_ga4 else "seo",
+        )
+    except Exception:
+        return {"ready": False, "reason": "saved_data_unavailable", "top_queries": [], "top_pages": []}
+
+
+def _query_table_rows(snapshot):
+    rows = []
+    for row in snapshot.get("top_queries") or []:
+        rows.append(
+            {
+                "Query": row.get("query") or row.get("normalized_query") or "",
+                "Clicks": _metric_value(row.get("clicks")),
+                "Impressions": _metric_value(row.get("impressions")),
+                "CTR": _metric_value(row.get("ctr"), style="percent"),
+                "Position": _metric_value(row.get("average_position"), style="position"),
+                "Click change": _metric_value(row.get("click_change")),
+                "Rank change": _metric_value(row.get("ranking_change"), style="position"),
+                "Markets": ", ".join(row.get("market_mix") or []),
+                "Devices": ", ".join(row.get("device_mix") or []),
+            }
+        )
+    return rows
+
+
+def _render_search_overview(
+    state,
+    user,
+    navigate,
+    google_store=None,
+    import_store=None,
+    phase4_store=None,
+    reporting_reader=None,
+    growth_store=None,
+):
+    _header(seo.SEO_OVERVIEW_ROUTE)
+    snapshot = _saved_search_snapshot(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
+    current = snapshot.get("current") or {}
+    previous = snapshot.get("previous") or {}
+    columns = st.columns(5)
+    for column, label, key, style, inverse in (
+        (columns[0], "Organic clicks", "organic_clicks", "number", False),
+        (columns[1], "Impressions", "organic_impressions", "number", False),
+        (columns[2], "CTR", "ctr", "percent", False),
+        (columns[3], "Average position", "average_position", "position", True),
+    ):
+        absolute, percent = _metric_delta(current.get(key), previous.get(key), position=inverse)
+        column.metric(
+            label,
+            _metric_value(current.get(key), style=style),
+            percent or absolute,
+            delta_color="inverse" if inverse else "normal",
+        )
+    quality = seo_metrics.rank_quality(snapshot.get("top_queries") or [])
+    coverage = seo_metrics.known_query_coverage(
+        current.get("organic_clicks"),
+        current.get("organic_impressions"),
+        snapshot.get("top_queries") or [],
+    )
+    columns[4].metric(
+        "Rank Quality",
+        "Unavailable" if quality["score"] is None else f"{float(quality['score']):.1f}/100",
+    )
+    health = (snapshot.get("health") or {}).get("gsc") or {}
+    through = health.get("through_date") or "Unavailable"
+    st.caption(
+        f"Source: Google Search Console | Exact saved property totals | Data through {through} | "
+        "Rank Quality is impression-weighted across known query rows."
+    )
+    if coverage.get("click_coverage") is not None:
+        st.caption(
+            f"Known-query coverage: {float(coverage['click_coverage']) * 100:.1f}% of property clicks "
+            f"and {float(coverage['impression_coverage']) * 100:.1f}% of property impressions. "
+            "The remainder may be unavailable because of Search Console privacy filtering or row limits."
+        )
+    trend = [
+        {
+            "Date": row.get("date"),
+            "Clicks": float(_numeric_value(row.get("organic_clicks")) or 0),
+            "Impressions": float(_numeric_value(row.get("organic_impressions")) or 0),
+        }
+        for row in snapshot.get("daily_trend") or []
+    ]
+    if trend:
+        _section_heading("Organic visibility")
+        st.line_chart(trend, x="Date", y=("Clicks", "Impressions"), height=250)
+    queries = list(snapshot.get("top_queries") or [])
+    view = st.segmented_control(
+        "Overview detail",
+        ("Top queries", "Quick wins", "Rising", "Declining", "Rank distribution", "Landing pages"),
+        default="Top queries",
+        key="seo-v2-overview-detail",
+        label_visibility="collapsed",
+    ) or "Top queries"
+    if view == "Top queries":
+        rows = _query_table_rows({"top_queries": queries[:25]})
+        empty = "No saved query rows are available."
+    elif view == "Quick wins":
+        quick_wins = sorted(
+            (
+                row for row in queries
+                if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 20
+            ),
+            key=lambda row: seo_metrics.opportunity_score(row)["score"],
+            reverse=True,
+        )
+        rows = _query_table_rows({"top_queries": quick_wins[:25]})
+        empty = "No striking-distance query opportunities are available."
+    elif view == "Rising":
+        rising = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0, reverse=True)
+        rows = _query_table_rows({"top_queries": rising[:25]})
+        empty = "No rising queries are available."
+    elif view == "Declining":
+        declining = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0)
+        rows = _query_table_rows({"top_queries": declining[:25]})
+        empty = "No declining queries are available."
+    elif view == "Rank distribution":
+        rows = [
+            {"Bucket": label, "Known impressions": _metric_value(value)}
+            for label, value in quality["distribution"].items()
+        ]
+        empty = "No rank distribution is available."
+    else:
+        rows = [
+            {
+                "Page": row.get("canonical_url") or row.get("path") or "",
+                "Type": row.get("page_type") or "",
+                "Clicks": _metric_value(row.get("clicks")),
+                "Impressions": _metric_value(row.get("impressions")),
+                "CTR": _metric_value(row.get("ctr"), style="percent"),
+                "Position": _metric_value(row.get("average_position"), style="position"),
+            }
+            for row in (snapshot.get("top_pages") or [])[:20]
+        ]
+        empty = "No saved Search Console landing-page rows are available."
+    _table(rows, empty=empty, height=310)
+    with st.expander("Data Connections & Sync Settings", expanded=False):
+        _render_data_connections_admin(
+            user,
+            google_store=google_store,
+            import_store=import_store,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            growth_store=growth_store,
+            embedded=True,
+        )
+
+
+def _render_keywords_rankings(state, *, phase4_store=None, reporting_reader=None):
+    _header(seo.SEO_KEYWORDS_ROUTE)
+    st.caption("One row represents one normalised query. Country and device are filters or mix labels, never duplicate rows.")
+    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    mapping_targets = {
+        str(row.get("primary_keyword") or "").strip().casefold(): row.get("target_page") or ""
+        for row in seo.active_records(state, "keyword_mappings")
+    }
+    keyword_status = {
+        str(row.get("keyword") or row.get("raw_query") or "").strip().casefold():
+        row.get("opportunity_status") or row.get("mapping_status") or ""
+        for row in seo.active_records(state, "keywords")
+    }
+    source_rows = list(snapshot.get("top_queries") or [])
+    view = st.segmented_control(
+        "View",
+        ("All", "Rising", "Declining", "New", "Top 3", "Positions 4-10", "Positions 11-20", "Unmapped"),
+        default="All",
+        key="seo-v2-query-view",
+    ) or "All"
+    if view == "Rising":
+        source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) > 0]
+    elif view == "Declining":
+        source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) < 0]
+    elif view == "New":
+        source_rows = [row for row in source_rows if (_numeric_value(row.get("previous_clicks")) or 0) == 0]
+    elif view == "Top 3":
+        source_rows = [row for row in source_rows if 0 < (_numeric_value(row.get("average_position")) or 0) <= 3]
+    elif view == "Positions 4-10":
+        source_rows = [row for row in source_rows if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 10]
+    elif view == "Positions 11-20":
+        source_rows = [row for row in source_rows if 11 <= (_numeric_value(row.get("average_position")) or 0) <= 20]
+    elif view == "Unmapped":
+        source_rows = [
+            row for row in source_rows
+            if not mapping_targets.get(str(row.get("query") or "").strip().casefold())
+        ]
+    rows = _query_table_rows({"top_queries": source_rows})
+    for row in rows:
+        key = str(row.get("Query") or "").strip().casefold()
+        row["Mapped target"] = mapping_targets.get(key) or "Unmapped"
+        row["Opportunity status"] = keyword_status.get(key) or "Open"
+    search = st.text_input("Search queries", key="seo-v2-query-search")
+    if search:
+        rows = [row for row in rows if search.casefold() in str(row.get("Query") or "").casefold()]
+    rows = _paginated_rows(rows, key="seo-v2-query-table", default_page_size=25)
+    _table(rows, empty="No saved Search Console query rows match these filters.", height=520)
+
+
+def _render_opportunities(
+    store,
+    state,
+    user,
+    navigate,
+    *,
+    phase4_store=None,
+    reporting_reader=None,
+    project_store=None,
+):
+    _header(seo_nav.SEO_OPPORTUNITIES_ROUTE)
+    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    prepared = []
+    source_by_query = {}
+    dismissed = {
+        str(row.get("keyword") or row.get("raw_query") or "").strip().casefold()
+        for row in seo.active_records(state, "keywords")
+        if row.get("opportunity_status") == "Dismissed"
+    }
+    for row in snapshot.get("top_queries") or []:
+        query = str(row.get("query") or row.get("normalized_query") or "").strip()
+        if not query or query.casefold() in dismissed:
+            continue
+        candidate = {
+            **row,
+            "mapped_target": bool(row.get("current_page")),
+            "content_gap": not bool(row.get("current_page")),
+            "cannibalisation_risk": row.get("cannibalisation_risk") or 0,
+        }
+        scored = seo_metrics.opportunity_score(candidate)
+        source_by_query[query] = {**row, **scored}
+        prepared.append(
+            {
+                "Score": float(scored["score"]),
+                "Query": query,
+                "Clicks": _metric_value(row.get("clicks")),
+                "Impressions": _metric_value(row.get("impressions")),
+                "CTR": _metric_value(row.get("ctr"), style="percent"),
+                "Position": _metric_value(row.get("average_position"), style="position"),
+                "Matched page": row.get("current_page") or "Unmapped",
+                "Why": scored["explanation"],
+            }
+        )
+    prepared.sort(key=lambda row: row["Score"], reverse=True)
+    _table(
+        _paginated_rows(prepared, key="seo-v2-opportunities"),
+        empty="No explainable opportunities are available for the selected saved data.",
+        height=520,
+    )
+    st.caption("Scores use only observed impressions, position, CTR, movement, mapping, content-gap and cannibalisation evidence. No search volume is inferred.")
+    if not prepared:
+        return
+    selected_query = st.selectbox(
+        "Opportunity action",
+        tuple(row["Query"] for row in prepared),
+        key="seo-v2-opportunity-action",
+    )
+    selected = source_by_query[selected_query]
+    actions = st.columns(3)
+    if actions[0].button("Add to Mapping", use_container_width=True, key="seo-v2-opportunity-map"):
+        saved = seo.upsert_record(
+            state,
+            "keywords",
+            {
+                "keyword": selected_query,
+                "raw_query": selected_query,
+                "clicks": selected.get("clicks") or 0,
+                "impressions": selected.get("impressions") or 0,
+                "ctr": selected.get("ctr") or 0,
+                "average_position": selected.get("average_position") or 0,
+                "target_url": selected.get("current_page") or "",
+                "mapping_status": "Unreviewed",
+                "opportunity_status": "Open",
+            },
+            actor=user,
+        )
+        if _persist(
+            store,
+            state,
+            user,
+            action="seo_opportunity_added_to_mapping",
+            area="SEO / Opportunities",
+            message=f"SEO opportunity added to mapping: {selected_query}",
+            entity_type="seo_keyword",
+            entity_id=saved["id"],
+        ):
+            _navigate(navigate, seo_nav.SEO_MAPPING_ROUTE)
+    if actions[1].button("Create Blog Brief", use_container_width=True, key="seo-v2-opportunity-blog"):
+        project_store = project_store or seo_blog_workflow.PostgresBlogProjectStore()
+        opportunity = {
+            **selected,
+            "query": selected_query,
+            "matched_page": selected.get("current_page") or "",
+            "data_through_date": ((snapshot.get("health") or {}).get("gsc") or {}).get("through_date") or "",
+            "score_explanation": selected.get("explanation") or "",
+        }
+        project = project_store.save_project(
+            {
+                "project_id": str(uuid.uuid4()),
+                "owner_id": user.get("id") or "",
+                "owner_name": _actor_name(user),
+                "status": "Idea",
+                "primary_keyword": selected_query,
+                "target_url": opportunity["matched_page"],
+                "opportunity_snapshot": opportunity,
+                "brief": seo_blog_workflow.prefill_from_opportunity({}, opportunity),
+            }
+        )
+        _blog_activity(
+            project_store,
+            project,
+            user,
+            "seo_blog_brief_created",
+            f"Blog brief created from SEO opportunity: {selected_query}",
+            content_hash=seo_blog_workflow.prompt_hash(selected_query),
+        )
+        st.session_state[f"{seo_blog_workflow.STATE_PREFIX}project"] = project["project_id"]
+        _navigate(navigate, seo.SEO_BLOG_ROUTE)
+    if actions[2].button("Dismiss", use_container_width=True, key="seo-v2-opportunity-dismiss"):
+        saved = seo.upsert_record(
+            state,
+            "keywords",
+            {
+                "keyword": selected_query,
+                "raw_query": selected_query,
+                "mapping_status": "Rejected",
+                "opportunity_status": "Dismissed",
+            },
+            actor=user,
+        )
+        if _persist(
+            store,
+            state,
+            user,
+            action="seo_opportunity_dismissed",
+            area="SEO / Opportunities",
+            message=f"SEO opportunity dismissed: {selected_query}",
+            entity_type="seo_keyword",
+            entity_id=saved["id"],
+        ):
+            st.rerun()
+
+
+def _render_search_landing_pages(*, phase4_store=None, reporting_reader=None):
+    _header(seo_nav.SEO_LANDING_PAGES_ROUTE)
+    snapshot = _saved_search_snapshot(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+        include_organic_ga4=True,
+    )
+    rows = []
+    for row in snapshot.get("top_pages") or []:
+        impressions = _numeric_value(row.get("impressions")) or 0
+        clicks = _numeric_value(row.get("clicks")) or 0
+        rows.append(
+            {
+                "Canonical URL": row.get("canonical_url") or row.get("page_url") or row.get("path") or "",
+                "Title": row.get("title") or "",
+                "Page type": row.get("page_type") or "Page",
+                "GSC clicks": _metric_value(clicks),
+                "Impressions": _metric_value(impressions),
+                "CTR": _metric_value((clicks / impressions) if impressions else None, style="percent"),
+                "Avg position": _metric_value(
+                    row.get("average_position"),
+                    style="position",
+                ),
+                "Movement": _metric_value(row.get("previous_change")),
+                "Organic sessions (supporting)": _metric_value(row.get("sessions")),
+            }
+        )
+    _table(
+        _paginated_rows(rows, key="seo-v2-pages"),
+        empty="No saved Search Console page rows are available.",
+        height=520,
+    )
+
+
+def _render_seo_health(user, *, google_store=None, import_store=None, phase4_store=None, reporting_reader=None, growth_store=None):
+    _header(seo_nav.SEO_HEALTH_ROUTE)
+    reader = reporting_reader or seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store)
+    try:
+        rows = reader._query_all(
+            "technical",
+            """
+            SELECT canonical_url, source, severity, issue_summary, correction_steps,
+                   likely_impact, index_state, coverage_state, fetch_state,
+                   status, first_seen_at, last_seen_at, checked_at
+            FROM seo_technical_url_audits_v2
+            WHERE workspace_key=%s
+            ORDER BY CASE severity WHEN 'Critical' THEN 1 WHEN 'High' THEN 2
+                     WHEN 'Medium' THEN 3 ELSE 4 END, last_seen_at DESC
+            LIMIT 500
+            """,
+            (google_seo.GOOGLE_SEO_WORKSPACE_KEY,),
+        )
+    except Exception:
+        rows = []
+    _table(rows, empty="No saved technical URL findings are available yet.", height=480)
+    st.caption(
+        "URL Inspection evidence, sitemap checks and HTML audits run in background jobs. "
+        "URL Inspection is Google's saved indexed-version evidence, not a live test. Opening this page performs no crawl or Google request."
+    )
+    urls = sorted({str(row.get("canonical_url") or "") for row in rows if row.get("canonical_url")})
+    if urls:
+        controls = st.columns([3, 1, 1])
+        selected_url = controls[0].selectbox("Affected URL", urls, key="seo-v2-technical-url")
+        if controls[1].button("Queue recheck", use_container_width=True, key="seo-v2-technical-recheck"):
+            try:
+                queued = seo_technical_audit.PostgresTechnicalAuditStore().queue_recheck(
+                    selected_url,
+                    requested_by=user.get("id") or "",
+                )
+            except Exception:
+                st.warning("The background recheck could not be queued. No live page was changed.")
+            else:
+                record_activity_log(
+                    "seo_technical_recheck_queued",
+                    "SEO / Health",
+                    f"Technical SEO recheck queued: {selected_url}",
+                    entity_type="seo_url",
+                    entity_id=selected_url,
+                    event_key=f"seo-technical-recheck:{queued.get('id') or selected_url}",
+                    actor=_actor_name(user),
+                    metadata={
+                        "actor_id": user.get("id") or "",
+                        "actor_role": user.get("role") or "",
+                        "origin": "human",
+                    },
+                )
+                st.success("Background recheck queued.")
+        import urllib.parse
+        connection = (google_store or google_seo.default_store()).get_connection()
+        resource = str(connection.get("gsc_site_url") or "")
+        inspection_url = (
+            "https://search.google.com/search-console/inspect?resource_id="
+            + urllib.parse.quote(resource, safe="")
+            + "&id="
+            + urllib.parse.quote(selected_url, safe="")
+        )
+        controls[2].link_button(
+            "Open in Search Console",
+            inspection_url,
+            use_container_width=True,
+        )
+    if os_accounts.is_admin(user):
+        with st.expander("Administrator connection and recovery tools", expanded=False):
+            _render_data_connections_admin(
+                user,
+                google_store=google_store,
+                import_store=import_store,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
+                growth_store=growth_store,
+                embedded=True,
+            )
+
+
+def _json_object(value, default):
+    if isinstance(value, type(default)):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, type(default)) else default
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _copy_text_button(text, *, key, label="Copy"):
+    import streamlit.components.v1 as components
+    payload = json.dumps(str(text or "")).replace("<", "\\u003c")
+    components.html(
+        f"""
+        <button id="{html.escape(key)}" style="height:34px;border:1px solid #c9b071;background:#d8aa48;
+          border-radius:5px;padding:0 14px;font:600 13px sans-serif;cursor:pointer">{html.escape(label)}</button>
+        <span id="{html.escape(key)}-status" style="font:12px sans-serif;margin-left:8px"></span>
+        <script>
+        document.getElementById({json.dumps(key)}).onclick = async () => {{
+          await navigator.clipboard.writeText({payload});
+          document.getElementById({json.dumps(key + '-status')}).textContent = 'Copied';
+        }};
+        </script>
+        """,
+        height=45,
+    )
+
+
+def _blog_activity(project_store, project, user, action, message, *, content_hash=""):
+    key = f"{action}:{content_hash or seo_blog_workflow.utc_timestamp()}"
+    created = project_store.record_event(
+        project["project_id"],
+        actor_id=user.get("id") or "",
+        actor_name=_actor_name(user),
+        action_type=action,
+        idempotency_key=key,
+        metadata={"status": project.get("status") or ""},
+    )
+    if created:
+        record_activity_log(
+            action,
+            "SEO / Blog",
+            message,
+            entity_type="seo_blog_project",
+            entity_id=project["project_id"],
+            event_key=f"seo-blog:{project['project_id']}:{key}",
+            actor=_actor_name(user),
+            metadata={
+                "actor_id": user.get("id") or "",
+                "actor_role": user.get("role") or "",
+                "origin": "human",
+                "status": project.get("status") or "",
+            },
+        )
+
+
+def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, project_store=None):
+    _header(seo.SEO_BLOG_ROUTE)
+    with st.expander("How to create and publish a blog", expanded=False):
+        st.markdown(
+            "1. Choose a saved SEO opportunity and product or collection.\n"
+            "2. Complete the brief and create Prompt 1.\n"
+            "3. Keep the same ChatGPT conversation while the article and images are created.\n"
+            "4. Import and review the returned content package.\n"
+            "5. Create Prompt 2 for a Shopify draft.\n"
+            "6. Review the draft, then explicitly approve publishing or scheduling."
+        )
+    project_store = project_store or seo_blog_workflow.PostgresBlogProjectStore()
+    try:
+        projects = project_store.list_projects(
+            owner_id=user.get("id") or "",
+            include_all=os_accounts.is_admin(user),
+        )
+    except Exception:
+        st.info("The Blog project store is not ready. Apply the additive Analytics/SEO migration first.")
+        return
+    actions = st.columns([1, 2, 4])
+    if actions[0].button("New brief", type="primary", icon=":material/add:", use_container_width=True):
+        created = project_store.save_project(
+            {
+                "project_id": str(uuid.uuid4()),
+                "owner_id": user.get("id") or "",
+                "owner_name": _actor_name(user),
+                "status": "Idea",
+                "brief": {},
+            }
+        )
+        _blog_activity(project_store, created, user, "seo_blog_brief_created", "Blog brief created")
+        st.session_state[f"{seo_blog_workflow.STATE_PREFIX}project"] = created["project_id"]
+        st.rerun()
+    if not projects:
+        st.caption("No blog projects yet. Create a brief to begin.")
+        return
+    by_id = {str(row.get("project_id")): row for row in projects}
+    selected_id = actions[1].selectbox(
+        "Project",
+        tuple(by_id),
+        format_func=lambda key: by_id[key].get("title") or by_id[key].get("primary_keyword") or "Untitled brief",
+        key=f"{seo_blog_workflow.STATE_PREFIX}project",
+    )
+    project = dict(by_id[selected_id])
+    brief = _json_object(project.get("brief"), {})
+    opportunity = _json_object(project.get("opportunity_snapshot"), {})
+    actions[2].caption(f"Status: {project.get('status') or 'Idea'} | Project {selected_id}")
+
+    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    gsc_through = ((snapshot.get("health") or {}).get("gsc") or {}).get("through_date") or ""
+    opportunity_rows = seo_blog_workflow.build_blog_opportunities(
+        (snapshot.get("top_queries") or [])[:100],
+        data_through_date=gsc_through,
+    )
+    opportunities = {
+        str(row.get("normalized_query") or row.get("query") or ""): row
+        for row in opportunity_rows
+    }
+    if opportunities:
+        with st.expander("Opportunity evidence", expanded=False):
+            _table(
+                [
+                    {
+                        "Query": row.get("query") or "",
+                        "Clicks": _metric_value(row.get("clicks")),
+                        "Impressions": _metric_value(row.get("impressions")),
+                        "CTR": _metric_value(row.get("ctr"), style="percent"),
+                        "Position": _metric_value(row.get("average_position"), style="position"),
+                        "Change": _metric_value(row.get("click_change")),
+                        "Matched page": row.get("matched_page") or "Unmapped",
+                        "Article type": row.get("recommended_article_type") or "",
+                        "Confidence": row.get("confidence") or "",
+                        "Data through": row.get("data_through_date") or "",
+                        "Why": row.get("score_explanation") or "",
+                    }
+                    for row in opportunity_rows[:25]
+                ],
+                empty="No saved GSC blog opportunities are available.",
+                height=300,
+            )
+        selected_opportunity = st.selectbox(
+            "Saved GSC opportunity",
+            ("", *opportunities),
+            format_func=lambda key: "Choose an opportunity" if not key else key,
+            key=f"{seo_blog_workflow.STATE_PREFIX}opportunity::{selected_id}",
+        )
+        if st.button("Use opportunity", disabled=not selected_opportunity, key=f"seo-blog-use-opportunity::{selected_id}"):
+            brief = seo_blog_workflow.prefill_from_opportunity(brief, opportunities[selected_opportunity])
+            project.update(brief=brief, opportunity_snapshot=opportunities[selected_opportunity])
+            project_store.save_project(project)
+            st.rerun()
+
+    saved_targets = list(seo.active_records(state, "target_library"))
+    try:
+        live_targets = _cached_blog_shopify_targets()
+    except Exception:
+        live_targets = []
+    targets = {
+        str(row.get("id") or row.get("url") or ""): row
+        for row in [*live_targets, *saved_targets]
+        if row.get("id") or row.get("url")
+    }
+    target_id = st.selectbox(
+        "Shopify product or collection",
+        ("", *targets),
+        format_func=lambda key: "Choose a saved Shopify target" if not key else targets[key].get("title") or targets[key].get("name") or targets[key].get("url") or key,
+        key=f"{seo_blog_workflow.STATE_PREFIX}target::{selected_id}",
+    ) if targets else ""
+    if target_id and target_id != brief.get("target_entity_id"):
+        target = targets[target_id]
+        brief = {
+            **brief,
+            "target_entity_id": target_id,
+            "target_title": brief.get("target_title") or target.get("title") or target.get("name") or "",
+            "target_url": brief.get("target_url") or target.get("url") or "",
+            "target_sport": brief.get("target_sport") or target.get("sport") or "",
+            "source_artwork": brief.get("source_artwork") or target.get("source_artwork") or target.get("source_asset") or "",
+        }
+
+    key_root = f"{seo_blog_workflow.STATE_PREFIX}{selected_id}"
+    first = st.columns(3)
+    brief["target_market"] = first[0].selectbox("Target market", seo_blog_workflow.MARKETS, index=seo_blog_workflow.MARKETS.index(brief.get("target_market")) if brief.get("target_market") in seo_blog_workflow.MARKETS else 0, key=f"{key_root}-market")
+    brief["sport"] = first[1].text_input("Sport", value=brief.get("sport") or "", key=f"{key_root}-sport")
+    brief["search_intent"] = first[2].text_input("Search intent / article type", value=brief.get("search_intent") or "", key=f"{key_root}-intent")
+    context = st.columns(2)
+    default_language = brief.get("language") or seo_blog_workflow.MARKET_LANGUAGE.get(brief["target_market"])
+    brief["language"] = context[0].selectbox(
+        "Language",
+        seo_blog_workflow.LANGUAGES,
+        index=seo_blog_workflow.LANGUAGES.index(default_language) if default_language in seo_blog_workflow.LANGUAGES else 0,
+        key=f"{key_root}-language",
+    )
+    brief["publication_preference"] = context[1].selectbox(
+        "Draft / schedule preference",
+        seo_blog_workflow.PUBLICATION_PREFERENCES,
+        index=seo_blog_workflow.PUBLICATION_PREFERENCES.index(brief.get("publication_preference")) if brief.get("publication_preference") in seo_blog_workflow.PUBLICATION_PREFERENCES else 0,
+        key=f"{key_root}-publication",
+    )
+    second = st.columns(2)
+    brief["subject"] = second[0].text_input("Athlete, team, rivalry, event or season", value=brief.get("subject") or "", key=f"{key_root}-subject")
+    brief["timely_hook"] = second[1].text_input("Timely hook", value=brief.get("timely_hook") or "", key=f"{key_root}-hook")
+    brief["primary_keyword"] = st.text_input("Primary keyword", value=brief.get("primary_keyword") or "", key=f"{key_root}-primary")
+    brief["supporting_keywords"] = st.text_input("Supporting keywords", value=", ".join(brief.get("supporting_keywords") or []), key=f"{key_root}-supporting")
+    brief["related_entities"] = st.text_input("Related entities", value=", ".join(brief.get("related_entities") or []), key=f"{key_root}-entities")
+    brief["fan_questions"] = st.text_input("Fan questions", value=", ".join(brief.get("fan_questions") or []), key=f"{key_root}-questions")
+    target_columns = st.columns(2)
+    brief["target_title"] = target_columns[0].text_input("Product / collection title", value=brief.get("target_title") or "", key=f"{key_root}-target-title")
+    brief["target_url"] = target_columns[1].text_input("Exact product / collection URL", value=brief.get("target_url") or "", key=f"{key_root}-target-url")
+    brief["internal_links"] = st.text_area("Verified internal links", value="\n".join(brief.get("internal_links") or []), height=80, key=f"{key_root}-links")
+    with st.expander("Advanced brief", expanded=False):
+        brief["backlink_objective"] = st.text_input("Backlink objective", value=brief.get("backlink_objective") or "", key=f"{key_root}-backlink")
+        brief["link_worthy_angle"] = st.text_input("Link-worthy asset or angle", value=brief.get("link_worthy_angle") or "", key=f"{key_root}-angle")
+        brief["outreach_audience"] = st.text_input("Intended outreach publications / audience", value=brief.get("outreach_audience") or "", key=f"{key_root}-outreach")
+        brief["youtube_url"] = st.text_input("YouTube URL", value=brief.get("youtube_url") or "", key=f"{key_root}-youtube")
+        brief["target_length"] = st.text_input("Target length override", value=brief.get("target_length") or "", key=f"{key_root}-length")
+        brief["tags"] = st.text_input("Tags", value=", ".join(brief.get("tags") or []), key=f"{key_root}-tags")
+    third = st.columns(2)
+    brief["author"] = third[0].text_input("Author", value=brief.get("author") or _actor_name(user), key=f"{key_root}-author")
+    brief["target_blog"] = third[1].text_input("Target Shopify blog", value=brief.get("target_blog") or "News", key=f"{key_root}-blog")
+    brief["approved_source_assets"] = st.text_area("Approved source image references", value="\n".join(brief.get("approved_source_assets") or []), height=80, key=f"{key_root}-assets")
+    uploaded_sources = st.file_uploader(
+        "Approved source image uploads",
+        type=("png", "jpg", "jpeg", "webp"),
+        accept_multiple_files=True,
+        key=f"{key_root}-source-uploads",
+        help="Only file names are persisted in the brief; image bytes remain in the current upload control.",
+    )
+    if uploaded_sources:
+        existing_sources = seo_blog_workflow._clean_list(brief.get("approved_source_assets"))
+        brief["approved_source_assets"] = list(dict.fromkeys([
+            *existing_sources,
+            *(str(item.name) for item in uploaded_sources),
+        ]))
+    permissions = st.columns(2)
+    brief["assets_permitted"] = permissions[0].checkbox("Supplied athlete/product assets are permitted for use", value=bool(brief.get("assets_permitted")), key=f"{key_root}-permitted")
+    brief["safe_non_identifiable_images"] = permissions[1].checkbox("Use non-identifiable editorial imagery when approved athlete imagery is absent", value=bool(brief.get("safe_non_identifiable_images")), key=f"{key_root}-fallback")
+
+    draft_hash = seo_blog_workflow.prompt_hash(json.dumps(brief, sort_keys=True, default=str))
+    autosave_key = f"{key_root}-autosaved"
+    if st.session_state.get(autosave_key) != draft_hash:
+        project.update(
+            brief=brief,
+            title=brief.get("article_title") or brief.get("subject") or "",
+            primary_keyword=brief.get("primary_keyword") or "",
+            target_url=brief.get("target_url") or "",
+        )
+        project = project_store.save_project(project)
+        st.session_state[autosave_key] = draft_hash
+
+    action_row = st.columns(5)
+    if action_row[0].button("Save draft", use_container_width=True, key=f"seo-blog-save::{selected_id}"):
+        _blog_activity(project_store, project, user, "seo_blog_brief_saved", f"Blog brief saved: {brief.get('primary_keyword') or brief.get('subject')}", content_hash=draft_hash)
+        st.success("Draft saved.")
+    if action_row[1].button("Create Prompt 1", type="primary", use_container_width=True, key=f"seo-blog-prompt1::{selected_id}"):
+        try:
+            prompt = seo_blog_workflow.build_prompt_1(
+                selected_id,
+                brief,
+                source_date=gsc_through,
+                opportunity=opportunity,
+            )
+        except seo_blog_workflow.BlogWorkflowError as error:
+            st.warning(str(error))
+        else:
+            prompt_hash = seo_blog_workflow.prompt_hash(prompt)
+            project.update(status="Brief ready", prompt_1=prompt, prompt_1_hash=prompt_hash, brief=seo_blog_workflow.validate_brief(brief))
+            project = project_store.save_project(project)
+            _blog_activity(project_store, project, user, "seo_blog_prompt_1_created", f"Blog Prompt 1 created: {brief.get('primary_keyword')}", content_hash=prompt_hash)
+            st.rerun()
+    prompt_1 = str(project.get("prompt_1") or "")
+    action_row[2].download_button("Download Prompt 1", prompt_1.encode("utf-8"), file_name=f"{selected_id}-prompt-1.txt", mime="text/plain", disabled=not prompt_1, use_container_width=True)
+
+    with st.expander("Prompt 1", expanded=bool(prompt_1)):
+        if prompt_1:
+            st.text_area("Prompt 1 output", prompt_1, height=320, key=f"{key_root}-prompt1-preview")
+            _copy_text_button(prompt_1, key=f"copy-prompt1-{selected_id}", label="Copy Prompt 1")
+        else:
+            st.caption("Complete the required brief fields, then create Prompt 1.")
+
+    st.subheader("Import Content Package")
+    uploaded = st.file_uploader("JSON package", type=("json",), key=f"{key_root}-package-file")
+    pasted = st.text_area("Or paste the JSON package", height=180, key=f"{key_root}-package-paste")
+    manual_review = st.checkbox("Allow manual review for clearly listed validation issues", key=f"{key_root}-manual-review")
+    validation = _json_object(project.get("qa_results"), {})
+    if st.button("Validate package", disabled=not (uploaded or pasted.strip()), key=f"seo-blog-validate::{selected_id}"):
+        payload = uploaded.getvalue().decode("utf-8") if uploaded else pasted
+        try:
+            validation = seo_blog_workflow.validate_content_package(
+                payload,
+                project_id=selected_id,
+                target_url=brief.get("target_url") or "",
+                allow_manual_review=manual_review,
+            )
+        except seo_blog_workflow.ContentPackageError as error:
+            for issue in error.issues:
+                st.warning(issue)
+        else:
+            project.update(
+                status="Needs review" if validation.get("issues") else "Approved",
+                content_package=validation["package"],
+                image_manifest=validation["image_manifest"],
+                qa_results={key: value for key, value in validation.items() if key not in {"package", "image_manifest"}},
+            )
+            project = project_store.save_project(project)
+            package_hash = seo_blog_workflow.prompt_hash(json.dumps(validation["package"], sort_keys=True))
+            _blog_activity(project_store, project, user, "seo_blog_content_package_imported", f"Blog content package imported: {brief.get('primary_keyword')}", content_hash=package_hash)
+            st.rerun()
+    if validation:
+        if validation.get("issues"):
+            st.warning("Review required: " + "; ".join(validation.get("issues") or []))
+        else:
+            st.success(f"Content package validated. {validation.get('word_count') or 0} words.")
+
+    capability = seo_blog_workflow.shopify_write_capability()
+    if action_row[3].button("Create Prompt 2", disabled=not validation, use_container_width=True, key=f"seo-blog-prompt2::{selected_id}"):
+        try:
+            prompt_2 = seo_blog_workflow.build_prompt_2(project, validation, capability=capability)
+        except seo_blog_workflow.BlogWorkflowError as error:
+            st.warning(str(error))
+        else:
+            prompt_hash = seo_blog_workflow.prompt_hash(prompt_2)
+            project.update(prompt_2=prompt_2, prompt_2_hash=prompt_hash, status="Approved")
+            project = project_store.save_project(project)
+            _blog_activity(project_store, project, user, "seo_blog_prompt_2_created", f"Blog Prompt 2 created: {brief.get('primary_keyword')}", content_hash=prompt_hash)
+            st.rerun()
+    prompt_2 = str(project.get("prompt_2") or "")
+    action_row[4].download_button("Download Prompt 2", prompt_2.encode("utf-8"), file_name=f"{selected_id}-prompt-2.txt", mime="text/plain", disabled=not prompt_2, use_container_width=True)
+    with st.expander("Prompt 2", expanded=bool(prompt_2)):
+        if prompt_2:
+            st.text_area("Prompt 2 output", prompt_2, height=320, key=f"{key_root}-prompt2-preview")
+            _copy_text_button(prompt_2, key=f"copy-prompt2-{selected_id}", label="Copy Prompt 2")
+        else:
+            st.caption("Prompt 2 is available only after package validation and a confirmed Shopify article/file-write capability.")
+
+    st.subheader("History")
+    _table(
+        [
+            {
+                "Title": row.get("title") or "Untitled",
+                "Primary keyword": row.get("primary_keyword") or "",
+                "Target page": row.get("target_url") or "",
+                "Owner": row.get("owner_name") or "",
+                "Status": row.get("status") or "Idea",
+                "Updated": row.get("updated_at") or "",
+            }
+            for row in projects
+        ],
+        empty="No blog history is available.",
+        height=260,
+    )
+
+
 @st.fragment
 def _render_active_route(
     user,
@@ -2896,7 +3810,7 @@ def _render_active_route(
     navigation_runtime.dispatch_selected(
         route,
         {
-            seo.SEO_OVERVIEW_ROUTE: lambda: _render_overview(
+            seo.SEO_OVERVIEW_ROUTE: lambda: _render_search_overview(
                 state,
                 user,
                 navigate,
@@ -2906,19 +3820,41 @@ def _render_active_route(
                 reporting_reader,
                 growth_store,
             ),
-            seo.SEO_CITATIONS_ROUTE: lambda: _render_citations(store, state, user),
-            seo.SEO_BLOG_ROUTE: lambda: _render_blog(store, state, user),
-            seo.SEO_INTERNAL_LINKING_ROUTE: lambda: _render_internal_linking(store, state, user),
-            seo.SEO_BACKLINKS_ROUTE: lambda: _render_outreach(store, state, user),
-            seo.SEO_KEYWORDS_ROUTE: lambda: _render_keywords(store, state, user, growth_store=growth_store),
-            seo.SEO_REPORTS_ROUTE: lambda: _render_reports_strategy(
-                store, state, user,
+            seo.SEO_KEYWORDS_ROUTE: lambda: _render_keywords_rankings(
+                state,
                 phase4_store=phase4_store,
                 reporting_reader=reporting_reader,
+            ),
+            seo_nav.SEO_OPPORTUNITIES_ROUTE: lambda: _render_opportunities(
+                store,
+                state,
+                user,
+                navigate,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
+            ),
+            seo_nav.SEO_LANDING_PAGES_ROUTE: lambda: _render_search_landing_pages(
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
+            ),
+            seo_nav.SEO_MAPPING_ROUTE: lambda: _render_keywords(
+                store,
+                state,
+                user,
                 growth_store=growth_store,
             ),
-            seo.SEO_TASKS_ROUTE: lambda: _render_tasks_results(
+            seo.SEO_BLOG_ROUTE: lambda: _render_blog_v2(
+                state,
                 user,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
+            ),
+            seo_nav.SEO_HEALTH_ROUTE: lambda: _render_seo_health(
+                user,
+                google_store=google_store,
+                import_store=import_store,
+                phase4_store=phase4_store,
+                reporting_reader=reporting_reader,
                 growth_store=growth_store,
             ),
         },

@@ -7,22 +7,28 @@ Cave operational Shopify ledger.
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
 import google_seo_phase4
+import seo_metrics
 
 
 WORKSPACE_KEY = google_seo_phase4.WORKSPACE_KEY
 KNOWN_LOCALE_PREFIXES = ("en-au", "en-us", "en-gb", "en-uk", "au", "us", "uk")
 MARKET_COUNTRIES = {
-    "AU": ("AU",),
-    "Australia": ("AU",),
-    "US": ("US",),
-    "United States": ("US",),
-    "UK": ("GB", "UK"),
-    "United Kingdom": ("GB", "UK"),
+    "AU": ("AU", "AUS"),
+    "Australia": ("AU", "AUS"),
+    "US": ("US", "USA"),
+    "United States": ("US", "USA"),
+    "UK": ("GB", "GBR", "UK"),
+    "United Kingdom": ("GB", "GBR", "UK"),
+    "CA": ("CA", "CAN"),
+    "Canada": ("CA", "CAN"),
+    "NZ": ("NZ", "NZL"),
+    "New Zealand": ("NZ", "NZL"),
 }
 MARKET_CURRENCIES = {
     "AU": ("AUD",),
@@ -82,12 +88,31 @@ def impression_weighted_position(position_weight, impressions):
     return _decimal(position_weight) / impressions
 
 
-def matching_period(*, preset, through_date, custom_start=None, custom_end=None):
+def _shift_months(value, months):
+    month_index = value.year * 12 + value.month - 1 + int(months)
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    return date(year, month, min(value.day, monthrange(year, month)[1]))
+
+
+def matching_period(
+    *,
+    preset,
+    through_date,
+    custom_start=None,
+    custom_end=None,
+    comparison="Previous period",
+    today=None,
+):
     """Return a source-specific current and previous matching period."""
     through = _as_date(through_date)
     if not through:
         return None
-    if str(preset or "") in {"Custom range", "Custom dates"}:
+    today = _as_date(today) or date.today()
+    if str(preset or "") in {"Today", "Yesterday"}:
+        end = today if str(preset) == "Today" else today - timedelta(days=1)
+        start = end
+    elif str(preset or "") in {"Custom range", "Custom dates"}:
         start = _as_date(custom_start)
         requested_end = _as_date(custom_end)
         if not start or not requested_end:
@@ -95,21 +120,34 @@ def matching_period(*, preset, through_date, custom_start=None, custom_end=None)
         end = min(requested_end, through)
     else:
         days = {
+            "Last 7 days": 7,
             "Last 28 days": 28,
+            "Last 30 days": 30,
             "Last 90 days": 90,
             "Last 12 months": 365,
-        }.get(str(preset or ""), 28)
+        }.get(str(preset or ""))
         end = through
-        start = end - timedelta(days=days - 1)
+        if str(preset or "") == "Last 16 months":
+            start = _shift_months(end, -16) + timedelta(days=1)
+        else:
+            days = days or 28
+            start = end - timedelta(days=days - 1)
     if start > end:
         return None
     length = (end - start).days + 1
-    previous_end = start - timedelta(days=1)
+    previous_start = previous_end = None
+    if str(comparison or "Off") == "Previous period":
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=length - 1)
+    elif str(comparison or "Off") == "Previous year":
+        previous_start = _shift_months(start, -12)
+        previous_end = _shift_months(end, -12)
     return {
         "start_date": start,
         "end_date": end,
-        "previous_start_date": previous_end - timedelta(days=length - 1),
+        "previous_start_date": previous_start,
         "previous_end_date": previous_end,
+        "preliminary": str(preset or "") == "Today",
     }
 
 
@@ -427,8 +465,19 @@ class PostgresSEOLiveAnalyticsReader:
         return clauses, params
 
     def _gsc_where(self, identifier, period, market, device):
-        clauses = ["workspace_key=%s", "gsc_site_url=%s", "date BETWEEN %s AND %s", "is_complete=TRUE"]
-        params = [WORKSPACE_KEY, identifier, period["start_date"], period["end_date"]]
+        clauses = [
+            "workspace_key=%s", "property_id=%s",
+            "source_date BETWEEN %s AND %s", "is_complete=TRUE",
+            "search_type=%s", "data_state=%s",
+        ]
+        params = [
+            WORKSPACE_KEY,
+            identifier,
+            period["start_date"],
+            period["end_date"],
+            getattr(self, "_active_search_type", "web"),
+            getattr(self, "_active_data_state", "final"),
+        ]
         scope, scope_params = self._detail_scope(market, device)
         return [*clauses, *scope], [*params, *scope_params]
 
@@ -451,68 +500,108 @@ class PostgresSEOLiveAnalyticsReader:
 
     def _gsc_daily(self, identifier, period, market, device):
         scope, scope_params = self._detail_scope(market, device)
-        use_totals = not scope
+        query_class = getattr(self, "_active_query_class", "All known queries")
+        use_totals = not scope and query_class == "All known queries"
         if use_totals:
             sql = """
-                SELECT date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                SELECT source_date AS date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
                        SUM(average_position * impressions) AS position_weight,
                        COUNT(*) AS source_rows
-                FROM seo_gsc_daily_totals
-                WHERE workspace_key=%s AND gsc_site_url=%s
-                  AND date BETWEEN %s AND %s AND is_complete=TRUE
-                GROUP BY date ORDER BY date
+                FROM seo_gsc_property_totals_v2
+                WHERE workspace_key=%s AND property_id=%s
+                  AND source_date BETWEEN %s AND %s AND is_complete=TRUE
+                  AND search_type=%s AND data_state=%s
+                GROUP BY source_date ORDER BY source_date
             """
-            params = (WORKSPACE_KEY, identifier, period["previous_start_date"], period["end_date"])
+            params = (
+                WORKSPACE_KEY,
+                identifier,
+                period["previous_start_date"] or period["start_date"],
+                period["end_date"],
+                getattr(self, "_active_search_type", "web"),
+                getattr(self, "_active_data_state", "final"),
+            )
         else:
+            query_scope, query_params = self._query_class_scope("normalized_query")
+            detail_scope = f"AND {' AND '.join(scope)}" if scope else ""
             sql = f"""
-                SELECT date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                       SUM(average_position * impressions) AS position_weight,
+                SELECT source_date AS date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                       SUM(position_weight) AS position_weight,
                        COUNT(*) AS source_rows
-                FROM seo_gsc_daily_details
-                WHERE workspace_key=%s AND gsc_site_url=%s
-                  AND date BETWEEN %s AND %s AND is_complete=TRUE
-                  AND {' AND '.join(scope)}
-                GROUP BY date ORDER BY date
+                FROM seo_gsc_query_daily_v2
+                WHERE workspace_key=%s AND property_id=%s
+                  AND source_date BETWEEN %s AND %s AND is_complete=TRUE
+                  AND search_type=%s AND data_state=%s
+                  {detail_scope}
+                  {query_scope}
+                GROUP BY source_date ORDER BY source_date
             """
-            params = [WORKSPACE_KEY, identifier, period["previous_start_date"], period["end_date"], *scope_params]
+            params = [
+                WORKSPACE_KEY,
+                identifier,
+                period["previous_start_date"] or period["start_date"],
+                period["end_date"],
+                getattr(self, "_active_search_type", "web"),
+                getattr(self, "_active_data_state", "final"),
+                *scope_params,
+                *query_params,
+            ]
         return self._query_all("gsc", sql, params)
 
-    def _gsc_top_queries(self, identifier, current_period, previous_period, market, device, limit=20):
+    def _query_class_scope(self, column):
+        classification = getattr(self, "_active_query_class", "All known queries")
+        terms = [str(item or "").strip().casefold() for item in getattr(self, "_brand_terms", ()) if str(item or "").strip()]
+        if classification == "All known queries" or not terms:
+            return "", []
+        expressions = " OR ".join(f"LOWER({column}) LIKE %s" for _term in terms)
+        values = [f"%{term}%" for term in terms]
+        if classification == "Branded":
+            return f"AND ({expressions})", values
+        if classification == "Non-branded":
+            return f"AND NOT ({expressions})", values
+        return "", []
+
+    def _gsc_top_queries(self, identifier, current_period, previous_period, market, device, limit=5000):
         current_where, current_params = self._gsc_where(identifier, current_period, market, device)
         previous_where, previous_params = self._gsc_where(identifier, previous_period, market, device)
+        query_scope, query_params = self._query_class_scope("normalized_query")
         return self._query_all(
             "gsc",
             f"""
             WITH current_metrics AS (
-                SELECT query, UPPER(country_code) AS country_code, UPPER(device) AS device,
+                SELECT normalized_query,
+                       MIN(raw_query) AS query,
                        SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                       SUM(average_position * impressions) AS position_weight
-                FROM seo_gsc_daily_details
-                WHERE {' AND '.join(current_where)} AND query<>''
-                GROUP BY query, UPPER(country_code), UPPER(device)
+                       SUM(position_weight) AS position_weight,
+                       ARRAY_REMOVE(ARRAY_AGG(DISTINCT UPPER(country_code)), '') AS market_mix,
+                       ARRAY_REMOVE(ARRAY_AGG(DISTINCT UPPER(device)), '') AS device_mix
+                FROM seo_gsc_query_daily_v2
+                WHERE {' AND '.join(current_where)} AND normalized_query<>'' {query_scope}
+                GROUP BY normalized_query
             ), previous_metrics AS (
-                SELECT query, UPPER(country_code) AS country_code, UPPER(device) AS device,
+                SELECT normalized_query,
                        SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                       SUM(average_position * impressions) AS position_weight
-                FROM seo_gsc_daily_details
-                WHERE {' AND '.join(previous_where)} AND query<>''
-                GROUP BY query, UPPER(country_code), UPPER(device)
+                       SUM(position_weight) AS position_weight
+                FROM seo_gsc_query_daily_v2
+                WHERE {' AND '.join(previous_where)} AND normalized_query<>'' {query_scope}
+                GROUP BY normalized_query
             )
-            SELECT current_metrics.query, current_metrics.country_code, current_metrics.device,
+            SELECT current_metrics.normalized_query, current_metrics.query,
+                   current_metrics.market_mix, current_metrics.device_mix,
                    current_metrics.clicks, current_metrics.impressions,
                    current_metrics.position_weight,
                    COALESCE(previous_metrics.clicks, 0) AS previous_clicks,
                    COALESCE(previous_metrics.impressions, 0) AS previous_impressions,
                    COALESCE(previous_metrics.position_weight, 0) AS previous_position_weight
             FROM current_metrics
-            LEFT JOIN previous_metrics USING (query, country_code, device)
+            LEFT JOIN previous_metrics USING (normalized_query)
             ORDER BY current_metrics.clicks DESC, current_metrics.impressions DESC
             LIMIT %s
             """,
-            [*current_params, *previous_params, int(limit)],
+            [*current_params, *query_params, *previous_params, *query_params, int(limit)],
         )
 
-    def _gsc_top_pages(self, identifier, current_period, previous_period, market, device, limit=30):
+    def _gsc_top_pages(self, identifier, current_period, previous_period, market, device, limit=1000):
         current_where, current_params = self._gsc_where(identifier, current_period, market, device)
         previous_where, previous_params = self._gsc_where(identifier, previous_period, market, device)
         return self._query_all(
@@ -520,13 +609,13 @@ class PostgresSEOLiveAnalyticsReader:
             f"""
             WITH current_metrics AS (
                 SELECT page_url, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                       SUM(average_position * impressions) AS position_weight
-                FROM seo_gsc_daily_details
+                       SUM(position_weight) AS position_weight
+                FROM seo_gsc_page_daily_v2
                 WHERE {' AND '.join(current_where)} AND page_url<>''
                 GROUP BY page_url
             ), previous_metrics AS (
                 SELECT page_url, SUM(clicks) AS clicks
-                FROM seo_gsc_daily_details
+                FROM seo_gsc_page_daily_v2
                 WHERE {' AND '.join(previous_where)} AND page_url<>''
                 GROUP BY page_url
             )
@@ -547,7 +636,7 @@ class PostgresSEOLiveAnalyticsReader:
             f"""
             SELECT UPPER(country_code) AS country_code, UPPER(device) AS device,
                    SUM(clicks) AS clicks, SUM(impressions) AS impressions
-            FROM seo_gsc_daily_details
+            FROM seo_gsc_query_daily_v2
             WHERE {' AND '.join(clauses)}
             GROUP BY UPPER(country_code), UPPER(device)
             """,
@@ -556,15 +645,15 @@ class PostgresSEOLiveAnalyticsReader:
 
     def _gsc_bundle(self, health, period, market, device, compare):
         previous = {
-            "start_date": period["previous_start_date"],
-            "end_date": period["previous_end_date"],
+            "start_date": period["previous_start_date"] or period["start_date"],
+            "end_date": period["previous_end_date"] or period["end_date"],
         }
         rows = self._gsc_daily(health["identifier"], period, market, device)
         current_rows = [row for row in rows if period["start_date"] <= _as_date(row.get("date")) <= period["end_date"]]
         previous_rows = [
             row for row in rows
             if period["previous_start_date"] <= _as_date(row.get("date")) <= period["previous_end_date"]
-        ] if compare else []
+        ] if compare and period.get("previous_start_date") else []
         daily = []
         previous_daily = []
         for row in current_rows:
@@ -590,7 +679,8 @@ class PostgresSEOLiveAnalyticsReader:
                 "previous_position": previous_position,
                 "click_change": _decimal(row.get("clicks")) - _decimal(row.get("previous_clicks")),
                 "ranking_change": (previous_position - position) if previous_position is not None else None,
-                "market": "UK" if row.get("country_code") == "GB" else (row.get("country_code") or "Other"),
+                "market_mix": sorted({seo_metrics.normalize_gsc_country(value) for value in row.get("market_mix") or [] if value}),
+                "device_mix": sorted({str(value or "").title() for value in row.get("device_mix") or [] if value}),
             })
         return {
             "current": self._aggregate_gsc(current_rows),
@@ -805,6 +895,21 @@ class PostgresSEOLiveAnalyticsReader:
             "previous_daily": self._daily_groups(previous_rows, self._aggregate_shopify),
         }
 
+    def shopify_operational_totals(self, start_date, end_date):
+        """Return paid, non-cancelled Shopify ledger totals without mixing currencies."""
+        period = {
+            "previous_start_date": _as_date(start_date),
+            "end_date": _as_date(end_date),
+        }
+        if not period["previous_start_date"] or not period["end_date"]:
+            return self._aggregate_shopify([])
+        rows = self._shopify_daily(period, "All markets", "All devices")
+        selected = [
+            row for row in rows
+            if period["previous_start_date"] <= _as_date(row.get("date")) <= period["end_date"]
+        ]
+        return self._aggregate_shopify(selected)
+
     def _reconciliation_bundle(self, period, market, device, compare):
         if str(device or "") != "All devices":
             return {"current": {}, "previous": {}}
@@ -940,15 +1045,7 @@ class PostgresSEOLiveAnalyticsReader:
 
     @staticmethod
     def _merge_breakdowns(gsc_rows, ga4_rows):
-        country_buckets = {
-            key: {
-                "market": key,
-                "gsc_clicks": Decimal("0"),
-                "gsc_impressions": Decimal("0"),
-                "ga4_sessions": Decimal("0"),
-            }
-            for key in ("AU", "US", "UK", "Other")
-        }
+        country_buckets = {}
         device_buckets = {
             key: {
                 "device": key,
@@ -960,21 +1057,26 @@ class PostgresSEOLiveAnalyticsReader:
         }
 
         def country_key(value):
-            value = str(value or "").upper()
-            if value == "AU":
-                return "AU"
-            if value == "US":
-                return "US"
-            if value in {"GB", "UK"}:
-                return "UK"
-            return "Other"
+            return seo_metrics.normalize_gsc_country(value) or "Other"
+
+        def country_bucket(value):
+            key = country_key(value)
+            return country_buckets.setdefault(
+                key,
+                {
+                    "market": key,
+                    "gsc_clicks": Decimal("0"),
+                    "gsc_impressions": Decimal("0"),
+                    "ga4_sessions": Decimal("0"),
+                },
+            )
 
         def device_key(value):
             value = str(value or "").title()
             return value if value in device_buckets else ""
 
         for row in gsc_rows or []:
-            country = country_buckets[country_key(row.get("country_code"))]
+            country = country_bucket(row.get("country_code"))
             country["gsc_clicks"] += _decimal(row.get("clicks"))
             country["gsc_impressions"] += _decimal(row.get("impressions"))
             device = device_buckets.get(device_key(row.get("device")))
@@ -982,11 +1084,14 @@ class PostgresSEOLiveAnalyticsReader:
                 device["gsc_clicks"] += _decimal(row.get("clicks"))
                 device["gsc_impressions"] += _decimal(row.get("impressions"))
         for row in ga4_rows or []:
-            country_buckets[country_key(row.get("country_code"))]["ga4_sessions"] += _decimal(row.get("sessions"))
+            country_bucket(row.get("country_code"))["ga4_sessions"] += _decimal(row.get("sessions"))
             device = device_buckets.get(device_key(row.get("device")))
             if device:
                 device["ga4_sessions"] += _decimal(row.get("sessions"))
-        return list(country_buckets.values()), list(device_buckets.values())
+        return (
+            sorted(country_buckets.values(), key=lambda row: row["market"]),
+            list(device_buckets.values()),
+        )
 
     @staticmethod
     def _combine_daily(*bundles, key):
@@ -1004,39 +1109,58 @@ class PostgresSEOLiveAnalyticsReader:
         market="All markets",
         device="All devices",
         compare=True,
+        comparison="",
+        search_type="web",
+        query_class="All known queries",
+        source_scope="all",
         custom_start=None,
         custom_end=None,
         search=None,
         source_health=None,
     ):
         del search
+        comparison = str(comparison or ("Previous period" if compare else "Off"))
+        compare = comparison != "Off"
+        self._active_search_type = str(search_type or "web").casefold()
+        self._active_query_class = str(query_class or "All known queries")
+        self._active_data_state = "all" if str(preset or "") == "Today" else "final"
+        try:
+            settings = self.store.get_settings()
+        except Exception:
+            settings = {}
+        self._brand_terms = tuple(settings.get("brand_terms") or ("sports cave", "sportscave"))
         self.read_errors = {}
         health = dict(source_health or self.source_health())
         current = _empty_metrics()
         previous = _empty_metrics()
         periods = {}
         bundles = {}
-        for source in ("gsc", "ga4", "shopify", "reconciliation"):
+        source_names = {
+            "seo": ("gsc",),
+            "seo_landing": ("gsc", "ga4"),
+        }.get(str(source_scope or "all"), ("gsc", "ga4", "shopify", "reconciliation"))
+        for source in source_names:
             source_health = health.get(source) or {}
             periods[source] = matching_period(
                 preset=preset,
                 through_date=source_health.get("through_date"),
                 custom_start=custom_start,
                 custom_end=custom_end,
+                comparison=comparison,
             )
-        if health["gsc"]["available"] and periods["gsc"]:
+        if "gsc" in source_names and health["gsc"]["available"] and periods["gsc"]:
             bundles["gsc"] = self._gsc_bundle(health["gsc"], periods["gsc"], market, device, compare)
             current.update(bundles["gsc"]["current"])
             previous.update(bundles["gsc"]["previous"])
-        if health["ga4"]["available"] and periods["ga4"]:
+        if "ga4" in source_names and health["ga4"]["available"] and periods["ga4"]:
             bundles["ga4"] = self._ga4_bundle(health["ga4"], periods["ga4"], market, device, compare)
             current.update(bundles["ga4"]["current"])
             previous.update(bundles["ga4"]["previous"])
-        if health["shopify"]["available"] and periods["shopify"] and str(device) == "All devices":
+        if "shopify" in source_names and health["shopify"]["available"] and periods["shopify"] and str(device) == "All devices":
             bundles["shopify"] = self._shopify_bundle(periods["shopify"], market, device, compare)
             current.update(bundles["shopify"]["current"])
             previous.update(bundles["shopify"]["previous"])
-        if health["reconciliation"]["available"] and periods["reconciliation"] and str(device) == "All devices":
+        if "reconciliation" in source_names and health["reconciliation"]["available"] and periods["reconciliation"] and str(device) == "All devices":
             bundles["reconciliation"] = self._reconciliation_bundle(periods["reconciliation"], market, device, compare)
             current.update(bundles["reconciliation"]["current"])
             previous.update(bundles["reconciliation"]["previous"])
@@ -1057,7 +1181,7 @@ class PostgresSEOLiveAnalyticsReader:
         previous_daily = self._combine_daily(
             bundles.get("gsc"), bundles.get("ga4"), bundles.get("shopify"), key="previous_daily",
         ) if compare else []
-        ready = any((health[source].get("available") for source in ("gsc", "ga4", "shopify")))
+        ready = any((health[source].get("available") for source in source_names if source in health))
         raw_fallback = not bool((health.get("snapshot") or {}).get("available"))
         stale = str((health.get("refresh") or {}).get("status") or "") in {"partial", "failed"}
         return {
@@ -1069,6 +1193,10 @@ class PostgresSEOLiveAnalyticsReader:
                 "market": market,
                 "device": device,
                 "compare": bool(compare),
+                "comparison": comparison,
+                "search_type": self._active_search_type,
+                "query_class": self._active_query_class,
+                "source_scope": str(source_scope or "all"),
                 "custom_start": _iso(custom_start),
                 "custom_end": _iso(custom_end),
             },

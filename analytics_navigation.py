@@ -1,0 +1,36 @@
+ANALYTICS_PAGE_KEY = "analytics"
+
+ANALYTICS_OVERVIEW_ROUTE = "Analytics Overview"
+ANALYTICS_TRAFFIC_ROUTE = "Traffic & Acquisition"
+ANALYTICS_PAGES_ROUTE = "Pages & Engagement"
+ANALYTICS_ECOMMERCE_ROUTE = "Analytics Ecommerce"
+ANALYTICS_REALTIME_ROUTE = "Analytics Realtime"
+
+ANALYTICS_ROUTES = (
+    ANALYTICS_OVERVIEW_ROUTE,
+    ANALYTICS_TRAFFIC_ROUTE,
+    ANALYTICS_PAGES_ROUTE,
+    ANALYTICS_ECOMMERCE_ROUTE,
+    ANALYTICS_REALTIME_ROUTE,
+)
+
+ANALYTICS_NAV_LABELS = {
+    ANALYTICS_OVERVIEW_ROUTE: "Overview",
+    ANALYTICS_TRAFFIC_ROUTE: "Traffic & Acquisition",
+    ANALYTICS_PAGES_ROUTE: "Pages & Engagement",
+    ANALYTICS_ECOMMERCE_ROUTE: "Ecommerce",
+    ANALYTICS_REALTIME_ROUTE: "Realtime",
+}
+ANALYTICS_PAGE_KEYS = {
+    ANALYTICS_OVERVIEW_ROUTE: ANALYTICS_PAGE_KEY,
+    ANALYTICS_TRAFFIC_ROUTE: "analytics_traffic",
+    ANALYTICS_PAGES_ROUTE: "analytics_pages",
+    ANALYTICS_ECOMMERCE_ROUTE: "analytics_ecommerce",
+    ANALYTICS_REALTIME_ROUTE: "analytics_realtime",
+}
+
+LEGACY_ANALYTICS_PAGE_KEYS = (
+    "seo_analytics",
+    "seo_store_analytics",
+    "store_analytics",
+)

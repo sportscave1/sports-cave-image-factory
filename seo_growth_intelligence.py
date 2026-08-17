@@ -21,8 +21,10 @@ from activity_log import record_activity_log
 import google_seo
 import google_seo_import
 import google_seo_phase4
+import analytics_reporting
 import os_accounts
 import seo_live_analytics
+import seo_technical_audit
 import seo_workspace as seo_workspace
 
 
@@ -36,21 +38,25 @@ OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 PIPELINE_LEASE_SECONDS = 30 * 60
 PIPELINE_STAGES = (
     ("connection_health", "Connection health"),
-    ("gsc_daily_sync", "GSC seven-day refresh"),
-    ("ga4_daily_sync", "GA4 seven-day refresh"),
+    ("gsc_daily_sync", "GSC fourteen-day refresh"),
+    ("gsc_fresh_sync", "GSC preliminary current date"),
+    ("ga4_daily_sync", "GA4 fourteen-day refresh"),
     ("shopify_pages", "Shopify page refresh"),
     ("shopify_orders", "Shopify order refresh"),
     ("ga4_transactions", "GA4 transaction refresh"),
     ("url_mapping", "URL mapping"),
     ("revenue_reconciliation", "Revenue reconciliation"),
     ("joined_reporting", "Joined reporting snapshots"),
+    ("technical_audit", "Technical URL audit"),
     ("opportunities", "Opportunity detection"),
     ("measurements", "28/56/90-day measurements"),
 )
 ANALYTICS_REFRESH_STAGES = (
     ("schema_check", "Analytics schema"),
     ("gsc_daily_sync", "GSC recent refresh"),
+    ("gsc_fresh_sync", "GSC preliminary current date"),
     ("ga4_daily_sync", "GA4 recent refresh"),
+    ("ga4_report_contracts", "GA4 report snapshots"),
     ("shopify_saved_data", "Shopify/Supabase saved data"),
     ("url_mapping", "URL mapping"),
     ("revenue_reconciliation", "Revenue reconciliation"),
@@ -1448,6 +1454,7 @@ def run_daily_analytics_refresh(
     connection_store=None,
     requested_by="render-cron",
     worker_id="",
+    fresh_gsc_refresher=None,
 ):
     """Refresh saved analytics without running reports, tasks or measurements."""
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
@@ -1523,7 +1530,16 @@ def run_daily_analytics_refresh(
     callbacks = {
         "schema_check": schema_check,
         "gsc_daily_sync": lambda: google_source("GSC"),
+        "gsc_fresh_sync": fresh_gsc_refresher or (
+            lambda: google_seo_import.refresh_gsc_fresh_data(
+                import_store=import_store,
+                connection_store=connection_store,
+            )
+        ),
         "ga4_daily_sync": lambda: google_source("GA4"),
+        "ga4_report_contracts": lambda: analytics_reporting.refresh_saved_report_contracts(
+            connection_store=connection_store,
+        ),
         "shopify_saved_data": saved_source_health,
         "url_mapping": phase4_store.map_saved_urls,
         "revenue_reconciliation": phase4_store.reconcile_revenue,
@@ -1560,6 +1576,8 @@ def run_daily_growth_pipeline(
     connection_store=None,
     requested_by="render-cron",
     worker_id="",
+    technical_auditor=None,
+    fresh_gsc_refresher=None,
 ):
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
     store = store or PostgresSEOGrowthStore(phase4_store)
@@ -1626,6 +1644,12 @@ def run_daily_growth_pipeline(
     stage_callbacks = {
         "connection_health": lambda: connection_store.get_connection(),
         "gsc_daily_sync": lambda: (queue_google_once() or google_worker.run_once(source="GSC") or {}),
+        "gsc_fresh_sync": fresh_gsc_refresher or (
+            lambda: google_seo_import.refresh_gsc_fresh_data(
+                import_store=import_store,
+                connection_store=connection_store,
+            )
+        ),
         "ga4_daily_sync": lambda: (queue_google_once() or google_worker.run_once(source="GA4") or {}),
         "shopify_pages": lambda: (queue_phase4_once() or phase4_worker.run_once(source="shopify_pages") or {}),
         "shopify_orders": lambda: (queue_phase4_once() or phase4_worker.run_once(source="shopify_orders") or {}),
@@ -1633,6 +1657,9 @@ def run_daily_growth_pipeline(
         "url_mapping": lambda: (queue_phase4_once() or phase4_worker.run_once(source="mapping") or phase4_store.map_saved_urls()),
         "revenue_reconciliation": lambda: (queue_phase4_once() or phase4_worker.run_once(source="reconciliation") or phase4_store.reconcile_revenue()),
         "joined_reporting": lambda: phase4_store.refresh_reporting_snapshots(),
+        "technical_audit": technical_auditor or (
+            lambda: seo_technical_audit.run_background_audit(connection_store=connection_store)
+        ),
         "opportunities": lambda: phase4_store.refresh_reporting_snapshots(),
         "measurements": lambda: store.refresh_due_measurements(),
     }

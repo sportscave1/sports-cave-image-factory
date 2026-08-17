@@ -1,49 +1,71 @@
-import os
-
-
 SEO_PAGE_KEY = "seo"
-SEO_OVERVIEW_ROUTE = "SEO Overview"
-SEO_KEYWORDS_ROUTE = "Keyword Research & Mapping"
-SEO_REPORTS_ROUTE = "Reports & Strategy"
-SEO_TASKS_ROUTE = "Tasks & Results"
-SEO_CITATIONS_ROUTE = "Citations"
-SEO_BLOG_ROUTE = "Blog Content"
-SEO_INTERNAL_LINKING_ROUTE = "Internal Linking"
-SEO_BACKLINKS_ROUTE = "Backlinks & Outreach"
 
-SEO_ANALYTICS_ROUTES = (
+SEO_OVERVIEW_ROUTE = "SEO Overview"
+SEO_KEYWORDS_ROUTE = "Keywords & Rankings"
+SEO_OPPORTUNITIES_ROUTE = "SEO Opportunities"
+SEO_LANDING_PAGES_ROUTE = "SEO Landing Pages"
+SEO_MAPPING_ROUTE = "Keyword Mapping"
+SEO_BLOG_ROUTE = "SEO Blog"
+SEO_HEALTH_ROUTE = "SEO Health & Fixes"
+
+SEO_ROUTES = (
     SEO_OVERVIEW_ROUTE,
     SEO_KEYWORDS_ROUTE,
-)
-
-SEO_WORKSPACE_ROUTES = (
-    SEO_REPORTS_ROUTE,
-    SEO_TASKS_ROUTE,
+    SEO_OPPORTUNITIES_ROUTE,
+    SEO_LANDING_PAGES_ROUTE,
+    SEO_MAPPING_ROUTE,
     SEO_BLOG_ROUTE,
-    SEO_INTERNAL_LINKING_ROUTE,
-    SEO_BACKLINKS_ROUTE,
-    SEO_CITATIONS_ROUTE,
-)
-
-SEO_FULL_WORKSPACE_ENABLED = os.getenv("SEO_FULL_WORKSPACE_ENABLED", "").strip().casefold() in {
-    "1", "true", "yes", "on",
-}
-
-# The underlying workspace routes and data remain intact and can be restored by
-# enabling the admin feature flag.
-SEO_ROUTES = (
-    (*SEO_ANALYTICS_ROUTES, *SEO_WORKSPACE_ROUTES)
-    if SEO_FULL_WORKSPACE_ENABLED
-    else SEO_ANALYTICS_ROUTES
+    SEO_HEALTH_ROUTE,
 )
 
 SEO_NAV_LABELS = {
     SEO_OVERVIEW_ROUTE: "Overview",
-    SEO_KEYWORDS_ROUTE: "Keyword Research & Mapping",
-    SEO_REPORTS_ROUTE: "Reports & Strategy",
-    SEO_TASKS_ROUTE: "Tasks & Results",
-    SEO_CITATIONS_ROUTE: "Citations",
-    SEO_BLOG_ROUTE: "Blog Content",
-    SEO_INTERNAL_LINKING_ROUTE: "Internal Linking",
-    SEO_BACKLINKS_ROUTE: "Backlinks & Outreach",
+    SEO_KEYWORDS_ROUTE: "Keywords & Rankings",
+    SEO_OPPORTUNITIES_ROUTE: "Opportunities",
+    SEO_LANDING_PAGES_ROUTE: "Landing Pages",
+    SEO_MAPPING_ROUTE: "Keyword Mapping",
+    SEO_BLOG_ROUTE: "Blog",
+    SEO_HEALTH_ROUTE: "SEO Health & Fixes",
+}
+SEO_PAGE_KEYS = {
+    SEO_OVERVIEW_ROUTE: SEO_PAGE_KEY,
+    SEO_KEYWORDS_ROUTE: "seo_keywords",
+    SEO_OPPORTUNITIES_ROUTE: "seo_opportunities",
+    SEO_LANDING_PAGES_ROUTE: "seo_landing_pages",
+    SEO_MAPPING_ROUTE: "seo_keyword_mapping",
+    SEO_BLOG_ROUTE: "seo_blog",
+    SEO_HEALTH_ROUTE: "seo_health",
+}
+
+# These hidden routes preserve old links and records while the visible workspace
+# uses the focused GSC-first information architecture above.
+SEO_REPORTS_ROUTE = "Reports & Strategy"
+SEO_TASKS_ROUTE = "Tasks & Results"
+SEO_CITATIONS_ROUTE = "Citations"
+SEO_INTERNAL_LINKING_ROUTE = "Internal Linking"
+SEO_BACKLINKS_ROUTE = "Backlinks & Outreach"
+SEO_LEGACY_KEYWORDS_ROUTE = "Keyword Research & Mapping"
+SEO_LEGACY_BLOG_ROUTE = "Blog Content"
+SEO_LEGACY_ROUTES = (
+    SEO_LEGACY_KEYWORDS_ROUTE,
+    SEO_REPORTS_ROUTE,
+    SEO_TASKS_ROUTE,
+    SEO_CITATIONS_ROUTE,
+    SEO_LEGACY_BLOG_ROUTE,
+    SEO_INTERNAL_LINKING_ROUTE,
+    SEO_BACKLINKS_ROUTE,
+)
+
+SEO_ANALYTICS_ROUTES = SEO_ROUTES
+SEO_WORKSPACE_ROUTES = SEO_LEGACY_ROUTES
+SEO_FULL_WORKSPACE_ENABLED = False
+
+SEO_LEGACY_ROUTE_REDIRECTS = {
+    SEO_LEGACY_KEYWORDS_ROUTE: SEO_MAPPING_ROUTE,
+    SEO_LEGACY_BLOG_ROUTE: SEO_BLOG_ROUTE,
+    SEO_REPORTS_ROUTE: SEO_OPPORTUNITIES_ROUTE,
+    SEO_TASKS_ROUTE: SEO_OPPORTUNITIES_ROUTE,
+    SEO_CITATIONS_ROUTE: SEO_HEALTH_ROUTE,
+    SEO_INTERNAL_LINKING_ROUTE: SEO_MAPPING_ROUTE,
+    SEO_BACKLINKS_ROUTE: SEO_OPPORTUNITIES_ROUTE,
 }

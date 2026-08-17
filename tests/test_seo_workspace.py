@@ -26,17 +26,22 @@ def user(*, permissions=(), role="worker"):
 
 
 class SEONavigationTests(unittest.TestCase):
-    def test_registry_has_one_assignable_parent_and_only_live_analytics_routes(self):
+    def test_registry_has_one_assignable_parent_and_full_gsc_workspace(self):
         parent = os_accounts.PAGE_BY_KEY[seo.SEO_PAGE_KEY]
         self.assertEqual(parent["route"], seo.SEO_OVERVIEW_ROUTE)
         self.assertEqual(parent["label"], "SEO")
         self.assertTrue(parent["worker_assignable"])
-        self.assertEqual(len(seo.SEO_ROUTES), 2)
+        self.assertEqual(len(seo.SEO_ROUTES), 7)
         self.assertEqual(
             seo.SEO_ROUTES,
             (
                 seo.SEO_OVERVIEW_ROUTE,
                 seo.SEO_KEYWORDS_ROUTE,
+                seo_navigation.SEO_OPPORTUNITIES_ROUTE,
+                seo_navigation.SEO_LANDING_PAGES_ROUTE,
+                seo_navigation.SEO_MAPPING_ROUTE,
+                seo.SEO_BLOG_ROUTE,
+                seo_navigation.SEO_HEALTH_ROUTE,
             ),
         )
         self.assertIn(seo.SEO_REPORTS_ROUTE, seo_navigation.SEO_WORKSPACE_ROUTES)

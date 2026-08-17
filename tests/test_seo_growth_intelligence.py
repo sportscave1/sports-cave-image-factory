@@ -178,6 +178,8 @@ class GrowthPipelineTests(unittest.TestCase):
                 connection_store=Mock(get_connection=Mock(return_value={"status": "Connected"})),
                 requested_by="test",
                 worker_id="worker",
+                technical_auditor=lambda: {"status": "completed", "processed": 1, "written": 1},
+                fresh_gsc_refresher=lambda: {"status": "preliminary", "processed": 1, "written": 1},
             )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(store.started, [stage[0] for stage in growth.PIPELINE_STAGES])

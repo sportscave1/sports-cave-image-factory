@@ -1,10 +1,13 @@
 from pathlib import Path
 from unittest import mock
+import inspect
 import unittest
 
 import navigation_runtime
+import ads_navigation
 import os_accounts
 import seo_navigation
+import seo_page
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +54,35 @@ class SidebarDisclosureTests(unittest.TestCase):
         seo_store_loader.assert_not_called()
         dropbox_loader.assert_not_called()
 
+    def test_active_ads_routes_are_authoritative_over_persisted_disclosure_state(self):
+        for route in ads_navigation.ADS_ROUTES:
+            for stale_group in ("", "social", "seo", "reporting"):
+                self.assertTrue(
+                    navigation_runtime.disclosure_group_is_expanded(
+                        route,
+                        group="ads",
+                        stored_group=stale_group,
+                        force_open_routes=ads_navigation.ADS_ROUTES,
+                    )
+                )
+
+        self.assertTrue(
+            navigation_runtime.disclosure_group_is_expanded(
+                "Dashboard",
+                group="ads",
+                stored_group="ads",
+                force_open_routes=ads_navigation.ADS_ROUTES,
+            )
+        )
+        self.assertFalse(
+            navigation_runtime.disclosure_group_is_expanded(
+                "Dashboard",
+                group="ads",
+                stored_group="seo",
+                force_open_routes=ads_navigation.ADS_ROUTES,
+            )
+        )
+
     def test_only_selected_renderer_executes(self):
         selected = mock.Mock(return_value="selected")
         inactive = mock.Mock()
@@ -85,9 +117,8 @@ class SidebarDisclosureTests(unittest.TestCase):
         self.assertNotIn('"route": "Email"', source)
 
     def test_inactive_seo_tabs_are_not_constructed(self):
-        source = (ROOT / "seo_page.py").read_text(encoding="utf-8")
+        source = inspect.getsource(seo_page._render_active_route)
         self.assertNotIn("st.tabs(", source)
-        self.assertIn("st.segmented_control(", source)
         self.assertIn("navigation_runtime.dispatch_selected(", source)
 
     def test_sidebar_imports_only_lightweight_seo_navigation_metadata(self):

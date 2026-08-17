@@ -223,17 +223,27 @@ class LiveAnalyticsContractTests(unittest.TestCase):
 
     def test_reader_is_database_only_and_uses_operational_shopify_tables(self):
         source = inspect.getsource(seo_live_analytics.PostgresSEOLiveAnalyticsReader)
-        self.assertIn("FROM seo_gsc_daily_totals", source)
+        self.assertIn("FROM seo_gsc_property_totals_v2", source)
+        self.assertIn("FROM seo_gsc_query_daily_v2", source)
+        self.assertIn("FROM seo_gsc_page_daily_v2", source)
         self.assertIn("FROM seo_ga4_daily_landing_pages", source)
         self.assertIn("FROM shopify_orders", source)
         self.assertNotIn("requests.", source)
         self.assertNotIn("GoogleSEOReportingClient", source)
         self.assertNotIn("ShopifySEOClient", source)
 
-    def test_navigation_is_analytics_only_by_default_and_reversible(self):
+    def test_navigation_is_gsc_first_and_legacy_routes_are_reversible(self):
         self.assertEqual(
             seo_navigation.SEO_ROUTES,
-            (seo_navigation.SEO_OVERVIEW_ROUTE, seo_navigation.SEO_KEYWORDS_ROUTE),
+            (
+                seo_navigation.SEO_OVERVIEW_ROUTE,
+                seo_navigation.SEO_KEYWORDS_ROUTE,
+                seo_navigation.SEO_OPPORTUNITIES_ROUTE,
+                seo_navigation.SEO_LANDING_PAGES_ROUTE,
+                seo_navigation.SEO_MAPPING_ROUTE,
+                seo_navigation.SEO_BLOG_ROUTE,
+                seo_navigation.SEO_HEALTH_ROUTE,
+            ),
         )
         self.assertIn(seo_navigation.SEO_REPORTS_ROUTE, seo_navigation.SEO_WORKSPACE_ROUTES)
         self.assertFalse(seo_navigation.SEO_FULL_WORKSPACE_ENABLED)
@@ -339,6 +349,10 @@ class LiveAnalyticsContractTests(unittest.TestCase):
             seo_growth_intelligence.seo_live_analytics,
             "PostgresSEOLiveAnalyticsReader",
             HealthReader,
+        ), patch.object(
+            seo_growth_intelligence.analytics_reporting,
+            "refresh_saved_report_contracts",
+            return_value={"status": "completed", "written": 9},
         ):
             result = seo_growth_intelligence.run_daily_analytics_refresh(
                 store=store,
@@ -347,6 +361,7 @@ class LiveAnalyticsContractTests(unittest.TestCase):
                 connection_store=Mock(),
                 requested_by="test",
                 worker_id="worker-1",
+                fresh_gsc_refresher=lambda: {"status": "preliminary", "received": 1, "written": 1},
             )
         expected = [stage[0] for stage in seo_growth_intelligence.ANALYTICS_REFRESH_STAGES]
         self.assertEqual(result["status"], "completed")

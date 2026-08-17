@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import random
 import secrets
 import threading
 import time
@@ -256,13 +257,13 @@ def _request_with_retries(call, *, stage):
             status_code = int(getattr(response, "status_code", 0) or 0)
             if status_code == 429 or status_code >= 500:
                 if attempt < GOOGLE_HTTP_RETRIES:
-                    time.sleep(0.15 * (attempt + 1))
+                    time.sleep(min((0.15 * (2 ** attempt)) + random.uniform(0, 0.1), 2.0))
                     continue
             return response
         except (requests.Timeout, requests.ConnectionError) as error:
             last_error = error
             if attempt < GOOGLE_HTTP_RETRIES:
-                time.sleep(0.15 * (attempt + 1))
+                time.sleep(min((0.15 * (2 ** attempt)) + random.uniform(0, 0.1), 2.0))
                 continue
             break
     raise GoogleSEOError(
@@ -562,6 +563,7 @@ class PostgresGoogleSEOStore:
                                connection_status, reconnect_required,
                                gsc_site_url, gsc_property_name,
                                ga4_property_id, ga4_property_name,
+                               ga4_property_timezone, ga4_property_currency,
                                available_gsc_properties, available_ga4_properties,
                                properties_checked_at, last_successful_sync_at,
                                gsc_data_through_date, ga4_data_through_date,

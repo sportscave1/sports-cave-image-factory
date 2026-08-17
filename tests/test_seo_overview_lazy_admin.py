@@ -1,4 +1,5 @@
 import inspect
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -206,6 +207,55 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         self.assertIn("Google Analytics 4", rendered)
         self.assertIn("Shopify", rendered)
 
+    def test_embedded_connections_use_the_parent_disclosure_without_a_second_toggle(self):
+        ui = FakeUI(admin_open=False)
+        connection_store = Mock()
+        connection_store.get_connection.return_value = {
+            "has_refresh_token": True,
+            "gsc_property_name": "Sports Cave",
+            "gsc_site_url": "https://example.test/",
+            "ga4_property_name": "Sports Cave GA4",
+            "ga4_property_id": "properties/1",
+        }
+
+        with patch.object(seo_page, "st", ui), patch.object(
+            google_seo, "configuration_status", return_value={"ready": True}
+        ), patch.object(
+            google_seo, "connection_status_label", return_value="Connected"
+        ), patch.object(
+            seo_page, "_shopify_health", return_value={"status": "Connected", "last_sync": "Saved"}
+        ), patch.object(
+            seo_page, "_render_google_controls"
+        ), patch.object(
+            seo_page, "_render_historical_import_controls"
+        ), patch.object(
+            seo_page, "_render_analytics_refresh_admin"
+        ):
+            seo_page._render_data_connections_admin(
+                admin_user(),
+                google_store=connection_store,
+                embedded=True,
+            )
+
+        connection_store.get_connection.assert_called_once()
+        self.assertNotIn(("button", "Data Connections & Sync Settings"), ui.events)
+
+    def test_unconfigured_overview_skips_the_postgres_reader_without_hiding_filters(self):
+        ui = FakeUI()
+        empty_environment = {key: "" for key in seo_page.DATABASE_URL_ENV_KEYS}
+        with patch.object(seo_page, "st", ui), patch.dict(
+            os.environ, empty_environment, clear=False
+        ), patch.object(
+            seo_page,
+            "_load_reporting_snapshot",
+            side_effect=AssertionError("database reader should stay lazy"),
+        ):
+            snapshot = seo_page._saved_search_snapshot()
+
+        self.assertEqual(snapshot["reason"], "database_not_configured")
+        self.assertEqual(snapshot["top_queries"], [])
+        self.assertFalse(snapshot["health"]["gsc"]["available"])
+
     def test_disclosure_toggle_changes_only_session_state(self):
         ui = FakeUI(admin_open=False, click_toggle=True)
         with patch.object(seo_page, "st", ui):
@@ -245,7 +295,7 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
         rendered = " ".join(value for _kind, value in ui.events)
         self.assertIn("Main analytics", rendered)
         self.assertIn("Performance", rendered)
-        self.assertNotIn("Google Search Console", rendered)
+        self.assertIn("Google Search Console", rendered)
         self.assertNotIn("Google data import", rendered)
 
     def test_admin_exposes_one_refresh_and_keeps_connection_recovery(self):

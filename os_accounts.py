@@ -5,6 +5,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
 import ads_navigation
+import analytics_navigation
 from shared_credentials import CREDENTIAL_PERMISSION_KEYS
 import social_media
 import seo_navigation as seo_workspace
@@ -89,6 +90,23 @@ PAGE_REGISTRY = (
         "navigation_child": True,
     },
     {
+        "key": analytics_navigation.ANALYTICS_PAGE_KEY,
+        "route": analytics_navigation.ANALYTICS_OVERVIEW_ROUTE,
+        "label": "Analytics",
+        "worker_assignable": True,
+    },
+    *(
+        {
+            "key": analytics_navigation.ANALYTICS_PAGE_KEYS[route],
+            "route": route,
+            "label": analytics_navigation.ANALYTICS_NAV_LABELS[route],
+            "worker_assignable": False,
+            "parent_key": analytics_navigation.ANALYTICS_PAGE_KEY,
+            "navigation_child": True,
+        }
+        for route in analytics_navigation.ANALYTICS_ROUTES[1:]
+    ),
+    {
         "key": seo_workspace.SEO_PAGE_KEY,
         "route": seo_workspace.SEO_OVERVIEW_ROUTE,
         "label": "SEO",
@@ -96,7 +114,7 @@ PAGE_REGISTRY = (
     },
     *(
         {
-            "key": f"seo_{route.casefold().replace(' & ', '_').replace(' ', '_')}",
+            "key": seo_workspace.SEO_PAGE_KEYS[route],
             "route": route,
             "label": seo_workspace.SEO_NAV_LABELS[route],
             "worker_assignable": False,
@@ -171,10 +189,24 @@ PAGE_ALIASES = {
     "Marketing Factory": "Ads",
     "Dropbox": "Files",
     social_media.LEGACY_REELS_ROUTE: social_media.AI_REELS_ROUTE,
+    **seo_workspace.SEO_LEGACY_ROUTE_REDIRECTS,
 }
 PAGE_KEY_ALIASES = {
     "dropbox": "files",
     social_media.LEGACY_REELS_PAGE_KEY: social_media.SOCIAL_MEDIA_PAGE_KEY,
+    "seo_store_analytics": analytics_navigation.ANALYTICS_PAGE_KEY,
+    "store_analytics": analytics_navigation.ANALYTICS_PAGE_KEY,
+    "seo_keyword_research_mapping": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_MAPPING_ROUTE],
+    "seo_blog_content": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_BLOG_ROUTE],
+    "seo_reports_strategy": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_OPPORTUNITIES_ROUTE],
+    "seo_tasks_results": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_OPPORTUNITIES_ROUTE],
+    "seo_citations": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_HEALTH_ROUTE],
+    "seo_internal_linking": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_MAPPING_ROUTE],
+    "seo_backlinks_outreach": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_OPPORTUNITIES_ROUTE],
+    **{
+        key: analytics_navigation.ANALYTICS_PAGE_KEY
+        for key in analytics_navigation.LEGACY_ANALYTICS_PAGE_KEYS
+    },
 }
 PAGE_BY_KEY = {page["key"]: page for page in PAGE_REGISTRY}
 PAGE_BY_ROUTE = {page["route"]: page for page in PAGE_REGISTRY}
@@ -369,6 +401,17 @@ def can_access_page(user, route_or_key):
         if is_admin(user):
             return True
         return seo_workspace.SEO_PAGE_KEY in permission_keys(user)
+    if page and (
+        page["key"] == analytics_navigation.ANALYTICS_PAGE_KEY
+        or page.get("parent_key") == analytics_navigation.ANALYTICS_PAGE_KEY
+    ):
+        if is_admin(user):
+            return True
+        permissions = permission_keys(user)
+        return bool(
+            analytics_navigation.ANALYTICS_PAGE_KEY in permissions
+            or seo_workspace.SEO_PAGE_KEY in permissions
+        )
     if page and (
         page["key"] == ads_navigation.ADS_PAGE_KEY
         or page.get("parent_key") == ads_navigation.ADS_PAGE_KEY
