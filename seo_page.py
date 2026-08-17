@@ -290,13 +290,37 @@ def _navigate(navigate, route):
 
 
 def _google_badge_class(status):
-    if status == "Connected":
+    if status in {"Connected", "Connected and data ready"}:
         return "sc-seo-badge-connected"
-    if status == "Needs attention":
+    if status == "Needs attention" or str(status).startswith((
+        "Connected -", "Reconnection required", "Permission/property error"
+    )):
         return "sc-seo-badge-attention"
     if status == "Configuration required":
         return "sc-seo-badge-required"
     return ""
+
+
+def _gsc_health_notice(health):
+    health = dict(health or {})
+    status = str(health.get("status") or "")
+    messages = {
+        "missing_migration": (
+            "The canonical Search Console reporting migration is missing. "
+            "Apply the additive GSC migrations before syncing."
+        ),
+        "canonical_backfill_required": (
+            "Search Console is connected and legacy rows exist, but the canonical SEO datasets "
+            "still require backfill or refetch."
+        ),
+        "initial_data_sync_required": (
+            "Search Console is configured, but the canonical SEO datasets have not been synced yet."
+        ),
+        "sync_failed": "The latest canonical Search Console sync failed and no readable last-good data exists.",
+        "stale_last_good": "The latest Search Console sync failed; the metrics below use preserved last-good canonical data.",
+        "not_configured": "Select and test a Search Console property before syncing SEO data.",
+    }
+    return messages.get(status, "")
 
 
 def _integration_card(
@@ -398,7 +422,8 @@ def _cached_default_phase4_health():
 
 
 @st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
-def _cached_default_live_source_health():
+def _cached_default_live_source_health(cache_revision=0):
+    del cache_revision
     return seo_live_analytics.default_reader().source_health()
 
 
@@ -415,7 +440,9 @@ def _cached_default_reporting_snapshot(
     custom_start,
     custom_end,
     source_health,
+    cache_revision,
 ):
+    del cache_revision
     reader = seo_live_analytics.default_reader()
     return reader.snapshot(
         preset=preset,
@@ -463,7 +490,7 @@ def _render_google_controls(user, store, config_status, connection):
         )
         return
 
-    controls = st.columns(2)
+    controls = st.columns(3)
     if controls[0].button(
         "Refresh properties",
         icon=":material/refresh:",
@@ -476,8 +503,28 @@ def _render_google_controls(user, store, config_status, connection):
         )
         invalidate_seo_overview_summary_cache()
         st.rerun()
+    if controls[1].button(
+        "Test GSC connection",
+        icon=":material/health_and_safety:",
+        key="seo-google-test-gsc",
+    ):
+        result = google_seo.test_gsc_connection(
+            store,
+            user,
+            google_seo.load_config(),
+        )
+        _set_notice(
+            result.get("message") or (
+                "Search Console token, property permission and read access verified."
+                if result.get("ok")
+                else "Search Console connection test failed."
+            ),
+            success=bool(result.get("ok")),
+        )
+        invalidate_seo_overview_summary_cache()
+        st.rerun()
     if reconnect_required:
-        controls[1].link_button(
+        controls[2].link_button(
             "Reconnect",
             google_seo.GOOGLE_OAUTH_CONNECT_PATH,
             icon=":material/link:",
@@ -1035,7 +1082,8 @@ def _render_analytics_refresh_admin(user, *, growth_store=None):
                 _set_notice("An analytics refresh is already running.")
             else:
                 _set_notice(
-                    "Saved analytics remain available; one or more sources need attention.",
+                    result.get("error_summary")
+                    or "Saved analytics remain available; the analytics refresh needs attention.",
                     success=False,
                 )
             if failed:
@@ -1169,6 +1217,7 @@ def _load_reporting_snapshot(
         arguments["custom_start"],
         arguments["custom_end"],
         source_health or {},
+        seo_live_analytics.default_reader().cache_revision(),
     )
 
 
@@ -1617,7 +1666,9 @@ def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None, nav
         health = reporting_reader.source_health()
     else:
         try:
-            health = dict(_cached_default_live_source_health())
+            health = dict(_cached_default_live_source_health(
+                seo_live_analytics.default_reader().cache_revision()
+            ))
         except Exception:
             health = {}
     _render_data_health_strip(health)
@@ -1726,6 +1777,7 @@ def _render_data_connections_admin(
     config_status = google_seo.configuration_status()
     using_default_google_store = google_store is None
     google_store = google_store or google_seo.default_store()
+    gsc_health = {}
     try:
         connection = (
             _cached_default_google_connection()
@@ -1737,8 +1789,21 @@ def _render_data_connections_admin(
         fallback = "Needs attention" if config_status.get("ready") else "Configuration required"
         gsc_status = ga4_status = fallback
     else:
-        gsc_status = google_seo.connection_status_label(
-            config_status, connection, service="gsc"
+        try:
+            source_health = (
+                reporting_reader.source_health()
+                if reporting_reader is not None
+                else _cached_default_live_source_health(
+                    seo_live_analytics.default_reader().cache_revision()
+                )
+            )
+        except Exception:
+            source_health = {}
+        gsc_health = dict((source_health or {}).get("gsc") or {})
+        gsc_status = google_seo.gsc_connection_status_label(
+            config_status,
+            connection,
+            gsc_health,
         )
         ga4_status = google_seo.connection_status_label(
             config_status, connection, service="ga4"
@@ -1753,8 +1818,16 @@ def _render_data_connections_admin(
             gsc_status,
             property_name=connection.get("gsc_property_name") or "",
             property_id=connection.get("gsc_site_url") or "",
-            last_sync=connection.get("last_successful_sync_at") or "",
-            data_date=connection.get("gsc_data_through_date") or "",
+            last_sync=(
+                connection.get("gsc_canonical_synced_at")
+                or connection.get("last_successful_sync_at")
+                or ""
+            ),
+            data_date=(
+                connection.get("gsc_canonical_data_through_date")
+                or connection.get("gsc_data_through_date")
+                or ""
+            ),
         ),
         unsafe_allow_html=True,
     )
@@ -1781,6 +1854,15 @@ def _render_data_connections_admin(
         ),
         unsafe_allow_html=True,
     )
+    canonical_counts = dict(gsc_health.get("canonical_counts") or {})
+    if any(int(value or 0) for value in canonical_counts.values()):
+        st.caption(
+            "Canonical GSC rows: "
+            f"{int(canonical_counts.get('property_totals') or 0):,} property totals, "
+            f"{int(canonical_counts.get('queries') or 0):,} queries, "
+            f"{int(canonical_counts.get('pages') or 0):,} pages and "
+            f"{int(canonical_counts.get('query_pages') or 0):,} query/page rows."
+        )
     _render_google_controls(user, google_store, config_status, connection)
 
     _render_analytics_refresh_admin(user, growth_store=growth_store)
@@ -3012,6 +3094,12 @@ def _render_search_overview(
         "Unavailable" if quality["score"] is None else f"{float(quality['score']):.1f}/100",
     )
     health = (snapshot.get("health") or {}).get("gsc") or {}
+    health_notice = _gsc_health_notice(health)
+    if health_notice:
+        if health.get("available"):
+            st.warning(health_notice)
+        else:
+            st.error(health_notice)
     through = health.get("through_date") or "Unavailable"
     st.caption(
         f"Source: Google Search Console | Exact saved property totals | Data through {through} | "

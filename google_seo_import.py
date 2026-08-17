@@ -26,6 +26,7 @@ import seo_metrics
 
 SEO_IMPORT_MIGRATION = "20260813_google_seo_phase3_storage.sql"
 ANALYTICS_REBUILD_MIGRATION = "20260817_analytics_seo_blog_rebuild.sql"
+GSC_PIPELINE_REPAIR_MIGRATION = "20260817_gsc_canonical_pipeline_repair.sql"
 WORKSPACE_KEY = google_seo.GOOGLE_SEO_WORKSPACE_KEY
 SOURCES = ("GSC", "GA4")
 MODES = ("historical", "daily", "manual")
@@ -297,6 +298,81 @@ class GoogleSEOReportingClient:
                 break
         return rows_out, len(rows_out) >= GSC_DAILY_ROW_LIMIT
 
+    def fetch_gsc_property_totals(
+        self,
+        site_url,
+        start_date,
+        end_date,
+        *,
+        data_state="final",
+        search_type=GSC_SEARCH_TYPE,
+    ):
+        payload = self._post(
+            self._gsc_endpoint(site_url),
+            {
+                "startDate": _as_date(start_date).isoformat(),
+                "endDate": _as_date(end_date).isoformat(),
+                "type": str(search_type or GSC_SEARCH_TYPE).casefold(),
+                "dataState": str(data_state or "final").casefold(),
+                "aggregationType": "byProperty",
+                "rowLimit": 1,
+                "startRow": 0,
+            },
+            stage="gsc_property_totals",
+        )
+        row = ((payload.get("rows") or [{}])[0]) or {}
+        return {
+            "start_date": _as_date(start_date),
+            "end_date": _as_date(end_date),
+            "search_type": str(search_type or GSC_SEARCH_TYPE).casefold(),
+            "data_state": str(data_state or "final").casefold(),
+            "aggregation_type": str(payload.get("responseAggregationType") or ""),
+            "clicks": _decimal(row.get("clicks")),
+            "impressions": _decimal(row.get("impressions")),
+            "ctr": _decimal(row.get("ctr")),
+            "average_position": _decimal(row.get("position")),
+        }
+
+    def fetch_gsc_query_range(
+        self,
+        site_url,
+        start_date,
+        end_date,
+        *,
+        data_state="final",
+        search_type=GSC_SEARCH_TYPE,
+    ):
+        rows = []
+        start_row = 0
+        endpoint = self._gsc_endpoint(site_url)
+        while start_row < GSC_DAILY_ROW_LIMIT:
+            payload = self._post(
+                endpoint,
+                {
+                    "startDate": _as_date(start_date).isoformat(),
+                    "endDate": _as_date(end_date).isoformat(),
+                    "dimensions": ["query", "country", "device"],
+                    "type": str(search_type or GSC_SEARCH_TYPE).casefold(),
+                    "dataState": str(data_state or "final").casefold(),
+                    "rowLimit": GSC_PAGE_SIZE,
+                    "startRow": start_row,
+                },
+                stage="gsc_query_audit",
+            )
+            page = list(payload.get("rows") or [])
+            rows.extend(page)
+            start_row += len(page)
+            if len(page) < GSC_PAGE_SIZE:
+                break
+        return {
+            "rows": rows,
+            "row_count": len(rows),
+            "truncated": len(rows) >= GSC_DAILY_ROW_LIMIT,
+            "aggregation_type": "",
+            "data_state": str(data_state or "final").casefold(),
+            "search_type": str(search_type or GSC_SEARCH_TYPE).casefold(),
+        }
+
     def fetch_gsc_date(
         self,
         site_url,
@@ -377,6 +453,7 @@ class GoogleSEOReportingClient:
                 "startDate": slice_date.isoformat(),
                 "endDate": slice_date.isoformat(),
                 "type": search_type,
+                "aggregationType": "byProperty",
                 "rowLimit": 1,
                 "startRow": 0,
                 "dataState": data_state,
@@ -402,6 +479,9 @@ class GoogleSEOReportingClient:
                 "impressions": _decimal(total_row.get("impressions")),
                 "ctr": _decimal(total_row.get("ctr")),
                 "average_position": _decimal(total_row.get("position")),
+                "aggregation_type": str(
+                    totals_payload.get("responseAggregationType") or "byProperty"
+                ),
                 "is_final": data_state == "final",
                 "is_complete": True,
                 "is_truncated": False,
@@ -594,8 +674,10 @@ class PostgresSEOImportStore:
         if self._schema_ready:
             return
         migrations = (
+            BASE_DIR / "migrations" / google_seo.GOOGLE_SEO_MIGRATION,
             BASE_DIR / "migrations" / SEO_IMPORT_MIGRATION,
             BASE_DIR / "migrations" / ANALYTICS_REBUILD_MIGRATION,
+            BASE_DIR / "migrations" / GSC_PIPELINE_REPAIR_MIGRATION,
         )
         if not all(migration.is_file() for migration in migrations):
             raise SEOImportError("SEO import storage is unavailable.", code="migration_missing")
@@ -726,9 +808,33 @@ class PostgresSEOImportStore:
                     (WORKSPACE_KEY, str(source or "").upper(), property_identifier),
                 )
                 row = cur.fetchone() or {}
+                if not row.get("latest") and str(source or "").upper() == "GSC":
+                    cur.execute(
+                        """
+                        SELECT property_identifier, latest_stored_date AS latest
+                        FROM seo_data_inventories
+                        WHERE workspace_key=%s AND source='GSC'
+                        ORDER BY latest_stored_date DESC NULLS LAST
+                        """,
+                        (WORKSPACE_KEY,),
+                    )
+                    row = next(
+                        (
+                            dict(candidate)
+                            for candidate in cur.fetchall() or []
+                            if google_seo.gsc_properties_match(
+                                property_identifier,
+                                candidate.get("property_identifier"),
+                            )
+                        ),
+                        {},
+                    )
         return _as_date(row.get("latest"))
 
     def replace_gsc_date(self, site_url, slice_data):
+        self.ensure_schema()
+        site_url = str(site_url or "").strip()
+        property_key = google_seo.canonical_gsc_property_key(site_url)
         slice_date = _as_date(slice_data["date"])
         details = list(slice_data.get("details") or [])
         query_rows = list(slice_data.get("query_rows") or [])
@@ -736,77 +842,81 @@ class PostgresSEOImportStore:
         query_page_rows = list(slice_data.get("query_page_rows") or [])
         appearance_rows = list(slice_data.get("appearance_rows") or [])
         total = dict(slice_data.get("total") or {})
-        data_state = str(slice_data.get("data_state") or "final")[:20]
-        search_type = str(slice_data.get("search_type") or GSC_SEARCH_TYPE)[:50]
+        data_state = str(slice_data.get("data_state") or "final").casefold()[:20]
+        search_type = str(slice_data.get("search_type") or GSC_SEARCH_TYPE).casefold()[:50]
+        source_method = str(slice_data.get("source_method") or "api")[:40]
+        write_legacy = bool(slice_data.get("write_legacy", True))
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        (SELECT COUNT(*) FROM seo_gsc_daily_details
-                         WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s) AS detail_count,
-                        EXISTS(
-                            SELECT 1 FROM seo_gsc_daily_totals
-                            WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s
-                        ) AS has_total
-                    """,
-                    (
-                        WORKSPACE_KEY, site_url, slice_date, search_type,
-                        WORKSPACE_KEY, site_url, slice_date, search_type,
-                    ),
-                )
-                previous_row = cur.fetchone() or {}
-                previous = _integer(previous_row.get("detail_count"))
-                previous_rows = previous + int(bool(previous_row.get("has_total")))
-                cur.execute(
-                    "DELETE FROM seo_gsc_daily_details WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s",
-                    (WORKSPACE_KEY, site_url, slice_date, search_type),
-                )
-                cur.execute(
-                    "DELETE FROM seo_gsc_daily_totals WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s",
-                    (WORKSPACE_KEY, site_url, slice_date, search_type),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO seo_gsc_daily_totals(
-                        workspace_key, gsc_site_url, date, search_type, clicks, impressions,
-                        ctr, average_position, is_final, is_complete, is_truncated
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        WORKSPACE_KEY, site_url, slice_date, search_type,
-                        total.get("clicks", 0), total.get("impressions", 0), total.get("ctr", 0),
-                        total.get("average_position", 0), bool(total.get("is_final", True)),
-                        bool(total.get("is_complete", True)), bool(total.get("is_truncated", False)),
-                    ),
-                )
-                if details:
-                    cur.executemany(
+                previous_rows = 0
+                if write_legacy:
+                    cur.execute(
                         """
-                        INSERT INTO seo_gsc_daily_details(
-                            workspace_key, gsc_site_url, date, dimension_key_hash,
-                            query, page_url, country_code,
-                            device, search_type, clicks, impressions, ctr, average_position,
-                            is_final, is_complete, is_truncated
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        SELECT
+                            (SELECT COUNT(*) FROM seo_gsc_daily_details
+                             WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s) AS detail_count,
+                            EXISTS(
+                                SELECT 1 FROM seo_gsc_daily_totals
+                                WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s
+                            ) AS has_total
                         """,
-                        [
-                            (
-                                WORKSPACE_KEY, site_url, slice_date,
-                                dimension_key_hash(
-                                    row.get("query", ""), row.get("page_url", ""),
-                                    row.get("country_code", ""), row.get("device", ""), search_type,
-                                ),
-                                row.get("query", ""),
-                                row.get("page_url", ""), row.get("country_code", ""), row.get("device", ""),
-                                search_type, row.get("clicks", 0), row.get("impressions", 0),
-                                row.get("ctr", 0), row.get("average_position", 0),
-                                data_state == "final",
-                                bool(total.get("is_complete", True)), bool(total.get("is_truncated", False)),
-                            )
-                            for row in details
-                        ],
+                        (
+                            WORKSPACE_KEY, site_url, slice_date, search_type,
+                            WORKSPACE_KEY, site_url, slice_date, search_type,
+                        ),
                     )
+                    previous_row = cur.fetchone() or {}
+                    previous = _integer(previous_row.get("detail_count"))
+                    previous_rows = previous + int(bool(previous_row.get("has_total")))
+                    cur.execute(
+                        "DELETE FROM seo_gsc_daily_details WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s",
+                        (WORKSPACE_KEY, site_url, slice_date, search_type),
+                    )
+                    cur.execute(
+                        "DELETE FROM seo_gsc_daily_totals WHERE workspace_key=%s AND gsc_site_url=%s AND date=%s AND search_type=%s",
+                        (WORKSPACE_KEY, site_url, slice_date, search_type),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO seo_gsc_daily_totals(
+                            workspace_key, gsc_site_url, date, search_type, clicks, impressions,
+                            ctr, average_position, is_final, is_complete, is_truncated
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            WORKSPACE_KEY, site_url, slice_date, search_type,
+                            total.get("clicks", 0), total.get("impressions", 0), total.get("ctr", 0),
+                            total.get("average_position", 0), bool(total.get("is_final", True)),
+                            bool(total.get("is_complete", True)), bool(total.get("is_truncated", False)),
+                        ),
+                    )
+                    if details:
+                        cur.executemany(
+                            """
+                            INSERT INTO seo_gsc_daily_details(
+                                workspace_key, gsc_site_url, date, dimension_key_hash,
+                                query, page_url, country_code,
+                                device, search_type, clicks, impressions, ctr, average_position,
+                                is_final, is_complete, is_truncated
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                (
+                                    WORKSPACE_KEY, site_url, slice_date,
+                                    dimension_key_hash(
+                                        row.get("query", ""), row.get("page_url", ""),
+                                        row.get("country_code", ""), row.get("device", ""), search_type,
+                                    ),
+                                    row.get("query", ""),
+                                    row.get("page_url", ""), row.get("country_code", ""), row.get("device", ""),
+                                    search_type, row.get("clicks", 0), row.get("impressions", 0),
+                                    row.get("ctr", 0), row.get("average_position", 0),
+                                    data_state == "final",
+                                    bool(total.get("is_complete", True)), bool(total.get("is_truncated", False)),
+                                )
+                                for row in details
+                            ],
+                        )
                 for table in (
                     "seo_gsc_property_totals_v2",
                     "seo_gsc_query_daily_v2",
@@ -815,20 +925,36 @@ class PostgresSEOImportStore:
                     "seo_gsc_search_appearance_daily_v2",
                 ):
                     cur.execute(
-                        f"DELETE FROM {table} WHERE workspace_key=%s AND property_id=%s "
+                        f"DELETE FROM {table} WHERE workspace_key=%s "
+                        "AND (property_id=%s OR property_key=%s) "
                         "AND source_date=%s AND search_type=%s AND data_state=%s",
-                        (WORKSPACE_KEY, site_url, slice_date, search_type, data_state),
+                        (
+                            WORKSPACE_KEY, site_url, property_key,
+                            slice_date, search_type, data_state,
+                        ),
                     )
                 cur.execute(
                     """
-                    INSERT INTO seo_gsc_property_totals_v2(
-                        workspace_key, property_id, source_date, search_type,
-                        aggregation_type, data_state, clicks, impressions, ctr,
-                        average_position, is_complete, is_truncated, row_count
-                    ) VALUES (%s, %s, %s, %s, 'property', %s, %s, %s, %s, %s, %s, %s, %s)
+                    DELETE FROM seo_gsc_canonical_date_status
+                    WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                      AND source_date=%s AND search_type=%s AND data_state=%s
                     """,
                     (
-                        WORKSPACE_KEY, site_url, slice_date, search_type, data_state,
+                        WORKSPACE_KEY, site_url, property_key,
+                        slice_date, search_type, data_state,
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO seo_gsc_property_totals_v2(
+                        workspace_key, property_id, property_key, source_date, search_type,
+                        aggregation_type, data_state, clicks, impressions, ctr,
+                        average_position, is_complete, is_truncated, row_count
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        WORKSPACE_KEY, site_url, property_key, slice_date, search_type,
+                        str(total.get("aggregation_type") or "byProperty")[:50], data_state,
                         total.get("clicks", 0), total.get("impressions", 0),
                         total.get("ctr", 0), total.get("average_position", 0),
                         bool(total.get("is_complete", True)), bool(total.get("is_truncated", False)),
@@ -839,14 +965,14 @@ class PostgresSEOImportStore:
                     cur.executemany(
                         """
                         INSERT INTO seo_gsc_query_daily_v2(
-                            workspace_key, property_id, source_date, search_type, data_state,
+                            workspace_key, property_id, property_key, source_date, search_type, data_state,
                             query_hash, raw_query, normalized_query, country_code, device,
                             clicks, impressions, position_weight, is_complete, is_truncated
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         [
                             (
-                                WORKSPACE_KEY, site_url, slice_date, search_type, data_state,
+                                WORKSPACE_KEY, site_url, property_key, slice_date, search_type, data_state,
                                 dimension_key_hash(row.get("raw_query", "")),
                                 row.get("raw_query", ""), row.get("normalized_query", ""),
                                 normalize_gsc_country(row.get("country_code", "")), row.get("device", ""),
@@ -862,14 +988,14 @@ class PostgresSEOImportStore:
                     cur.executemany(
                         """
                         INSERT INTO seo_gsc_page_daily_v2(
-                            workspace_key, property_id, source_date, search_type, data_state,
+                            workspace_key, property_id, property_key, source_date, search_type, data_state,
                             page_hash, page_url, country_code, device, clicks, impressions,
                             position_weight, is_complete, is_truncated
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         [
                             (
-                                WORKSPACE_KEY, site_url, slice_date, search_type, data_state,
+                                WORKSPACE_KEY, site_url, property_key, slice_date, search_type, data_state,
                                 dimension_key_hash(row.get("page_url", "")), row.get("page_url", ""),
                                 normalize_gsc_country(row.get("country_code", "")), row.get("device", ""),
                                 row.get("clicks", 0), row.get("impressions", 0),
@@ -884,14 +1010,14 @@ class PostgresSEOImportStore:
                     cur.executemany(
                         """
                         INSERT INTO seo_gsc_query_page_daily_v2(
-                            workspace_key, property_id, source_date, search_type, data_state,
+                            workspace_key, property_id, property_key, source_date, search_type, data_state,
                             query_hash, page_hash, raw_query, page_url, clicks, impressions,
                             position_weight, is_complete, is_truncated
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         [
                             (
-                                WORKSPACE_KEY, site_url, slice_date, search_type, data_state,
+                                WORKSPACE_KEY, site_url, property_key, slice_date, search_type, data_state,
                                 dimension_key_hash(row.get("raw_query", "")),
                                 dimension_key_hash(row.get("page_url", "")),
                                 row.get("raw_query", ""), row.get("page_url", ""),
@@ -907,13 +1033,13 @@ class PostgresSEOImportStore:
                     cur.executemany(
                         """
                         INSERT INTO seo_gsc_search_appearance_daily_v2(
-                            workspace_key, property_id, source_date, search_type, data_state,
+                            workspace_key, property_id, property_key, source_date, search_type, data_state,
                             appearance, clicks, impressions, position_weight, is_complete, is_truncated
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         [
                             (
-                                WORKSPACE_KEY, site_url, slice_date, search_type, data_state,
+                                WORKSPACE_KEY, site_url, property_key, slice_date, search_type, data_state,
                                 row.get("appearance", ""), row.get("clicks", 0),
                                 row.get("impressions", 0), row.get("position_weight", 0),
                                 not bool((slice_data.get("grain_truncation") or {}).get("search_appearance", False)),
@@ -922,47 +1048,320 @@ class PostgresSEOImportStore:
                             for row in appearance_rows
                         ],
                     )
-                cur.execute(
-                    """
-                    INSERT INTO seo_data_inventories(
-                        workspace_key, source, property_identifier, rows_stored,
-                        earliest_stored_date, latest_stored_date
-                    ) VALUES (%s, 'GSC', %s, %s, %s, %s)
-                    ON CONFLICT (workspace_key, source, property_identifier) DO UPDATE SET
-                        rows_stored=GREATEST(seo_data_inventories.rows_stored + %s - %s, 0),
-                        earliest_stored_date=LEAST(
-                            COALESCE(seo_data_inventories.earliest_stored_date, %s), %s
-                        ),
-                        latest_stored_date=GREATEST(
-                            COALESCE(seo_data_inventories.latest_stored_date, %s), %s
-                        ),
-                        updated_at=now()
-                    """,
-                    (
-                        WORKSPACE_KEY, site_url, len(details) + 1, slice_date, slice_date,
-                        len(details) + 1, previous_rows, slice_date, slice_date, slice_date, slice_date,
-                    ),
+                grain_truncation = dict(slice_data.get("grain_truncation") or {})
+                canonical_complete = bool(total.get("is_complete", True)) and not any(
+                    bool(grain_truncation.get(key, False))
+                    for key in ("query", "page", "query_page", "search_appearance")
                 )
                 cur.execute(
                     """
-                    UPDATE seo_google_connections
-                    SET gsc_earliest_stored_date=(
-                            SELECT earliest_stored_date FROM seo_data_inventories
-                            WHERE workspace_key=%s AND source='GSC' AND property_identifier=%s
-                        ),
-                        gsc_data_through_date=(
-                            SELECT latest_stored_date FROM seo_data_inventories
-                            WHERE workspace_key=%s AND source='GSC' AND property_identifier=%s
-                        ),
-                        gsc_import_status='running', gsc_import_error='', updated_at=now()
-                    WHERE workspace_key=%s
+                    INSERT INTO seo_gsc_canonical_date_status(
+                        workspace_key, property_id, property_key, source_date,
+                        search_type, data_state, aggregation_type,
+                        property_total_rows, query_rows, page_rows,
+                        query_page_rows, search_appearance_rows,
+                        canonical_complete, source_method, completed_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s,
+                        1, %s, %s, %s, %s, %s, %s,
+                        CASE WHEN %s THEN now() ELSE NULL END
+                    )
                     """,
                     (
-                        WORKSPACE_KEY, site_url, WORKSPACE_KEY, site_url, WORKSPACE_KEY,
+                        WORKSPACE_KEY, site_url, property_key, slice_date,
+                        search_type, data_state,
+                        str(total.get("aggregation_type") or "byProperty")[:50],
+                        len(query_rows), len(page_rows), len(query_page_rows),
+                        len(appearance_rows), canonical_complete, source_method,
+                        canonical_complete,
                     ),
                 )
+                if write_legacy:
+                    cur.execute(
+                        """
+                        INSERT INTO seo_data_inventories(
+                            workspace_key, source, property_identifier, rows_stored,
+                            earliest_stored_date, latest_stored_date
+                        ) VALUES (%s, 'GSC', %s, %s, %s, %s)
+                        ON CONFLICT (workspace_key, source, property_identifier) DO UPDATE SET
+                            rows_stored=GREATEST(seo_data_inventories.rows_stored + %s - %s, 0),
+                            earliest_stored_date=LEAST(
+                                COALESCE(seo_data_inventories.earliest_stored_date, %s), %s
+                            ),
+                            latest_stored_date=GREATEST(
+                                COALESCE(seo_data_inventories.latest_stored_date, %s), %s
+                            ),
+                            updated_at=now()
+                        """,
+                        (
+                            WORKSPACE_KEY, site_url, len(details) + 1, slice_date, slice_date,
+                            len(details) + 1, previous_rows, slice_date, slice_date, slice_date, slice_date,
+                        ),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE seo_google_connections
+                        SET gsc_earliest_stored_date=(
+                                SELECT earliest_stored_date FROM seo_data_inventories
+                                WHERE workspace_key=%s AND source='GSC' AND property_identifier=%s
+                            ),
+                            gsc_data_through_date=(
+                                SELECT latest_stored_date FROM seo_data_inventories
+                                WHERE workspace_key=%s AND source='GSC' AND property_identifier=%s
+                            ),
+                            gsc_canonical_property_key=%s,
+                            gsc_canonical_sync_status='running',
+                            gsc_canonical_sync_error_code='',
+                            gsc_canonical_sync_error_message='',
+                            gsc_canonical_revision=gsc_canonical_revision + 1,
+                            gsc_import_status='running', gsc_import_error='', updated_at=now()
+                        WHERE workspace_key=%s
+                        """,
+                        (
+                            WORKSPACE_KEY, site_url, WORKSPACE_KEY, site_url,
+                            property_key, WORKSPACE_KEY,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE seo_google_connections
+                        SET gsc_canonical_property_key=%s,
+                            gsc_canonical_sync_status='running',
+                            gsc_canonical_sync_error_code='',
+                            gsc_canonical_sync_error_message='',
+                            gsc_canonical_revision=gsc_canonical_revision + 1,
+                            updated_at=now()
+                        WHERE workspace_key=%s
+                        """,
+                        (property_key, WORKSPACE_KEY),
+                    )
             conn.commit()
-        return {"inserted": len(details) + 1, "replaced": previous_rows}
+        return {
+            "inserted": len(details) + 1,
+            "replaced": previous_rows,
+            "canonical_complete": canonical_complete,
+            "canonical_counts": {
+                "property_totals": 1,
+                "queries": len(query_rows),
+                "pages": len(page_rows),
+                "query_pages": len(query_page_rows),
+                "search_appearance": len(appearance_rows),
+            },
+        }
+
+    def backfill_gsc_canonical_from_legacy(
+        self,
+        site_url,
+        *,
+        start_date=None,
+        end_date=None,
+        max_dates=0,
+    ):
+        """Backfill complete canonical grains one legacy date at a time."""
+        self.ensure_schema()
+        selected = str(site_url or "").strip()
+        selected_key = google_seo.canonical_gsc_property_key(selected)
+        with self._backend().connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT gsc_site_url
+                    FROM seo_gsc_daily_totals
+                    WHERE workspace_key=%s
+                    ORDER BY gsc_site_url
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+                candidates = [str(row.get("gsc_site_url") or "") for row in cur.fetchall() or []]
+        matching = [value for value in candidates if google_seo.gsc_properties_match(selected, value)]
+        if not matching:
+            return {
+                "status": "no_legacy_rows",
+                "property_id": selected,
+                "property_key": selected_key,
+                "dates_processed": 0,
+                "canonical_rows_written": 0,
+            }
+        legacy_site = selected if selected in matching else matching[0]
+        clauses = ["workspace_key=%s", "gsc_site_url=%s", "is_complete=TRUE"]
+        params = [WORKSPACE_KEY, legacy_site]
+        if start_date:
+            clauses.append("date>=%s")
+            params.append(_as_date(start_date))
+        if end_date:
+            clauses.append("date<=%s")
+            params.append(_as_date(end_date))
+        with self._backend().connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT date, search_type
+                    FROM seo_gsc_daily_totals
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY date, search_type
+                    """,
+                    params,
+                )
+                dates = [dict(row) for row in cur.fetchall() or []]
+        if max_dates:
+            dates = dates[:max(0, int(max_dates))]
+        processed = canonical_written = 0
+        for item in dates:
+            slice_date = _as_date(item.get("date"))
+            search_type = str(item.get("search_type") or GSC_SEARCH_TYPE).casefold()
+            with self._backend().connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT clicks, impressions, ctr, average_position,
+                               is_final, is_complete, is_truncated
+                        FROM seo_gsc_daily_totals
+                        WHERE workspace_key=%s AND gsc_site_url=%s
+                          AND date=%s AND search_type=%s
+                        """,
+                        (WORKSPACE_KEY, legacy_site, slice_date, search_type),
+                    )
+                    total = dict(cur.fetchone() or {})
+                    cur.execute(
+                        """
+                        SELECT query, page_url, country_code, device,
+                               clicks, impressions, ctr, average_position
+                        FROM seo_gsc_daily_details
+                        WHERE workspace_key=%s AND gsc_site_url=%s
+                          AND date=%s AND search_type=%s
+                          AND is_complete=TRUE AND is_truncated=FALSE
+                        ORDER BY dimension_key_hash
+                        """,
+                        (WORKSPACE_KEY, legacy_site, slice_date, search_type),
+                    )
+                    details = [dict(row) for row in cur.fetchall() or []]
+            query_groups = {}
+            page_groups = {}
+            query_page_groups = {}
+            for row in details:
+                clicks = _decimal(row.get("clicks"))
+                impressions = _decimal(row.get("impressions"))
+                weight = _decimal(row.get("average_position")) * impressions
+                raw_query = str(row.get("query") or "")
+                page_url = str(row.get("page_url") or "")
+                country = normalize_gsc_country(row.get("country_code"))
+                device = str(row.get("device") or "")
+                if raw_query:
+                    target = query_groups.setdefault(
+                        (raw_query, country, device),
+                        {"clicks": Decimal("0"), "impressions": Decimal("0"), "position_weight": Decimal("0")},
+                    )
+                    target["clicks"] += clicks
+                    target["impressions"] += impressions
+                    target["position_weight"] += weight
+                if page_url:
+                    target = page_groups.setdefault(
+                        (page_url, country, device),
+                        {"clicks": Decimal("0"), "impressions": Decimal("0"), "position_weight": Decimal("0")},
+                    )
+                    target["clicks"] += clicks
+                    target["impressions"] += impressions
+                    target["position_weight"] += weight
+                if raw_query and page_url:
+                    target = query_page_groups.setdefault(
+                        (raw_query, page_url),
+                        {"clicks": Decimal("0"), "impressions": Decimal("0"), "position_weight": Decimal("0")},
+                    )
+                    target["clicks"] += clicks
+                    target["impressions"] += impressions
+                    target["position_weight"] += weight
+            query_rows = [
+                {
+                    "raw_query": key[0], "normalized_query": normalize_query(key[0]),
+                    "country_code": key[1], "device": key[2], **values,
+                }
+                for key, values in query_groups.items()
+            ]
+            page_rows = [
+                {"page_url": key[0], "country_code": key[1], "device": key[2], **values}
+                for key, values in page_groups.items()
+            ]
+            query_page_rows = [
+                {"raw_query": key[0], "page_url": key[1], **values}
+                for key, values in query_page_groups.items()
+            ]
+            payload = {
+                "date": slice_date,
+                "search_type": search_type,
+                "data_state": "final" if total.get("is_final", True) else "all",
+                "source_method": "legacy_backfill",
+                "write_legacy": False,
+                "total": {
+                    **total,
+                    "aggregation_type": "byProperty",
+                    "is_complete": bool(total.get("is_complete", True)),
+                    "is_truncated": bool(total.get("is_truncated", False)),
+                },
+                "details": details,
+                "query_rows": query_rows,
+                "page_rows": page_rows,
+                "query_page_rows": query_page_rows,
+                "appearance_rows": [],
+                "grain_truncation": {},
+            }
+            result = self.replace_gsc_date(selected, payload)
+            processed += 1
+            canonical_written += sum(_integer(value) for value in result["canonical_counts"].values())
+        canonical_counts = {}
+        canonical_through = None
+        if processed:
+            with self._backend().connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT MAX(source_date) AS latest_date,
+                               COALESCE(SUM(property_total_rows), 0) AS property_totals,
+                               COALESCE(SUM(query_rows), 0) AS queries,
+                               COALESCE(SUM(page_rows), 0) AS pages,
+                               COALESCE(SUM(query_page_rows), 0) AS query_pages,
+                               COALESCE(SUM(search_appearance_rows), 0) AS search_appearance
+                        FROM seo_gsc_canonical_date_status
+                        WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                          AND data_state='final' AND canonical_complete=TRUE
+                        """,
+                        (WORKSPACE_KEY, selected, selected_key),
+                    )
+                    summary = dict(cur.fetchone() or {})
+                    canonical_through = summary.pop("latest_date", None)
+                    canonical_counts = {
+                        key: _integer(value) for key, value in summary.items()
+                    }
+                    cur.execute(
+                        """
+                        UPDATE seo_google_connections
+                        SET gsc_canonical_property_key=%s,
+                            gsc_canonical_sync_status='completed',
+                            gsc_canonical_sync_error_code='',
+                            gsc_canonical_sync_error_message='',
+                            gsc_canonical_data_through_date=%s,
+                            gsc_canonical_synced_at=now(),
+                            gsc_canonical_row_counts=%s::jsonb,
+                            gsc_canonical_revision=gsc_canonical_revision + 1,
+                            updated_at=now()
+                        WHERE workspace_key=%s
+                        """,
+                        (
+                            selected_key, canonical_through,
+                            json.dumps(canonical_counts), WORKSPACE_KEY,
+                        ),
+                    )
+                conn.commit()
+        return {
+            "status": "completed",
+            "property_id": selected,
+            "property_key": selected_key,
+            "legacy_property_id": legacy_site,
+            "dates_processed": processed,
+            "canonical_rows_written": canonical_written,
+            "canonical_counts": canonical_counts,
+            "canonical_data_through_date": _iso(canonical_through),
+        }
 
     def replace_ga4_date(self, property_id, slice_data, *, property_timezone="", property_currency=""):
         slice_date = _as_date(slice_data["date"])
@@ -1084,10 +1483,83 @@ class PostgresSEOImportStore:
         if not ok:
             raise SEOImportError("The SEO import lease was lost.", code="import_lease_lost")
 
+    def canonical_gsc_range_status(
+        self,
+        property_identifier,
+        start_date,
+        end_date,
+        *,
+        search_types=GSC_SEARCH_TYPES,
+        data_state="final",
+    ):
+        self.ensure_schema()
+        start = _as_date(start_date)
+        end = _as_date(end_date)
+        property_id = str(property_identifier or "").strip()
+        property_key = google_seo.canonical_gsc_property_key(property_id)
+        expected_dates = ((end - start).days + 1) if start and end and start <= end else 0
+        expected_slices = expected_dates * len(tuple(search_types))
+        with self._backend().connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS status_rows,
+                           COUNT(*) FILTER (WHERE canonical_complete=TRUE) AS complete_rows,
+                           MIN(source_date) AS earliest_date,
+                           MAX(source_date) AS latest_date,
+                           COALESCE(SUM(property_total_rows), 0) AS property_totals,
+                           COALESCE(SUM(query_rows), 0) AS queries,
+                           COALESCE(SUM(page_rows), 0) AS pages,
+                           COALESCE(SUM(query_page_rows), 0) AS query_pages,
+                           COALESCE(SUM(search_appearance_rows), 0) AS search_appearance
+                    FROM seo_gsc_canonical_date_status
+                    WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                      AND source_date BETWEEN %s AND %s
+                      AND search_type=ANY(%s) AND data_state=%s
+                    """,
+                    (
+                        WORKSPACE_KEY, property_id, property_key, start, end,
+                        list(search_types), str(data_state or "final").casefold(),
+                    ),
+                )
+                row = dict(cur.fetchone() or {})
+        complete_rows = _integer(row.get("complete_rows"))
+        return {
+            **row,
+            "property_id": property_id,
+            "property_key": property_key,
+            "expected_slices": expected_slices,
+            "complete": expected_slices > 0 and complete_rows == expected_slices,
+        }
+
     def complete_run(self, run_id, lease_owner, source, *, status="completed"):
         source = str(source).upper()
         import_status_column = "gsc_import_status" if source == "GSC" else "ga4_import_status"
         error_column = "gsc_import_error" if source == "GSC" else "ga4_import_error"
+        canonical = {}
+        if source == "GSC" and status == "completed":
+            with self._backend().connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT property_identifier, requested_start_date, requested_end_date
+                        FROM seo_sync_runs
+                        WHERE id=%s AND status='running' AND lease_owner=%s
+                        """,
+                        (run_id, lease_owner),
+                    )
+                    pending = dict(cur.fetchone() or {})
+            if pending.get("requested_start_date") and pending.get("requested_end_date"):
+                canonical = self.canonical_gsc_range_status(
+                    pending.get("property_identifier"),
+                    pending.get("requested_start_date"),
+                    pending.get("requested_end_date"),
+                )
+                if not canonical.get("complete"):
+                    raise SEOImportError(
+                        "The GSC run finished its legacy dates but one or more canonical datasets are incomplete.",
+                        code="gsc_canonical_incomplete",
+                    )
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1100,12 +1572,56 @@ class PostgresSEOImportStore:
                 )
                 row = cur.fetchone()
                 if row:
-                    cur.execute(
-                        f"UPDATE seo_google_connections SET {import_status_column}=%s, {error_column}='', last_successful_sync_at=now(), updated_at=now() WHERE workspace_key=%s",
-                        (status, WORKSPACE_KEY),
-                    )
+                    if source == "GSC":
+                        counts = {
+                            key: _integer(canonical.get(key))
+                            for key in (
+                                "property_totals", "queries", "pages",
+                                "query_pages", "search_appearance",
+                            )
+                        }
+                        cur.execute(
+                            f"""
+                            UPDATE seo_google_connections
+                            SET {import_status_column}=%s, {error_column}='',
+                                gsc_canonical_sync_status='completed',
+                                gsc_canonical_sync_error_code='',
+                                gsc_canonical_sync_error_message='',
+                                gsc_canonical_data_through_date=%s,
+                                gsc_canonical_synced_at=now(),
+                                gsc_canonical_row_counts=%s::jsonb,
+                                gsc_canonical_revision=gsc_canonical_revision + 1,
+                                last_successful_sync_at=now(), updated_at=now()
+                            WHERE workspace_key=%s
+                            """,
+                            (
+                                status,
+                                canonical.get("latest_date") or row.get("latest_stored_data_date"),
+                                json.dumps(counts),
+                                WORKSPACE_KEY,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            f"UPDATE seo_google_connections SET {import_status_column}=%s, {error_column}='', last_successful_sync_at=now(), updated_at=now() WHERE workspace_key=%s",
+                            (status, WORKSPACE_KEY),
+                        )
             conn.commit()
         clean = _clean_run(row)
+        if clean and source == "GSC":
+            counts = {
+                key: _integer(canonical.get(key))
+                for key in (
+                    "property_totals", "queries", "pages",
+                    "query_pages", "search_appearance",
+                )
+            }
+            clean["canonical_complete"] = bool(canonical.get("complete"))
+            clean["canonical_counts"] = counts
+            clean["canonical_rows_written"] = sum(counts.values())
+            clean["canonical_data_through_date"] = _iso(
+                canonical.get("latest_date") or clean.get("latest_stored_data_date")
+            )
         if clean:
             record_activity_log(
                 "google_seo_import_completed",
@@ -1163,6 +1679,24 @@ class PostgresSEOImportStore:
                         f"UPDATE seo_google_connections SET {import_status_column}=%s, {error_column}=%s, updated_at=now() WHERE workspace_key=%s",
                         (status, str(error_message or "SEO import failed.")[:300], WORKSPACE_KEY),
                     )
+                    if source == "GSC":
+                        cur.execute(
+                            """
+                            UPDATE seo_google_connections
+                            SET gsc_canonical_sync_status=%s,
+                                gsc_canonical_sync_error_code=%s,
+                                gsc_canonical_sync_error_message=%s,
+                                gsc_canonical_revision=gsc_canonical_revision + 1,
+                                updated_at=now()
+                            WHERE workspace_key=%s
+                            """,
+                            (
+                                status,
+                                str(error_code or "seo_import_failed")[:100],
+                                str(error_message or "SEO import failed.")[:300],
+                                WORKSPACE_KEY,
+                            ),
+                        )
             conn.commit()
         clean = _clean_run(row)
         if clean:
@@ -1348,7 +1882,12 @@ class SEOImportWorker:
                 (connection.get("gsc_site_url") if source == "GSC" else connection.get("ga4_property_id"))
                 or ""
             )
-            if property_identifier != selected:
+            selected_matches = (
+                google_seo.gsc_properties_match(property_identifier, selected)
+                if source == "GSC"
+                else property_identifier == selected
+            )
+            if not selected_matches:
                 raise SEOImportError(
                     "The selected Google property changed after this import was queued.",
                     code="queued_property_changed",
@@ -1356,7 +1895,17 @@ class SEOImportWorker:
                 )
             client = self.client_factory(access_token)
             if source == "GSC":
-                return self._process_gsc(run, client, property_identifier)
+                api_site_url = next(
+                    (
+                        str(row.get("id") or "")
+                        for row in connection.get("available_gsc_properties") or []
+                        if google_seo.gsc_properties_match(
+                            property_identifier, row.get("id")
+                        )
+                    ),
+                    selected,
+                )
+                return self._process_gsc(run, client, api_site_url)
             if source == "GA4":
                 return self._process_ga4(run, client, property_identifier)
             raise SEOImportError("The SEO import source is unsupported.", code="source_unsupported", retryable=False)

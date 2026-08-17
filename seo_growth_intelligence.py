@@ -1439,11 +1439,31 @@ def queue_growth_pipeline(user, *, store=None, mode="manual"):
 
 def _stage_result_counts(result):
     result = dict(result or {})
+    canonical_counts = dict(result.get("canonical_counts") or {})
+    canonical_written = _integer(result.get("canonical_rows_written")) or sum(
+        _integer(value) for value in canonical_counts.values()
+    )
     return {
         "rows_processed": _integer(result.get("received") or result.get("processed") or result.get("rows_processed")),
-        "rows_written": _integer(result.get("written") or result.get("rows_written") or result.get("inserted")),
-        "data_through_date": result.get("common_reporting_date") or result.get("latest_stored_data_date") or result.get("data_through_date"),
+        "rows_written": canonical_written or _integer(
+            result.get("written") or result.get("rows_written") or result.get("inserted")
+        ),
+        "data_through_date": (
+            result.get("canonical_data_through_date")
+            or result.get("common_reporting_date")
+            or result.get("latest_stored_data_date")
+            or result.get("data_through_date")
+        ),
     }
+
+
+def _analytics_failure_summary(failures):
+    labels = dict(ANALYTICS_REFRESH_STAGES)
+    messages = []
+    for stage_key, error in failures:
+        _code, message = _safe_error(error)
+        messages.append(f"{labels.get(stage_key, stage_key)}: {message}")
+    return "; ".join(messages)[:1000]
 
 
 def run_daily_analytics_refresh(
@@ -1511,7 +1531,19 @@ def run_daily_analytics_refresh(
             connection_store=connection_store,
             requested_by=requested_by,
         )
-        return google_worker.run_once(source=source) or {"status": "no_pending_run"}
+        result = google_worker.run_once(source=source) or {"status": "no_pending_run"}
+        source_status = str(result.get("status") or "").casefold()
+        if source_status not in {"completed", "preliminary"}:
+            message = str(
+                result.get("error_summary")
+                or result.get("error_message")
+                or f"{source} canonical sync did not complete."
+            )[:300]
+            raise SEOGrowthError(
+                message,
+                code=str(result.get("error_code") or f"{source.casefold()}_sync_failed")[:100],
+            )
+        return result
 
     def saved_source_health():
         health = seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store).source_health()
@@ -1555,16 +1587,18 @@ def run_daily_analytics_refresh(
         except Exception as error:
             failures.append(("source_health", error))
     status = "partial" if failures else "completed"
+    failure_summary = _analytics_failure_summary(failures)
     completed = store.complete_pipeline(
         pipeline_id,
         status=status,
         error_code=failures[0][0] if failures else "",
-        error_summary="One or more analytics sources need attention." if failures else "",
+        error_summary=failure_summary,
     )
     return {
         "status": status,
         "run": _json_safe(completed),
         "failed_stages": sorted({key for key, _error in failures}),
+        "error_summary": failure_summary,
     }
 
 

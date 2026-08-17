@@ -11,6 +11,7 @@ from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
 from files_upload_api import FILES_UPLOAD_ROUTES
 import google_seo
 from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
+import run_migrations
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 
 
@@ -36,9 +37,19 @@ streamlit_app = App("app.py", routes=routes)
 app = app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
 
 
+def prepare_google_seo_storage():
+    database_url, _source = run_migrations.get_database_url()
+    if not database_url:
+        return False
+    for filename in google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS:
+        run_migrations.run_migrations(only=filename)
+    return True
+
+
 if __name__ == "__main__":
     import uvicorn
 
+    prepare_google_seo_storage()
     collector_vault.log_collector_vault_readiness(check_shopify=True)
     uvicorn.run(
         app,

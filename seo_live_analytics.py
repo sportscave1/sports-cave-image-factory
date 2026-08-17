@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
+import google_seo
 import google_seo_phase4
 import seo_metrics
 
@@ -264,11 +265,38 @@ class PostgresSEOLiveAnalyticsReader:
                 (WORKSPACE_KEY,),
             )
             ga4 = str(fallback.get("ga4_property_id") or "")
-        return {"gsc": gsc, "ga4": ga4}
+        return {
+            "gsc": gsc,
+            "gsc_key": google_seo.canonical_gsc_property_key(gsc),
+            "ga4": ga4,
+        }
 
     def _latest_import_status(self, source, identifier):
         if not identifier:
             return {}
+        if str(source).upper() == "GSC":
+            rows = self._query_all(
+                "gsc",
+                """
+                SELECT status, mode, property_identifier, latest_stored_data_date,
+                       completed_end_date, error_code, error_summary,
+                       completed_at, updated_at
+                FROM seo_sync_runs
+                WHERE workspace_key=%s AND source='GSC'
+                ORDER BY created_at DESC
+                LIMIT 20
+                """,
+                (WORKSPACE_KEY,),
+            )
+            return next(
+                (
+                    row for row in rows
+                    if google_seo.gsc_properties_match(
+                        identifier, row.get("property_identifier")
+                    )
+                ),
+                {},
+            )
         return self._query_one(
             str(source).casefold(),
             """
@@ -282,33 +310,107 @@ class PostgresSEOLiveAnalyticsReader:
             (WORKSPACE_KEY, source, identifier),
         )
 
+    def cache_revision(self):
+        row = self._query_one(
+            "connection",
+            """
+            SELECT COALESCE(gsc_canonical_revision, 0) AS revision
+            FROM seo_google_connections
+            WHERE workspace_key=%s
+            """,
+            (WORKSPACE_KEY,),
+        )
+        return _integer(row.get("revision"))
+
     def source_health(self):
         properties = self._selected_properties()
+        schema = self._query_one(
+            "canonical_schema",
+            """
+            SELECT to_regclass('public.seo_gsc_property_totals_v2') IS NOT NULL AS has_totals,
+                   to_regclass('public.seo_gsc_query_daily_v2') IS NOT NULL AS has_queries,
+                   to_regclass('public.seo_gsc_page_daily_v2') IS NOT NULL AS has_pages,
+                   to_regclass('public.seo_gsc_query_page_daily_v2') IS NOT NULL AS has_query_pages,
+                   to_regclass('public.seo_gsc_canonical_date_status') IS NOT NULL AS has_status
+            """,
+        )
+        canonical_schema_ready = bool(schema) and all(bool(value) for value in schema.values())
+        legacy_candidates = self._query_all(
+            "gsc_legacy",
+            """
+            SELECT inventory.property_identifier,
+                   inventory.rows_stored AS inventory_rows,
+                   inventory.earliest_stored_date AS earliest_date,
+                   inventory.latest_stored_date AS latest_date,
+                   COALESCE(detail.detail_rows, 0) AS detail_rows
+            FROM seo_data_inventories AS inventory
+            LEFT JOIN (
+                SELECT gsc_site_url, COUNT(*) AS detail_rows
+                FROM seo_gsc_daily_details
+                WHERE workspace_key=%s AND is_complete=TRUE
+                GROUP BY gsc_site_url
+            ) AS detail ON detail.gsc_site_url=inventory.property_identifier
+            WHERE inventory.workspace_key=%s AND inventory.source='GSC'
+            ORDER BY inventory.latest_stored_date DESC NULLS LAST
+            """,
+            (WORKSPACE_KEY, WORKSPACE_KEY),
+        ) if properties["gsc"] else []
+        legacy = next(
+            (
+                row for row in legacy_candidates
+                if google_seo.gsc_properties_match(
+                    properties["gsc"], row.get("property_identifier")
+                )
+            ),
+            {},
+        )
         gsc = self._query_one(
             "gsc",
             """
-            SELECT MIN(date) AS earliest_date, MAX(date) AS latest_date,
-                   (SELECT rows_stored FROM seo_data_inventories
-                    WHERE workspace_key=%s AND source='GSC' AND property_identifier=%s) AS inventory_rows,
-                   EXISTS(
-                       SELECT 1 FROM seo_gsc_daily_details
-                       WHERE workspace_key=%s AND gsc_site_url=%s AND is_complete=TRUE
-                   ) AS has_detail_rows,
-                   (SELECT MIN(date) FROM seo_gsc_daily_details
-                    WHERE workspace_key=%s AND gsc_site_url=%s AND is_complete=TRUE) AS detail_earliest_date,
-                   (SELECT MAX(date) FROM seo_gsc_daily_details
-                    WHERE workspace_key=%s AND gsc_site_url=%s AND is_complete=TRUE) AS detail_latest_date
-            FROM seo_gsc_daily_totals
-            WHERE workspace_key=%s AND gsc_site_url=%s AND is_complete=TRUE
+            SELECT
+                (SELECT COUNT(*) FROM seo_gsc_property_totals_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS total_rows,
+                (SELECT MIN(source_date) FROM seo_gsc_property_totals_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS earliest_date,
+                (SELECT MAX(source_date) FROM seo_gsc_property_totals_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS latest_date,
+                (SELECT COUNT(*) FROM seo_gsc_query_daily_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS query_rows,
+                (SELECT COUNT(*) FROM seo_gsc_page_daily_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS page_rows,
+                (SELECT COUNT(*) FROM seo_gsc_query_page_daily_v2
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final' AND is_complete=TRUE) AS query_page_rows,
+                (SELECT COUNT(*) FROM seo_gsc_canonical_date_status
+                 WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
+                   AND search_type='web' AND data_state='final'
+                   AND canonical_complete=TRUE) AS complete_dates
             """,
-            (
-                WORKSPACE_KEY, properties["gsc"],
-                WORKSPACE_KEY, properties["gsc"],
-                WORKSPACE_KEY, properties["gsc"],
-                WORKSPACE_KEY, properties["gsc"],
-                WORKSPACE_KEY, properties["gsc"],
+            tuple(
+                value
+                for _index in range(7)
+                for value in (WORKSPACE_KEY, properties["gsc"], properties.get("gsc_key", ""))
             ),
-        ) if properties["gsc"] else {}
+        ) if properties["gsc"] and canonical_schema_ready else {}
+        connection_gsc = self._query_one(
+            "connection",
+            """
+            SELECT gsc_connection_test_status, gsc_connection_tested_at,
+                   gsc_connection_test_error_code, gsc_connection_test_error_message,
+                   gsc_connection_permission_level, gsc_canonical_sync_status,
+                   gsc_canonical_sync_error_code, gsc_canonical_sync_error_message,
+                   gsc_canonical_data_through_date, gsc_canonical_synced_at,
+                   gsc_canonical_revision
+            FROM seo_google_connections
+            WHERE workspace_key=%s
+            """,
+            (WORKSPACE_KEY,),
+        ) if canonical_schema_ready else {}
         ga4 = self._query_one(
             "ga4",
             """
@@ -374,34 +476,67 @@ class PostgresSEOLiveAnalyticsReader:
         )
         gsc_run = self._latest_import_status("GSC", properties["gsc"])
         ga4_run = self._latest_import_status("GA4", properties["ga4"])
-        gsc_rows = _integer(gsc.get("inventory_rows")) or (
-            1 if gsc.get("has_detail_rows") or gsc.get("latest_date") else 0
+        canonical_counts = {
+            "property_totals": _integer(gsc.get("total_rows")),
+            "queries": _integer(gsc.get("query_rows")),
+            "pages": _integer(gsc.get("page_rows")),
+            "query_pages": _integer(gsc.get("query_page_rows")),
+            "complete_dates": _integer(gsc.get("complete_dates")),
+        }
+        gsc_rows = sum(
+            canonical_counts[key]
+            for key in ("property_totals", "queries", "pages", "query_pages")
         )
+        gsc_totals_ready = canonical_counts["property_totals"] > 0
+        legacy_rows = _integer(legacy.get("inventory_rows")) or _integer(legacy.get("detail_rows"))
         ga4_rows = _integer(ga4.get("inventory_rows")) or (
             1 if ga4.get("has_saved_rows") or ga4.get("latest_date") else 0
         )
         shopify_rows = _integer(shopify.get("total_rows"))
         reconciliation_rows = _integer(reconciliation.get("total_rows"))
-        gsc_dates = [
-            value for value in (
-                _as_date(gsc.get("earliest_date")),
-                _as_date(gsc.get("detail_earliest_date")),
-            ) if value
-        ]
-        gsc_latest_dates = [
-            value for value in (
-                _as_date(gsc.get("latest_date")),
-                _as_date(gsc.get("detail_latest_date")),
-            ) if value
-        ]
+        gsc_dates = [value for value in (_as_date(gsc.get("earliest_date")),) if value]
+        gsc_latest_dates = [value for value in (_as_date(gsc.get("latest_date")),) if value]
+        canonical_sync_status = str(
+            connection_gsc.get("gsc_canonical_sync_status") or "pending"
+        )
+        if not canonical_schema_ready:
+            gsc_status = "missing_migration"
+        elif canonical_sync_status in {"failed", "partial"}:
+            gsc_status = "stale_last_good" if gsc_totals_ready else "sync_failed"
+        elif gsc_totals_ready:
+            gsc_status = "ready"
+        elif legacy_rows:
+            gsc_status = "canonical_backfill_required"
+        elif properties["gsc"]:
+            gsc_status = "initial_data_sync_required"
+        else:
+            gsc_status = "not_configured"
         return {
             "gsc": {
-                "available": gsc_rows > 0,
-                "status": _source_status(rows=gsc_rows, identifier=properties["gsc"], run_status=gsc_run.get("status")),
+                "available": gsc_totals_ready,
+                "status": gsc_status,
                 "identifier": properties["gsc"],
+                "property_key": properties.get("gsc_key", ""),
                 "earliest_date": min(gsc_dates).isoformat() if gsc_dates else "",
                 "through_date": max(gsc_latest_dates).isoformat() if gsc_latest_dates else "",
                 "rows": gsc_rows,
+                "canonical_rows": gsc_rows,
+                "canonical_counts": canonical_counts,
+                "legacy_rows": legacy_rows,
+                "legacy_earliest_date": _iso(legacy.get("earliest_date")),
+                "legacy_through_date": _iso(legacy.get("latest_date")),
+                "canonical_schema_ready": canonical_schema_ready,
+                "canonical_sync_status": canonical_sync_status,
+                "canonical_sync_error_code": str(
+                    connection_gsc.get("gsc_canonical_sync_error_code") or ""
+                ),
+                "connection_test_status": str(
+                    connection_gsc.get("gsc_connection_test_status") or "not_tested"
+                ),
+                "connection_test_error_code": str(
+                    connection_gsc.get("gsc_connection_test_error_code") or ""
+                ),
+                "cache_revision": _integer(connection_gsc.get("gsc_canonical_revision")),
                 "run_status": str(gsc_run.get("status") or "not_started"),
                 "error_code": str(gsc_run.get("error_code") or ""),
                 "source_label": "Google Search Console",
@@ -466,13 +601,14 @@ class PostgresSEOLiveAnalyticsReader:
 
     def _gsc_where(self, identifier, period, market, device):
         clauses = [
-            "workspace_key=%s", "property_id=%s",
+            "workspace_key=%s", "(property_id=%s OR property_key=%s)",
             "source_date BETWEEN %s AND %s", "is_complete=TRUE",
             "search_type=%s", "data_state=%s",
         ]
         params = [
             WORKSPACE_KEY,
             identifier,
+            google_seo.canonical_gsc_property_key(identifier),
             period["start_date"],
             period["end_date"],
             getattr(self, "_active_search_type", "web"),
@@ -508,7 +644,7 @@ class PostgresSEOLiveAnalyticsReader:
                        SUM(average_position * impressions) AS position_weight,
                        COUNT(*) AS source_rows
                 FROM seo_gsc_property_totals_v2
-                WHERE workspace_key=%s AND property_id=%s
+                WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
                   AND source_date BETWEEN %s AND %s AND is_complete=TRUE
                   AND search_type=%s AND data_state=%s
                 GROUP BY source_date ORDER BY source_date
@@ -516,6 +652,7 @@ class PostgresSEOLiveAnalyticsReader:
             params = (
                 WORKSPACE_KEY,
                 identifier,
+                google_seo.canonical_gsc_property_key(identifier),
                 period["previous_start_date"] or period["start_date"],
                 period["end_date"],
                 getattr(self, "_active_search_type", "web"),
@@ -529,7 +666,7 @@ class PostgresSEOLiveAnalyticsReader:
                        SUM(position_weight) AS position_weight,
                        COUNT(*) AS source_rows
                 FROM seo_gsc_query_daily_v2
-                WHERE workspace_key=%s AND property_id=%s
+                WHERE workspace_key=%s AND (property_id=%s OR property_key=%s)
                   AND source_date BETWEEN %s AND %s AND is_complete=TRUE
                   AND search_type=%s AND data_state=%s
                   {detail_scope}
@@ -539,6 +676,7 @@ class PostgresSEOLiveAnalyticsReader:
             params = [
                 WORKSPACE_KEY,
                 identifier,
+                google_seo.canonical_gsc_property_key(identifier),
                 period["previous_start_date"] or period["start_date"],
                 period["end_date"],
                 getattr(self, "_active_search_type", "web"),

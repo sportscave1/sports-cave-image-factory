@@ -36,6 +36,12 @@ GA4_ACCOUNT_SUMMARIES_ENDPOINT = (
 )
 GA4_DATA_ENDPOINT = "https://analyticsdata.googleapis.com/v1beta"
 GOOGLE_SEO_MIGRATION = "20260813_google_seo_phase1.sql"
+GOOGLE_SEO_PIPELINE_MIGRATIONS = (
+    GOOGLE_SEO_MIGRATION,
+    "20260813_google_seo_phase3_storage.sql",
+    "20260817_analytics_seo_blog_rebuild.sql",
+    "20260817_gsc_canonical_pipeline_repair.sql",
+)
 GOOGLE_SEO_WORKSPACE_KEY = "sports-cave"
 GOOGLE_OAUTH_STATE_SECONDS = 10 * 60
 GOOGLE_HTTP_TIMEOUT_SECONDS = 15
@@ -59,6 +65,7 @@ class GoogleSEOError(RuntimeError):
         stage="google",
         reconnect_required=False,
         status_code=0,
+        provider_message="",
     ):
         super().__init__(str(message or "Google connection could not be completed."))
         self.public_message = str(message or "Google connection could not be completed.")
@@ -66,6 +73,7 @@ class GoogleSEOError(RuntimeError):
         self.stage = str(stage or "google")[:100]
         self.reconnect_required = bool(reconnect_required)
         self.status_code = int(status_code or 0)
+        self.provider_message = str(provider_message or "")[:500]
 
 
 class GoogleConfigurationError(GoogleSEOError):
@@ -90,6 +98,32 @@ def _iso(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat().replace("+00:00", "Z")
     return str(value)
+
+
+def canonical_gsc_property_key(site_url):
+    """Return a comparison key without changing Google's exact API siteUrl."""
+    raw = str(site_url or "").strip()
+    if not raw:
+        return ""
+    if raw.casefold().startswith("sc-domain:"):
+        domain = raw.split(":", 1)[1].strip().casefold().rstrip(".")
+        return f"domain:{domain}" if domain else ""
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return f"raw:{raw.casefold().rstrip('/')}"
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    port = f":{parsed.port}" if parsed.port else ""
+    path = parsed.path or ""
+    path = "/" + "/".join(part for part in path.split("/") if part) if path.strip("/") else ""
+    return f"url:{parsed.scheme.casefold()}://{host}{port}{path}"
+
+
+def gsc_properties_match(first, second):
+    first_raw = str(first or "").strip()
+    second_raw = str(second or "").strip()
+    if not first_raw or not second_raw:
+        return False
+    return first_raw == second_raw or canonical_gsc_property_key(first_raw) == canonical_gsc_property_key(second_raw)
 
 
 def configuration_status(environ=None):
@@ -227,15 +261,35 @@ def require_admin(user):
     return user
 
 
+def _provider_error_message(response):
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return ""
+    status = str(error.get("status") or "").strip()
+    message = str(error.get("message") or "").strip()
+    reasons = []
+    for item in error.get("errors") or []:
+        if isinstance(item, dict) and item.get("reason"):
+            reasons.append(str(item["reason"]))
+    parts = [part for part in (status, message, ", ".join(dict.fromkeys(reasons))) if part]
+    return " | ".join(parts)[:500]
+
+
 def _response_json(response, *, stage, reconnect_required=False):
     status_code = int(getattr(response, "status_code", 0) or 0)
     if not 200 <= status_code < 300:
+        provider_message = _provider_error_message(response)
         raise GoogleSEOError(
-            "Google could not complete this request. Please try again.",
+            provider_message or "Google could not complete this request. Please try again.",
             code=f"google_http_{status_code or 'error'}",
             stage=stage,
-            reconnect_required=reconnect_required or status_code in {400, 401, 403},
+            reconnect_required=reconnect_required or status_code == 401,
             status_code=status_code,
+            provider_message=provider_message,
         )
     try:
         payload = response.json()
@@ -448,6 +502,168 @@ def latest_gsc_data_date(access_token, site_url, *, request_post=requests.post, 
     return max(dates) if dates else ""
 
 
+def gsc_search_analytics_request(
+    access_token,
+    site_url,
+    *,
+    start_date,
+    end_date,
+    dimensions=(),
+    search_type="web",
+    data_state="final",
+    row_limit=1,
+    start_row=0,
+    aggregation_type="",
+    request_post=requests.post,
+    stage="gsc_connection_test",
+):
+    endpoint = f"{GSC_SITES_ENDPOINT}/{quote(str(site_url), safe='')}/searchAnalytics/query"
+    body = {
+        "startDate": _iso(start_date)[:10],
+        "endDate": _iso(end_date)[:10],
+        "type": str(search_type or "web").casefold(),
+        "dataState": str(data_state or "final").casefold(),
+        "rowLimit": max(1, min(int(row_limit or 1), 25_000)),
+        "startRow": max(0, int(start_row or 0)),
+    }
+    if dimensions:
+        body["dimensions"] = list(dimensions)
+    if aggregation_type:
+        body["aggregationType"] = str(aggregation_type)
+    response = _request_with_retries(
+        lambda: request_post(
+            endpoint,
+            headers={**_bearer_headers(access_token), "Content-Type": "application/json"},
+            json=body,
+            timeout=GOOGLE_HTTP_TIMEOUT_SECONDS,
+        ),
+        stage=stage,
+    )
+    return _response_json(response, stage=stage)
+
+
+def probe_gsc_connection(
+    store,
+    config,
+    *,
+    end_date=None,
+    request_get=requests.get,
+    request_post=requests.post,
+):
+    access_token, connection = _access_token_for_connection(
+        store,
+        config,
+        request_post=request_post,
+    )
+    selected = str(connection.get("gsc_site_url") or "").strip()
+    if not selected:
+        raise GoogleSEOError(
+            "Select a Search Console property before testing the connection.",
+            code="gsc_property_missing",
+            stage="gsc_connection_test",
+        )
+    properties = list_gsc_properties(access_token, request_get=request_get)
+    matched = next(
+        (row for row in properties if gsc_properties_match(selected, row.get("id"))),
+        None,
+    )
+    if not matched:
+        raise GoogleSEOError(
+            "The selected Search Console property is not returned by Google for this account.",
+            code="gsc_property_permission_denied",
+            stage="gsc_connection_test",
+            status_code=403,
+        )
+    permission = str(matched.get("permission_level") or "")
+    if permission.casefold() in {"siteunverifieduser", "none"}:
+        raise GoogleSEOError(
+            "Google returned the property without Search Console read permission.",
+            code="gsc_property_permission_denied",
+            stage="gsc_connection_test",
+            status_code=403,
+        )
+    api_site_url = str(matched.get("id") or selected)
+    latest = str(end_date or "").strip() or latest_gsc_data_date(
+        access_token,
+        api_site_url,
+        request_post=request_post,
+    )
+    if not latest:
+        raise GoogleSEOError(
+            "Search Console accepted the property but returned no finalised source date.",
+            code="gsc_no_final_data",
+            stage="gsc_connection_test",
+        )
+    end = date.fromisoformat(latest[:10])
+    start = end - timedelta(days=6)
+    payload = gsc_search_analytics_request(
+        access_token,
+        api_site_url,
+        start_date=start,
+        end_date=end,
+        search_type="web",
+        data_state="final",
+        aggregation_type="byProperty",
+        request_post=request_post,
+    )
+    row = ((payload.get("rows") or [{}])[0]) or {}
+    return {
+        "ok": True,
+        "selected_site_url": selected,
+        "api_site_url": api_site_url,
+        "property_key": canonical_gsc_property_key(api_site_url),
+        "permission_level": permission,
+        "granted_scopes": tuple(connection.get("granted_scopes") or ()),
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "aggregation_type": str(payload.get("responseAggregationType") or ""),
+        "data_state": "final",
+        "search_type": "web",
+        "clicks": row.get("clicks"),
+        "impressions": row.get("impressions"),
+        "ctr": row.get("ctr"),
+        "average_position": row.get("position"),
+    }
+
+
+def test_gsc_connection(
+    store,
+    user,
+    config,
+    *,
+    end_date=None,
+    request_get=requests.get,
+    request_post=requests.post,
+):
+    require_admin(user)
+    try:
+        result = probe_gsc_connection(
+            store,
+            config,
+            end_date=end_date,
+            request_get=request_get,
+            request_post=request_post,
+        )
+    except GoogleSEOError as error:
+        store.record_gsc_connection_test(
+            status="failed",
+            error_code=error.code,
+            error_message=error.provider_message or error.public_message,
+        )
+        return {
+            "ok": False,
+            "code": error.code,
+            "message": error.provider_message or error.public_message,
+            "reconnect_required": error.reconnect_required,
+        }
+    store.record_gsc_connection_test(
+        status="passed",
+        api_site_url=result["api_site_url"],
+        permission_level=result["permission_level"],
+    )
+    return result
+
+
 def latest_ga4_data_date(access_token, property_id, *, request_post=requests.post):
     clean_id = str(property_id or "").strip()
     if not clean_id.startswith("properties/"):
@@ -498,12 +714,22 @@ def _safe_connection(row):
             row[field] = list(value or [])
         else:
             row[field] = _safe_property_list(row.get(field))
+    counts = row.get("gsc_canonical_row_counts")
+    if isinstance(counts, str):
+        try:
+            counts = json.loads(counts)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            counts = {}
+    row["gsc_canonical_row_counts"] = dict(counts or {}) if isinstance(counts, dict) else {}
     for field in (
         "properties_checked_at",
         "last_successful_sync_at",
         "gsc_data_through_date",
         "ga4_data_through_date",
         "last_error_at",
+        "gsc_connection_tested_at",
+        "gsc_canonical_data_through_date",
+        "gsc_canonical_synced_at",
         "connected_at",
         "disconnected_at",
         "created_at",
@@ -532,8 +758,8 @@ class PostgresGoogleSEOStore:
         with self._schema_lock:
             if self._schema_ready:
                 return
-            migration = BASE_DIR / "migrations" / GOOGLE_SEO_MIGRATION
-            if not migration.is_file():
+            migrations = tuple(BASE_DIR / "migrations" / name for name in GOOGLE_SEO_PIPELINE_MIGRATIONS)
+            if not all(migration.is_file() for migration in migrations):
                 raise GoogleSEOStoreError(
                     "Google SEO storage is unavailable.",
                     code="migration_missing",
@@ -542,7 +768,8 @@ class PostgresGoogleSEOStore:
             try:
                 with self._backend().connect() as conn:
                     with conn.cursor() as cur:
-                        cur.execute(migration.read_text(encoding="utf-8"))
+                        for migration in migrations:
+                            cur.execute(migration.read_text(encoding="utf-8"))
                     conn.commit()
             except Exception as error:
                 raise GoogleSEOStoreError(
@@ -568,6 +795,14 @@ class PostgresGoogleSEOStore:
                                properties_checked_at, last_successful_sync_at,
                                gsc_data_through_date, ga4_data_through_date,
                                last_error_code, last_error_message, last_error_at,
+                               gsc_canonical_property_key,
+                               gsc_connection_test_status, gsc_connection_tested_at,
+                               gsc_connection_test_error_code, gsc_connection_test_error_message,
+                               gsc_connection_permission_level,
+                               gsc_canonical_sync_status, gsc_canonical_sync_error_code,
+                               gsc_canonical_sync_error_message, gsc_canonical_data_through_date,
+                               gsc_canonical_synced_at, gsc_canonical_revision,
+                               gsc_canonical_row_counts,
                                connected_at, disconnected_at, created_at, updated_at,
                                encrypted_refresh_token IS NOT NULL AS has_refresh_token
                         FROM seo_google_connections
@@ -596,7 +831,15 @@ class PostgresGoogleSEOStore:
                     SELECT encrypted_refresh_token, granted_scopes,
                            gsc_site_url, gsc_property_name,
                            ga4_property_id, ga4_property_name,
-                           connection_status, reconnect_required
+                           available_gsc_properties, available_ga4_properties,
+                           connection_status, reconnect_required,
+                           gsc_canonical_property_key, gsc_connection_test_status,
+                           gsc_connection_tested_at, gsc_connection_test_error_code,
+                           gsc_connection_test_error_message, gsc_connection_permission_level,
+                           gsc_canonical_sync_status, gsc_canonical_sync_error_code,
+                           gsc_canonical_sync_error_message, gsc_canonical_data_through_date,
+                           gsc_canonical_synced_at, gsc_canonical_revision,
+                           gsc_canonical_row_counts
                     FROM seo_google_connections
                     WHERE workspace_key=%s
                     LIMIT 1
@@ -748,19 +991,43 @@ class PostgresGoogleSEOStore:
                     UPDATE seo_google_connections
                     SET owner_user_id=%s,
                         gsc_site_url=%s, gsc_property_name=%s,
+                        gsc_canonical_property_key=%s,
                         ga4_property_id=%s, ga4_property_name=%s,
                         gsc_data_through_date=CASE
-                            WHEN gsc_site_url<>%s THEN NULL ELSE gsc_data_through_date
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN NULL ELSE gsc_data_through_date
                         END,
                         ga4_data_through_date=CASE
-                            WHEN ga4_property_id<>%s THEN NULL ELSE ga4_data_through_date
+                            WHEN ga4_property_id IS DISTINCT FROM %s THEN NULL ELSE ga4_data_through_date
                         END,
                         last_successful_sync_at=CASE
-                            WHEN gsc_site_url<>%s OR ga4_property_id<>%s
+                            WHEN gsc_site_url IS DISTINCT FROM %s OR ga4_property_id IS DISTINCT FROM %s
                                 THEN NULL
                             ELSE last_successful_sync_at
                         END,
                         connection_status='Connected', reconnect_required=FALSE,
+                        gsc_connection_test_status=CASE
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN 'not_tested'
+                            ELSE gsc_connection_test_status
+                        END,
+                        gsc_connection_tested_at=CASE
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN NULL
+                            ELSE gsc_connection_tested_at
+                        END,
+                        gsc_connection_test_error_code='',
+                        gsc_connection_test_error_message='',
+                        gsc_canonical_sync_status=CASE
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN 'pending'
+                            ELSE gsc_canonical_sync_status
+                        END,
+                        gsc_canonical_data_through_date=CASE
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN NULL
+                            ELSE gsc_canonical_data_through_date
+                        END,
+                        gsc_canonical_row_counts=CASE
+                            WHEN gsc_site_url IS DISTINCT FROM %s THEN '{}'::jsonb
+                            ELSE gsc_canonical_row_counts
+                        END,
+                        gsc_canonical_revision=gsc_canonical_revision + 1,
                         last_error_code='', last_error_message='', last_error_at=NULL,
                         updated_at=now()
                     WHERE workspace_key=%s
@@ -771,12 +1038,18 @@ class PostgresGoogleSEOStore:
                         str(user_id or "")[:200],
                         gsc_property["id"],
                         gsc_property["name"],
+                        canonical_gsc_property_key(gsc_property["id"]),
                         ga4_property["id"],
                         ga4_property["name"],
                         gsc_property["id"],
                         ga4_property["id"],
                         gsc_property["id"],
                         ga4_property["id"],
+                        gsc_property["id"],
+                        gsc_property["id"],
+                        gsc_property["id"],
+                        gsc_property["id"],
+                        gsc_property["id"],
                         GOOGLE_SEO_WORKSPACE_KEY,
                     ),
                 )
@@ -812,6 +1085,52 @@ class PostgresGoogleSEOStore:
                 acquired = bool(cur.fetchone())
             conn.commit()
         return acquired
+
+    def record_gsc_connection_test(
+        self,
+        *,
+        status,
+        api_site_url="",
+        permission_level="",
+        error_code="",
+        error_message="",
+    ):
+        self.ensure_schema()
+        api_site_url = str(api_site_url or "").strip()
+        with self._backend().connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE seo_google_connections
+                    SET gsc_site_url=CASE WHEN %s<>'' THEN %s ELSE gsc_site_url END,
+                        gsc_canonical_property_key=CASE
+                            WHEN %s<>'' THEN %s ELSE gsc_canonical_property_key
+                        END,
+                        gsc_connection_test_status=%s,
+                        gsc_connection_tested_at=now(),
+                        gsc_connection_test_error_code=%s,
+                        gsc_connection_test_error_message=%s,
+                        gsc_connection_permission_level=%s,
+                        reconnect_required=CASE
+                            WHEN %s IN ('refresh_token_unavailable', 'access_token_missing', 'google_http_401')
+                                THEN TRUE
+                            ELSE reconnect_required
+                        END,
+                        updated_at=now()
+                    WHERE workspace_key=%s
+                    """,
+                    (
+                        api_site_url, api_site_url,
+                        api_site_url, canonical_gsc_property_key(api_site_url),
+                        str(status or "failed")[:40],
+                        str(error_code or "")[:100],
+                        str(error_message or "")[:300],
+                        str(permission_level or "")[:100],
+                        str(error_code or "")[:100],
+                        GOOGLE_SEO_WORKSPACE_KEY,
+                    ),
+                )
+            conn.commit()
 
     def complete_sync(self, lock_token, *, gsc_data_date, ga4_data_date):
         self.ensure_schema()
@@ -879,12 +1198,25 @@ class PostgresGoogleSEOStore:
                         granted_scopes='[]'::jsonb,
                         connection_status='Not connected', reconnect_required=FALSE,
                         gsc_site_url='', gsc_property_name='',
+                        gsc_canonical_property_key='',
                         ga4_property_id='', ga4_property_name='',
                         available_gsc_properties='[]'::jsonb,
                         available_ga4_properties='[]'::jsonb,
                         properties_checked_at=NULL,
                         last_successful_sync_at=NULL,
                         gsc_data_through_date=NULL,
+                        gsc_connection_test_status='not_tested',
+                        gsc_connection_tested_at=NULL,
+                        gsc_connection_test_error_code='',
+                        gsc_connection_test_error_message='',
+                        gsc_connection_permission_level='',
+                        gsc_canonical_sync_status='pending',
+                        gsc_canonical_sync_error_code='',
+                        gsc_canonical_sync_error_message='',
+                        gsc_canonical_data_through_date=NULL,
+                        gsc_canonical_synced_at=NULL,
+                        gsc_canonical_revision=gsc_canonical_revision + 1,
+                        gsc_canonical_row_counts='{}'::jsonb,
                         ga4_data_through_date=NULL,
                         last_error_code='', last_error_message='', last_error_at=NULL,
                         sync_lock_token='', sync_started_at=NULL,
@@ -992,7 +1324,7 @@ def complete_authorization(
         store.save_discovered_properties(gsc_properties, ga4_properties)
         selected_gsc = str(existing.get("gsc_site_url") or "")
         selected_ga4 = str(existing.get("ga4_property_id") or "")
-        if selected_gsc and selected_gsc not in {row["id"] for row in gsc_properties}:
+        if selected_gsc and not any(gsc_properties_match(selected_gsc, row["id"]) for row in gsc_properties):
             raise GoogleSEOError(
                 "The selected Search Console property is no longer accessible.",
                 code="gsc_property_inaccessible",
@@ -1165,7 +1497,11 @@ def sync_now(
         gsc_properties = list_gsc_properties(access_token, request_get=request_get)
         ga4_properties = list_ga4_properties(access_token, request_get=request_get)
         store.save_discovered_properties(gsc_properties, ga4_properties)
-        if selected_gsc not in {row["id"] for row in gsc_properties}:
+        matched_gsc = next(
+            (row for row in gsc_properties if gsc_properties_match(selected_gsc, row.get("id"))),
+            None,
+        )
+        if not matched_gsc:
             raise GoogleSEOError(
                 "The selected Search Console property is no longer accessible.",
                 code="gsc_property_inaccessible",
@@ -1179,7 +1515,7 @@ def sync_now(
             )
         gsc_date = latest_gsc_data_date(
             access_token,
-            selected_gsc,
+            matched_gsc["id"],
             request_post=request_post,
         )
         ga4_date = latest_ga4_data_date(
@@ -1274,3 +1610,39 @@ def connection_status_label(config_status, connection, *, service=""):
     if service == "ga4" and not connection.get("ga4_property_id"):
         return "Needs attention"
     return "Connected" if connection.get("connection_status") == "Connected" else "Needs attention"
+
+
+def gsc_connection_status_label(config_status, connection, canonical_health=None):
+    canonical_health = dict(canonical_health or {})
+    if not config_status.get("ready"):
+        return "Configuration required"
+    if not connection or not connection.get("has_refresh_token"):
+        return "Not connected"
+    if connection.get("reconnect_required"):
+        return "Reconnection required"
+    if not connection.get("gsc_site_url"):
+        return "Permission/property error"
+    test_status = str(connection.get("gsc_connection_test_status") or "not_tested")
+    test_error = str(connection.get("gsc_connection_test_error_code") or "")
+    if test_status == "failed":
+        if "permission" in test_error or "property" in test_error or test_error in {"google_http_403"}:
+            return "Permission/property error"
+        if connection.get("reconnect_required") or test_error in {"google_http_401", "access_token_missing"}:
+            return "Reconnection required"
+        return "Connected - sync failed"
+    canonical_rows = int(canonical_health.get("canonical_rows") or canonical_health.get("rows") or 0)
+    legacy_rows = int(canonical_health.get("legacy_rows") or 0)
+    canonical_status = str(
+        canonical_health.get("canonical_sync_status")
+        or connection.get("gsc_canonical_sync_status")
+        or "pending"
+    )
+    if canonical_status in {"failed", "partial"}:
+        return "Connected - sync failed"
+    if test_status != "passed":
+        return "Connected - connection test required"
+    if canonical_rows > 0 and canonical_health.get("available"):
+        return "Connected and data ready"
+    if legacy_rows > 0:
+        return "Connected - canonical backfill required"
+    return "Connected - initial data sync required"
