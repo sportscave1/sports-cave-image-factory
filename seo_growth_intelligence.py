@@ -99,6 +99,25 @@ FORBIDDEN_FIELD_RE = re.compile(
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 
 
+def _activity_actor_metadata_from_identifier(actor):
+    clean_actor = str(actor or "").strip()[:200]
+    metadata = {"actor_id": clean_actor} if clean_actor else {}
+    try:
+        account = os_accounts.DEFAULT_STORE.get_user(clean_actor) if clean_actor else {}
+    except Exception:
+        account = {}
+    if account:
+        metadata.update(
+            {
+                "actor_display": account.get("display_name") or account.get("username") or clean_actor,
+                "actor_email": account.get("email") or "",
+                "actor_role": account.get("role") or "",
+                "actor_timezone": os_accounts.timezone_for_user(account),
+            }
+        )
+    return metadata
+
+
 class SEOGrowthError(RuntimeError):
     def __init__(self, message, *, code="seo_growth_error", retryable=True):
         super().__init__(str(message or "SEO Growth Intelligence could not complete the request."))
@@ -1008,14 +1027,15 @@ class PostgresSEOGrowthStore:
                     (str(actor or "")[:200], WORKSPACE_KEY, recommendation_id),
                 )
             connection.commit()
+        activity_metadata = _activity_actor_metadata_from_identifier(actor)
         record_activity_log(
             "seo_recommendation_converted_to_task",
             "SEO / Tasks & Results",
             f"SEO recommendation converted to task: {task.get('title') or ''}",
             entity_type="seo_growth_task",
             entity_id=task_id,
-            metadata={"recommendation_id": recommendation_id},
-            actor=str(actor or "sports_cave_os")[:200],
+            metadata={**activity_metadata, "recommendation_id": recommendation_id},
+            actor=str(activity_metadata.get("actor_display") or actor or "sports_cave_os")[:200],
         )
         return _json_safe(task)
 
@@ -1060,14 +1080,15 @@ class PostgresSEOGrowthStore:
                 )
                 row = cursor.fetchone()
             connection.commit()
+        activity_metadata = _activity_actor_metadata_from_identifier(actor)
         record_activity_log(
             "seo_task_status_updated",
             "SEO / Tasks & Results",
             f"SEO task status updated: {status}",
             entity_type="seo_growth_task",
             entity_id=task_id,
-            metadata={"status": status},
-            actor=str(actor or "sports_cave_os")[:200],
+            metadata={**activity_metadata, "status": status},
+            actor=str(activity_metadata.get("actor_display") or actor or "sports_cave_os")[:200],
         )
         return _json_safe(dict(row or {}))
 
@@ -1398,7 +1419,13 @@ def queue_growth_pipeline(user, *, store=None, mode="manual"):
         "SEO Growth Intelligence daily pipeline queued",
         entity_type="seo_growth_pipeline_run",
         entity_id=str(run.get("id") or ""),
-        metadata={"mode": mode},
+        metadata={
+            "actor_id": user.get("id") or "",
+            "actor_email": user.get("email") or "",
+            "actor_role": user.get("role") or "",
+            "actor_timezone": os_accounts.timezone_for_user(user),
+            "mode": mode,
+        },
         actor=str(user.get("display_name") or user.get("id") or "sports_cave_os")[:200],
     )
     return run

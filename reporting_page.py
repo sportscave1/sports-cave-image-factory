@@ -602,28 +602,46 @@ def _render_staff_week_activity(user, anchor_date):
 def _render_operational_activity(user, start_date, end_date):
     if not os_accounts.can_view_activity_log(user):
         return
-    st.subheader("All Operational Activity")
-    signature = f"{start_date}:{end_date}"
-    if st.session_state.get("reporting-activity-range") != signature:
-        st.session_state["reporting-activity-range"] = signature
+    st.subheader("Human Work Records")
+    filter_cols = st.columns([1.4, 1.1, 1.2, 1])
+    staff_filter = filter_cols[0].text_input("Staff member", key="reporting-human-work-staff")
+    area_filter = filter_cols[1].text_input("Area", key="reporting-human-work-area")
+    action_type_filter = filter_cols[2].text_input("Action type", key="reporting-human-work-action")
+    outcome_label = filter_cols[3].selectbox(
+        "Outcome",
+        ("All", "Completed", "Skipped", "Did not finish", "Failed"),
+        key="reporting-human-work-outcome",
+    )
+    outcome_filter = {
+        "Completed": "completed",
+        "Skipped": "skipped",
+        "Did not finish": "did_not_finish",
+        "Failed": "failed",
+    }.get(outcome_label, "")
+    signature = f"{start_date}:{end_date}:{staff_filter}:{area_filter}:{action_type_filter}:{outcome_filter}"
+    if st.session_state.get("reporting-human-work-range") != signature:
+        st.session_state["reporting-human-work-range"] = signature
         st.session_state["reporting-activity-page"] = 1
     page = max(int(st.session_state.get("reporting-activity-page") or 1), 1)
     try:
-        result = sports_cave_dashboard.list_activity_entries_page(
+        result = sports_cave_dashboard.list_human_work_entries_page(
             start_date,
             end_date,
             page=page,
             page_size=ACTIVITY_PAGE_SIZE,
             user=user,
+            staff_filter=staff_filter,
+            area_filter=area_filter,
+            action_type_filter=action_type_filter,
+            outcome_filter=outcome_filter,
         )
     except sports_cave_dashboard.DashboardStorageError:
-        st.warning("Operational activity could not load right now.")
+        st.warning("Human work records could not load right now.")
         return
-    timezone_name = os_accounts.timezone_for_user(user) or daily_activity_reporting.REPORT_TIMEZONE
-    tzinfo = ZoneInfo(timezone_name)
+    tzinfo = ZoneInfo(daily_activity_reporting.REPORT_TIMEZONE)
     records = [
-        sports_cave_dashboard.activity_table_record(entry, tzinfo)
-        for entry in sports_cave_dashboard.group_mockup_activity_entries(result.get("rows") or [], tzinfo)
+        sports_cave_dashboard.human_work_table_record(entry, tzinfo)
+        for entry in result.get("rows") or []
     ]
     if records:
         st.dataframe(
@@ -632,10 +650,10 @@ def _render_operational_activity(user, start_date, end_date):
             use_container_width=True,
             height=min(430, max(180, 29 * (len(records) + 1))),
             row_height=28,
-            key=f"reporting-operational-activity-{page}",
+            key=f"reporting-human-work-records-{page}",
         )
     else:
-        st.caption("No meaningful operational activity found for this page.")
+        st.caption("No human work records match these filters.")
     controls = st.columns([1, 1, 5])
     if controls[0].button("Previous", disabled=not result.get("has_previous"), key="reporting-activity-previous"):
         st.session_state["reporting-activity-page"] = max(page - 1, 1)

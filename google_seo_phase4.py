@@ -3635,7 +3635,14 @@ def queue_phase4_pipeline(user, mode, *, phase4_store=None, connection_store=Non
         f"SEO Phase 4 {mode} pipeline queued",
         entity_type="seo_phase4_run",
         entity_id=",".join(str(run.get("id") or "") for run in runs),
-        metadata={"mode": mode, "sources": list(PHASE4_SOURCES)},
+        metadata={
+            "actor_id": user.get("id") or "",
+            "actor_email": user.get("email") or "",
+            "actor_role": user.get("role") or "",
+            "actor_timezone": os_accounts.timezone_for_user(user),
+            "mode": mode,
+            "sources": list(PHASE4_SOURCES),
+        },
         actor=str(user.get("display_name") or user.get("id") or "sports_cave_os")[:200],
     )
     return runs

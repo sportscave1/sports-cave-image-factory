@@ -9,6 +9,7 @@ import re
 from time import monotonic
 
 import os_accounts
+import human_work
 import design_studio_styles
 import sports_sales_calendar
 
@@ -4076,8 +4077,7 @@ def list_activity_entries_page(start_date, end_date, *, page=1, page_size=25, us
     try:
         start_day = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date))
         end_day = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date))
-        timezone_name = os_accounts.timezone_for_user(user) or "Australia/Sydney"
-        zone = ZoneInfo(timezone_name)
+        zone = sports_sales_calendar.SYDNEY_TIMEZONE
         start_at = datetime.combine(start_day, time.min, tzinfo=zone).astimezone(timezone.utc)
         end_at = datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
         safe_page_size = min(max(int(page_size or 25), 10), 100)
@@ -4106,6 +4106,59 @@ def list_activity_entries_page(start_date, end_date, *, page=1, page_size=25, us
         "has_next": len(rows) > safe_page_size,
         "query_count": 1,
     }
+
+
+def list_human_work_entries_page(
+    start_date,
+    end_date,
+    *,
+    page=1,
+    page_size=25,
+    user=None,
+    staff_filter="",
+    area_filter="",
+    action_type_filter="",
+    outcome_filter="",
+):
+    access_scope = activity_log_access_scope(user)
+    if access_scope is None:
+        raise DashboardStorageError("Human Work access is not available for this account.")
+    try:
+        start_day = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date))
+        end_day = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date))
+        timezone_name = os_accounts.timezone_for_user(user) or "Australia/Sydney"
+        zone = ZoneInfo(timezone_name)
+        start_at = datetime.combine(start_day, time.min, tzinfo=zone).astimezone(timezone.utc)
+        end_at = datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
+        safe_page_size = min(max(int(page_size or 25), 10), 100)
+        safe_page = max(int(page or 1), 1)
+        backend = get_supabase_backend()
+        user_ids = None if access_scope["all_users"] else [access_scope["actor_user_id"]]
+        rows = backend.list_human_work_events(
+            start_at=start_at,
+            end_at=end_at,
+            limit=safe_page_size + 1,
+            offset=(safe_page - 1) * safe_page_size,
+            user_ids=user_ids,
+            staff_filter=staff_filter if access_scope["all_users"] else "",
+            area_filter=area_filter if area_filter != "All" else "",
+            action_type_filter=action_type_filter if action_type_filter != "All" else "",
+            outcome_filter=outcome_filter if outcome_filter != "All" else "",
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+    return {
+        "rows": [dict(row or {}) for row in rows[:safe_page_size]],
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "has_previous": safe_page > 1,
+        "has_next": len(rows) > safe_page_size,
+        "query_count": 1,
+    }
+
+
+def human_work_table_record(entry, tzinfo=timezone.utc):
+    return human_work.table_record(entry, tzinfo=tzinfo)
 
 
 def build_reporting_staff_week_snapshot(user, anchor_date=None):
@@ -4148,7 +4201,7 @@ def build_reporting_staff_week_snapshot(user, anchor_date=None):
                 "Area": work.get("area") or "Sports Cave",
                 "Record/reference": work.get("row_id") or "",
                 "Outcome": work.get("status") or "Completed",
-                "Source": "Daily Planner" if str(work.get("row_id") or "").startswith("planner:") else "Activity log",
+                "Source": "Daily Planner" if str(work.get("row_id") or "").startswith("planner:") else "Human work",
             }
         )
     return {
@@ -4597,6 +4650,7 @@ def build_home_weekly_work_snapshot(user, local_now=None):
             "role": _compact_text(row.get("role") or "worker").title(),
             "total_planned": 0,
             "completed_tasks": 0,
+            "completed_work": 0,
             "did_not_finish": 0,
             "skipped": 0,
             "unresolved": 0,
@@ -4635,6 +4689,7 @@ def build_home_weekly_work_snapshot(user, local_now=None):
         outcome = task.get("outcome") or "unresolved"
         if outcome == "completed":
             member["completed_tasks"] += 1
+            member["completed_work"] += 1
         elif outcome == "did_not_finish":
             member["did_not_finish"] += 1
         elif outcome == "skipped":
@@ -4665,47 +4720,41 @@ def build_home_weekly_work_snapshot(user, local_now=None):
             }
         )
 
-    import daily_activity_reporting
-
     seen_activity = set()
-    for raw in bundle.get("activities") or []:
-        if not daily_activity_reporting.activity_is_meaningful_work(raw):
+    human_work_rows = [dict(row or {}) for row in bundle.get("human_work") or []]
+    if not human_work_rows:
+        for raw in bundle.get("activities") or []:
+            event = human_work.activity_to_human_work_event(raw)
+            if event:
+                human_work_rows.append(event)
+    for event in human_work_rows:
+        if human_work.event_is_planner(event):
             continue
-        try:
-            activity = daily_activity_reporting.classify_activity(raw)
-        except (TypeError, ValueError):
-            continue
-        if not activity or activity.get("action", "").startswith("daily_planner_task_"):
-            continue
-        account = _weekly_work_account(activity, users)
-        if not account:
-            continue
-        owner_id = str(account.get("id") or "")
+        owner_id = str(event.get("user_id") or "")
         if owner_id not in staff:
             continue
-        payload = raw.get("new_value") or {}
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                payload = {}
-        metadata = payload.get("metadata") if isinstance(payload, dict) else {}
-        if not isinstance(metadata, dict):
-            metadata = {}
-        dedupe_key = _compact_text(metadata.get("event_key") or "") or "|".join(
+        dedupe_key = _compact_text(event.get("correlation_key") or event.get("id") or "") or "|".join(
             (
-                _compact_text(raw.get("event_type") or activity.get("action") or ""),
-                _compact_text(raw.get("entity_type") or ""),
-                _compact_text(raw.get("entity_id") or ""),
-                _compact_text(activity.get("details") or "").casefold(),
+                _compact_text(event.get("action_type") or ""),
+                _compact_text(event.get("entity_type") or ""),
+                _compact_text(event.get("entity_id") or ""),
+                _compact_text(event.get("description") or "").casefold(),
             )
         )
         if dedupe_key in seen_activity:
             continue
         seen_activity.add(dedupe_key)
-        timestamp = _weekly_work_timestamp(activity.get("created_at"), sydney_now.astimezone(timezone.utc))
+        outcome = _compact_text(event.get("outcome") or "completed").casefold()
+        if outcome == "failed":
+            continue
+        timestamp = _weekly_work_timestamp(event.get("occurred_at"), sydney_now.astimezone(timezone.utc))
+        if not (start_local.astimezone(timezone.utc) <= timestamp <= sydney_now.astimezone(timezone.utc)):
+            continue
         member = staff[owner_id]
-        member["meaningful_actions"] += 1
+        if human_work.event_counts_as_completed(event):
+            member["meaningful_actions"] += 1
+            member["completed_work"] += 1
+            member["actual_seconds"] += max(int(event.get("actual_seconds") or 0), 0)
         member["last_activity"] = max(
             filter(None, (member["last_activity"], timestamp)), default=timestamp
         )
@@ -4714,11 +4763,11 @@ def build_home_weekly_work_snapshot(user, local_now=None):
                 "timestamp": timestamp,
                 "staff": member["staff"],
                 "staff_id": owner_id,
-                "work": _compact_text(activity.get("details") or activity.get("item") or activity.get("action") or "Work completed"),
-                "area": _compact_text(activity.get("category") or activity.get("page") or "Sports Cave"),
-                "status": "Completed" if activity.get("status") == "success" else str(activity.get("status") or "Completed").title(),
-                "actual_seconds": 0,
-                "row_id": f"activity:{dedupe_key}",
+                "work": _compact_text(event.get("description") or event.get("action_type") or "Work completed"),
+                "area": _compact_text(event.get("area") or event.get("source_route") or "Sports Cave"),
+                "status": outcome.replace("_", " ").title() if outcome else "Completed",
+                "actual_seconds": max(int(event.get("actual_seconds") or 0), 0),
+                "row_id": f"human:{dedupe_key}",
             }
         )
 
@@ -4731,7 +4780,8 @@ def build_home_weekly_work_snapshot(user, local_now=None):
         )
     completed_work.sort(key=lambda row: row["timestamp"], reverse=True)
     total_planned = sum(row["total_planned"] for row in team)
-    tasks_completed = sum(row["completed_tasks"] for row in team)
+    planner_completed = sum(row["completed_tasks"] for row in team)
+    tasks_completed = sum(row["completed_work"] for row in team)
     return {
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
@@ -4739,15 +4789,16 @@ def build_home_weekly_work_snapshot(user, local_now=None):
         "is_team_view": os_accounts.is_admin(user),
         "metrics": {
             "tasks_completed": tasks_completed,
+            "planner_tasks_completed": planner_completed,
             "tasks_not_finished": sum(row["did_not_finish"] for row in team),
             "tasks_skipped": sum(row["skipped"] for row in team),
             "tasks_unresolved": sum(row["unresolved"] for row in team),
             "tasks_total": total_planned,
-            "completion_percentage": tasks_completed / total_planned * 100 if total_planned else 0.0,
+            "completion_percentage": planner_completed / total_planned * 100 if total_planned else 0.0,
             "actual_seconds": sum(row["actual_seconds"] for row in team),
             "meaningful_actions": sum(row["meaningful_actions"] for row in team),
             "staff_active": sum(
-                bool(row["total_planned"] or row["meaningful_actions"])
+                bool(row["total_planned"] or row["completed_work"] or row["meaningful_actions"])
                 for row in team
             ),
         },

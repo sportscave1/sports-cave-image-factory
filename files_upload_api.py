@@ -1284,6 +1284,17 @@ def _activity_actor(user):
     )
 
 
+def _activity_metadata(user):
+    user = dict(user or {})
+    return {
+        "actor_id": user.get("id") or "",
+        "actor_email": user.get("email") or "",
+        "actor_role": user.get("role") or "",
+        "actor_country": user.get("country") or "",
+        "actor_timezone": os_accounts.timezone_for_user(user),
+    }
+
+
 def _stream_upstream_response(upstream):
     try:
         iterator = getattr(upstream, "iter_content", None)
@@ -1526,6 +1537,7 @@ async def create_files_folder(request: Request):
             f"Folder created: {metadata.get('name') or folder_name}",
             entity_type="dropbox_folder",
             entity_id=created_path,
+            metadata=_activity_metadata(user),
             actor=_activity_actor(user),
         )
         return JSONResponse(
@@ -1583,6 +1595,7 @@ async def rename_files_item(request: Request):
             f"Renamed {old_path.rsplit('/', 1)[-1]} to {metadata.get('name') or new_name}",
             entity_type="dropbox_item",
             entity_id=new_path,
+            metadata=_activity_metadata(user),
             actor=_activity_actor(user),
         )
         return JSONResponse(
@@ -1654,6 +1667,7 @@ async def append_files_upload_chunk(request: Request):
                 entity_type="dropbox_file",
                 entity_id=context["destination"],
                 metadata={
+                    **_activity_metadata(context["user"]),
                     "size": context["size"],
                     "destination": context["destination"],
                 },
@@ -1720,7 +1734,7 @@ async def download_file(request: Request):
             f"Downloaded file: {PurePosixPath(path).name}",
             entity_type="dropbox_file",
             entity_id=path,
-            metadata={"filename": PurePosixPath(path).name},
+            metadata={**_activity_metadata(user), "filename": PurePosixPath(path).name},
             actor=_activity_actor(user),
         )
         return RedirectResponse(str(link), status_code=307)
@@ -2098,6 +2112,7 @@ async def delete_files(request: Request):
                 entity_type="dropbox_folder",
                 entity_id=dropbox_integration.normalize_dropbox_path(payload.get("current_path")),
                 metadata={
+                    **_activity_metadata(user),
                     "folder": dropbox_integration.normalize_dropbox_path(payload.get("current_path")),
                     "item_count": len(successful),
                     "failed_count": len(failed),
@@ -2191,6 +2206,7 @@ async def paste_files(request: Request):
                 entity_type="dropbox_folder",
                 entity_id=destination,
                 metadata={
+                    **_activity_metadata(user),
                     "destination": destination,
                     "item_count": len(successful),
                     "failed_count": len(failed),

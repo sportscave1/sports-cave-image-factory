@@ -65,7 +65,7 @@ class ReportingPageContractTests(unittest.TestCase):
         self.assertIn("Australia/Sydney", source)
         self.assertIn("sports_cave_dashboard.list_daily_execution_history", source)
         self.assertIn("Staff Weekly Activity", source)
-        self.assertIn("All Operational Activity", source)
+        self.assertIn("Human Work Records", source)
         self.assertIn("def render_weekly_review_page", source)
 
 

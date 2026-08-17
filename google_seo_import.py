@@ -1048,7 +1048,14 @@ def queue_imports(user, mode, *, import_store=None, connection_store=None):
         f"Google SEO {mode} import queued",
         entity_type="seo_sync_run",
         entity_id=",".join(str(row.get("id") or "") for row in runs),
-        metadata={"mode": mode, "sources": list(SOURCES)},
+        metadata={
+            "actor_id": user.get("id") or "",
+            "actor_email": user.get("email") or "",
+            "actor_role": user.get("role") or "",
+            "actor_timezone": os_accounts.timezone_for_user(user),
+            "mode": mode,
+            "sources": list(SOURCES),
+        },
         actor=str(user.get("display_name") or user.get("id") or "sports_cave_os")[:200],
     )
     return runs

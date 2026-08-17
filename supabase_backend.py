@@ -987,6 +987,141 @@ def _create_prompt_template_tables(cur):
     )
 
 
+def _ensure_human_work_schema(cur):
+    cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS human_work_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id TEXT NOT NULL,
+            staff_display_name TEXT NOT NULL,
+            staff_role TEXT,
+            origin TEXT NOT NULL DEFAULT 'human',
+            area TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            source_route TEXT,
+            outcome TEXT NOT NULL DEFAULT 'completed',
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            actual_seconds INTEGER,
+            correlation_key TEXT NOT NULL,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            audit_log_id BIGINT REFERENCES audit_logs(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CHECK (origin = 'human')
+        )
+        """
+    )
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS staff_role TEXT")
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS source_route TEXT")
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS actual_seconds INTEGER")
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS audit_log_id BIGINT")
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb")
+    cur.execute("ALTER TABLE human_work_events ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT 'human'")
+    cur.execute("UPDATE human_work_events SET origin='human' WHERE COALESCE(origin, '') = ''")
+    _safe_create_index(
+        cur,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_human_work_events_correlation_key ON human_work_events(correlation_key)",
+        "idx_human_work_events_correlation_key",
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_human_work_events_occurred_at ON human_work_events(occurred_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_human_work_events_user_occurred ON human_work_events(user_id, occurred_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_human_work_events_area_action_occurred ON human_work_events(area, action_type, occurred_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_human_work_events_outcome_occurred ON human_work_events(outcome, occurred_at DESC)")
+
+
+def _merge_actor_context_metadata(new_value):
+    payload = dict(new_value or {})
+    metadata = dict(payload.get("metadata") or {})
+    if metadata.get("actor_id"):
+        metadata.setdefault("origin", "human")
+        payload["metadata"] = metadata
+        return payload
+    try:
+        from activity_log import get_activity_actor, get_activity_actor_metadata
+    except Exception:
+        actor_metadata = {}
+        actor_display = ""
+    else:
+        actor_metadata = get_activity_actor_metadata()
+        actor_display = get_activity_actor()
+    if actor_metadata.get("actor_id"):
+        for key, value in actor_metadata.items():
+            if value not in (None, ""):
+                metadata.setdefault(key, value)
+        metadata.setdefault("actor_display", str(actor_display or "").strip())
+        metadata.setdefault("origin", "human")
+        payload["metadata"] = metadata
+    return payload
+
+
+def _record_human_work_event_once(cur, event):
+    event = dict(event or {})
+    if not event or not event.get("user_id") or not event.get("correlation_key"):
+        return None
+    try:
+        import human_work
+
+        clean_metadata = human_work.safe_metadata(event.get("metadata") or {})
+    except Exception:
+        clean_metadata = dict(event.get("metadata") or {})
+    cur.execute(
+        """
+        INSERT INTO human_work_events(
+            user_id, staff_display_name, staff_role, origin,
+            area, action_type, description, entity_type, entity_id,
+            source_route, outcome, occurred_at, actual_seconds,
+            correlation_key, metadata, audit_log_id
+        )
+        VALUES (
+            %s, %s, %s, 'human',
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s::jsonb, %s
+        )
+        ON CONFLICT (correlation_key) DO UPDATE SET
+            audit_log_id=COALESCE(human_work_events.audit_log_id, EXCLUDED.audit_log_id),
+            metadata=human_work_events.metadata || EXCLUDED.metadata
+        RETURNING *
+        """,
+        (
+            str(event.get("user_id") or "").strip(),
+            str(event.get("staff_display_name") or "").strip()[:200] or "Staff member",
+            str(event.get("staff_role") or "").strip()[:80],
+            str(event.get("area") or "").strip()[:120],
+            str(event.get("action_type") or "").strip()[:120],
+            str(event.get("description") or "").strip()[:500] or "Work completed",
+            str(event.get("entity_type") or "").strip()[:120],
+            str(event.get("entity_id") or "").strip()[:250],
+            str(event.get("source_route") or "").strip()[:160],
+            str(event.get("outcome") or "completed").strip()[:80],
+            event.get("occurred_at") or datetime.now(timezone.utc),
+            event.get("actual_seconds"),
+            str(event.get("correlation_key") or "").strip()[:250],
+            json_dumps(clean_metadata),
+            event.get("audit_log_id"),
+        ),
+    )
+    return cur.fetchone() or {}
+
+
+def _record_human_work_from_audit_row(cur, row):
+    try:
+        import human_work
+
+        event = human_work.activity_to_human_work_event(row or {})
+    except Exception:
+        return None
+    if not event:
+        return None
+    try:
+        return _record_human_work_event_once(cur, event)
+    except Exception:
+        return None
+
+
 def _ensure_schema_uncached():
     if not is_configured():
         raise SupabaseNotConfigured(
@@ -2257,6 +2392,7 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_order_line ON audit_logs(shopify_order_id, shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_handle ON audit_logs(shopify_handle)")
+            _ensure_human_work_schema(cur)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
             _ensure_daily_execution_timer_schema(cur)
@@ -2465,6 +2601,7 @@ def ensure_dashboard_schema():
                     "CREATE INDEX IF NOT EXISTS idx_audit_logs_activity_event_key ON audit_logs ((new_value->'metadata'->>'event_key')) WHERE new_value ? 'metadata'",
                     "idx_audit_logs_activity_event_key",
                 )
+                _ensure_human_work_schema(cur)
             conn.commit()
         _DASHBOARD_SCHEMA_READY = True
 
@@ -3029,6 +3166,7 @@ def _insert_audit_log(
     actor="sports_cave_os",
     source="sports_cave_os",
 ):
+    clean_new_value = _merge_actor_context_metadata(new_value or {})
     cur.execute(
         """
         INSERT INTO audit_logs(
@@ -3037,6 +3175,7 @@ def _insert_audit_log(
             old_value, new_value, reason, actor, source
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+        RETURNING *
         """,
         (
             str(event_type or "").strip() or "unknown_event",
@@ -3046,12 +3185,15 @@ def _insert_audit_log(
             str(shopify_line_item_id or "").strip(),
             str(shopify_handle or "").strip(),
             json_dumps(old_value or {}),
-            json_dumps(new_value or {}),
+            json_dumps(clean_new_value),
             str(reason or "").strip(),
             str(actor or "").strip() or "sports_cave_os",
             str(source or "").strip() or "sports_cave_os",
         ),
     )
+    row = cur.fetchone() or {}
+    _record_human_work_from_audit_row(cur, row)
+    return row
 
 
 def _dashboard_task_from_row(row):
@@ -3099,6 +3241,7 @@ def record_activity_log(
         "action_type": clean_action,
         "metadata": clean_metadata,
     }
+    payload = _merge_actor_context_metadata(payload)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3118,6 +3261,7 @@ def record_activity_log(
                 )
                 existing = cur.fetchone()
                 if existing:
+                    _record_human_work_from_audit_row(cur, existing)
                     conn.commit()
                     return existing
             cur.execute(
@@ -3140,8 +3284,151 @@ def record_activity_log(
                 ),
             )
             row = cur.fetchone() or {}
+            _record_human_work_from_audit_row(cur, row)
         conn.commit()
     return row
+
+
+def _human_work_row(row):
+    row = dict(row or {})
+    if not row:
+        return {}
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+    row["metadata"] = dict(metadata or {})
+    if row.get("occurred_at") and isinstance(row.get("occurred_at"), datetime):
+        row["occurred_at"] = row["occurred_at"].astimezone(timezone.utc)
+    return row
+
+
+def record_human_work_event(
+    *,
+    user_id,
+    staff_display_name,
+    staff_role="",
+    area,
+    action_type,
+    description,
+    entity_type="",
+    entity_id="",
+    source_route="",
+    outcome="completed",
+    occurred_at=None,
+    actual_seconds=None,
+    correlation_key,
+    metadata=None,
+    audit_log_id=None,
+):
+    """Canonical server-side API for one idempotent authenticated human action."""
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        raise ValueError("Authenticated user id is required for human work tracking.")
+    clean_key = str(correlation_key or "").strip()
+    if not clean_key:
+        raise ValueError("A stable idempotency key is required for human work tracking.")
+    event = {
+        "user_id": clean_user_id,
+        "staff_display_name": staff_display_name,
+        "staff_role": staff_role,
+        "origin": "human",
+        "area": area,
+        "action_type": action_type,
+        "description": description,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "source_route": source_route,
+        "outcome": outcome,
+        "occurred_at": occurred_at or datetime.now(timezone.utc),
+        "actual_seconds": actual_seconds,
+        "correlation_key": clean_key,
+        "metadata": metadata or {},
+        "audit_log_id": audit_log_id,
+    }
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            row = _record_human_work_event_once(cur, event)
+        conn.commit()
+    return _human_work_row(row)
+
+
+def list_human_work_events(
+    *,
+    start_at=None,
+    end_at=None,
+    limit=200,
+    offset=0,
+    user_ids=None,
+    staff_filter="",
+    area_filter="",
+    action_type_filter="",
+    outcome_filter="",
+):
+    ensure_dashboard_schema()
+    clauses = ["origin='human'"]
+    params = []
+    if start_at is not None:
+        clauses.append("occurred_at >= %s")
+        params.append(start_at)
+    if end_at is not None:
+        clauses.append("occurred_at < %s")
+        params.append(end_at)
+    clean_user_ids = [
+        str(user_id or "").strip()
+        for user_id in (user_ids or [])
+        if str(user_id or "").strip()
+    ]
+    if clean_user_ids:
+        clauses.append("user_id = ANY(%s)")
+        params.append(clean_user_ids)
+    if str(staff_filter or "").strip():
+        clauses.append("staff_display_name ILIKE %s")
+        params.append(f"%{str(staff_filter).strip()}%")
+    if str(area_filter or "").strip():
+        clauses.append("area ILIKE %s")
+        params.append(f"%{str(area_filter or '').strip()}%")
+    if str(action_type_filter or "").strip():
+        clauses.append("action_type ILIKE %s")
+        params.append(f"%{str(action_type_filter or '').strip()}%")
+    if str(outcome_filter or "").strip():
+        clauses.append("outcome = %s")
+        params.append(str(outcome_filter or "").strip())
+    where_sql = f"WHERE {' AND '.join(clauses)}"
+    safe_limit = None
+    if limit is not None:
+        try:
+            safe_limit = min(max(int(limit), 1), 5000)
+        except (TypeError, ValueError):
+            safe_limit = 200
+    try:
+        safe_offset = max(int(offset or 0), 0)
+    except (TypeError, ValueError):
+        safe_offset = 0
+    limit_sql = "LIMIT %s OFFSET %s" if safe_limit is not None else ""
+    if safe_limit is not None:
+        params.extend((safe_limit, safe_offset))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                f"""
+                SELECT id, user_id, staff_display_name, staff_role, origin,
+                       area, action_type, description, entity_type, entity_id,
+                       source_route, outcome, occurred_at, actual_seconds,
+                       correlation_key, metadata, audit_log_id, created_at
+                FROM human_work_events
+                {where_sql}
+                ORDER BY occurred_at DESC, created_at DESC
+                {limit_sql}
+                """,
+                params,
+            )
+            return [_human_work_row(row) for row in cur.fetchall() or []]
 
 
 def _dashboard_query_timeout_ms(default=2500):
@@ -6170,7 +6457,6 @@ def load_home_weekly_work_bundle(
 ):
     """Load the complete Home work snapshot with one current-week SQL statement."""
     ensure_dashboard_schema()
-    from daily_activity_reporting import MEANINGFUL_WORK_ACTIONS
 
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id:
@@ -6204,31 +6490,19 @@ def load_home_weekly_work_bundle(
                     FROM daily_execution_task_timers timer
                     JOIN selected_sheets sheet ON sheet.id=timer.sheet_id
                 ),
-                selected_activity AS (
-                    SELECT activity.*
-                    FROM audit_logs activity
-                    WHERE activity.created_at >= %s
-                      AND activity.created_at <= %s
-                      AND activity.event_type = ANY(%s)
-                      AND (
-                          %s IS TRUE
-                          OR COALESCE(activity.new_value->'metadata'->>'actor_id', '')=%s
-                          OR EXISTS (
-                              SELECT 1
-                              FROM permitted_users person
-                              WHERE lower(COALESCE(activity.actor, '')) IN (
-                                  lower(person.username),
-                                  lower(person.email),
-                                  lower(person.display_name)
-                              )
-                          )
-                      )
+                selected_human_work AS (
+                    SELECT work.*
+                    FROM human_work_events work
+                    JOIN permitted_users person ON person.id=work.user_id
+                    WHERE work.origin='human'
+                      AND work.occurred_at >= %s
+                      AND work.occurred_at <= %s
                 )
                 SELECT
                     COALESCE((SELECT jsonb_agg(to_jsonb(person)) FROM permitted_users person), '[]'::jsonb) AS users,
                     COALESCE((SELECT jsonb_agg(to_jsonb(sheet)) FROM selected_sheets sheet), '[]'::jsonb) AS sheets,
                     COALESCE((SELECT jsonb_agg(to_jsonb(timer)) FROM selected_timers timer), '[]'::jsonb) AS timers,
-                    COALESCE((SELECT jsonb_agg(to_jsonb(activity)) FROM selected_activity activity), '[]'::jsonb) AS activities
+                    COALESCE((SELECT jsonb_agg(to_jsonb(work)) FROM selected_human_work work), '[]'::jsonb) AS human_work
                 """,
                 (
                     bool(include_team),
@@ -6237,9 +6511,6 @@ def load_home_weekly_work_bundle(
                     str(week_end),
                     start_utc,
                     end_utc,
-                    sorted(MEANINGFUL_WORK_ACTIONS),
-                    bool(include_team),
-                    clean_user_id,
                 ),
             )
             row = cur.fetchone() or {}
@@ -6247,7 +6518,8 @@ def load_home_weekly_work_bundle(
         "users": [dict(item or {}) for item in row.get("users") or []],
         "sheets": [_daily_execution_sheet_from_row(item) for item in row.get("sheets") or []],
         "timers": [_timer_from_row(item) for item in row.get("timers") or []],
-        "activities": [dict(item or {}) for item in row.get("activities") or []],
+        "human_work": [_human_work_row(item) for item in row.get("human_work") or []],
+        "activities": [],
         "query_count": 1,
     }
 

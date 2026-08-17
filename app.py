@@ -7624,6 +7624,19 @@ def remove_uploaded_lifestyle_result(result, prompt_path):
     ]
     result["status_text"] = f"Removed lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
+    if saved_paths:
+        record_activity_log(
+            "mockup_deleted",
+            "Mockups",
+            f"Deleted mockup: {get_prompt_label(prompt_path)}",
+            entity_type="mockup_run",
+            entity_id=str(result.get("run_dir") or ""),
+            metadata={
+                "product_name": result.get("product_name") or "",
+                "prompt": prompt_filename,
+            },
+            event_key=f"mockup-deleted:{result.get('run_dir') or ''}:{prompt_filename}",
+        )
     return result
 
 
@@ -12227,11 +12240,12 @@ def render_home_weekly_work(user, local_now):
     metrics = snapshot.get("metrics") or {}
     cards = st.columns(6)
     completed = int(metrics.get("tasks_completed") or 0)
+    planner_completed = int(metrics.get("planner_tasks_completed") or 0)
     total = int(metrics.get("tasks_total") or 0)
     cards[0].metric(
         "Task completion",
         f"{round(float(metrics.get('completion_percentage') or 0))}%",
-        f"{completed} of {total} completed",
+        f"{planner_completed} of {total} planned",
         delta_color="off",
     )
     cards[1].metric("Tasks completed", completed)
@@ -12248,7 +12262,8 @@ def render_home_weekly_work(user, local_now):
                     "Staff member": row.get("staff") or "",
                     "Role": row.get("role") or "",
                     "Completion %": f"{round(float(row.get('completion_percentage') or 0))}%",
-                    "Completed tasks": int(row.get("completed_tasks") or 0),
+                    "Completed work": int(row.get("completed_work") or 0),
+                    "Planner completed": int(row.get("completed_tasks") or 0),
                     "Did not finish": int(row.get("did_not_finish") or 0),
                     "Skipped": int(row.get("skipped") or 0),
                     "Remaining": int(row.get("unresolved") or 0),

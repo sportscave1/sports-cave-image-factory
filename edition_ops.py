@@ -1,6 +1,7 @@
 from copy import deepcopy
 import csv
 from datetime import datetime, timezone
+import hashlib
 import importlib
 import io
 import json
@@ -172,6 +173,11 @@ def _render_import_popover_styles():
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _activity_event_key(prefix, payload):
+    identity = json.dumps(payload or {}, ensure_ascii=True, sort_keys=True, default=str)
+    return f"{prefix}:{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _format_time(value):
@@ -1076,6 +1082,22 @@ def _render_shopify_mirror_controls(backend, rows, rows_to_save):
                 backend,
                 pending_handles,
                 sync_all_active=False,
+            )
+            record_activity_log(
+                "shopify_metafield_pushed",
+                "Edition Ops",
+                f"Manual Shopify metafield pushed for {result.get('synced') or 0} product(s).",
+                entity_type="edition_product",
+                metadata={
+                    "handles": pending_handles,
+                    "synced": int(result.get("synced") or 0),
+                    "failed": int(result.get("skipped") or result.get("failed") or 0),
+                    "status": "success",
+                },
+                event_key=_activity_event_key(
+                    "shopify-metafield-pushed",
+                    {"handles": pending_handles, "synced": result.get("synced"), "failed": result.get("failed")},
+                ),
             )
             st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = result
             st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = None
@@ -2150,6 +2172,26 @@ def _render_pull_new_products_button(target, backend):
             if not config.get("configured"):
                 raise ValueError("Shopify is not configured.")
             result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+            record_activity_log(
+                "shopify_new_products_pulled",
+                "Edition Ops",
+                _format_new_product_pull_summary(result),
+                entity_type="shopify_product_sync",
+                metadata={
+                    "new_products_inserted": int(result.get("new_products_inserted") or 0),
+                    "existing_products_updated": int(result.get("existing_products_updated") or 0),
+                    "error_count": len(result.get("errors") or []),
+                    "status": "success",
+                },
+                event_key=_activity_event_key(
+                    "shopify-new-products-pulled",
+                    {
+                        "new": result.get("new_products_inserted"),
+                        "updated": result.get("existing_products_updated"),
+                        "errors": len(result.get("errors") or []),
+                    },
+                ),
+            )
             _reload_products_from_supabase()
             st.session_state[NOTICE_KEY] = _format_new_product_pull_summary(result)
             st.session_state[NOTICE_LEVEL_KEY] = (
@@ -2178,11 +2220,34 @@ def _render_advanced_controls(backend, rows):
                     if not config.get("configured"):
                         raise ValueError("Shopify is not configured.")
                     sync_result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
+                    sync_errors = list(sync_result.get("errors") or [])
+                    sync_errors.extend(sync_result.get("variant_sync_errors") or [])
+                    record_activity_log(
+                        "shopify_catalogue_refreshed",
+                        "Edition Ops",
+                        "Shopify catalogue refreshed",
+                        entity_type="shopify_product_sync",
+                        metadata={
+                            "products_fetched": int(sync_result.get("products_fetched") or 0),
+                            "new_products_inserted": int(sync_result.get("new_products_inserted") or 0),
+                            "existing_products_updated": int(sync_result.get("existing_products_updated") or 0),
+                            "existing_products_skipped": int(sync_result.get("existing_products_skipped") or 0),
+                            "error_count": len(sync_errors),
+                            "status": "success",
+                        },
+                        event_key=_activity_event_key(
+                            "shopify-catalogue-refreshed",
+                            {
+                                "fetched": sync_result.get("products_fetched"),
+                                "new": sync_result.get("new_products_inserted"),
+                                "updated": sync_result.get("existing_products_updated"),
+                                "errors": len(sync_errors),
+                            },
+                        ),
+                    )
                     st.session_state[MANUAL_PRODUCT_SYNC_RESULT_KEY] = sync_result
                     _reload_products_from_supabase()
                     st.session_state[NOTICE_KEY] = _format_shopify_product_sync_summary(sync_result)
-                    sync_errors = list(sync_result.get("errors") or [])
-                    sync_errors.extend(sync_result.get("variant_sync_errors") or [])
                     st.session_state[NOTICE_LEVEL_KEY] = "warning" if sync_errors else "success"
                     sync_completed = True
             except Exception as error:
@@ -2254,12 +2319,35 @@ def _render_advanced_controls(backend, rows):
                     if not config.get("configured"):
                         raise ValueError("Shopify is not configured.")
                     reconciliation_result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
+                    reconciliation_errors = list(reconciliation_result.get("errors") or [])
+                    reconciliation_errors.extend(reconciliation_result.get("variant_sync_errors") or [])
+                    record_activity_log(
+                        "shopify_product_reconciliation_completed",
+                        "Edition Ops",
+                        _format_full_product_reconciliation_summary(reconciliation_result),
+                        entity_type="shopify_product_sync",
+                        metadata={
+                            "products_fetched": int(reconciliation_result.get("products_fetched") or 0),
+                            "new_products_inserted": int(reconciliation_result.get("new_products_inserted") or 0),
+                            "existing_products_updated": int(reconciliation_result.get("existing_products_updated") or 0),
+                            "existing_products_skipped": int(reconciliation_result.get("existing_products_skipped") or 0),
+                            "error_count": len(reconciliation_errors),
+                            "status": "success",
+                        },
+                        event_key=_activity_event_key(
+                            "shopify-product-reconciliation-completed",
+                            {
+                                "fetched": reconciliation_result.get("products_fetched"),
+                                "new": reconciliation_result.get("new_products_inserted"),
+                                "updated": reconciliation_result.get("existing_products_updated"),
+                                "errors": len(reconciliation_errors),
+                            },
+                        ),
+                    )
                     _reload_products_from_supabase()
                     st.session_state[NOTICE_KEY] = _format_full_product_reconciliation_summary(
                         reconciliation_result
                     )
-                    reconciliation_errors = list(reconciliation_result.get("errors") or [])
-                    reconciliation_errors.extend(reconciliation_result.get("variant_sync_errors") or [])
                     st.session_state[NOTICE_LEVEL_KEY] = "warning" if reconciliation_errors else "success"
                     reconciliation_completed = True
             except Exception as error:

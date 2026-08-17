@@ -989,7 +989,11 @@
       const sheet = bundle.sheet || {};
       const reviewed = ["reviewed","completed","archived"].includes(String(sheet.status || "").toLowerCase());
       const planLocked = reviewed || String(sheet.status || "").toLowerCase() === "finalised";
-      const saveLabel = bundle.work_date === bundle.today ? "Save today's plan" : "Save plan";
+      const saveLabel = bundle.work_date === bundle.today
+        ? "Save today's plan"
+        : bundle.work_date === addDays(bundle.today, 1)
+          ? "Save tomorrow's plan"
+          : "Save plan";
       const saveMessage = state.saveError
         ? `<span class="save-state error" id="save-state" role="alert">${escapeHtml(state.saveError)}</span><button class="button" data-action="retry-save" ${state.saving ? "disabled" : ""}>Retry</button>`
         : `<span class="save-state" id="save-state">${reviewed ? "Daily Review complete. This saved sheet is read-only." : planLocked ? "This plan was automatically finalised. Complete its Daily Review below." : "Changes are saved only when you choose Save."}</span>`;

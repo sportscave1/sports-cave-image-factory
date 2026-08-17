@@ -176,7 +176,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("row_height=28", source)
         self.assertIn('"Daily Execution History"', source)
         self.assertIn('"Staff Weekly Activity"', source)
-        self.assertIn('"All Operational Activity"', source)
+        self.assertIn('"Human Work Records"', source)
 
     def test_notification_bell_allowlist_excludes_alerts_and_generic_activity(self):
         claims = {
@@ -322,7 +322,8 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertEqual("2026-08-10", admin_snapshot["week_start"])
         self.assertEqual("2026-08-16", admin_snapshot["week_end"])
         self.assertEqual(2, len(admin_snapshot["team"]))
-        self.assertEqual(1, admin_snapshot["metrics"]["tasks_completed"])
+        self.assertEqual(2, admin_snapshot["metrics"]["tasks_completed"])
+        self.assertEqual(1, admin_snapshot["metrics"]["planner_tasks_completed"])
         self.assertEqual(1, admin_snapshot["metrics"]["tasks_not_finished"])
         self.assertEqual(2, admin_snapshot["metrics"]["tasks_total"])
         self.assertEqual(50.0, admin_snapshot["metrics"]["completion_percentage"])

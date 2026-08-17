@@ -36,6 +36,10 @@ def get_activity_actor():
     return _ACTIVITY_ACTOR.get()
 
 
+def get_activity_actor_metadata():
+    return dict(_ACTIVITY_ACTOR_METADATA.get() or {})
+
+
 def _safe_activity_metadata(metadata, *, page, action_type, actor):
     clean = {
         key: value
@@ -50,6 +54,8 @@ def _safe_activity_metadata(metadata, *, page, action_type, actor):
     clean.setdefault("action_key", str(action_type or "").strip() or "activity")
     clean.setdefault("source_user_initiated", True)
     clean.setdefault("status", "success")
+    if clean.get("actor_id"):
+        clean.setdefault("origin", "human")
     return clean
 
 

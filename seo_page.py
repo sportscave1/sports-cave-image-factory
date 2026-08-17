@@ -144,7 +144,14 @@ def _persist(store, state, user, *, action, area, message, entity_type="seo_reco
         message,
         entity_type=entity_type,
         entity_id=entity_id,
-        metadata={"seo_area": area, **dict(metadata or {})},
+        metadata={
+            "actor_id": user.get("id") or "",
+            "actor_email": user.get("email") or "",
+            "actor_role": user.get("role") or "",
+            "actor_timezone": os_accounts.timezone_for_user(user),
+            "seo_area": area,
+            **dict(metadata or {}),
+        },
         actor=_actor_name(user),
     )
     return True

@@ -11,6 +11,7 @@ from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import os_accounts
+import human_work
 import social_media_store
 
 
@@ -30,6 +31,7 @@ ATTENTION_STATUSES = {
 SYSTEM_ACTOR_TYPES = {"automatic", "background", "cron", "scheduled", "system", "webhook"}
 EXCLUDED_ACTIONS = {
     "activity",
+    "files_downloaded",
     "login",
     "logout",
     "page_loaded",
@@ -54,30 +56,7 @@ SYSTEM_SOURCES = {
     "supabase_ledger",
     "webhook",
 }
-MEANINGFUL_WORK_ACTIONS = frozenset(
-    {
-        "new_order_received",
-        "order_fulfilled",
-        "order_fulfilled_certificate_generated",
-        "certificate_generated",
-        "certificate_uploaded",
-        "product_uploaded",
-        "product_created",
-        "product_updated",
-        "product_media_updated",
-        "product_edition_updated",
-        "edition_product_updated",
-        "edition_product_manual_update",
-        "collection_created",
-        "collection_updated",
-        "design_task_completed",
-        "task_completed",
-        "dashboard_task_completed",
-        "daily_planner_task_completed",
-        "daily_planner_task_did_not_finish",
-        "daily_planner_task_skipped",
-    }
-)
+MEANINGFUL_WORK_ACTIONS = human_work.MEANINGFUL_AUDIT_ACTIONS | human_work.CANONICAL_ACTION_TYPES
 SECRET_PATTERN = re.compile(
     r"(?i)\b(api[_ -]?key|authorization|bearer|password|secret|token)\b\s*[:=]\s*\S+"
 )
@@ -155,6 +134,12 @@ ACTION_CATEGORIES = {
     "files_moved_to_recycle_bin": "Files",
     "files_downloaded": "Files",
 }
+ACTION_CATEGORIES.update(
+    {
+        rule.action_type: rule.area
+        for rule in human_work.ACTION_RULES.values()
+    }
+)
 
 ACTION_PREFIX_CATEGORIES = (
     ("account_", "Account and access changes"),
@@ -1210,11 +1195,28 @@ def collect_report_snapshot(
         import supabase_backend as backend
 
     accounts = account_store.list_users()
-    activity_rows = backend.list_activity_logs(
-        start_at=period.start_utc,
-        end_at=period.end_utc,
-        limit=None,
-    )
+    if hasattr(backend, "list_human_work_events"):
+        try:
+            activity_rows = [
+                human_work.event_to_activity_row(row)
+                for row in backend.list_human_work_events(
+                    start_at=period.start_utc,
+                    end_at=period.end_utc,
+                    limit=None,
+                )
+            ]
+        except Exception:
+            activity_rows = backend.list_activity_logs(
+                start_at=period.start_utc,
+                end_at=period.end_utc,
+                limit=None,
+            )
+    else:
+        activity_rows = backend.list_activity_logs(
+            start_at=period.start_utc,
+            end_at=period.end_utc,
+            limit=None,
+        )
     owner_email = (
         os_accounts.reporting_owner_email()
         if owner_email is None

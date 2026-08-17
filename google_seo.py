@@ -920,7 +920,13 @@ def _record_activity(action, message, user, *, metadata=None):
         message,
         entity_type="google_seo_connection",
         entity_id=GOOGLE_SEO_WORKSPACE_KEY,
-        metadata=dict(metadata or {}),
+        metadata={
+            "actor_id": (user or {}).get("id") or "",
+            "actor_email": (user or {}).get("email") or "",
+            "actor_role": (user or {}).get("role") or "",
+            "actor_timezone": os_accounts.timezone_for_user(user or {}),
+            **dict(metadata or {}),
+        },
         actor=_activity_actor(user),
     )
 
