@@ -1311,18 +1311,17 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(saved["source"], "supabase")
         self.assertEqual(loaded["rows"][0]["notes"], "Submitted safely")
 
-    def test_render_main_service_uses_streamlit_starlette_app_and_webhook_service_is_separate(self):
+    def test_render_primary_is_externally_managed_and_webhook_service_is_separate(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
         server_source = (ROOT / "sports_cave_server.py").read_text(encoding="utf-8")
         config = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
 
-        self.assertIn("name: sports-cave-image-factory", source)
-        self.assertIn("startCommand: python sports_cave_server.py", source)
+        self.assertIn("sports-cave-os (srv-d8kl4on7f7vs73dvavv0)", source)
+        self.assertNotIn("startCommand: python sports_cave_server.py", source)
         self.assertIn('App("app.py", routes=routes)', server_source)
         self.assertIn('fileWatcherType = "none"', config)
         self.assertIn("runOnSave = false", config)
         self.assertIn("gatherUsageStats = false", config)
-        self.assertIn("healthCheckPath: /_stcore/health", source)
         self.assertIn("name: sports-cave-os-webhooks", source)
         self.assertIn("startCommand: python webhook_server.py", source)
         self.assertIn("healthCheckPath: /healthz", source)

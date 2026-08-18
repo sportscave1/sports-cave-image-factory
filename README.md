@@ -72,6 +72,14 @@ python -m streamlit run app.py
 
 You can also use `start-app.bat` on Windows.
 
+## Production Render topology
+
+The canonical primary web service and the intentionally separate webhook, SEO
+worker, and daily cron are recorded in
+[`docs/RENDER_SERVICE_TOPOLOGY.md`](docs/RENDER_SERVICE_TOPOLOGY.md). Run
+`python scripts/validate_render_topology.py` before any Blueprint sync. Do not
+rename the primary Render service to rebrand the application.
+
 ## Daily Staff Reporting
 
 The owner-only Reporting page, Resend delivery, Supabase archive, and manual

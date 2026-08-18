@@ -4789,6 +4789,37 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["shopify_orders_fetched"], 0)
         self.assertEqual(result["edition_counters_incremented"], 0)
 
+    def test_bounded_reconciliation_reaches_shopify_despite_unrelated_historical_duplicates(self):
+        with patch.object(
+            supabase_backend,
+            "start_sync_run",
+            return_value="run-bounded-reconciliation",
+        ), patch.object(
+            supabase_backend,
+            "edition_allocation_duplicate_diagnostics",
+            return_value={
+                "edition_orders_total": 173,
+                "duplicate_group_count": 4,
+                "duplicate_row_count": 8,
+                "sync_allowed": False,
+                "blocked_reasons": ["Raw duplicate edition allocation groups exist"],
+            },
+        ), patch.object(
+            supabase_backend,
+            "_latest_paid_orders_payload",
+            side_effect=RuntimeError("bounded fetch reached"),
+        ) as fetch:
+            with self.assertRaisesRegex(RuntimeError, "bounded fetch reached"):
+                supabase_backend.sync_latest_paid_orders_to_supabase(
+                    config=self.config,
+                    limit=50,
+                    lookback_days=14,
+                    ensure_schema_first=False,
+                    allow_unrelated_allocation_duplicates=True,
+                )
+
+        fetch.assert_called_once()
+
     def test_orders_top_actions_accepts_duplicate_diagnostics_argument(self):
         import orders_page
 

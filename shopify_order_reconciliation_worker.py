@@ -49,7 +49,15 @@ def run_once():
             limit=50,
             lookback_days=14,
             ensure_schema_first=False,
+            allow_unrelated_allocation_duplicates=True,
         )
+        if result.get("sync_blocked"):
+            _log(
+                "shopify_order_reconciliation_blocked",
+                reason=result.get("block_reason") or "unknown",
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 1),
+            )
+            return result
         _log(
             "shopify_order_reconciliation_completed",
             orders_examined=result.get("shopify_orders_fetched", 0),

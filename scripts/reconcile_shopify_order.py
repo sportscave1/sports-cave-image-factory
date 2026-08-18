@@ -52,6 +52,7 @@ def main(argv=None) -> int:
             order_name=args.order_name or "",
             apply=bool(args.apply),
             notify=bool(args.notify),
+            ensure_schema_first=False,
         )
         for order_id in identities
     ]

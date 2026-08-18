@@ -398,7 +398,7 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         render = Path("render.yaml").read_text(encoding="utf-8")
 
         self.assertNotIn("preDeployCommand", render)
-        self.assertIn("startCommand: python sports_cave_server.py", render)
+        self.assertNotIn("startCommand: python sports_cave_server.py", render)
         self.assertIn("startCommand: python webhook_server.py", render)
         self.assertNotIn("--verify-required-schema", render)
         self.assertNotIn("--verify-marketplace-schema", render)
@@ -710,7 +710,32 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         ) as sync:
             shopify_order_reconciliation_worker.run_once()
 
-        sync.assert_called_once_with(limit=50, lookback_days=14, ensure_schema_first=False)
+        sync.assert_called_once_with(
+            limit=50,
+            lookback_days=14,
+            ensure_schema_first=False,
+            allow_unrelated_allocation_duplicates=True,
+        )
+
+    def test_targeted_reconciliation_cli_never_runs_schema_maintenance(self):
+        source = Path("scripts/reconcile_shopify_order.py").read_text(encoding="utf-8")
+
+        self.assertIn("ensure_schema_first=False", source)
+
+    def test_background_reconciliation_isolates_unrelated_historical_duplicates(self):
+        with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend,
+            "sync_latest_paid_orders_to_supabase",
+            return_value={"shopify_orders_fetched": 1, "new_orders_inserted": 1},
+        ) as sync:
+            shopify_order_reconciliation_worker.run_once()
+
+        sync.assert_called_once_with(
+            limit=50,
+            lookback_days=14,
+            ensure_schema_first=False,
+            allow_unrelated_allocation_duplicates=True,
+        )
 
 
 if __name__ == "__main__":

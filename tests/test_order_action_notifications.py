@@ -93,7 +93,7 @@ class OrderActionStateTests(unittest.TestCase):
         )
         self.assertTrue(order_action_state.row_requires_action(row))
 
-    def test_complete_fulfilment_still_counts_missing_certificate_work(self):
+    def test_terminal_sports_cave_fulfilment_preserves_legacy_completion(self):
         row = action_row(
             "21",
             certificate_status="Needs certificate",
@@ -103,7 +103,29 @@ class OrderActionStateTests(unittest.TestCase):
             certificate_pdf_url="",
             certificate_shopify_file_id="",
         )
-        self.assertTrue(order_action_state.row_requires_action(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_historical_ready_certificate_and_terminal_fulfilment_stay_complete(self):
+        row = action_row(
+            "22",
+            certificate_status="Ready",
+            prodigi_status="Complete",
+            fulfillment_status="unfulfilled",
+        )
+
+        self.assertTrue(order_action_state.certificate_step_is_complete(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_shopify_fulfilled_is_terminal_only_without_conflicting_prodigi_state(self):
+        completed = action_row("23", prodigi_status="", fulfillment_status="fulfilled")
+        in_progress = action_row(
+            "24",
+            prodigi_status="In production",
+            fulfillment_status="fulfilled",
+        )
+
+        self.assertFalse(order_action_state.row_requires_action(completed))
+        self.assertTrue(order_action_state.row_requires_action(in_progress))
 
     def test_every_required_step_complete_removes_order(self):
         unfinished = action_row("30", prodigi_status="Needs certificate")
@@ -142,7 +164,7 @@ class OrderActionStateTests(unittest.TestCase):
                 prodigi_status="Complete",
                 assignments_count=0,
                 edition_order_id="",
-                certificate_status="Uploaded",
+                certificate_status="Ready",
             )
             for order_number in range(2800, 3000)
         )
@@ -355,15 +377,14 @@ class OrderStatusUiContractTests(unittest.TestCase):
     def test_backend_selector_uses_shared_rules_and_has_no_latest_fifty_limit(self):
         summary_source = inspect.getsource(supabase_backend.get_order_action_summary)
         query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
-        self.assertIn("order_action_state.CERTIFICATE_TERMINAL_STATUSES", summary_source)
         self.assertIn("order_action_state.FULFILMENT_TERMINAL_STATUSES", summary_source)
         self.assertIn("COUNT(DISTINCT shopify_order_id)", summary_source)
         self.assertNotIn("LIMIT 50", query_source)
         self.assertIn("shopify_order_id", query_source)
         self.assertIn("prodigi_status", query_source)
-        self.assertIn("edition_orders", query_source)
-        self.assertIn("certificates", query_source)
-        self.assertIn("certificates_complete", query_source)
+        self.assertNotIn("edition_orders", query_source)
+        self.assertNotIn("certificates", query_source)
+        self.assertNotIn("certificates_complete", query_source)
 
     def test_orders_page_reuses_shared_certificate_and_fulfilment_helpers(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")

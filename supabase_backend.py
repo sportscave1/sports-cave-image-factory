@@ -16931,6 +16931,7 @@ def sync_latest_paid_orders_to_supabase(
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
     backfill_latest_paid=False,
     ensure_schema_first=True,
+    allow_unrelated_allocation_duplicates=False,
 ):
     total_started = time.perf_counter()
     schema_started = time.perf_counter()
@@ -16955,7 +16956,7 @@ def sync_latest_paid_orders_to_supabase(
             duplicate_diagnostics.get("sync_allowed") is False
             and duplicate_diagnostics.get("configured", True) is not False
         )
-        if duplicate_group_count or diagnostics_blocked:
+        if (duplicate_group_count or diagnostics_blocked) and not allow_unrelated_allocation_duplicates:
             if duplicate_group_count:
                 message = "Duplicate edition allocations detected. Repair required before syncing."
             else:
@@ -16993,6 +16994,14 @@ def sync_latest_paid_orders_to_supabase(
                 "duplicate_diagnostics": duplicate_diagnostics,
                 "errors": [message],
             }
+        if duplicate_group_count or diagnostics_blocked:
+            _orders_sync_log(
+                "duplicate_allocation_preflight_isolated",
+                "warning",
+                duplicate_groups=duplicate_group_count,
+                duplicate_rows=duplicate_row_count,
+                reason="bounded reconciliation uses per-order immutable-id locks",
+            )
         shopify_fetch_started = time.perf_counter()
         _orders_sync_log("shopify_orders_fetch_started", mode="latest_paid_sync")
         payload = _latest_paid_orders_payload(
@@ -18959,9 +18968,7 @@ ORDER_ACTION_ROWS_SQL = """
         o.fulfillment_status,
         li.shopify_line_item_id,
         li.quantity,
-        COALESCE(pd.prodigi_status, '') AS prodigi_status,
-        COALESCE(allocation.assignments_count, 0) AS assignments_count,
-        COALESCE(allocation.certificates_complete, FALSE) AS certificates_complete
+        COALESCE(pd.prodigi_status, '') AS prodigi_status
     FROM shopify_orders o
     JOIN shopify_order_lines li
       ON li.shopify_order_id = o.shopify_order_id
@@ -18973,33 +18980,6 @@ ORDER_ACTION_ROWS_SQL = """
                  dispatch.submitted_at DESC NULLS LAST
         LIMIT 1
     ) pd ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT
-            COUNT(DISTINCT eo.id) AS assignments_count,
-            COUNT(DISTINCT eo.id) >= GREATEST(COALESCE(li.quantity, 1), 1)
-            AND BOOL_AND(
-                COALESCE(NULLIF(eo.shopify_file_id, ''), NULLIF(eo.certificate_file_url, ''), '') <> ''
-                OR LOWER(BTRIM(COALESCE(eo.certificate_status, ''))) = ANY(%s)
-                OR EXISTS (
-                    SELECT 1
-                    FROM certificates c
-                    WHERE COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
-                      AND (
-                          LOWER(BTRIM(COALESCE(c.certificate_status, c.status, ''))) = ANY(%s)
-                          OR COALESCE(
-                              NULLIF(c.shopify_file_url, ''),
-                              NULLIF(c.certificate_file_url, ''),
-                              NULLIF(c.certificate_pdf_url, ''),
-                              NULLIF(c.certificate_shopify_file_id, ''),
-                              NULLIF(c.shopify_pdf_file_id, ''),
-                              ''
-                          ) <> ''
-                      )
-                )
-            ) AS certificates_complete
-        FROM edition_orders eo
-        WHERE eo.shopify_line_item_id = li.shopify_line_item_id
-    ) allocation ON TRUE
     WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid')
       AND o.cancelled_at IS NULL
 """
@@ -19008,13 +18988,7 @@ ORDER_ACTION_ROWS_SQL = """
 def list_order_action_rows():
     """Load local order status rows for diagnostics and rule-level verification."""
     def load_rows(cur):
-        cur.execute(
-            ORDER_ACTION_ROWS_SQL,
-            (
-                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
-                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
-            ),
-        )
+        cur.execute(ORDER_ACTION_ROWS_SQL)
         return cur.fetchall()
 
     rows, _diagnostic = _run_read_operation("orders.action_required", load_rows)
@@ -19030,18 +19004,15 @@ def get_order_action_summary():
             )
             SELECT COUNT(DISTINCT shopify_order_id) AS action_required_count
             FROM action_rows
-            WHERE NOT certificates_complete
-               OR NOT (
-                    LOWER(BTRIM(COALESCE(prodigi_status, ''))) = ANY(%s)
-                    OR (
-                        BTRIM(COALESCE(prodigi_status, '')) = ''
-                        AND LOWER(BTRIM(COALESCE(fulfillment_status, ''))) = ANY(%s)
-                    )
-               )
+            WHERE NOT (
+                LOWER(BTRIM(COALESCE(prodigi_status, ''))) = ANY(%s)
+                OR (
+                    BTRIM(COALESCE(prodigi_status, '')) = ''
+                    AND LOWER(BTRIM(COALESCE(fulfillment_status, ''))) = ANY(%s)
+                )
+            )
             """,
             (
-                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
-                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
                 sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
                 sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
             ),

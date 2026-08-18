@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 
 PAID_ORDER_STATUSES = frozenset({"paid", "partially paid", "partially_paid"})
-CERTIFICATE_TERMINAL_STATUSES = frozenset({"uploaded", "complete", "completed"})
+CERTIFICATE_TERMINAL_STATUSES = frozenset({"ready", "uploaded", "complete", "completed"})
 FULFILMENT_TERMINAL_STATUSES = frozenset(
     {"complete", "completed", "fulfilled", "fulfilled in shopify"}
 )
@@ -94,6 +94,9 @@ def final_fulfilment_status(row):
     displayed_status = str(row.get("prodigi") or "").strip()
     if displayed_status:
         return "Complete" if displayed_status.casefold() == "complete" else displayed_status
+    order_status = row.get("fulfillment_status") or row.get("fulfilment_status")
+    if canonical_status(order_status) in FULFILMENT_TERMINAL_STATUSES:
+        return "Complete"
     if not certificate_is_ready_for_fulfilment(row):
         return "Needs certificate"
     if certificate_step_is_complete(row):
@@ -114,10 +117,10 @@ def row_requires_action(row):
     row = {} if row is None else row
     if not order_is_relevant(row):
         return False
-    return not (
-        certificate_step_is_complete(row)
-        and fulfilment_step_is_complete(row)
-    )
+    # Preserve the operational state users already completed in Sports Cave OS.
+    # A terminal Prodigi/Sports Cave dispatch is authoritative; optional newer
+    # certificate or marketplace evidence must never reopen historical work.
+    return final_fulfilment_status(row) != "Complete"
 
 
 def order_ids_requiring_action(rows):

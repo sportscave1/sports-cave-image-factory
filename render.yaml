@@ -1,18 +1,7 @@
+# The canonical primary app is the externally managed Render service
+# sports-cave-os (srv-d8kl4on7f7vs73dvavv0). Never declare or rename a primary
+# app in this Blueprint. See docs/RENDER_SERVICE_TOPOLOGY.md.
 services:
-  - type: web
-    name: sports-cave-image-factory
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python sports_cave_server.py
-    healthCheckPath: /_stcore/health
-    envVars:
-      - key: FRAMED_CERTIFICATE_PRODUCT_HANDLE
-        sync: false
-      - key: FRAMED_CERTIFICATE_PRODUCT_ID
-        sync: false
-      - key: FRAMED_CERTIFICATE_VARIANT_ID
-        sync: false
   - type: web
     name: sports-cave-os-webhooks
     runtime: python
