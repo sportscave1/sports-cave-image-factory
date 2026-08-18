@@ -45,6 +45,7 @@ import app_branding
 import ads_navigation as ads_nav
 import analytics_navigation as analytics_nav
 import dropbox_integration
+import files_window_launcher
 import mockup_storage
 import navigation_runtime
 import os_accounts
@@ -2330,6 +2331,29 @@ def inject_styles():
             display: block;
             min-height: 38px;
             width: 100%;
+        }
+
+        .sc-files-window-launcher-fallback {
+            align-items: center;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: #202124 !important;
+            display: flex;
+            font: 400 14px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            height: 38px;
+            padding: 0 12px;
+            text-decoration: none !important;
+            width: 100%;
+        }
+
+        .sc-files-window-launcher-fallback:hover,
+        .sc-files-window-launcher-fallback:focus-visible {
+            background: #e9eaec;
+            border-color: #dcdee1;
+        }
+
+        .st-key-planner-data-refresh-bridge {
+            display: none !important;
         }
 
         .st-key-files-explorer {
@@ -8971,7 +8995,7 @@ def render_sidebar():
             unsafe_allow_html=True,
         )
         with st.sidebar.container(key="files-window-launcher-slot"):
-            _files_window_launcher_component()(key="files-window-launcher", default=None)
+            files_window_launcher.render(st, get_components_module())
     reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
     reporting_daily_allowed = os_accounts.can_access_page(user, os_accounts.DAILY_PLANNER_ROUTE)
     reporting_weekly_allowed = os_accounts.can_access_page(user, os_accounts.WEEKLY_REVIEW_ROUTE)
@@ -14353,17 +14377,6 @@ FILES_DIRECTORY_CACHE_SECONDS = 180
 FILES_DIRECTORY_CACHE_LIMIT = 64
 FILES_TEAM_ROOT_CACHE_SECONDS = 15 * 60
 FILES_CHUNK_COMPONENT_DIR = BASE_DIR / "components" / "files_chunk_uploader"
-FILES_WINDOW_LAUNCHER_COMPONENT_DIR = BASE_DIR / "components" / "files_window_launcher"
-
-
-@lru_cache(maxsize=1)
-def _files_window_launcher_component():
-    return get_components_module().declare_component(
-        "files_window_launcher",
-        path=str(FILES_WINDOW_LAUNCHER_COMPONENT_DIR),
-    )
-
-
 @lru_cache(maxsize=1)
 def _files_chunk_component():
     return get_components_module().declare_component(
@@ -15738,6 +15751,8 @@ def main():
         )
         log_startup_stage("PAGE ACCESS BLOCKED", current_page)
         return
+
+    top_bar.render_planner_data_refresh_bridge(st, current_route=current_page)
 
     if page_uses_local_database(current_page):
         log_startup_stage("LOCAL DB INIT START")

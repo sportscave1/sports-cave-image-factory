@@ -2504,6 +2504,12 @@ def _render_orders_data_area():
     read_diagnostic = dict(meta.get("database_read") or {})
     if read_diagnostic.get("recovered"):
         st.info("A stale database connection was replaced automatically. These results are current.")
+    if read_diagnostic.get("compatibility_mode"):
+        st.warning(
+            "Orders is temporarily using the previous database schema. Apply migration "
+            f"{read_diagnostic.get('required_migration') or '20260818_shopify_marketplace_order_reconciliation.sql'} "
+            "to restore full marketplace ingestion diagnostics."
+        )
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:

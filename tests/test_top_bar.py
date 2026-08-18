@@ -33,6 +33,15 @@ class _ComponentsRecorder:
         self.calls.append((body, kwargs))
 
 
+class _ButtonRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def button(self, label, **kwargs):
+        self.calls.append((label, kwargs))
+        return False
+
+
 class TopBarSecurityTests(unittest.TestCase):
     def test_signed_snapshot_contains_permissions_but_no_email_or_secrets(self):
         token = top_bar_security.create_top_bar_token(
@@ -388,6 +397,50 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
         self.assertIn("listenerController.abort()", source)
         self.assertNotIn("parentWindow.location.assign", source)
+
+    def test_planner_data_updates_request_one_streamlit_rerun_without_reloading_document(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+        handler = source[
+            source.index("const requestPlannerDataRefresh") :
+            source.index("plannerChannel?.addEventListener", source.index("const handlePlannerDataUpdated"))
+        ]
+
+        self.assertIn("state.plannerDataRefreshPending", handler)
+        self.assertIn(".st-key-planner-data-refresh-bridge button:not(:disabled)", handler)
+        self.assertEqual(1, handler.count("refreshButton.click()"))
+        self.assertIn('root.dataset.plannerDataRefreshStatus = "bridge-unavailable"', handler)
+        self.assertIn("eventTimestamp <= lastTimestamp", handler)
+        self.assertIn("attempt < 20", handler)
+        self.assertIn("requestPlannerDataRefresh(attempt + 1)", handler)
+        self.assertNotIn("location.reload", handler)
+        self.assertNotIn("setInterval", handler)
+        self.assertIn("state.plannerDataRefreshPending = false", source)
+        self.assertIn("state.destroyed = true", source)
+
+    def test_planner_refresh_bridge_is_stable_and_route_scoped(self):
+        recorder = _ButtonRecorder()
+
+        for route in ("Dashboard", "Reporting", "Weekly Review"):
+            with self.subTest(route=route):
+                self.assertTrue(
+                    top_bar.render_planner_data_refresh_bridge(
+                        recorder,
+                        current_route=route,
+                    )
+                )
+        self.assertFalse(
+            top_bar.render_planner_data_refresh_bridge(
+                recorder,
+                current_route="Orders",
+            )
+        )
+        self.assertEqual(3, len(recorder.calls))
+        self.assertTrue(
+            all(
+                call[1]["key"] == top_bar.PLANNER_DATA_REFRESH_BRIDGE_KEY
+                for call in recorder.calls
+            )
+        )
 
     def test_native_header_is_hidden_only_by_installed_component(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")

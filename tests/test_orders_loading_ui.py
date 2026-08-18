@@ -4124,6 +4124,16 @@ class EditionOpsUiTests(unittest.TestCase):
 
 
 class OrdersDatabaseReadRepairTests(unittest.TestCase):
+    def setUp(self):
+        self.original_marketplace_capability = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY
+        self.original_marketplace_checked_at = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT
+        supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = None
+        supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = 0.0
+
+    def tearDown(self):
+        supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = self.original_marketplace_capability
+        supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = self.original_marketplace_checked_at
+
     class Cursor:
         def __init__(self, rows=None, error=None, statements=None):
             self.rows = list(rows or [])
@@ -4192,6 +4202,110 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         self.assertEqual(raised.exception.diagnostic["category"], "sql_query_error")
         self.assertEqual(failed.close_calls, 1)
         self.assertEqual(failed.rollback_calls, 1)
+
+    def test_latest_50_uses_narrow_legacy_projection_only_for_marketplace_schema_gap(self):
+        statements = []
+
+        class UndefinedColumn(Exception):
+            sqlstate = "42703"
+            diag = SimpleNamespace(column_name="source_name")
+
+        class AdaptiveCursor(self.Cursor):
+            def __init__(self, *, fail_canonical=False):
+                super().__init__(statements=statements)
+                self.fail_canonical = fail_canonical
+
+            def execute(self, sql, params=None):
+                statement = str(sql)
+                self.statements.append((statement, tuple(params or ())))
+                if self.fail_canonical and "o.source_name, o.ingestion_status" in statement:
+                    raise UndefinedColumn('column o.source_name does not exist')
+                self.rows = [
+                    {
+                        "shopify_order_id": "",
+                        "order_name": "",
+                        "shopify_line_item_id": "",
+                        "source_name": "Etsy",
+                        "ingestion_status": "pending",
+                        "mapping_method": "",
+                        "order_raw_json": {"source_name": "etsy"},
+                    }
+                ]
+
+        connections = [
+            self.Connection(AdaptiveCursor(fail_canonical=True)),
+            self.Connection(AdaptiveCursor()),
+        ]
+        with patch.object(supabase_backend, "connect", side_effect=connections) as connect:
+            rows = supabase_backend.list_hybrid_order_rows(limit=50)
+
+        self.assertEqual(2, connect.call_count)
+        self.assertEqual("Etsy", rows[0]["source_name"])
+        self.assertIn("o.source_name, o.ingestion_status", statements[0][0])
+        self.assertNotIn("o.source_name, o.ingestion_status", statements[1][0])
+        self.assertIn("AS source_name", statements[1][0])
+        self.assertIn("AS mapping_method", statements[1][0])
+        diagnostic = supabase_backend.get_last_database_read_diagnostic()
+        self.assertEqual("schema_compatibility_mode", diagnostic["category"])
+        self.assertEqual("source_name", diagnostic["missing_column"])
+        self.assertEqual(
+            "20260818_shopify_marketplace_order_reconciliation.sql",
+            diagnostic["required_migration"],
+        )
+        self.assertEqual(2, diagnostic["query_count"])
+
+    def test_cached_legacy_capability_avoids_repeating_failed_canonical_query(self):
+        supabase_backend._set_marketplace_order_read_capability(False)
+        statements = []
+        connection = self.Connection(self.Cursor(rows=[], statements=statements))
+
+        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
+            rows = supabase_backend.list_hybrid_order_rows(limit=50)
+
+        self.assertEqual([], rows)
+        self.assertEqual(1, connect.call_count)
+        self.assertNotIn("o.source_name, o.ingestion_status", statements[0][0])
+        self.assertEqual(
+            "schema_compatibility_mode",
+            supabase_backend.get_last_database_read_diagnostic()["category"],
+        )
+
+    def test_legacy_search_preserves_filter_and_capability_ttl_rechecks_canonical_schema(self):
+        supabase_backend._set_marketplace_order_read_capability(False)
+        legacy_statements = []
+        legacy_connection = self.Connection(self.Cursor(rows=[], statements=legacy_statements))
+        with patch.object(supabase_backend, "connect", return_value=legacy_connection):
+            supabase_backend.list_hybrid_order_rows(limit=25, search="Etsy")
+
+        self.assertIn("WHERE LOWER(COALESCE(o.order_name", legacy_statements[0][0])
+        self.assertEqual("%etsy%", legacy_statements[0][1][0])
+        self.assertEqual(25, legacy_statements[0][1][-1])
+        self.assertNotIn("o.source_name, o.ingestion_status", legacy_statements[0][0])
+
+        supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT -= (
+            supabase_backend.ORDER_MARKETPLACE_CAPABILITY_TTL_SECONDS + 1
+        )
+        canonical_statements = []
+        canonical_connection = self.Connection(self.Cursor(rows=[], statements=canonical_statements))
+        with patch.object(supabase_backend, "connect", return_value=canonical_connection):
+            supabase_backend.list_hybrid_order_rows(limit=25)
+
+        self.assertIn("o.source_name, o.ingestion_status", canonical_statements[0][0])
+        self.assertTrue(supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY)
+        self.assertEqual("ok", supabase_backend.get_last_database_read_diagnostic()["category"])
+
+    def test_unrelated_undefined_column_is_not_swallowed_by_compatibility_mode(self):
+        class UndefinedColumn(Exception):
+            sqlstate = "42703"
+            diag = SimpleNamespace(column_name="unexpected_column")
+
+        failed = self.Connection(self.Cursor(error=UndefinedColumn("unexpected column")))
+        with patch.object(supabase_backend, "connect", return_value=failed) as connect:
+            with self.assertRaises(supabase_backend.DatabaseReadError):
+                supabase_backend.list_hybrid_order_rows(limit=50)
+
+        self.assertEqual(1, connect.call_count)
+        self.assertIsNone(supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY)
 
     def test_latest_50_and_search_are_two_bulk_read_queries_without_writes(self):
         statements = []
@@ -4264,6 +4378,13 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         self.assertIn("form_submit_button", form_source)
         self.assertNotIn("_duplicate_diagnostics_snapshot", render_source)
         self.assertIn("_load_snapshot_once(search_text, force=True)", render_source)
+
+    def test_orders_compatibility_mode_is_visible_and_names_required_migration(self):
+        source = inspect.getsource(orders_page._render_orders_data_area)
+
+        self.assertIn('read_diagnostic.get("compatibility_mode")', source)
+        self.assertIn("20260818_shopify_marketplace_order_reconciliation.sql", source)
+        self.assertIn("temporarily using the previous database schema", source)
 
     def test_failed_load_keeps_safe_error_state_without_local_fallback(self):
         error = supabase_backend.DatabaseReadError(

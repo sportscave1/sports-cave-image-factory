@@ -97,6 +97,22 @@ _PROMPT_TEMPLATE_SCHEMA_READY = False
 _DASHBOARD_SCHEMA_READY = False
 _DROPBOX_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
+SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION = (
+    "20260818_shopify_marketplace_order_reconciliation.sql"
+)
+SHOPIFY_MARKETPLACE_ORDER_READ_COLUMNS = frozenset(
+    {
+        "source_name",
+        "ingestion_status",
+        "ingestion_result",
+        "ingestion_reason",
+        "mapping_method",
+    }
+)
+ORDER_MARKETPLACE_CAPABILITY_TTL_SECONDS = 60.0
+_ORDER_MARKETPLACE_READ_CAPABILITY = None
+_ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = 0.0
+_ORDER_MARKETPLACE_READ_CAPABILITY_LOCK = threading.Lock()
 DROPBOX_CONNECTION_SETTING_KEY = "dropbox_connection"
 _LAST_DATABASE_STATUS = {}
 _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
@@ -759,6 +775,55 @@ def _run_read_operation(operation, read_callable):
             if deadline_timer is not None:
                 deadline_timer.cancel()
             _close_read_connection(conn)
+
+
+def _database_undefined_column_name(error):
+    """Return one safe PostgreSQL column name without exposing query values."""
+
+    current = error
+    visited = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        diagnostic = dict(getattr(current, "diagnostic", {}) or {})
+        sqlstate = str(
+            diagnostic.get("sqlstate")
+            or getattr(current, "sqlstate", "")
+            or getattr(current, "pgcode", "")
+            or ""
+        ).upper()
+        diag = getattr(current, "diag", None)
+        column_name = str(getattr(diag, "column_name", "") or "").strip().casefold()
+        if sqlstate == "42703" and column_name:
+            return column_name
+        if sqlstate == "42703":
+            lowered = str(current or "").casefold()
+            for candidate in SHOPIFY_MARKETPLACE_ORDER_READ_COLUMNS:
+                if candidate in lowered:
+                    return candidate
+        current = getattr(current, "__cause__", None)
+    return ""
+
+
+def _is_marketplace_order_read_schema_error(error):
+    return _database_undefined_column_name(error) in SHOPIFY_MARKETPLACE_ORDER_READ_COLUMNS
+
+
+def _cached_marketplace_order_read_capability():
+    with _ORDER_MARKETPLACE_READ_CAPABILITY_LOCK:
+        if _ORDER_MARKETPLACE_READ_CAPABILITY is None:
+            return None
+        age = time.monotonic() - _ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT
+        if age >= ORDER_MARKETPLACE_CAPABILITY_TTL_SECONDS:
+            return None
+        return bool(_ORDER_MARKETPLACE_READ_CAPABILITY)
+
+
+def _set_marketplace_order_read_capability(available):
+    global _ORDER_MARKETPLACE_READ_CAPABILITY
+    global _ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT
+    with _ORDER_MARKETPLACE_READ_CAPABILITY_LOCK:
+        _ORDER_MARKETPLACE_READ_CAPABILITY = bool(available)
+        _ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = time.monotonic()
 
 
 def get_last_database_read_diagnostic():
@@ -19960,7 +20025,23 @@ def list_hybrid_order_rows(limit=50, search=""):
         """
         search_params = [search_value] * 10 + [f"%{raw_search.lstrip('#')}%"]
 
-    def load_base_rows(cur):
+    def load_base_rows(cur, *, marketplace_columns=True):
+        marketplace_order_fields = (
+            "o.source_name, o.ingestion_status, o.ingestion_result, o.ingestion_reason,"
+            if marketplace_columns
+            else """
+                COALESCE(NULLIF(o.raw_json->>'source_display', ''),
+                         NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
+                'pending'::text AS ingestion_status,
+                ''::text AS ingestion_result,
+                ''::text AS ingestion_reason,
+            """
+        )
+        mapping_method_field = (
+            "li.mapping_method"
+            if marketplace_columns
+            else "COALESCE(NULLIF(li.raw_json->>'mapping_method', ''), '') AS mapping_method"
+        )
         cur.execute(
             f"""
             WITH selected_orders AS (
@@ -19974,11 +20055,11 @@ def list_hybrid_order_rows(limit=50, search=""):
             SELECT
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
-                o.source_name, o.ingestion_status, o.ingestion_result, o.ingestion_reason,
+                {marketplace_order_fields}
                 o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at,
                 o.cancelled_at, o.synced_at, o.raw_json AS order_raw_json,
                 li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
-                li.assignment_status, li.last_error, li.mapping_method, li.shopify_handle, li.shopify_product_id,
+                li.assignment_status, li.last_error, {mapping_method_field}, li.shopify_handle, li.shopify_product_id,
                 COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
                 COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
                 COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
@@ -20003,10 +20084,48 @@ def list_hybrid_order_rows(limit=50, search=""):
         )
         return cur.fetchall()
 
-    base_rows, base_diagnostic = _run_read_operation(
-        "orders.search.base" if raw_search else "orders.latest_50.base",
-        load_base_rows,
-    )
+    base_operation = "orders.search.base" if raw_search else "orders.latest_50.base"
+    compatibility_mode = _cached_marketplace_order_read_capability() is False
+    compatibility_probe_failed = False
+    missing_column = ""
+    if compatibility_mode:
+        base_rows, base_diagnostic = _run_read_operation(
+            base_operation,
+            lambda cur: load_base_rows(cur, marketplace_columns=False),
+        )
+    else:
+        try:
+            base_rows, base_diagnostic = _run_read_operation(
+                base_operation,
+                lambda cur: load_base_rows(cur, marketplace_columns=True),
+            )
+            _set_marketplace_order_read_capability(True)
+        except DatabaseReadError as error:
+            if not _is_marketplace_order_read_schema_error(error):
+                raise
+            missing_column = _database_undefined_column_name(error)
+            compatibility_mode = True
+            compatibility_probe_failed = True
+            _set_marketplace_order_read_capability(False)
+            print(
+                "WARN Orders schema compatibility mode "
+                f"operation={base_operation} missing_column={missing_column or 'marketplace_metadata'} "
+                f"required_migration={SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION}",
+                flush=True,
+            )
+            base_rows, base_diagnostic = _run_read_operation(
+                base_operation,
+                lambda cur: load_base_rows(cur, marketplace_columns=False),
+            )
+    if compatibility_mode:
+        base_diagnostic.update(
+            {
+                "category": "schema_compatibility_mode",
+                "compatibility_mode": True,
+                "missing_column": missing_column,
+                "required_migration": SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION,
+            }
+        )
     print(
         "PERF Orders base query "
         f"duration_ms={int(base_diagnostic.get('duration_ms') or 0)} rows={len(base_rows)} "
@@ -20144,15 +20263,26 @@ def list_hybrid_order_rows(limit=50, search=""):
     )
     aggregate_diagnostic = {
         "operation": "orders.search" if raw_search else "orders.latest_50",
-        "category": "stale_connection_recovered"
-        if base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")
-        else "ok",
+        "category": (
+            "schema_compatibility_mode"
+            if compatibility_mode
+            else "stale_connection_recovered"
+            if base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")
+            else "ok"
+        ),
         "exception_class": base_diagnostic.get("exception_class") or overlay_diagnostic.get("exception_class") or "",
         "sqlstate": base_diagnostic.get("sqlstate") or overlay_diagnostic.get("sqlstate") or "",
         "attempts": int(base_diagnostic.get("attempts") or 0) + int(overlay_diagnostic.get("attempts") or 0),
-        "query_count": 1 + int(bool(line_id_lookup_values or order_id_lookup_values or order_name_lookup_values)),
+        "query_count": (
+            1
+            + int(compatibility_probe_failed)
+            + int(bool(line_id_lookup_values or order_id_lookup_values or order_name_lookup_values))
+        ),
         "recovered": bool(base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")),
         "duration_ms": int((time.perf_counter() - total_started) * 1000),
+        "compatibility_mode": bool(compatibility_mode),
+        "missing_column": str(base_diagnostic.get("missing_column") or ""),
+        "required_migration": str(base_diagnostic.get("required_migration") or ""),
     }
     _LAST_DATABASE_READ_DIAGNOSTIC.set(aggregate_diagnostic)
     return merged_rows

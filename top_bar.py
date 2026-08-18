@@ -15,6 +15,8 @@ from daily_planner import PLANNER_WINDOW_PATH
 COMPONENT_PATH = (
     Path(__file__).resolve().parent / "components" / "sports_cave_top_bar" / "index.html"
 )
+PLANNER_DATA_REFRESH_BRIDGE_KEY = "planner-data-refresh-bridge"
+PLANNER_DATA_REFRESH_ROUTES = frozenset({"dashboard", "reporting", "weekly review"})
 
 
 def allowed_routes_for_user(user):
@@ -110,6 +112,18 @@ def render_top_bar(components, user, *, logo_src, current_route, navigation_epoc
         navigation_epoch=navigation_epoch,
     )
     components.html(component_html(config), height=0, width=0)
+
+
+def render_planner_data_refresh_bridge(st_module, *, current_route):
+    """Mount one hidden native widget that requests a normal Streamlit rerun."""
+
+    if str(current_route or "").strip().casefold() not in PLANNER_DATA_REFRESH_ROUTES:
+        return False
+    st_module.button(
+        "Refresh planner data",
+        key=PLANNER_DATA_REFRESH_BRIDGE_KEY,
+    )
+    return True
 
 
 def navigation_complete_html(*, current_route, navigation_epoch=0, status="ready"):

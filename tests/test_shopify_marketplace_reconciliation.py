@@ -75,6 +75,108 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertIn(path.name, {candidate.name for candidate in run_migrations.migration_files()})
         self.assertNotIn("DROP ", sql.upper())
         self.assertNotIn("DELETE ", sql.upper())
+        self.assertEqual(12, sql.upper().count("ADD COLUMN IF NOT EXISTS"))
+        self.assertIn("CREATE INDEX IF NOT EXISTS IDX_SHOPIFY_VARIANTS_SKU_NORMALIZED", sql.upper())
+        self.assertNotIn("ALTER TABLE IF EXISTS", sql.upper())
+
+    def test_deployment_gate_contract_covers_every_marketplace_column_and_index(self):
+        migration = Path("migrations/20260818_shopify_marketplace_order_reconciliation.sql").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            ("20260818_shopify_marketplace_order_reconciliation.sql",),
+            run_migrations.REQUIRED_DEPLOYMENT_MIGRATIONS,
+        )
+        for table_name, column_name in run_migrations.REQUIRED_DEPLOYMENT_COLUMNS:
+            self.assertIn(table_name, migration)
+            self.assertIn(column_name, migration)
+        self.assertIn(
+            ("shopify_variants", "idx_shopify_variants_sku_normalized"),
+            run_migrations.REQUIRED_DEPLOYMENT_INDEXES,
+        )
+
+    def test_read_only_deployment_gate_reports_complete_migrated_schema(self):
+        class Cursor:
+            def __init__(self):
+                self.rows = []
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append(str(sql))
+                if "to_regclass" in sql:
+                    self.rows = [{"table_name": "schema_migrations"}]
+                elif "FROM schema_migrations" in sql:
+                    self.rows = [{"filename": run_migrations.SHOPIFY_MARKETPLACE_MIGRATION}]
+                elif "information_schema.columns" in sql:
+                    self.rows = [
+                        {
+                            "table_name": table,
+                            "column_name": column,
+                            "data_type": expected[0],
+                            "is_nullable": expected[1],
+                            "column_default": expected[2] or None,
+                        }
+                        for (table, column), expected in run_migrations.REQUIRED_DEPLOYMENT_COLUMNS.items()
+                    ]
+                elif "FROM pg_indexes" in sql:
+                    self.rows = [
+                        {"tablename": table, "indexname": index}
+                        for table, index in run_migrations.REQUIRED_DEPLOYMENT_INDEXES
+                    ]
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+            def fetchall(self):
+                return list(self.rows)
+
+        cursor = Cursor()
+        self.assertEqual([], run_migrations.required_schema_issues(cursor))
+        for statement in cursor.statements:
+            upper = statement.upper()
+            for token in ("ALTER ", "CREATE ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "TRUNCATE "):
+                self.assertNotIn(token, upper)
+
+    def test_read_only_deployment_gate_names_missing_migration_column_and_index(self):
+        class Cursor:
+            def __init__(self):
+                self.rows = []
+
+            def execute(self, sql, params=()):
+                if "to_regclass" in sql:
+                    self.rows = [{"table_name": None}]
+                else:
+                    self.rows = []
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+            def fetchall(self):
+                return list(self.rows)
+
+        issues = run_migrations.required_schema_issues(Cursor())
+
+        self.assertIn(
+            "missing migration record: 20260818_shopify_marketplace_order_reconciliation.sql",
+            issues,
+        )
+        self.assertIn("missing column: shopify_orders.source_name", issues)
+        self.assertIn("missing column: shopify_order_lines.mapping_method", issues)
+        self.assertIn("missing index: idx_shopify_variants_sku_normalized on shopify_variants", issues)
+
+    def test_render_services_gate_schema_without_running_migrations_in_workers(self):
+        render = Path("render.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("preDeployCommand: python run_migrations.py --verify-required-schema", render)
+        self.assertIn(
+            "startCommand: python run_migrations.py --verify-required-schema && python sports_cave_server.py",
+            render,
+        )
+        self.assertIn(
+            "startCommand: python run_migrations.py --verify-required-schema && python webhook_server.py",
+            render,
+        )
+        self.assertNotIn("startCommand: python run_migrations.py --only", render)
 
     def test_order_queries_request_channel_and_test_flags_without_filtering_channel(self):
         for query in (

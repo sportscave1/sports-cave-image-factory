@@ -37,6 +37,25 @@ ALLOWED_CONSTRAINT_REPLACEMENTS = frozenset(
         ),
     }
 )
+SHOPIFY_MARKETPLACE_MIGRATION = "20260818_shopify_marketplace_order_reconciliation.sql"
+REQUIRED_DEPLOYMENT_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
+REQUIRED_DEPLOYMENT_COLUMNS = {
+    ("shopify_orders", "source_name"): ("text", "NO", "''"),
+    ("shopify_orders", "ingestion_status"): ("text", "NO", "pending"),
+    ("shopify_orders", "ingestion_method"): ("text", "NO", "''"),
+    ("shopify_orders", "ingestion_result"): ("text", "NO", "''"),
+    ("shopify_orders", "ingestion_reason"): ("text", "NO", "''"),
+    ("shopify_orders", "ingestion_duration_ms"): ("integer", "NO", "0"),
+    ("shopify_orders", "last_ingested_at"): ("timestamp with time zone", "YES", ""),
+    ("shopify_order_lines", "shopify_variant_id"): ("text", "YES", ""),
+    ("shopify_order_lines", "mapping_method"): ("text", "NO", "''"),
+    ("webhook_events", "source_name"): ("text", "NO", "''"),
+    ("webhook_events", "import_result"): ("text", "NO", "''"),
+    ("webhook_events", "rejection_reason"): ("text", "NO", "''"),
+}
+REQUIRED_DEPLOYMENT_INDEXES = {
+    ("shopify_variants", "idx_shopify_variants_sku_normalized"),
+}
 
 
 def get_database_url():
@@ -68,6 +87,107 @@ def migration_files(only=None):
     if not selected:
         raise ValueError(f"Migration not found: {clean_name}")
     return selected
+
+
+def required_schema_issues(cur):
+    """Return PII-free compatibility failures using read-only catalogue queries."""
+
+    issues = []
+    cur.execute("SELECT to_regclass('public.schema_migrations') AS table_name")
+    migration_table = (cur.fetchone() or {}).get("table_name")
+    applied_migrations = set()
+    if migration_table:
+        cur.execute(
+            "SELECT filename FROM schema_migrations WHERE filename = ANY(%s)",
+            (list(REQUIRED_DEPLOYMENT_MIGRATIONS),),
+        )
+        applied_migrations = {
+            str(row.get("filename") or "") for row in (cur.fetchall() or [])
+        }
+    for filename in REQUIRED_DEPLOYMENT_MIGRATIONS:
+        if filename not in applied_migrations:
+            issues.append(f"missing migration record: {filename}")
+
+    cur.execute(
+        """
+        SELECT table_name, column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name = ANY(%s)
+        """,
+        (sorted({table for table, _column in REQUIRED_DEPLOYMENT_COLUMNS}),),
+    )
+    live_columns = {
+        (str(row.get("table_name") or ""), str(row.get("column_name") or "")): row
+        for row in (cur.fetchall() or [])
+    }
+    for key, expected in REQUIRED_DEPLOYMENT_COLUMNS.items():
+        table_name, column_name = key
+        expected_type, expected_nullable, default_fragment = expected
+        row = live_columns.get(key)
+        if not row:
+            issues.append(f"missing column: {table_name}.{column_name}")
+            continue
+        live_type = str(row.get("data_type") or "").casefold()
+        live_nullable = str(row.get("is_nullable") or "").upper()
+        live_default = str(row.get("column_default") or "").casefold()
+        if live_type != expected_type.casefold():
+            issues.append(
+                f"wrong type: {table_name}.{column_name} expected={expected_type} actual={live_type or 'unknown'}"
+            )
+        if live_nullable != expected_nullable:
+            issues.append(
+                f"wrong nullability: {table_name}.{column_name} expected={expected_nullable} actual={live_nullable or 'unknown'}"
+            )
+        if default_fragment and default_fragment.casefold() not in live_default:
+            issues.append(f"wrong default: {table_name}.{column_name}")
+
+    cur.execute(
+        """
+        SELECT tablename, indexname
+        FROM pg_indexes
+        WHERE schemaname='public'
+          AND tablename = ANY(%s)
+        """,
+        (sorted({table for table, _index in REQUIRED_DEPLOYMENT_INDEXES}),),
+    )
+    live_indexes = {
+        (str(row.get("tablename") or ""), str(row.get("indexname") or ""))
+        for row in (cur.fetchall() or [])
+    }
+    for table_name, index_name in REQUIRED_DEPLOYMENT_INDEXES:
+        if (table_name, index_name) not in live_indexes:
+            issues.append(f"missing index: {index_name} on {table_name}")
+    return issues
+
+
+def verify_required_schema():
+    """Fail deployment before startup when required additive schema is absent."""
+
+    database_url, source = get_database_url()
+    if not database_url:
+        raise SystemExit("Schema verification failed: DATABASE_URL is missing.")
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(
+        database_url,
+        autocommit=True,
+        row_factory=dict_row,
+        options="-c default_transaction_read_only=on",
+    ) as conn:
+        with conn.cursor() as cur:
+            issues = required_schema_issues(cur)
+    if issues:
+        print(f"Schema verification source: {source}")
+        for issue in issues:
+            print(f"MISSING {issue}")
+        raise SystemExit(
+            "Schema verification failed. Apply "
+            f"{SHOPIFY_MARKETPLACE_MIGRATION} with run_migrations.py, then verify again."
+        )
+    print(f"Schema verification source: {source}")
+    print("READY required application schema")
+    return True
 
 
 def run_migrations(*, only=None, check=False):
@@ -125,5 +245,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply reviewed Sports Cave database migrations.")
     parser.add_argument("--only", help="Apply one migration filename from the migrations directory.")
     parser.add_argument("--check", action="store_true", help="Validate selection and safety without connecting.")
+    parser.add_argument(
+        "--verify-required-schema",
+        action="store_true",
+        help="Read-only verification that deployment-required migrations, columns and indexes exist.",
+    )
     args = parser.parse_args()
-    run_migrations(only=args.only, check=args.check)
+    if args.verify_required_schema:
+        if args.only or args.check:
+            parser.error("--verify-required-schema cannot be combined with --only or --check.")
+        verify_required_schema()
+    else:
+        run_migrations(only=args.only, check=args.check)

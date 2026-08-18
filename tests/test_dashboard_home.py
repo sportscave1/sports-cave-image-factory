@@ -2669,6 +2669,15 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertIn("task_outcome", source)
         self.assertIn("timer_id:timer.id", source)
         self.assertIn("notifyPlannerDataUpdated", source)
+        outcome_block = source[
+            source.index("const applyTaskOutcome = async (selectedOutcome)") :
+            source.index("const handleClick", source.index("const applyTaskOutcome = async (selectedOutcome)"))
+        ]
+        self.assertLess(
+            outcome_block.index("await loadToday({silent:true})"),
+            outcome_block.index("notifyPlannerDataUpdated(result?.sheet || {})"),
+        )
+        self.assertIn("if (!timer.id || state.actionPending) return", outcome_block)
         self.assertIn("SportsCaveHomeDailyPlanner?.destroy?.({preserveDom: true})", source)
         self.assertIn("listenerController.abort()", source)
         self.assertIn("channel?.close()", source)
@@ -3387,6 +3396,33 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("Daily Execution Archive", rendered)
         self.assertNotIn("Recent operational activity", rendered)
         self.assertFalse(any(button.label == "Complete Daily Review" for button in app_test.button))
+
+    def test_planner_refresh_bridge_supports_consecutive_home_reruns(self):
+        backend = FakeDashboardBackend()
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            app_test.run(timeout=20)
+            for _attempt in range(3):
+                bridge = next(
+                    button
+                    for button in app_test.button
+                    if button.label == "Refresh planner data"
+                )
+                bridge.click()
+                app_test.run(timeout=20)
+                self.assertFalse(app_test.exception)
+                self.assertEqual(
+                    1,
+                    sum(
+                        button.label == "Refresh planner data"
+                        for button in app_test.button
+                    ),
+                )
 
     def test_non_admin_home_remains_planner_free_with_forged_planner_session_state(self):
         backend = FakeDashboardBackend()

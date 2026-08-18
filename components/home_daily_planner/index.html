@@ -895,9 +895,9 @@
         if (state.bundle) state.bundle.active_timer = {};
         stopChime();
         broadcastTimer({}, [], terminalTimerId);
-        notifyPlannerDataUpdated(result?.sheet || {});
         state.notice = selectedOutcome === "completed" ? "Task finished." : "Task skipped.";
         await loadToday({silent:true});
+        notifyPlannerDataUpdated(result?.sheet || {});
       } catch (error) {
         state.error = error.message || "Daily Planner outcome could not be saved.";
         render();

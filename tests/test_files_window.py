@@ -1109,11 +1109,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         start = self.app.index('if "Files" in allowed_routes:')
         branch = self.app[
             start : self.app.index(
-                '_sidebar_route_button("Reporting"',
+                "reporting_overview_allowed =",
                 start,
             )
         ]
-        self.assertIn("_files_window_launcher_component", branch)
+        self.assertIn("files_window_launcher.render", branch)
+        self.assertNotIn("declare_component", branch)
         self.assertNotIn("set_current_page", branch)
 
     def test_one_click_open_multi_select_and_keyboard_navigation_have_no_checkboxes(self):

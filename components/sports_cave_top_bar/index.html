@@ -835,6 +835,7 @@
       reportingBindTimer: null,
       historyRoutePending: "",
       historyDuplicateSkips: 0,
+      destroyed: false,
     };
     const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.dailyPlannerTimerScope || "none"}`;
     const plannerDataStorageKey = () => `scPlannerDataUpdated:${state.config.dailyPlannerTimerScope || "none"}`;
@@ -1671,15 +1672,36 @@
       if (plannerTimerWasTerminated(payload.timer)) return;
       applyPlannerTimerState(payload.timer || {}, payload.events || []);
     };
+    const requestPlannerDataRefresh = (attempt = 0) => {
+      if (!state.plannerDataRefreshPending || state.destroyed) return;
+      const refreshButton = doc.querySelector(
+        ".st-key-planner-data-refresh-bridge button:not(:disabled)",
+      );
+      if (!refreshButton && attempt < 20) {
+        later(() => requestPlannerDataRefresh(attempt + 1), 50);
+        return;
+      }
+      if (!refreshButton) {
+        state.plannerDataRefreshPending = false;
+        root.dataset.plannerDataRefreshStatus = "bridge-unavailable";
+        return;
+      }
+      root.dataset.plannerDataRefreshStatus = "requested";
+      refreshButton.click();
+    };
     const handlePlannerDataUpdated = (payload) => {
       if (!payload || payload.type !== "sports-cave-planner-data-updated") return;
       if (!payload.scope || payload.scope !== state.config.dailyPlannerTimerScope) return;
+      const eventTimestamp = Number(payload.sent_at || 0);
+      const lastTimestamp = Number(root.dataset.plannerDataRefreshSentAt || 0);
+      if (eventTimestamp && eventTimestamp <= lastTimestamp) return;
+      root.dataset.plannerDataRefreshSentAt = String(eventTimestamp || Date.now());
       refreshPlannerStatus({immediate:true});
       const route = String(state.config.currentRoute || "").toLocaleLowerCase();
       if (!["dashboard", "reporting", "weekly review"].includes(route)) return;
       if (state.plannerDataRefreshPending) return;
       state.plannerDataRefreshPending = true;
-      later(() => parentWindow.location.reload(), 120);
+      later(() => requestPlannerDataRefresh(), 0);
     };
     plannerChannel?.addEventListener("message", (event) => receivePlannerTimerState(event.data));
     parentWindow.addEventListener("storage", (event) => {
@@ -2230,6 +2252,8 @@
         return true;
       },
       destroy({preserveDom = false} = {}) {
+        state.destroyed = true;
+        state.plannerDataRefreshPending = false;
         listenerController.abort();
         if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
         timers.forEach((timer) => {

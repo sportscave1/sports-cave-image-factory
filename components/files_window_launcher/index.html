@@ -30,6 +30,9 @@
     <button id="launcher" type="button">Files</button>
     <script>
       const button = document.getElementById("launcher");
+      const listenerController = new AbortController();
+      const listenerOptions = {signal: listenerController.signal};
+      let launchPending = false;
 
       function send(type, data) {
         window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
@@ -59,10 +62,28 @@
       }
 
       function openFilesWindow() {
-        openBrowserFilesWindow();
+        if (launchPending) return;
+        launchPending = true;
+        button.disabled = true;
+        try {
+          openBrowserFilesWindow();
+        } finally {
+          queueMicrotask(() => {
+            launchPending = false;
+            if (document.contains(button)) button.disabled = false;
+          });
+        }
       }
 
-      button.addEventListener("click", openFilesWindow);
+      function destroy() {
+        listenerController.abort();
+        launchPending = false;
+      }
+
+      window.SportsCaveFilesLauncher?.destroy?.();
+      window.SportsCaveFilesLauncher = {destroy};
+      button.addEventListener("click", openFilesWindow, listenerOptions);
+      window.addEventListener("pagehide", destroy, {once: true, signal: listenerController.signal});
       send("streamlit:componentReady", { apiVersion: 1 });
       setHeight(38);
     </script>
