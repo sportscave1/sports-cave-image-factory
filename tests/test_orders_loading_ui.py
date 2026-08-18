@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import edition_ops
+import files_window_launcher
 import order_allocator
 import os_pages
 import orders_page
@@ -349,6 +350,65 @@ class EditionOpsUiTests(unittest.TestCase):
             self.assertEqual(display_row["order"].count(orders_page.COPY_ORDER_ICON), 1)
             self.assertEqual(display_row["order"].count(row["order"]), 1)
             self.assertEqual(set(display_row), set(orders_page.VISIBLE_COLUMNS))
+
+    def test_orders_table_hides_channel_and_certificate_but_preserves_internal_state(self):
+        row = orders_page._normalise_row(
+            {
+                "order": "#SC3026",
+                "channel": "Etsy",
+                "certificate_status": "Ready",
+                "prodigi_status": "In production",
+            }
+        )
+        displayed = orders_page._display_rows([row])[0]
+
+        self.assertEqual("Etsy", row["channel"])
+        self.assertEqual("Uploaded", row["certificate"])
+        self.assertNotIn("channel", displayed)
+        self.assertNotIn("certificate", displayed)
+        self.assertEqual("file", orders_page.VISIBLE_COLUMNS[-1])
+        self.assertEqual(
+            "/files-window?relative_path=02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED",
+            displayed["file"],
+        )
+
+    def test_completed_orders_keep_neutral_rows_and_only_complete_text_is_green(self):
+        payload = orders_page._display_table_payload(
+            [
+                {
+                    "order": "#SC3000",
+                    "certificate_status": "Ready",
+                    "prodigi_status": "Complete",
+                },
+                {
+                    "order": "#SC3026",
+                    "certificate_status": "Certificate Missing",
+                    "prodigi_status": "",
+                },
+            ]
+        )
+        html = payload.to_html()
+
+        self.assertNotIn("background-color", html)
+        self.assertIn("color: #2f9e44", html)
+        self.assertIn("color: #9a6700", html)
+        self.assertEqual("", orders_page._fulfilment_cell_style("Sent to Fulfilment"))
+        self.assertNotIn("#2f9e44", orders_page._fulfilment_cell_style("Ready"))
+        self.assertNotIn("#2f9e44", orders_page._fulfilment_cell_style("Needs certificate"))
+
+    def test_orders_file_action_reuses_named_files_window_without_dropbox_listing(self):
+        handler = files_window_launcher.table_click_handler_html(
+            relative_path=orders_page.ORDERS_FILES_RELATIVE_FOLDER,
+        )
+        render_table = inspect.getsource(orders_page._render_orders_table)
+
+        self.assertIn("SportsCaveFilesWindow", handler)
+        self.assertIn("sports-cave-files-window", handler)
+        self.assertIn("02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED", handler)
+        self.assertIn("popup.focus()", handler)
+        self.assertIn("_render_files_click_handler()", render_table)
+        self.assertNotIn("list_folder", render_table)
+        self.assertNotIn("Dropbox", render_table)
 
     def test_prodigi_reference_contains_all_16_code_mappings(self):
         rows = os_pages.prodigi_reference_rows()
@@ -1458,15 +1518,14 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.VISIBLE_COLUMNS,
             (
                 "order",
-                "channel",
                 "edition",
-                "certificate",
                 "customer",
                 "product",
                 "variant",
                 "shipping",
                 "date",
                 "prodigi",
+                "file",
             ),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
@@ -1477,7 +1536,17 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("_compact_variant_label", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
+        self.assertIn('certificate_engine = _LazyModule("certificate_engine")', source)
+        self.assertIn('order_allocator = _LazyModule("order_allocator")', source)
+        self.assertIn('importlib.import_module("pandas")', source)
+        self.assertNotIn("import pandas as pd", source)
         self.assertIn("_render_orders_search_form", render_page)
+        self.assertLess(render_page.index('st.title("Orders")'), render_page.index("_start_snapshot_load"))
+        self.assertIn("_render_orders_supabase_live_refresh()", render_page)
+        self.assertLess(
+            render_page.index("_render_orders_data_area()"),
+            render_page.index("_render_orders_supabase_live_refresh()"),
+        )
         self.assertIn("Search orders", inspect.getsource(orders_page._render_orders_search_form))
         self.assertNotIn("Show all rows", render_page)
         self.assertNotIn("_render_admin_panel", render_page)
@@ -1486,6 +1555,11 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Reupload Certificate", top_actions)
         self.assertIn("Open Certificate", top_actions)
         self.assertIn("Start Fulfilment QA", top_actions)
+        self.assertNotIn("channel", orders_page.VISIBLE_COLUMNS)
+        self.assertNotIn("certificate", orders_page.VISIBLE_COLUMNS)
+        self.assertEqual("file", orders_page.VISIBLE_COLUMNS[-1])
+        self.assertIn("LinkColumn", inspect.getsource(orders_page._column_config))
+        self.assertIn('display_text="Open"', inspect.getsource(orders_page._column_config))
         self.assertNotIn("Check New Paid Orders", top_actions)
         self.assertNotIn("Backfill Latest Paid", top_actions)
         self.assertNotIn("Backfill latest paid orders", top_actions)
@@ -2433,7 +2507,10 @@ class EditionOpsUiTests(unittest.TestCase):
         class FakeStreamlit:
             def __init__(self):
                 self.session_state = {}
-                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.column_config = SimpleNamespace(
+                    TextColumn=lambda *args, **kwargs: None,
+                    LinkColumn=lambda *args, **kwargs: None,
+                )
                 self.rendered_rows = None
 
             def columns(self, spec):
@@ -4124,18 +4201,21 @@ class EditionOpsUiTests(unittest.TestCase):
 
 class OrdersDatabaseReadRepairTests(unittest.TestCase):
     def setUp(self):
+        supabase_backend._discard_cached_read_connection()
         self.original_marketplace_capability = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY
         self.original_marketplace_checked_at = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = None
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = 0.0
 
     def tearDown(self):
+        supabase_backend._discard_cached_read_connection()
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = self.original_marketplace_capability
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = self.original_marketplace_checked_at
 
     class Cursor:
-        def __init__(self, rows=None, error=None, statements=None):
+        def __init__(self, rows=None, error=None, statements=None, row_batches=None):
             self.rows = list(rows or [])
+            self.row_batches = [list(batch or []) for batch in (row_batches or [])]
             self.error = error
             self.statements = statements if statements is not None else []
 
@@ -4151,6 +4231,8 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
                 raise self.error
 
         def fetchall(self):
+            if self.row_batches:
+                return self.row_batches.pop(0)
             return list(self.rows)
 
         def read(self):
@@ -4186,8 +4268,10 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         self.assertEqual(connect.call_count, 2)
         self.assertTrue(diagnostic["recovered"])
         self.assertEqual(stale.close_calls, 1)
-        self.assertEqual(fresh.close_calls, 1)
+        self.assertEqual(fresh.close_calls, 0)
         self.assertEqual(fresh.rollback_calls, 1)
+        supabase_backend._discard_cached_read_connection()
+        self.assertEqual(fresh.close_calls, 1)
 
     def test_permanent_sql_error_is_not_retried_or_hidden(self):
         failed = self.Connection(self.Cursor(error=ValueError("syntax error near SELECT")))
@@ -4290,15 +4374,14 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
                 "allocation_index": 2,
             },
         ]
-        connections = [
-            self.Connection(self.Cursor(rows=base_rows, statements=statements)),
-            self.Connection(self.Cursor(rows=allocations, statements=statements)),
-        ]
+        connection = self.Connection(
+            self.Cursor(row_batches=[base_rows, allocations], statements=statements)
+        )
 
-        with patch.object(supabase_backend, "connect", side_effect=connections) as connect:
+        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50, search="#SC2906")
 
-        self.assertEqual(connect.call_count, 2)
+        self.assertEqual(connect.call_count, 1)
         self.assertEqual(len(statements), 2)
         self.assertIn("WITH selected_orders AS", statements[0][0])
         self.assertEqual(statements[0][1][-1], 50)
@@ -4319,7 +4402,9 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             os_pages.prodigi_tracker_row_id(snapshot_rows[0]),
             f"edition-order|{snapshot_rows[0]['edition_order_id']}",
         )
-        self.assertTrue(all(connection.closed for connection in connections))
+        self.assertFalse(connection.closed)
+        supabase_backend._discard_cached_read_connection()
+        self.assertTrue(connection.closed)
 
     def test_orders_search_is_explicit_and_normal_render_skips_duplicate_audit(self):
         form_source = inspect.getsource(orders_page._render_orders_search_form)

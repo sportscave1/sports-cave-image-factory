@@ -52,14 +52,18 @@ class OrdersProdigiLoadingRepairTests(unittest.TestCase):
         self.assertEqual(args, ())
         self.assertEqual(kwargs, {"search": "", "limit": 50})
 
-    def test_orders_search_is_submitted_and_periodic_database_poll_is_not_rendered(self):
+    def test_orders_search_is_submitted_and_visibility_poll_runs_after_table(self):
         search_source = inspect.getsource(orders_page._render_orders_search_form)
         render_source = inspect.getsource(orders_page.render_page)
 
         self.assertIn('st.form("orders-search-form"', search_source)
         self.assertIn("if search_submitted", render_source)
         self.assertIn("_start_snapshot_load(search_text, force=True)", render_source)
-        self.assertNotIn("_render_orders_supabase_live_refresh", render_source)
+        self.assertIn("_render_orders_supabase_live_refresh", render_source)
+        self.assertLess(
+            render_source.index("_render_orders_data_area"),
+            render_source.index("_render_orders_supabase_live_refresh"),
+        )
         self.assertIn("_render_orders_loading_fragment", render_source)
 
     def test_orders_failure_keeps_safe_display_cache_and_retry_copy(self):

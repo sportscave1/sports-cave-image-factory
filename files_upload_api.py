@@ -1384,9 +1384,14 @@ async def list_files(request: Request):
             raise FilesUploadError("Files request is not allowed.", status_code=403)
         user = await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
-        current_path = _validated_current_folder(
-            request.query_params.get("path") or context["root_path"],
-            context["root_path"],
+        relative_path = request.query_params.get("relative_path")
+        current_path = (
+            _validated_relative_folder(relative_path, context["root_path"])
+            if relative_path is not None
+            else _validated_current_folder(
+                request.query_params.get("path") or context["root_path"],
+                context["root_path"],
+            )
         )
         force = str(request.query_params.get("refresh") or "").casefold() in {"1", "true"}
         page_size = request.query_params.get("page_size")

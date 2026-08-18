@@ -100,10 +100,27 @@ class FilesWindowLauncherLifecycleTests(unittest.TestCase):
         self.assertIn("listenerController.abort()", source)
         self.assertIn('window.addEventListener("pagehide", destroy', source)
         self.assertIn("if (launchPending) return", source)
-        self.assertIn('window.open("/files-window", "sports-cave-files-window"', source)
+        self.assertIn('window.open(href, "sports-cave-files-window"', source)
         self.assertIn("popup.focus()", source)
+        self.assertIn("SportsCaveFilesWindow", source)
+        self.assertIn("relative_path", source)
         self.assertIn("window.SportsCaveFilesLauncher?.destroy?.()", source)
         self.assertNotIn("streamlit:setComponentValue", source)
+
+    def test_scoped_folder_url_is_relative_validated_and_uses_existing_window(self):
+        relative = "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED"
+        href = files_window_launcher.files_window_href(relative)
+        handler = files_window_launcher.table_click_handler_html(relative_path=relative)
+
+        self.assertEqual(f"/files-window?relative_path={relative}", href)
+        self.assertIn("SportsCaveFilesWindow", handler)
+        self.assertIn(files_window_launcher.FILES_WINDOW_NAME, handler)
+        self.assertIn("popup.focus()", handler)
+        self.assertIn("AbortController", handler)
+
+        for unsafe in ("../private", "/absolute", "folder\\child", "C:/private", "folder//child"):
+            with self.assertRaises(ValueError):
+                files_window_launcher.files_window_href(unsafe)
 
 
 if __name__ == "__main__":

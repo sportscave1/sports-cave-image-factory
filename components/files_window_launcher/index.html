@@ -42,7 +42,22 @@
         send("streamlit:setFrameHeight", { height });
       }
 
-      function openBrowserFilesWindow() {
+      function safeRelativePath(value) {
+        const raw = String(value || "");
+        if (!raw || raw !== raw.trim() || raw.startsWith("/") || raw.includes("\\") || raw.includes(":") || raw.includes("\0")) return "";
+        const parts = raw.split("/");
+        if (parts.some(part => !part || part === "." || part === "..")) return "";
+        return parts.join("/");
+      }
+
+      function filesUrl(relativePath) {
+        const clean = safeRelativePath(relativePath);
+        return clean
+          ? `/files-window?relative_path=${encodeURIComponent(clean)}`
+          : "/files-window";
+      }
+
+      function openBrowserFilesWindow(relativePath = "") {
         const features = [
           "popup=yes",
           "width=1280",
@@ -53,12 +68,13 @@
           "scrollbars=yes",
           "noopener=no"
         ].join(",");
-        const popup = window.open("/files-window", "sports-cave-files-window", features);
+        const href = filesUrl(relativePath);
+        const popup = window.open(href, "sports-cave-files-window", features);
         if (popup) {
           popup.focus();
           return;
         }
-        window.open("/files-window", "_blank");
+        window.open(href, "_blank");
       }
 
       function openFilesWindow() {
@@ -78,10 +94,15 @@
       function destroy() {
         listenerController.abort();
         launchPending = false;
+        if (window.parent.SportsCaveFilesWindow === sharedFilesWindow) {
+          delete window.parent.SportsCaveFilesWindow;
+        }
       }
 
+      const sharedFilesWindow = {open: openBrowserFilesWindow};
       window.SportsCaveFilesLauncher?.destroy?.();
       window.SportsCaveFilesLauncher = {destroy};
+      window.parent.SportsCaveFilesWindow = sharedFilesWindow;
       button.addEventListener("click", openFilesWindow, listenerOptions);
       window.addEventListener("pagehide", destroy, {once: true, signal: listenerController.signal});
       send("streamlit:componentReady", { apiVersion: 1 });

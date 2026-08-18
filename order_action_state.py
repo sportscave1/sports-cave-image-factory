@@ -85,20 +85,63 @@ def display_prodigi_status(value):
     return status
 
 
+def _order_payload(row):
+    row = {} if row is None else row
+    for key in ("order_raw_json", "raw_json", "raw_payload"):
+        payload = row.get(key)
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def canonical_order_fulfilment_status(row):
+    """Return explicit saved fulfilment evidence without using channel or age."""
+
+    row = {} if row is None else row
+    payload = _order_payload(row)
+    # Evidence priority is field-based across both normalized columns and the
+    # saved payload. This prevents a top-level Shopify "unfulfilled" fallback
+    # from hiding terminal internal or marketplace evidence in raw_json.
+    for key in (
+        "sports_cave_fulfilment_status",
+        "sports_cave_fulfillment_status",
+        "internal_fulfilment_status",
+        "internal_fulfillment_status",
+        "marketplace_fulfilment_status",
+        "marketplace_fulfillment_status",
+        "fulfillment_status",
+        "fulfilment_status",
+        "displayFulfillmentStatus",
+    ):
+        for source in (row, payload):
+            status = str(source.get(key) or "").strip()
+            if status:
+                return status
+    return ""
+
+
 def final_fulfilment_status(row):
     """Return the exact final value displayed in the Orders Fulfilment column."""
     row = {} if row is None else row
-    dispatch_status = row.get("prodigi_status")
-    if str(dispatch_status or "").strip():
-        return display_prodigi_status(dispatch_status)
-    displayed_status = str(row.get("prodigi") or "").strip()
-    if displayed_status:
-        return "Complete" if displayed_status.casefold() == "complete" else displayed_status
-    order_status = row.get("fulfillment_status") or row.get("fulfilment_status")
-    if canonical_status(order_status) in FULFILMENT_TERMINAL_STATUSES:
+    dispatch_status = str(row.get("prodigi_status") or "").strip()
+    if canonical_status(dispatch_status) in FULFILMENT_TERMINAL_STATUSES:
         return "Complete"
+    displayed_status = str(row.get("prodigi") or "").strip()
+    if canonical_status(displayed_status) in FULFILMENT_TERMINAL_STATUSES:
+        return "Complete"
+    # Shopify is only the fallback when no internal dispatch state exists. A
+    # non-terminal Sports Cave/Prodigi state must not be overwritten by a
+    # conflicting Shopify "fulfilled" value.
+    if not dispatch_status and not displayed_status:
+        order_status = canonical_order_fulfilment_status(row)
+        if canonical_status(order_status) in FULFILMENT_TERMINAL_STATUSES:
+            return "Complete"
     if not certificate_is_ready_for_fulfilment(row):
         return "Needs certificate"
+    if dispatch_status:
+        return display_prodigi_status(dispatch_status)
+    if displayed_status:
+        return displayed_status
     if certificate_step_is_complete(row):
         return "Ready to dispatch"
     return "Certificate ready"
@@ -109,7 +152,7 @@ def fulfilment_step_is_complete(row):
     dispatch_status = row.get("prodigi_status") or row.get("prodigi")
     if str(dispatch_status or "").strip():
         return canonical_status(dispatch_status) in FULFILMENT_TERMINAL_STATUSES
-    order_status = row.get("fulfillment_status") or row.get("fulfilment_status")
+    order_status = canonical_order_fulfilment_status(row)
     return canonical_status(order_status) in FULFILMENT_TERMINAL_STATUSES
 
 

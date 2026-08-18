@@ -243,6 +243,40 @@ class FilesWindowApiTests(unittest.TestCase):
             user_id="worker-1",
         )
 
+    def test_relative_folder_request_resolves_inside_configured_root_once(self):
+        relative = "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED"
+        target = f"{TEAM_ROOT}/{relative}"
+        request = get_request("/api/files-list", {"relative_path": relative})
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(files_upload_api, "_directory_entries", return_value=[]) as directory:
+            response = asyncio.run(files_upload_api.list_files(request))
+
+        payload = json.loads(response.body)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(target, payload["current_path"])
+        directory.assert_called_once_with(
+            "secret-token",
+            target,
+            force=False,
+            root_path=TEAM_ROOT,
+            user_id="worker-1",
+        )
+
+    def test_relative_folder_request_rejects_traversal_before_listing(self):
+        request = get_request("/api/files-list", {"relative_path": "../private"})
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(files_upload_api, "_directory_entries") as directory:
+            response = asyncio.run(files_upload_api.list_files(request))
+
+        self.assertEqual(403, response.status_code)
+        directory.assert_not_called()
+
     def test_timestamp_formatting_converts_to_configured_timezone_and_handles_missing_values(self):
         value = "2026-07-25T02:41:00Z"
         self.assertEqual(
@@ -1096,7 +1130,8 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_files_sidebar_opens_browser_window_for_approved_accounts(self):
-        self.assertIn('window.open("/files-window"', self.launcher)
+        self.assertIn("filesUrl(relativePath)", self.launcher)
+        self.assertIn("relative_path", self.launcher)
         self.assertIn('"sports-cave-files-window"', self.launcher)
         self.assertIn("popup.focus()", self.launcher)
         self.assertNotIn('href="sports-cave-files://app"', self.launcher)
@@ -1116,6 +1151,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("files_window_launcher.render", branch)
         self.assertNotIn("declare_component", branch)
         self.assertNotIn("set_current_page", branch)
+
+    def test_files_window_opens_validated_relative_folder_directly(self):
+        self.assertIn('query.get("relative_path")', self.client)
+        self.assertIn('params.set("relative_path", relativePath)', self.client)
+        self.assertIn('loadFolder("", {relativePath: requestedRelativePath})', self.client)
+        self.assertIn("const resolvedPath = String(payload.current_path", self.client)
 
     def test_one_click_open_multi_select_and_keyboard_navigation_have_no_checkboxes(self):
         item_handler = self.client[self.client.index("function createItemElement") : self.client.index("function detailCell")]
@@ -1339,7 +1380,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("const CLIENT_FOLDER_REVALIDATE_SECONDS = 20", self.client)
         self.assertIn("function cachedFolderEntry(path)", self.client)
         self.assertIn("function cachedFolder(path)", self.client)
-        self.assertIn("function requestFolder(path, refresh, page = \"\")", self.client)
+        self.assertIn(
+            "function requestFolder(path, refresh, page = \"\", relativePath = \"\")",
+            self.client,
+        )
         self.assertIn('params.set("page_size", String(FOLDER_PAGE_SIZE))', self.client)
         self.assertIn("state.folderRequests.has(requestKey)", self.client)
         self.assertIn("rememberFolder(payload, path)", self.client)

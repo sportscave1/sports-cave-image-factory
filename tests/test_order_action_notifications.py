@@ -116,6 +116,58 @@ class OrderActionStateTests(unittest.TestCase):
         self.assertTrue(order_action_state.certificate_step_is_complete(row))
         self.assertFalse(order_action_state.row_requires_action(row))
 
+    def test_historical_fulfilled_etsy_payload_stays_complete(self):
+        row = action_row(
+            "225",
+            source_name="Etsy",
+            certificate_status="Certificate Missing",
+            prodigi_status="",
+            fulfillment_status="",
+            order_raw_json={"source_display": "Etsy", "fulfillment_status": "FULFILLED"},
+        )
+
+        self.assertEqual("FULFILLED", order_action_state.canonical_order_fulfilment_status(row))
+        self.assertEqual("Complete", order_action_state.final_fulfilment_status(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_terminal_marketplace_completion_overrides_shopify_unfulfilled(self):
+        row = action_row(
+            "226",
+            source_name="Etsy",
+            certificate_status="Ready",
+            prodigi_status="",
+            fulfillment_status="UNFULFILLED",
+            order_raw_json={"marketplace_fulfilment_status": "Complete"},
+        )
+
+        self.assertEqual("Complete", order_action_state.canonical_order_fulfilment_status(row))
+        self.assertEqual("Complete", order_action_state.final_fulfilment_status(row))
+        self.assertFalse(order_action_state.row_requires_action(row))
+
+    def test_future_unfulfilled_etsy_order_remains_actionable(self):
+        row = action_row(
+            "227",
+            source_name="Etsy",
+            certificate_status="Certificate Missing",
+            prodigi_status="",
+            fulfillment_status="UNFULFILLED",
+        )
+
+        self.assertEqual("Needs certificate", order_action_state.final_fulfilment_status(row))
+        self.assertTrue(order_action_state.row_requires_action(row))
+        self.assertNotIn("etsy", inspect.getsource(order_action_state.final_fulfilment_status).casefold())
+
+    def test_missing_certificate_precedes_nonterminal_dispatch_label(self):
+        row = action_row(
+            "228",
+            certificate_status="Certificate Missing",
+            prodigi_status="Not started",
+            fulfillment_status="UNFULFILLED",
+        )
+
+        self.assertEqual("Needs certificate", order_action_state.final_fulfilment_status(row))
+        self.assertTrue(order_action_state.row_requires_action(row))
+
     def test_shopify_fulfilled_is_terminal_only_without_conflicting_prodigi_state(self):
         completed = action_row("23", prodigi_status="", fulfillment_status="fulfilled")
         in_progress = action_row(
@@ -172,6 +224,55 @@ class OrderActionStateTests(unittest.TestCase):
         self.assertEqual(1, count)
         self.assertEqual("1", order_action_state.badge_label(count))
 
+    def test_production_equivalent_marketplace_fixture_counts_only_sc3026(self):
+        rows = [
+            action_row(
+                "gid://shopify/Order/7339668635955",
+                order_name="#SC2989",
+                shopify_line_item_id="gid://shopify/LineItem/17414822297907",
+                certificate_status="Ready",
+                prodigi_status="Complete",
+                fulfillment_status="UNFULFILLED",
+            ),
+            action_row(
+                "gid://shopify/Order/7341353337139",
+                order_name="#SC2994",
+                shopify_line_item_id="gid://shopify/LineItem/17418011476275",
+                certificate_status="Ready",
+                prodigi_status="Complete",
+                fulfillment_status="PARTIALLY_FULFILLED",
+            ),
+            action_row(
+                "gid://shopify/Order/7342818132275",
+                order_name="#SC2998",
+                source_name="2329312",
+                shopify_line_item_id="gid://shopify/LineItem/17420335710515",
+                certificate_status="Ready",
+                prodigi_status="Complete",
+                fulfillment_status="UNFULFILLED",
+            ),
+            action_row(
+                "gid://shopify/Order/7358223745331",
+                order_name="#SC3026",
+                source_name="Online Store",
+                shopify_line_item_id="gid://shopify/LineItem/17448334524723",
+                certificate_status="Certificate Missing",
+                prodigi_status="",
+                fulfillment_status="UNFULFILLED",
+            ),
+        ]
+
+        self.assertEqual(
+            {"gid://shopify/Order/7358223745331"},
+            {
+                row["shopify_order_id"]
+                for row in rows
+                if order_action_state.row_requires_action(row)
+            },
+        )
+        self.assertEqual(1, order_action_state.count_orders_requiring_action(rows))
+        self.assertEqual("1", order_action_state.badge_label(1))
+
     def test_shared_final_status_matches_orders_fulfilment_labels(self):
         self.assertEqual(
             "Needs certificate",
@@ -226,6 +327,15 @@ class NewOrderEventTests(unittest.TestCase):
     def test_existing_history_is_not_announced_on_initial_baseline(self):
         events = [self.event("old-1", "3000", inserted=False)]
         selected, marker = order_action_state.select_new_order_events(events)
+        self.assertEqual([], selected)
+        self.assertEqual("", marker)
+
+    def test_historical_completed_etsy_order_does_not_replay_a_notification(self):
+        historical = self.event("etsy-history", "2985", inserted=False)
+        historical["source_name"] = "Etsy"
+
+        selected, marker = order_action_state.select_new_order_events([historical])
+
         self.assertEqual([], selected)
         self.assertEqual("", marker)
 
@@ -385,6 +495,32 @@ class OrderStatusUiContractTests(unittest.TestCase):
         self.assertNotIn("edition_orders", query_source)
         self.assertNotIn("certificates", query_source)
         self.assertNotIn("certificates_complete", query_source)
+
+    def test_badge_matches_numeric_and_gid_line_item_dispatch_identities(self):
+        query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
+
+        self.assertIn("dispatch.shopify_line_item_id = ANY", query_source)
+        self.assertIn("REGEXP_REPLACE", query_source)
+        self.assertIn("gid://shopify/LineItem/", query_source)
+        self.assertIn("o.raw_json->>'fulfillment_status'", query_source)
+        self.assertIn("o.raw_json->>'marketplace_fulfilment_status'", query_source)
+        self.assertIn("WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, '')))", query_source)
+        self.assertIn("THEN 0 ELSE 1", query_source)
+
+    def test_orders_readers_use_the_same_canonical_dispatch_identity(self):
+        hybrid_source = inspect.getsource(supabase_backend.list_hybrid_order_rows)
+        fallback_source = inspect.getsource(supabase_backend.list_orders)
+
+        self.assertIn("pd.shopify_line_item_id = ANY", hybrid_source)
+        self.assertIn("gid://shopify/LineItem/", hybrid_source)
+        self.assertIn("o.raw_json->>'fulfillment_status'", hybrid_source)
+        self.assertIn("o.raw_json->>'marketplace_fulfilment_status'", hybrid_source)
+        self.assertIn("WHEN LOWER(BTRIM(COALESCE(pd.prodigi_status, '')))", hybrid_source)
+        self.assertIn("pd.shopify_line_item_id = ANY", fallback_source)
+        self.assertIn("gid://shopify/LineItem/", fallback_source)
+        self.assertIn("o.raw_json->>'fulfillment_status'", fallback_source)
+        self.assertIn("o.raw_json->>'marketplace_fulfilment_status'", fallback_source)
+        self.assertIn("WHEN LOWER(BTRIM(COALESCE(pd.prodigi_status, '')))", fallback_source)
 
     def test_orders_page_reuses_shared_certificate_and_fulfilment_helpers(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")

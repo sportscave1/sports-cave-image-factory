@@ -702,11 +702,12 @@
 
       const restored = restoredState();
       const query = new URLSearchParams(location.search);
+      const requestedRelativePath = query.get("relative_path") || "";
       const state = {
         rootPath: "",
         rootName: "Sportscave Team Folder",
         cacheNamespace: "",
-        currentPath: query.get("path") || String(restored.currentPath || ""),
+        currentPath: requestedRelativePath ? "" : (query.get("path") || String(restored.currentPath || "")),
         timeZone: "UTC",
         back: Array.isArray(restored.back) ? restored.back.slice(-30) : [],
         forward: Array.isArray(restored.forward) ? restored.forward.slice(-30) : [],
@@ -1307,13 +1308,14 @@
         }
       }
 
-      function requestFolder(path, refresh, page = "") {
+      function requestFolder(path, refresh, page = "", relativePath = "") {
         const params = new URLSearchParams();
-        if (path) params.set("path", path);
+        if (relativePath) params.set("relative_path", relativePath);
+        else if (path) params.set("path", path);
         if (refresh) params.set("refresh", "1");
         params.set("page_size", String(FOLDER_PAGE_SIZE));
         if (page) params.set("page", page);
-        const requestKey = `${folderCacheKey(path)}|${refresh ? "refresh" : "normal"}|${page || "first"}`;
+        const requestKey = `${relativePath ? `relative:${relativePath}` : folderCacheKey(path)}|${refresh ? "refresh" : "normal"}|${page || "first"}`;
         if (!page && state.folderRequests.has(requestKey)) {
           return state.folderRequests.get(requestKey);
         }
@@ -1364,7 +1366,7 @@
         return parent.toLocaleLowerCase().startsWith(state.rootPath.toLocaleLowerCase()) ? parent : state.rootPath;
       }
 
-      async function loadFolder(path, { refresh = false, preserveScroll = false } = {}) {
+      async function loadFolder(path, { refresh = false, preserveScroll = false, relativePath = "" } = {}) {
         const token = ++state.navigationToken;
         const oldScroll = preserveScroll ? elements.results.scrollTop : 0;
         abortStaleFolderRequests(path);
@@ -1413,15 +1415,16 @@
         renderNavigation();
         renderStatus();
         try {
-          const payload = await requestFolder(path, refresh);
+          const payload = await requestFolder(path, refresh, "", relativePath);
           if (token !== state.navigationToken) return false;
-          rememberFolder(payload, path);
+          const resolvedPath = String(payload.current_path || path || "");
+          rememberFolder(payload, resolvedPath);
           applyFolderPayload(payload);
           state.loading = false;
           state.loadingMore = Boolean(payload.has_more && payload.next_page);
           renderAll();
           elements.results.scrollTop = preserveScroll ? oldScroll : 0;
-          await continueFolderPages(path, payload, token, oldScroll, preserveScroll);
+          await continueFolderPages(resolvedPath, payload, token, oldScroll, preserveScroll);
           return true;
         } catch (error) {
           if (token !== state.navigationToken) return false;
@@ -3156,8 +3159,10 @@
         initialiseDesktopBridge();
         state.searchByPath[state.currentPath] = query.get("q") || state.searchByPath[state.currentPath] || "";
         const requestedPath = state.currentPath;
-        const loaded = await loadFolder(requestedPath);
-        if (!loaded && requestedPath) {
+        const loaded = requestedRelativePath
+          ? await loadFolder("", {relativePath: requestedRelativePath})
+          : await loadFolder(requestedPath);
+        if (!loaded && (requestedPath || requestedRelativePath)) {
           state.back = [];
           state.forward = [];
           state.currentPath = "";

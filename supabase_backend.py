@@ -683,6 +683,44 @@ def _close_read_connection(conn):
         pass
 
 
+_READ_CONNECTION_LOCK = threading.RLock()
+_CACHED_READ_CONNECTION = None
+_CACHED_READ_CONNECTION_FACTORY = None
+
+
+def _discard_cached_read_connection(conn=None):
+    """Drop a failed or obsolete read resource without affecting write paths."""
+    global _CACHED_READ_CONNECTION
+    global _CACHED_READ_CONNECTION_FACTORY
+    target = conn if conn is not None else _CACHED_READ_CONNECTION
+    if target is not None:
+        _close_read_connection(target)
+    if conn is None or conn is _CACHED_READ_CONNECTION:
+        _CACHED_READ_CONNECTION = None
+        _CACHED_READ_CONNECTION_FACTORY = None
+
+
+def _cached_read_connection():
+    """Return one serialised, reusable read connection for this app process.
+
+    A new Supabase TLS connection costs close to a second from Render. The
+    latest-50 Orders reader performs two bounded bulk statements, and the
+    sidebar performs a third status statement. Reusing the read resource keeps
+    the SQL and transaction boundaries unchanged while removing repeated TLS
+    handshakes. Any stale/failed connection is discarded and retried once by
+    ``_run_read_operation``.
+    """
+    global _CACHED_READ_CONNECTION
+    global _CACHED_READ_CONNECTION_FACTORY
+    factory = connect
+    if _CACHED_READ_CONNECTION_FACTORY is not factory:
+        _discard_cached_read_connection()
+    if _CACHED_READ_CONNECTION is None or bool(getattr(_CACHED_READ_CONNECTION, "closed", False)):
+        _CACHED_READ_CONNECTION = factory()
+        _CACHED_READ_CONNECTION_FACTORY = factory
+    return _CACHED_READ_CONNECTION
+
+
 def _run_read_operation(operation, read_callable):
     """Run one bounded read, retrying one recognised stale failure.
 
@@ -696,8 +734,10 @@ def _run_read_operation(operation, read_callable):
         conn = None
         deadline_timer = None
         deadline_fired = threading.Event()
+        keep_connection = False
+        _READ_CONNECTION_LOCK.acquire()
         try:
-            conn = connect()
+            conn = _cached_read_connection()
 
             def cancel_overdue_read():
                 deadline_fired.set()
@@ -740,6 +780,7 @@ def _run_read_operation(operation, read_callable):
                 f"attempts={attempt + 1} recovered={str(bool(attempt)).lower()}",
                 flush=True,
             )
+            keep_connection = True
             return value, diagnostic
         except Exception as error:
             if deadline_timer is not None:
@@ -780,7 +821,9 @@ def _run_read_operation(operation, read_callable):
         finally:
             if deadline_timer is not None:
                 deadline_timer.cancel()
-            _close_read_connection(conn)
+            if not keep_connection:
+                _discard_cached_read_connection(conn)
+            _READ_CONNECTION_LOCK.release()
 
 
 def _database_undefined_column_name(error):
@@ -18965,7 +19008,24 @@ ORDER_ACTION_ROWS_SQL = """
         o.order_name,
         o.financial_status,
         o.cancelled_at,
-        o.fulfillment_status,
+        COALESCE(
+            NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
+            NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
+            NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
+            NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
+            NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
+            NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+            NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
+            NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
+            NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
+            NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
+            NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
+            NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+            NULLIF(o.fulfillment_status, ''),
+            NULLIF(o.raw_json->>'fulfillment_status', ''),
+            NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
+            ''
+        ) AS fulfillment_status,
         li.shopify_line_item_id,
         li.quantity,
         COALESCE(pd.prodigi_status, '') AS prodigi_status
@@ -18975,8 +19035,29 @@ ORDER_ACTION_ROWS_SQL = """
     LEFT JOIN LATERAL (
         SELECT dispatch.prodigi_status
         FROM prodigi_dispatch_rows dispatch
-        WHERE dispatch.shopify_line_item_id = li.shopify_line_item_id
-        ORDER BY dispatch.updated_at DESC NULLS LAST,
+        WHERE dispatch.shopify_line_item_id = ANY(
+            ARRAY[
+                li.shopify_line_item_id,
+                REGEXP_REPLACE(
+                    COALESCE(li.shopify_line_item_id, ''),
+                    '^gid://shopify/LineItem/',
+                    '',
+                    'i'
+                ),
+                'gid://shopify/LineItem/' || REGEXP_REPLACE(
+                    COALESCE(li.shopify_line_item_id, ''),
+                    '^gid://shopify/LineItem/',
+                    '',
+                    'i'
+                )
+            ]
+        )
+        ORDER BY CASE
+                     WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
+                          ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+                     THEN 0 ELSE 1
+                 END,
+                 dispatch.updated_at DESC NULLS LAST,
                  dispatch.submitted_at DESC NULLS LAST
         LIMIT 1
     ) pd ON TRUE
@@ -19155,23 +19236,18 @@ def consume_new_order_notifications(actor_id):
 def orders_visibility_marker(*, ensure_schema_first=True):
     if ensure_schema_first:
         ensure_schema()
-    try:
-        with connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        COUNT(*) AS order_count,
-                        COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
-                    FROM shopify_orders
-                    """
-                )
-                row = cur.fetchone() or {}
-    except Exception as error:
-        schema_message = webhook_schema_error_message(error) or orders_sync_schema_error_message(error)
-        if schema_message:
-            raise RuntimeError(schema_message) from error
-        raise
+    def load_marker(cur):
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) AS order_count,
+                COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
+            FROM shopify_orders
+            """
+        )
+        return cur.fetchone() or {}
+
+    row, _diagnostic = _run_read_operation("orders.visibility_marker", load_marker)
     latest = row.get("latest_order_update") or ""
     return {
         "order_count": int(row.get("order_count") or 0),
@@ -20171,7 +20247,25 @@ def list_hybrid_order_rows(limit=50, search=""):
             )
             SELECT
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
-                o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
+                o.customer_name, o.customer_email, o.financial_status,
+                COALESCE(
+                    NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
+                    NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.fulfillment_status, ''),
+                    NULLIF(o.raw_json->>'fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
+                    ''
+                ) AS fulfillment_status,
                 COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
                          NULLIF(o.raw_json->>'source_display', ''),
                          NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
@@ -20198,8 +20292,31 @@ def list_hybrid_order_rows(limit=50, search=""):
             LEFT JOIN LATERAL (
                 SELECT pd.row_id, pd.prodigi_status
                 FROM prodigi_dispatch_rows pd
-                WHERE pd.shopify_line_item_id = li.shopify_line_item_id
-                ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
+                WHERE pd.shopify_line_item_id = ANY(
+                    ARRAY[
+                        li.shopify_line_item_id,
+                        REGEXP_REPLACE(
+                            COALESCE(li.shopify_line_item_id, ''),
+                            '^gid://shopify/LineItem/',
+                            '',
+                            'i'
+                        ),
+                        'gid://shopify/LineItem/' || REGEXP_REPLACE(
+                            COALESCE(li.shopify_line_item_id, ''),
+                            '^gid://shopify/LineItem/',
+                            '',
+                            'i'
+                        )
+                    ]
+                )
+                ORDER BY
+                    CASE
+                        WHEN LOWER(BTRIM(COALESCE(pd.prodigi_status, ''))) IN
+                             ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+                        THEN 0 ELSE 1
+                    END,
+                    pd.updated_at DESC NULLS LAST,
+                    pd.submitted_at DESC NULLS LAST
                 LIMIT 1
             ) pd ON TRUE
             ORDER BY COALESCE(o.created_at, o.processed_at, o.synced_at) DESC NULLS LAST,
@@ -20374,7 +20491,25 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             SELECT o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                    COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, '')) AS customer_name,
                    COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
-                   o.financial_status, o.fulfillment_status,
+                   o.financial_status,
+                   COALESCE(
+                       NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
+                       NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
+                       NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
+                       NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
+                       NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
+                       NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+                       NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
+                       NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
+                       NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
+                       NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
+                       NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
+                       NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+                       NULLIF(o.fulfillment_status, ''),
+                       NULLIF(o.raw_json->>'fulfillment_status', ''),
+                       NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
+                       ''
+                   ) AS fulfillment_status,
                    o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at, o.cancelled_at, o.synced_at,
                    o.raw_json AS order_raw_json,
                    li.id AS order_line_id, COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id) AS shopify_line_item_id, li.quantity,
@@ -20438,13 +20573,36 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             LEFT JOIN LATERAL (
                 SELECT pd.row_id, pd.prodigi_status
                 FROM prodigi_dispatch_rows pd
-                WHERE pd.shopify_line_item_id = COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id)
+                WHERE pd.shopify_line_item_id = ANY(
+                    ARRAY[
+                        COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id),
+                        REGEXP_REPLACE(
+                            COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id, ''),
+                            '^gid://shopify/LineItem/',
+                            '',
+                            'i'
+                        ),
+                        'gid://shopify/LineItem/' || REGEXP_REPLACE(
+                            COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id, ''),
+                            '^gid://shopify/LineItem/',
+                            '',
+                            'i'
+                        )
+                    ]
+                )
                   AND (
                       eo.edition_number IS NULL
                       OR pd.edition_number IS NULL
                       OR pd.edition_number = eo.edition_number
                   )
-                ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
+                ORDER BY
+                    CASE
+                        WHEN LOWER(BTRIM(COALESCE(pd.prodigi_status, ''))) IN
+                             ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+                        THEN 0 ELSE 1
+                    END,
+                    pd.updated_at DESC NULLS LAST,
+                    pd.submitted_at DESC NULLS LAST
                 LIMIT 1
             ) pd ON TRUE
             LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text

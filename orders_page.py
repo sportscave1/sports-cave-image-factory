@@ -8,18 +8,39 @@ import time
 from zoneinfo import ZoneInfo
 
 import streamlit as st
-import streamlit.components.v1 as components
-try:
-    import pandas as pd
-except Exception:  # pragma: no cover - optional at import time
-    pd = None
 
-import certificate_engine
-import certificate_job
-import os_accounts
-import order_allocator
-import order_action_state
-import shopify_sync
+
+class _LazyModule:
+    """Delay action-only dependencies until the user needs them.
+
+    The Orders heading and search shell are emitted before the database read
+    begins. Importing certificate generation, Shopify HTTP helpers, pandas and
+    component code before that shell added more than a second to a first visit.
+    Attribute access keeps the existing call sites and callback behaviour
+    unchanged while moving that work off the navigation critical path.
+    """
+
+    def __init__(self, module_name):
+        self._module_name = str(module_name)
+        self._module = None
+
+    def _load(self):
+        if self._module is None:
+            self._module = importlib.import_module(self._module_name)
+        return self._module
+
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+
+
+certificate_engine = _LazyModule("certificate_engine")
+certificate_job = _LazyModule("certificate_job")
+components = _LazyModule("streamlit.components.v1")
+os_accounts = _LazyModule("os_accounts")
+order_allocator = _LazyModule("order_allocator")
+order_action_state = _LazyModule("order_action_state")
+shopify_sync = _LazyModule("shopify_sync")
+files_window_launcher = _LazyModule("files_window_launcher")
 from activity_log import record_activity_log
 from certificate_logging import certificate_stage_log
 
@@ -40,6 +61,7 @@ CERTIFICATE_ACTION_STALE_SECONDS = 300
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
 COPY_ORDER_ICON = "\u29c9"
+ORDERS_FILES_RELATIVE_FOLDER = "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
 LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
@@ -47,7 +69,7 @@ REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 ORDER_SYNC_BACKFILL_KEY = "orders_sync_backfill_latest_paid"
 ORDERS_SYNC_TIMEOUT_SECONDS = 90
 ORDERS_SUPABASE_LIVE_MARKER_KEY = "orders_supabase_live_visibility_marker"
-ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 25
+ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 5
 SEARCH_KEY = "orders_search_text"
 LOADED_QUERY_KEY = "orders_loaded_query"
 SHOW_ALL_KEY = "orders_show_all_rows"
@@ -59,6 +81,8 @@ DEFAULT_VISIBLE_ROW_LIMIT = 50
 ORDERS_PAGE_LOAD_TIMEOUT_SECONDS = 8
 HYBRID_FAST_ORDERS_ENABLED = True
 _ORDERS_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="orders-ledger-read")
+_PANDAS_MODULE = None
+_PANDAS_IMPORT_ATTEMPTED = False
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -72,16 +96,27 @@ ALLOCATION_BLOCKER_STATUSES = {
 }
 VISIBLE_COLUMNS = (
     "order",
-    "channel",
     "edition",
-    "certificate",
     "customer",
     "product",
     "variant",
     "shipping",
     "date",
     "prodigi",
+    "file",
 )
+
+
+def _pandas_module():
+    global _PANDAS_MODULE
+    global _PANDAS_IMPORT_ATTEMPTED
+    if not _PANDAS_IMPORT_ATTEMPTED:
+        _PANDAS_IMPORT_ATTEMPTED = True
+        try:
+            _PANDAS_MODULE = importlib.import_module("pandas")
+        except Exception:  # pragma: no cover - optional in minimal runtimes
+            _PANDAS_MODULE = None
+    return _PANDAS_MODULE
 
 
 def _format_time(value):
@@ -617,6 +652,9 @@ def _normalise_row(row):
         "Needs certificate": "muted",
     }.get(updated["certificate"], "default")
     updated["prodigi"] = _prodigi_label(updated)
+    updated["file"] = files_window_launcher.files_window_href(
+        ORDERS_FILES_RELATIVE_FOLDER
+    )
     return updated
 
 
@@ -1291,30 +1329,6 @@ def _repair_missing_editions(*, dry_run=True, limit=100):
         f"{'Previewed' if dry_run else 'Applied'} missing-edition repair for "
         f"{int(result.get('candidate_rows') or 0)} ledger row(s)."
     )
-
-
-def _display_rows(rows):
-    return [
-        {column: _normalise_row(row).get(column, "") for column in VISIBLE_COLUMNS}
-        for row in _apply_latest_product_numbers(rows)
-    ]
-
-
-def _column_config():
-    return {
-        "order": st.column_config.TextColumn("Order", width="small"),
-        "channel": st.column_config.TextColumn("Channel", width="small"),
-        "date": st.column_config.TextColumn("Date", width="small"),
-        "customer": st.column_config.TextColumn("Customer", width="medium"),
-        "customer_email": st.column_config.TextColumn("Email", width="medium"),
-        "edition": st.column_config.TextColumn("Edition", width="small"),
-        "edition_total": st.column_config.NumberColumn("Edition total", width="small"),
-        "certificate": st.column_config.TextColumn("Certificate status", width="small"),
-        "shipping": st.column_config.TextColumn("Shipping summary", width="large"),
-        "product": st.column_config.TextColumn("Product", width="large"),
-        "variant": st.column_config.TextColumn("Variant", width="large"),
-        "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
-    }
 
 
 def _positive_numbers(values):
@@ -2032,49 +2046,58 @@ def _render_order_copy_click_handler():
     components.html(_order_copy_click_handler_html(), height=0, width=0)
 
 
+def _render_files_click_handler():
+    if getattr(st, "__name__", "") != "streamlit":
+        return
+    components.html(
+        files_window_launcher.table_click_handler_html(
+            relative_path=ORDERS_FILES_RELATIVE_FOLDER,
+        ),
+        height=0,
+        width=0,
+    )
+
+
 def _column_config():
     return {
         "order": st.column_config.TextColumn("Order", width="small"),
         "edition": st.column_config.TextColumn("Edition", width="small"),
-        "certificate": st.column_config.TextColumn("Certificate", width="small"),
         "customer": st.column_config.TextColumn("Customer", width="medium"),
         "product": st.column_config.TextColumn("Product", width="medium"),
         "variant": st.column_config.TextColumn("Variant", width="small"),
         "shipping": st.column_config.TextColumn("Shipping", width="small"),
         "date": st.column_config.TextColumn("Date", width="small"),
         "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
+        "file": st.column_config.LinkColumn(
+            "File",
+            display_text="Open",
+            width="small",
+        ),
     }
+
+
+def _fulfilment_cell_style(value):
+    status = str(value or "").strip()
+    if status == "Complete":
+        return "color: #2f9e44; font-weight: 600;"
+    if status == "Needs certificate":
+        return "color: #9a6700; font-weight: 600;"
+    if status in {"Ready", "Ready to dispatch", "Certificate ready", "In progress"}:
+        return "color: #1d4ed8; font-weight: 500;"
+    if status in {"Issue", "Upload failed"}:
+        return "color: #c92a2a; font-weight: 600;"
+    return ""
 
 
 def _display_table_payload(rows):
     display_rows = _display_rows(rows)
-    if pd is None or getattr(st, "__name__", "") != "streamlit":
+    if getattr(st, "__name__", "") != "streamlit":
         return display_rows
-    frame = pd.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
-    def row_style(row):
-        if (
-            order_action_state.certificate_step_is_complete(row)
-            and order_action_state.fulfilment_step_is_complete(row)
-        ):
-            return ["background-color: rgba(47, 158, 68, 0.14); color: #123c24;" for _ in row]
-        return ["" for _ in row]
-
-    return frame.style.apply(row_style, axis=1).map(
-        lambda value: (
-            "color: #2f9e44; font-weight: 600;"
-            if value == "Uploaded"
-            else "color: #c92a2a; font-weight: 600;"
-            if value == "Upload failed"
-            else "color: #2f9e44; font-weight: 600;"
-            if value == "Complete"
-            else "color: #495057;"
-            if value == "Needs certificate"
-            else "color: #1d4ed8; font-weight: 500;"
-            if value == "Ready"
-            else ""
-        ),
-        subset=["certificate", "prodigi"],
-    )
+    pandas_module = _pandas_module()
+    if pandas_module is None:
+        return display_rows
+    frame = pandas_module.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
+    return frame.style.map(_fulfilment_cell_style, subset=["prodigi"])
 
 
 def _render_top_actions(rows, duplicate_diagnostics=None):
@@ -2465,6 +2488,7 @@ def _render_orders_table(rows):
             key=GRID_KEY,
         )
         _render_order_copy_click_handler()
+        _render_files_click_handler()
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 
@@ -2591,4 +2615,5 @@ def render_page():
             _load_snapshot_once("")
 
     _render_orders_data_area()
+    _render_orders_supabase_live_refresh()
     _perf_log("total page load", page_started, rows=len(st.session_state.get(ROWS_KEY) or []))
