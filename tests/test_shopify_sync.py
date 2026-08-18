@@ -5696,7 +5696,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
-    def test_sync_latest_paid_orders_skips_existing_cursor_orders_without_latest_created_catchup(
+    def test_sync_latest_paid_orders_recovers_missed_order_from_recent_created_catchup(
         self,
         fetch_latest_paid_orders,
         get_sync_state,
@@ -5736,13 +5736,22 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 }
             ],
         }
-        fetch_latest_paid_orders.return_value = {
-            "orders": [existing_order],
-            "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
-            "limit": 50,
-            "lookback_days": 14,
-            "pages_fetched": 1,
-        }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [existing_order],
+                "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+            {
+                "orders": [new_order, existing_order],
+                "query": "financial_status:paid created_at:>='2026-06-15T06:22:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+        ]
 
         with patch.object(
             supabase_backend,
@@ -5817,24 +5826,25 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         ensure_schema.assert_not_called()
         known_repair.assert_not_called()
         handles_lookup.assert_not_called()
-        process_order.assert_not_called()
-        mirror_handles.assert_not_called()
-        self.assertEqual(fetch_latest_paid_orders.call_count, 1)
-        self.assertEqual(result["fetch_strategy"], "cursor_only")
+        process_order.assert_called_once()
+        self.assertEqual(process_order.call_args.args[0]["order_name"], "#SC3002")
+        mirror_handles.assert_called_once()
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertEqual(result["fetch_strategy"], "cursor_plus_recent_created_reconciliation")
         self.assertEqual(result["cursor_orders_fetched"], 1)
-        self.assertEqual(result["latest_created_orders_fetched"], 0)
-        self.assertEqual(result["duplicate_orders_removed"], 0)
-        self.assertEqual(result["shopify_orders_fetched"], 1)
+        self.assertEqual(result["latest_created_orders_fetched"], 2)
+        self.assertEqual(result["duplicate_orders_removed"], 1)
+        self.assertEqual(result["shopify_orders_fetched"], 2)
         self.assertEqual(result["existing_orders_skipped"], 1)
-        self.assertEqual(result["new_orders_inserted"], 0)
-        self.assertEqual(result["new_lines_inserted"], 0)
-        self.assertEqual(result["edition_allocations_created"], 0)
-        self.assertEqual(result["fetched_order_names"], ["#SC3001"])
-        self.assertEqual(result["imported_order_names"], [])
+        self.assertEqual(result["new_orders_inserted"], 1)
+        self.assertEqual(result["new_lines_inserted"], 1)
+        self.assertEqual(result["edition_allocations_created"], 1)
+        self.assertEqual(result["fetched_order_names"], ["#SC3001", "#SC3002"])
+        self.assertEqual(result["imported_order_names"], ["#SC3002"])
         self.assertEqual(result["preserved_order_names"], ["#SC3001"])
-        self.assertEqual(result["assigned_order_names"], [])
-        self.assertEqual(result["affected_order_names"], [])
-        self.assertEqual(result["affected_shopify_order_ids"], [])
+        self.assertEqual(result["assigned_order_names"], ["#SC3002"])
+        self.assertEqual(result["affected_order_names"], ["#SC3002"])
+        self.assertEqual(result["affected_shopify_order_ids"], ["gid://shopify/Order/3002"])
         self.assertTrue(result["cursor_updated"])
 
     @patch.object(supabase_backend, "ensure_schema", side_effect=AssertionError("webhook must not run schema DDL"))
@@ -6054,10 +6064,11 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         )
         self.assertEqual(fetch_latest_paid_orders.call_args_list[0].kwargs["sort_key"], "UPDATED_AT")
         self.assertTrue(fetch_latest_paid_orders.call_args_list[0].kwargs["lightweight"])
-        self.assertEqual(fetch_latest_paid_orders.call_count, 1)
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertIn("created_at:>=", fetch_latest_paid_orders.call_args_list[1].kwargs["query"])
         self.assertEqual(payload["sync_from"], "2026-06-25T09:50:00Z")
         self.assertEqual(payload["query_mode"], "cursor")
-        self.assertEqual(payload["fetch_strategy"], "cursor_only")
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_recent_created_reconciliation")
         self.assertFalse(payload["backfill_latest_paid"])
         self.assertEqual(payload["pages_fetched"], 0)
         self.assertEqual(payload["line_items_fetched"], 0)
@@ -6088,15 +6099,16 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         )
         self.assertEqual(fetch_latest_paid_orders.call_args_list[0].kwargs["sort_key"], "UPDATED_AT")
         self.assertTrue(fetch_latest_paid_orders.call_args_list[0].kwargs["lightweight"])
-        self.assertEqual(fetch_latest_paid_orders.call_count, 1)
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertIn("created_at:>=", fetch_latest_paid_orders.call_args_list[1].kwargs["query"])
         self.assertEqual(payload["sync_from"], "2026-06-24T12:00:00Z")
         self.assertEqual(payload["query_mode"], "safe_window")
-        self.assertEqual(payload["fetch_strategy"], "cursor_only")
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_recent_created_reconciliation")
         self.assertFalse(payload["backfill_latest_paid"])
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
-    def test_latest_paid_orders_payload_is_cursor_only_without_backfill(
+    def test_latest_paid_orders_payload_includes_bounded_recent_created_reconciliation(
         self,
         fetch_latest_paid_orders,
         get_sync_state,
@@ -6111,23 +6123,38 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             "remote_updated_at": "2026-06-29T06:25:00Z",
             "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/3001"}],
         }
-        fetch_latest_paid_orders.return_value = {
-            "orders": [dict(cursor_order)],
-            "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
-            "limit": 50,
-            "lookback_days": 14,
-            "pages_fetched": 1,
+        missed_order = {
+            "shopify_order_id": "gid://shopify/Order/3002",
+            "order_name": "#SC3002",
+            "remote_updated_at": "2026-06-29T06:10:00Z",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/3002"}],
         }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [dict(cursor_order)],
+                "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+            {
+                "orders": [dict(missed_order), dict(cursor_order)],
+                "query": "financial_status:paid created_at:>='2026-06-15T06:22:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+        ]
 
         payload = supabase_backend._latest_paid_orders_payload(config=self.config, limit=50, lookback_days=14)
 
-        self.assertEqual(fetch_latest_paid_orders.call_count, 1)
-        self.assertEqual(payload["fetch_strategy"], "cursor_only")
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_recent_created_reconciliation")
         self.assertEqual(payload["cursor_orders_fetched"], 1)
-        self.assertEqual(payload["latest_created_orders_fetched"], 0)
-        self.assertEqual(payload["duplicate_orders_removed"], 0)
-        self.assertEqual([order["order_name"] for order in payload["orders"]], ["#SC3001"])
-        self.assertEqual(payload["line_items_fetched"], 1)
+        self.assertEqual(payload["latest_created_orders_fetched"], 2)
+        self.assertEqual(payload["duplicate_orders_removed"], 1)
+        self.assertEqual([order["order_name"] for order in payload["orders"]], ["#SC3001", "#SC3002"])
+        self.assertEqual(payload["line_items_fetched"], 2)
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")

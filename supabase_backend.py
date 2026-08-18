@@ -39,6 +39,9 @@ LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY = "last_orders_paid_webhook_result"
 LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY = "last_orders_paid_webhook_error"
 LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY = "last_orders_paid_webhook_handle"
 LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY = "last_orders_paid_webhook_mirror_result"
+LAST_ORDER_RECONCILIATION_RESULT_KEY = "last_order_reconciliation_result"
+LAST_ORDER_RECONCILIATION_ERROR_KEY = "last_order_reconciliation_error"
+LAST_SUCCESSFUL_ORDER_RECONCILIATION_KEY = "last_successful_order_reconciliation_at"
 ORDER_NOTIFICATION_CURSOR_PREFIX = "new_order_popup_cursor_v1"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
@@ -62,7 +65,7 @@ DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
 DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT = 50
-DEFAULT_LATEST_CREATED_CATCHUP_LIMIT = 10
+DEFAULT_LATEST_CREATED_CATCHUP_LIMIT = 50
 DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS = 14
 DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS = 48
 DATETIME_MAX_UTC = datetime.max.replace(tzinfo=timezone.utc)
@@ -71,7 +74,7 @@ DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "name": "Sports Cave PSD Master Folder",
 }
 HISTORICAL_ORDER_STATUS = "Historical Order"
-REPAIRABLE_ORDER_LINE_STATUSES = ("Error", "Product Not Found", "Needs Edition Setup")
+REPAIRABLE_ORDER_LINE_STATUSES = ("Error", "Product Not Found", "Needs product mapping", "Needs Edition Setup")
 MISSING_EDITION_REPAIRABLE_STATUSES = REPAIRABLE_ORDER_LINE_STATUSES + ("Needs Edition", "Historical Order")
 HISTORICAL_ORDER_NOTE = (
     "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
@@ -1814,6 +1817,13 @@ def _ensure_schema_uncached():
                     ("remote_updated_at", "TIMESTAMPTZ"),
                     ("processed_at", "TIMESTAMPTZ"),
                     ("cancelled_at", "TIMESTAMPTZ"),
+                    ("source_name", "TEXT DEFAULT ''"),
+                    ("ingestion_status", "TEXT DEFAULT 'pending'"),
+                    ("ingestion_method", "TEXT DEFAULT ''"),
+                    ("ingestion_result", "TEXT DEFAULT ''"),
+                    ("ingestion_reason", "TEXT DEFAULT ''"),
+                    ("ingestion_duration_ms", "INTEGER DEFAULT 0"),
+                    ("last_ingested_at", "TIMESTAMPTZ"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                     ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -1822,6 +1832,7 @@ def _ensure_schema_uncached():
                 "shopify_order_lines": (
                     ("shopify_order_id", "TEXT"),
                     ("shopify_product_id", "TEXT"),
+                    ("shopify_variant_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("product_title", "TEXT"),
                     ("variant_title", "TEXT"),
@@ -1829,6 +1840,7 @@ def _ensure_schema_uncached():
                     ("quantity", "INTEGER DEFAULT 1"),
                     ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
                     ("last_error", "TEXT DEFAULT ''"),
+                    ("mapping_method", "TEXT DEFAULT ''"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -2986,6 +2998,13 @@ def ensure_order_read_schema():
                         ("remote_updated_at", "TIMESTAMPTZ"),
                         ("processed_at", "TIMESTAMPTZ"),
                         ("cancelled_at", "TIMESTAMPTZ"),
+                        ("source_name", "TEXT DEFAULT ''"),
+                        ("ingestion_status", "TEXT DEFAULT 'pending'"),
+                        ("ingestion_method", "TEXT DEFAULT ''"),
+                        ("ingestion_result", "TEXT DEFAULT ''"),
+                        ("ingestion_reason", "TEXT DEFAULT ''"),
+                        ("ingestion_duration_ms", "INTEGER DEFAULT 0"),
+                        ("last_ingested_at", "TIMESTAMPTZ"),
                         ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                         ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ),
@@ -2993,6 +3012,7 @@ def ensure_order_read_schema():
                         ("shopify_line_item_id", "TEXT"),
                         ("shopify_order_id", "TEXT"),
                         ("shopify_product_id", "TEXT"),
+                        ("shopify_variant_id", "TEXT"),
                         ("shopify_handle", "TEXT"),
                         ("product_title", "TEXT"),
                         ("variant_title", "TEXT"),
@@ -3000,6 +3020,7 @@ def ensure_order_read_schema():
                         ("quantity", "INTEGER DEFAULT 1"),
                         ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
                         ("last_error", "TEXT DEFAULT ''"),
+                        ("mapping_method", "TEXT DEFAULT ''"),
                         ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                         ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -11882,6 +11903,69 @@ def _orders_sync_log(event, status="started", **fields):
     print(" ".join(parts), flush=True)
 
 
+def _record_order_reconciliation_health(summary=None, *, error="", ensure_schema_first=True):
+    payload = dict(summary or {})
+    payload.setdefault("completed_at", utc_now())
+    payload["last_error"] = str(error or payload.get("last_error") or "")[:2000]
+    try:
+        set_app_setting(
+            LAST_ORDER_RECONCILIATION_RESULT_KEY,
+            payload,
+            ensure_schema_first=ensure_schema_first,
+        )
+        set_app_setting(
+            LAST_ORDER_RECONCILIATION_ERROR_KEY,
+            payload["last_error"],
+            ensure_schema_first=ensure_schema_first,
+        )
+        if not payload["last_error"]:
+            set_app_setting(
+                LAST_SUCCESSFUL_ORDER_RECONCILIATION_KEY,
+                payload["completed_at"],
+                ensure_schema_first=ensure_schema_first,
+            )
+    except Exception as health_error:
+        _orders_sync_log(
+            "reconciliation_health_write_failed",
+            "failed",
+            error=health_error.__class__.__name__,
+        )
+
+
+def get_order_reconciliation_health(*, ensure_schema_first=True):
+    result = get_app_setting(
+        LAST_ORDER_RECONCILIATION_RESULT_KEY,
+        {},
+        ensure_schema_first=ensure_schema_first,
+    )
+    if not isinstance(result, dict):
+        result = {}
+    return {
+        "last_successful_reconciliation": get_sync_setting(
+            LAST_SUCCESSFUL_ORDER_RECONCILIATION_KEY,
+            "",
+            ensure_schema_first=ensure_schema_first,
+        ),
+        "orders_examined": int(result.get("orders_examined") or 0),
+        "orders_inserted": int(result.get("orders_inserted") or 0),
+        "orders_updated": int(result.get("orders_updated") or 0),
+        "orders_unchanged": int(result.get("orders_unchanged") or 0),
+        "orders_requiring_mapping": int(result.get("orders_requiring_mapping") or 0),
+        "orders_rejected": int(result.get("orders_rejected") or 0),
+        "last_error": str(
+            result.get("last_error")
+            or get_sync_setting(
+                LAST_ORDER_RECONCILIATION_ERROR_KEY,
+                "",
+                ensure_schema_first=ensure_schema_first,
+            )
+            or ""
+        ),
+        "fetch_strategy": str(result.get("fetch_strategy") or ""),
+        "completed_at": str(result.get("completed_at") or ""),
+    }
+
+
 def _sync_order_line_count(orders):
     return sum(len(order.get("line_items") or []) for order in orders or [])
 
@@ -12062,26 +12146,47 @@ def _paid_order_skip_counts(orders):
     skipped_orders = 0
     skipped_lines = 0
     for order in orders or []:
-        financial_status = str(order.get("financial_status") or "").upper()
-        cancelled = bool(str(order.get("cancelled_at") or "").strip())
-        unpaid_or_refunded = financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}
-        if cancelled or unpaid_or_refunded:
+        eligibility = shopify_order_eligibility(order)
+        if not eligibility["eligible"]:
             skipped_orders += 1
             skipped_lines += len(order.get("line_items") or [])
     return skipped_orders, skipped_lines
 
 
-def _latest_paid_order_is_processable(order):
+def _truthy_shopify_flag(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes"}
+
+
+def shopify_order_eligibility(order):
+    """Return the explicit, channel-agnostic business eligibility decision.
+
+    Sales channel is attribution only. Operational allocation accepts paid or
+    partially-paid, non-test, non-cancelled orders with an immutable ID and at
+    least one line item.
+    """
     if not isinstance(order, dict):
-        return False
+        return {"eligible": False, "reason": "invalid_payload"}
     if not str(order.get("shopify_order_id") or "").strip():
-        return False
-    financial_status = str(order.get("financial_status") or "").upper()
-    if financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}:
-        return False
+        return {"eligible": False, "reason": "missing_shopify_order_id"}
+    if _truthy_shopify_flag(order.get("test")):
+        return {"eligible": False, "reason": "test_order"}
     if str(order.get("cancelled_at") or "").strip():
-        return False
-    return True
+        return {"eligible": False, "reason": "cancelled_order"}
+    financial_status = str(order.get("financial_status") or "").upper()
+    if financial_status not in {"PAID", "PARTIALLY_PAID"}:
+        return {
+            "eligible": False,
+            "reason": "financial_status_missing" if not financial_status else f"financial_status_{financial_status.casefold()}",
+        }
+    if not list(order.get("line_items") or []):
+        return {"eligible": False, "reason": "no_line_items"}
+    return {"eligible": True, "reason": "eligible_paid_non_cancelled_order"}
+
+
+def _latest_paid_order_is_processable(order):
+    return bool(shopify_order_eligibility(order).get("eligible"))
 
 
 def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, assign_ms, db_write_ms):
@@ -12362,7 +12467,17 @@ def _edition_product_row_for_output(row, *, match_method="", reason=""):
 
 
 def _unique_edition_product_match(rows, *, match_method, missing_reason, ambiguous_reason):
-    clean_rows = [row for row in (rows or []) if row]
+    clean_rows = []
+    seen = set()
+    for row in rows or []:
+        if not row:
+            continue
+        key = str(row.get("id") or row.get("shopify_handle") or row.get("shopify_product_id") or "")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        clean_rows.append(row)
     if len(clean_rows) == 1:
         return {
             "product": _edition_product_row_for_output(
@@ -12408,29 +12523,13 @@ def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=
     )
     title = str(line_item.get("product_title") or line_item.get("title") or "").strip()
     title_key = _normalize_product_title_key(title)
+    variant_title = str(line_item.get("variant_title") or line_item.get("variantTitle") or "").strip()
+    variant_title_key = " ".join(variant_title.casefold().split())
+    sku = str(line_item.get("sku") or "").strip()
     lock_sql = " FOR UPDATE" if lock else ""
 
-    if product_ids:
-        cur.execute(
-            f"""
-            SELECT ep.*
-            FROM edition_products ep
-            WHERE ep.shopify_product_id = ANY(%s)
-               OR ep.shopify_product_gid = ANY(%s)
-            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
-            {lock_sql}
-            """,
-            (product_ids, product_ids),
-        )
-        result = _unique_edition_product_match(
-            cur.fetchall() or [],
-            match_method="shopify_product_id",
-            missing_reason="No Edition Ops product matched the Shopify product ID.",
-            ambiguous_reason="Multiple Edition Ops products matched the Shopify product ID.",
-        )
-        if result["status"] != "missing":
-            return result
-
+    # Marketplace orders can retain a canonical variant while presenting a different
+    # product/source payload. The variant identity is therefore the strongest match.
     if variant_ids:
         cur.execute(
             f"""
@@ -12451,6 +12550,74 @@ def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=
             match_method="shopify_variant_id",
             missing_reason="No Edition Ops product matched the Shopify variant ID.",
             ambiguous_reason="Multiple Edition Ops products matched the Shopify variant ID.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if sku:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM shopify_variants sv
+            JOIN edition_products ep
+              ON ep.shopify_product_id = sv.shopify_product_id
+              OR ep.shopify_product_gid = sv.shopify_product_id
+            WHERE LOWER(BTRIM(COALESCE(sv.sku, ''))) = LOWER(BTRIM(%s))
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (sku,),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="sku",
+            missing_reason="No Edition Ops product matched the exact SKU.",
+            ambiguous_reason="The SKU matched multiple Edition Ops products.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if product_ids and variant_title_key:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM edition_products ep
+            JOIN shopify_variants sv
+              ON sv.shopify_product_id = ep.shopify_product_id
+              OR sv.shopify_product_id = ep.shopify_product_gid
+            WHERE (ep.shopify_product_id = ANY(%s) OR ep.shopify_product_gid = ANY(%s))
+              AND LOWER(BTRIM(COALESCE(sv.title, ''))) = %s
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (product_ids, product_ids, variant_title_key),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_product_id_and_variant_title",
+            missing_reason="No Edition Ops product matched the Shopify product ID and variant title.",
+            ambiguous_reason="Multiple Edition Ops products matched the Shopify product ID and variant title.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if product_ids:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM edition_products ep
+            WHERE ep.shopify_product_id = ANY(%s)
+               OR ep.shopify_product_gid = ANY(%s)
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (product_ids, product_ids),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_product_id",
+            missing_reason="No Edition Ops product matched the Shopify product ID.",
+            ambiguous_reason="Multiple Edition Ops products matched the Shopify product ID.",
         )
         if result["status"] != "missing":
             return result
@@ -12502,7 +12669,7 @@ def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=
     return {
         "product": {},
         "status": "missing",
-        "reason": "No Edition Ops product matched by product ID, variant ID, handle, or normalized title.",
+        "reason": "No Edition Ops product matched by variant ID, SKU, product ID and variant, handle, or normalized title.",
         "candidates": [],
     }
 
@@ -13475,11 +13642,11 @@ def _upsert_order(cur, order):
             shopify_order_id, legacy_resource_id, order_name, shopify_order_name,
             order_number, shopify_order_number, admin_url,
             customer_id, shopify_customer_id, customer_name, customer_email, email,
-            financial_status, fulfillment_status,
+            financial_status, fulfillment_status, source_name,
             total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at,
             raw_json, raw, synced_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 %s::jsonb, %s::jsonb, now(), now())
@@ -13497,6 +13664,7 @@ def _upsert_order(cur, order):
             email=EXCLUDED.email,
             financial_status=EXCLUDED.financial_status,
             fulfillment_status=EXCLUDED.fulfillment_status,
+            source_name=COALESCE(NULLIF(EXCLUDED.source_name, ''), shopify_orders.source_name),
             total_price=EXCLUDED.total_price,
             currency=EXCLUDED.currency,
             created_at=EXCLUDED.created_at,
@@ -13523,6 +13691,7 @@ def _upsert_order(cur, order):
             customer_email,
             order.get("financial_status"),
             order.get("fulfillment_status"),
+            order.get("source_display") or order.get("source_name") or "",
             order.get("total_price"),
             order.get("currency"),
             order.get("created_at") or "",
@@ -13628,6 +13797,69 @@ def _persist_order_snapshot(order):
             raise
 
 
+def _order_ingestion_log(order, *, ingestion_method, import_result, reason="", duration_ms=0, mapping_methods=None):
+    payload = {
+        "event": "shopify_order_ingestion",
+        "shopify_order_id": _shopify_order_id(order),
+        "order_name": _shopify_order_name(order),
+        "source_name": str(order.get("source_display") or order.get("source_name") or ""),
+        "ingestion_method": str(ingestion_method or "reconciliation"),
+        "import_result": str(import_result or ""),
+        "rejection_reason": str(reason or ""),
+        "mapping_methods": sorted({str(value) for value in (mapping_methods or []) if str(value or "").strip()}),
+        "duration_ms": max(int(duration_ms or 0), 0),
+    }
+    print(json.dumps(payload, ensure_ascii=True, default=str), flush=True)
+
+
+def _set_order_ingestion_outcome(
+    order,
+    *,
+    ingestion_method,
+    ingestion_status,
+    import_result,
+    reason="",
+    duration_ms=0,
+    mapping_methods=None,
+):
+    _order_ingestion_log(
+        order,
+        ingestion_method=ingestion_method,
+        import_result=import_result,
+        reason=reason,
+        duration_ms=duration_ms,
+        mapping_methods=mapping_methods,
+    )
+    if not is_configured() or not _shopify_order_id(order):
+        return
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE shopify_orders
+                SET source_name=COALESCE(NULLIF(%s, ''), source_name),
+                    ingestion_status=%s,
+                    ingestion_method=%s,
+                    ingestion_result=%s,
+                    ingestion_reason=%s,
+                    ingestion_duration_ms=%s,
+                    last_ingested_at=now(),
+                    updated_at=now()
+                WHERE shopify_order_id=%s
+                """,
+                (
+                    str(order.get("source_display") or order.get("source_name") or ""),
+                    str(ingestion_status or "pending"),
+                    str(ingestion_method or "reconciliation"),
+                    str(import_result or ""),
+                    str(reason or ""),
+                    max(int(duration_ms or 0), 0),
+                    _shopify_order_id(order),
+                ),
+            )
+        conn.commit()
+
+
 def _set_order_line_status(
     cur,
     shopify_line_item_id,
@@ -13639,6 +13871,7 @@ def _set_order_line_status(
     product_title="",
     variant_title="",
     sku="",
+    mapping_method="",
     last_error="",
 ):
     has_line_variant_id = column_exists(cur, "shopify_order_lines", "shopify_variant_id")
@@ -13656,6 +13889,21 @@ def _set_order_line_status(
         str(shopify_variant_id or ""),
         str(shopify_variant_id or ""),
     ) if has_line_variant_id else ()
+    has_mapping_method = column_exists(cur, "shopify_order_lines", "mapping_method")
+    mapping_update_sql = (
+        """
+            mapping_method=CASE
+                WHEN %s <> '' THEN %s
+                ELSE mapping_method
+            END,
+        """
+        if has_mapping_method
+        else ""
+    )
+    mapping_params = (
+        str(mapping_method or ""),
+        str(mapping_method or ""),
+    ) if has_mapping_method else ()
     cur.execute(
         f"""
         UPDATE shopify_order_lines
@@ -13666,6 +13914,7 @@ def _set_order_line_status(
                 ELSE shopify_product_id
             END,
             {variant_update_sql}
+            {mapping_update_sql}
             shopify_handle=CASE
                 WHEN %s <> '' THEN %s
                 ELSE shopify_handle
@@ -13692,6 +13941,7 @@ def _set_order_line_status(
             str(shopify_product_id or ""),
             str(shopify_product_id or ""),
             *variant_params,
+            *mapping_params,
             str(shopify_handle or ""),
             str(shopify_handle or ""),
             str(product_title or ""),
@@ -15122,7 +15372,9 @@ def process_paid_order(
     assign_editions=True,
     allocation_skip_reason="",
     ensure_schema_first=True,
+    ingestion_method="reconciliation",
 ):
+    processing_started = time.perf_counter()
     if ensure_schema_first:
         ensure_schema()
     if not order.get("shopify_order_id"):
@@ -15134,9 +15386,19 @@ def process_paid_order(
     generated_certificates = 0
     errors = []
     _persist_order_snapshot(order)
+    mapping_methods = set()
 
-    financial_status = str(order.get("financial_status") or "").upper()
-    if financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}:
+    eligibility = shopify_order_eligibility(order)
+    if not eligibility.get("eligible"):
+        rejection_reason = eligibility.get("reason") or "ineligible_order"
+        _set_order_ingestion_outcome(
+            order,
+            ingestion_method=ingestion_method,
+            ingestion_status="rejected",
+            import_result="rejected",
+            reason=rejection_reason,
+            duration_ms=int((time.perf_counter() - processing_started) * 1000),
+        )
         return {
             "assignments_created": 0,
             "existing_assignments_skipped": 0,
@@ -15144,9 +15406,20 @@ def process_paid_order(
             "generated_certificates": 0,
             "historical_lines_marked": 0,
             "changed_handles": [],
+            "ingestion_status": "rejected",
+            "import_result": "rejected",
+            "rejection_reason": rejection_reason,
             "errors": [],
         }
     if not assign_editions:
+        _set_order_ingestion_outcome(
+            order,
+            ingestion_method=ingestion_method,
+            ingestion_status="complete",
+            import_result="stored_without_allocation",
+            reason=allocation_skip_reason or HISTORICAL_ORDER_NOTE,
+            duration_ms=int((time.perf_counter() - processing_started) * 1000),
+        )
         return {
             "assignments_created": 0,
             "existing_assignments_skipped": 0,
@@ -15175,31 +15448,6 @@ def process_paid_order(
             item[0],
         ),
     )
-    existing_edition_identity = list_existing_edition_order_identities(
-        [order],
-        ensure_schema_first=ensure_schema_first,
-    )
-    existing_order_locks = list_existing_order_sync_locks([order], ensure_schema_first=ensure_schema_first)
-    existing_order_ids = existing_edition_identity.get("order_ids") or set()
-    order_id_candidates = set(_shopify_id_candidates("Order", order.get("shopify_order_id")))
-    order_lock_keys = set(_order_sync_lock_keys(order.get("shopify_order_id"), _shopify_order_name(order)))
-    if (
-        bool(order_lock_keys.intersection(existing_order_locks))
-        or
-        bool(order_id_candidates.intersection(existing_order_ids))
-        or _shopify_order_name(order) in (existing_edition_identity.get("order_names") or set())
-    ):
-        return {
-            "assignments_created": 0,
-            "existing_assignments_skipped": 1,
-            "missing_mapping_skipped": 0,
-            "generated_certificates": 0,
-            "historical_lines_marked": 0,
-            "changed_handles": [],
-            "new_assignment_ids": [],
-            "errors": [],
-        }
-
     for line_index, line_item in line_items_for_allocation:
         if not isinstance(line_item, dict):
             line_item = {}
@@ -15232,6 +15480,7 @@ def process_paid_order(
                 product = match_result.get("product") or {}
         except Exception as error:
             product = None
+            mapping_methods.add("mapping_error")
             errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
             line_status_started = time.perf_counter()
             with connect() as conn:
@@ -15246,6 +15495,7 @@ def process_paid_order(
                         product_title=line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
                         sku=line_item.get("sku") or "",
+                        mapping_method="mapping_error",
                         last_error=str(error),
                     )
                 conn.commit()
@@ -15253,6 +15503,8 @@ def process_paid_order(
             continue
 
         if product:
+            mapping_method = str(product.get("match_method") or (match_result or {}).get("match_method") or "cached_match")
+            mapping_methods.add(mapping_method)
             for cache_key in (
                 str(product.get("shopify_product_id") or "").strip(),
                 str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
@@ -15267,6 +15519,8 @@ def process_paid_order(
         handle = (product or {}).get("handle") or ""
         if not handle:
             missing_mapping_skipped += quantity
+            mapping_method = "ambiguous" if (match_result or {}).get("status") == "ambiguous" else "unmapped"
+            mapping_methods.add(mapping_method)
             mapping_reason = (match_result or {}).get("reason") or "Could not confidently match the line to an Edition Ops product."
             errors.append(f"Missing product mapping for line item {line_item_id}: {mapping_reason}")
             line_status_started = time.perf_counter()
@@ -15275,12 +15529,13 @@ def process_paid_order(
                     _set_order_line_status(
                         cur,
                         line_item_id,
-                        "Product Not Found",
+                        "Needs product mapping",
                         shopify_product_id=(product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or "",
                         shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
                         product_title=(product or {}).get("title") or line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
                         sku=line_item.get("sku") or "",
+                        mapping_method=mapping_method,
                         last_error=mapping_reason,
                     )
                 conn.commit()
@@ -15303,6 +15558,7 @@ def process_paid_order(
                         product_title=product.get("title") or line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
                         sku=line_item.get("sku") or "",
+                        mapping_method=str(product.get("match_method") or "matched_disabled_product"),
                         last_error=setup_reason,
                     )
                 conn.commit()
@@ -15379,6 +15635,7 @@ def process_paid_order(
                     product_title=product_title,
                     variant_title=line_item.get("variant_title") or "",
                     sku=line_item.get("sku") or "",
+                    mapping_method=str((product or {}).get("match_method") or "matched"),
                     last_error=line_error,
                 )
             conn.commit()
@@ -15442,6 +15699,27 @@ def process_paid_order(
         existing_assignments=existing_assignments_skipped,
         missing_mapping=missing_mapping_skipped,
     )
+    if missing_mapping_skipped:
+        ingestion_status = "needs_mapping"
+        import_result = "needs_mapping"
+        ingestion_reason = "One or more line items need product mapping."
+    elif errors:
+        ingestion_status = "retryable_error"
+        import_result = "updated_with_errors"
+        ingestion_reason = errors[0]
+    else:
+        ingestion_status = "complete"
+        import_result = "inserted_or_updated"
+        ingestion_reason = ""
+    _set_order_ingestion_outcome(
+        order,
+        ingestion_method=ingestion_method,
+        ingestion_status=ingestion_status,
+        import_result=import_result,
+        reason=ingestion_reason,
+        duration_ms=int((time.perf_counter() - processing_started) * 1000),
+        mapping_methods=mapping_methods,
+    )
     return {
         "assignments_created": assignments_created,
         "existing_assignments_skipped": existing_assignments_skipped,
@@ -15450,6 +15728,9 @@ def process_paid_order(
         "historical_lines_marked": 0,
         "changed_handles": sorted(changed_handles),
         "new_assignment_ids": _sorted_nonempty(assignment.get("id") for assignment in new_assignments),
+        "ingestion_status": ingestion_status,
+        "import_result": import_result,
+        "mapping_methods": sorted(mapping_methods),
         "errors": errors,
     }
 
@@ -15464,6 +15745,7 @@ def process_shopify_order_for_editions(
     assign_editions=True,
     allocation_skip_reason="",
     ensure_schema_first=True,
+    ingestion_method="reconciliation",
 ):
     """Persist one Shopify order, assign editions, and sync product widget metafields."""
     order = dict(order_payload or {})
@@ -15478,6 +15760,7 @@ def process_shopify_order_for_editions(
         assign_editions=assign_editions,
         allocation_skip_reason=allocation_skip_reason,
         ensure_schema_first=ensure_schema_first,
+        ingestion_method=ingestion_method,
     )
 
 
@@ -15572,7 +15855,10 @@ def _latest_paid_orders_payload(
         reverse = False
         query_mode = cursor.get("query_mode") or "cursor"
     order_limit = int(limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT)
-    latest_created_limit = order_limit if backfill_latest_paid else 0
+    latest_created_limit = order_limit if backfill_latest_paid else min(
+        max(int(latest_created_catchup_limit or DEFAULT_LATEST_CREATED_CATCHUP_LIMIT), 1),
+        100,
+    )
     query_parameters = {
         "status": "any",
         "financial_status": "paid",
@@ -15651,17 +15937,40 @@ def _latest_paid_orders_payload(
             orders=len(cursor_orders),
             duration_ms=int((time.perf_counter() - cursor_stage_started) * 1000),
         )
-        latest_created_query = ""
-        latest_created_fetched = {}
-        latest_created_orders = []
-        orders = cursor_orders
-        duplicate_orders_removed = 0
+        recent_created_from = utc_now_datetime() - timedelta(days=max(int(lookback_days or 1), 1))
+        latest_created_query = (
+            "financial_status:paid "
+            f"created_at:>='{_datetime_to_shopify_query(recent_created_from)}'"
+        )
+        latest_stage_started = time.perf_counter()
+        _orders_sync_log("latest_created_fetch_started", mode="reconciliation", limit=latest_created_limit)
+        latest_created_fetched = shopify_sync.fetch_latest_paid_orders(
+            limit=latest_created_limit,
+            lookback_days=lookback_days,
+            query=latest_created_query,
+            sort_key="CREATED_AT",
+            reverse=True,
+            lightweight=True,
+            config=config,
+        )
+        latest_created_orders = latest_created_fetched.get("orders") or []
+        _orders_sync_log(
+            "latest_created_fetch_completed",
+            "completed",
+            orders=len(latest_created_orders),
+            duration_ms=int((time.perf_counter() - latest_stage_started) * 1000),
+        )
+        orders, duplicate_orders_removed = _dedupe_shopify_order_candidates(
+            cursor_orders,
+            latest_created_orders,
+        )
         _orders_sync_log("candidate_orders_count", "completed", candidate_orders=len(orders))
         fetched = {
-            "query": cursor_fetched.get("query") or query,
+            "query": f"{cursor_fetched.get('query') or query} + recent_created:{latest_created_fetched.get('query') or latest_created_query}",
             "limit": order_limit,
             "lookback_days": lookback_days,
-            "pages_fetched": int(cursor_fetched.get("pages_fetched") or 0),
+            "pages_fetched": int(cursor_fetched.get("pages_fetched") or 0)
+            + int(latest_created_fetched.get("pages_fetched") or 0),
             "line_items_fetched": _sync_order_line_count(orders),
             "metafields_fetched": _sync_order_metafield_count(orders),
         }
@@ -15678,8 +15987,21 @@ def _latest_paid_orders_payload(
         "orders": orders,
         "query": str(fetched.get("query") or ""),
         "query_parameters": query_parameters,
-        "latest_created_query_parameters": {},
-        "fetch_strategy": "latest_paid_backfill" if backfill_latest_paid else "cursor_only",
+        "latest_created_query_parameters": {
+            "status": "any",
+            "financial_status": "paid",
+            "fulfillment_status": "",
+            "updated_at_min": "",
+            "created_at_min": _datetime_to_shopify_query(
+                utc_now_datetime() - timedelta(days=max(int(lookback_days or 1), 1))
+            ),
+            "limit": latest_created_limit,
+            "sort": "CREATED_AT",
+            "order": "desc",
+        }
+        if not backfill_latest_paid
+        else {},
+        "fetch_strategy": "latest_paid_backfill" if backfill_latest_paid else "cursor_plus_recent_created_reconciliation",
         "cursor_orders_fetched": len(cursor_orders),
         "latest_created_orders_fetched": len(latest_created_orders),
         "duplicate_orders_removed": duplicate_orders_removed,
@@ -15719,7 +16041,8 @@ def list_existing_shopify_order_states(order_ids, *, ensure_schema_first=True):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT shopify_order_id, remote_updated_at, created_at, synced_at
+                    SELECT shopify_order_id, remote_updated_at, created_at, synced_at,
+                           ingestion_status, ingestion_result, ingestion_reason
                     FROM shopify_orders
                     WHERE shopify_order_id = ANY(%s)
                     """,
@@ -15736,6 +16059,9 @@ def list_existing_shopify_order_states(order_ids, *, ensure_schema_first=True):
             "remote_updated_at": row.get("remote_updated_at"),
             "created_at": row.get("created_at"),
             "synced_at": row.get("synced_at"),
+            "ingestion_status": row.get("ingestion_status"),
+            "ingestion_result": row.get("ingestion_result"),
+            "ingestion_reason": row.get("ingestion_reason"),
         }
         for row in rows
         if row.get("shopify_order_id")
@@ -15756,20 +16082,35 @@ def _latest_paid_order_needs_sync(
     if not order_id:
         return False
     order_name = _shopify_order_name(order)
-    identities = existing_edition_order_identities or {}
     order_id_candidates = set(_shopify_id_candidates("Order", order_id))
-    order_lock_keys = set(_order_sync_lock_keys(order_id, order_name))
-    if order_lock_keys.intersection(existing_order_sync_locks or set()):
-        return False
-    if order_id_candidates.intersection(identities.get("order_ids") or set()) or order_name in (identities.get("order_names") or set()):
-        return False
-    if order_id not in existing_order_ids:
+    stored_order_id = next((candidate for candidate in order_id_candidates if candidate in existing_order_ids), "")
+    if not stored_order_id:
+        identities = existing_edition_order_identities or {}
+        order_lock_keys = set(_order_sync_lock_keys(order_id, order_name))
+        if order_lock_keys.intersection(existing_order_sync_locks or set()):
+            return False
+        if order_id_candidates.intersection(identities.get("order_ids") or set()):
+            return False
+        if order_name and order_name in (identities.get("order_names") or set()):
+            return False
         return True
     for line_item in order.get("line_items") or []:
         line_item_id = str(line_item.get("shopify_line_item_id") or "").strip()
-        if line_item_id and line_item_id not in existing_line_item_ids:
+        line_id_candidates = set(_shopify_id_candidates("LineItem", line_item_id))
+        if line_item_id and not line_id_candidates.intersection(existing_line_item_ids):
             return True
-    _ = existing_order_states
+    state = (existing_order_states or {}).get(order_id) or (existing_order_states or {}).get(stored_order_id) or {}
+    if str(state.get("ingestion_status") or "").strip().casefold() in {
+        "pending",
+        "processing",
+        "needs_mapping",
+        "retryable_error",
+    }:
+        return True
+    remote_updated = _shopify_order_cursor_datetime(order)
+    stored_updated = _parse_datetime(state.get("remote_updated_at"))
+    if remote_updated and (not stored_updated or remote_updated > stored_updated):
+        return True
     return False
 
 
@@ -16539,6 +16880,17 @@ def sync_latest_paid_orders_to_supabase(
     db_write_started = time.perf_counter()
     line_items_fetched = int(payload.get("line_items_fetched") or _sync_order_line_count(fetched_orders))
     skipped_status_orders, skipped_status_lines = _paid_order_skip_counts(fetched_orders)
+    for rejected_order in fetched_orders:
+        rejection = shopify_order_eligibility(rejected_order)
+        if rejection.get("eligible"):
+            continue
+        _order_ingestion_log(
+            rejected_order,
+            ingestion_method="reconciliation",
+            import_result="rejected",
+            reason=rejection.get("reason") or "ineligible_order",
+            duration_ms=0,
+        )
     newest_processed_cursor = _newest_shopify_order_cursor(fetched_orders)
     newest_processed_cursor_text = _datetime_to_setting(newest_processed_cursor) if newest_processed_cursor else ""
     cursor_updated = False
@@ -16553,6 +16905,9 @@ def sync_latest_paid_orders_to_supabase(
     assigned_order_names = set()
     affected_shopify_order_ids = set()
     affected_edition_order_ids = set()
+    needs_mapping_orders = 0
+    retryable_error_orders = 0
+    rejected_orders = skipped_status_orders
 
     try:
         attempt_started = time.perf_counter()
@@ -16722,15 +17077,30 @@ def sync_latest_paid_orders_to_supabase(
         _orders_sync_log("allocation_started", orders=len(candidate_orders))
         _orders_sync_log("edition_allocation_started", orders=len(candidate_orders))
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
-            result = process_shopify_order_for_editions(
-                order,
-                allocation_status="assigned",
-                fetch_missing_products=False,
-                generate_certificates=False,
-                sync_product_metafields=False,
-                assign_editions=True,
-                ensure_schema_first=ensure_schema_first,
-            )
+            try:
+                result = process_shopify_order_for_editions(
+                    order,
+                    allocation_status="assigned",
+                    fetch_missing_products=False,
+                    generate_certificates=False,
+                    sync_product_metafields=False,
+                    assign_editions=True,
+                    ensure_schema_first=ensure_schema_first,
+                    ingestion_method="reconciliation",
+                )
+            except Exception as order_error:
+                retryable_error_orders += 1
+                candidate_processing_errors += 1
+                message = f"Order {_shopify_order_name(order) or _shopify_order_id(order)} failed and remains retryable: {order_error}"
+                errors.append(message)
+                _order_ingestion_log(
+                    order,
+                    ingestion_method="reconciliation",
+                    import_result="retryable_error",
+                    reason=order_error.__class__.__name__,
+                    duration_ms=0,
+                )
+                continue
             processed_orders += 1
             order_assignments = int(result.get("assignments_created") or 0)
             assignments += order_assignments
@@ -16743,9 +17113,14 @@ def sync_latest_paid_orders_to_supabase(
                 affected_edition_order_ids.update(result.get("new_assignment_ids") or [])
             result_errors = result.get("errors") or []
             errors.extend(result_errors)
-            candidate_processing_errors += len(result_errors)
+            ingestion_status = str(result.get("ingestion_status") or "complete").strip().casefold()
+            if ingestion_status == "needs_mapping":
+                needs_mapping_orders += 1
+            elif ingestion_status == "retryable_error":
+                retryable_error_orders += 1
+                candidate_processing_errors += max(len(result_errors), 1)
             order_id = _shopify_order_id(order)
-            if order_id in imported_shopify_order_ids and not result_errors:
+            if order_id in imported_shopify_order_ids and ingestion_status != "retryable_error":
                 successfully_imported_order_ids.add(order_id)
         allocation_elapsed_ms = (time.perf_counter() - allocation_started) * 1000
         _sync_perf_log(
@@ -16958,12 +17333,29 @@ def sync_latest_paid_orders_to_supabase(
                     "failed",
                     error=str(notification_error),
                 )
+        _record_order_reconciliation_health(
+            {
+                "orders_examined": seen,
+                "orders_inserted": imported_orders,
+                "orders_updated": max(processed_orders - imported_orders, 0),
+                "orders_unchanged": max(seen - len(candidate_orders) - rejected_orders, 0),
+                "orders_requiring_mapping": needs_mapping_orders,
+                "orders_rejected": rejected_orders,
+                "orders_retryable_errors": retryable_error_orders,
+                "fetch_strategy": payload.get("fetch_strategy") or "",
+                "cursor_updated": cursor_updated,
+            },
+            error=(errors[0] if retryable_error_orders and errors else ""),
+            ensure_schema_first=ensure_schema_first,
+        )
         return {
             "mode": "latest_paid_sync",
             "orders_seen": seen,
             "shopify_orders_fetched": seen,
             "orders_processed": processed_orders,
             "orders_inserted_or_updated": processed_orders,
+            "orders_updated": max(processed_orders - imported_orders, 0),
+            "orders_unchanged": max(seen - len(candidate_orders) - rejected_orders, 0),
             "orders_imported": imported_orders,
             "existing_orders_skipped": existing_orders_preserved,
             "new_orders_inserted": imported_orders,
@@ -16982,6 +17374,9 @@ def sync_latest_paid_orders_to_supabase(
             "known_missing_repairs_applied": known_applied,
             "known_missing_repairs_already_consistent": known_consistent,
             "missing_mapping_skipped": missing_mapping_skipped,
+            "orders_requiring_mapping": needs_mapping_orders,
+            "orders_retryable_errors": retryable_error_orders,
+            "orders_rejected": rejected_orders,
             "generated_certificates": 0,
             "certificates_deferred": assignments,
             "product_metafields_deferred": int(product_metafield_mirror.get("skipped") or 0),
@@ -17051,6 +17446,19 @@ def sync_latest_paid_orders_to_supabase(
             pass
         if ensure_schema_first:
             log_app_error("latest_paid_order_sync_failed", failure_message, {"records_seen": seen})
+        _record_order_reconciliation_health(
+            {
+                "orders_examined": seen,
+                "orders_inserted": imported_orders,
+                "orders_updated": max(processed_orders - imported_orders, 0),
+                "orders_requiring_mapping": needs_mapping_orders,
+                "orders_rejected": rejected_orders,
+                "orders_retryable_errors": retryable_error_orders + 1,
+                "fetch_strategy": payload.get("fetch_strategy") or "",
+            },
+            error=failure_message,
+            ensure_schema_first=ensure_schema_first,
+        )
         _orders_sync_log("orders_sync_failed", "failed", error=failure_message, orders=seen, assignments=assignments)
         raise RuntimeError(failure_message) from error
 
@@ -17226,6 +17634,12 @@ def normalize_rest_order(payload):
                 "note_attributes": properties,
             }
         )
+    source_name = str(payload.get("source_name") or payload.get("sourceName") or "").strip()
+    source_display = {
+        "web": "Online Store",
+        "pos": "Shopify POS",
+        "shopify_draft_order": "Draft order",
+    }.get(source_name.casefold(), source_name.replace("_", " ").strip().title())
     return {
         "shopify_order_id": _shopify_gid("Order", legacy_order_id),
         "legacy_resource_id": legacy_order_id,
@@ -17245,6 +17659,9 @@ def normalize_rest_order(payload):
         "created_at": payload.get("created_at") or "",
         "remote_updated_at": payload.get("updated_at") or "",
         "processed_at": payload.get("processed_at") or "",
+        "source_name": source_name,
+        "source_display": source_display,
+        "test": bool(payload.get("test")),
         "cancelled_at": payload.get("cancelled_at") or "",
         "note": payload.get("note") or "",
         "custom_attributes": payload.get("note_attributes") or [],
@@ -17271,6 +17688,8 @@ def _safe_webhook_order_payload(payload):
         "name": payload.get("name") or payload.get("order_name") or "",
         "order_number": payload.get("order_number") or payload.get("order_number") or "",
         "financial_status": payload.get("financial_status") or "",
+        "source_name": payload.get("source_name") or payload.get("sourceName") or "",
+        "test": bool(payload.get("test")),
         "created_at": payload.get("created_at") or "",
         "updated_at": payload.get("updated_at") or payload.get("remote_updated_at") or "",
         "line_item_count": len(line_items),
@@ -17338,6 +17757,9 @@ def _ensure_webhook_event_table_with_cursor(cur):
         ("processed_at", "TIMESTAMPTZ"),
         ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
         ("new_order_inserted", "BOOLEAN DEFAULT FALSE"),
+        ("source_name", "TEXT DEFAULT ''"),
+        ("import_result", "TEXT DEFAULT ''"),
+        ("rejection_reason", "TEXT DEFAULT ''"),
         ("payload", "JSONB DEFAULT '{}'::jsonb"),
         ("error_message", "TEXT"),
     ):
@@ -17372,6 +17794,7 @@ def _claim_webhook_event(
         shopify_order_name = safe_payload.get("name") or ""
     shopify_order_id = str(shopify_order_id or "").strip()
     shopify_order_name = str(shopify_order_name or "").strip()
+    source_name = str(safe_payload.get("source_name") or "").strip()
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -17380,22 +17803,36 @@ def _claim_webhook_event(
                     """
                     INSERT INTO webhook_events(
                         webhook_id, topic, status, shop_domain, shopify_order_id, shopify_order_name,
-                        source, payload, received_at
+                        source, source_name, payload, received_at
                     )
-                    VALUES (%s, %s, 'received', %s, %s, %s, 'webhook', %s::jsonb, now())
+                    VALUES (%s, %s, 'received', %s, %s, %s, 'webhook', %s, %s::jsonb, now())
                     ON CONFLICT (webhook_id) DO NOTHING
                     RETURNING webhook_id
                     """,
-                    (webhook_id, topic, shop_domain, shopify_order_id, shopify_order_name, json_dumps(safe_payload)),
+                    (
+                        webhook_id,
+                        topic,
+                        shop_domain,
+                        shopify_order_id,
+                        shopify_order_name,
+                        source_name,
+                        json_dumps(safe_payload),
+                    ),
                 )
                 inserted = cur.fetchone()
                 if inserted:
                     conn.commit()
                     return True
-                cur.execute("SELECT status FROM webhook_events WHERE webhook_id=%s", (webhook_id,))
+                cur.execute("SELECT status, received_at, processed_at FROM webhook_events WHERE webhook_id=%s", (webhook_id,))
                 existing = cur.fetchone() or {}
                 existing_status = str(existing.get("status") or "").strip().casefold()
-                if existing_status in {"failed", "retry"}:
+                received_at = _parse_datetime(existing.get("received_at"))
+                stale_inflight = (
+                    existing_status in {"received", "processing"}
+                    and received_at is not None
+                    and received_at <= utc_now_datetime() - timedelta(minutes=5)
+                )
+                if existing_status in {"failed", "retry"} or stale_inflight:
                     cur.execute(
                         """
                         UPDATE webhook_events
@@ -17405,6 +17842,7 @@ def _claim_webhook_event(
                             shopify_order_id=%s,
                             shopify_order_name=%s,
                             source='webhook',
+                            source_name=%s,
                             payload=%s::jsonb,
                             received_at=now(),
                             processed_at=NULL,
@@ -17415,21 +17853,19 @@ def _claim_webhook_event(
                             error_message=''
                         WHERE webhook_id=%s
                         """,
-                        (topic, shop_domain, shopify_order_id, shopify_order_name, json_dumps(safe_payload), webhook_id),
+                        (
+                            topic,
+                            shop_domain,
+                            shopify_order_id,
+                            shopify_order_name,
+                            source_name,
+                            json_dumps(safe_payload),
+                            webhook_id,
+                        ),
                     )
                     conn.commit()
                     return True
-                cur.execute(
-                    """
-                    UPDATE webhook_events
-                    SET status='skipped_duplicate',
-                        error_message='Duplicate webhook delivery skipped.',
-                        processed_at=COALESCE(processed_at, now())
-                    WHERE webhook_id=%s
-                    """,
-                    (webhook_id,),
-                )
-            conn.commit()
+                conn.rollback()
     except Exception as error:
         schema_message = webhook_schema_error_message(error)
         if schema_message:
@@ -17496,6 +17932,9 @@ def _update_webhook_event_status(
     new_order_inserted=False,
     shopify_order_id="",
     shopify_order_name="",
+    source_name="",
+    import_result="",
+    rejection_reason="",
 ):
     if not webhook_id:
         return
@@ -17514,7 +17953,10 @@ def _update_webhook_event_status(
                         new_order_inserted=%s,
                         processed_at=CASE WHEN %s IN ('processed', 'processed_with_warnings', 'skipped', 'skipped_duplicate', 'failed') THEN now() ELSE processed_at END,
                         shopify_order_id=COALESCE(NULLIF(%s, ''), shopify_order_id),
-                        shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name)
+                        shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name),
+                        source_name=COALESCE(NULLIF(%s, ''), source_name),
+                        import_result=COALESCE(NULLIF(%s, ''), import_result),
+                        rejection_reason=COALESCE(NULLIF(%s, ''), rejection_reason)
                     WHERE webhook_id=%s
                     """,
                     (
@@ -17528,6 +17970,9 @@ def _update_webhook_event_status(
                         status,
                         str(shopify_order_id or "").strip(),
                         str(shopify_order_name or "").strip(),
+                        str(source_name or "").strip(),
+                        str(import_result or "").strip(),
+                        str(rejection_reason or "").strip(),
                         webhook_id,
                     ),
                 )
@@ -17852,13 +18297,37 @@ def process_single_paid_shopify_order_for_editions(
     order = _load_single_paid_shopify_order(order_id_or_payload, config=config)
     order_name = _shopify_order_name(order)
     order_id = _shopify_order_id(order)
-    _webhook_log("webhook_order_processing_started", source=source, order_name=order_name, shopify_order_id=order_id)
-    if not _latest_paid_order_is_processable(order):
-        _webhook_log("order_not_paid_skipped", "completed", source=source, order_name=order_name, shopify_order_id=order_id)
+    source_name = str(order.get("source_display") or order.get("source_name") or "")
+    _webhook_log(
+        "webhook_order_processing_started",
+        source=source,
+        source_name=source_name,
+        order_name=order_name,
+        shopify_order_id=order_id,
+    )
+    eligibility = shopify_order_eligibility(order)
+    if not eligibility.get("eligible"):
+        rejection_reason = eligibility.get("reason") or "ineligible_order"
+        _order_ingestion_log(
+            order,
+            ingestion_method=source,
+            import_result="rejected",
+            reason=rejection_reason,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        _webhook_log(
+            "order_ineligible_skipped",
+            "completed",
+            source=source,
+            source_name=source_name,
+            order_name=order_name,
+            shopify_order_id=order_id,
+            reason=rejection_reason,
+        )
         return {
             "source": source,
             "processed": False,
-            "reason": "Order is not paid, is cancelled, or is invalid.",
+            "reason": rejection_reason,
             "order_name": order_name,
             "shopify_order_id": order_id,
             "imported_lines": 0,
@@ -17871,7 +18340,14 @@ def process_single_paid_shopify_order_for_editions(
             "new_order_inserted": False,
             "errors": [],
         }
-    _webhook_log("order_paid_validated", "completed", source=source, order_name=order_name, shopify_order_id=order_id)
+    _webhook_log(
+        "order_paid_validated",
+        "completed",
+        source=source,
+        source_name=source_name,
+        order_name=order_name,
+        shopify_order_id=order_id,
+    )
 
     existing_order_ids = list_existing_shopify_order_ids(
         [order_id],
@@ -17896,13 +18372,17 @@ def process_single_paid_shopify_order_for_editions(
         existing_lines=len(existing_line_ids),
         new_lines=len(new_line_ids),
     )
-    if line_item_ids and not new_line_ids:
+    if line_item_ids and not new_line_ids and source != "targeted_reconciliation":
         result = {
             "source": source,
             "processed": True,
             "reason": "All Shopify line items already exist.",
             "order_name": order_name,
             "shopify_order_id": order_id,
+            "source_name": source_name,
+            "import_result": "unchanged",
+            "ingestion_status": "complete",
+            "mapping_methods": [],
             "imported_lines": 0,
             "skipped_existing_lines": len(existing_line_ids),
             "editions_assigned": 0,
@@ -17913,9 +18393,15 @@ def process_single_paid_shopify_order_for_editions(
             "new_order_inserted": False,
             "errors": [],
         }
-        _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
+        _webhook_log(
+            "webhook_order_processing_finished",
+            "completed",
+            source=source,
+            source_name=source_name,
+            order_name=order_name,
+            elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
         return result
-
     _webhook_log("edition_allocation_started", source=source, order_name=order_name, new_lines=len(new_line_ids))
     allocation_result = process_shopify_order_for_editions(
         order,
@@ -17925,6 +18411,7 @@ def process_single_paid_shopify_order_for_editions(
         sync_product_metafields=False,
         assign_editions=True,
         ensure_schema_first=ensure_schema_first,
+        ingestion_method=source,
     )
     _webhook_log(
         "edition_allocation_completed",
@@ -17972,11 +18459,217 @@ def process_single_paid_shopify_order_for_editions(
         "product_metafield_mirror": mirror_result,
         "order_visible_refresh_hint": bool(new_line_ids or allocation_result.get("assignments_created")),
         "new_order_inserted": bool(order_id and not order_was_existing and new_line_ids),
+        "source_name": source_name,
+        "import_result": allocation_result.get("import_result") or "unchanged",
+        "ingestion_status": allocation_result.get("ingestion_status") or "complete",
+        "mapping_methods": allocation_result.get("mapping_methods") or [],
         "errors": errors,
     }
     _webhook_log("orders_snapshot_invalidated", "completed", source=source, order_name=order_name)
     _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
     return result
+
+
+def get_shopify_order_ingestion_trace(
+    shopify_order_id,
+    *,
+    order_name="",
+    ensure_schema_first=True,
+):
+    """Return a PII-safe persistence trace for one immutable Shopify order ID."""
+    if ensure_schema_first:
+        ensure_schema()
+    immutable_order_id = str(shopify_order_id or "").strip()
+    display_name = str(order_name or "").strip()
+    if not immutable_order_id:
+        raise ValueError("Shopify order ID is required for an ingestion trace.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT shopify_order_id, order_name, source_name, financial_status,
+                       fulfillment_status, ingestion_status, ingestion_method,
+                       ingestion_result, ingestion_reason, ingestion_duration_ms,
+                       last_ingested_at, created_at, remote_updated_at, synced_at
+                FROM shopify_orders
+                WHERE shopify_order_id=%s
+                LIMIT 1
+                """,
+                (immutable_order_id,),
+            )
+            stored_order = cur.fetchone() or {}
+            cur.execute(
+                """
+                SELECT shopify_line_item_id, assignment_status, mapping_method,
+                       COALESCE(NULLIF(shopify_variant_id, ''), NULLIF(raw_json->>'shopify_variant_id', ''),
+                                NULLIF(raw_json->>'variant_id', '')) AS shopify_variant_id,
+                       COALESCE(NULLIF(sku, ''), NULLIF(raw_json->>'sku', '')) AS sku,
+                       quantity, last_error
+                FROM shopify_order_lines
+                WHERE shopify_order_id=%s
+                ORDER BY shopify_line_item_id
+                """,
+                (immutable_order_id,),
+            )
+            stored_lines = list(cur.fetchall() or [])
+            cur.execute(
+                """
+                SELECT webhook_id, topic, status, source_name, import_result,
+                       rejection_reason, received_at, processed_at,
+                       processing_elapsed_ms, error_message
+                FROM webhook_events
+                WHERE shopify_order_id=%s
+                   OR (%s <> '' AND shopify_order_name=%s)
+                ORDER BY received_at DESC NULLS LAST
+                LIMIT 20
+                """,
+                (immutable_order_id, display_name, display_name),
+            )
+            webhook_events = list(cur.fetchall() or [])
+            cur.execute(
+                """
+                SELECT shopify_line_item_id, COUNT(*) AS operational_units,
+                       MIN(edition_number) AS first_edition_number,
+                       MAX(edition_number) AS last_edition_number
+                FROM edition_orders
+                WHERE shopify_order_id=%s
+                GROUP BY shopify_line_item_id
+                ORDER BY shopify_line_item_id
+                """,
+                (immutable_order_id,),
+            )
+            allocations = list(cur.fetchall() or [])
+    return {
+        "shopify_order_id": immutable_order_id,
+        "order_stored": bool(stored_order),
+        "stored_order": dict(stored_order),
+        "stored_line_count": len(stored_lines),
+        "stored_lines": [dict(row) for row in stored_lines],
+        "webhook_received": bool(webhook_events),
+        "webhook_events": [dict(row) for row in webhook_events],
+        "allocated_operational_units": sum(int(row.get("operational_units") or 0) for row in allocations),
+        "allocations": [dict(row) for row in allocations],
+    }
+
+
+def reconcile_single_shopify_order(
+    *,
+    shopify_order_id="",
+    order_name="",
+    apply=False,
+    config=None,
+    ensure_schema_first=True,
+):
+    """Fetch and optionally apply one exact order without scanning order history."""
+    if ensure_schema_first:
+        ensure_schema()
+    config = config or shopify_sync.get_config()
+    requested_id = str(shopify_order_id or "").strip()
+    requested_name = str(order_name or "").strip()
+    if not requested_id and not requested_name:
+        raise ValueError("Provide a Shopify order ID or display order name.")
+    if requested_id:
+        fetched = shopify_sync.fetch_orders_by_ids([_shopify_gid("Order", requested_id)], config=config)
+        order = dict((fetched or [{}])[0] or {})
+    else:
+        order = dict(shopify_sync.fetch_order_by_name(requested_name, config=config) or {})
+    if not order or not _shopify_order_id(order):
+        raise ValueError("Shopify did not return the requested order.")
+    if requested_name and _shopify_order_name(order).casefold() != f"#{requested_name.lstrip('#')}".casefold():
+        raise ValueError("Shopify returned a different display order name; no changes were made.")
+
+    immutable_order_id = _shopify_order_id(order)
+    trace_before = get_shopify_order_ingestion_trace(
+        immutable_order_id,
+        order_name=_shopify_order_name(order),
+        ensure_schema_first=False,
+    )
+    existing_ids = list_existing_shopify_order_ids(
+        [immutable_order_id],
+        ensure_schema_first=False,
+    )
+    eligibility = shopify_order_eligibility(order)
+    mapping_preview = []
+    for line in order.get("line_items") or []:
+        match = resolve_edition_product_for_order_line(
+            line,
+            fetch_missing_products=False,
+            ensure_schema_first=False,
+        )
+        product = match.get("product") or {}
+        mapping_preview.append(
+            {
+                "shopify_line_item_id": str(line.get("shopify_line_item_id") or ""),
+                "quantity": max(int(line.get("quantity") or 1), 1),
+                "mapping_status": match.get("status") or "missing",
+                "mapping_method": product.get("match_method") or "",
+                "mapped_handle": product.get("handle") or "",
+                "reason": match.get("reason") or "",
+            }
+        )
+
+    result = {
+        "mode": "apply" if apply else "dry_run",
+        "shopify_order_id": immutable_order_id,
+        "order_name": _shopify_order_name(order),
+        "source_name": str(order.get("source_display") or order.get("source_name") or ""),
+        "financial_status": str(order.get("financial_status") or ""),
+        "fulfillment_status": str(order.get("fulfillment_status") or ""),
+        "shipping_method": str(order.get("shipping_method") or order.get("shipping_title") or ""),
+        "currency": str(order.get("currency") or ""),
+        "total_price": str(order.get("total_price") or ""),
+        "line_item_count": len(order.get("line_items") or []),
+        "total_quantity": sum(max(int(line.get("quantity") or 1), 1) for line in order.get("line_items") or []),
+        "customer_present": bool(str(order.get("customer_name") or "").strip()),
+        "shipping_address_present": bool(order.get("shipping_address") or order.get("shipping_address_summary")),
+        "eligible": bool(eligibility.get("eligible")),
+        "eligibility_reason": eligibility.get("reason") or "",
+        "already_stored": immutable_order_id in existing_ids,
+        "trace_before": trace_before,
+        "mapping": mapping_preview,
+        "backfill_safe_to_repeat": True,
+        "applied": False,
+    }
+    if not apply:
+        return result
+    if not eligibility.get("eligible"):
+        _order_ingestion_log(
+            order,
+            ingestion_method="targeted_reconciliation",
+            import_result="rejected",
+            reason=eligibility.get("reason") or "ineligible_order",
+        )
+        return result
+    applied = process_single_paid_shopify_order_for_editions(
+        order,
+        source="targeted_reconciliation",
+        config=config,
+        ensure_schema_first=False,
+    )
+    notification_events_created = 0
+    if applied.get("processed") and str(applied.get("ingestion_status") or "").casefold() != "retryable_error":
+        notification_events_created = record_new_order_notification_events(
+            [order],
+            source="targeted_reconciliation",
+        )
+    trace_after = get_shopify_order_ingestion_trace(
+        immutable_order_id,
+        order_name=_shopify_order_name(order),
+        ensure_schema_first=False,
+    )
+    return {
+        **result,
+        "applied": bool(applied.get("processed")),
+        "import_result": applied.get("import_result") or "",
+        "ingestion_status": applied.get("ingestion_status") or "",
+        "new_order_inserted": bool(applied.get("new_order_inserted")),
+        "imported_lines": int(applied.get("imported_lines") or 0),
+        "editions_assigned": int(applied.get("editions_assigned") or 0),
+        "assigned_editions": list(applied.get("assigned_editions") or []),
+        "new_order_notification_events_created": notification_events_created,
+        "errors": list(applied.get("errors") or []),
+        "trace_after": trace_after,
+    }
 
 
 def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, claim_event=True):
@@ -18043,6 +18736,9 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
             new_order_inserted=bool(result.get("new_order_inserted")),
             shopify_order_id=result.get("shopify_order_id") or "",
             shopify_order_name=result.get("order_name") or "",
+            source_name=result.get("source_name") or "",
+            import_result=result.get("import_result") or ("rejected" if not result.get("processed") else "unchanged"),
+            rejection_reason=result.get("reason") or "" if not result.get("processed") else "",
         )
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY, utc_now())
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY, result.get("order_name") or result.get("shopify_order_id") or "")
@@ -18137,27 +18833,33 @@ def record_new_order_notification_events(orders, *, source="latest_paid_sync"):
     for order in orders or ():
         order_id = _shopify_order_id(order)
         if order_id:
-            unique.setdefault(order_id, _shopify_order_name(order))
+            unique.setdefault(
+                order_id,
+                (
+                    _shopify_order_name(order),
+                    str(order.get("source_display") or order.get("source_name") or ""),
+                ),
+            )
     if not unique:
         return 0
     inserted = 0
     with connect() as conn:
         with conn.cursor() as cur:
             _ensure_webhook_event_table_with_cursor(cur)
-            for order_id, order_name in unique.items():
+            for order_id, (order_name, source_name) in unique.items():
                 event_id = "new-order:" + hashlib.sha256(order_id.encode("utf-8")).hexdigest()
                 cur.execute(
                     """
                     INSERT INTO webhook_events(
                         webhook_id, topic, status, shopify_order_id, shopify_order_name,
-                        source, inserted_count, new_order_inserted, received_at, processed_at,
+                        source, source_name, inserted_count, new_order_inserted, received_at, processed_at,
                         payload, error_message
                     )
-                    VALUES (%s, 'orders/paid', 'processed', %s, %s, %s, 1, TRUE, now(), now(), '{}'::jsonb, '')
+                    VALUES (%s, 'orders/paid', 'processed', %s, %s, %s, %s, 1, TRUE, now(), now(), '{}'::jsonb, '')
                     ON CONFLICT (webhook_id) DO NOTHING
                     RETURNING webhook_id
                     """,
-                    (event_id, order_id, order_name, source),
+                    (event_id, order_id, order_name, source, source_name),
                 )
                 if cur.fetchone():
                     inserted += 1
@@ -19272,10 +19974,11 @@ def list_hybrid_order_rows(limit=50, search=""):
             SELECT
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
+                o.source_name, o.ingestion_status, o.ingestion_result, o.ingestion_reason,
                 o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at,
                 o.cancelled_at, o.synced_at, o.raw_json AS order_raw_json,
                 li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
-                li.assignment_status, li.last_error, li.shopify_handle, li.shopify_product_id,
+                li.assignment_status, li.last_error, li.mapping_method, li.shopify_handle, li.shopify_product_id,
                 COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
                 COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
                 COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
@@ -19619,13 +20322,13 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
         )
         params = [search_value] * 9 + [f"%{search.strip()}%"]
     status_clauses = {
-        "Needs edition": "COALESCE(li.assignment_status, '') IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')",
+        "Needs edition": "COALESCE(li.assignment_status, '') IN ('Needs Edition', 'Product Not Found', 'Needs product mapping', 'Needs Edition Setup', 'Error')",
         "Assigned": "(COALESCE(li.assignment_status, '') = 'Assigned' OR eo.id IS NOT NULL)",
         "Historical": f"COALESCE(li.assignment_status, '') = '{HISTORICAL_ORDER_STATUS}' AND eo.id IS NULL",
         "Certificates missing": "eo.id IS NOT NULL AND c.id IS NULL",
         "PSD missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, ''), '') = ''",
         "Fulfilment missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, ''), '') = ''",
-        "Errors": "COALESCE(li.assignment_status, '') IN ('Error', 'Product Not Found', 'Needs Edition Setup', 'Sold Out')",
+        "Errors": "COALESCE(li.assignment_status, '') IN ('Error', 'Product Not Found', 'Needs product mapping', 'Needs Edition Setup', 'Sold Out')",
     }
     selected_status_clause = status_clauses.get(str(status_filter or "").strip())
     if selected_status_clause:
@@ -19656,7 +20359,7 @@ def get_order_summary():
                 SELECT
                     (SELECT COUNT(*) FROM shopify_orders) AS orders_synced,
                     (SELECT COUNT(*) FROM shopify_order_lines
-                     WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')) AS needs_edition,
+                     WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs product mapping', 'Needs Edition Setup', 'Error')) AS needs_edition,
                     (SELECT COUNT(*) FROM shopify_order_lines
                      WHERE assignment_status = %s) AS historical_lines,
                     (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,

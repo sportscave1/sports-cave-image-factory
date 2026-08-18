@@ -8,6 +8,8 @@ from typing import Mapping
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 
+import shopify_order_reconciliation_worker
+
 
 SHOPIFY_WEBHOOK_SECRET_ENV_NAMES = (
     "SHOPIFY_WEBHOOK_SECRET",
@@ -58,6 +60,16 @@ def _service_version_info():
         "deployment_timestamp": os.getenv("RENDER_DEPLOY_CREATED_AT") or os.getenv("DEPLOYMENT_TIMESTAMP") or "",
         "service_role": os.getenv("SPORTS_CAVE_SERVICE_ROLE") or "webhook",
     }
+
+
+@app.on_event("startup")
+def _start_recent_order_reconciliation():
+    shopify_order_reconciliation_worker.start()
+
+
+@app.on_event("shutdown")
+def _stop_recent_order_reconciliation():
+    shopify_order_reconciliation_worker.stop()
 
 
 def _shopify_webhook_secret_candidates():

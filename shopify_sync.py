@@ -1310,6 +1310,8 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
       createdAt
       updatedAt
       processedAt
+      sourceName
+      test
       cancelledAt
       note
       displayFinancialStatus
@@ -1419,6 +1421,8 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
       createdAt
       updatedAt
       processedAt
+      sourceName
+      test
       cancelledAt
       note
       displayFinancialStatus
@@ -1528,6 +1532,8 @@ query SportsCaveOrdersLight($first: Int!, $after: String, $query: String, $sortK
       createdAt
       updatedAt
       processedAt
+      sourceName
+      test
       displayFinancialStatus
       displayFulfillmentStatus
       email
@@ -1603,6 +1609,8 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
       createdAt
       updatedAt
       processedAt
+      sourceName
+      test
       cancelledAt
       note
       displayFinancialStatus
@@ -3411,6 +3419,12 @@ def normalize_order(node, store_domain):
     legacy_resource_id = str(node.get("legacyResourceId") or "")
     financial_status = node.get("displayFinancialStatus") or ""
     metafields = ((node.get("metafields") or {}).get("nodes") or [])
+    source_name = str(node.get("sourceName") or "").strip()
+    source_display = {
+        "web": "Online Store",
+        "pos": "Shopify POS",
+        "shopify_draft_order": "Draft order",
+    }.get(source_name.casefold(), source_name.replace("_", " ").strip().title())
     return {
         "shopify_order_id": node.get("id") or "",
         "legacy_resource_id": legacy_resource_id,
@@ -3422,6 +3436,9 @@ def normalize_order(node, store_domain):
         "created_at": node.get("createdAt") or "",
         "remote_updated_at": node.get("updatedAt") or "",
         "processed_at": node.get("processedAt") or "",
+        "source_name": source_name,
+        "source_display": source_display,
+        "test": bool(node.get("test")),
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,
         "fulfillment_status": node.get("displayFulfillmentStatus") or "",
@@ -3560,6 +3577,40 @@ def fetch_orders_by_ids(order_ids, config=None, request_post=None):
                 continue
             all_orders.append(normalize_order(node, config["store_domain"]))
     return all_orders
+
+
+def fetch_order_by_name(order_name, config=None, request_post=None):
+    """Resolve one display order name, then return its immutable Shopify order payload."""
+    config = config or get_config()
+    requested = str(order_name or "").strip()
+    if not requested:
+        raise ValueError("Shopify order name is required.")
+    canonical_name = f"#{requested.lstrip('#')}"
+    search_terms = [f"name:{canonical_name.lstrip('#')}", f"name:{canonical_name}"]
+    matches = {}
+    for search_query in search_terms:
+        page = fetch_orders_page(
+            page_size=10,
+            config=config,
+            request_post=request_post,
+            query=search_query,
+            default_paid_unfulfilled_filter=False,
+            sort_key="CREATED_AT",
+            reverse=True,
+        )
+        for order in page.get("orders") or []:
+            if str(order.get("order_name") or "").strip().casefold() != canonical_name.casefold():
+                continue
+            order_id = str(order.get("shopify_order_id") or "").strip()
+            if order_id:
+                matches[order_id] = order
+        if matches:
+            break
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise ShopifyAPIError(f"Shopify returned multiple immutable IDs for order name {canonical_name}.")
+    return next(iter(matches.values()))
 
 
 def fetch_latest_paid_orders(

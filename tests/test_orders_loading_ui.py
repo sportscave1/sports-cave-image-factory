@@ -1459,6 +1459,7 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.VISIBLE_COLUMNS,
             (
                 "order",
+                "channel",
                 "edition",
                 "certificate",
                 "customer",

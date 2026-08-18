@@ -1,0 +1,346 @@
+import os
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import order_allocator
+import run_migrations
+import shopify_sync
+import shopify_order_reconciliation_worker
+import supabase_backend
+
+
+def paid_marketplace_order(**overrides):
+    order = {
+        "shopify_order_id": "gid://shopify/Order/3020",
+        "legacy_resource_id": "3020",
+        "order_name": "#SC3020",
+        "order_number": "SC3020",
+        "created_at": "2026-08-17T13:22:00+10:00",
+        "processed_at": "2026-08-17T13:22:10+10:00",
+        "remote_updated_at": "2026-08-17T13:22:10+10:00",
+        "financial_status": "PAID",
+        "fulfillment_status": "UNFULFILLED",
+        "source_name": "etsy",
+        "source_display": "Etsy",
+        "shipping_method": "Australia Post",
+        "shipping_title": "Australia Post",
+        "customer_name": "Marketplace customer",
+        "line_items": [
+            {
+                "shopify_line_item_id": "gid://shopify/LineItem/30201",
+                "shopify_product_id": "gid://shopify/Product/200",
+                "shopify_variant_id": "gid://shopify/ProductVariant/201",
+                "variant_id": "gid://shopify/ProductVariant/201",
+                "product_title": "Limited Wall Art",
+                "variant_title": "Black / XL",
+                "sku": "LIMITED-BLACK-XL",
+                "quantity": 1,
+            }
+        ],
+    }
+    order.update(overrides)
+    return order
+
+
+class MappingCursor:
+    def __init__(self, *, variant_rows=None, sku_rows=None):
+        self.variant_rows = list(variant_rows or [])
+        self.sku_rows = list(sku_rows or [])
+        self.rows = []
+        self.statements = []
+
+    def execute(self, sql, params=()):
+        self.statements.append((str(sql), params))
+        if "sv.shopify_variant_id = ANY" in str(sql):
+            self.rows = self.variant_rows
+        elif "LOWER(BTRIM(COALESCE(sv.sku" in str(sql):
+            self.rows = self.sku_rows
+        else:
+            self.rows = []
+
+    def fetchall(self):
+        return list(self.rows)
+
+
+class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
+    def test_marketplace_migration_is_additive_parseable_and_discovered(self):
+        from pglast import parse_sql
+
+        path = Path("migrations/20260818_shopify_marketplace_order_reconciliation.sql")
+        sql = path.read_text(encoding="utf-8")
+
+        self.assertGreater(len(parse_sql(sql)), 0)
+        self.assertTrue(run_migrations.safe_migration_sql(sql))
+        self.assertIn(path.name, {candidate.name for candidate in run_migrations.migration_files()})
+        self.assertNotIn("DROP ", sql.upper())
+        self.assertNotIn("DELETE ", sql.upper())
+
+    def test_order_queries_request_channel_and_test_flags_without_filtering_channel(self):
+        for query in (
+            shopify_sync.ORDERS_QUERY,
+            shopify_sync.ORDERS_SAFE_QUERY,
+            shopify_sync.ORDERS_LIGHT_QUERY,
+            shopify_sync.ORDERS_BY_IDS_QUERY,
+        ):
+            self.assertIn("sourceName", query)
+            self.assertIn("test", query)
+            self.assertNotIn("sourceName:", query)
+
+    def test_etsy_rest_order_is_normalized_and_eligible_with_attribution(self):
+        payload = {
+            "id": 3020,
+            "name": "#SC3020",
+            "financial_status": "paid",
+            "fulfillment_status": None,
+            "source_name": "etsy",
+            "shipping_lines": [{"title": "Australia Post"}],
+            "line_items": [
+                {
+                    "id": 30201,
+                    "product_id": 200,
+                    "variant_id": 201,
+                    "sku": "LIMITED-BLACK-XL",
+                    "title": "Limited Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+
+        order = supabase_backend.normalize_rest_order(payload)
+
+        self.assertEqual(order["shopify_order_id"], "gid://shopify/Order/3020")
+        self.assertEqual(order["source_name"], "etsy")
+        self.assertEqual(order["source_display"], "Etsy")
+        self.assertEqual(order["shipping_method"], "Australia Post")
+        self.assertEqual(order["line_items"][0]["shopify_variant_id"], "gid://shopify/ProductVariant/201")
+        self.assertTrue(supabase_backend.shopify_order_eligibility(order)["eligible"])
+
+    def test_channel_never_changes_business_eligibility(self):
+        for source in ("web", "etsy", "pos", "shopify_draft_order", "future_marketplace"):
+            order = paid_marketplace_order(source_name=source, source_display=source)
+            self.assertTrue(supabase_backend.shopify_order_eligibility(order)["eligible"], source)
+
+        for changes, reason in (
+            ({"test": True}, "test_order"),
+            ({"cancelled_at": "2026-08-17T14:00:00Z"}, "cancelled_order"),
+            ({"financial_status": "PENDING"}, "financial_status_pending"),
+        ):
+            decision = supabase_backend.shopify_order_eligibility(paid_marketplace_order(**changes))
+            self.assertFalse(decision["eligible"])
+            self.assertEqual(decision["reason"], reason)
+
+    def test_variant_id_is_the_first_mapping_identity(self):
+        product = {
+            "id": 7,
+            "shopify_product_id": "gid://shopify/Product/200",
+            "shopify_handle": "limited-wall-art",
+            "product_title": "Limited Wall Art",
+            "active": True,
+        }
+        cursor = MappingCursor(variant_rows=[product], sku_rows=[product])
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(
+            cursor,
+            paid_marketplace_order()["line_items"][0],
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["match_method"], "shopify_variant_id")
+        self.assertEqual(len(cursor.statements), 1)
+
+    def test_exact_sku_maps_when_marketplace_variant_id_is_missing(self):
+        product = {
+            "id": 7,
+            "shopify_product_id": "gid://shopify/Product/200",
+            "shopify_handle": "limited-wall-art",
+            "product_title": "Limited Wall Art",
+            "active": True,
+        }
+        cursor = MappingCursor(sku_rows=[product])
+        line = dict(paid_marketplace_order()["line_items"][0])
+        line["shopify_variant_id"] = ""
+        line["variant_id"] = ""
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(cursor, line)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["match_method"], "sku")
+        self.assertEqual(len(cursor.statements), 1)
+
+    def test_unmapped_marketplace_item_is_persisted_as_needs_mapping_without_edition(self):
+        order = paid_marketplace_order()
+        with patch.object(supabase_backend, "_persist_order_snapshot") as persist, patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={"product": {}, "status": "missing", "reason": "No safe match.", "candidates": []},
+        ), patch.object(supabase_backend, "_set_order_line_status") as set_status, patch.object(
+            supabase_backend, "allocate_edition_for_order_line"
+        ) as allocate, patch.object(supabase_backend, "connect"), patch.object(
+            supabase_backend, "_set_order_ingestion_outcome"
+        ) as outcome:
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+            )
+
+        persist.assert_called_once_with(order)
+        allocate.assert_not_called()
+        self.assertEqual(set_status.call_args.args[2], "Needs product mapping")
+        self.assertEqual(set_status.call_args.kwargs["mapping_method"], "unmapped")
+        self.assertEqual(result["ingestion_status"], "needs_mapping")
+        self.assertEqual(result["missing_mapping_skipped"], 1)
+        self.assertEqual(outcome.call_args.kwargs["import_result"], "needs_mapping")
+
+    def test_fulfilment_snapshot_keeps_channel_and_actionable_unmapped_units(self):
+        rows = order_allocator._snapshot_rows_from_supabase_order_rows(
+            [
+                {
+                    "shopify_order_id": "gid://shopify/Order/3020",
+                    "order_name": "#SC3020",
+                    "source_name": "Etsy",
+                    "customer_name": "Marketplace customer",
+                    "shopify_line_item_id": "gid://shopify/LineItem/30201",
+                    "product_title": "Limited Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 2,
+                    "assignment_status": "Needs product mapping",
+                    "order_raw_json": {
+                        "shipping_method": "Australia Post",
+                        "shipping_address_summary": "NSW 2000, Australia",
+                    },
+                    "assignments": [],
+                }
+            ]
+        )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["channel"] for row in rows}, {"Etsy"})
+        self.assertEqual({row["edition"] for row in rows}, {"Needs product mapping"})
+        self.assertFalse(any(row["has_saved_allocation"] for row in rows))
+
+    def test_targeted_display_name_resolution_uses_exact_match_and_immutable_id(self):
+        config = {"store_domain": "sports-cave.myshopify.com"}
+        expected = paid_marketplace_order()
+        with patch.object(
+            shopify_sync,
+            "fetch_orders_page",
+            return_value={"orders": [expected], "has_next_page": True, "end_cursor": "ignored"},
+        ) as fetch_page:
+            result = shopify_sync.fetch_order_by_name("SC3020", config=config)
+
+        self.assertEqual(result["shopify_order_id"], "gid://shopify/Order/3020")
+        self.assertEqual(fetch_page.call_args.kwargs["page_size"], 10)
+        self.assertFalse(fetch_page.call_args.kwargs["default_paid_unfulfilled_filter"])
+
+    def test_targeted_reconciliation_is_dry_run_by_default_and_reports_existing_trace(self):
+        order = paid_marketplace_order()
+        trace = {"order_stored": False, "webhook_received": False, "stored_line_count": 0}
+        with patch.object(shopify_sync, "fetch_order_by_name", return_value=order), patch.object(
+            supabase_backend, "get_shopify_order_ingestion_trace", return_value=trace
+        ), patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set()), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={
+                "product": {"handle": "limited-wall-art", "match_method": "shopify_variant_id"},
+                "status": "matched",
+                "reason": "matched",
+            },
+        ), patch.object(supabase_backend, "process_single_paid_shopify_order_for_editions") as process:
+            result = supabase_backend.reconcile_single_shopify_order(
+                order_name="SC3020",
+                apply=False,
+                config={"store_domain": "sports-cave.myshopify.com"},
+                ensure_schema_first=False,
+            )
+
+        process.assert_not_called()
+        self.assertEqual(result["shopify_order_id"], "gid://shopify/Order/3020")
+        self.assertEqual(result["source_name"], "Etsy")
+        self.assertTrue(result["eligible"])
+        self.assertFalse(result["applied"])
+        self.assertTrue(result["backfill_safe_to_repeat"])
+        self.assertEqual(result["trace_before"], trace)
+
+    def test_targeted_apply_uses_immutable_identity_and_idempotent_notification_event(self):
+        order = paid_marketplace_order()
+        before = {"order_stored": False, "webhook_received": False}
+        after = {"order_stored": True, "stored_line_count": 1, "allocated_operational_units": 1}
+        with patch.object(shopify_sync, "fetch_orders_by_ids", return_value=[order]) as fetch, patch.object(
+            supabase_backend, "get_shopify_order_ingestion_trace", side_effect=[before, after]
+        ), patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set()), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={
+                "product": {"handle": "limited-wall-art", "match_method": "shopify_variant_id"},
+                "status": "matched",
+                "reason": "matched",
+            },
+        ), patch.object(
+            supabase_backend,
+            "process_single_paid_shopify_order_for_editions",
+            return_value={
+                "processed": True,
+                "new_order_inserted": True,
+                "import_result": "inserted_or_updated",
+                "ingestion_status": "complete",
+                "imported_lines": 1,
+                "editions_assigned": 1,
+                "assigned_editions": ["edition-1"],
+                "errors": [],
+            },
+        ) as process, patch.object(
+            supabase_backend, "record_new_order_notification_events", return_value=1
+        ) as notify:
+            result = supabase_backend.reconcile_single_shopify_order(
+                shopify_order_id="gid://shopify/Order/3020",
+                apply=True,
+                config={"store_domain": "sports-cave.myshopify.com"},
+                ensure_schema_first=False,
+            )
+
+        fetch.assert_called_once_with(["gid://shopify/Order/3020"], config={"store_domain": "sports-cave.myshopify.com"})
+        self.assertEqual(process.call_args.args[0]["shopify_order_id"], "gid://shopify/Order/3020")
+        notify.assert_called_once_with([order], source="targeted_reconciliation")
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["new_order_notification_events_created"], 1)
+        self.assertEqual(result["trace_after"], after)
+
+    def test_safe_webhook_receipt_does_not_store_customer_pii(self):
+        payload = {
+            "id": 3020,
+            "name": "#SC3020",
+            "source_name": "etsy",
+            "email": "private@example.com",
+            "shipping_address": {"address1": "private"},
+            "line_items": [{"id": 1}],
+        }
+        safe = supabase_backend._safe_webhook_order_payload(payload)
+
+        self.assertEqual(safe["source_name"], "etsy")
+        self.assertEqual(safe["line_item_count"], 1)
+        self.assertNotIn("email", safe)
+        self.assertNotIn("shipping_address", safe)
+
+    def test_background_reconciliation_is_disabled_locally_and_uses_bounded_window_when_run(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SHOPIFY_ORDER_RECONCILIATION_ENABLED", None)
+            os.environ.pop("RENDER", None)
+            os.environ.pop("RENDER_SERVICE_NAME", None)
+            self.assertFalse(shopify_order_reconciliation_worker.enabled())
+
+        with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend,
+            "sync_latest_paid_orders_to_supabase",
+            return_value={"shopify_orders_fetched": 2, "new_orders_inserted": 1},
+        ) as sync:
+            shopify_order_reconciliation_worker.run_once()
+
+        sync.assert_called_once_with(limit=50, lookback_days=14, ensure_schema_first=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -64,6 +64,7 @@ ALLOCATION_BLOCKER_STATUSES = {
     "Needs Review - Sold Out",
     "Missing Shopify ID",
     "Product not matched",
+    "Needs product mapping",
     "Edition disabled",
     "Product inactive",
     "Historical backfill required",
@@ -71,6 +72,7 @@ ALLOCATION_BLOCKER_STATUSES = {
 }
 VISIBLE_COLUMNS = (
     "order",
+    "channel",
     "edition",
     "certificate",
     "customer",
@@ -539,6 +541,7 @@ def _normalise_row(row):
     updated["order"] = str(updated.get("order") or "")
     updated["date"] = str(updated.get("date") or "")
     updated["customer"] = _placeholder_text(updated.get("customer"))
+    updated["channel"] = str(updated.get("channel") or updated.get("source_name") or "")
     updated["shipping_method"] = str(
         updated.get("shipping_method")
         or updated.get("shipping_title")
@@ -1300,6 +1303,7 @@ def _display_rows(rows):
 def _column_config():
     return {
         "order": st.column_config.TextColumn("Order", width="small"),
+        "channel": st.column_config.TextColumn("Channel", width="small"),
         "date": st.column_config.TextColumn("Date", width="small"),
         "customer": st.column_config.TextColumn("Customer", width="medium"),
         "customer_email": st.column_config.TextColumn("Email", width="medium"),
@@ -2369,6 +2373,21 @@ def _render_admin_panel(rows):
         return
     backend = _configured_supabase_backend()
     with st.expander("Admin Order Sync + Diagnostics", expanded=False):
+        if backend:
+            try:
+                health = backend.get_order_reconciliation_health(ensure_schema_first=False)
+                st.caption(
+                    "Order reconciliation: "
+                    f"last success {_format_time(health.get('last_successful_reconciliation'))} | "
+                    f"examined {health.get('orders_examined', 0)} | "
+                    f"inserted {health.get('orders_inserted', 0)} | "
+                    f"updated {health.get('orders_updated', 0)} | "
+                    f"needs mapping {health.get('orders_requiring_mapping', 0)} | "
+                    f"rejected {health.get('orders_rejected', 0)} | "
+                    f"last error {health.get('last_error') or 'None'}"
+                )
+            except Exception as error:
+                st.caption(f"Order reconciliation health unavailable: {error.__class__.__name__}")
         admin_cols = st.columns([1.05, 1.05, 1.05, 1.05, 1, 1])
         if admin_cols[0].button("Preview Latest Paid Fetch", use_container_width=True, disabled=not backend):
             with st.spinner("Previewing latest paid Shopify orders..."):

@@ -1561,6 +1561,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
             "order": order_name,
             "date": date_value,
             "customer": str(row.get("customer_name") or order_raw.get("customer_name") or ""),
+            "channel": str(row.get("source_name") or order_raw.get("source_display") or order_raw.get("source_name") or ""),
             "customer_email": str(row.get("customer_email") or order_raw.get("customer_email") or order_raw.get("email") or ""),
             "shipping": shipping,
             "shipping_method": shipping_method,
@@ -1615,8 +1616,8 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
 
         status = str(row.get("assignment_status") or "").strip()
         blocker = ""
-        if status in {"Product Not Found"}:
-            blocker = "Product not matched"
+        if status in {"Product Not Found", "Needs product mapping"}:
+            blocker = "Needs product mapping"
         elif status in {"Needs Edition Setup"}:
             blocker = "Edition disabled"
         elif status in {"Sold Out"}:
