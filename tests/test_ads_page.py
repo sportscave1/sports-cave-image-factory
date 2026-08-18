@@ -228,6 +228,101 @@ class AdsPageTests(unittest.TestCase):
         self.assertNotIn("Marketing Factory", [button.label for button in app_test.button])
         self.assertEqual(len(app_test.exception), 0)
 
+    def test_initial_render_defers_result_image_review_and_dropbox_work(self):
+        final_review_module = ads_page.ads_final_review._module
+        image_workflow_module = ads_page.ads_image_workflow._module
+        image_factory_module = ads_page.image_factory._module
+        ads_page.ads_final_review._module = None
+        ads_page.ads_image_workflow._module = None
+        ads_page.image_factory._module = None
+        try:
+            with (
+                patch("ads_page.load_edition_ops_product_rows", return_value=[]),
+                patch("ads_page.build_ads_result_record") as build_result,
+                patch("ads_page._ads_dropbox_connection") as dropbox_connection,
+                patch("ads_page._instant_experience_package_items") as build_package,
+            ):
+                app_test = AppTest.from_string(
+                    "import ads_page\nads_page.render_page()"
+                ).run(timeout=20)
+
+            self.assertFalse(app_test.exception)
+            build_result.assert_not_called()
+            dropbox_connection.assert_not_called()
+            build_package.assert_not_called()
+            self.assertIsNone(ads_page.ads_final_review._module)
+            self.assertIsNone(ads_page.ads_image_workflow._module)
+            self.assertIsNone(ads_page.image_factory._module)
+            self.assertNotIn(ads_page.ADS_RESULT_STATE_KEY, app_test.session_state)
+        finally:
+            ads_page.ads_final_review._module = final_review_module
+            ads_page.ads_image_workflow._module = image_workflow_module
+            ads_page.image_factory._module = image_factory_module
+
+    def test_initial_setup_is_compact_and_optional_sections_start_collapsed(self):
+        with patch("ads_page.load_edition_ops_product_rows", return_value=[]):
+            app_test = AppTest.from_string(
+                "import ads_page\nads_page.render_page()"
+            ).run(timeout=20)
+
+        expanders = {expander.label: expander.proto.expanded for expander in app_test.expander}
+        self.assertEqual(
+            expanders,
+            {
+                "How to use": False,
+                "Campaign Moment (Optional)": False,
+            },
+        )
+        self.assertTrue(
+            {"Category", "Country", "Campaign type"}.issubset(
+                {selectbox.label for selectbox in app_test.selectbox}
+            )
+        )
+        self.assertIn("Product page URL *", [field.label for field in app_test.text_input])
+        self.assertIn("Submit", [button.label for button in app_test.button])
+        self.assertFalse(app_test.file_uploader)
+
+    def test_snapshot_and_selector_caches_are_input_keyed_and_user_safe(self):
+        ads_page._read_edition_ops_snapshot_rows.clear()
+        ads_page._merge_edition_ops_product_rows.clear()
+        ads_page.build_ads_product_selector_records.clear()
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "products.json"
+            snapshot.write_text(
+                json.dumps({"rows": [{"product_title": "Cached Product"}]}),
+                encoding="utf-8",
+            )
+            original_read_text = Path.read_text
+            calls = []
+
+            def tracked_read_text(path, *args, **kwargs):
+                calls.append(str(path))
+                return original_read_text(path, *args, **kwargs)
+
+            with patch.object(Path, "read_text", autospec=True, side_effect=tracked_read_text):
+                first = ads_page._edition_ops_rows_from_local_snapshot(snapshot)
+                second = ads_page._edition_ops_rows_from_local_snapshot(snapshot)
+
+            self.assertEqual(first, second)
+            self.assertEqual(len(calls), 1)
+
+        nathan_rows = ads_page._merge_edition_ops_product_rows(
+            [],
+            [{"product_title": "Nathan Product"}],
+            [],
+        )
+        reina_rows = ads_page._merge_edition_ops_product_rows(
+            [],
+            [{"product_title": "Reina Product"}],
+            [],
+        )
+        self.assertEqual(nathan_rows[0]["product_title"], "Nathan Product")
+        self.assertEqual(reina_rows[0]["product_title"], "Reina Product")
+
+        first_records = ads_page.build_ads_product_selector_records(nathan_rows)
+        second_records = ads_page.build_ads_product_selector_records(nathan_rows)
+        self.assertEqual(first_records, second_records)
+
     def test_dropdown_options_are_in_required_order(self):
         self.assertEqual(
             ads_page.CATEGORY_OPTIONS,

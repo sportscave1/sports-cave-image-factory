@@ -337,14 +337,16 @@ class GSCReaderAndOrchestrationTests(unittest.TestCase):
         self.assertIn('source_status not in {"completed", "preliminary"}', source)
         self.assertIn("_analytics_failure_summary", source)
 
-    def test_all_rebuilt_search_pages_use_the_same_saved_snapshot_reader(self):
+    def test_all_rebuilt_search_pages_use_the_compact_interactive_reader(self):
         for renderer in (
             seo_page._render_search_overview,
             seo_page._render_keywords_rankings,
             seo_page._render_opportunities,
             seo_page._render_search_landing_pages,
         ):
-            self.assertIn("_saved_search_snapshot", inspect.getsource(renderer))
+            source = inspect.getsource(renderer)
+            self.assertIn("_interactive_reader", source)
+            self.assertNotIn("_saved_search_snapshot", source)
 
     def test_normal_rendering_contains_no_live_google_request(self):
         source = inspect.getsource(seo_live_analytics.PostgresSEOLiveAnalyticsReader)

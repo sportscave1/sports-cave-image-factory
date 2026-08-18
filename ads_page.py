@@ -2,6 +2,7 @@ import csv
 import hashlib
 import html
 import io
+import importlib
 import json
 import logging
 import random
@@ -17,16 +18,30 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
-import ads_final_review
-import ads_image_workflow
+from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
-import image_factory
 import os_accounts
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
     build_sports_cave_image_realism_rules,
 )
+
+
+class _LazyModuleProxy:
+    def __init__(self, module_name):
+        self._module_name = module_name
+        self._module = None
+
+    def __getattr__(self, attribute):
+        if self._module is None:
+            self._module = importlib.import_module(self._module_name)
+        return getattr(self._module, attribute)
+
+
+ads_final_review = _LazyModuleProxy("ads_final_review")
+ads_image_workflow = _LazyModuleProxy("ads_image_workflow")
+image_factory = _LazyModuleProxy("image_factory")
 
 
 CATEGORY_OPTIONS = [
@@ -426,7 +441,6 @@ IMAGE_ORDER = [
     ("Scarcity", "Artwork close-up, edition badge, plaque or numbered-run detail."),
 ]
 
-INSTANT_EXPERIENCE_CONCEPTS = ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS
 INSTANT_EXPERIENCE_COPY_FIELDS = (
     ("primary_text", "Description"),
     ("headline", "Headline"),
@@ -1137,6 +1151,7 @@ def _edition_ops_product_selector_identity(row):
     return ""
 
 
+@st.cache_data(show_spinner=False)
 def build_ads_product_selector_records(rows):
     rows = list(rows or ())
     duplicate_titles = _edition_ops_duplicate_title_keys(rows)
@@ -1291,40 +1306,33 @@ def resolve_edition_ops_product_selection(
     }
 
 
-def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
-    snapshot_path = Path(snapshot_path)
-    if not snapshot_path.exists():
-        return []
+@st.cache_data(show_spinner=False)
+def _read_edition_ops_snapshot_rows(snapshot_path, modified_ns, size):
+    del modified_ns, size
     try:
-        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        payload = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return []
     rows = payload.get("rows") if isinstance(payload, dict) else []
     return rows if isinstance(rows, list) else []
 
 
-def load_edition_ops_product_rows(
-    snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
-    *,
-    live_loader=None,
-):
-    rows = []
+def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
     snapshot_path = Path(snapshot_path)
-    should_load_live = live_loader is not None or snapshot_path == EDITION_OPS_SNAPSHOT_PATH
-    if should_load_live:
-        loader = live_loader or load_live_edition_product_rows
-        try:
-            live_rows = loader()
-        except Exception:
-            live_rows = []
-        if isinstance(live_rows, list):
-            rows.extend(live_rows)
+    try:
+        snapshot_stat = snapshot_path.stat()
+    except OSError:
+        return []
+    return _read_edition_ops_snapshot_rows(
+        str(snapshot_path),
+        snapshot_stat.st_mtime_ns,
+        snapshot_stat.st_size,
+    )
 
-    session_rows = st.session_state.get(EDITION_OPS_ROWS_SESSION_KEY, [])
-    if isinstance(session_rows, list):
-        rows.extend(session_rows)
-    rows.extend(_edition_ops_rows_from_local_snapshot(snapshot_path))
 
+@st.cache_data(show_spinner=False)
+def _merge_edition_ops_product_rows(live_rows, session_rows, snapshot_rows):
+    rows = [*list(live_rows or ()), *list(session_rows or ()), *list(snapshot_rows or ())]
     unique_rows = []
     seen_rows = set()
     for row in rows:
@@ -1336,6 +1344,33 @@ def load_edition_ops_product_rows(
         unique_rows.append(row)
         seen_rows.add(row_key)
     return unique_rows
+
+
+def load_edition_ops_product_rows(
+    snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
+    *,
+    live_loader=None,
+):
+    live_rows = []
+    snapshot_path = Path(snapshot_path)
+    should_load_live = live_loader is not None or snapshot_path == EDITION_OPS_SNAPSHOT_PATH
+    if should_load_live:
+        loader = live_loader or load_live_edition_product_rows
+        try:
+            loaded_rows = loader()
+        except Exception:
+            loaded_rows = []
+        if isinstance(loaded_rows, list):
+            live_rows = loaded_rows
+
+    session_rows = st.session_state.get(EDITION_OPS_ROWS_SESSION_KEY, [])
+    if not isinstance(session_rows, list):
+        session_rows = []
+    return _merge_edition_ops_product_rows(
+        live_rows,
+        session_rows,
+        _edition_ops_rows_from_local_snapshot(snapshot_path),
+    )
 
 
 def load_edition_ops_product_name_options(
@@ -8484,8 +8519,7 @@ def render_product_name_input(*, rows=None, result=None):
 
 
 def render_campaign_moment_section():
-    with st.container(border=True):
-        st.markdown("**Campaign Moment (Optional)**")
+    with st.expander("Campaign Moment (Optional)", expanded=False):
         st.caption(
             "Add an occasion, sporting event or promotional period to make one copy variation more timely. Leave blank for fully evergreen ads."
         )
@@ -8553,6 +8587,9 @@ def render_campaign_moment_section():
             st.caption(
                 f"{moment['name']} · {moment['resolved_market']} · {moment['strength']}"
             )
+        if st.button("Clear moment", key="ads-clear-campaign-moment"):
+            clear_campaign_moment_state()
+            st.rerun()
     return campaign_moment_from_form_state()
 
 
@@ -11639,6 +11676,9 @@ def render_page():
     st.markdown(
         """
         <style>
+        div[data-testid="stMainBlockContainer"] {
+            padding-top: 4rem !important;
+        }
         div[class*="st-key-ads-image-slot"] {
             min-width: 0;
         }
@@ -11731,6 +11771,12 @@ def render_page():
             line-height: 1.35 !important;
             white-space: pre-wrap !important;
         }
+        div[data-testid="stExpander"] details summary {
+            min-height: 42px;
+        }
+        div[data-testid="stExpander"] details summary p {
+            margin: 0;
+        }
         @media (max-width: 720px) {
             .sc-ad-review-score {
                 align-items: flex-start;
@@ -11806,16 +11852,12 @@ def render_page():
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
     campaign_moment = render_campaign_moment_section()
-    clear_col, submit_col = st.columns([1, 2])
-    clear_moment = clear_col.button("Clear moment")
-    submitted = submit_col.button(
+    submitted = st.button(
         "Submit",
         type="primary",
+        use_container_width=True,
     )
 
-    if clear_moment:
-        clear_campaign_moment_state()
-        st.rerun()
     if submitted:
         validation_message = validate_ads_inputs(
             product_name,

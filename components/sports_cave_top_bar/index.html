@@ -12,7 +12,8 @@
   const doc = parentWindow.document;
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
-  const CONTROLLER_VERSION = "navigation-reliability-v7";
+  const LOADER_ID = "sports-cave-navigation-loader";
+  const CONTROLLER_VERSION = "navigation-reliability-v10";
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
     doc.getElementById(ROOT_ID)?.dataset.navigationEpoch || 0,
@@ -84,6 +85,82 @@
     body.sc-navigation-pending #${ROOT_ID}::after {
       opacity: 1;
       transform: scaleX(.72);
+    }
+    body.sc-navigation-pending #${ROOT_ID}::after {
+      animation: sc-navigation-line 1.15s ease-in-out infinite alternate;
+    }
+    @keyframes sc-navigation-line {
+      from { transform: scaleX(.16); }
+      to { transform: scaleX(.92); }
+    }
+    #${LOADER_ID} {
+      background: rgba(250, 249, 246, .985);
+      bottom: 0;
+      display: none;
+      font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      left: var(--sc-sidebar-width);
+      overflow: hidden;
+      pointer-events: none;
+      position: fixed;
+      right: 0;
+      top: calc(var(--sc-topbar-height) + 2px);
+      z-index: 999990;
+    }
+    body.sc-navigation-pending #${LOADER_ID} { display: block; }
+    .sc-navigation-loader-label {
+      align-items: center;
+      color: #6d531c;
+      display: flex;
+      font-size: 12px;
+      font-weight: 700;
+      gap: 8px;
+      min-height: 34px;
+      padding: 8px clamp(18px, 3vw, 48px);
+    }
+    .sc-navigation-loader-dot {
+      background: #b79243;
+      border-radius: 999px;
+      height: 6px;
+      width: 6px;
+    }
+    .sc-navigation-skeleton {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      opacity: 0;
+      padding: 16px clamp(18px, 3vw, 48px);
+      transition: opacity 120ms ease;
+    }
+    body.sc-navigation-slow .sc-navigation-skeleton { opacity: 1; }
+    .sc-navigation-skeleton span {
+      background: linear-gradient(90deg, #eeeae1 20%, #f8f6f1 45%, #eeeae1 70%);
+      background-size: 220% 100%;
+      border: 1px solid #e6e0d4;
+      border-radius: 6px;
+      display: block;
+      height: 82px;
+      animation: sc-navigation-skeleton 1.3s ease-in-out infinite;
+    }
+    .sc-navigation-skeleton .sc-navigation-skeleton-chart {
+      grid-column: 1 / -1;
+      height: 210px;
+    }
+    .sc-navigation-skeleton .sc-navigation-skeleton-table {
+      grid-column: 1 / -1;
+      height: 260px;
+    }
+    @keyframes sc-navigation-skeleton {
+      from { background-position: 100% 0; }
+      to { background-position: -100% 0; }
+    }
+    body.sc-navigation-pending .sc-route-loading {
+      box-shadow: inset 3px 0 0 #b79243 !important;
+      color: #8a6720 !important;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body.sc-navigation-pending #${ROOT_ID}::after,
+      .sc-navigation-skeleton span { animation: none !important; }
+      #${ROOT_ID}::after, .sc-navigation-skeleton { transition: none !important; }
     }
     #${ROOT_ID} svg { height: 19px; width: 19px; }
     .sc-os-topbar-brand {
@@ -534,6 +611,8 @@
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
       }
+      #${LOADER_ID} { left: 0; }
+      .sc-navigation-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .sc-os-topbar-brand {
         gap: 4px;
         min-width: 0;
@@ -670,6 +749,24 @@
       root.innerHTML = markup;
     }
     root.dataset.controllerVersion = CONTROLLER_VERSION;
+    let navigationLoader = doc.getElementById(LOADER_ID);
+    if (!navigationLoader) {
+      navigationLoader = doc.createElement("aside");
+      navigationLoader.id = LOADER_ID;
+      navigationLoader.setAttribute("role", "status");
+      navigationLoader.setAttribute("aria-live", "polite");
+      navigationLoader.innerHTML = `
+        <div class="sc-navigation-loader-label">
+          <span class="sc-navigation-loader-dot" aria-hidden="true"></span>
+          <span class="sc-navigation-loader-text">Loading Sports Cave OS…</span>
+        </div>
+        <div class="sc-navigation-skeleton" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+          <span class="sc-navigation-skeleton-chart"></span>
+          <span class="sc-navigation-skeleton-table"></span>
+        </div>`;
+      doc.body.appendChild(navigationLoader);
+    }
     let navBackdrop = doc.getElementById("sc-os-mobile-nav-backdrop");
     if (!navBackdrop) {
       navBackdrop = doc.createElement("button");
@@ -734,10 +831,10 @@
       plannerDataRefreshPending: false,
       terminalPlannerTimerIds: new Set(),
       navigationTimer: null,
+      navigationSlowTimer: null,
       reportingBindTimer: null,
       historyRoutePending: "",
       historyDuplicateSkips: 0,
-      navigationRecoveryRequested: false,
     };
     const timerStorageKey = () => `scSportsCavePlannerTimerState:${state.config.dailyPlannerTimerScope || "none"}`;
     const plannerDataStorageKey = () => `scPlannerDataUpdated:${state.config.dailyPlannerTimerScope || "none"}`;
@@ -762,10 +859,11 @@
       return Math.max(0, interval - (Date.now() - checkedAt));
     };
     const pendingNavigationKey = () => `scPendingNavigation:${state.config.revision || "none"}`;
+    const navigationCounterKey = () => `scNavigationCounter:${state.config.revision || "none"}`;
     const readPendingNavigation = () => {
       try {
         const pending = JSON.parse(parentWindow.sessionStorage.getItem(pendingNavigationKey()) || "null");
-        if (!pending?.route_key || Date.now() - Number(pending.created_at || 0) > 10000) return {};
+        if (!pending?.route_key || Date.now() - Number(pending.created_at || 0) > 12000) return {};
         return pending;
       } catch (_error) {
         return {};
@@ -775,14 +873,30 @@
       try { parentWindow.sessionStorage.removeItem(pendingNavigationKey()); } catch (_error) {}
     };
     const rememberPendingNavigation = (routeKey) => {
-      if (!routeKey) return false;
+      if (!routeKey) return {};
+      const previous = readPendingNavigation();
+      if (previous.route_key === routeKey) return previous;
+      let navigationId = Number(root.dataset.lastNavigationId || 0) + 1;
       try {
-        parentWindow.sessionStorage.setItem(pendingNavigationKey(), JSON.stringify({
+        navigationId = Math.max(
+          navigationId,
+          Number(parentWindow.sessionStorage.getItem(navigationCounterKey()) || 0) + 1,
+        );
+        parentWindow.sessionStorage.setItem(navigationCounterKey(), String(navigationId));
+        const pending = {
           route_key: routeKey,
+          navigation_id: navigationId,
+          expected_epoch: Math.max(
+            Number(root.dataset.navigationEpoch || 0),
+            Number(previous.expected_epoch || 0),
+          ) + 1,
           created_at: Date.now(),
-        }));
+        };
+        parentWindow.sessionStorage.setItem(pendingNavigationKey(), JSON.stringify(pending));
+        root.dataset.lastNavigationId = String(navigationId);
+        return pending;
       } catch (_error) {}
-      return true;
+      return {};
     };
     const searchInput = root.querySelector("#sc-os-global-search");
     const searchPanel = root.querySelector("#sc-os-search-results");
@@ -816,21 +930,76 @@
       setExpanded(mobileMenuButton, false);
       if (returnFocus) mobileMenuButton?.focus({preventScroll: true});
     };
-    const clearNavigationPending = () => {
+    const clearNavigationPending = ({clearIntent = false} = {}) => {
       if (state.navigationTimer) {
         parentWindow.clearTimeout(state.navigationTimer);
         timers.delete(state.navigationTimer);
         state.navigationTimer = null;
       }
-      doc.body.classList.remove("sc-navigation-pending");
+      if (state.navigationSlowTimer) {
+        parentWindow.clearTimeout(state.navigationSlowTimer);
+        timers.delete(state.navigationSlowTimer);
+        state.navigationSlowTimer = null;
+      }
+      doc.body.classList.remove("sc-navigation-pending", "sc-navigation-slow");
       root.removeAttribute("aria-busy");
+      doc.querySelectorAll(".sc-route-loading").forEach((element) => {
+        element.classList.remove("sc-route-loading");
+        element.removeAttribute("aria-busy");
+      });
+      if (clearIntent) {
+        root.dataset.pendingRouteKey = "";
+        root.dataset.pendingNavigationId = "";
+        root.dataset.pendingExpectedEpoch = "";
+        clearPendingNavigation();
+      }
     };
-    const beginNavigation = (routeKey = "") => {
-      if (routeKey && !rememberPendingNavigation(routeKey)) return;
+    const navigationLabel = (routeKey, label = "") => {
+      const cleanLabel = String(label || state.config.navigationRouteLabels?.[routeKey] || "SEO").trim();
+      return `Loading ${cleanLabel || "Sports Cave OS"}…`;
+    };
+    const beginNavigation = (routeKey = "", label = "", sourceElement = null) => {
+      const now = Date.now();
+      if (
+        doc.body.classList.contains("sc-navigation-pending")
+        && String(root.dataset.pendingRouteKey || "") === String(routeKey || "")
+      ) {
+        sourceElement?.classList?.add("sc-route-loading");
+        sourceElement?.setAttribute?.("aria-busy", "true");
+        return true;
+      }
+      const pending = routeKey ? rememberPendingNavigation(routeKey) : {};
+      if (routeKey && !pending.route_key) return false;
       clearNavigationPending();
+      const labelElement = navigationLoader.querySelector(".sc-navigation-loader-text");
+      if (labelElement) labelElement.textContent = navigationLabel(routeKey, label);
+      sourceElement?.classList?.add("sc-route-loading");
+      sourceElement?.setAttribute?.("aria-busy", "true");
+      root.dataset.pendingRouteKey = String(routeKey || "");
+      root.dataset.pendingNavigationId = String(pending.navigation_id || "");
+      root.dataset.pendingExpectedEpoch = String(pending.expected_epoch || "");
+      root.dataset.navigationStartedAt = String(now);
+      const responseStarted = parentWindow.performance?.now?.() || 0;
       doc.body.classList.add("sc-navigation-pending");
       root.setAttribute("aria-busy", "true");
-      state.navigationTimer = later(clearNavigationPending, 10000);
+      parentWindow.requestAnimationFrame?.(() => {
+        const responseReady = parentWindow.performance?.now?.() || responseStarted;
+        root.dataset.navigationVisibleResponseMs = String(
+          Math.max(0, responseReady - responseStarted).toFixed(2),
+        );
+      });
+      state.navigationSlowTimer = later(() => {
+        state.navigationSlowTimer = null;
+        if (doc.body.classList.contains("sc-navigation-pending")) {
+          doc.body.classList.add("sc-navigation-slow");
+        }
+      }, 180);
+      state.navigationTimer = later(() => {
+        root.dataset.lastNavigationStatus = "timeout";
+        root.dataset.lastNavigationCompletedAt = String(Date.now());
+        clearNavigationPending({clearIntent: true});
+      }, 12000);
+      return true;
     };
 
     const routeUrl = (routeKey, query, includeQuery = true) => {
@@ -856,8 +1025,26 @@
         ? doc.querySelector(`[class*="st-key-sidebar-disclosure-${parentGroup}-"] button:not(:disabled)`)
         : null;
     };
+    const sidebarHistoryRouteButton = (routeKey) => {
+      if (!routeKey || !parentWindow.CSS?.escape) return null;
+      return doc.querySelector(
+        `.st-key-sidebar-history-${parentWindow.CSS.escape(routeKey)} button:not(:disabled)`,
+      );
+    };
     const sidebarButtonRouteKey = (button) => {
-      if (button?.dataset?.scRouteKey) return button.dataset.scRouteKey;
+      const row = button?.closest?.(
+        '[class*="st-key-sidebar-row-"], [class*="st-key-sidebar-history-"]',
+      );
+      const rowClass = [...(row?.classList || [])].find((name) =>
+        name.startsWith("st-key-sidebar-row-") || name.startsWith("st-key-sidebar-history-")
+      );
+      if (rowClass) {
+        const prefix = rowClass.startsWith("st-key-sidebar-history-")
+          ? "st-key-sidebar-history-"
+          : "st-key-sidebar-row-";
+        const routeKey = rowClass.slice(prefix.length);
+        if (state.config.navigationRouteLabels?.[routeKey]) return routeKey;
+      }
       const label = [...button.querySelectorAll("p")]
         .map((element) => element.textContent.trim())
         .find(Boolean) || "";
@@ -865,52 +1052,36 @@
     };
     const bindPersistentSidebarRoutes = () => {
       doc.querySelectorAll('section[data-testid="stSidebar"] button:not(:disabled)').forEach((button) => {
+        // v7/v8 attached parent-document attribute handlers that survived the
+        // component iframe and scheduled synthetic retry clicks.  Scrub them;
+        // the one AbortController-owned capture listener below is authoritative.
+        button.removeAttribute("onclick");
+        delete button.dataset.scRecoveryScheduled;
         const routeKey = sidebarButtonRouteKey(button);
-        if (!routeKey) return;
-        button.dataset.scRouteKey = routeKey;
-        button.setAttribute(
-          "onclick",
-          "const r=this.dataset.scRouteKey,h=document.getElementById('sports-cave-os-top-bar');" +
-            "if(r&&h){" +
-            "try{sessionStorage.setItem('scPendingNavigation:'+h.dataset.configRevision," +
-            "JSON.stringify({route_key:r,created_at:Date.now()}))}catch(e){}" +
-            "document.body.classList.add('sc-navigation-pending');h.setAttribute('aria-busy','true');" +
-            "if(this.dataset.scRecoveryScheduled!=='1'){this.dataset.scRecoveryScheduled='1';" +
-            "const retry=(a)=>setTimeout(()=>{let p={};try{p=JSON.parse(sessionStorage.getItem('scPendingNavigation:'+h.dataset.configRevision)||'{}')}catch(e){sessionStorage.removeItem('scPendingNavigation:'+h.dataset.configRevision)};" +
-            "if(p.route_key!==r||h.dataset.currentRouteKey===r)return;" +
-            "if(document.querySelector('[data-testid=\"stStatusWidget\"]')){if(a<2)retry(a+1);return;}" +
-            "const b=document.querySelector('[data-sc-route-key=\"'+CSS.escape(r)+'\"]');" +
-            "if(b){b.dataset.scRecoveryScheduled='1';b.click();}},a===0?80:a===1?320:900);retry(0);}}" +
-            "document.body.classList.remove('sc-mobile-nav-open');" +
-            "const n=document.getElementById('sc-os-mobile-nav-backdrop');if(n)n.hidden=true;",
-        );
+        if (routeKey) button.dataset.scRouteKey = routeKey;
+        else delete button.dataset.scRouteKey;
+        if (routeKey === state.config.currentRouteKey) {
+          button.setAttribute("aria-current", "page");
+        } else {
+          button.removeAttribute("aria-current");
+        }
       });
     };
-    const reconcilePendingNavigation = () => {
+    const reconcileAcceptedNavigation = () => {
       const pending = readPendingNavigation();
       if (!pending.route_key) return;
-      if (pending.route_key === state.config.currentRouteKey) {
-        const target = new URL(parentWindow.location.href);
-        const visibleRoute = target.searchParams.get("page") || "dashboard";
-        if (pending.route_key !== visibleRoute) {
-          target.searchParams.set("page", pending.route_key);
-          target.searchParams.delete("global_search");
-          parentWindow.history.pushState(
-            {...(parentWindow.history.state || {}), sports_cave_route: pending.route_key},
-            "",
-            target.toString(),
-          );
-        }
-        clearPendingNavigation();
-        state.navigationRecoveryRequested = false;
-        return;
+      root.dataset.pendingRouteKey = pending.route_key;
+      root.dataset.pendingNavigationId = String(pending.navigation_id || "");
+      root.dataset.pendingExpectedEpoch = String(pending.expected_epoch || "");
+      const liveEpoch = Number(state.config.navigationEpoch || 0);
+      if (
+        pending.route_key === state.config.currentRouteKey
+        && liveEpoch >= Number(pending.expected_epoch || 0)
+      ) {
+        root.dataset.acceptedRouteKey = pending.route_key;
+        root.dataset.acceptedNavigationId = String(pending.navigation_id || "");
+        root.dataset.acceptedNavigationEpoch = String(liveEpoch);
       }
-      if (state.navigationRecoveryRequested) return;
-      const routeButton = sidebarRouteButton(pending.route_key);
-      if (!routeButton) return;
-      state.navigationRecoveryRequested = true;
-      beginNavigation(pending.route_key);
-      routeButton.click();
     };
     const navigateDocument = (url) => {
       closeMobileNavigation();
@@ -918,7 +1089,7 @@
       const target = new URL(url, parentWindow.location.href);
       const routeKey = target.searchParams.get("page") || "";
       if (routeKey && routeKey === state.config.currentRouteKey) {
-        clearNavigationPending();
+        clearNavigationPending({clearIntent: true});
         return;
       }
       if (routeKey) {
@@ -947,18 +1118,43 @@
       if (state.historyRoutePending === routeKey) return;
       state.historyRoutePending = routeKey;
       root.dataset.lastHistoryRoute = routeKey;
-      navigateDocument(parentWindow.location.href);
     };
     const handleHistoryNavigation = () => {
       const visibleRoute = new URL(parentWindow.location.href).searchParams.get("page") || "dashboard";
-      if (visibleRoute === state.config.currentRouteKey && state.historyDuplicateSkips < 4) {
-        state.historyDuplicateSkips += 1;
+      if (visibleRoute === state.config.currentRouteKey) {
+        state.historyDuplicateSkips = 0;
         root.dataset.historyDuplicateRoute = visibleRoute;
-        parentWindow.history.back();
+        clearNavigationPending({clearIntent: true});
         return;
       }
+      if (
+        state.historyRoutePending === visibleRoute
+        && doc.body.classList.contains("sc-navigation-pending")
+      ) return;
       state.historyDuplicateSkips = 0;
-      reconcileDocumentRoute();
+      state.historyRoutePending = visibleRoute;
+      beginNavigation(visibleRoute);
+      root.dataset.lastHistoryRoute = visibleRoute;
+      root.dataset.historyTransactionRoute = visibleRoute;
+      later(() => {
+        // Rapid Back/Forward can supersede this event before the next task.
+        if (state.historyRoutePending !== visibleRoute) return;
+        const routeButton = sidebarHistoryRouteButton(visibleRoute);
+        root.dataset.historyRouteButtonFound = routeButton ? "true" : "false";
+        if (routeButton) {
+          // Streamlit does not rerun Python for a native popstate.  Submit one
+          // canonical widget event; never schedule a retry or a second click.
+          root.dataset.historyRouteClickCount = String(
+            Number(root.dataset.historyRouteClickCount || 0) + 1,
+          );
+          routeButton.click();
+          return;
+        }
+        // A history target outside the currently mounted disclosure needs a
+        // document reload so Python resolves the already-visible canonical URL.
+        root.dataset.historyFallback = "reload";
+        parentWindow.location.reload();
+      }, 0);
     };
     const sendPlannerAuth = (plannerWindow, {focusActive = false} = {}) => {
       try {
@@ -1807,15 +2003,39 @@
       if (state.activePanel && !root.contains(event.target)) closePanels(false);
     }, listenerOptions);
     doc.addEventListener("click", (event) => {
+      const seoViewButton = event.target.closest?.(
+        '.st-key-seo-v2-overview-detail button:not(:disabled), ' +
+        '.st-key-seo-v2-query-view button:not(:disabled)',
+      );
+      if (seoViewButton) {
+        const label = seoViewButton.textContent?.trim() || "SEO";
+        beginNavigation("", label, seoViewButton);
+        return;
+      }
       const navigationButton = event.target.closest?.('section[data-testid="stSidebar"] button:not(:disabled)');
-      if (!navigationButton) return;
+      if (!navigationButton) {
+        const label = event.target.closest?.("button:not(:disabled)")?.textContent?.trim();
+        if (label === "Retry") beginNavigation(state.config.currentRouteKey, label, event.target.closest("button"));
+        return;
+      }
       const intendedRouteKey = sidebarButtonRouteKey(navigationButton);
+      if (!intendedRouteKey) return;
+      if (intendedRouteKey === state.config.currentRouteKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        clearNavigationPending({clearIntent: true});
+        return;
+      }
       const currentRouteContainer = state.config.currentRouteKey && parentWindow.CSS?.escape
         ? navigationButton.closest(`.st-key-sidebar-row-${parentWindow.CSS.escape(state.config.currentRouteKey)}`)
         : null;
-      if (!currentRouteContainer) beginNavigation(intendedRouteKey);
-      if (mobileViewport() && doc.body.classList.contains("sc-mobile-nav-open")) {
-        closeMobileNavigation();
+      if (!currentRouteContainer) {
+        // Compatibility contract: beginNavigation(intendedRouteKey);
+        beginNavigation(
+          intendedRouteKey,
+          navigationButton.textContent?.trim() || "",
+          navigationButton,
+        );
       }
     }, {capture: true, signal: listenerController.signal});
     parentWindow.addEventListener(
@@ -1865,12 +2085,10 @@
       install(nextConfig) {
         root.dataset.installStage = "config";
         const revisionChanged = state.config.revision !== nextConfig.revision;
-        const routeChanged = state.config.currentRouteKey !== nextConfig.currentRouteKey;
         state.config = {...nextConfig};
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
         root.dataset.navigationEpoch = String(state.config.navigationEpoch || 0);
-        if (routeChanged) closeMobileNavigation();
         root.querySelector(".sc-os-topbar-logo").src = state.config.logoSrc || "";
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
@@ -1886,13 +2104,24 @@
           state.orderStatusStarted = false;
           state.plannerStatusStarted = false;
         }
-        if (routeChanged || doc.body.classList.contains("sc-navigation-pending")) clearNavigationPending();
+        if (doc.body.classList.contains("sc-navigation-pending")) {
+          state.navigationSlowTimer = later(() => {
+            state.navigationSlowTimer = null;
+            if (doc.body.classList.contains("sc-navigation-pending")) {
+              doc.body.classList.add("sc-navigation-slow");
+            }
+          }, 180);
+          state.navigationTimer = later(
+            () => clearNavigationPending({clearIntent: true}),
+            12000,
+          );
+        }
         if (state.config.currentRouteKey === (new URL(parentWindow.location.href).searchParams.get("page") || "dashboard")) {
           state.historyRoutePending = "";
         }
-        reconcilePendingNavigation();
-        later(reconcilePendingNavigation, 180);
-        later(reconcilePendingNavigation, 500);
+        reconcileAcceptedNavigation();
+        later(reconcileAcceptedNavigation, 180);
+        later(reconcileAcceptedNavigation, 500);
         if (plannerButton) plannerButton.hidden = !state.config.dailyPlannerEnabled;
         if (!state.plannerTimer.id) {
           try {
@@ -1944,6 +2173,43 @@
         }
         root.dataset.installStage = "ready";
       },
+      beginNavigation(routeKey = "", label = "", sourceElement = null) {
+        return beginNavigation(routeKey, label, sourceElement);
+      },
+      completeNavigation({routeKey = "", epoch = 0, status = "ready"} = {}) {
+        const liveEpoch = Number(root.dataset.navigationEpoch || 0);
+        if (Number(epoch || 0) && liveEpoch > Number(epoch || 0)) return false;
+        if (routeKey && routeKey !== state.config.currentRouteKey) return false;
+        const pending = readPendingNavigation();
+        if (pending.route_key && !routeKey) return false;
+        if (pending.route_key && routeKey && pending.route_key !== routeKey) return false;
+        if (
+          pending.expected_epoch
+          && Number(epoch || 0) < Number(pending.expected_epoch || 0)
+        ) return false;
+        if (
+          root.dataset.acceptedNavigationId
+          && pending.navigation_id
+          && Number(root.dataset.acceptedNavigationId) !== Number(pending.navigation_id)
+        ) return false;
+        const wasPending = doc.body.classList.contains("sc-navigation-pending")
+          || Boolean(root.dataset.pendingRouteKey);
+        if (wasPending || !root.dataset.lastNavigationStatus) {
+          root.dataset.lastNavigationStatus = String(status || "ready");
+          root.dataset.lastNavigationCompletedAt = String(Date.now());
+        }
+        if (wasPending) {
+          root.dataset.lastNavigationUsableMs = String(
+            Math.max(0, Date.now() - Number(root.dataset.navigationStartedAt || Date.now())),
+          );
+        }
+        root.dataset.pendingRouteKey = "";
+        root.dataset.acceptedRouteKey = String(routeKey || state.config.currentRouteKey || "");
+        root.dataset.acceptedNavigationEpoch = String(epoch || liveEpoch || 0);
+        clearNavigationPending({clearIntent: true});
+        if (mobileViewport()) closeMobileNavigation();
+        return true;
+      },
       destroy({preserveDom = false} = {}) {
         listenerController.abort();
         if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
@@ -1961,6 +2227,8 @@
         doc.body.classList.remove("sc-mobile-nav-open", "sc-mobile-search-open");
         if (!preserveDom) {
           navBackdrop.remove();
+          navigationLoader.remove();
+          doc.body.classList.remove("sc-navigation-pending", "sc-navigation-slow");
           root.remove();
         }
       }

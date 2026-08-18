@@ -39,8 +39,11 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         if page["route"] in allowed_routes
         and page["route"] != os_accounts.DAILY_PLANNER_ROUTE
     }
-    if "Reporting" in allowed_routes:
-        navigation_route_keys["Overview"] = "reporting"
+    navigation_route_labels = {
+        str(page["key"]): str(page["label"])
+        for page in os_accounts.PAGE_REGISTRY
+        if page["route"] in allowed_routes
+    }
     planner_enabled = os_accounts.is_admin(user)
     revision_payload = {
         "user_id": str((user or {}).get("id") or ""),
@@ -71,6 +74,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "currentRouteKey": os_accounts.page_key_for_route(current_route) or "",
         "navigationEpoch": int(navigation_epoch or 0),
         "navigationRouteKeys": navigation_route_keys,
+        "navigationRouteLabels": navigation_route_labels,
         "accountsRouteKey": "accounts_access",
         "searchUrl": "/api/os/top-bar/search-index",
         "notificationsUrl": "/api/os/top-bar/notifications",
@@ -106,3 +110,34 @@ def render_top_bar(components, user, *, logo_src, current_route, navigation_epoc
         navigation_epoch=navigation_epoch,
     )
     components.html(component_html(config), height=0, width=0)
+
+
+def navigation_complete_html(*, current_route, navigation_epoch=0, status="ready"):
+    payload = {
+        "routeKey": os_accounts.page_key_for_route(current_route) or "",
+        "epoch": int(navigation_epoch or 0),
+        "status": str(status or "ready"),
+    }
+    return (
+        "<script>(function(){const p="
+        + json.dumps(payload, ensure_ascii=True).replace("</", "<\\/")
+        + ";window.parent.SportsCaveTopBar?.completeNavigation?.(p);})();</script>"
+    )
+
+
+def render_navigation_complete(
+    components,
+    *,
+    current_route,
+    navigation_epoch=0,
+    status="ready",
+):
+    components.html(
+        navigation_complete_html(
+            current_route=current_route,
+            navigation_epoch=navigation_epoch,
+            status=status,
+        ),
+        height=0,
+        width=0,
+    )

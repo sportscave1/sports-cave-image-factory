@@ -41,6 +41,7 @@ GOOGLE_SEO_PIPELINE_MIGRATIONS = (
     "20260813_google_seo_phase3_storage.sql",
     "20260817_analytics_seo_blog_rebuild.sql",
     "20260817_gsc_canonical_pipeline_repair.sql",
+    "20260818_seo_interactive_performance.sql",
 )
 GOOGLE_SEO_WORKSPACE_KEY = "sports-cave"
 GOOGLE_OAUTH_STATE_SECONDS = 10 * 60

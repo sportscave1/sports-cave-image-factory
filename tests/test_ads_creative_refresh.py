@@ -172,6 +172,23 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertEqual(navigation_runtime.toggle_disclosure_group("", "ads"), "ads")
         self.assertEqual(navigation_runtime.toggle_disclosure_group("ads", "ads"), "")
         self.assertEqual(navigation_runtime.toggle_disclosure_group("seo", "ads"), "ads")
+        for route in ads_navigation.ADS_ROUTES:
+            self.assertTrue(
+                navigation_runtime.disclosure_group_is_expanded(
+                    route,
+                    group="ads",
+                    stored_group="",
+                    force_open_routes=ads_navigation.ADS_ROUTES,
+                )
+            )
+        self.assertFalse(
+            navigation_runtime.disclosure_group_is_expanded(
+                seo_navigation.SEO_OVERVIEW_ROUTE,
+                group="ads",
+                stored_group="",
+                force_open_routes=ads_navigation.ADS_ROUTES,
+            )
+        )
         for selector in (
             ".st-key-sidebar-ads-children,",
             '.st-key-sidebar-ads-children div[data-testid="stButton"] button,',
@@ -246,7 +263,52 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         ).click()
         app_test.run(timeout=30)
         self.assertFalse(app_test.exception)
-        self.assertNotIn(
+        self.assertIn(
+            "sidebar-child::Creative Refresh",
+            {button.key for button in app_test.sidebar.button},
+        )
+
+    def test_ads_route_overrides_stale_collapsed_disclosure_state(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["startup_shell_loaded"] = True
+        app_test.session_state["sidebar-open-group"] = ""
+        app_test.query_params["page"] = ads_navigation.ADS_PAGE_KEY
+
+        app_test.run(timeout=30)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual([title.value for title in app_test.title], ["Ads"])
+        self.assertIn(
+            "sidebar-child::Creative Refresh",
+            {button.key for button in app_test.sidebar.button},
+        )
+
+        app_test.session_state["sidebar-open-group"] = "seo"
+        app_test.run(timeout=30)
+        self.assertIn(
+            "sidebar-child::Creative Refresh",
+            {button.key for button in app_test.sidebar.button},
+        )
+
+    def test_clicking_ads_once_navigates_and_keeps_its_child_visible(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["startup_shell_loaded"] = True
+        app_test.session_state["selected_page"] = "Dashboard"
+        app_test.session_state["sidebar-open-group"] = ""
+        app_test.run(timeout=30)
+
+        next(
+            button
+            for button in app_test.sidebar.button
+            if button.key == "sidebar-disclosure::ads"
+        ).click()
+        app_test.run(timeout=30)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual([title.value for title in app_test.title], ["Ads"])
+        self.assertIn(
             "sidebar-child::Creative Refresh",
             {button.key for button in app_test.sidebar.button},
         )

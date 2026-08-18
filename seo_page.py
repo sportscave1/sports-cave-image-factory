@@ -1,11 +1,15 @@
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import html
 import json
+import logging
 import os
 import re
+import time
 import uuid
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
 import google_seo
@@ -18,12 +22,16 @@ import seo_blog_workflow
 import seo_live_analytics
 import seo_metrics
 import seo_navigation as seo_nav
+import seo_pagination
+import seo_reporting_runtime
 import seo_sync_progress
 import seo_technical_audit
 import seo_workspace as seo
 
 
 SEO_OVERVIEW_CACHE_TTL_SECONDS = 15
+SEO_REPORTING_CACHE_TTL_SECONDS = 300
+SEO_WATERMARK_CACHE_TTL_SECONDS = 15
 SEO_PROGRESS_POLL_SECONDS = 15
 SEO_ADMIN_OPEN_STATE_KEY = "seo-data-connections-open"
 DATABASE_URL_ENV_KEYS = (
@@ -202,7 +210,13 @@ def _table(rows, *, empty, height=360):
     if not rows:
         st.info(empty)
         return
+    started = time.perf_counter()
     st.dataframe(rows, use_container_width=True, hide_index=True, height=height)
+    logging.info(
+        "SEO_PERF operation=table_construction duration_ms=%.2f rows=%s",
+        (time.perf_counter() - started) * 1000,
+        len(rows),
+    )
 
 
 def _active_view(options, *, key, default=None):
@@ -459,6 +473,39 @@ def _cached_default_reporting_snapshot(
     )
 
 
+@st.cache_data(ttl=SEO_WATERMARK_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
+def _cached_interactive_reporting_context():
+    return seo_reporting_runtime.default_reader().reporting_context()
+
+
+@st.cache_data(ttl=SEO_REPORTING_CACHE_TTL_SECONDS, show_spinner=False, max_entries=48)
+def _cached_interactive_overview(filters_json, context_json, watermark):
+    del watermark
+    return seo_reporting_runtime.default_reader().overview_base(
+        json.loads(filters_json),
+        context=json.loads(context_json),
+    )
+
+
+@st.cache_data(ttl=SEO_REPORTING_CACHE_TTL_SECONDS, show_spinner=False, max_entries=96)
+def _cached_interactive_landing_pages(filters_json, context_json, watermark, limit):
+    del watermark
+    return seo_reporting_runtime.default_reader().landing_pages(
+        json.loads(filters_json),
+        context=json.loads(context_json),
+        limit=limit,
+    )
+
+
+@st.cache_data(ttl=SEO_REPORTING_CACHE_TTL_SECONDS, show_spinner=False, max_entries=48)
+def _cached_interactive_rank_distribution(filters_json, context_json, watermark):
+    del watermark
+    return seo_reporting_runtime.default_reader().rank_distribution(
+        json.loads(filters_json),
+        context=json.loads(context_json),
+    )
+
+
 @st.cache_data(ttl=SEO_OVERVIEW_CACHE_TTL_SECONDS, show_spinner=False, max_entries=1)
 def _cached_default_growth_pipeline_status():
     return seo_growth_intelligence.default_store().recent_pipeline_status()
@@ -470,6 +517,10 @@ def invalidate_seo_overview_summary_cache():
     _cached_default_phase4_health.clear()
     _cached_default_live_source_health.clear()
     _cached_default_reporting_snapshot.clear()
+    _cached_interactive_reporting_context.clear()
+    _cached_interactive_overview.clear()
+    _cached_interactive_landing_pages.clear()
+    _cached_interactive_rank_distribution.clear()
     _cached_default_growth_pipeline_status.clear()
 
 
@@ -2679,7 +2730,7 @@ def _render_saved_query_intelligence(*, growth_store=None):
 
 
 def _render_keywords(store, state, user, *, growth_store=None):
-    _header(seo.SEO_KEYWORDS_ROUTE)
+    _header(seo_nav.SEO_MAPPING_ROUTE)
     st.caption("Use real search data only. This workspace never invents search volume, clicks, impressions, CTR or position.")
     keywords = seo.active_records(state, "keywords")
     tab_names = ("Saved Query Intelligence", "Keyword Library", "Import GSC CSV", "Page Mapping", "Analysis Prompt", "Rules")
@@ -3033,7 +3084,226 @@ def _saved_search_snapshot(
         return {"ready": False, "reason": "saved_data_unavailable", "top_queries": [], "top_pages": []}
 
 
+def _filter_json(filters):
+    return json.dumps(filters or {}, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _interactive_reader(*, phase4_store=None, reporting_reader=None):
+    if reporting_reader is not None:
+        if all(hasattr(reporting_reader, name) for name in ("overview_base", "query_page", "landing_pages")):
+            return reporting_reader, False
+        return None, False
+    if phase4_store is not None:
+        backend = phase4_store._backend() if hasattr(phase4_store, "_backend") else None
+        return seo_reporting_runtime.PostgresSEOInteractiveReader(backend), False
+    return seo_reporting_runtime.default_reader(), True
+
+
+def _interactive_context(reader, *, use_cache):
+    started = time.perf_counter()
+    cache_state = _cache_observation("interactive-reporting-context") if use_cache else "bypass"
+    context = _cached_interactive_reporting_context() if use_cache else reader.reporting_context()
+    logging.info(
+        "SEO_PERF operation=snapshot_reader_total duration_ms=%.2f cache=%s watermark=%s",
+        (time.perf_counter() - started) * 1000,
+        cache_state,
+        context.get("watermark") or "none",
+    )
+    return context
+
+
+def _cache_observation(key):
+    """Record session-observed reporting cache hits without storing user decisions."""
+    observed = set(st.session_state.get("seo-reporting-cache-observed") or ())
+    hit = key in observed
+    observed.add(key)
+    st.session_state["seo-reporting-cache-observed"] = sorted(observed)[-160:]
+    return "hit" if hit else "miss"
+
+
+def _load_interactive_overview(filters, reader, context, *, use_cache, route):
+    started = time.perf_counter()
+    filters_json = _filter_json(filters)
+    context_json = json.dumps(context, sort_keys=True, default=str, separators=(",", ":"))
+    cache_key = hashlib.sha256(
+        f"overview|{filters_json}|{context.get('watermark', '')}".encode("utf-8")
+    ).hexdigest()[:24]
+    cache_state = _cache_observation(cache_key) if use_cache else "bypass"
+    snapshot = (
+        _cached_interactive_overview(filters_json, context_json, context.get("watermark") or "")
+        if use_cache
+        else reader.overview_base(filters, context=context)
+    )
+    diagnostics = dict(snapshot.get("diagnostics") or {})
+    seo_reporting_runtime.log_diagnostics(route, "overview_base", diagnostics, cache=cache_state)
+    logging.info(
+        "SEO_PERF route=%s operation=overview_base_total duration_ms=%.2f cache=%s",
+        route,
+        (time.perf_counter() - started) * 1000,
+        cache_state,
+    )
+    return snapshot
+
+
+def _snapshot_unavailable_notice(snapshot):
+    reason = str((snapshot or {}).get("reason") or "")
+    if reason == "search_type_snapshot_unavailable":
+        st.info("This search type is not in the saved interactive reporting snapshot yet. Select Web or wait for the next background reporting refresh.")
+    elif reason in {"reporting_snapshot_unavailable", "saved_data_unavailable"}:
+        st.warning(
+            "The compact SEO reporting snapshot is unavailable. Background sync can repair it; "
+            "this page will not scan or rebuild full Search Console history while you wait."
+        )
+
+
+def _progressive_query_rows(
+    reader,
+    filters,
+    context,
+    *,
+    view,
+    search,
+    key,
+    use_cache=False,
+    signature_extra=None,
+    excluded_queries=(),
+):
+    del use_cache  # Pages live in session state so prior rows are never refetched.
+    controls = st.columns([1, 1.2, 2.3, 2.4])
+    page_size = controls[0].selectbox(
+        "Rows",
+        (25, 50, 100),
+        index=0,
+        key=f"{key}-rows-control",
+    )
+    signature = seo_pagination.pagination_signature(
+        {
+            "filters": filters,
+            "view": view,
+            "search": str(search or "").strip().casefold(),
+            "sort": "view-default-v1",
+            "watermark": context.get("watermark") or "",
+            "page_size": page_size,
+            "extra": signature_extra or {},
+            "excluded_queries": sorted(excluded_queries),
+        }
+    )
+    state_key = f"{key}-progressive-state"
+    state = seo_pagination.state_for(
+        st.session_state,
+        state_key,
+        signature=signature,
+        page_size=page_size,
+    )
+
+    def fetch(limit):
+        started = time.perf_counter()
+        page = reader.query_page(
+            filters,
+            view=view,
+            search=search,
+            limit=limit,
+            cursor=state.get("cursor"),
+            context=context,
+            excluded_queries=excluded_queries,
+        )
+        seo_reporting_runtime.log_diagnostics(
+            view,
+            "query_page",
+            page.get("diagnostics"),
+            cache="session-miss",
+        )
+        logging.info(
+            "SEO_PERF route=%s operation=query_page_total duration_ms=%.2f requested_rows=%s returned_rows=%s",
+            view,
+            (time.perf_counter() - started) * 1000,
+            limit,
+            len(page.get("rows") or []),
+        )
+        return page
+
+    if not state.get("rows") and not state.get("complete"):
+        state = seo_pagination.append_page(state, fetch(page_size))
+        st.session_state[state_key] = state
+    controls[1].caption(seo_pagination.visible_count_label(state))
+    load_more = controls[2].button(
+        "Load 25 more",
+        key=f"{key}-load-more::{signature}::{len(state.get('rows') or [])}",
+        disabled=bool(state.get("complete")),
+        help="Append the next 25 keywords using stable server-side ordering.",
+    )
+    if load_more and not state.get("complete"):
+        controls[2].caption("Loading the next 25 keywords…")
+        state = seo_pagination.append_page(state, fetch(25))
+        st.session_state[state_key] = state
+    export_key = f"{key}-csv-export"
+    export_state = dict(st.session_state.get(export_key) or {})
+    if export_state.get("signature") != signature:
+        export_state = {}
+        st.session_state[export_key] = export_state
+    if export_state.get("data"):
+        controls[3].download_button(
+            f"Download {int(export_state.get('count') or 0):,} rows",
+            export_state["data"],
+            file_name=f"sports-cave-{key.replace('seo-v2-', '')}.csv",
+            mime="text/csv",
+            key=f"{key}-download::{signature}",
+            use_container_width=True,
+        )
+    elif controls[3].button(
+        "Prepare filtered CSV",
+        key=f"{key}-prepare-export::{signature}",
+        help="Query the complete filtered result without rendering it in the browser.",
+        use_container_width=True,
+    ):
+        controls[3].caption("Preparing the filtered CSV…")
+        export = reader.query_export(
+            filters,
+            view=view,
+            search=search,
+            context=context,
+            excluded_queries=excluded_queries,
+        )
+        seo_reporting_runtime.log_diagnostics(
+            view,
+            "query_export",
+            export.get("diagnostics"),
+            cache="explicit-export",
+        )
+        export_rows = []
+        for row in export.get("rows") or []:
+            export_rows.append(
+                {
+                    "query": row.get("query") or "",
+                    "clicks": row.get("clicks") or 0,
+                    "impressions": row.get("impressions") or 0,
+                    "ctr": row.get("ctr") or 0,
+                    "average_position": row.get("average_position") or 0,
+                    "click_change": row.get("click_change") or 0,
+                    "ranking_change": row.get("ranking_change") or 0,
+                    "current_page": row.get("current_page") or "",
+                    "markets": ", ".join(row.get("market_mix") or []),
+                    "devices": ", ".join(row.get("device_mix") or []),
+                }
+            )
+        export_state = {
+            "signature": signature,
+            "count": len(export_rows),
+            "data": seo.records_csv_bytes(
+                export_rows,
+                (
+                    "query", "clicks", "impressions", "ctr", "average_position",
+                    "click_change", "ranking_change", "current_page", "markets", "devices",
+                ),
+            ),
+        }
+        st.session_state[export_key] = export_state
+        st.rerun(scope="fragment")
+    return list(state.get("rows") or []), state
+
+
 def _query_table_rows(snapshot):
+    started = time.perf_counter()
     rows = []
     for row in snapshot.get("top_queries") or []:
         rows.append(
@@ -3049,6 +3319,11 @@ def _query_table_rows(snapshot):
                 "Devices": ", ".join(row.get("device_mix") or []),
             }
         )
+    logging.info(
+        "SEO_PERF operation=python_query_transformation duration_ms=%.2f rows=%s",
+        (time.perf_counter() - started) * 1000,
+        len(rows),
+    )
     return rows
 
 
@@ -3063,10 +3338,36 @@ def _render_search_overview(
     growth_store=None,
 ):
     _header(seo.SEO_OVERVIEW_ROUTE)
-    snapshot = _saved_search_snapshot(
+    filters = _reporting_filters()
+    view = st.segmented_control(
+        "Overview detail",
+        ("Top queries", "Quick wins", "Rising", "Declining", "Rank distribution", "Landing pages"),
+        default="Top queries",
+        key="seo-v2-overview-detail",
+        label_visibility="collapsed",
+    ) or "Top queries"
+    reader, use_cache = _interactive_reader(
         phase4_store=phase4_store,
         reporting_reader=reporting_reader,
     )
+    context = None
+    if reader is not None:
+        context = _interactive_context(reader, use_cache=use_cache)
+        snapshot = _load_interactive_overview(
+            filters,
+            reader,
+            context,
+            use_cache=use_cache,
+            route=seo.SEO_OVERVIEW_ROUTE,
+        )
+    else:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo",
+        )
+    _snapshot_unavailable_notice(snapshot)
     current = snapshot.get("current") or {}
     previous = snapshot.get("previous") or {}
     columns = st.columns(5)
@@ -3083,12 +3384,23 @@ def _render_search_overview(
             percent or absolute,
             delta_color="inverse" if inverse else "normal",
         )
-    quality = seo_metrics.rank_quality(snapshot.get("top_queries") or [])
-    coverage = seo_metrics.known_query_coverage(
-        current.get("organic_clicks"),
-        current.get("organic_impressions"),
-        snapshot.get("top_queries") or [],
-    )
+    quality = snapshot.get("rank_quality") or seo_metrics.rank_quality(snapshot.get("top_queries") or [])
+    known_clicks = _numeric_value(snapshot.get("known_query_clicks"))
+    known_impressions = _numeric_value(snapshot.get("known_query_impressions"))
+    property_clicks = _numeric_value(current.get("organic_clicks"))
+    property_impressions = _numeric_value(current.get("organic_impressions"))
+    coverage = {
+        "click_coverage": (
+            known_clicks / property_clicks
+            if known_clicks is not None and property_clicks
+            else None
+        ),
+        "impression_coverage": (
+            known_impressions / property_impressions
+            if known_impressions is not None and property_impressions
+            else None
+        )
+    }
     columns[4].metric(
         "Rank Quality",
         "Unavailable" if quality["score"] is None else f"{float(quality['score']):.1f}/100",
@@ -3121,44 +3433,88 @@ def _render_search_overview(
     ]
     if trend:
         _section_heading("Organic visibility")
+        chart_started = time.perf_counter()
         st.line_chart(trend, x="Date", y=("Clicks", "Impressions"), height=250)
-    queries = list(snapshot.get("top_queries") or [])
-    view = st.segmented_control(
-        "Overview detail",
-        ("Top queries", "Quick wins", "Rising", "Declining", "Rank distribution", "Landing pages"),
-        default="Top queries",
-        key="seo-v2-overview-detail",
-        label_visibility="collapsed",
-    ) or "Top queries"
-    if view == "Top queries":
-        rows = _query_table_rows({"top_queries": queries[:25]})
-        empty = "No saved query rows are available."
-    elif view == "Quick wins":
-        quick_wins = sorted(
-            (
-                row for row in queries
-                if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 20
-            ),
-            key=lambda row: seo_metrics.opportunity_score(row)["score"],
-            reverse=True,
+        logging.info(
+            "SEO_PERF route=%s operation=chart_construction duration_ms=%.2f rows=%s",
+            seo.SEO_OVERVIEW_ROUTE,
+            (time.perf_counter() - chart_started) * 1000,
+            len(trend),
         )
-        rows = _query_table_rows({"top_queries": quick_wins[:25]})
-        empty = "No striking-distance query opportunities are available."
-    elif view == "Rising":
-        rising = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0, reverse=True)
-        rows = _query_table_rows({"top_queries": rising[:25]})
-        empty = "No rising queries are available."
-    elif view == "Declining":
-        declining = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0)
-        rows = _query_table_rows({"top_queries": declining[:25]})
-        empty = "No declining queries are available."
+    if view in {"Top queries", "Quick wins", "Rising", "Declining"} and reader is not None:
+        query_view = "All" if view == "Top queries" else view
+        query_rows, _pagination = _progressive_query_rows(
+            reader,
+            filters,
+            context,
+            view=query_view,
+            search="",
+            key=f"seo-v2-overview-{query_view.casefold().replace(' ', '-')}",
+            use_cache=use_cache,
+        )
+        rows = _query_table_rows({"top_queries": query_rows})
+        empty = {
+            "Top queries": "No saved query rows are available.",
+            "Quick wins": "No striking-distance query opportunities are available.",
+            "Rising": "No rising queries are available.",
+            "Declining": "No declining queries are available.",
+        }[view]
+    elif view == "Rank distribution" and reader is not None and hasattr(reader, "rank_distribution"):
+        filters_json = _filter_json(filters)
+        context_json = json.dumps(context, sort_keys=True, default=str, separators=(",", ":"))
+        cache_key = hashlib.sha256(
+            f"rank|{filters_json}|{context.get('watermark', '')}".encode("utf-8")
+        ).hexdigest()[:24]
+        cache_state = _cache_observation(cache_key) if use_cache else "bypass"
+        result = (
+            _cached_interactive_rank_distribution(
+                filters_json,
+                context_json,
+                context.get("watermark") or "",
+            )
+            if use_cache
+            else reader.rank_distribution(filters, context=context)
+        )
+        seo_reporting_runtime.log_diagnostics(
+            seo.SEO_OVERVIEW_ROUTE,
+            "rank_distribution",
+            result.get("diagnostics"),
+            cache=cache_state,
+        )
+        rows = [
+            {"Bucket": label, "Known impressions": _metric_value(value)}
+            for label, value in (result.get("distribution") or {}).items()
+        ]
+        empty = "No rank distribution is available."
     elif view == "Rank distribution":
         rows = [
             {"Bucket": label, "Known impressions": _metric_value(value)}
-            for label, value in quality["distribution"].items()
+            for label, value in (quality.get("distribution") or {}).items()
         ]
         empty = "No rank distribution is available."
-    else:
+    elif view == "Landing pages" and reader is not None:
+        filters_json = _filter_json(filters)
+        context_json = json.dumps(context, sort_keys=True, default=str, separators=(",", ":"))
+        cache_key = hashlib.sha256(
+            f"landing|{filters_json}|{context.get('watermark', '')}".encode("utf-8")
+        ).hexdigest()[:24]
+        cache_state = _cache_observation(cache_key) if use_cache else "bypass"
+        result = (
+            _cached_interactive_landing_pages(
+                filters_json,
+                context_json,
+                context.get("watermark") or "",
+                25,
+            )
+            if use_cache
+            else reader.landing_pages(filters, context=context, limit=25)
+        )
+        seo_reporting_runtime.log_diagnostics(
+            seo.SEO_OVERVIEW_ROUTE,
+            "landing_pages",
+            result.get("diagnostics"),
+            cache=cache_state,
+        )
         rows = [
             {
                 "Page": row.get("canonical_url") or row.get("path") or "",
@@ -3168,26 +3524,46 @@ def _render_search_overview(
                 "CTR": _metric_value(row.get("ctr"), style="percent"),
                 "Position": _metric_value(row.get("average_position"), style="position"),
             }
-            for row in (snapshot.get("top_pages") or [])[:20]
+            for row in (result.get("rows") or [])
         ]
         empty = "No saved Search Console landing-page rows are available."
+    else:
+        queries = list(snapshot.get("top_queries") or [])
+        if view == "Top queries":
+            selected = queries[:25]
+            empty = "No saved query rows are available."
+        elif view == "Quick wins":
+            selected = sorted(
+                (row for row in queries if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 20),
+                key=lambda row: seo_metrics.opportunity_score(row)["score"],
+                reverse=True,
+            )[:25]
+            empty = "No striking-distance query opportunities are available."
+        elif view == "Rising":
+            selected = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0, reverse=True)[:25]
+            empty = "No rising queries are available."
+        elif view == "Declining":
+            selected = sorted(queries, key=lambda row: _numeric_value(row.get("ranking_change")) or 0)[:25]
+            empty = "No declining queries are available."
+        else:
+            selected = snapshot.get("top_pages") or []
+            empty = "No saved Search Console landing-page rows are available."
+        rows = _query_table_rows({"top_queries": selected}) if view != "Landing pages" else list(selected)
     _table(rows, empty=empty, height=310)
-    with st.expander("Data Connections & Sync Settings", expanded=False):
-        _render_data_connections_admin(
-            user,
-            google_store=google_store,
-            import_store=import_store,
-            phase4_store=phase4_store,
-            reporting_reader=reporting_reader,
-            growth_store=growth_store,
-            embedded=True,
-        )
+    _render_data_connections_admin(
+        user,
+        google_store=google_store,
+        import_store=import_store,
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+        growth_store=growth_store,
+    )
 
 
 def _render_keywords_rankings(state, *, phase4_store=None, reporting_reader=None):
     _header(seo.SEO_KEYWORDS_ROUTE)
     st.caption("One row represents one normalised query. Country and device are filters or mix labels, never duplicate rows.")
-    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    filters = _reporting_filters()
     mapping_targets = {
         str(row.get("primary_keyword") or "").strip().casefold(): row.get("target_page") or ""
         for row in seo.active_records(state, "keyword_mappings")
@@ -3197,39 +3573,70 @@ def _render_keywords_rankings(state, *, phase4_store=None, reporting_reader=None
         row.get("opportunity_status") or row.get("mapping_status") or ""
         for row in seo.active_records(state, "keywords")
     }
-    source_rows = list(snapshot.get("top_queries") or [])
     view = st.segmented_control(
         "View",
         ("All", "Rising", "Declining", "New", "Top 3", "Positions 4-10", "Positions 11-20", "Unmapped"),
         default="All",
         key="seo-v2-query-view",
     ) or "All"
-    if view == "Rising":
-        source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) > 0]
-    elif view == "Declining":
-        source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) < 0]
-    elif view == "New":
-        source_rows = [row for row in source_rows if (_numeric_value(row.get("previous_clicks")) or 0) == 0]
-    elif view == "Top 3":
-        source_rows = [row for row in source_rows if 0 < (_numeric_value(row.get("average_position")) or 0) <= 3]
-    elif view == "Positions 4-10":
-        source_rows = [row for row in source_rows if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 10]
-    elif view == "Positions 11-20":
-        source_rows = [row for row in source_rows if 11 <= (_numeric_value(row.get("average_position")) or 0) <= 20]
-    elif view == "Unmapped":
-        source_rows = [
-            row for row in source_rows
-            if not mapping_targets.get(str(row.get("query") or "").strip().casefold())
-        ]
+    search = st.text_input("Search queries", key="seo-v2-query-search")
+    reader, use_cache = _interactive_reader(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
+    if reader is not None:
+        context = _interactive_context(reader, use_cache=use_cache)
+        query_rows, _pagination = _progressive_query_rows(
+            reader,
+            filters,
+            context,
+            view=view,
+            search=search,
+            key="seo-v2-query-table",
+            use_cache=use_cache,
+            signature_extra={
+                "mapping_revision": seo_pagination.pagination_signature(mapping_targets),
+                "status_revision": seo_pagination.pagination_signature(keyword_status),
+            },
+            excluded_queries=tuple(mapping_targets),
+        )
+        source_rows = query_rows
+        if not context.get("available"):
+            _snapshot_unavailable_notice({"reason": "reporting_snapshot_unavailable"})
+    else:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo",
+        )
+        source_rows = list(snapshot.get("top_queries") or [])
+        if view == "Rising":
+            source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) > 0]
+        elif view == "Declining":
+            source_rows = [row for row in source_rows if (_numeric_value(row.get("ranking_change")) or 0) < 0]
+        elif view == "New":
+            source_rows = [row for row in source_rows if (_numeric_value(row.get("previous_clicks")) or 0) == 0]
+        elif view == "Top 3":
+            source_rows = [row for row in source_rows if 0 < (_numeric_value(row.get("average_position")) or 0) <= 3]
+        elif view == "Positions 4-10":
+            source_rows = [row for row in source_rows if 4 <= (_numeric_value(row.get("average_position")) or 0) <= 10]
+        elif view == "Positions 11-20":
+            source_rows = [row for row in source_rows if 11 <= (_numeric_value(row.get("average_position")) or 0) <= 20]
+        elif view == "Unmapped":
+            source_rows = [
+                row for row in source_rows
+                if not mapping_targets.get(str(row.get("query") or "").strip().casefold())
+            ]
+        if search:
+            source_rows = [row for row in source_rows if search.casefold() in str(row.get("query") or "").casefold()]
     rows = _query_table_rows({"top_queries": source_rows})
     for row in rows:
         key = str(row.get("Query") or "").strip().casefold()
         row["Mapped target"] = mapping_targets.get(key) or "Unmapped"
         row["Opportunity status"] = keyword_status.get(key) or "Open"
-    search = st.text_input("Search queries", key="seo-v2-query-search")
-    if search:
-        rows = [row for row in rows if search.casefold() in str(row.get("Query") or "").casefold()]
-    rows = _paginated_rows(rows, key="seo-v2-query-table", default_page_size=25)
+    if reader is None:
+        rows = _paginated_rows(rows, key="seo-v2-query-table-legacy", default_page_size=25)
     _table(rows, empty="No saved Search Console query rows match these filters.", height=520)
 
 
@@ -3244,7 +3651,7 @@ def _render_opportunities(
     project_store=None,
 ):
     _header(seo_nav.SEO_OPPORTUNITIES_ROUTE)
-    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    filters = _reporting_filters()
     prepared = []
     source_by_query = {}
     dismissed = {
@@ -3252,7 +3659,39 @@ def _render_opportunities(
         for row in seo.active_records(state, "keywords")
         if row.get("opportunity_status") == "Dismissed"
     }
-    for row in snapshot.get("top_queries") or []:
+    search = st.text_input("Search opportunities", key="seo-v2-opportunity-search")
+    reader, use_cache = _interactive_reader(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
+    snapshot = {"health": {}}
+    if reader is not None:
+        context = _interactive_context(reader, use_cache=use_cache)
+        source_rows, _pagination = _progressive_query_rows(
+            reader,
+            filters,
+            context,
+            view="Opportunities",
+            search=search,
+            key="seo-v2-opportunities",
+            use_cache=use_cache,
+            signature_extra={"dismissed_revision": seo_pagination.pagination_signature(sorted(dismissed))},
+            excluded_queries=tuple(dismissed),
+        )
+        snapshot = {"health": seo_reporting_runtime.PostgresSEOInteractiveReader._health(context)}
+        if not context.get("available"):
+            _snapshot_unavailable_notice({"reason": "reporting_snapshot_unavailable"})
+    else:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo",
+        )
+        source_rows = list(snapshot.get("top_queries") or [])
+        if search:
+            source_rows = [row for row in source_rows if search.casefold() in str(row.get("query") or "").casefold()]
+    for row in source_rows:
         query = str(row.get("query") or row.get("normalized_query") or "").strip()
         if not query or query.casefold() in dismissed:
             continue
@@ -3276,12 +3715,13 @@ def _render_opportunities(
                 "Why": scored["explanation"],
             }
         )
-    prepared.sort(key=lambda row: row["Score"], reverse=True)
-    _table(
-        _paginated_rows(prepared, key="seo-v2-opportunities"),
-        empty="No explainable opportunities are available for the selected saved data.",
-        height=520,
+    prepared.sort(key=lambda row: (-row["Score"], row["Query"].casefold()))
+    rendered_opportunities = (
+        prepared
+        if reader is not None
+        else _paginated_rows(prepared, key="seo-v2-opportunities-legacy")
     )
+    _table(rendered_opportunities, empty="No explainable opportunities are available for the selected saved data.", height=520)
     st.caption("Scores use only observed impressions, position, CTR, movement, mapping, content-gap and cannibalisation evidence. No search volume is inferred.")
     if not prepared:
         return
@@ -3378,13 +3818,39 @@ def _render_opportunities(
 
 def _render_search_landing_pages(*, phase4_store=None, reporting_reader=None):
     _header(seo_nav.SEO_LANDING_PAGES_ROUTE)
-    snapshot = _saved_search_snapshot(
+    filters = _reporting_filters()
+    reader, use_cache = _interactive_reader(
         phase4_store=phase4_store,
         reporting_reader=reporting_reader,
-        include_organic_ga4=True,
     )
+    if reader is not None:
+        context = _interactive_context(reader, use_cache=use_cache)
+        filters_json = _filter_json(filters)
+        context_json = json.dumps(context, sort_keys=True, default=str, separators=(",", ":"))
+        result = (
+            _cached_interactive_landing_pages(
+                filters_json,
+                context_json,
+                context.get("watermark") or "",
+                25,
+            )
+            if use_cache
+            else reader.landing_pages(filters, context=context, limit=25)
+        )
+        source_rows = result.get("rows") or []
+        st.caption(f"Showing {len(source_rows):,} of {int(result.get('total') or 0):,} landing pages")
+        if not context.get("available"):
+            _snapshot_unavailable_notice({"reason": "reporting_snapshot_unavailable"})
+    else:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo_landing",
+        )
+        source_rows = snapshot.get("top_pages") or []
     rows = []
-    for row in snapshot.get("top_pages") or []:
+    for row in source_rows:
         impressions = _numeric_value(row.get("impressions")) or 0
         clicks = _numeric_value(row.get("clicks")) or 0
         rows.append(
@@ -3403,11 +3869,9 @@ def _render_search_landing_pages(*, phase4_store=None, reporting_reader=None):
                 "Organic sessions (supporting)": _metric_value(row.get("sessions")),
             }
         )
-    _table(
-        _paginated_rows(rows, key="seo-v2-pages"),
-        empty="No saved Search Console page rows are available.",
-        height=520,
-    )
+    if reader is None:
+        rows = _paginated_rows(rows, key="seo-v2-pages-legacy")
+    _table(rows, empty="No saved Search Console page rows are available.", height=520)
 
 
 def _render_seo_health(user, *, google_store=None, import_store=None, phase4_store=None, reporting_reader=None, growth_store=None):
@@ -3598,10 +4062,33 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
     opportunity = _json_object(project.get("opportunity_snapshot"), {})
     actions[2].caption(f"Status: {project.get('status') or 'Idea'} | Project {selected_id}")
 
-    snapshot = _saved_search_snapshot(phase4_store=phase4_store, reporting_reader=reporting_reader)
+    filters = _reporting_filters()
+    reader, use_cache = _interactive_reader(
+        phase4_store=phase4_store,
+        reporting_reader=reporting_reader,
+    )
+    if reader is not None:
+        reporting_context = _interactive_context(reader, use_cache=use_cache)
+        opportunity_page = reader.query_page(
+            filters,
+            view="Opportunities",
+            limit=25,
+            context=reporting_context,
+        )
+        snapshot = {
+            "health": seo_reporting_runtime.PostgresSEOInteractiveReader._health(reporting_context),
+            "top_queries": opportunity_page.get("rows") or [],
+        }
+    else:
+        snapshot = _load_reporting_snapshot(
+            filters,
+            phase4_store=phase4_store,
+            reporting_reader=reporting_reader,
+            source_scope="seo",
+        )
     gsc_through = ((snapshot.get("health") or {}).get("gsc") or {}).get("through_date") or ""
     opportunity_rows = seo_blog_workflow.build_blog_opportunities(
-        (snapshot.get("top_queries") or [])[:100],
+        (snapshot.get("top_queries") or [])[:25],
         data_through_date=gsc_through,
     )
     opportunities = {
@@ -3854,8 +4341,16 @@ def _render_active_route(
     reporting_reader=None,
     growth_store=None,
 ):
+    route_started = time.perf_counter()
     state = {}
-    if route != seo.SEO_OVERVIEW_ROUTE:
+    state_routes = {
+        seo.SEO_KEYWORDS_ROUTE,
+        seo_nav.SEO_OPPORTUNITIES_ROUTE,
+        seo_nav.SEO_MAPPING_ROUTE,
+        seo.SEO_BLOG_ROUTE,
+    }
+    if route in state_routes:
+        state_started = time.perf_counter()
         try:
             state = store.load()
         except seo.SEOStoreError as error:
@@ -3863,10 +4358,15 @@ def _render_active_route(
             st.error(str(error))
             st.caption("SEO records were not changed. Ask an administrator to check the shared data store.")
             return
+        logging.info(
+            "SEO_PERF route=%s operation=workspace_state duration_ms=%.2f",
+            route,
+            (time.perf_counter() - state_started) * 1000,
+        )
     consume_summary = getattr(store, "consume_import_summary", None)
     summary = (
         consume_summary()
-        if route != seo.SEO_OVERVIEW_ROUTE and callable(consume_summary)
+        if route in state_routes and callable(consume_summary)
         else None
     )
     if summary:
@@ -3895,9 +4395,7 @@ def _render_active_route(
                 f"{len(summary['conflicts'])} archived or intentionally skipped citation records "
                 "were left unchanged. Review the stored migration summary before resolving them."
             )
-    navigation_runtime.dispatch_selected(
-        route,
-        {
+    handlers = {
             seo.SEO_OVERVIEW_ROUTE: lambda: _render_search_overview(
                 state,
                 user,
@@ -3945,8 +4443,41 @@ def _render_active_route(
                 reporting_reader=reporting_reader,
                 growth_store=growth_store,
             ),
-        },
-    )
+        }
+    render_status = "ready"
+    try:
+        navigation_runtime.dispatch_selected(route, handlers)
+    except Exception as error:
+        render_status = "error"
+        logging.exception("SEO route render failed route=%s", route)
+        st.error("This SEO view could not be loaded, but the workspace is still available.")
+        st.caption("Retry this view or return to SEO Overview. No saved SEO data was changed.")
+        retry_col, back_col, _ = st.columns([1, 1, 6])
+        if retry_col.button("Retry", key=f"seo-route-retry::{route}"):
+            st.rerun(scope="fragment")
+        if back_col.button("Back", key=f"seo-route-back::{route}"):
+            _navigate(navigate, seo.SEO_OVERVIEW_ROUTE)
+        if os_accounts.is_admin(user):
+            st.caption(f"Error type: {error.__class__.__name__}")
+    finally:
+        completion_payload = json.dumps(
+            {
+                "routeKey": os_accounts.page_key_for_route(route) or "",
+                "epoch": int(st.session_state.get("navigation_epoch") or 0),
+                "status": render_status,
+            },
+            ensure_ascii=True,
+        ).replace("</", "<\\/")
+        components.html(
+            f"<script>window.parent.SportsCaveTopBar?.completeNavigation?.({completion_payload});</script>",
+            height=0,
+            width=0,
+        )
+        logging.info(
+            "SEO_PERF route=%s operation=route_dispatch duration_ms=%.2f",
+            route,
+            (time.perf_counter() - route_started) * 1000,
+        )
 
 
 def render_page(

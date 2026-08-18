@@ -25,7 +25,7 @@ class SidebarDisclosureTests(unittest.TestCase):
         self.assertEqual(navigation_runtime.toggle_disclosure_group("social", "seo"), "seo")
         self.assertEqual(navigation_runtime.toggle_disclosure_group("seo", "social"), "social")
 
-    def test_deep_route_opens_once_but_explicit_collapse_survives_rerun(self):
+    def test_deep_route_always_restores_its_owning_parent(self):
         self.assertEqual(
             navigation_runtime.initial_disclosure_group(
                 seo_navigation.SEO_KEYWORDS_ROUTE,
@@ -42,7 +42,7 @@ class SidebarDisclosureTests(unittest.TestCase):
                 social_routes=SOCIAL_ROUTES,
                 seo_routes=seo_navigation.SEO_ROUTES,
             ),
-            "",
+            "seo",
         )
 
     def test_toggle_is_navigation_only_and_invokes_no_heavy_loader(self):
@@ -198,15 +198,74 @@ class RouteReliabilityTests(unittest.TestCase):
         self.assertEqual(second["status"], "pending")
         self.assertNotIn("token", second)
 
+    def test_every_seo_child_is_a_canonical_registry_destination(self):
+        for route in seo_navigation.SEO_ROUTES:
+            page = os_accounts.PAGE_BY_ROUTE[route]
+            self.assertEqual(os_accounts.PAGE_BY_KEY[page["key"]]["route"], route)
+            self.assertEqual(os_accounts.page_key_for_route(route), page["key"])
+
+    def test_every_seo_child_can_replace_every_other_child_in_one_transaction(self):
+        for previous in seo_navigation.SEO_ROUTES:
+            for requested in seo_navigation.SEO_ROUTES:
+                transition = navigation_runtime.route_transition(
+                    11,
+                    previous,
+                    requested,
+                    "sidebar",
+                )
+                self.assertEqual(transition["to"], requested)
+                self.assertEqual(transition["epoch"], 12)
+
+    def test_late_empty_and_older_completions_cannot_win(self):
+        self.assertFalse(
+            navigation_runtime.navigation_completion_is_current(
+                response_route=seo_navigation.SEO_OVERVIEW_ROUTE,
+                response_epoch=4,
+                current_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                current_epoch=5,
+                pending_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                pending_expected_epoch=5,
+            )
+        )
+        self.assertFalse(
+            navigation_runtime.navigation_completion_is_current(
+                response_route="",
+                response_epoch=4,
+                current_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                current_epoch=5,
+                pending_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                pending_expected_epoch=5,
+            )
+        )
+        self.assertTrue(
+            navigation_runtime.navigation_completion_is_current(
+                response_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                response_epoch=5,
+                current_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                current_epoch=5,
+                pending_route=seo_navigation.SEO_KEYWORDS_ROUTE,
+                pending_expected_epoch=5,
+            )
+        )
+
     def test_app_uses_history_aware_resolution_and_recoverable_error_actions(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("navigation_runtime.resolve_route(", source)
         self.assertIn("CURRENT_PAGE_QUERY_STATE_KEY", source)
         self.assertIn("query_params.set_with_no_forward_msg", source)
+        self.assertIn("NAVIGATION_HISTORY_ROUTE_STATE_KEY", source)
+        self.assertIn('source="browser-history", sync_query=False', source)
         self.assertIn("NAVIGATION_CLIENT_ROUTE_STATE_KEY", source)
-        self.assertIn('source == "sidebar"', source)
-        self.assertIn('route, source = client_route, "client-transition"', source)
-        self.assertIn("update_browser=not bool(", source)
+        self.assertIn("st.session_state.pop(NAVIGATION_CLIENT_ROUTE_STATE_KEY, None)", source)
+        self.assertNotIn('route, source = client_route, "client-transition"', source)
+        set_start = source.index("def set_current_page(")
+        set_end = source.index("\n\ndef init_session_state", set_start)
+        set_source = source[set_start:set_end]
+        self.assertLess(
+            set_source.index("_store_current_page(route, source=source)"),
+            set_source.index("sync_current_page_to_query_params("),
+        )
+        self.assertIn("current_route == route", set_source)
         self.assertIn('retry_col.button("Retry"', source)
         self.assertIn('back_col.button("Back"', source)
         self.assertIn("_finish_navigation_transition(current_page, status=\"ready\")", source)
@@ -227,16 +286,23 @@ class RouteReliabilityTests(unittest.TestCase):
         self.assertIn("state.config.revision", source)
         self.assertIn('readStatusCache("orders")', source)
         self.assertIn("rememberPendingNavigation(routeKey)", source)
-        self.assertIn("reconcilePendingNavigation", source)
+        self.assertIn("reconcileAcceptedNavigation", source)
+        self.assertNotIn("reconcilePendingNavigation", source)
         self.assertIn("handleHistoryNavigation", source)
         self.assertIn("historyDuplicateSkips", source)
         self.assertIn("visibleRoute === state.config.currentRouteKey", source)
-        self.assertIn("parentWindow.history.pushState(", source)
+        self.assertNotIn("parentWindow.history.pushState(", source)
+        self.assertIn("sidebarHistoryRouteButton", source)
         self.assertIn("bindPersistentSidebarRoutes", source)
         self.assertIn("button.dataset.scRouteKey", source)
-        self.assertIn("h.dataset.configRevision", source)
-        self.assertIn("scRecoveryScheduled", source)
-        self.assertIn("stStatusWidget", source)
+        bind_start = source.index("const bindPersistentSidebarRoutes")
+        bind_end = source.index("const reconcileAcceptedNavigation", bind_start)
+        bind_source = source[bind_start:bind_end]
+        self.assertNotIn('button.setAttribute(\n          "onclick"', bind_source)
+        self.assertNotIn("stStatusWidget", source)
+        self.assertIn("navigation_id", source)
+        self.assertIn("expected_epoch", source)
+        self.assertIn("pending.expected_epoch", source)
         self.assertIn("liveNavigationEpoch > incomingNavigationEpoch", source)
         self.assertIn("root.dataset.navigationEpoch", source)
         self.assertIn("navigation_epoch=st.session_state.get", (ROOT / "app.py").read_text(encoding="utf-8"))
@@ -244,6 +310,19 @@ class RouteReliabilityTests(unittest.TestCase):
         self.assertEqual(source.count('doc.addEventListener("click"'), 1)
         self.assertEqual(source.count('parentWindow.addEventListener("popstate"'), 1)
         self.assertIn("sidebarRouteButton(routeKey)", source)
+
+    def test_grouped_children_expose_unique_route_keyed_rows(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn('row = container.container(key=f"sidebar-row-{route_key}")', source)
+        self.assertIn('overview_row = children.container(key="sidebar-row-reporting")', source)
+        client = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('name.startsWith("st-key-sidebar-row-")', client)
+
+    def test_overview_label_is_not_aliased_to_reporting(self):
+        source = (ROOT / "top_bar.py").read_text(encoding="utf-8")
+        self.assertNotIn('navigation_route_keys["Overview"] = "reporting"', source)
 
 
 if __name__ == "__main__":

@@ -212,9 +212,15 @@ class SyncProgressArchitectureTests(unittest.TestCase):
 
     def test_overview_route_skips_full_legacy_workspace_read(self):
         source = inspect.getsource(seo_page._render_active_route)
-        self.assertIn("if route != seo.SEO_OVERVIEW_ROUTE:", source)
+        self.assertIn("if route in state_routes:", source)
+        state_routes = source[
+            source.index("state_routes = {") : source.index("if route in state_routes:")
+        ]
+        self.assertNotIn("SEO_OVERVIEW_ROUTE", state_routes)
+        self.assertNotIn("SEO_LANDING_PAGES_ROUTE", state_routes)
+        self.assertNotIn("SEO_HEALTH_ROUTE", state_routes)
         self.assertLess(
-            source.index("if route != seo.SEO_OVERVIEW_ROUTE:"),
+            source.index("if route in state_routes:"),
             source.index("state = store.load()"),
         )
 

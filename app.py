@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
+AUTH_REVALIDATE_SECONDS = 30
 
 
 def safe_startup_print(message):
@@ -319,6 +320,10 @@ CURRENT_PAGE_QUERY_STATE_KEY = "current_page_query_value"
 NAVIGATION_EPOCH_STATE_KEY = "navigation_epoch"
 NAVIGATION_TRANSITION_STATE_KEY = "navigation_transition"
 NAVIGATION_LAST_READY_STATE_KEY = "navigation_last_ready_page"
+NAVIGATION_HISTORY_ROUTE_STATE_KEY = "navigation_history_route"
+# Removed in navigation-reliability-v9.  Keep the name only long enough to
+# discard values written by older sessions; a browser-side pending route must
+# never outrank the canonical URL/session transaction.
 NAVIGATION_CLIENT_ROUTE_STATE_KEY = "navigation_client_route_pending"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
 DRIVE_SECTION_NAMES = {
@@ -1422,6 +1427,10 @@ def inject_styles():
 
         section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
             gap: 0.125rem !important;
+        }
+
+        section[data-testid="stSidebar"] [class*="st-key-sidebar-history-"] {
+            display: none !important;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-a11y {
@@ -4045,6 +4054,7 @@ def page_query_value(page):
 
 
 def _set_page_query_snapshot(query_value):
+    """Update Streamlit's query state after the browser committed the URL."""
     try:
         from streamlit.runtime.state import get_session_state
 
@@ -4057,9 +4067,16 @@ def _set_page_query_snapshot(query_value):
 
 
 def sync_current_page_to_query_params(page, *, update_browser=True):
+    """Commit one canonical route key to Streamlit and the visible URL.
+
+    The sidebar's persistent controller commits the visible URL synchronously
+    from the exact route-keyed row.  In that one case ``update_browser=False``
+    updates Streamlit's matching snapshot without creating a duplicate history
+    entry.  Other callers use Streamlit's normal visible query update.
+    """
     query_value = page_query_value(page)
     if not query_value:
-        return
+        return False
     try:
         current = st.query_params.get(PAGE_QUERY_PARAM, "")
         if isinstance(current, (list, tuple)):
@@ -4067,10 +4084,13 @@ def sync_current_page_to_query_params(page, *, update_browser=True):
         current = str(current or "")
         st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
         if current != query_value:
-            if update_browser or not _set_page_query_snapshot(query_value):
-                st.query_params[PAGE_QUERY_PARAM] = query_value
+            if not update_browser and _set_page_query_snapshot(query_value):
+                return True
+            st.query_params[PAGE_QUERY_PARAM] = query_value
+            return True
     except Exception:
-        pass
+        return False
+    return False
 
 
 def sync_current_page_query_param(page):
@@ -4117,9 +4137,9 @@ def _store_current_page(route, *, source="restore"):
     st.session_state["current_page_source"] = str(source or "restore")
 
 
-def _begin_navigation_transition(route, *, source):
+def _begin_navigation_transition(route, *, source, force=False):
     previous = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
-    if not previous or previous == route:
+    if not previous or (previous == route and not force):
         return
     transition = navigation_runtime.route_transition(
         st.session_state.get(NAVIGATION_EPOCH_STATE_KEY),
@@ -4183,6 +4203,7 @@ def _render_navigation_failure(current_page, error):
     epoch = int(transition.get("epoch") or 0)
     if retry_col.button("Retry", key=f"navigation-retry::{current_page}::{epoch}"):
         logging.info("NAV route_retry epoch=%s route=%s", epoch, current_page)
+        _begin_navigation_transition(current_page, source="error-retry", force=True)
         st.rerun()
     if back_col.button("Back", key=f"navigation-back::{current_page}::{epoch}"):
         set_current_page(previous_page, source="error-back")
@@ -4190,15 +4211,28 @@ def _render_navigation_failure(current_page, error):
 
 
 def get_current_page():
+    # A v7/v8 component stored this forever and it consequently overruled
+    # Back/Forward and newer URL state.  Browser pending state is now visual
+    # only; the URL/session pair below is the sole routing authority.
+    st.session_state.pop(NAVIGATION_CLIENT_ROUTE_STATE_KEY, None)
     session_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
     legacy_page = normalise_app_page(st.session_state.get(LEGACY_PAGE_STATE_KEY))
     query_value = page_query_param_value()
     query_page = page_from_query_params()
-    client_route = normalise_app_page(
-        st.session_state.get(NAVIGATION_CLIENT_ROUTE_STATE_KEY)
+    history_state = dict(
+        st.session_state.get(NAVIGATION_HISTORY_ROUTE_STATE_KEY) or {}
     )
-    if client_route:
-        route, source = client_route, "client-transition"
+    history_route = normalise_app_page(history_state.get("route"))
+    history_stale_query = str(history_state.get("stale_query") or "")
+    if history_route and query_value == page_query_value(history_route):
+        st.session_state.pop(NAVIGATION_HISTORY_ROUTE_STATE_KEY, None)
+        history_route = ""
+    elif history_route and query_value != history_stale_query:
+        # A genuinely new URL supersedes the saved popstate bridge.
+        st.session_state.pop(NAVIGATION_HISTORY_ROUTE_STATE_KEY, None)
+        history_route = ""
+    if history_route:
+        route, source = history_route, "browser-history"
     else:
         route, source = navigation_runtime.resolve_route(
             session_route=session_route,
@@ -4222,15 +4256,20 @@ def set_current_page(page, *, source="user", sync_query=True):
     route = normalise_app_page(page)
     if not route:
         raise ValueError(f"Unknown Sports Cave page: {page}")
+    current_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
+    current_query = page_query_param_value()
+    if current_route == route and (
+        not sync_query or current_query == page_query_value(route)
+    ):
+        return route
+    if source != "browser-history":
+        st.session_state.pop(NAVIGATION_HISTORY_ROUTE_STATE_KEY, None)
     _begin_navigation_transition(route, source=source)
+    # Durably store the exact route before either the query-parameter forward
+    # message or the explicit Streamlit rerun can be emitted.
     _store_current_page(route, source=source)
-    st.session_state[NAVIGATION_CLIENT_ROUTE_STATE_KEY] = route
     if sync_query:
-        client_managed = source == "sidebar"
-        sync_current_page_to_query_params(
-            route,
-            update_browser=not client_managed,
-        )
+        sync_current_page_to_query_params(route)
     return route
 
 
@@ -4248,7 +4287,7 @@ def init_session_state():
     sync_current_page_to_query_params(
         current_page,
         update_browser=not bool(
-            normalise_app_page(st.session_state.get(NAVIGATION_CLIENT_ROUTE_STATE_KEY))
+            st.session_state.get(NAVIGATION_HISTORY_ROUTE_STATE_KEY)
         ),
     )
 
@@ -8641,7 +8680,7 @@ def _toggle_sidebar_group(group):
 
 
 @st.fragment
-def _render_sidebar_create_growth(current_page, allowed_routes):
+def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
     if SIDEBAR_OPEN_GROUP_KEY not in st.session_state:
         st.session_state[SIDEBAR_OPEN_GROUP_KEY] = navigation_runtime.initial_disclosure_group(
             current_page,
@@ -8656,6 +8695,11 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
             ads_routes=ads_nav.ADS_ROUTES,
             analytics_routes=analytics_nav.ANALYTICS_ROUTES,
         )
+    active_group = _active_sidebar_group(current_page)
+    if active_group:
+        # The selected route owns disclosure state.  A stale fragment value
+        # must not collapse a parent or resurrect the previously open family.
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = active_group
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
     def disclosure(
@@ -8707,7 +8751,9 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
         return expanded
 
     def child_button(container, route, label, *, icon=None):
-        clicked = container.button(
+        route_key = os_accounts.page_key_for_route(route)
+        row = container.container(key=f"sidebar-row-{route_key}")
+        clicked = row.button(
             label,
             key=f"sidebar-child::{route}",
             use_container_width=True,
@@ -8804,6 +8850,23 @@ def _render_sidebar_create_growth(current_page, allowed_routes):
         help="Coming later",
         icon=":material/mail:",
     )
+    for route in history_routes:
+        route_key = os_accounts.page_key_for_route(route)
+        if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:
+            continue
+        bridge = st.container(key=f"sidebar-history-{route_key}")
+        if bridge.button(
+            f"History route: {route}",
+            key=f"sidebar-history::{route}",
+            help="Browser history navigation bridge",
+        ):
+            stale_query = page_query_param_value()
+            st.session_state[NAVIGATION_HISTORY_ROUTE_STATE_KEY] = {
+                "route": route,
+                "stale_query": stale_query,
+            }
+            set_current_page(route, source="browser-history", sync_query=False)
+            st.rerun(scope="app")
 
 
 @st.fragment
@@ -8816,6 +8879,8 @@ def _render_sidebar_create_reporting(
 ):
     if SIDEBAR_OPEN_GROUP_KEY not in st.session_state:
         st.session_state[SIDEBAR_OPEN_GROUP_KEY] = _active_sidebar_group(current_page)
+    if _active_sidebar_group(current_page) == "reporting":
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = "reporting"
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
     expanded = open_group == "reporting"
     container = st.container(
@@ -8844,7 +8909,8 @@ def _render_sidebar_create_reporting(
     children = st.container(key="sidebar-reporting-children")
     children.markdown('<span id="sidebar-reporting-children"></span>', unsafe_allow_html=True)
     if reporting_overview_allowed:
-        if children.button(
+        overview_row = children.container(key="sidebar-row-reporting")
+        if overview_row.button(
             "Overview",
             key="sidebar-child::Reporting::Overview",
             use_container_width=True,
@@ -8855,7 +8921,8 @@ def _render_sidebar_create_reporting(
             set_current_page("Reporting", source="sidebar")
             st.rerun(scope="app")
     if reporting_daily_allowed:
-        children.button(
+        daily_row = children.container(key=f"sidebar-row-{os_accounts.DAILY_PLANNER_PAGE_KEY}")
+        daily_row.button(
             os_accounts.DAILY_PLANNER_ROUTE,
             key=f"sidebar-child::{os_accounts.DAILY_PLANNER_ROUTE}",
             use_container_width=True,
@@ -8864,7 +8931,8 @@ def _render_sidebar_create_reporting(
             help="Open Daily Planner in a separate window",
         )
     if reporting_weekly_allowed:
-        if children.button(
+        weekly_row = children.container(key=f"sidebar-row-{os_accounts.WEEKLY_REVIEW_PAGE_KEY}")
+        if weekly_row.button(
             os_accounts.WEEKLY_REVIEW_ROUTE,
             key=f"sidebar-child::{os_accounts.WEEKLY_REVIEW_ROUTE}",
             use_container_width=True,
@@ -8882,13 +8950,18 @@ def render_sidebar():
     allowed_routes = tuple(
         page for page in MENU_OPTIONS if os_accounts.can_access_page(user, page)
     )
+    history_routes = tuple(
+        page["route"]
+        for page in os_accounts.PAGE_REGISTRY
+        if os_accounts.can_access_page(user, page["route"])
+    )
 
     _sidebar_route_button("Dashboard", current_page, allowed_routes)
     for route in ("Orders", "Prodigi", "Edition Ops"):
         _sidebar_route_button(route, current_page, allowed_routes)
 
     with st.sidebar:
-        _render_sidebar_create_growth(current_page, allowed_routes)
+        _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
     _sidebar_route_button("VA Training", current_page, allowed_routes)
     if "Files" in allowed_routes:
@@ -9593,11 +9666,11 @@ def _account_system_status():
 def _refresh_session_account_if_due(user, *, max_age_seconds=0):
     if not user or user.get("legacy"):
         return user
-    status = _account_system_status()
-    if not status.get("available"):
-        return user
     checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
     if time.monotonic() - checked_at < max_age_seconds:
+        return user
+    status = _account_system_status()
+    if not status.get("available"):
         return user
     try:
         refreshed = os_accounts.DEFAULT_STORE.get_user(user.get("id"))
@@ -9667,7 +9740,10 @@ def current_auth_cookie():
 
 def is_app_authenticated():
     if st.session_state.get("sports_cave_authenticated"):
-        user = _refresh_session_account_if_due(current_os_user(), max_age_seconds=0)
+        user = _refresh_session_account_if_due(
+            current_os_user(),
+            max_age_seconds=AUTH_REVALIDATE_SECONDS,
+        )
         if user:
             set_activity_actor(_activity_actor_for_user(user))
             return True
@@ -15566,11 +15642,24 @@ def render_selected_page(current_page):
 
 
 def main():
+    rerun_started = time.perf_counter()
     init_session_state()
     inject_styles()
     log_startup_stage("CSS LOADED")
 
-    if not is_app_authenticated():
+    auth_started = time.perf_counter()
+    auth_checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
+    auth_cache_hit = bool(
+        st.session_state.get("sports_cave_authenticated")
+        and auth_checked_at
+        and time.monotonic() - auth_checked_at < AUTH_REVALIDATE_SECONDS
+    )
+    authenticated = is_app_authenticated()
+    safe_startup_print(
+        f"PERF auth duration_ms={(time.perf_counter() - auth_started) * 1000:.2f} "
+        f"cache={'hit' if auth_cache_hit else 'miss'}"
+    )
+    if not authenticated:
         log_startup_stage("LOGIN GATE START")
         if not render_login_gate():
             log_startup_stage("LOGIN GATE STOP")
@@ -15594,7 +15683,12 @@ def main():
     ):
         set_current_page("Files", source="oauth")
 
+    route_started = time.perf_counter()
     current_page = get_current_page()
+    safe_startup_print(
+        f"PERF route_resolution duration_ms={(time.perf_counter() - route_started) * 1000:.2f} "
+        f"route={current_page}"
+    )
     top_bar.render_top_bar(
         get_components_module(),
         current_os_user(),
@@ -15614,6 +15708,12 @@ def main():
     log_app_memory(f"Page load start: {current_page}")
 
     if not ensure_current_page_access(current_page):
+        top_bar.render_navigation_complete(
+            get_components_module(),
+            current_route=current_page,
+            navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
+            status="denied",
+        )
         log_startup_stage("PAGE ACCESS BLOCKED", current_page)
         return
 
@@ -15634,10 +15734,25 @@ def main():
             st.exception(error)
         else:
             st.caption("Technical details are available in protected tools.")
+        top_bar.render_navigation_complete(
+            get_components_module(),
+            current_route=current_page,
+            navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
+            status="error",
+        )
     else:
         _finish_navigation_transition(current_page, status="ready")
+        top_bar.render_navigation_complete(
+            get_components_module(),
+            current_route=current_page,
+            navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
+            status="ready",
+        )
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
+    safe_startup_print(
+        f"PERF rerun total_ms={(time.perf_counter() - rerun_started) * 1000:.2f} route={current_page}"
+    )
 
 
 main()

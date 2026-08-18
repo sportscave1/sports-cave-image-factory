@@ -30,9 +30,7 @@ def initial_disclosure_group(
     ads_routes=(),
     analytics_routes=(),
 ):
-    if stored is not None:
-        return str(stored or "")
-    return active_disclosure_group(
+    active = active_disclosure_group(
         route,
         social_routes=social_routes,
         seo_routes=seo_routes,
@@ -40,6 +38,11 @@ def initial_disclosure_group(
         ads_routes=ads_routes,
         analytics_routes=analytics_routes,
     )
+    if active:
+        return active
+    if stored is not None:
+        return str(stored or "")
+    return ""
 
 
 def toggle_disclosure_group(current_group, clicked_group):
@@ -123,3 +126,32 @@ def route_transition(epoch, current_route, requested_route, source):
         "source": str(source or "user"),
         "status": "pending",
     }
+
+
+def navigation_completion_is_current(
+    *,
+    response_route,
+    response_epoch,
+    current_route,
+    current_epoch,
+    pending_route="",
+    pending_expected_epoch=0,
+):
+    """Pure mirror of the browser's latest-intent completion guard."""
+    response_epoch = max(0, int(response_epoch or 0))
+    current_epoch = max(0, int(current_epoch or 0))
+    pending_expected_epoch = max(0, int(pending_expected_epoch or 0))
+    response_route = str(response_route or "")
+    current_route = str(current_route or "")
+    pending_route = str(pending_route or "")
+    if response_epoch < current_epoch:
+        return False
+    if pending_route and not response_route:
+        return False
+    if response_route and response_route != current_route:
+        return False
+    if pending_route and response_route and pending_route != response_route:
+        return False
+    if pending_expected_epoch and response_epoch < pending_expected_epoch:
+        return False
+    return True
