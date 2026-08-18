@@ -297,9 +297,12 @@ def _rule_expander(title, lines):
             st.markdown(f"- {line}")
 
 
-def _navigate(navigate, route):
+def _navigate(navigate, route, *, force=False):
     if navigate is not None:
-        navigate(route)
+        if force:
+            navigate(route, force=True)
+        else:
+            navigate(route)
         st.rerun()
 
 
@@ -4454,7 +4457,7 @@ def _render_active_route(
         st.caption("Retry this view or return to SEO Overview. No saved SEO data was changed.")
         retry_col, back_col, _ = st.columns([1, 1, 6])
         if retry_col.button("Retry", key=f"seo-route-retry::{route}"):
-            st.rerun(scope="fragment")
+            _navigate(navigate, route, force=True)
         if back_col.button("Back", key=f"seo-route-back::{route}"):
             _navigate(navigate, seo.SEO_OVERVIEW_ROUTE)
         if os_accounts.is_admin(user):

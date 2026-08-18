@@ -8,6 +8,7 @@ import analytics_navigation
 import navigation_runtime
 import os_accounts
 import seo_navigation
+import social_media
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,21 @@ class SEOFirstClickRoutingTests(unittest.TestCase):
         self.assertEqual(app.session_state["current_page"], seo_navigation.SEO_BLOG_ROUTE)
         self.assertNotIn("navigation_client_route_pending", app.session_state)
 
+    def test_retry_forces_the_same_child_transaction_instead_of_overview(self):
+        route = seo_navigation.SEO_KEYWORDS_ROUTE
+        app = authenticated_app(seo_navigation.SEO_PAGE_KEYS[route])
+        before_epoch = int(app.session_state.filtered_state.get("navigation_epoch", 0))
+        retry = next(
+            item for item in app.button
+            if item.key == f"seo-route-retry::{route}"
+        )
+        retry.click()
+        app.run(timeout=30)
+        self.assertEqual(app.session_state["current_page"], route)
+        self.assertEqual(query_page(app), seo_navigation.SEO_PAGE_KEYS[route])
+        self.assertEqual(app.session_state["navigation_epoch"], before_epoch + 1)
+        self.assertEqual(app.session_state["sidebar-open-group"], "seo")
+
 
 class SharedGroupedMenuRegressionTests(unittest.TestCase):
     def test_each_group_route_is_authoritative_over_a_stale_open_parent(self):
@@ -91,6 +107,10 @@ class SharedGroupedMenuRegressionTests(unittest.TestCase):
             "seo": seo_navigation.SEO_ROUTES,
             "ads": ads_navigation.ADS_ROUTES,
             "analytics": analytics_navigation.ANALYTICS_ROUTES,
+            "social": (
+                social_media.SOCIAL_MEDIA_ROUTE,
+                social_media.AI_REELS_ROUTE,
+            ),
         }
         for group, routes in grouped.items():
             for route in routes:
@@ -98,6 +118,10 @@ class SharedGroupedMenuRegressionTests(unittest.TestCase):
                     navigation_runtime.initial_disclosure_group(
                         route,
                         stored="social",
+                        social_routes=(
+                            social_media.SOCIAL_MEDIA_ROUTE,
+                            social_media.AI_REELS_ROUTE,
+                        ),
                         seo_routes=seo_navigation.SEO_ROUTES,
                         ads_routes=ads_navigation.ADS_ROUTES,
                         analytics_routes=analytics_navigation.ANALYTICS_ROUTES,
@@ -113,6 +137,16 @@ class SharedGroupedMenuRegressionTests(unittest.TestCase):
         self.assertIn("row.button(", child_source)
         self.assertIn("use_container_width=True", child_source)
         self.assertNotIn("st.markdown(\"<a", child_source)
+
+    def test_component_does_not_reset_sidebar_scroll_or_mutate_native_clicks(self):
+        source = (
+            ROOT / "components" / "sports_cave_top_bar" / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("resetInitialSidebarScroll", source)
+        self.assertIn("parentWindow.setTimeout(beginAcceptedSidebarNavigation, 0)", source)
+        self.assertIn('event.key === "Enter"', source)
+        self.assertIn("navigationButton.click()", source)
+        self.assertEqual(source.count('doc.addEventListener("click"'), 1)
 
 
 if __name__ == "__main__":

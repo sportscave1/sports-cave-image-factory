@@ -4252,19 +4252,19 @@ def get_current_page():
     return route
 
 
-def set_current_page(page, *, source="user", sync_query=True):
+def set_current_page(page, *, source="user", sync_query=True, force=False):
     route = normalise_app_page(page)
     if not route:
         raise ValueError(f"Unknown Sports Cave page: {page}")
     current_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
     current_query = page_query_param_value()
-    if current_route == route and (
+    if not force and current_route == route and (
         not sync_query or current_query == page_query_value(route)
     ):
         return route
     if source != "browser-history":
         st.session_state.pop(NAVIGATION_HISTORY_ROUTE_STATE_KEY, None)
-    _begin_navigation_transition(route, source=source)
+    _begin_navigation_transition(route, source=source, force=force)
     # Durably store the exact route before either the query-parameter forward
     # message or the explicit Streamlit rerun can be emitted.
     _store_current_page(route, source=source)
@@ -15606,7 +15606,11 @@ def render_selected_page(current_page):
         get_seo_page().render_page(
             current_os_user(),
             current_page,
-            navigate=lambda route: set_current_page(route, source="seo"),
+            navigate=lambda route, force=False: set_current_page(
+                route,
+                source="seo",
+                force=force,
+            ),
         )
     elif current_page == "Design Studio":
         get_design_studio_page().render_design_studio_page(

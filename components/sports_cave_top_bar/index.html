@@ -13,7 +13,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-reliability-v10";
+  const CONTROLLER_VERSION = "navigation-reliability-v14";
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
     doc.getElementById(ROOT_ID)?.dataset.navigationEpoch || 0,
@@ -1915,15 +1915,6 @@
         doc.body.classList.remove("sc-mobile-search-open");
       }
     };
-    const resetInitialSidebarScroll = () => {
-      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-      if (!sidebar?.querySelector('[class*="st-key-sidebar-row-dashboard"]')) return false;
-      sidebar.querySelectorAll("div").forEach((element) => {
-        if (element.scrollHeight > element.clientHeight + 2) element.scrollTop = 0;
-      });
-      return true;
-    };
-
     searchInput.addEventListener("focus", () => {
       if (state.activePanel !== "search") openSearch();
     }, listenerOptions);
@@ -1983,6 +1974,22 @@
     }, listenerOptions);
     doc.addEventListener("keydown", (event) => {
       const target = event.target;
+      const navigationButton = target?.closest?.(
+        'section[data-testid="stSidebar"] button:not(:disabled)',
+      );
+      if (
+        navigationButton
+        && sidebarButtonRouteKey(navigationButton)
+        && (event.key === "Enter" || event.key === " " || event.key === "Spacebar")
+      ) {
+        // Native Streamlit buttons delegate their handler through React. Keep
+        // keyboard activation deterministic across component replacement by
+        // translating one accepted key into exactly one button activation.
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        navigationButton.click();
+        return;
+      }
       const editable = target && (
         target.matches?.("input, textarea, select") || target.isContentEditable
       );
@@ -2014,8 +2021,6 @@
       }
       const navigationButton = event.target.closest?.('section[data-testid="stSidebar"] button:not(:disabled)');
       if (!navigationButton) {
-        const label = event.target.closest?.("button:not(:disabled)")?.textContent?.trim();
-        if (label === "Retry") beginNavigation(state.config.currentRouteKey, label, event.target.closest("button"));
         return;
       }
       const intendedRouteKey = sidebarButtonRouteKey(navigationButton);
@@ -2026,17 +2031,21 @@
         clearNavigationPending({clearIntent: true});
         return;
       }
-      const currentRouteContainer = state.config.currentRouteKey && parentWindow.CSS?.escape
-        ? navigationButton.closest(`.st-key-sidebar-row-${parentWindow.CSS.escape(state.config.currentRouteKey)}`)
-        : null;
-      if (!currentRouteContainer) {
+      // Let Streamlit's delegated button handler consume the click before the
+      // loader mutates button classes/ARIA.  The next browser task still paints
+      // pending feedback well inside the 100 ms contract, but cannot interfere
+      // with React's accepted widget event or event-flush microtasks.
+      const beginAcceptedSidebarNavigation = () => {
+        if (!navigationButton.isConnected) return;
+        if (sidebarButtonRouteKey(navigationButton) !== intendedRouteKey) return;
         // Compatibility contract: beginNavigation(intendedRouteKey);
         beginNavigation(
           intendedRouteKey,
           navigationButton.textContent?.trim() || "",
           navigationButton,
         );
-      }
+      };
+      parentWindow.setTimeout(beginAcceptedSidebarNavigation, 0);
     }, {capture: true, signal: listenerController.signal});
     parentWindow.addEventListener(
       "resize",
@@ -2077,17 +2086,27 @@
     later(updateSidebarWidth, 250);
     later(updateSidebarWidth, 1000);
     [0, 180, 500, 1100, 2200].forEach((delay) => later(bindReportingPlannerButton, delay));
-    [0, 120, 420, 900, 1800, 3200].forEach((delay) => {
-      later(resetInitialSidebarScroll, delay);
-    });
     return {
       version: CONTROLLER_VERSION,
       install(nextConfig) {
         root.dataset.installStage = "config";
+        const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
         state.config = {...nextConfig};
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
+        if (
+          Number(state.config.navigationEpoch || 0) > previousNavigationEpoch
+          && !doc.body.classList.contains("sc-navigation-pending")
+        ) {
+          // Retry/error actions are regular Streamlit buttons, so do not touch
+          // their click event. The incremented Python epoch starts the loader
+          // here, using the still-visible previous epoch as the expected ID.
+          beginNavigation(
+            state.config.currentRouteKey,
+            state.config.navigationRouteLabels?.[state.config.currentRouteKey] || "SEO",
+          );
+        }
         root.dataset.navigationEpoch = String(state.config.navigationEpoch || 0);
         root.querySelector(".sc-os-topbar-logo").src = state.config.logoSrc || "";
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";

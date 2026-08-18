@@ -266,6 +266,8 @@ class RouteReliabilityTests(unittest.TestCase):
             set_source.index("sync_current_page_to_query_params("),
         )
         self.assertIn("current_route == route", set_source)
+        self.assertIn("force=False", set_source)
+        self.assertIn("force=force", set_source)
         self.assertIn('retry_col.button("Retry"', source)
         self.assertIn('back_col.button("Back"', source)
         self.assertIn("_finish_navigation_transition(current_page, status=\"ready\")", source)
@@ -308,6 +310,13 @@ class RouteReliabilityTests(unittest.TestCase):
         self.assertIn("navigation_epoch=st.session_state.get", (ROOT / "app.py").read_text(encoding="utf-8"))
         self.assertIn("navigationRouteKeys", (ROOT / "top_bar.py").read_text(encoding="utf-8"))
         self.assertEqual(source.count('doc.addEventListener("click"'), 1)
+        self.assertNotIn("resetInitialSidebarScroll", source)
+        self.assertIn("previousNavigationEpoch", source)
+        seo_source = (ROOT / "seo_page.py").read_text(encoding="utf-8")
+        self.assertIn("_navigate(navigate, route, force=True)", seo_source)
+        retry_start = seo_source.index('if retry_col.button("Retry", key=f"seo-route-retry')
+        retry_end = seo_source.index('if back_col.button("Back"', retry_start)
+        self.assertNotIn('st.rerun(scope="fragment")', seo_source[retry_start:retry_end])
         self.assertEqual(source.count('parentWindow.addEventListener("popstate"'), 1)
         self.assertIn("sidebarRouteButton(routeKey)", source)
 

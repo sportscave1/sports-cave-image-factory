@@ -58,7 +58,7 @@ class MobileShellTests(unittest.TestCase):
     def test_top_bar_controller_rebinds_from_the_live_iframe_without_duplicates(self):
         source = TOP_BAR_CLIENT.read_text(encoding="utf-8")
 
-        self.assertIn('CONTROLLER_VERSION = "navigation-reliability-v10"', source)
+        self.assertIn('CONTROLLER_VERSION = "navigation-reliability-v14"', source)
         self.assertIn("root.dataset.controllerVersion !== CONTROLLER_VERSION", source)
         self.assertIn("SportsCaveTopBar?.destroy?.({preserveDom: true})", source)
         self.assertIn("parentWindow.SportsCaveTopBar = createController()", source)
