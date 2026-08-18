@@ -1,6 +1,9 @@
 import os
+import inspect
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import order_allocator
@@ -8,6 +11,7 @@ import run_migrations
 import shopify_sync
 import shopify_order_reconciliation_worker
 import supabase_backend
+from scripts import reconcile_shopify_order as reconcile_script
 
 
 def paid_marketplace_order(**overrides):
@@ -64,6 +68,231 @@ class MappingCursor:
 
 
 class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
+    def test_targeted_reconciliation_cli_is_dry_run_and_accepts_narrow_ids(self):
+        args = reconcile_script.build_parser().parse_args(
+            ["--order-id", "gid://shopify/Order/3020", "--order-id", "3021"]
+        )
+
+        self.assertEqual(["gid://shopify/Order/3020", "3021"], args.order_id)
+        self.assertFalse(args.apply)
+        self.assertFalse(args.notify)
+
+    def test_core_order_upsert_uses_pre_marketplace_columns_and_preserves_channel_in_raw_json(self):
+        class Cursor:
+            def execute(self, sql, params=()):
+                self.sql = str(sql)
+                self.params = tuple(params or ())
+
+        cursor = Cursor()
+        order = paid_marketplace_order()
+
+        supabase_backend._upsert_order(cursor, order)
+
+        column_clause = cursor.sql.split("VALUES", 1)[0]
+        self.assertNotIn("source_name", column_clause)
+        self.assertNotIn("ingestion_status", column_clause)
+        self.assertIn('"source_name": "etsy"', str(cursor.params))
+
+    def test_optional_ingestion_diagnostics_do_not_break_old_schema(self):
+        class UndefinedColumn(Exception):
+            sqlstate = "42703"
+            diag = SimpleNamespace(column_name="source_name")
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, _sql, _params=()):
+                raise UndefinedColumn("column source_name does not exist")
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                return None
+
+        with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend, "connect", return_value=Connection()
+        ):
+            supabase_backend._set_order_ingestion_outcome(
+                paid_marketplace_order(),
+                ingestion_method="webhook",
+                ingestion_status="complete",
+                import_result="inserted",
+            )
+
+        self.assertFalse(supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY)
+
+    def test_optional_ingestion_diagnostic_failure_does_not_fail_committed_order(self):
+        with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend, "connect", side_effect=RuntimeError("diagnostic database timeout")
+        ):
+            supabase_backend._set_order_ingestion_outcome(
+                paid_marketplace_order(),
+                ingestion_method="webhook",
+                ingestion_status="complete",
+                import_result="inserted",
+            )
+
+    def test_core_webhook_receipt_sql_does_not_require_marketplace_columns(self):
+        source = inspect.getsource(supabase_backend._claim_webhook_event)
+        core_insert = source.split("ON CONFLICT", 1)[0]
+
+        self.assertNotIn("source_name", core_insert)
+        self.assertNotIn("import_result", core_insert)
+        self.assertNotIn("rejection_reason", core_insert)
+
+    def test_recent_reconciliation_state_reader_is_pre_marketplace_compatible(self):
+        source = inspect.getsource(supabase_backend.list_existing_shopify_order_states)
+
+        self.assertIn("to_jsonb(o)->>'ingestion_status'", source)
+        self.assertNotIn("SELECT shopify_order_id, remote_updated_at, created_at, synced_at,\n                           ingestion_status", source)
+        self.assertIn("'complete'", source)
+
+    def test_webhook_core_status_commits_when_optional_marketplace_event_columns_are_missing(self):
+        class UndefinedColumn(Exception):
+            sqlstate = "42703"
+            diag = SimpleNamespace(column_name="import_result")
+
+        class Cursor:
+            def __init__(self, fail_optional=False):
+                self.fail_optional = fail_optional
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, _params=()):
+                if self.fail_optional and "import_result=" in str(sql):
+                    raise UndefinedColumn("column import_result does not exist")
+
+        class Connection:
+            def __init__(self, cursor):
+                self._cursor = cursor
+                self.committed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return self._cursor
+
+            def commit(self):
+                self.committed = True
+
+        core = Connection(Cursor())
+        optional = Connection(Cursor(fail_optional=True))
+        with patch.object(supabase_backend, "connect", side_effect=[core, optional]):
+            supabase_backend._update_webhook_event_status(
+                "webhook-3020",
+                "processed",
+                shopify_order_id="gid://shopify/Order/3020",
+                source_name="Etsy",
+                import_result="inserted",
+            )
+
+        self.assertTrue(core.committed)
+        self.assertFalse(optional.committed)
+        self.assertFalse(supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY)
+
+    def test_webhook_core_status_survives_optional_diagnostic_timeout(self):
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, _sql, _params=()):
+                return None
+
+        class Connection:
+            def __init__(self):
+                self.committed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                self.committed = True
+
+        core = Connection()
+        with patch.object(
+            supabase_backend,
+            "connect",
+            side_effect=[core, RuntimeError("optional diagnostics timed out")],
+        ):
+            supabase_backend._update_webhook_event_status(
+                "webhook-3020",
+                "processed",
+                shopify_order_id="gid://shopify/Order/3020",
+                source_name="Etsy",
+                import_result="inserted",
+            )
+
+        self.assertTrue(core.committed)
+
+    def test_inflight_webhook_is_retryable_not_acknowledged_as_completed_duplicate(self):
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, _params=()):
+                self.sql = str(sql)
+
+            def fetchone(self):
+                if "SELECT status" in self.sql:
+                    return {"status": "processing", "received_at": datetime.now(timezone.utc)}
+                return None
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def rollback(self):
+                return None
+
+            def commit(self):
+                return None
+
+        with patch.object(supabase_backend, "connect", return_value=Connection()):
+            with self.assertRaisesRegex(RuntimeError, "already in progress"):
+                supabase_backend._claim_webhook_event(
+                    "webhook-3020",
+                    "orders/paid",
+                    paid_marketplace_order(),
+                )
+
     def test_marketplace_migration_is_additive_parseable_and_discovered(self):
         from pglast import parse_sql
 
@@ -79,20 +308,20 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertIn("CREATE INDEX IF NOT EXISTS IDX_SHOPIFY_VARIANTS_SKU_NORMALIZED", sql.upper())
         self.assertNotIn("ALTER TABLE IF EXISTS", sql.upper())
 
-    def test_deployment_gate_contract_covers_every_marketplace_column_and_index(self):
+    def test_marketplace_schema_contract_is_optional_and_covers_migration(self):
         migration = Path("migrations/20260818_shopify_marketplace_order_reconciliation.sql").read_text(
             encoding="utf-8"
         )
         self.assertEqual(
             ("20260818_shopify_marketplace_order_reconciliation.sql",),
-            run_migrations.REQUIRED_DEPLOYMENT_MIGRATIONS,
+            run_migrations.MARKETPLACE_SCHEMA_MIGRATIONS,
         )
-        for table_name, column_name in run_migrations.REQUIRED_DEPLOYMENT_COLUMNS:
+        for table_name, column_name in run_migrations.MARKETPLACE_SCHEMA_COLUMNS:
             self.assertIn(table_name, migration)
             self.assertIn(column_name, migration)
         self.assertIn(
             ("shopify_variants", "idx_shopify_variants_sku_normalized"),
-            run_migrations.REQUIRED_DEPLOYMENT_INDEXES,
+            run_migrations.MARKETPLACE_SCHEMA_INDEXES,
         )
 
     def test_read_only_deployment_gate_reports_complete_migrated_schema(self):
@@ -116,12 +345,12 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
                             "is_nullable": expected[1],
                             "column_default": expected[2] or None,
                         }
-                        for (table, column), expected in run_migrations.REQUIRED_DEPLOYMENT_COLUMNS.items()
+                        for (table, column), expected in run_migrations.MARKETPLACE_SCHEMA_COLUMNS.items()
                     ]
                 elif "FROM pg_indexes" in sql:
                     self.rows = [
                         {"tablename": table, "indexname": index}
-                        for table, index in run_migrations.REQUIRED_DEPLOYMENT_INDEXES
+                        for table, index in run_migrations.MARKETPLACE_SCHEMA_INDEXES
                     ]
 
             def fetchone(self):
@@ -131,7 +360,7 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
                 return list(self.rows)
 
         cursor = Cursor()
-        self.assertEqual([], run_migrations.required_schema_issues(cursor))
+        self.assertEqual([], run_migrations.marketplace_schema_issues(cursor))
         for statement in cursor.statements:
             upper = statement.upper()
             for token in ("ALTER ", "CREATE ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "TRUNCATE "):
@@ -154,7 +383,8 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
             def fetchall(self):
                 return list(self.rows)
 
-        issues = run_migrations.required_schema_issues(Cursor())
+        self.assertEqual([], run_migrations.required_schema_issues(Cursor()))
+        issues = run_migrations.marketplace_schema_issues(Cursor())
 
         self.assertIn(
             "missing migration record: 20260818_shopify_marketplace_order_reconciliation.sql",
@@ -164,18 +394,14 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertIn("missing column: shopify_order_lines.mapping_method", issues)
         self.assertIn("missing index: idx_shopify_variants_sku_normalized on shopify_variants", issues)
 
-    def test_render_services_gate_schema_without_running_migrations_in_workers(self):
+    def test_render_services_do_not_gate_core_shopify_on_optional_marketplace_schema(self):
         render = Path("render.yaml").read_text(encoding="utf-8")
 
-        self.assertIn("preDeployCommand: python run_migrations.py --verify-required-schema", render)
-        self.assertIn(
-            "startCommand: python run_migrations.py --verify-required-schema && python sports_cave_server.py",
-            render,
-        )
-        self.assertIn(
-            "startCommand: python run_migrations.py --verify-required-schema && python webhook_server.py",
-            render,
-        )
+        self.assertNotIn("preDeployCommand", render)
+        self.assertIn("startCommand: python sports_cave_server.py", render)
+        self.assertIn("startCommand: python webhook_server.py", render)
+        self.assertNotIn("--verify-required-schema", render)
+        self.assertNotIn("--verify-marketplace-schema", render)
         self.assertNotIn("startCommand: python run_migrations.py --only", render)
 
     def test_order_queries_request_channel_and_test_flags_without_filtering_channel(self):
@@ -324,6 +550,22 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertEqual({row["edition"] for row in rows}, {"Needs product mapping"})
         self.assertFalse(any(row["has_saved_allocation"] for row in rows))
 
+    def test_pre_marketplace_order_without_channel_defaults_to_shopify_display_only(self):
+        rows = order_allocator._snapshot_rows_from_supabase_order_rows(
+            [
+                {
+                    "shopify_order_id": "gid://shopify/Order/3019",
+                    "order_name": "#SC3019",
+                    "shopify_line_item_id": "gid://shopify/LineItem/30191",
+                    "quantity": 1,
+                    "order_raw_json": {},
+                    "assignments": [],
+                }
+            ]
+        )
+
+        self.assertEqual("Shopify", rows[0]["channel"])
+
     def test_targeted_display_name_resolution_uses_exact_match_and_immutable_id(self):
         config = {"store_domain": "sports-cave.myshopify.com"}
         expected = paid_marketplace_order()
@@ -400,6 +642,7 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
             result = supabase_backend.reconcile_single_shopify_order(
                 shopify_order_id="gid://shopify/Order/3020",
                 apply=True,
+                notify=True,
                 config={"store_domain": "sports-cave.myshopify.com"},
                 ensure_schema_first=False,
             )
@@ -410,6 +653,32 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertTrue(result["applied"])
         self.assertEqual(result["new_order_notification_events_created"], 1)
         self.assertEqual(result["trace_after"], after)
+
+    def test_targeted_apply_does_not_notify_historical_repair_by_default(self):
+        order = paid_marketplace_order()
+        with patch.object(shopify_sync, "fetch_orders_by_ids", return_value=[order]), patch.object(
+            supabase_backend,
+            "get_shopify_order_ingestion_trace",
+            side_effect=[{"order_stored": False}, {"order_stored": True}],
+        ), patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set()), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={"product": {}, "status": "missing", "reason": "No safe match."},
+        ), patch.object(
+            supabase_backend,
+            "process_single_paid_shopify_order_for_editions",
+            return_value={"processed": True, "new_order_inserted": True, "errors": []},
+        ), patch.object(supabase_backend, "record_new_order_notification_events") as notify:
+            result = supabase_backend.reconcile_single_shopify_order(
+                shopify_order_id=order["shopify_order_id"],
+                apply=True,
+                config={"store_domain": "sports-cave.myshopify.com"},
+                ensure_schema_first=False,
+            )
+
+        notify.assert_not_called()
+        self.assertTrue(result["applied"])
+        self.assertFalse(result["notifications_requested"])
 
     def test_safe_webhook_receipt_does_not_store_customer_pii(self):
         payload = {

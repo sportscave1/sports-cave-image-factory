@@ -5,7 +5,7 @@ import re
 
 
 STYLE_REQUIRED_LABEL = "Style required"
-STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v2"
+STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v3_legends_locked"
 
 DESIGN_DETAIL_FIELDS = (
     ("design_title", "Design title"),
@@ -39,6 +39,7 @@ SUPPORTED_IMAGE_ROLES = (
     "equipment_reference",
     "historical_reference",
     "signature_asset",
+    "collector_badge_asset",
     "plaque_asset",
 )
 
@@ -67,6 +68,7 @@ DEFAULT_USE_MODE_BY_ROLE = {
     "equipment_reference": "reference_only",
     "historical_reference": "reference_only",
     "signature_asset": "signature_asset",
+    "collector_badge_asset": "visible_cutout",
     "plaque_asset": "visible_cutout",
 }
 
@@ -309,6 +311,108 @@ Use exactly one verified authentic signature for each principal. Keep each signa
 """.strip()
 
 
+LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION = (
+    "SPORTS CAVE LEGENDS JERSEY DISPLAY CONTRACT V3 - LOCKED"
+)
+LEGENDS_JERSEY_DISPLAY_FIXED_TITLE = "LEGENDS NEVER DIE"
+
+LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK = """
+LEGENDS JERSEY SOURCE-PHOTO AND IDENTITY LOCK
+
+This is intentionally a rear-facing jersey-display series. Use the actual selected source photographs and preserve the real source pixels wherever technically possible. Identity is established through authentic source photography, body silhouette, uniform, jersey surname and jersey number. Do not penalise a compliant artwork merely because full front-facing faces are not visible. If a genuine restrained rear three-quarter source includes part of a face, preserve it exactly.
+
+Never redraw, regenerate, face-swap, rotate, mirror, re-pose or reconstruct either athlete. Preserve authentic anatomy, skin, hair, helmet, equipment, clothing folds, uniform markings, surnames, numbers, badges and logos. Do not create a fake back, fake number, AI-generated jersey lettering, invented anatomy or an extended body. Minor non-generative cropping, masking, proportional scaling, colour grading and lighting integration are allowed. Introduce no extra people.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_RESEARCH_RULES = f"""
+{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+Treat Ohtani vs Judge as the primary master reference because it contains the newest badge, paired lower nameplates, verified-signature treatment and limited-edition treatment. Bryant vs Jordan and Messi vs Ronaldo are supporting references for the same rear-facing collector-series family. Purple Reign is a negative reference only and must contribute no title, composition, colour, border or scene direction.
+
+Verify exactly two task principals. For each principal verify the full printed name, authentic jersey-display surname, jersey number, team or country, sport, era, uniform, equipment and a genuine rear or restrained rear-three-quarter photo direction. Verify that the two selected eras and uniforms are correct for the task. The artwork identity is fixed: main title {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; subtitle [PRINCIPAL ONE SURNAME] VS [PRINCIPAL TWO SURNAME]. The task's creative title remains metadata only and must never become artwork text.
+
+Return one concise handoff containing: the two verified full names; exact display surnames and jersey numbers; correct team/country, era and uniform for each; the strongest compatible rear-photo direction for each; the shared sporting environment; one verified signature requirement per principal; and exact search phrases for rear, rear-three-quarter and verified-signature sources. Do not propose an alternative headline, face-off, action montage, split location or Purple Reign treatment.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES = f"""
+SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
+
+{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+Use the verified names, jersey-display surnames, numbers, teams/countries, eras and uniform requirements from the immediately preceding Research response. Do not redo the concept and do not search for general inspiration. Find genuine final-use photographs that can reproduce the approved rear-facing {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE} series.
+
+Use the platform's dedicated image-search capability. Display each selected candidate as an actual tool-native image-result card or supported inline preview, with the source page as secondary attribution. A link, filename or description without a visible image is not a result. Replace broken previews. Never use screenshots of search results.
+
+Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show only: actual preview, principal, rank, source, available resolution, verified team/country/era/uniform/number, role, subject mapping and use mode. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
+
+After both groups, score every viable two-photo combination and recommend one strongest PAIR. Pair scoring must cover matching rear orientation, crop and body scale; camera height; perspective; lighting; comparable visual importance; clear authentic surnames and numbers; complete heads, shoulders and arms; and ability to fit the locked landscape 4:3 layout. A strong individual image must lose if it creates a weak pair. If no compatible authentic pair exists, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES = """
+For each principal rank the three strongest genuine photographs using, in order: rear-facing or restrained rear-three-quarter orientation; authentic surname and number clearly visible; strong upper-body scale dominated by shoulders and jersey; high-resolution editorial or licensed-quality source; natural stadium, arena, field entrance or game setting; head, shoulders, arms, jersey name and number uncropped; compatibility with the other principal's camera height, angle, scale, crop, lighting and perspective; correct team/country, era, uniform, number and equipment; and useful resolution of 2000 px or more preferred, 1200 px minimum unless no better authentic source exists.
+
+Use focused intent such as "[athlete] jersey back high resolution", "[athlete] from behind jersey number", "[athlete] rear view stadium", "[athlete] walking onto field back jersey" and "[athlete] rear three quarter authentic game photo".
+
+Reject front-facing portraits, face-offs, dramatic action, distant full-body players, direct-to-camera poses, hidden surnames or numbers, wrong teams/numbers/eras/uniforms, AI images, illustrations, trading cards, posters, existing artwork, watermarks, signed memorabilia, thumbnails and any source requiring reconstruction of the athlete, pose, anatomy, jersey, name or number. Reject one-front/one-rear pairings, incompatible crops and any pairing resembling Purple Reign.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_GENERATION_RULES = f"""
+{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+REFERENCE PRIORITY
+Reproduce the repeatable visual system of the approved Ohtani vs Judge master. Bryant vs Jordan and Messi vs Ronaldo support the same series. Purple Reign is a negative reference only. Do not borrow its custom headline, split-world composition, action subject, purple neon, scale imbalance, ornate double frame or loose collector details.
+
+FIXED ARTWORK IDENTITY - OVERRIDES TASK TITLE AND EVERY LEGACY INSTRUCTION
+The main artwork title must be exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}. Use the exact locked subtitle in the Legends variable map below: [SURNAME 1] VS [SURNAME 2]. The task's DESIGN TITLE, visible schedule title and concept title are metadata only. Never render PURPLE REIGN, THE DYNASTY, AFC SUPREMACY or any other custom concept title. Exactly two task principals, their two full lower names, their two verified signatures, the official Sports Cave Collector Series circular badge and the LIMITED EDITION / 001 / 100 plaque are required.
+
+Both jersey-number fields in the locked variable map must contain exact verified numerals before final generation. If either still contains a verification placeholder, conflicts with its selected source or is not clearly readable in that authentic source, stop and return to Research/Find Images. Never guess or generate a number.
+
+MASTER REAR JERSEY COMPOSITION
+Composite exactly one selected genuine rear or restrained rear-three-quarter source photograph per principal. Place them side by side, both looking toward the same field, stadium, arena, court or sporting environment. Give them comparable size, height, crop and visual importance. Use large shoulders and jersey backs; subjects should occupy about 60-70% of artwork height and normally crop around upper thighs or waist. Keep heads, shoulders, jersey surnames and numbers completely visible. Do not mix front and rear orientation, create a face-off, twist either athlete toward the viewer, make one athlete dominant, or place them in separate visual worlds.
+
+BACKGROUND AND ATMOSPHERE
+Use one unified, secondary sporting environment behind both athletes: predominantly black and deep charcoal, restrained antique-gold lighting, subtle stadium or arena lights, fine gold dust/smoke/haze/particles, faint oversized authentic jersey number behind its corresponding athlete, and controlled central separation light. Let authentic team colours come primarily from the real uniforms. No split tunnel, hard diagonal divide, two-location montage, purple neon corridor, giant architecture, extra players, spectators or generated crowd figures.
+
+UPPER TYPOGRAPHY
+Use a large centred uppercase premium serif title reading exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}, widely spaced in antique gold or warm ivory. Put the exact uppercase surname subtitle directly beneath it, optionally with one short thin gold divider on each side. Preserve generous breathing room. Text must not touch the border, athletes or background numbers and must remain legible at Shopify-thumbnail size.
+
+LOWER COLLECTOR STRUCTURE
+Place one thin rectangular full-name plate beneath each corresponding athlete. Print each principal's complete supplied name exactly once in the correct plate. Place that principal's exact verified signature beneath the same nameplate. Both signatures must have the same colour, apparent stroke thickness, visual scale and finish while preserving their genuine stroke paths. Keep them restrained, mapped correctly, fully contained and clear of athlete, nameplates, badge and plaque. Place the exact official Sports Cave Collector Series circular badge at lower centre, with the exact approved LIMITED EDITION plaque beside or integrated with it. The plaque must visibly preserve LIMITED EDITION and 001 / 100. Badge and plaque stay subtle, premium and uncropped. Never generate, redraw, retype or approximate either asset; if either exact approved asset is not mapped, state that the artwork is incomplete and stop before final generation.
+
+BORDER AND OUTPUT
+Landscape 4:3, print-ready. Use one thin continuous inset antique-gold rectangular border with print-safe margins. Keep title, subtitle, heads, shoulders, bodies, surnames, numbers, names, signatures, badge, plaque and every effect inside it. No ornate or double frame and nothing crossing the border.
+
+PURPLE REIGN FAILURE EXCLUSIONS
+No custom headline; action pose; front/rear mix; scale imbalance; split stadium/tunnel; purple neon; incompatible camera angles/crops; large loose names without matched nameplates; floating signatures; incomplete central collector layout; ornate double border; general rivalry poster; extra people; or reconstructed identity-bearing pixels. A polished rivalry poster is still a failed Legends Jersey Display.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_SIGNATURE_PLACEMENT_RULES = f"""
+LEGENDS JERSEY DISPLAY SIGNATURE AND LOWER-COLLECTOR PASS
+
+Preserve the approved {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE} artwork, rear side-by-side sources, title, subtitle, jerseys, background and border unchanged. Ensure the left full-name plate and signature map only to Principal One and the right full-name plate and signature map only to Principal Two. Composite each exact verified signature asset; never typeset, trace, redraw or imitate it. Match the two signatures in colour, apparent stroke thickness, visual scale and finish without changing either genuine stroke path. Keep both beneath their corresponding nameplates, completely inside the border and clear of names, athletes, the official central badge and the LIMITED EDITION / 001 / 100 plaque.
+
+Use only the exact approved Collector Series badge and plaque assets in the mapping below. Do not invent or redraw the Sports Cave logo or edition treatment. If either signature, badge or plaque mapping is missing, report the design as incomplete instead of filling the gap.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_REVIEW_BASE_RULES = f"""
+SPORTS CAVE DESIGN STUDIO V2 - HARSH REVIEW
+
+{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+Review the supplied finished artwork only against the current task variables and exact asset mappings. Ignore stale task titles, names, signatures, sources or research from another design. First return STYLE CONTRACT: PASS or FAIL. Then score out of 10, list visible failures and provide one exact correction brief. A polished image cannot earn a high score until the locked jersey-display contract passes.
+
+Do not penalise the artwork merely because full front-facing faces are absent. For this series, authenticate identity through the selected genuine rear/rear-three-quarter photographs, body silhouettes, uniforms, jersey surnames and jersey numbers. Preserve any partial genuine face exactly. Never recommend reconstructing a person, uniform, name or number; require a replacement authentic source through Find Images when the source is unsuitable.
+""".strip()
+
+LEGENDS_JERSEY_DISPLAY_REVIEW_RULES = f"""
+Confirm first that the title is exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; the subtitle is the exact two surnames in task order; exactly two task principals appear rear-facing or restrained rear-three-quarter, side by side in one environment; scale, crop and importance are comparable; genuine jersey surnames, numbers, teams, eras and uniforms are correct and readable; both complete printed names and correctly mapped verified signatures appear in matched lower nameplates; signature colour, stroke weight, scale and finish are consistent; the exact official Sports Cave badge and LIMITED EDITION / 001 / 100 plaque are present; landscape 4:3, thin single antique-gold border and full containment pass; and no extra person or identity reconstruction appears.
+
+Hard-cap the commercial score at 6/10 if any one of these occurs: title is not exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; subtitle is wrong; rear-facing side-by-side composition is absent; one principal is front-facing or in action; principals have unequal size or importance; surname/number is wrong or unreadable; era/team/uniform is wrong; a full printed name is missing; a signature is missing, wrong, mismapped or inconsistent; official badge is missing/fabricated; LIMITED EDITION or 001 / 100 plaque is missing/wrong/fabricated; the scene is split-world, tunnel, purple-neon or Purple Reign-like; an extra person appears; athlete/uniform/identity pixels were reconstructed; or any required element crosses the gold border. State the triggering cap explicitly. A polished Purple Reign-style output cannot score above 6/10 under this style.
+
+The correction brief must restore the locked master system, not invent a new rivalry concept. Preserve compliant real source pixels and successful collector elements; replace only an unsuitable source or incorrect local element.
+""".strip()
+
+
 _STYLES = (
     _style(
         "ultimate_moment",
@@ -349,22 +453,22 @@ Use one definitive authentic photograph of the exact moment as the artwork found
     _style(
         "legends_jersey_display",
         "Legends Jersey Display",
-        "Two iconic rear jerseys presented as an equal-status legacy piece.",
-        "Messi vs Ronaldo - Legends Never Die",
+        "One locked LEGENDS NEVER DIE collector series with two authentic rear jerseys.",
+        "Ohtani vs Judge - LEGENDS NEVER DIE master system",
         2,
         2,
-        ("rear_jersey_one", "rear_jersey_two"),
-        ("equipment_reference", "historical_reference", "signature_asset"),
-        """
-Verify each legend's genuine rear-view image, exact kit, club or country, era, surname, number, badges and stitching. Establish the shared legacy story without inventing a rear view.
-""",
-        """
-Return separate groups for legend one rear-view full-body candidates and legend two rear-view full-body candidates; then correct kit/name/number references and minimal shared atmosphere; then one signature per legend last. Say clearly when a suitable authentic rear image does not exist.
-""",
-        """
-Use exactly two genuine rear or rear three-quarter source photographs at equal scale. Preserve the real jersey surname, number, colours, badges and stitching. Never create a rear view from a front-facing photograph or generate lettering. Place each verified signature beneath or near the correct legend.
-""",
-        "Confirm both views are genuine rear views and every jersey surname, number, kit and era is exact. Reject generated jersey lettering.",
+        (
+            "rear_jersey_one",
+            "rear_jersey_two",
+            "signature_asset",
+            "collector_badge_asset",
+            "plaque_asset",
+        ),
+        ("equipment_reference", "historical_reference"),
+        LEGENDS_JERSEY_DISPLAY_RESEARCH_RULES,
+        LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES,
+        LEGENDS_JERSEY_DISPLAY_GENERATION_RULES,
+        LEGENDS_JERSEY_DISPLAY_REVIEW_RULES,
         minimum=2,
         exact=2,
     ),
@@ -647,6 +751,18 @@ def validate_design_request(style_slug, details=None, task_text=""):
         return [STYLE_REQUIRED_LABEL]
     subjects = principal_subjects(details, task_text)
     errors = []
+    if style.slug == "legends_jersey_display":
+        explicit_subjects = [
+            _subject_from_item((details or {}).get(key))
+            for key in ("principal_subject_one", "principal_subject_two")
+        ]
+        explicit_subjects = [subject for subject in explicit_subjects if subject]
+        if len(explicit_subjects) != 2:
+            errors.append(
+                "Legends Jersey Display requires exactly two named principals saved explicitly as Principal subject one and Principal subject two; a creative task title cannot supply or replace them."
+            )
+            return errors
+        subjects = explicit_subjects
     if len(subjects) > MAX_SUPPORTED_PRINCIPAL_HUMAN_SUBJECTS:
         errors.append(
             "This task exceeds the Sports Cave prompt limit of three principal people. "
@@ -777,6 +893,75 @@ def _plaque_assets(selected_assets=None):
     ]
 
 
+def _collector_badge_assets(selected_assets=None):
+    return [
+        asset
+        for asset in normalise_selected_assets(selected_assets)
+        if asset["role"] == "collector_badge_asset"
+    ]
+
+
+def _legends_source_mapping_block(selected_assets, subjects):
+    assets = normalise_selected_assets(selected_assets)
+    lines = ["EXACT LEGENDS REAR-SOURCE MAPPING"]
+    for index, role in enumerate(("rear_jersey_one", "rear_jersey_two")):
+        principal = subjects[index] if index < len(subjects) else f"[PRINCIPAL {index + 1} REQUIRED]"
+        matches = [asset for asset in assets if asset["role"] == role]
+        if not matches:
+            lines.append(
+                f"* {principal} -> MISSING AUTHENTIC {role} SOURCE; stop before generation and return to Find Images."
+            )
+            continue
+        asset = matches[0]
+        mapped_subject = str(asset.get("subject_name") or "").strip()
+        if mapped_subject and mapped_subject.casefold() != principal.casefold():
+            lines.append(
+                f"* {principal} -> INVALID MAPPING {asset['reference']} declares subject={mapped_subject}; correct the mapping before generation."
+            )
+            continue
+        lines.append(
+            f"* {principal} -> {asset['reference']} | role={role} | use exact authentic source pixels"
+        )
+    lines.extend(
+        [
+            "",
+            "Use only these two mapped sources as visible athletes. A missing, mismapped or unsuitable source blocks final generation; never substitute generated anatomy or jersey details.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _legends_collector_asset_mapping_block(selected_assets=None):
+    badges = _collector_badge_assets(selected_assets)
+    plaques = _plaque_assets(selected_assets)
+    lines = ["EXACT OFFICIAL SPORTS CAVE COLLECTOR ASSET MAPPING"]
+    if badges:
+        for badge in badges:
+            lines.append(
+                f"* Sports Cave Collector Series circular badge -> {badge['reference']} | role=collector_badge_asset | use exact asset unchanged"
+            )
+    else:
+        lines.append(
+            "* Sports Cave Collector Series circular badge -> MISSING APPROVED ASSET; no approved circular badge file was located in the repository. Do not invent, redraw or substitute a generic Sports Cave logo."
+        )
+    if plaques:
+        for plaque in plaques:
+            lines.append(
+                f"* LIMITED EDITION / 001 / 100 plaque -> {plaque['reference']} | role=plaque_asset | use exact asset unchanged"
+            )
+    else:
+        lines.append(
+            "* LIMITED EDITION / 001 / 100 plaque -> MISSING APPROVED ASSET; do not invent, redraw, retype or approximate it."
+        )
+    lines.extend(
+        [
+            "",
+            "Both exact approved assets are mandatory. Keep them subtle, legible, uncropped and fully inside the lower-centre border. If either mapping is missing, report the collector artwork as incomplete and stop before final generation.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _selected_asset_use_plan(assets, signatures):
     approved_signature_refs = {
         item["reference"].casefold()
@@ -899,8 +1084,70 @@ def _task_variables(task_text, details, subjects):
     return "\n".join(lines)
 
 
+_NAME_SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"}
+
+
+def _display_surname(full_name):
+    parts = [part for part in str(full_name or "").strip().split() if part]
+    while len(parts) > 1 and parts[-1].casefold() in _NAME_SUFFIXES:
+        parts.pop()
+    return parts[-1].upper() if parts else "[SURNAME REQUIRED]"
+
+
+def _legends_jersey_number(details, task_text, subject, index):
+    details = dict(details or {})
+    explicit = " ".join(
+        str(details.get(key) or "").split()
+        for key in (
+            f"principal_subject_{'one' if index == 0 else 'two'}_jersey_number",
+            f"principal_{index + 1}_jersey_number",
+        )
+        if str(details.get(key) or "").strip()
+    ).strip()
+    if re.fullmatch(r"\d{1,3}", explicit):
+        return explicit
+    surname = _display_surname(subject)
+    patterns = (
+        rf"\b{re.escape(surname)}\b[^;|\n]{{0,32}}?(?:#|NO\.?|NUMBER|JERSEY)\s*(\d{{1,3}})\b",
+        rf"(?:#|NO\.?|NUMBER|JERSEY)\s*(\d{{1,3}})\b[^;|\n]{{0,32}}?\b{re.escape(surname)}\b",
+    )
+    search_values = (
+        str(details.get("uniform_equipment_livery") or ""),
+        str(details.get("special_instructions") or ""),
+        str(task_text or ""),
+    )
+    for search_text in search_values:
+        for pattern in patterns:
+            match = re.search(pattern, search_text, flags=re.I)
+            if match:
+                return match.group(1)
+    return "[VERIFY EXACT NUMBER FROM RESEARCH AND THE SELECTED AUTHENTIC REAR SOURCE BEFORE GENERATION]"
+
+
 def _style_task_variables(style, task_text, details, subjects):
     base = _task_variables(task_text, details, subjects)
+    if style.slug == "legends_jersey_display":
+        principal_one = subjects[0] if len(subjects) > 0 else "[FULL NAME REQUIRED]"
+        principal_two = subjects[1] if len(subjects) > 1 else "[FULL NAME REQUIRED]"
+        surname_one = _display_surname(principal_one)
+        surname_two = _display_surname(principal_two)
+        creative_title = " ".join(str((details or {}).get("design_title") or "").split())
+        lines = [
+            "LOCKED LEGENDS JERSEY DISPLAY VARIABLE MAP",
+            f"CONTRACT VERSION: {LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}",
+            f"ARTWORK MAIN TITLE: {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}",
+            f"ARTWORK SUBTITLE: {surname_one} VS {surname_two}",
+            f"PRINCIPAL ONE FULL PRINTED NAME: {principal_one}",
+            f"PRINCIPAL ONE JERSEY SURNAME: {surname_one}",
+            f"PRINCIPAL ONE JERSEY NUMBER: {_legends_jersey_number(details, task_text, principal_one, 0)}",
+            f"PRINCIPAL TWO FULL PRINTED NAME: {principal_two}",
+            f"PRINCIPAL TWO JERSEY SURNAME: {surname_two}",
+            f"PRINCIPAL TWO JERSEY NUMBER: {_legends_jersey_number(details, task_text, principal_two, 1)}",
+            f"TASK CREATIVE TITLE (METADATA ONLY - NEVER RENDER): {creative_title or '[NONE]'}",
+            "TITLE OVERRIDE RULE: task title, DESIGN TITLE, ESSENTIAL TEXT and legacy prompt text cannot replace or compete with LEGENDS NEVER DIE.",
+        ]
+        legends_variables = "\n".join(lines)
+        return f"{base}\n\n{legends_variables}"
     if style.slug != "rivalry_faceoff":
         return base
     details = dict(details or {})
@@ -1028,10 +1275,15 @@ def build_research_prompt(style_slug, task_text, details=None):
         if style.slug == "rivalry_faceoff"
         else COMMON_RESEARCH_RULES
     )
+    source_contract = (
+        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+        if style.slug == "legends_jersey_display"
+        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
+    )
     return "\n\n".join(
         (
             base_rules,
-            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            source_contract,
             _style_task_variables(style, task_text, details, subjects),
             f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
             _adapter_block(adapter),
@@ -1047,14 +1299,20 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     roles = ", ".join(style.required_image_roles)
     optional = ", ".join(style.optional_image_roles) or "none"
-    base_rules = (
-        (RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES,)
-        if style.slug == "rivalry_faceoff"
-        else (COMMON_FIND_IMAGES_RULES, FIND_IMAGES_INLINE_RESULT_CONTRACT)
+    if style.slug == "rivalry_faceoff":
+        base_rules = (RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES,)
+    elif style.slug == "legends_jersey_display":
+        base_rules = (LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES,)
+    else:
+        base_rules = (COMMON_FIND_IMAGES_RULES, FIND_IMAGES_INLINE_RESULT_CONTRACT)
+    source_contract = (
+        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+        if style.slug == "legends_jersey_display"
+        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     )
     return "\n\n".join(
         (*base_rules,
-            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            source_contract,
             _style_task_variables(style, task_text, details, subjects),
             f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
             f"IMAGE ROLE CONTRACT\nRequired: {roles}. Optional: {optional}. Assign one supported role and use mode to every selected asset.",
@@ -1071,11 +1329,27 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     signatures = verified_signature_assets(assets, subjects)
+    source_contract = (
+        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+        if style.slug == "legends_jersey_display"
+        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
+    )
+    source_mapping = (
+        _legends_source_mapping_block(assets, subjects)
+        if style.slug == "legends_jersey_display"
+        else ""
+    )
+    collector_mapping = (
+        _legends_collector_asset_mapping_block(assets)
+        if style.slug == "legends_jersey_display"
+        else _plaque_mapping_block(assets)
+    )
     return "\n\n".join(
-        (
+        section
+        for section in (
             COMMON_GENERATION_RULES,
             GENERATION_ASSET_VALIDATION_CONTRACT,
-            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            source_contract,
             (
                 f"STYLE-SPECIFIC COMPOSITION - {style.label}\n"
                 f"Maximum distinct principal people: {style.maximum_distinct_human_subjects}. "
@@ -1087,10 +1361,12 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
             ),
             _style_task_variables(style, task_text, details, subjects),
             _selected_asset_use_plan(assets, signatures),
+            source_mapping,
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
-            _plaque_mapping_block(assets),
+            collector_mapping,
         )
+        if section
     )
 
 
@@ -1104,7 +1380,16 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
     style_signature_rules = (
         RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES
         if style.slug == "rivalry_faceoff"
-        else ""
+        else (
+            LEGENDS_JERSEY_DISPLAY_SIGNATURE_PLACEMENT_RULES
+            if style.slug == "legends_jersey_display"
+            else ""
+        )
+    )
+    collector_mapping = (
+        _legends_collector_asset_mapping_block(assets)
+        if style.slug == "legends_jersey_display"
+        else _plaque_mapping_block(assets)
     )
     return "\n\n".join(
         section
@@ -1114,7 +1399,7 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
             _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
-            _plaque_mapping_block(assets),
+            collector_mapping,
         )
         if section
     )
@@ -1127,14 +1412,29 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
     assets = normalise_selected_assets(selected_assets)
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     signatures = verified_signature_assets(assets, subjects)
+    review_rules = (
+        LEGENDS_JERSEY_DISPLAY_REVIEW_BASE_RULES
+        if style.slug == "legends_jersey_display"
+        else COMMON_REVIEW_RULES
+    )
+    source_contract = (
+        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+        if style.slug == "legends_jersey_display"
+        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
+    )
+    collector_mapping = (
+        _legends_collector_asset_mapping_block(assets)
+        if style.slug == "legends_jersey_display"
+        else _plaque_mapping_block(assets)
+    )
     return "\n\n".join(
         (
-            COMMON_REVIEW_RULES,
-            HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            review_rules,
+            source_contract,
             _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
-            _plaque_mapping_block(assets),
+            collector_mapping,
             f"STYLE-SPECIFIC REVIEW - {style.label}\n{style.harsh_review_rules}",
         )
     )

@@ -3652,7 +3652,47 @@ def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
     ]
 
 
-def build_design_research_prompt(task_text: str) -> str:
+def _locked_legends_v2_prompt_from_context(stage, task_text, design_context=None):
+    if not isinstance(design_context, dict):
+        return ""
+    metadata = design_context.get("metadata") if isinstance(design_context.get("metadata"), dict) else {}
+    style_slug = design_studio_styles.normalize_design_style(
+        design_context.get("design_style") or metadata.get("design_style")
+    )
+    if style_slug != "legends_jersey_display":
+        return ""
+    details = _task_design_details(design_context)
+    selected_assets = _task_selected_assets(design_context)
+    errors = design_studio_styles.validate_design_request(style_slug, details, task_text)
+    if errors:
+        return "\n".join(
+            (
+                design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION,
+                "PROMPT BLOCKED - correct the task's explicit Legends Jersey Display principal fields before continuing.",
+                *errors,
+            )
+        )
+    builders = {
+        "research": lambda: design_studio_styles.build_research_prompt(style_slug, task_text, details),
+        "find_images": lambda: design_studio_styles.build_find_images_prompt(style_slug, task_text, details),
+        "generation": lambda: design_studio_styles.build_generation_prompt(
+            style_slug,
+            task_text,
+            details,
+            selected_assets,
+        ),
+    }
+    return builders[stage]()
+
+
+def build_design_research_prompt(task_text: str, *, design_context=None) -> str:
+    locked_prompt = _locked_legends_v2_prompt_from_context(
+        "research",
+        task_text,
+        design_context,
+    )
+    if locked_prompt:
+        return locked_prompt
     prompt = _clean_prompt(DESIGN_RESEARCH_PROMPT_TEMPLATE).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
@@ -3663,6 +3703,13 @@ def build_design_research_prompt(task_text: str) -> str:
 
 
 def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, design_context=None) -> str:
+    locked_prompt = _locked_legends_v2_prompt_from_context(
+        "find_images",
+        task_text,
+        design_context,
+    )
+    if locked_prompt:
+        return locked_prompt
     prompt = _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
     image_search_sections = [
         design_studio_styles.FIND_IMAGES_INLINE_RESULT_CONTRACT,
@@ -3682,6 +3729,13 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, 
 
 
 def build_design_generation_prompt(task_text: str, *, design_context=None) -> str:
+    locked_prompt = _locked_legends_v2_prompt_from_context(
+        "generation",
+        task_text,
+        design_context,
+    )
+    if locked_prompt:
+        return locked_prompt
     prompt = _clean_prompt(SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
@@ -3990,7 +4044,10 @@ def render_new_design_tab():
         height=110,
         key=f"design-studio-task-research-input::{hashlib.sha1(selected_task_text.encode('utf-8')).hexdigest()[:10]}",
     )
-    research_prompt = build_design_research_prompt(task_text)
+    research_prompt = build_design_research_prompt(
+        task_text,
+        design_context=selected_task_record if selected_task_record else None,
+    )
     render_generated_prompt_box(
         "Research Prompt",
         research_prompt,
@@ -4128,15 +4185,19 @@ def _render_v2_prompt_card(label, purpose, prompt, key, *, expanded=False, heigh
     with st.expander(label, expanded=expanded):
         st.caption(purpose)
         prompt_text = _clean_prompt(prompt)
+        prompt_identity = (
+            f"{design_studio_styles.STYLE_REGISTRY_VERSION}::"
+            f"{hashlib.sha1(prompt_text.encode('utf-8')).hexdigest()[:10]}"
+        )
         st.text_area(
             f"{label} preview",
             value=prompt_text,
             height=height,
-            key=f"design-studio-v2-prompt::{key}::{hashlib.sha1(prompt_text.encode('utf-8')).hexdigest()[:10]}",
+            key=f"design-studio-v2-prompt::{key}::{prompt_identity}",
             label_visibility="collapsed",
             disabled=True,
         )
-        _render_copy_button(prompt_text, f"design-studio-v2::{key}", label=f"Copy {label}")
+        _render_copy_button(prompt_text, f"design-studio-v2::{key}::{prompt_identity}", label=f"Copy {label}")
 
 
 def _render_design_details(defaults, identity, *, can_save=False):

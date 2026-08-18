@@ -4,8 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python run_migrations.py --verify-required-schema
-    startCommand: python run_migrations.py --verify-required-schema && python sports_cave_server.py
+    startCommand: python sports_cave_server.py
     healthCheckPath: /_stcore/health
     envVars:
       - key: FRAMED_CERTIFICATE_PRODUCT_HANDLE
@@ -19,7 +18,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python run_migrations.py --verify-required-schema && python webhook_server.py
+    startCommand: python webhook_server.py
     healthCheckPath: /healthz
     envVars:
       - key: FRAMED_CERTIFICATE_PRODUCT_HANDLE

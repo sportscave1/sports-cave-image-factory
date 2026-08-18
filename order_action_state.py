@@ -114,7 +114,10 @@ def row_requires_action(row):
     row = {} if row is None else row
     if not order_is_relevant(row):
         return False
-    return final_fulfilment_status(row) != "Complete"
+    return not (
+        certificate_step_is_complete(row)
+        and fulfilment_step_is_complete(row)
+    )
 
 
 def order_ids_requiring_action(rows):

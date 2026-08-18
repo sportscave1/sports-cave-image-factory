@@ -38,8 +38,8 @@ ALLOWED_CONSTRAINT_REPLACEMENTS = frozenset(
     }
 )
 SHOPIFY_MARKETPLACE_MIGRATION = "20260818_shopify_marketplace_order_reconciliation.sql"
-REQUIRED_DEPLOYMENT_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
-REQUIRED_DEPLOYMENT_COLUMNS = {
+MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
+MARKETPLACE_SCHEMA_COLUMNS = {
     ("shopify_orders", "source_name"): ("text", "NO", "''"),
     ("shopify_orders", "ingestion_status"): ("text", "NO", "pending"),
     ("shopify_orders", "ingestion_method"): ("text", "NO", "''"),
@@ -53,7 +53,7 @@ REQUIRED_DEPLOYMENT_COLUMNS = {
     ("webhook_events", "import_result"): ("text", "NO", "''"),
     ("webhook_events", "rejection_reason"): ("text", "NO", "''"),
 }
-REQUIRED_DEPLOYMENT_INDEXES = {
+MARKETPLACE_SCHEMA_INDEXES = {
     ("shopify_variants", "idx_shopify_variants_sku_normalized"),
 }
 
@@ -89,7 +89,7 @@ def migration_files(only=None):
     return selected
 
 
-def required_schema_issues(cur):
+def _schema_issues(cur, *, migrations, columns, indexes):
     """Return PII-free compatibility failures using read-only catalogue queries."""
 
     issues = []
@@ -99,12 +99,12 @@ def required_schema_issues(cur):
     if migration_table:
         cur.execute(
             "SELECT filename FROM schema_migrations WHERE filename = ANY(%s)",
-            (list(REQUIRED_DEPLOYMENT_MIGRATIONS),),
+            (list(migrations),),
         )
         applied_migrations = {
             str(row.get("filename") or "") for row in (cur.fetchall() or [])
         }
-    for filename in REQUIRED_DEPLOYMENT_MIGRATIONS:
+    for filename in migrations:
         if filename not in applied_migrations:
             issues.append(f"missing migration record: {filename}")
 
@@ -115,13 +115,13 @@ def required_schema_issues(cur):
         WHERE table_schema='public'
           AND table_name = ANY(%s)
         """,
-        (sorted({table for table, _column in REQUIRED_DEPLOYMENT_COLUMNS}),),
+        (sorted({table for table, _column in columns}),),
     )
     live_columns = {
         (str(row.get("table_name") or ""), str(row.get("column_name") or "")): row
         for row in (cur.fetchall() or [])
     }
-    for key, expected in REQUIRED_DEPLOYMENT_COLUMNS.items():
+    for key, expected in columns.items():
         table_name, column_name = key
         expected_type, expected_nullable, default_fragment = expected
         row = live_columns.get(key)
@@ -149,20 +149,37 @@ def required_schema_issues(cur):
         WHERE schemaname='public'
           AND tablename = ANY(%s)
         """,
-        (sorted({table for table, _index in REQUIRED_DEPLOYMENT_INDEXES}),),
+        (sorted({table for table, _index in indexes}),),
     )
     live_indexes = {
         (str(row.get("tablename") or ""), str(row.get("indexname") or ""))
         for row in (cur.fetchall() or [])
     }
-    for table_name, index_name in REQUIRED_DEPLOYMENT_INDEXES:
+    for table_name, index_name in indexes:
         if (table_name, index_name) not in live_indexes:
             issues.append(f"missing index: {index_name} on {table_name}")
     return issues
 
 
-def verify_required_schema():
-    """Fail deployment before startup when required additive schema is absent."""
+def required_schema_issues(cur):
+    """Core Shopify has no dependency on the optional marketplace migration."""
+
+    del cur
+    return []
+
+
+def marketplace_schema_issues(cur):
+    """Report optional marketplace diagnostic schema gaps without gating Shopify."""
+
+    return _schema_issues(
+        cur,
+        migrations=MARKETPLACE_SCHEMA_MIGRATIONS,
+        columns=MARKETPLACE_SCHEMA_COLUMNS,
+        indexes=MARKETPLACE_SCHEMA_INDEXES,
+    )
+
+
+def _verify_schema(*, issue_loader, ready_message, failure_message):
 
     database_url, source = get_database_url()
     if not database_url:
@@ -176,18 +193,40 @@ def verify_required_schema():
         options="-c default_transaction_read_only=on",
     ) as conn:
         with conn.cursor() as cur:
-            issues = required_schema_issues(cur)
+            issues = issue_loader(cur)
     if issues:
         print(f"Schema verification source: {source}")
         for issue in issues:
             print(f"MISSING {issue}")
         raise SystemExit(
-            "Schema verification failed. Apply "
-            f"{SHOPIFY_MARKETPLACE_MIGRATION} with run_migrations.py, then verify again."
+            failure_message
         )
     print(f"Schema verification source: {source}")
-    print("READY required application schema")
+    print(ready_message)
     return True
+
+
+def verify_required_schema():
+    """Verify only schema required by the core application and Shopify ingestion."""
+
+    return _verify_schema(
+        issue_loader=required_schema_issues,
+        ready_message="READY required core application schema",
+        failure_message="Required core application schema verification failed.",
+    )
+
+
+def verify_marketplace_schema():
+    """Explicitly verify optional marketplace diagnostics without gating startup."""
+
+    return _verify_schema(
+        issue_loader=marketplace_schema_issues,
+        ready_message="READY optional Shopify marketplace diagnostics schema",
+        failure_message=(
+            "Optional marketplace schema verification failed. Apply "
+            f"{SHOPIFY_MARKETPLACE_MIGRATION} to enable full marketplace diagnostics."
+        ),
+    )
 
 
 def run_migrations(*, only=None, check=False):
@@ -250,10 +289,20 @@ if __name__ == "__main__":
         action="store_true",
         help="Read-only verification that deployment-required migrations, columns and indexes exist.",
     )
+    parser.add_argument(
+        "--verify-marketplace-schema",
+        action="store_true",
+        help="Read-only verification of optional marketplace diagnostic columns and indexes.",
+    )
     args = parser.parse_args()
-    if args.verify_required_schema:
+    if args.verify_required_schema or args.verify_marketplace_schema:
         if args.only or args.check:
-            parser.error("--verify-required-schema cannot be combined with --only or --check.")
-        verify_required_schema()
+            parser.error("schema verification cannot be combined with --only or --check.")
+        if args.verify_required_schema and args.verify_marketplace_schema:
+            parser.error("choose one schema verification mode.")
+        if args.verify_marketplace_schema:
+            verify_marketplace_schema()
+        else:
+            verify_required_schema()
     else:
         run_migrations(only=args.only, check=args.check)

@@ -541,7 +541,7 @@ def _normalise_row(row):
     updated["order"] = str(updated.get("order") or "")
     updated["date"] = str(updated.get("date") or "")
     updated["customer"] = _placeholder_text(updated.get("customer"))
-    updated["channel"] = str(updated.get("channel") or updated.get("source_name") or "")
+    updated["channel"] = str(updated.get("channel") or updated.get("source_name") or "Shopify")
     updated["shipping_method"] = str(
         updated.get("shipping_method")
         or updated.get("shipping_title")
@@ -2388,6 +2388,21 @@ def _render_admin_panel(rows):
                 )
             except Exception as error:
                 st.caption(f"Order reconciliation health unavailable: {error.__class__.__name__}")
+            if st.button(
+                "Check Optional Marketplace Diagnostics",
+                key="orders-check-optional-marketplace-diagnostics",
+            ):
+                try:
+                    marketplace_schema = backend.get_shopify_marketplace_schema_status()
+                    if marketplace_schema.get("available"):
+                        st.caption("Optional marketplace diagnostics schema is available.")
+                    else:
+                        st.caption(
+                            "Optional marketplace diagnostics are unavailable; core Shopify orders, "
+                            "the Orders badge and notifications remain active."
+                        )
+                except Exception as error:
+                    st.caption(f"Marketplace diagnostics check unavailable: {error.__class__.__name__}")
         admin_cols = st.columns([1.05, 1.05, 1.05, 1.05, 1, 1])
         if admin_cols[0].button("Preview Latest Paid Fetch", use_container_width=True, disabled=not backend):
             with st.spinner("Previewing latest paid Shopify orders..."):
@@ -2504,13 +2519,6 @@ def _render_orders_data_area():
     read_diagnostic = dict(meta.get("database_read") or {})
     if read_diagnostic.get("recovered"):
         st.info("A stale database connection was replaced automatically. These results are current.")
-    if read_diagnostic.get("compatibility_mode"):
-        st.warning(
-            "Orders is temporarily using the previous database schema. Apply migration "
-            f"{read_diagnostic.get('required_migration') or '20260818_shopify_marketplace_order_reconciliation.sql'} "
-            "to restore full marketplace ingestion diagnostics."
-        )
-
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
         st.success(notice)

@@ -142,29 +142,18 @@ async def healthz():
     return {"ok": True, "service": "sports-cave-os-webhooks", **_service_version_info()}
 
 
-def _process_orders_paid_background(payload, webhook_id, topic):
+def _process_collector_vault_background(payload, webhook_id, topic):
     try:
-        import supabase_backend
+        import collector_vault
 
-        supabase_backend.process_order_paid_webhook(
-            payload,
-            webhook_id,
-            topic,
-            claim_event=False,
+        collector_vault.process_framed_order_paid(payload)
+    except Exception as frame_error:
+        _webhook_log(
+            "framed_certificate_order_update_failed",
+            webhook_id=webhook_id,
+            topic=topic,
+            error=str(frame_error),
         )
-        try:
-            import collector_vault
-
-            collector_vault.process_framed_order_paid(payload)
-        except Exception as frame_error:
-            _webhook_log(
-                "framed_certificate_order_update_failed",
-                webhook_id=webhook_id,
-                topic=topic,
-                error=str(frame_error),
-            )
-    except Exception as error:
-        _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
 
 
 @app.post("/webhooks/shopify/orders-paid")
@@ -271,14 +260,42 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
             "source": "webhook",
             "webhook_id": webhook_id,
         }
-    background_tasks.add_task(_process_orders_paid_background, payload, claim.get("webhook_id") or webhook_id, topic)
+    durable_webhook_id = claim.get("webhook_id") or webhook_id
+    try:
+        result = supabase_backend.process_order_paid_webhook(
+            payload,
+            durable_webhook_id,
+            topic,
+            claim_event=False,
+        )
+    except Exception as error:
+        _webhook_log(
+            "webhook_order_processing_failed",
+            webhook_id=durable_webhook_id,
+            topic=topic,
+            error=error.__class__.__name__,
+        )
+        return Response("Shopify order persistence failed; retry this webhook.", status_code=500)
+
+    if not result.get("processed"):
+        response_status = "skipped"
+    elif result.get("errors"):
+        response_status = "processed_with_warnings"
+    else:
+        response_status = "processed"
+    background_tasks.add_task(
+        _process_collector_vault_background,
+        payload,
+        durable_webhook_id,
+        topic,
+    )
     return {
         "ok": True,
-        "status": "accepted",
+        "status": response_status,
         "source": "webhook",
-        "webhook_id": claim.get("webhook_id") or webhook_id,
-        "order_name": claim.get("order_name") or "",
-        "shopify_order_id": claim.get("shopify_order_id") or "",
+        "webhook_id": durable_webhook_id,
+        "order_name": result.get("order_name") or claim.get("order_name") or "",
+        "shopify_order_id": result.get("shopify_order_id") or claim.get("shopify_order_id") or "",
     }
 
 

@@ -849,14 +849,33 @@ def load_order_status(claims):
         if supabase_configured:
             summary = supabase_backend.get_order_action_summary()
             supabase_summary_loaded = True
-    except Exception:
-        pass
+    except Exception as error:
+        print(
+            json.dumps(
+                {
+                    "event": "orders_badge_summary_failed",
+                    "error": error.__class__.__name__,
+                    "fallback": "local_orders_snapshot",
+                },
+                ensure_ascii=True,
+            ),
+            flush=True,
+        )
     if supabase_configured:
         try:
             events = supabase_backend.consume_new_order_notifications(claims.get("sub") or "")
             notification = order_action_state.new_order_notification(events)
-        except Exception:
-            pass
+        except Exception as error:
+            print(
+                json.dumps(
+                    {
+                        "event": "new_order_notification_read_failed",
+                        "error": error.__class__.__name__,
+                    },
+                    ensure_ascii=True,
+                ),
+                flush=True,
+            )
         if supabase_summary_loaded:
             return {**summary, "notification": notification}
     try:
@@ -869,8 +888,17 @@ def load_order_status(claims):
             "action_required_count": count,
             "badge_label": order_action_state.badge_label(count),
         }
-    except Exception:
-        pass
+    except Exception as error:
+        print(
+            json.dumps(
+                {
+                    "event": "orders_badge_fallback_failed",
+                    "error": error.__class__.__name__,
+                },
+                ensure_ascii=True,
+            ),
+            flush=True,
+        )
     return {**summary, "notification": notification}
 
 

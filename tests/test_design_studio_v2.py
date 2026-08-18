@@ -63,7 +63,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         self.assertEqual(
             design_studio_styles.STYLE_REGISTRY_VERSION,
-            "sports_cave_design_styles_v2",
+            "sports_cave_design_styles_v3_legends_locked",
         )
 
     def test_every_style_builds_all_four_prompts(self):
@@ -128,7 +128,11 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 STYLE_DETAILS[slug],
             )
             with self.subTest(style=slug):
-                max_length = 14500 if slug == "rivalry_faceoff" else 9500
+                max_length = (
+                    14500
+                    if slug in {"rivalry_faceoff", "legends_jersey_display"}
+                    else 9500
+                )
                 self.assertLess(len(prompt), max_length)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
@@ -137,7 +141,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         expectations = {
             "ultimate_moment": "definitive authentic photograph of the exact moment",
             "rivalry_faceoff": "No third person",
-            "legends_jersey_display": "genuine rear or rear three-quarter source photographs",
+            "legends_jersey_display": "genuine rear or restrained rear-three-quarter source photograph",
             "nostalgic_tribute": "Do not duplicate the athlete",
             "motorsport_driver_car": "same verified season, race, team and livery",
             "minimalist_hero": "maximum two visible figures",
@@ -169,6 +173,185 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertIn("Skip Find Images by default", find_prompt)
         self.assertIn("immutable edit target", generation)
         self.assertIn("Add no people", generation)
+
+
+class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
+    DETAILS = {
+        "design_title": "PURPLE REIGN",
+        "sport": "Baseball",
+        "principal_subject_one": "Shohei Ohtani",
+        "principal_subject_two": "Aaron Judge",
+        "uniform_equipment_livery": "Ohtani #17; Judge #99",
+        "essential_text": "PURPLE REIGN",
+    }
+    ASSETS = [
+        {
+            "file_path": "ohtani-rear.jpg",
+            "role": "rear_jersey_one",
+            "subject_name": "Shohei Ohtani",
+        },
+        {
+            "file_path": "judge-rear.jpg",
+            "role": "rear_jersey_two",
+            "subject_name": "Aaron Judge",
+        },
+        {
+            "file_path": "ohtani-signature.png",
+            "role": "signature_asset",
+            "subject_name": "Shohei Ohtani",
+        },
+        {
+            "file_path": "judge-signature.png",
+            "role": "signature_asset",
+            "subject_name": "Aaron Judge",
+        },
+        {
+            "file_path": "sports-cave-collector-badge.png",
+            "role": "collector_badge_asset",
+        },
+        {
+            "file_path": "sports-cave-limited-edition-plaque.png",
+            "role": "plaque_asset",
+        },
+    ]
+
+    def bundle(self):
+        return design_studio_styles.build_prompt_bundle(
+            "legends_jersey_display",
+            "Purple Reign Ohtani vs Judge",
+            self.DETAILS,
+            self.ASSETS,
+        )
+
+    def test_fixed_title_and_principal_subtitle_override_creative_task_title(self):
+        bundle = self.bundle()
+        self.assertEqual(bundle["errors"], [])
+        for stage in ("research", "find_images", "generation", "signature_placement", "review"):
+            with self.subTest(stage=stage):
+                self.assertIn("LEGENDS NEVER DIE", bundle[stage])
+                self.assertIn("ARTWORK SUBTITLE: OHTANI VS JUDGE", bundle[stage])
+                self.assertIn("TASK CREATIVE TITLE (METADATA ONLY - NEVER RENDER): PURPLE REIGN", bundle[stage])
+        self.assertIn(
+            "task title, DESIGN TITLE, ESSENTIAL TEXT and legacy prompt text cannot replace",
+            bundle["generation"],
+        )
+        self.assertIn("PRINCIPAL ONE JERSEY NUMBER: 17", bundle["generation"])
+        self.assertIn("PRINCIPAL TWO JERSEY NUMBER: 99", bundle["generation"])
+
+    def test_find_images_ranks_compatible_rear_pairs_not_individual_action_photos(self):
+        prompt = self.bundle()["find_images"]
+        self.assertIn("three strongest genuine rear", prompt)
+        self.assertIn("[athlete] jersey back high resolution", prompt)
+        self.assertIn("recommend one strongest PAIR", prompt)
+        self.assertIn("matching rear orientation, crop and body scale", prompt)
+        self.assertIn("2000 px or more preferred, 1200 px minimum", prompt)
+        self.assertIn("Reject front-facing portraits, face-offs, dramatic action", prompt)
+        self.assertIn("never compensate by inventing a pose, uniform, surname, number, body or face", prompt)
+
+    def test_generation_has_exact_source_signature_badge_and_plaque_mappings(self):
+        prompt = self.bundle()["generation"]
+        expected = (
+            "Shohei Ohtani -> ohtani-rear.jpg",
+            "Aaron Judge -> judge-rear.jpg",
+            "Shohei Ohtani -> ohtani-signature.png",
+            "Aaron Judge -> judge-signature.png",
+            "Sports Cave Collector Series circular badge -> sports-cave-collector-badge.png",
+            "LIMITED EDITION / 001 / 100 plaque -> sports-cave-limited-edition-plaque.png",
+            "thin rectangular full-name plate",
+            "Landscape 4:3, print-ready",
+        )
+        for phrase in expected:
+            self.assertIn(phrase, prompt)
+        self.assertIn("Use the actual selected source photographs", prompt)
+        self.assertIn("Do not create a fake back, fake number, AI-generated jersey lettering", prompt)
+
+    def test_missing_official_collector_assets_block_invention(self):
+        prompt = design_studio_styles.build_generation_prompt(
+            "legends_jersey_display",
+            "Ohtani vs Judge",
+            self.DETAILS,
+            self.ASSETS[:4],
+        )
+        self.assertIn("circular badge -> MISSING APPROVED ASSET", prompt)
+        self.assertIn("001 / 100 plaque -> MISSING APPROVED ASSET", prompt)
+        self.assertIn("Do not invent, redraw or substitute a generic Sports Cave logo", prompt)
+        self.assertIn("stop before final generation", prompt)
+
+    def test_purple_reign_composition_is_an_explicit_style_failure(self):
+        generation = self.bundle()["generation"]
+        review = self.bundle()["review"]
+        for phrase in (
+            "Purple Reign is a negative reference only",
+            "No split tunnel",
+            "purple neon corridor",
+            "No ornate or double frame",
+            "A polished rivalry poster is still a failed Legends Jersey Display",
+        ):
+            self.assertIn(phrase, generation)
+        self.assertIn("Purple Reign-like", review)
+        self.assertIn("A polished Purple Reign-style output cannot score above 6/10", review)
+
+    def test_harsh_review_enforces_style_pass_and_six_point_cap(self):
+        prompt = self.bundle()["review"]
+        self.assertIn("STYLE CONTRACT: PASS or FAIL", prompt)
+        self.assertIn("Hard-cap the commercial score at 6/10", prompt)
+        for failure in (
+            "title is not exactly LEGENDS NEVER DIE",
+            "one principal is front-facing or in action",
+            "signature is missing, wrong, mismapped or inconsistent",
+            "official badge is missing/fabricated",
+            "LIMITED EDITION or 001 / 100 plaque is missing/wrong/fabricated",
+            "any required element crosses the gold border",
+        ):
+            self.assertIn(failure, prompt)
+        self.assertIn("Do not penalise the artwork merely because full front-facing faces are absent", prompt)
+
+    def test_style_requires_two_explicit_principals_not_title_inference(self):
+        self.assertEqual(
+            design_studio_styles.validate_design_request(
+                "legends_jersey_display",
+                {"design_title": "Purple Reign"},
+                "Purple Reign Kobe Bryant vs Michael Jordan",
+            ),
+            [
+                "Legends Jersey Display requires exactly two named principals saved explicitly as Principal subject one and Principal subject two; a creative task title cannot supply or replace them."
+            ],
+        )
+
+    def test_legacy_context_routes_to_locked_v2_contract(self):
+        context = {
+            "title": "Purple Reign Ohtani vs Judge",
+            "design_style": "Legends Jersey Display",
+            "metadata": {"design_style": "legends_jersey_display", "design_details": self.DETAILS},
+        }
+        prompts = (
+            design_studio_page.build_design_research_prompt(
+                context["title"], design_context=context
+            ),
+            design_studio_page.build_design_image_carousel_prompt(
+                context["title"], "stale legacy research", design_context=context
+            ),
+            design_studio_page.build_design_generation_prompt(
+                context["title"], design_context=context
+            ),
+        )
+        for prompt in prompts:
+            self.assertIn(design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION, prompt)
+            self.assertIn("LEGENDS NEVER DIE", prompt)
+
+    def test_other_styles_and_prompt_cache_identity_are_isolated(self):
+        minimalist = design_studio_styles.build_generation_prompt(
+            "minimalist_hero",
+            "Create Michael Jordan artwork",
+            STYLE_DETAILS["minimalist_hero"],
+        )
+        self.assertNotIn(design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION, minimalist)
+        self.assertNotIn("ARTWORK MAIN TITLE: LEGENDS NEVER DIE", minimalist)
+        card_source = inspect.getsource(design_studio_page._render_v2_prompt_card)
+        self.assertIn("STYLE_REGISTRY_VERSION", card_source)
+        for prompt in self.bundle().values():
+            if isinstance(prompt, str):
+                self.assertNotIn("SPORTS CAVE LEGENDS JERSEY DISPLAY CONTRACT V2", prompt)
 
 
 class DesignStudioImageContractTests(unittest.TestCase):
@@ -505,7 +688,8 @@ class DesignStudioV2PageContractTests(unittest.TestCase):
     def test_copy_button_receives_the_complete_prompt(self):
         card_source = inspect.getsource(design_studio_page._render_v2_prompt_card)
         copy_source = inspect.getsource(design_studio_page._render_copy_button)
-        self.assertIn("_render_copy_button(prompt_text", card_source)
+        self.assertIn("_render_copy_button(", card_source)
+        self.assertIn("prompt_text,", card_source)
         self.assertIn("navigator.clipboard.writeText(promptText)", copy_source)
 
 

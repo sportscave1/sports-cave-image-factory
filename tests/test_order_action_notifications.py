@@ -93,7 +93,7 @@ class OrderActionStateTests(unittest.TestCase):
         )
         self.assertTrue(order_action_state.row_requires_action(row))
 
-    def test_complete_fulfilment_ignores_legacy_certificate_fields(self):
+    def test_complete_fulfilment_still_counts_missing_certificate_work(self):
         row = action_row(
             "21",
             certificate_status="Needs certificate",
@@ -103,28 +103,26 @@ class OrderActionStateTests(unittest.TestCase):
             certificate_pdf_url="",
             certificate_shopify_file_id="",
         )
-        self.assertFalse(order_action_state.row_requires_action(row))
+        self.assertTrue(order_action_state.row_requires_action(row))
 
     def test_every_required_step_complete_removes_order(self):
         unfinished = action_row("30", prodigi_status="Needs certificate")
         completed = action_row(
             "30",
-            certificate_status="",
+            certificate_status="Uploaded",
             prodigi_status="Fulfilled in Shopify",
-            assignments_count=0,
-            edition_order_id="",
         )
         self.assertEqual(1, order_action_state.count_orders_requiring_action([unfinished]))
         self.assertEqual(0, order_action_state.count_orders_requiring_action([completed]))
         self.assertEqual("", order_action_state.badge_label(0))
 
-    def test_missing_legacy_allocation_fields_do_not_override_complete(self):
+    def test_uploaded_certificate_and_complete_fulfilment_remove_order(self):
         row = action_row(
             "31",
             line_quantity=3,
             assignments_count=0,
             edition_order_id="",
-            certificate_status="",
+            certificate_status="Uploaded",
             prodigi_status="Complete",
         )
         self.assertFalse(order_action_state.row_requires_action(row))
@@ -144,7 +142,7 @@ class OrderActionStateTests(unittest.TestCase):
                 prodigi_status="Complete",
                 assignments_count=0,
                 edition_order_id="",
-                certificate_status="",
+                certificate_status="Uploaded",
             )
             for order_number in range(2800, 3000)
         )
@@ -165,7 +163,7 @@ class OrderActionStateTests(unittest.TestCase):
                 action_row(
                     "33",
                     prodigi_status="Complete",
-                    certificate_status="",
+                    certificate_status="Uploaded",
                     assignments_count=0,
                     edition_order_id="",
                 )
@@ -189,6 +187,11 @@ class OrderActionStateTests(unittest.TestCase):
 
 
 class NewOrderEventTests(unittest.TestCase):
+    def test_webhook_retry_cannot_clear_new_order_notification_flag(self):
+        source = inspect.getsource(supabase_backend._update_webhook_event_status)
+
+        self.assertIn("COALESCE(new_order_inserted, FALSE) OR %s", source)
+
     def event(self, webhook_id, order_id, *, inserted=True, at="2026-08-12T10:00:00Z"):
         return {
             "webhook_id": webhook_id,
@@ -352,14 +355,15 @@ class OrderStatusUiContractTests(unittest.TestCase):
     def test_backend_selector_uses_shared_rules_and_has_no_latest_fifty_limit(self):
         summary_source = inspect.getsource(supabase_backend.get_order_action_summary)
         query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
-        self.assertIn("order_action_state.DISPLAY_COMPLETE_FULFILMENT_STATUSES", summary_source)
+        self.assertIn("order_action_state.CERTIFICATE_TERMINAL_STATUSES", summary_source)
+        self.assertIn("order_action_state.FULFILMENT_TERMINAL_STATUSES", summary_source)
         self.assertIn("COUNT(DISTINCT shopify_order_id)", summary_source)
         self.assertNotIn("LIMIT 50", query_source)
         self.assertIn("shopify_order_id", query_source)
         self.assertIn("prodigi_status", query_source)
-        self.assertNotIn("edition_orders", query_source)
-        self.assertNotIn("certificates", query_source)
-        self.assertNotIn("edition_number", query_source)
+        self.assertIn("edition_orders", query_source)
+        self.assertIn("certificates", query_source)
+        self.assertIn("certificates_complete", query_source)
 
     def test_orders_page_reuses_shared_certificate_and_fulfilment_helpers(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
@@ -400,7 +404,7 @@ class OrderStatusUiContractTests(unittest.TestCase):
                 prodigi_status="Complete",
                 assignments_count=0,
                 edition_order_id="",
-                certificate_status="",
+                certificate_status="Uploaded",
             )
             for order_number in range(2800, 3000)
         )

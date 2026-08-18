@@ -270,9 +270,41 @@ class ShopifySyncClientTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "accepted")
+        self.assertEqual(response.json()["status"], "processed")
         process_webhook.assert_called_once()
         self.assertFalse(process_webhook.call_args.kwargs["claim_event"])
+
+    def test_orders_paid_fastapi_route_does_not_acknowledge_failed_persistence(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid","line_items":[{"id":1}]}'
+        with patch.object(
+            webhook_server,
+            "verify_shopify_webhook_hmac",
+            return_value={"ok": True, "secret_env_used": "SHOPIFY_CLIENT_SECRET"},
+        ), patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={"webhook_id": "webhook-2879", "duplicate": False},
+        ), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+            side_effect=RuntimeError("database unavailable"),
+        ) as process_webhook:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": "verified-by-patch",
+                    "X-Shopify-Topic": "orders/paid",
+                    "X-Shopify-Webhook-Id": "webhook-2879",
+                },
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("retry", response.text.casefold())
+        process_webhook.assert_called_once()
 
     def test_orders_paid_fastapi_route_accepts_valid_webhook_secret(self):
         from fastapi.testclient import TestClient
@@ -4765,7 +4797,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertIn("duplicate_diagnostics", signature.parameters)
         self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
-        self.assertIn("Orders sync automatically after payment.", actions_source)
+        self.assertIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
         self.assertNotIn("Check New Paid Orders", actions_source)
 
     def test_orders_duplicate_warning_disappears_when_raw_diagnostics_are_clean(self):
@@ -4784,7 +4816,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             self.assertEqual(fake_st.errors, [])
 
             orders_page._render_duplicate_warning_panel({"duplicate_group_count": 1, "sync_allowed": False})
-            self.assertEqual(fake_st.errors, ["Orders need repair before new sync. Please contact Nathan/admin."])
+            self.assertEqual(fake_st.errors, [])
 
     def test_existing_order_name_in_edition_orders_skips_entire_sync_candidate(self):
         order = {
@@ -5291,11 +5323,12 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         warning_source = inspect.getsource(orders_page._render_duplicate_warning_panel)
         actions_source = inspect.getsource(orders_page._render_top_actions)
 
-        self.assertIn("Orders need repair before new sync. Please contact Nathan/admin.", warning_source)
+        self.assertIn("return", warning_source)
+        self.assertNotIn("st.error", warning_source)
         self.assertNotIn("allocation_key", warning_source)
         self.assertNotIn("Backfill latest paid orders", actions_source)
         self.assertNotIn("Check New Paid Orders", actions_source)
-        self.assertIn("Orders sync automatically after payment.", actions_source)
+        self.assertIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
 
     def test_developer_page_has_orders_cache_recheck_diagnostics_only(self):
         import app

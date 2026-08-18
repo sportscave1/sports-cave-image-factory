@@ -104,9 +104,15 @@ SHOPIFY_MARKETPLACE_ORDER_READ_COLUMNS = frozenset(
     {
         "source_name",
         "ingestion_status",
+        "ingestion_method",
         "ingestion_result",
         "ingestion_reason",
+        "ingestion_duration_ms",
+        "last_ingested_at",
+        "shopify_variant_id",
         "mapping_method",
+        "import_result",
+        "rejection_reason",
     }
 )
 ORDER_MARKETPLACE_CAPABILITY_TTL_SECONDS = 60.0
@@ -1882,13 +1888,6 @@ def _ensure_schema_uncached():
                     ("remote_updated_at", "TIMESTAMPTZ"),
                     ("processed_at", "TIMESTAMPTZ"),
                     ("cancelled_at", "TIMESTAMPTZ"),
-                    ("source_name", "TEXT DEFAULT ''"),
-                    ("ingestion_status", "TEXT DEFAULT 'pending'"),
-                    ("ingestion_method", "TEXT DEFAULT ''"),
-                    ("ingestion_result", "TEXT DEFAULT ''"),
-                    ("ingestion_reason", "TEXT DEFAULT ''"),
-                    ("ingestion_duration_ms", "INTEGER DEFAULT 0"),
-                    ("last_ingested_at", "TIMESTAMPTZ"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                     ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -1897,7 +1896,6 @@ def _ensure_schema_uncached():
                 "shopify_order_lines": (
                     ("shopify_order_id", "TEXT"),
                     ("shopify_product_id", "TEXT"),
-                    ("shopify_variant_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("product_title", "TEXT"),
                     ("variant_title", "TEXT"),
@@ -1905,7 +1903,6 @@ def _ensure_schema_uncached():
                     ("quantity", "INTEGER DEFAULT 1"),
                     ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
                     ("last_error", "TEXT DEFAULT ''"),
-                    ("mapping_method", "TEXT DEFAULT ''"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -3063,13 +3060,6 @@ def ensure_order_read_schema():
                         ("remote_updated_at", "TIMESTAMPTZ"),
                         ("processed_at", "TIMESTAMPTZ"),
                         ("cancelled_at", "TIMESTAMPTZ"),
-                        ("source_name", "TEXT DEFAULT ''"),
-                        ("ingestion_status", "TEXT DEFAULT 'pending'"),
-                        ("ingestion_method", "TEXT DEFAULT ''"),
-                        ("ingestion_result", "TEXT DEFAULT ''"),
-                        ("ingestion_reason", "TEXT DEFAULT ''"),
-                        ("ingestion_duration_ms", "INTEGER DEFAULT 0"),
-                        ("last_ingested_at", "TIMESTAMPTZ"),
                         ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                         ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ),
@@ -3077,7 +3067,6 @@ def ensure_order_read_schema():
                         ("shopify_line_item_id", "TEXT"),
                         ("shopify_order_id", "TEXT"),
                         ("shopify_product_id", "TEXT"),
-                        ("shopify_variant_id", "TEXT"),
                         ("shopify_handle", "TEXT"),
                         ("product_title", "TEXT"),
                         ("variant_title", "TEXT"),
@@ -3085,7 +3074,6 @@ def ensure_order_read_schema():
                         ("quantity", "INTEGER DEFAULT 1"),
                         ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
                         ("last_error", "TEXT DEFAULT ''"),
-                        ("mapping_method", "TEXT DEFAULT ''"),
                         ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                         ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -12031,6 +12019,53 @@ def get_order_reconciliation_health(*, ensure_schema_first=True):
     }
 
 
+def get_shopify_marketplace_schema_status():
+    """Return the optional marketplace diagnostic capability without mutating schema."""
+
+    expected = {
+        "shopify_orders": {
+            "source_name",
+            "ingestion_status",
+            "ingestion_method",
+            "ingestion_result",
+            "ingestion_reason",
+            "ingestion_duration_ms",
+            "last_ingested_at",
+        },
+        "shopify_order_lines": {"shopify_variant_id", "mapping_method"},
+        "webhook_events": {"source_name", "import_result", "rejection_reason"},
+    }
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name = ANY(%s)
+                """,
+                (sorted(expected),),
+            )
+            found = {
+                (str(row.get("table_name") or ""), str(row.get("column_name") or ""))
+                for row in (cur.fetchall() or [])
+            }
+    missing = sorted(
+        f"{table_name}.{column_name}"
+        for table_name, columns in expected.items()
+        for column_name in columns
+        if (table_name, column_name) not in found
+    )
+    available = not missing
+    _set_marketplace_order_read_capability(available)
+    return {
+        "available": available,
+        "missing": missing,
+        "migration": SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION,
+        "core_shopify_available": True,
+    }
+
+
 def _sync_order_line_count(orders):
     return sum(len(order.get("line_items") or []) for order in orders or [])
 
@@ -13707,11 +13742,11 @@ def _upsert_order(cur, order):
             shopify_order_id, legacy_resource_id, order_name, shopify_order_name,
             order_number, shopify_order_number, admin_url,
             customer_id, shopify_customer_id, customer_name, customer_email, email,
-            financial_status, fulfillment_status, source_name,
+            financial_status, fulfillment_status,
             total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at,
             raw_json, raw, synced_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 %s::jsonb, %s::jsonb, now(), now())
@@ -13729,7 +13764,6 @@ def _upsert_order(cur, order):
             email=EXCLUDED.email,
             financial_status=EXCLUDED.financial_status,
             fulfillment_status=EXCLUDED.fulfillment_status,
-            source_name=COALESCE(NULLIF(EXCLUDED.source_name, ''), shopify_orders.source_name),
             total_price=EXCLUDED.total_price,
             currency=EXCLUDED.currency,
             created_at=EXCLUDED.created_at,
@@ -13756,7 +13790,6 @@ def _upsert_order(cur, order):
             customer_email,
             order.get("financial_status"),
             order.get("fulfillment_status"),
-            order.get("source_display") or order.get("source_name") or "",
             order.get("total_price"),
             order.get("currency"),
             order.get("created_at") or "",
@@ -13897,32 +13930,54 @@ def _set_order_ingestion_outcome(
     )
     if not is_configured() or not _shopify_order_id(order):
         return
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE shopify_orders
-                SET source_name=COALESCE(NULLIF(%s, ''), source_name),
-                    ingestion_status=%s,
-                    ingestion_method=%s,
-                    ingestion_result=%s,
-                    ingestion_reason=%s,
-                    ingestion_duration_ms=%s,
-                    last_ingested_at=now(),
-                    updated_at=now()
-                WHERE shopify_order_id=%s
-                """,
-                (
-                    str(order.get("source_display") or order.get("source_name") or ""),
-                    str(ingestion_status or "pending"),
-                    str(ingestion_method or "reconciliation"),
-                    str(import_result or ""),
-                    str(reason or ""),
-                    max(int(duration_ms or 0), 0),
-                    _shopify_order_id(order),
-                ),
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE shopify_orders
+                    SET source_name=COALESCE(NULLIF(%s, ''), source_name),
+                        ingestion_status=%s,
+                        ingestion_method=%s,
+                        ingestion_result=%s,
+                        ingestion_reason=%s,
+                        ingestion_duration_ms=%s,
+                        last_ingested_at=now(),
+                        updated_at=now()
+                    WHERE shopify_order_id=%s
+                    """,
+                    (
+                        str(order.get("source_display") or order.get("source_name") or ""),
+                        str(ingestion_status or "pending"),
+                        str(ingestion_method or "reconciliation"),
+                        str(import_result or ""),
+                        str(reason or ""),
+                        max(int(duration_ms or 0), 0),
+                        _shopify_order_id(order),
+                    ),
+                )
+            conn.commit()
+        _set_marketplace_order_read_capability(True)
+    except Exception as error:
+        if _is_marketplace_order_read_schema_error(error):
+            _set_marketplace_order_read_capability(False)
+            _order_ingestion_log(
+                order,
+                ingestion_method=ingestion_method,
+                import_result="marketplace_diagnostics_unavailable",
+                reason="optional_marketplace_schema_unavailable",
+                duration_ms=duration_ms,
+                mapping_methods=mapping_methods,
             )
-        conn.commit()
+            return
+        _order_ingestion_log(
+            order,
+            ingestion_method=ingestion_method,
+            import_result="marketplace_diagnostics_failed",
+            reason=f"optional_marketplace_diagnostics_{error.__class__.__name__}",
+            duration_ms=duration_ms,
+            mapping_methods=mapping_methods,
+        )
 
 
 def _set_order_line_status(
@@ -16106,10 +16161,32 @@ def list_existing_shopify_order_states(order_ids, *, ensure_schema_first=True):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT shopify_order_id, remote_updated_at, created_at, synced_at,
-                           ingestion_status, ingestion_result, ingestion_reason
-                    FROM shopify_orders
-                    WHERE shopify_order_id = ANY(%s)
+                    SELECT o.shopify_order_id, o.remote_updated_at, o.created_at, o.synced_at,
+                           COALESCE(
+                               NULLIF(to_jsonb(o)->>'ingestion_status', ''),
+                               CASE
+                                   WHEN EXISTS (
+                                       SELECT 1
+                                       FROM shopify_order_lines state_li
+                                       WHERE state_li.shopify_order_id=o.shopify_order_id
+                                         AND state_li.assignment_status='Needs product mapping'
+                                   ) THEN 'needs_mapping'
+                                   WHEN EXISTS (
+                                       SELECT 1
+                                       FROM shopify_order_lines state_li
+                                       WHERE state_li.shopify_order_id=o.shopify_order_id
+                                         AND state_li.assignment_status IN (
+                                             'Needs Edition', 'Product Not Found',
+                                             'Needs Edition Setup', 'Error'
+                                         )
+                                   ) THEN 'retryable_error'
+                                   ELSE 'complete'
+                               END
+                           ) AS ingestion_status,
+                           COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
+                           COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason
+                    FROM shopify_orders o
+                    WHERE o.shopify_order_id = ANY(%s)
                     """,
                     (values,),
                 )
@@ -17822,9 +17899,6 @@ def _ensure_webhook_event_table_with_cursor(cur):
         ("processed_at", "TIMESTAMPTZ"),
         ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
         ("new_order_inserted", "BOOLEAN DEFAULT FALSE"),
-        ("source_name", "TEXT DEFAULT ''"),
-        ("import_result", "TEXT DEFAULT ''"),
-        ("rejection_reason", "TEXT DEFAULT ''"),
         ("payload", "JSONB DEFAULT '{}'::jsonb"),
         ("error_message", "TEXT"),
     ):
@@ -17859,7 +17933,6 @@ def _claim_webhook_event(
         shopify_order_name = safe_payload.get("name") or ""
     shopify_order_id = str(shopify_order_id or "").strip()
     shopify_order_name = str(shopify_order_name or "").strip()
-    source_name = str(safe_payload.get("source_name") or "").strip()
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -17868,9 +17941,9 @@ def _claim_webhook_event(
                     """
                     INSERT INTO webhook_events(
                         webhook_id, topic, status, shop_domain, shopify_order_id, shopify_order_name,
-                        source, source_name, payload, received_at
+                        source, payload, received_at
                     )
-                    VALUES (%s, %s, 'received', %s, %s, %s, 'webhook', %s, %s::jsonb, now())
+                    VALUES (%s, %s, 'received', %s, %s, %s, 'webhook', %s::jsonb, now())
                     ON CONFLICT (webhook_id) DO NOTHING
                     RETURNING webhook_id
                     """,
@@ -17880,7 +17953,6 @@ def _claim_webhook_event(
                         shop_domain,
                         shopify_order_id,
                         shopify_order_name,
-                        source_name,
                         json_dumps(safe_payload),
                     ),
                 )
@@ -17907,7 +17979,6 @@ def _claim_webhook_event(
                             shopify_order_id=%s,
                             shopify_order_name=%s,
                             source='webhook',
-                            source_name=%s,
                             payload=%s::jsonb,
                             received_at=now(),
                             processed_at=NULL,
@@ -17923,13 +17994,15 @@ def _claim_webhook_event(
                             shop_domain,
                             shopify_order_id,
                             shopify_order_name,
-                            source_name,
                             json_dumps(safe_payload),
                             webhook_id,
                         ),
                     )
                     conn.commit()
                     return True
+                if existing_status in {"received", "processing"}:
+                    conn.rollback()
+                    raise RuntimeError("Webhook delivery is already in progress; retry later.")
                 conn.rollback()
     except Exception as error:
         schema_message = webhook_schema_error_message(error)
@@ -18003,38 +18076,53 @@ def _update_webhook_event_status(
 ):
     if not webhook_id:
         return
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE webhook_events
+                SET status=%s,
+                    error_message=%s,
+                    inserted_count=%s,
+                    skipped_count=%s,
+                    affected_handles_count=%s,
+                    processing_elapsed_ms=%s,
+                    new_order_inserted=COALESCE(new_order_inserted, FALSE) OR %s,
+                    processed_at=CASE WHEN %s IN ('processed', 'processed_with_warnings', 'skipped', 'skipped_duplicate', 'failed') THEN now() ELSE processed_at END,
+                    shopify_order_id=COALESCE(NULLIF(%s, ''), shopify_order_id),
+                    shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name)
+                WHERE webhook_id=%s
+                """,
+                (
+                    status,
+                    str(error_message or "")[:2000],
+                    int(inserted_count or 0),
+                    int(skipped_count or 0),
+                    int(affected_handles_count or 0),
+                    int(processing_elapsed_ms or 0),
+                    bool(new_order_inserted),
+                    status,
+                    str(shopify_order_id or "").strip(),
+                    str(shopify_order_name or "").strip(),
+                    webhook_id,
+                ),
+            )
+        conn.commit()
+
+    if not any((source_name, import_result, rejection_reason)):
+        return
     try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE webhook_events
-                    SET status=%s,
-                        error_message=%s,
-                        inserted_count=%s,
-                        skipped_count=%s,
-                        affected_handles_count=%s,
-                        processing_elapsed_ms=%s,
-                        new_order_inserted=%s,
-                        processed_at=CASE WHEN %s IN ('processed', 'processed_with_warnings', 'skipped', 'skipped_duplicate', 'failed') THEN now() ELSE processed_at END,
-                        shopify_order_id=COALESCE(NULLIF(%s, ''), shopify_order_id),
-                        shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name),
-                        source_name=COALESCE(NULLIF(%s, ''), source_name),
+                    SET source_name=COALESCE(NULLIF(%s, ''), source_name),
                         import_result=COALESCE(NULLIF(%s, ''), import_result),
                         rejection_reason=COALESCE(NULLIF(%s, ''), rejection_reason)
                     WHERE webhook_id=%s
                     """,
                     (
-                        status,
-                        str(error_message or "")[:2000],
-                        int(inserted_count or 0),
-                        int(skipped_count or 0),
-                        int(affected_handles_count or 0),
-                        int(processing_elapsed_ms or 0),
-                        bool(new_order_inserted),
-                        status,
-                        str(shopify_order_id or "").strip(),
-                        str(shopify_order_name or "").strip(),
                         str(source_name or "").strip(),
                         str(import_result or "").strip(),
                         str(rejection_reason or "").strip(),
@@ -18042,11 +18130,22 @@ def _update_webhook_event_status(
                     ),
                 )
             conn.commit()
+        _set_marketplace_order_read_capability(True)
     except Exception as error:
-        schema_message = webhook_schema_error_message(error)
-        if schema_message:
-            raise RuntimeError(schema_message) from error
-        _webhook_log("webhook_event_status_update_failed", "failed", webhook_id=webhook_id, error=str(error))
+        if _is_marketplace_order_read_schema_error(error):
+            _set_marketplace_order_read_capability(False)
+            _webhook_log(
+                "marketplace_webhook_diagnostics_unavailable",
+                "completed",
+                webhook_id=webhook_id,
+            )
+            return
+        _webhook_log(
+            "marketplace_webhook_diagnostics_failed",
+            "failed",
+            webhook_id=webhook_id,
+            error=error.__class__.__name__,
+        )
 
 
 def _normalize_product_webhook_tags(value):
@@ -18552,11 +18651,19 @@ def get_shopify_order_ingestion_trace(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT shopify_order_id, order_name, source_name, financial_status,
-                       fulfillment_status, ingestion_status, ingestion_method,
-                       ingestion_result, ingestion_reason, ingestion_duration_ms,
-                       last_ingested_at, created_at, remote_updated_at, synced_at
-                FROM shopify_orders
+                SELECT o.shopify_order_id, o.order_name,
+                       COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
+                                NULLIF(o.raw_json->>'source_display', ''),
+                                NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
+                       o.financial_status, o.fulfillment_status,
+                       COALESCE(to_jsonb(o)->>'ingestion_status', 'schema_optional') AS ingestion_status,
+                       COALESCE(to_jsonb(o)->>'ingestion_method', '') AS ingestion_method,
+                       COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
+                       COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason,
+                       COALESCE((to_jsonb(o)->>'ingestion_duration_ms')::integer, 0) AS ingestion_duration_ms,
+                       to_jsonb(o)->>'last_ingested_at' AS last_ingested_at,
+                       o.created_at, o.remote_updated_at, o.synced_at
+                FROM shopify_orders o
                 WHERE shopify_order_id=%s
                 LIMIT 1
                 """,
@@ -18565,12 +18672,15 @@ def get_shopify_order_ingestion_trace(
             stored_order = cur.fetchone() or {}
             cur.execute(
                 """
-                SELECT shopify_line_item_id, assignment_status, mapping_method,
-                       COALESCE(NULLIF(shopify_variant_id, ''), NULLIF(raw_json->>'shopify_variant_id', ''),
-                                NULLIF(raw_json->>'variant_id', '')) AS shopify_variant_id,
-                       COALESCE(NULLIF(sku, ''), NULLIF(raw_json->>'sku', '')) AS sku,
-                       quantity, last_error
-                FROM shopify_order_lines
+                SELECT li.shopify_line_item_id, li.assignment_status,
+                       COALESCE(NULLIF(to_jsonb(li)->>'mapping_method', ''),
+                                NULLIF(li.raw_json->>'mapping_method', ''), '') AS mapping_method,
+                       COALESCE(NULLIF(to_jsonb(li)->>'shopify_variant_id', ''),
+                                NULLIF(li.raw_json->>'shopify_variant_id', ''),
+                                NULLIF(li.raw_json->>'variant_id', '')) AS shopify_variant_id,
+                       COALESCE(NULLIF(li.sku, ''), NULLIF(li.raw_json->>'sku', '')) AS sku,
+                       li.quantity, li.last_error
+                FROM shopify_order_lines li
                 WHERE shopify_order_id=%s
                 ORDER BY shopify_line_item_id
                 """,
@@ -18579,10 +18689,13 @@ def get_shopify_order_ingestion_trace(
             stored_lines = list(cur.fetchall() or [])
             cur.execute(
                 """
-                SELECT webhook_id, topic, status, source_name, import_result,
-                       rejection_reason, received_at, processed_at,
-                       processing_elapsed_ms, error_message
-                FROM webhook_events
+                SELECT e.webhook_id, e.topic, e.status,
+                       COALESCE(to_jsonb(e)->>'source_name', '') AS source_name,
+                       COALESCE(to_jsonb(e)->>'import_result', '') AS import_result,
+                       COALESCE(to_jsonb(e)->>'rejection_reason', '') AS rejection_reason,
+                       e.received_at, e.processed_at,
+                       e.processing_elapsed_ms, e.error_message
+                FROM webhook_events e
                 WHERE shopify_order_id=%s
                    OR (%s <> '' AND shopify_order_name=%s)
                 ORDER BY received_at DESC NULLS LAST
@@ -18622,6 +18735,7 @@ def reconcile_single_shopify_order(
     shopify_order_id="",
     order_name="",
     apply=False,
+    notify=False,
     config=None,
     ensure_schema_first=True,
 ):
@@ -18693,6 +18807,7 @@ def reconcile_single_shopify_order(
         "trace_before": trace_before,
         "mapping": mapping_preview,
         "backfill_safe_to_repeat": True,
+        "notifications_requested": bool(notify),
         "applied": False,
     }
     if not apply:
@@ -18712,7 +18827,11 @@ def reconcile_single_shopify_order(
         ensure_schema_first=False,
     )
     notification_events_created = 0
-    if applied.get("processed") and str(applied.get("ingestion_status") or "").casefold() != "retryable_error":
+    if (
+        notify
+        and applied.get("processed")
+        and str(applied.get("ingestion_status") or "").casefold() != "retryable_error"
+    ):
         notification_events_created = record_new_order_notification_events(
             [order],
             source="targeted_reconciliation",
@@ -18837,8 +18956,12 @@ ORDER_ACTION_ROWS_SQL = """
         o.order_name,
         o.financial_status,
         o.cancelled_at,
+        o.fulfillment_status,
         li.shopify_line_item_id,
-        COALESCE(pd.prodigi_status, '') AS prodigi_status
+        li.quantity,
+        COALESCE(pd.prodigi_status, '') AS prodigi_status,
+        COALESCE(allocation.assignments_count, 0) AS assignments_count,
+        COALESCE(allocation.certificates_complete, FALSE) AS certificates_complete
     FROM shopify_orders o
     JOIN shopify_order_lines li
       ON li.shopify_order_id = o.shopify_order_id
@@ -18850,6 +18973,33 @@ ORDER_ACTION_ROWS_SQL = """
                  dispatch.submitted_at DESC NULLS LAST
         LIMIT 1
     ) pd ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            COUNT(DISTINCT eo.id) AS assignments_count,
+            COUNT(DISTINCT eo.id) >= GREATEST(COALESCE(li.quantity, 1), 1)
+            AND BOOL_AND(
+                COALESCE(NULLIF(eo.shopify_file_id, ''), NULLIF(eo.certificate_file_url, ''), '') <> ''
+                OR LOWER(BTRIM(COALESCE(eo.certificate_status, ''))) = ANY(%s)
+                OR EXISTS (
+                    SELECT 1
+                    FROM certificates c
+                    WHERE COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                      AND (
+                          LOWER(BTRIM(COALESCE(c.certificate_status, c.status, ''))) = ANY(%s)
+                          OR COALESCE(
+                              NULLIF(c.shopify_file_url, ''),
+                              NULLIF(c.certificate_file_url, ''),
+                              NULLIF(c.certificate_pdf_url, ''),
+                              NULLIF(c.certificate_shopify_file_id, ''),
+                              NULLIF(c.shopify_pdf_file_id, ''),
+                              ''
+                          ) <> ''
+                      )
+                )
+            ) AS certificates_complete
+        FROM edition_orders eo
+        WHERE eo.shopify_line_item_id = li.shopify_line_item_id
+    ) allocation ON TRUE
     WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid')
       AND o.cancelled_at IS NULL
 """
@@ -18858,7 +19008,13 @@ ORDER_ACTION_ROWS_SQL = """
 def list_order_action_rows():
     """Load local order status rows for diagnostics and rule-level verification."""
     def load_rows(cur):
-        cur.execute(ORDER_ACTION_ROWS_SQL)
+        cur.execute(
+            ORDER_ACTION_ROWS_SQL,
+            (
+                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
+                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
+            ),
+        )
         return cur.fetchall()
 
     rows, _diagnostic = _run_read_operation("orders.action_required", load_rows)
@@ -18874,9 +19030,21 @@ def get_order_action_summary():
             )
             SELECT COUNT(DISTINCT shopify_order_id) AS action_required_count
             FROM action_rows
-            WHERE NOT (LOWER(BTRIM(COALESCE(prodigi_status, ''))) = ANY(%s))
+            WHERE NOT certificates_complete
+               OR NOT (
+                    LOWER(BTRIM(COALESCE(prodigi_status, ''))) = ANY(%s)
+                    OR (
+                        BTRIM(COALESCE(prodigi_status, '')) = ''
+                        AND LOWER(BTRIM(COALESCE(fulfillment_status, ''))) = ANY(%s)
+                    )
+               )
             """,
-            (sorted(order_action_state.DISPLAY_COMPLETE_FULFILMENT_STATUSES),),
+            (
+                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
+                sorted(order_action_state.CERTIFICATE_TERMINAL_STATUSES),
+                sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
+                sorted(order_action_state.FULFILMENT_TERMINAL_STATUSES),
+            ),
         )
         return int((cur.fetchone() or {}).get("action_required_count") or 0)
 
@@ -18898,33 +19066,27 @@ def record_new_order_notification_events(orders, *, source="latest_paid_sync"):
     for order in orders or ():
         order_id = _shopify_order_id(order)
         if order_id:
-            unique.setdefault(
-                order_id,
-                (
-                    _shopify_order_name(order),
-                    str(order.get("source_display") or order.get("source_name") or ""),
-                ),
-            )
+            unique.setdefault(order_id, _shopify_order_name(order))
     if not unique:
         return 0
     inserted = 0
     with connect() as conn:
         with conn.cursor() as cur:
             _ensure_webhook_event_table_with_cursor(cur)
-            for order_id, (order_name, source_name) in unique.items():
+            for order_id, order_name in unique.items():
                 event_id = "new-order:" + hashlib.sha256(order_id.encode("utf-8")).hexdigest()
                 cur.execute(
                     """
                     INSERT INTO webhook_events(
                         webhook_id, topic, status, shopify_order_id, shopify_order_name,
-                        source, source_name, inserted_count, new_order_inserted, received_at, processed_at,
+                        source, inserted_count, new_order_inserted, received_at, processed_at,
                         payload, error_message
                     )
-                    VALUES (%s, 'orders/paid', 'processed', %s, %s, %s, %s, 1, TRUE, now(), now(), '{}'::jsonb, '')
+                    VALUES (%s, 'orders/paid', 'processed', %s, %s, %s, 1, TRUE, now(), now(), '{}'::jsonb, '')
                     ON CONFLICT (webhook_id) DO NOTHING
                     RETURNING webhook_id
                     """,
-                    (event_id, order_id, order_name, source, source_name),
+                    (event_id, order_id, order_name, source),
                 )
                 if cur.fetchone():
                     inserted += 1
@@ -20025,23 +20187,7 @@ def list_hybrid_order_rows(limit=50, search=""):
         """
         search_params = [search_value] * 10 + [f"%{raw_search.lstrip('#')}%"]
 
-    def load_base_rows(cur, *, marketplace_columns=True):
-        marketplace_order_fields = (
-            "o.source_name, o.ingestion_status, o.ingestion_result, o.ingestion_reason,"
-            if marketplace_columns
-            else """
-                COALESCE(NULLIF(o.raw_json->>'source_display', ''),
-                         NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
-                'pending'::text AS ingestion_status,
-                ''::text AS ingestion_result,
-                ''::text AS ingestion_reason,
-            """
-        )
-        mapping_method_field = (
-            "li.mapping_method"
-            if marketplace_columns
-            else "COALESCE(NULLIF(li.raw_json->>'mapping_method', ''), '') AS mapping_method"
-        )
+    def load_base_rows(cur):
         cur.execute(
             f"""
             WITH selected_orders AS (
@@ -20055,11 +20201,19 @@ def list_hybrid_order_rows(limit=50, search=""):
             SELECT
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
-                {marketplace_order_fields}
+                COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
+                         NULLIF(o.raw_json->>'source_display', ''),
+                         NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
+                COALESCE(NULLIF(to_jsonb(o)->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
+                COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
+                COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason,
                 o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at,
                 o.cancelled_at, o.synced_at, o.raw_json AS order_raw_json,
                 li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
-                li.assignment_status, li.last_error, {mapping_method_field}, li.shopify_handle, li.shopify_product_id,
+                li.assignment_status, li.last_error,
+                COALESCE(NULLIF(to_jsonb(li)->>'mapping_method', ''),
+                         NULLIF(li.raw_json->>'mapping_method', ''), '') AS mapping_method,
+                li.shopify_handle, li.shopify_product_id,
                 COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
                 COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
                 COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
@@ -20085,47 +20239,7 @@ def list_hybrid_order_rows(limit=50, search=""):
         return cur.fetchall()
 
     base_operation = "orders.search.base" if raw_search else "orders.latest_50.base"
-    compatibility_mode = _cached_marketplace_order_read_capability() is False
-    compatibility_probe_failed = False
-    missing_column = ""
-    if compatibility_mode:
-        base_rows, base_diagnostic = _run_read_operation(
-            base_operation,
-            lambda cur: load_base_rows(cur, marketplace_columns=False),
-        )
-    else:
-        try:
-            base_rows, base_diagnostic = _run_read_operation(
-                base_operation,
-                lambda cur: load_base_rows(cur, marketplace_columns=True),
-            )
-            _set_marketplace_order_read_capability(True)
-        except DatabaseReadError as error:
-            if not _is_marketplace_order_read_schema_error(error):
-                raise
-            missing_column = _database_undefined_column_name(error)
-            compatibility_mode = True
-            compatibility_probe_failed = True
-            _set_marketplace_order_read_capability(False)
-            print(
-                "WARN Orders schema compatibility mode "
-                f"operation={base_operation} missing_column={missing_column or 'marketplace_metadata'} "
-                f"required_migration={SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION}",
-                flush=True,
-            )
-            base_rows, base_diagnostic = _run_read_operation(
-                base_operation,
-                lambda cur: load_base_rows(cur, marketplace_columns=False),
-            )
-    if compatibility_mode:
-        base_diagnostic.update(
-            {
-                "category": "schema_compatibility_mode",
-                "compatibility_mode": True,
-                "missing_column": missing_column,
-                "required_migration": SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION,
-            }
-        )
+    base_rows, base_diagnostic = _run_read_operation(base_operation, load_base_rows)
     print(
         "PERF Orders base query "
         f"duration_ms={int(base_diagnostic.get('duration_ms') or 0)} rows={len(base_rows)} "
@@ -20264,25 +20378,17 @@ def list_hybrid_order_rows(limit=50, search=""):
     aggregate_diagnostic = {
         "operation": "orders.search" if raw_search else "orders.latest_50",
         "category": (
-            "schema_compatibility_mode"
-            if compatibility_mode
-            else "stale_connection_recovered"
+            "stale_connection_recovered"
             if base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")
             else "ok"
         ),
         "exception_class": base_diagnostic.get("exception_class") or overlay_diagnostic.get("exception_class") or "",
         "sqlstate": base_diagnostic.get("sqlstate") or overlay_diagnostic.get("sqlstate") or "",
         "attempts": int(base_diagnostic.get("attempts") or 0) + int(overlay_diagnostic.get("attempts") or 0),
-        "query_count": (
-            1
-            + int(compatibility_probe_failed)
-            + int(bool(line_id_lookup_values or order_id_lookup_values or order_name_lookup_values))
-        ),
+        "query_count": 1 + int(bool(line_id_lookup_values or order_id_lookup_values or order_name_lookup_values)),
         "recovered": bool(base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")),
         "duration_ms": int((time.perf_counter() - total_started) * 1000),
-        "compatibility_mode": bool(compatibility_mode),
-        "missing_column": str(base_diagnostic.get("missing_column") or ""),
-        "required_migration": str(base_diagnostic.get("required_migration") or ""),
+        "marketplace_schema_optional": True,
     }
     _LAST_DATABASE_READ_DIAGNOSTIC.set(aggregate_diagnostic)
     return merged_rows
