@@ -43,6 +43,24 @@
         width: 100%;
       }
       .sc-home-planner * { box-sizing: border-box; }
+      .sc-loading-only {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        min-height: 92px;
+        width: 100%;
+      }
+      .sc-loading-spinner {
+        animation: sc-loading-spin .72s linear infinite;
+        border: 2px solid rgba(183,146,67,.24);
+        border-radius: 50%;
+        border-top-color: #b79243;
+        display: inline-block;
+        height: 22px;
+        width: 22px;
+      }
+      @keyframes sc-loading-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .sc-loading-spinner { animation: none; } }
       .sc-home-planner-header {
         align-items: center;
         background: #f8f5ee;
@@ -692,7 +710,7 @@
           <button class="sc-home-planner-button" data-home-planner-action="open">Open Planner</button>
         </header>
         <div class="sc-home-planner-body">
-          ${state.loading ? '<div class="sc-home-planner-standby"><strong>Loading today\'s plan...</strong><span>Connecting to saved planner state.</span></div>' : renderActive()}
+          ${state.loading ? '<div class="sc-loading-only" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>' : renderActive()}
           <div class="sc-home-planner-list-shell">
             <div class="sc-home-planner-list-head"><span>Remaining</span><span>${counts.remaining} open</span></div>
             <div class="sc-home-planner-list">${state.loading ? "" : renderRemainingList()}</div>

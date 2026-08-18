@@ -27,6 +27,7 @@ import seo_reporting_runtime
 import seo_sync_progress
 import seo_technical_audit
 import seo_workspace as seo
+import ui_loading
 from ui_option_ordering import alphabetize_options, selected_option_index
 
 
@@ -3305,7 +3306,7 @@ def _progressive_query_rows(
         help="Append the next 25 keywords using stable server-side ordering.",
     )
     if load_more and not state.get("complete"):
-        controls[2].caption("Loading the next 25 keywords…")
+        ui_loading.render_spinner(controls[2], compact=True)
         state = seo_pagination.append_page(state, fetch(25))
         st.session_state[state_key] = state
     export_key = f"{key}-csv-export"

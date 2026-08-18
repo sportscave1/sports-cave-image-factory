@@ -918,7 +918,7 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn("clearTimerEffectClaims(terminalTimerId)", outcome_source)
         self.assertIn("renderCurrent()", outcome_source)
         self.assertIn("{preserveView:true, restoreFocus:true}", outcome_source)
-        self.assertIn('showToast(outcomeMessage, "success", 3500)', outcome_source)
+        self.assertIn('showToast(outcomeMessage, "success")', outcome_source)
         self.assertIn('data-outcome="completed"', show_source)
         self.assertIn('data-outcome="did_not_finish"', show_source)
         self.assertIn("if (showOutcome(timer))", show_source)
@@ -957,7 +957,9 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertNotIn("closeOutcomeModal", failure_source)
         self.assertIn("data-outcome-retry", planner_source)
         self.assertIn("clearTimeout(state.toastTimer)", toast_source)
-        self.assertIn("setTimeout(() => toast.classList.add(\"hidden\"), duration)", toast_source)
+        self.assertIn("TEMPORARY_TOAST_MS = 3000", planner_source)
+        self.assertIn("state.toastIdentity === identity", toast_source)
+        self.assertIn("toast.textContent = \"\"", toast_source)
 
     def test_legacy_expiry_route_delegates_to_canonical_locked_outcome(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")

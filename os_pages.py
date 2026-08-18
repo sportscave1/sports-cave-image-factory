@@ -22,6 +22,7 @@ import os_accounts
 import prompt_store
 import shopify_sync
 import supabase_backend
+import ui_loading
 from certificate_logging import certificate_stage_log
 from services import r2_storage
 from ui_option_ordering import alphabetize_options, selected_option_index
@@ -4150,7 +4151,7 @@ def _render_prodigi_loading_fragment():
         status = _consume_prodigi_dispatch_load()
         if status == "loading":
             with st.container(border=True):
-                st.info("Loading Fulfilment orders...")
+                ui_loading.render_spinner()
             return
         st.rerun()
 
@@ -5347,7 +5348,7 @@ def render_supabase_limited_editions_page():
     page_started = time.perf_counter()
     db_started = time.perf_counter()
     try:
-        with st.spinner("Loading edition products..."):
+        with ui_loading.spinner_only():
             cache_version = supabase_cache_version("limited")
 
             def load_limited_page():
@@ -7936,7 +7937,7 @@ def render_shopify_orders_mirror_page():
     current_cursor = st.session_state.get("shopify-orders-mirror-cursor") or ""
     search_query = _shopify_orders_mirror_query(search_text, quick_filter)
     try:
-        with st.spinner("Loading live Shopify orders..."):
+        with ui_loading.spinner_only():
             live_page = cached_shopify_orders_mirror_page(
                 search_query,
                 current_cursor,
@@ -8164,7 +8165,7 @@ def render_supabase_orders_page():
 
     db_started = time.perf_counter()
     try:
-        with st.spinner("Loading orders..."):
+        with ui_loading.spinner_only():
             cache_version = supabase_cache_version("orders")
             snapshot_token = _order_widget_token(f"{status_filter}-{search}-{visible_count}")
             dataset, reused_saved_dataset, dataset_error = load_supabase_screen_snapshot(

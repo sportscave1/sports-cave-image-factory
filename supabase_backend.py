@@ -20376,8 +20376,25 @@ def list_hybrid_order_rows(limit=50, search=""):
                     c.certificate_r2_bucket, c.certificate_r2_key,
                     c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                 FROM edition_orders eo
-                LEFT JOIN certificates c
-                  ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                LEFT JOIN LATERAL (
+                    SELECT certificate.*
+                    FROM certificates certificate
+                    WHERE COALESCE(
+                        certificate.related_edition_order_id::text,
+                        certificate.edition_order_id::text
+                    ) = eo.id::text
+                    ORDER BY
+                        CASE WHEN COALESCE(
+                            NULLIF(certificate.shopify_file_url, ''),
+                            NULLIF(certificate.certificate_file_url, ''),
+                            NULLIF(certificate.certificate_pdf_url, ''),
+                            NULLIF(certificate.local_file_path, '')
+                        ) IS NOT NULL THEN 0 ELSE 1 END,
+                        certificate.updated_at DESC NULLS LAST,
+                        certificate.generated_at DESC NULLS LAST,
+                        certificate.id DESC
+                    LIMIT 1
+                ) c ON TRUE
                 WHERE eo.shopify_line_item_id = ANY(%s)
                    OR eo.shopify_order_id = ANY(%s)
                    OR UPPER(TRIM(COALESCE(eo.shopify_order_name, ''))) = ANY(%s)
@@ -20448,12 +20465,18 @@ def list_hybrid_order_rows(limit=50, search=""):
         order_id = canonical_shopify_id(row.get("shopify_order_id"))
         order_name = str(row.get("order_name") or "").strip().upper()
         merged = dict(row)
-        merged["assignments"] = (
-            assignments_by_line.get(line_id)
-            or assignments_by_order.get(order_id)
-            or assignments_by_order_name.get(order_name)
-            or []
-        )
+        # A stable line ID is authoritative. Falling back to every allocation
+        # on the order for a known line can copy line A's edition onto line B
+        # in a genuine multi-line order. Order/name fallback is reserved for
+        # legacy base rows that genuinely have no line identity.
+        if line_id:
+            merged["assignments"] = assignments_by_line.get(line_id) or []
+        else:
+            merged["assignments"] = (
+                assignments_by_order.get(order_id)
+                or assignments_by_order_name.get(order_name)
+                or []
+            )
         merged_rows.append(merged)
     print(
         f"PERF Orders merge time {(time.perf_counter() - merge_started):.3f}s rows={len(merged_rows)}",
@@ -20605,7 +20628,25 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                     pd.submitted_at DESC NULLS LAST
                 LIMIT 1
             ) pd ON TRUE
-            LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+            LEFT JOIN LATERAL (
+                SELECT certificate.*
+                FROM certificates certificate
+                WHERE COALESCE(
+                    certificate.related_edition_order_id::text,
+                    certificate.edition_order_id::text
+                ) = eo.id::text
+                ORDER BY
+                    CASE WHEN COALESCE(
+                        NULLIF(certificate.shopify_file_url, ''),
+                        NULLIF(certificate.certificate_file_url, ''),
+                        NULLIF(certificate.certificate_pdf_url, ''),
+                        NULLIF(certificate.local_file_path, '')
+                    ) IS NOT NULL THEN 0 ELSE 1 END,
+                    certificate.updated_at DESC NULLS LAST,
+                    certificate.generated_at DESC NULLS LAST,
+                    certificate.id DESC
+                LIMIT 1
+            ) c ON TRUE
             LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
             LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
             {where}

@@ -208,6 +208,29 @@
       .command:disabled .command-icon { color: var(--disabled); }
       .command-separator { background: #dfe1e3; height: 24px; margin: 0 3px; width: 1px; }
       .results-shell { min-height: 0; overflow: hidden; position: relative; }
+      .sc-loading-only {
+        align-items: center;
+        background: rgba(255,255,255,.72);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        pointer-events: none;
+        position: absolute;
+        z-index: 12;
+      }
+      .sc-loading-only[hidden] { display: none !important; }
+      .sc-loading-spinner {
+        animation: sc-loading-spin .72s linear infinite;
+        border: 2px solid rgba(183,146,67,.24);
+        border-radius: 50%;
+        border-top-color: #b79243;
+        box-sizing: border-box;
+        display: inline-block;
+        height: 22px;
+        width: 22px;
+      }
+      @keyframes sc-loading-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .sc-loading-spinner { animation: none; } }
       .results {
         height: 100%;
         min-height: 0;
@@ -343,7 +366,7 @@
         font-variant-numeric: tabular-nums;
         line-height: 42px;
       }
-      .empty-state, .loading-state {
+      .empty-state {
         align-items: center;
         color: var(--muted);
         display: flex;
@@ -353,15 +376,6 @@
         min-height: 240px;
         text-align: center;
       }
-      .loading-ring {
-        animation: spin 0.85s linear infinite;
-        border: 2px solid #d6dde2;
-        border-radius: 50%;
-        border-top-color: var(--accent);
-        height: 22px;
-        width: 22px;
-      }
-      @keyframes spin { to { transform: rotate(360deg); } }
       .status-bar {
         align-items: center;
         background: #fafafa;
@@ -633,8 +647,9 @@
           <div class="items view-medium" id="items" role="listbox" aria-multiselectable="true"></div>
         </div>
         <div class="drop-overlay" id="dropOverlay" role="status">Drop files to upload to this folder</div>
+        <div class="sc-loading-only" id="loadingIndicator" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>
       </div>
-      <footer class="status-bar"><span id="itemCount">Loading...</span><span id="selectionCount"></span></footer>
+      <footer class="status-bar"><span id="itemCount"></span><span id="selectionCount"></span></footer>
     </div>
 
     <input id="filesInput" type="file" multiple hidden>
@@ -679,7 +694,7 @@
         "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
         "openButton", "newButton", "uploadButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
         "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
-        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "protocolLink", "helperPanel", "helperMessage", "checkHelperButton",
+        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "loadingIndicator", "protocolLink", "helperPanel", "helperMessage", "checkHelperButton",
         "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
         "outboundDragPreview", "outboundDragPreviewLabel"
       ].map(id => [id, document.getElementById(id)]));
@@ -729,6 +744,7 @@
         visibleItemsCache: { items: null, search: "", sortKey: "", sortDir: "", value: [] },
         openStamp: { path: "", time: 0 },
         toastTimer: 0,
+        toastIdentity: "",
         helperTimer: 0,
         helperItem: null,
         imageViewerWindow: null,
@@ -932,15 +948,25 @@
         positionFileTooltip();
       }
 
-      function showToast(message, { kind = "", duration = 3200, actionLabel = "", action = null } = {}) {
+      const TEMPORARY_TOAST_MS = 3000;
+      function showToast(message, { kind = "", duration = TEMPORARY_TOAST_MS, actionLabel = "", action = null } = {}) {
+        const identity = `${kind}:${String(message || "")}:${String(actionLabel || "")}`;
+        if (state.toastIdentity === identity && elements.toast.classList.contains("visible")) return;
         window.clearTimeout(state.toastTimer);
+        state.toastIdentity = identity;
         elements.toast.className = `toast visible${kind ? ` ${kind}` : ""}`;
         elements.toastText.textContent = String(message || "");
         elements.toastAction.style.display = actionLabel ? "block" : "none";
         elements.toastAction.textContent = actionLabel;
         elements.toastAction.onclick = action || null;
         if (duration > 0) {
-          state.toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), duration);
+          state.toastTimer = window.setTimeout(() => {
+            elements.toast.classList.remove("visible");
+            elements.toastText.textContent = "";
+            elements.toastAction.onclick = null;
+            state.toastIdentity = "";
+            state.toastTimer = 0;
+          }, TEMPORARY_TOAST_MS);
         }
       }
 
@@ -1128,10 +1154,6 @@
         renderModifiedSortHeader();
         elements.items.replaceChildren();
         if (state.loading && !state.items.length) {
-          const loading = document.createElement("div");
-          loading.className = "loading-state";
-          loading.innerHTML = '<span class="loading-ring" aria-hidden="true"></span><span>Opening folder...</span>';
-          elements.items.appendChild(loading);
           return;
         }
         const items = visibleItems();
@@ -1162,16 +1184,16 @@
       }
 
       function renderStatus() {
+        elements.loadingIndicator.hidden = !(state.loading || state.loadingMore);
         if (state.loading && !state.items.length) {
-          elements.itemCount.textContent = "Opening folder...";
+          elements.itemCount.textContent = "";
           elements.selectionCount.textContent = "";
           return;
         }
         const visible = visibleItems().length;
-        const loadingText = state.loadingMore ? " · Loading more..." : (state.loading ? " · Refreshing..." : "");
         elements.itemCount.textContent = currentSearch()
-          ? `${visible} of ${state.items.length} items${loadingText}`
-          : `${state.items.length} item${state.items.length === 1 ? "" : "s"}${loadingText}`;
+          ? `${visible} of ${state.items.length} items`
+          : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
         const clipboardCount = state.clipboard.items.length;
         elements.selectionCount.textContent = state.selection.size
           ? `${state.selection.size} selected`
@@ -1475,7 +1497,6 @@
           state.back = state.back.slice(-30);
           state.forward = [];
         }
-        showToast(refresh ? "Refreshing..." : "Opening folder...", { duration: 1200 });
         const loaded = await loadFolder(target, { refresh, preserveScroll });
         if (!loaded && remember && previous && state.back[state.back.length - 1] === previous) state.back.pop();
         return loaded;

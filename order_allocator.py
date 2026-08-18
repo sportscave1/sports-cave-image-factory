@@ -1211,7 +1211,11 @@ def process_recent_paid_orders_for_editions(orders, config=None, request_post=No
 
 def _row_unit_index(row):
     try:
-        return int(row.get("line_item_unit_index") or int(row.get("edition_offset") or 0) + 1)
+        return int(
+            row.get("line_item_unit_index")
+            or row.get("allocation_index")
+            or int(row.get("edition_offset") or 0) + 1
+        )
     except (TypeError, ValueError):
         return 1
 
@@ -1228,6 +1232,137 @@ def _row_allocation_key(row):
         str(row.get("shopify_line_item_id") or row.get("line_item_id") or ""),
         _row_unit_index(row),
     )
+
+
+def _identity_text(value):
+    return " ".join(str(value or "").strip().split()).casefold()
+
+
+def fulfilment_row_identity(row):
+    """Return the canonical business identity for one operational order unit.
+
+    Shopify order and line-item IDs identify the underlying commerce line.  An
+    allocation index identifies a distinct unit when quantity is greater than
+    one.  The longer legacy key is used only when stable Shopify IDs are not
+    available; source attribution is deliberately part of that fallback so an
+    unrelated Etsy/manual row cannot be merged with a Shopify row that happens
+    to share a display number.
+    """
+
+    row = dict(row or {})
+    unit_index = _row_unit_index(row)
+    order_id = order_gid(row.get("shopify_order_id") or row.get("order_gid"))
+    line_id = line_item_gid(
+        row.get("shopify_line_item_id")
+        or row.get("line_item_gid")
+        or (row.get("line_item_id") if order_id else "")
+    )
+    if order_id and line_id:
+        return ("shopify", order_id.casefold(), line_id.casefold(), unit_index)
+
+    source = _identity_text(
+        row.get("source_system")
+        or row.get("source")
+        or row.get("source_name")
+        or row.get("channel")
+        or "legacy"
+    )
+    source_order_id = _identity_text(row.get("source_order_id"))
+    source_line_id = _identity_text(row.get("source_line_item_id"))
+    if source_order_id and source_line_id:
+        return ("source", source, source_order_id, source_line_id, unit_index)
+
+    order_reference = _identity_text(
+        row.get("source_order_id")
+        or row.get("shopify_order_id")
+        or row.get("order_id")
+        or row.get("order")
+        or row.get("order_name")
+        or row.get("order_number")
+    )
+    line_reference = _identity_text(
+        row.get("source_line_item_id")
+        or row.get("line_item_id")
+        or row.get("line_item_gid")
+    )
+    product_reference = _identity_text(
+        row.get("shopify_product_id")
+        or row.get("product_id")
+        or row.get("product_handle")
+        or row.get("shopify_handle")
+        or row.get("product")
+        or row.get("product_title")
+    )
+    variant_reference = _identity_text(
+        row.get("shopify_variant_id")
+        or row.get("variant_id")
+        or row.get("sku")
+        or row.get("variant")
+        or row.get("variant_title")
+    )
+    allocation_reference = _identity_text(row.get("edition_order_id"))
+    if not allocation_reference:
+        allocation_reference = str(unit_index or row.get("edition_number") or 1)
+    return (
+        "legacy",
+        source,
+        order_reference,
+        line_reference,
+        product_reference,
+        variant_reference,
+        allocation_reference,
+    )
+
+
+def _fulfilment_row_completeness(row):
+    preferred_fields = (
+        "edition_order_id",
+        "edition_number",
+        "certificate_id",
+        "certificate_pdf_url",
+        "shopify_file_url",
+        "certificate_pdf_path",
+        "certificate_shopify_file_id",
+        "prodigi_row_id",
+        "prodigi_status",
+    )
+    preferred = sum(bool(str(row.get(field) or "").strip()) for field in preferred_fields)
+    populated = sum(bool(value not in (None, "", [], {})) for value in row.values())
+    return preferred, populated
+
+
+def canonicalize_fulfilment_rows(rows):
+    """Collapse repeated representations of the same operational order unit.
+
+    This is intentionally identity-based rather than a broad value-level
+    ``drop_duplicates``.  It protects cached/legacy snapshots while preserving
+    separate line items and quantity allocations.  Missing metadata is merged
+    from the repeated representation so certificate and fulfilment actions keep
+    targeting the same canonical unit.
+    """
+
+    canonical_rows = []
+    indexes_by_identity = {}
+    for value in rows or []:
+        candidate = dict(value or {})
+        identity = fulfilment_row_identity(candidate)
+        existing_index = indexes_by_identity.get(identity)
+        if existing_index is None:
+            indexes_by_identity[identity] = len(canonical_rows)
+            canonical_rows.append(candidate)
+            continue
+
+        existing = canonical_rows[existing_index]
+        if _fulfilment_row_completeness(candidate) > _fulfilment_row_completeness(existing):
+            preferred, secondary = candidate, existing
+        else:
+            preferred, secondary = existing, candidate
+        merged = dict(preferred)
+        for field, field_value in secondary.items():
+            if merged.get(field) in (None, "", [], {}) and field_value not in (None, "", [], {}):
+                merged[field] = field_value
+        canonical_rows[existing_index] = merged
+    return canonical_rows
 
 
 def _row_order_payload(row):
@@ -1514,9 +1649,48 @@ def _date_label(value):
     return parsed.date().isoformat()
 
 
+def _canonical_assignment_rows(values):
+    canonical = []
+    indexes = {}
+    for position, value in enumerate(values or [], start=1):
+        assignment = dict(value or {})
+        edition_order_id = _identity_text(assignment.get("edition_order_id"))
+        allocation_index = _positive_int(assignment.get("allocation_index"))
+        edition_number = _positive_int(assignment.get("edition_number"))
+        if edition_order_id:
+            identity = ("edition_order", edition_order_id)
+        elif allocation_index:
+            identity = ("allocation_index", allocation_index)
+        elif edition_number:
+            identity = ("edition_number", edition_number)
+        else:
+            identity = ("position", position)
+        existing_index = indexes.get(identity)
+        if existing_index is None:
+            indexes[identity] = len(canonical)
+            canonical.append(assignment)
+            continue
+        existing = canonical[existing_index]
+        preferred = (
+            assignment
+            if _fulfilment_row_completeness(assignment)
+            > _fulfilment_row_completeness(existing)
+            else existing
+        )
+        secondary = existing if preferred is assignment else assignment
+        merged = dict(preferred)
+        for field, field_value in secondary.items():
+            if merged.get(field) in (None, "", [], {}) and field_value not in (None, "", [], {}):
+                merged[field] = field_value
+        canonical[existing_index] = merged
+    return canonical
+
+
 def _assignment_list(value):
     if isinstance(value, list):
-        return [dict(item) for item in value if isinstance(item, dict)]
+        return _canonical_assignment_rows(
+            [dict(item) for item in value if isinstance(item, dict)]
+        )
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -1589,11 +1763,14 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
         }
         assignments = _assignment_list(row.get("assignments"))
         if assignments:
-            for assignment in assignments:
+            for assignment_position, assignment in enumerate(assignments, start=1):
                 edition_number = _positive_int(assignment.get("edition_number"))
                 if not edition_number:
                     continue
-                allocation_index = _positive_int(assignment.get("allocation_index"), 1)
+                allocation_index = _positive_int(
+                    assignment.get("allocation_index"),
+                    assignment_position,
+                )
                 certificate_url = str(assignment.get("shopify_file_url") or "")
                 certificate_path = str(assignment.get("local_file_path") or "")
                 rows.append(
@@ -1649,7 +1826,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
                     "certificate_error": str(row.get("last_error") or ""),
                 }
             )
-    return sorted(rows, key=_row_allocation_key, reverse=True)
+    return sorted(canonicalize_fulfilment_rows(rows), key=_row_allocation_key, reverse=True)
 
 
 def load_supabase_orders_snapshot(limit=1000, *, include_summary=True):

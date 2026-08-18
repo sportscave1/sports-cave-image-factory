@@ -60,6 +60,8 @@ import design_studio_styles
 import sports_cave_pricing
 import sports_sales_calendar
 import top_bar
+import ui_feedback
+import ui_loading
 from ui_option_ordering import alphabetize_options, selected_option_index
 
 db = None
@@ -6806,7 +6808,7 @@ def render_copy_prompt_button(
                 toast.parentNode.removeChild(toast);
               }}
               button.innerText = originalLabel;
-            }}, 1400);
+            }}, 3000);
           }}
 
           button.addEventListener("click", copyPrompt);
@@ -7145,7 +7147,7 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
                 toast.parentNode.removeChild(toast);
               }}
               bar.querySelector(".mockup-prompt-label").innerText = originalLabel;
-            }}, 1400);
+            }}, 3000);
           }}
 
           bar.addEventListener("click", copyPrompt);
@@ -10861,27 +10863,10 @@ def _credential_value_box(value, *, muted=False):
 
 
 def _show_credential_toast(message):
-    if hasattr(st, "toast"):
-        st.toast(message)
-        return
-    toast_id = f"credential-toast-{hashlib.sha1(str(message).encode('utf-8')).hexdigest()[:12]}"
-    get_components_module().html(
-        f"""
-        <div id="{toast_id}" role="status" aria-live="polite" style="position:fixed;right:22px;bottom:22px;z-index:999999;background:#F5F2EA;color:#0B0B0D;border:1px solid rgba(212,165,76,0.85);border-radius:999px;padding:10px 14px;font-size:0.88rem;font-weight:800;box-shadow:0 12px 32px rgba(11,11,13,0.16);">
-          {html.escape(str(message or ""))}
-        </div>
-        <script>
-        (() => {{
-          const toast = document.getElementById("{toast_id}");
-          setTimeout(() => {{
-            if (toast && toast.parentNode) {{
-              toast.parentNode.removeChild(toast);
-            }}
-          }}, 1800);
-        }})();
-        </script>
-        """,
-        height=0,
+    ui_feedback.show_temporary_toast(
+        get_components_module(),
+        message,
+        event_key=f"credential:{hashlib.sha1(str(message).encode('utf-8')).hexdigest()[:12]}",
     )
 
 
@@ -13321,10 +13306,11 @@ def render_dashboard_task_header(state):
 
     toast_message = st.session_state.pop(DASHBOARD_TASK_CSV_IMPORT_TOAST_KEY, "")
     if toast_message:
-        if hasattr(st, "toast"):
-            st.toast(toast_message)
-        else:
-            st.success(toast_message)
+        ui_feedback.show_temporary_toast(
+            get_components_module(),
+            toast_message,
+            event_key=f"dashboard-csv:{hashlib.sha1(str(toast_message).encode('utf-8')).hexdigest()[:12]}",
+        )
 
     render_dashboard_task_csv_import_dialog(state)
 
@@ -13800,10 +13786,11 @@ def render_dashboard_tasks(state):
     render_dashboard_task_header(state)
     task_toast = st.session_state.pop("dashboard-task-toast", "")
     if task_toast:
-        if hasattr(st, "toast"):
-            st.toast(task_toast)
-        else:
-            st.success(task_toast)
+        ui_feedback.show_temporary_toast(
+            get_components_module(),
+            task_toast,
+            event_key=f"dashboard-task:{hashlib.sha1(str(task_toast).encode('utf-8')).hexdigest()[:12]}",
+        )
     if state.get("task_error"):
         st.warning("Tasks could not load right now. Please try again shortly.")
     if st.session_state.pop("dashboard-clear-add-task", False):
@@ -15523,7 +15510,7 @@ def _render_files_browser(access_token, user, root_path):
 
         loading = st.empty()
         if not _files_directory_is_cached(current_path):
-            loading.caption("Opening folder...")
+            loading.markdown(ui_loading.spinner_html(), unsafe_allow_html=True)
         try:
             entries = _files_directory_entries(access_token, current_path)
         except Exception as error:

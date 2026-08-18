@@ -13,6 +13,7 @@ import design_schedule
 import design_studio_styles
 import prompt_store
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+import ui_feedback
 from ui_option_ordering import alphabetize_options
 
 
@@ -4174,10 +4175,11 @@ def _persist_task_design_details(task, style_slug, details):
     except Exception:
         st.warning("Design details could not be saved. Refresh the Design Schedule and try again.")
         return None
-    if hasattr(st, "toast"):
-        st.toast("Design details saved to the Design Schedule.")
-    else:
-        st.success("Design details saved to the Design Schedule.")
+    ui_feedback.show_temporary_toast(
+        components,
+        "Design details saved to the Design Schedule.",
+        event_key=f"design-details-saved:{task_id}",
+    )
     return updated
 
 

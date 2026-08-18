@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+import ui_loading
+
 
 class _LazyModule:
     """Delay action-only dependencies until the user needs them.
@@ -660,7 +662,9 @@ def _normalise_row(row):
 
 def _sort_rows(rows):
     return sorted(
-        [_normalise_row(row) for row in rows],
+        order_allocator.canonicalize_fulfilment_rows(
+            [_normalise_row(row) for row in rows]
+        ),
         key=lambda row: (
             _parse_datetime(row.get("processed_at")),
             _parse_datetime(row.get("created_at")),
@@ -671,15 +675,7 @@ def _sort_rows(rows):
 
 
 def _row_key(row):
-    normalised = _normalise_row(row)
-    return "|".join(
-        [
-            normalised.get("shopify_order_id") or normalised.get("order") or "",
-            normalised.get("shopify_line_item_id") or "",
-            str(normalised.get("edition_offset") or 0),
-            str(normalised.get("edition_number") or ""),
-        ]
-    )
+    return order_allocator.fulfilment_row_identity(_normalise_row(row))
 
 
 def _certificate_fields(row):
@@ -760,13 +756,14 @@ def _load_snapshot_once(search="", *, force=False):
 
 def _apply_snapshot_payload(payload):
     payload = payload or {"rows": [], "source": "local_snapshot", "row_count": 0}
-    st.session_state[ROWS_KEY] = _sort_rows(payload.get("rows") or [])
+    canonical_rows = _sort_rows(payload.get("rows") or [])
+    st.session_state[ROWS_KEY] = canonical_rows
     st.session_state[META_KEY] = {
         "last_refreshed": payload.get("last_refreshed") or "",
         "saved_at": payload.get("saved_at") or "",
         "last_synced": payload.get("last_synced") or payload.get("last_refreshed") or "",
         "order_count": payload.get("order_count") or 0,
-        "row_count": payload.get("row_count") or len(payload.get("rows") or []),
+        "row_count": len(canonical_rows),
         "source": payload.get("source") or "local_snapshot",
         "error": payload.get("error") or "",
         "database_read": dict(payload.get("database_read") or {}),
@@ -915,7 +912,7 @@ def _write_snapshot(rows, meta=None):
         "saved_at": payload.get("saved_at") or "",
         "last_synced": (meta or {}).get("last_synced") or payload.get("last_synced") or payload.get("last_refreshed") or "",
         "order_count": (meta or {}).get("order_count") or payload.get("order_count") or 0,
-        "row_count": (meta or {}).get("row_count") or payload.get("row_count") or len(payload.get("rows") or []),
+        "row_count": len(sorted_rows),
         "source": (meta or {}).get("source") or payload.get("source") or "local_snapshot",
         "error": (meta or {}).get("error") or "",
     }
@@ -2052,6 +2049,7 @@ def _render_files_click_handler():
     components.html(
         files_window_launcher.table_click_handler_html(
             relative_path=ORDERS_FILES_RELATIVE_FOLDER,
+            display_label="PSD",
         ),
         height=0,
         width=0,
@@ -2069,8 +2067,8 @@ def _column_config():
         "date": st.column_config.TextColumn("Date", width="small"),
         "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
         "file": st.column_config.LinkColumn(
-            "File",
-            display_text="Open",
+            "PSD",
+            display_text="PSD",
             width="small",
         ),
     }
@@ -2585,7 +2583,7 @@ def _render_orders_loading_fragment():
         status = _consume_snapshot_load()
         if status == "loading":
             with st.container(border=True):
-                st.info("Loading orders...")
+                ui_loading.render_spinner()
             return
         st.rerun()
 

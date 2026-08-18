@@ -13,7 +13,8 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-reliability-v14";
+  const CONTROLLER_VERSION = "navigation-reliability-v15";
+  const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
     doc.getElementById(ROOT_ID)?.dataset.navigationEpoch || 0,
@@ -68,36 +69,13 @@
       z-index: 999999;
     }
     #${ROOT_ID} * { box-sizing: border-box; }
-    #${ROOT_ID}::after {
-      background: #d4a54c;
-      bottom: -1px;
-      content: "";
-      height: 2px;
-      left: 0;
-      opacity: 0;
-      pointer-events: none;
-      position: absolute;
-      transform: scaleX(.08);
-      transform-origin: left;
-      transition: opacity 100ms ease, transform 220ms ease;
-      width: 100%;
-    }
-    body.sc-navigation-pending #${ROOT_ID}::after {
-      opacity: 1;
-      transform: scaleX(.72);
-    }
-    body.sc-navigation-pending #${ROOT_ID}::after {
-      animation: sc-navigation-line 1.15s ease-in-out infinite alternate;
-    }
-    @keyframes sc-navigation-line {
-      from { transform: scaleX(.16); }
-      to { transform: scaleX(.92); }
-    }
     #${LOADER_ID} {
+      align-items: center;
       background: rgba(250, 249, 246, .985);
       bottom: 0;
       display: none;
       font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      justify-content: center;
       left: var(--sc-sidebar-width);
       overflow: hidden;
       pointer-events: none;
@@ -106,61 +84,32 @@
       top: calc(var(--sc-topbar-height) + 2px);
       z-index: 999990;
     }
-    body.sc-navigation-pending #${LOADER_ID} { display: block; }
-    .sc-navigation-loader-label {
+    body.sc-navigation-pending #${LOADER_ID} { display: flex; }
+    .sc-loading-spinner {
+      animation: sc-loading-spin .72s linear infinite;
+      border: 2px solid rgba(183, 146, 67, .24);
+      border-radius: 50%;
+      border-top-color: #b79243;
+      box-sizing: border-box;
+      display: inline-block;
+      height: 22px;
+      width: 22px;
+    }
+    .sc-loading-only {
       align-items: center;
-      color: #6d531c;
       display: flex;
-      font-size: 12px;
-      font-weight: 700;
-      gap: 8px;
-      min-height: 34px;
-      padding: 8px clamp(18px, 3vw, 48px);
+      justify-content: center;
+      min-height: 72px;
+      width: 100%;
     }
-    .sc-navigation-loader-dot {
-      background: #b79243;
-      border-radius: 999px;
-      height: 6px;
-      width: 6px;
-    }
-    .sc-navigation-skeleton {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      opacity: 0;
-      padding: 16px clamp(18px, 3vw, 48px);
-      transition: opacity 120ms ease;
-    }
-    body.sc-navigation-slow .sc-navigation-skeleton { opacity: 1; }
-    .sc-navigation-skeleton span {
-      background: linear-gradient(90deg, #eeeae1 20%, #f8f6f1 45%, #eeeae1 70%);
-      background-size: 220% 100%;
-      border: 1px solid #e6e0d4;
-      border-radius: 6px;
-      display: block;
-      height: 82px;
-      animation: sc-navigation-skeleton 1.3s ease-in-out infinite;
-    }
-    .sc-navigation-skeleton .sc-navigation-skeleton-chart {
-      grid-column: 1 / -1;
-      height: 210px;
-    }
-    .sc-navigation-skeleton .sc-navigation-skeleton-table {
-      grid-column: 1 / -1;
-      height: 260px;
-    }
-    @keyframes sc-navigation-skeleton {
-      from { background-position: 100% 0; }
-      to { background-position: -100% 0; }
-    }
+    .sc-loading-only.sc-loading-only--compact { min-height: 44px; }
+    @keyframes sc-loading-spin { to { transform: rotate(360deg); } }
     body.sc-navigation-pending .sc-route-loading {
       box-shadow: inset 3px 0 0 #b79243 !important;
       color: #8a6720 !important;
     }
     @media (prefers-reduced-motion: reduce) {
-      body.sc-navigation-pending #${ROOT_ID}::after,
-      .sc-navigation-skeleton span { animation: none !important; }
-      #${ROOT_ID}::after, .sc-navigation-skeleton { transition: none !important; }
+      .sc-loading-spinner { animation: none !important; }
     }
     #${ROOT_ID} svg { height: 19px; width: 19px; }
     .sc-os-topbar-brand {
@@ -612,7 +561,6 @@
         padding-right: env(safe-area-inset-right);
       }
       #${LOADER_ID} { left: 0; }
-      .sc-navigation-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .sc-os-topbar-brand {
         gap: 4px;
         min-width: 0;
@@ -755,18 +703,10 @@
       navigationLoader.id = LOADER_ID;
       navigationLoader.setAttribute("role", "status");
       navigationLoader.setAttribute("aria-live", "polite");
-      navigationLoader.innerHTML = `
-        <div class="sc-navigation-loader-label">
-          <span class="sc-navigation-loader-dot" aria-hidden="true"></span>
-          <span class="sc-navigation-loader-text">Loading Sports Cave OS…</span>
-        </div>
-        <div class="sc-navigation-skeleton" aria-hidden="true">
-          <span></span><span></span><span></span><span></span>
-          <span class="sc-navigation-skeleton-chart"></span>
-          <span class="sc-navigation-skeleton-table"></span>
-        </div>`;
       doc.body.appendChild(navigationLoader);
     }
+    navigationLoader.setAttribute("aria-label", "Loading");
+    navigationLoader.innerHTML = '<span class="sc-loading-spinner" aria-hidden="true"></span>';
     let navBackdrop = doc.getElementById("sc-os-mobile-nav-backdrop");
     if (!navBackdrop) {
       navBackdrop = doc.createElement("button");
@@ -813,9 +753,6 @@
       orderStatusStarted: false,
       plannerStatusStarted: false,
       plannerCountdownStarted: false,
-      orderToastTimer: null,
-      plannerToastTimer: null,
-      shownOrderIds: new Set(),
       shownPlannerEvents: new Set(),
       plannerAudioContext: null,
       plannerWindow: parentWindow.SportsCaveDailyPlannerWindow || null,
@@ -924,6 +861,54 @@
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
     const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
     const plannerToastRegion = root.querySelector("#sc-os-planner-toast-region");
+    const temporaryToasts = parentWindow.SportsCaveTemporaryToastRuntime || {
+      entries: new Map(),
+      seen: new Set(),
+      dismiss(channel) {
+        const entry = this.entries.get(channel);
+        if (!entry) return;
+        if (entry.timer) parentWindow.clearTimeout(entry.timer);
+        entry.region.hidden = true;
+        entry.region.replaceChildren();
+        entry.region.removeAttribute("data-toast-identity");
+        this.entries.delete(channel);
+      },
+      show(channel, region, identity, render, {remember = false} = {}) {
+        const cleanIdentity = String(identity || "").trim();
+        if (!cleanIdentity) return "ignored";
+        const current = this.entries.get(channel);
+        const now = Date.now();
+        if (current && current.identity === cleanIdentity && current.expiresAt > now) {
+          if (current.region !== region || !region.hasChildNodes()) {
+            current.region = region;
+            render();
+            region.hidden = false;
+            region.dataset.toastIdentity = cleanIdentity;
+          }
+          return "existing";
+        }
+        const seenIdentity = `${channel}:${cleanIdentity}`;
+        if (remember && this.seen.has(seenIdentity)) return "seen";
+        this.dismiss(channel);
+        render();
+        region.hidden = false;
+        region.dataset.toastIdentity = cleanIdentity;
+        const entry = {
+          identity: cleanIdentity,
+          region,
+          expiresAt: Date.now() + TEMPORARY_TOAST_MS,
+          timer: null,
+        };
+        entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS);
+        this.entries.set(channel, entry);
+        if (remember) {
+          this.seen.add(seenIdentity);
+          while (this.seen.size > 256) this.seen.delete(this.seen.values().next().value);
+        }
+        return "new";
+      },
+    };
+    parentWindow.SportsCaveTemporaryToastRuntime = temporaryToasts;
     const mobileViewport = () => parentWindow.matchMedia("(max-width: 820px), (max-width: 940px) and (max-height: 520px)").matches;
     const closeMobileNavigation = ({returnFocus = false} = {}) => {
       doc.body.classList.remove("sc-mobile-nav-open");
@@ -955,10 +940,6 @@
         clearPendingNavigation();
       }
     };
-    const navigationLabel = (routeKey, label = "") => {
-      const cleanLabel = String(label || state.config.navigationRouteLabels?.[routeKey] || "SEO").trim();
-      return `Loading ${cleanLabel || "Sports Cave OS"}…`;
-    };
     const beginNavigation = (routeKey = "", label = "", sourceElement = null) => {
       const now = Date.now();
       if (
@@ -972,8 +953,6 @@
       const pending = routeKey ? rememberPendingNavigation(routeKey) : {};
       if (routeKey && !pending.route_key) return false;
       clearNavigationPending();
-      const labelElement = navigationLoader.querySelector(".sc-navigation-loader-text");
-      if (labelElement) labelElement.textContent = navigationLabel(routeKey, label);
       sourceElement?.classList?.add("sc-route-loading");
       sourceElement?.setAttribute?.("aria-busy", "true");
       root.dataset.pendingRouteKey = String(routeKey || "");
@@ -1327,20 +1306,10 @@
       button.setAttribute("aria-label", `Orders, ${numericCount} require action`);
     };
     const dismissOrderToast = () => {
-      if (state.orderToastTimer) {
-        parentWindow.clearTimeout(state.orderToastTimer);
-        state.orderToastTimer = null;
-      }
-      orderToastRegion.hidden = true;
-      orderToastRegion.replaceChildren();
+      temporaryToasts.dismiss("orders");
     };
     const dismissPlannerToast = () => {
-      if (state.plannerToastTimer) {
-        parentWindow.clearTimeout(state.plannerToastTimer);
-        state.plannerToastTimer = null;
-      }
-      plannerToastRegion.hidden = true;
-      plannerToastRegion.replaceChildren();
+      temporaryToasts.dismiss("planner");
     };
     const enablePlannerAudio = async () => {
       const AudioContext = parentWindow.AudioContext || parentWindow.webkitAudioContext;
@@ -1405,61 +1374,66 @@
       }, 820);
     };
     const showPlannerPopupBlocked = (url) => {
-      dismissPlannerToast();
-      const notice = doc.createElement("div");
-      notice.className = "sc-os-planner-toast sc-os-planner-popup-blocked";
-      const message = doc.createElement("span");
-      message.textContent = "Allow popups for Sports Cave OS.";
-      const link = doc.createElement("a");
-      link.href = url;
-      link.target = "sports_cave_daily_planner";
-      link.textContent = "Open planner";
-      notice.append(message, link);
-      plannerToastRegion.appendChild(notice);
-      plannerToastRegion.hidden = false;
-      state.plannerToastTimer = later(dismissPlannerToast, 12000);
+      temporaryToasts.show("planner", plannerToastRegion, `popup-blocked:${url}`, () => {
+        const notice = doc.createElement("div");
+        notice.className = "sc-os-planner-toast sc-os-planner-popup-blocked";
+        const message = doc.createElement("span");
+        message.textContent = "Allow popups for Sports Cave OS.";
+        const link = doc.createElement("a");
+        link.href = url;
+        link.target = "sports_cave_daily_planner";
+        link.textContent = "Open planner";
+        notice.append(message, link);
+        plannerToastRegion.replaceChildren(notice);
+      });
     };
     const showPlannerToast = (message, {openPlanner = false, chime = false, eventKey = ""} = {}) => {
       const clean = String(message || "").trim();
       if (!clean) return;
       if (eventKey && state.shownPlannerEvents.has(eventKey)) return;
       if (eventKey) state.shownPlannerEvents.add(eventKey);
-      dismissPlannerToast();
-      const toast = doc.createElement("button");
-      toast.type = "button";
-      toast.className = "sc-os-planner-toast";
-      toast.textContent = clean;
-      toast.setAttribute("aria-label", `${clean}. Open Daily Planner.`);
-      toast.addEventListener("click", () => {
-        dismissPlannerToast();
-        openDailyPlanner();
-      }, listenerOptions);
-      plannerToastRegion.appendChild(toast);
-      plannerToastRegion.hidden = false;
-      if (chime) playPlannerTimeUpChime();
-      if (openPlanner) later(openDailyPlanner, 120);
-      state.plannerToastTimer = later(dismissPlannerToast, 9000);
+      const result = temporaryToasts.show(
+        "planner",
+        plannerToastRegion,
+        eventKey || `planner:${clean}`,
+        () => {
+          const toast = doc.createElement("button");
+          toast.type = "button";
+          toast.className = "sc-os-planner-toast";
+          toast.textContent = clean;
+          toast.setAttribute("aria-label", `${clean}. Open Daily Planner.`);
+          toast.addEventListener("click", () => {
+            dismissPlannerToast();
+            openDailyPlanner();
+          });
+          plannerToastRegion.replaceChildren(toast);
+        },
+        {remember: Boolean(eventKey)},
+      );
+      if (result === "new" && chime) playPlannerTimeUpChime();
+      if (result === "new" && openPlanner) later(openDailyPlanner, 120);
     };
     const showOrderToast = (notification) => {
       const message = String(notification?.message || "").trim();
       const orderIds = Array.isArray(notification?.shopify_order_ids)
         ? notification.shopify_order_ids.map(String).filter(Boolean)
         : [];
-      if (!message || (orderIds.length && orderIds.every((orderId) => state.shownOrderIds.has(orderId)))) return;
-      orderIds.forEach((orderId) => state.shownOrderIds.add(orderId));
-      dismissOrderToast();
-      const toast = doc.createElement("button");
-      toast.type = "button";
-      toast.className = "sc-os-order-toast";
-      toast.textContent = message;
-      toast.setAttribute("aria-label", `${message}. Open Orders.`);
-      toast.addEventListener("click", () => {
-        dismissOrderToast();
-        navigateDocument(routeUrl("orders", "", false));
-      }, listenerOptions);
-      orderToastRegion.appendChild(toast);
-      orderToastRegion.hidden = false;
-      state.orderToastTimer = later(dismissOrderToast, 7000);
+      if (!message) return;
+      const identity = orderIds.length
+        ? `orders:${[...new Set(orderIds)].sort().join(",")}`
+        : `orders:${message}`;
+      temporaryToasts.show("orders", orderToastRegion, identity, () => {
+        const toast = doc.createElement("button");
+        toast.type = "button";
+        toast.className = "sc-os-order-toast";
+        toast.textContent = message;
+        toast.setAttribute("aria-label", `${message}. Open Orders.`);
+        toast.addEventListener("click", () => {
+          dismissOrderToast();
+          navigateDocument(routeUrl("orders", "", false));
+        });
+        orderToastRegion.replaceChildren(toast);
+      }, {remember: true});
     };
     const refreshOrderStatus = async () => {
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
@@ -1806,7 +1780,7 @@
     })[character]);
     const openSearch = async () => {
       openPanel("search");
-      searchPanel.innerHTML = '<div class="sc-os-topbar-state">Searching...</div>';
+      searchPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
       await loadSearchIndex();
       if (state.activePanel === "search") renderSearchResults();
     };
@@ -1943,7 +1917,7 @@
     mobileSearchButton?.addEventListener("click", async () => {
       closeMobileNavigation();
       if (!openPanel("search")) return;
-      searchPanel.innerHTML = '<div class="sc-os-topbar-state">Searching...</div>';
+      searchPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
       searchInput.focus({preventScroll: true});
       await loadSearchIndex();
       if (state.activePanel === "search") renderSearchResults();
@@ -1982,7 +1956,7 @@
     }, listenerOptions);
     notificationsButton.addEventListener("click", async () => {
       if (!openPanel("notifications")) return;
-      notificationsPanel.innerHTML = '<div class="sc-os-topbar-state">Loading notifications...</div>';
+      notificationsPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
     }, listenerOptions);
@@ -2138,7 +2112,6 @@
           state.searchIndex = null;
           state.searchPromise = null;
           state.notifications = null;
-          state.shownOrderIds.clear();
           state.shownPlannerEvents.clear();
           state.terminalPlannerTimerIds.clear();
           state.plannerTimer = {};

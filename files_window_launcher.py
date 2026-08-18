@@ -83,11 +83,12 @@ def files_window_href(relative_path: str) -> str:
     return f"/files-window?relative_path={quote(clean_path, safe='/')}"
 
 
-def table_click_handler_html(*, relative_path: str) -> str:
-    """Intercept Orders File links and reuse the named Sports Cave Files window."""
+def table_click_handler_html(*, relative_path: str, display_label: str = "Open") -> str:
+    """Intercept a displayed Files link and reuse the named Sports Cave Files window."""
 
     clean_path = validate_relative_folder_path(relative_path)
     href = files_window_href(clean_path)
+    clean_label = str(display_label or "Open").strip() or "Open"
     return f"""
 <script>
 (() => {{
@@ -95,6 +96,7 @@ def table_click_handler_html(*, relative_path: str) -> str:
   const doc = parentWindow.document;
   const relativePath = {json.dumps(clean_path)};
   const href = {json.dumps(href)};
+  const displayLabel = {json.dumps(clean_label)};
   const windowName = {json.dumps(FILES_WINDOW_NAME)};
   const features = [
     "popup=yes", "width=1280", "height=860", "left=80", "top=40",
@@ -121,7 +123,7 @@ def table_click_handler_html(*, relative_path: str) -> str:
     const link = target && target.closest
       ? target.closest('a[href*="/files-window?relative_path="]')
       : null;
-    if (!link || String(link.textContent || "").trim() !== "Open") return;
+    if (!link || String(link.textContent || "").trim() !== displayLabel) return;
     event.preventDefault();
     event.stopPropagation();
     openFiles();

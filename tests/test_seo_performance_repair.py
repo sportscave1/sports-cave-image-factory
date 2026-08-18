@@ -208,7 +208,9 @@ class SportsCaveLoaderRepairTests(unittest.TestCase):
         self.assertIn("#b79243", self.source)
         self.assertIn("prefers-reduced-motion", self.source)
         self.assertIn("#${LOADER_ID} { left: 0; }", self.source)
-        self.assertIn("sc-navigation-skeleton", self.source)
+        self.assertIn("sc-loading-spinner", self.source)
+        self.assertNotIn("sc-navigation-skeleton", self.source)
+        self.assertNotIn("Loading Sports Cave OS", self.source)
 
     def test_errors_are_recoverable_instead_of_blank(self):
         source = inspect.getsource(seo_page._render_active_route)

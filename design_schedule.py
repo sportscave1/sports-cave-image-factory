@@ -3,9 +3,11 @@ import hashlib
 import html
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import design_studio_styles
 import sports_cave_dashboard
+import ui_feedback
 from ui_option_ordering import alphabetize_options, selected_option_index
 
 
@@ -772,7 +774,11 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
     st.session_state.setdefault(SCHEDULE_VIEW_KEY, "Active Designs")
     toast = st.session_state.pop(SCHEDULE_TOAST_KEY, "")
     if toast:
-        st.toast(toast) if hasattr(st, "toast") else st.success(toast)
+        ui_feedback.show_temporary_toast(
+            components,
+            toast,
+            event_key=f"design-schedule:{hashlib.sha1(str(toast).encode('utf-8')).hexdigest()[:12]}",
+        )
 
     view = str(st.session_state.get(SCHEDULE_VIEW_KEY) or "Active Designs")
     if view not in DESIGN_SCHEDULE_VIEWS:

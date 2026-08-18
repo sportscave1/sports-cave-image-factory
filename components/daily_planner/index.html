@@ -138,9 +138,11 @@
     .segmented button:first-child { border-radius: 5px 0 0 5px; margin-left: 0; }
     .segmented button:last-child { border-radius: 0 5px 5px 0; }
     .segmented button.active { background: #27251f; color: white; }
-    .skeleton { animation: pulse 1.15s ease-in-out infinite; background: #e5e2db; border-radius: 4px; height: 34px; margin-bottom: 8px; }
-    .skeleton.short { width: 38%; }
-    @keyframes pulse { 50% { opacity: .45; } }
+    .sc-loading-only { align-items:center; display:flex; justify-content:center; min-height:72px; width:100%; }
+    .sc-loading-only.compact { min-height:44px; }
+    .sc-loading-spinner { animation:sc-loading-spin .72s linear infinite; border:2px solid rgba(183,146,67,.24); border-radius:50%; border-top-color:#b79243; box-sizing:border-box; display:inline-block; height:22px; width:22px; }
+    @keyframes sc-loading-spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .sc-loading-spinner { animation:none; } }
     .toast {
       background: #181714; border: 1px solid var(--gold); border-radius: 6px; bottom: 34px; color: white;
       max-width: 420px; padding: 10px 12px; position: fixed; right: 14px; z-index: 20;
@@ -394,7 +396,7 @@
       historyLoaded: false, weeklyLoaded: false,
       historyPeriod: "today", historyStart: "", historyEnd: "", historyRows: [],
       weeklyAnchor: "", weekly: null, statusTimer: null, countdownTimer: null,
-      toastTimer: null, seenEvents: new Set(), chimePlaying: false, chimeNodes: [],
+      toastTimer: null, toastIdentity: "", seenEvents: new Set(), chimePlaying: false, chimeNodes: [],
       chimeStopTimer: null, audio: null, volume: Number(localStorage.getItem("scPlannerVolume") || .75),
       soundEnabled: localStorage.getItem("scPlannerSoundEnabled") !== "0",
       outcomeSaving: false, pendingOutcome: null, outcomeTimerId: "",
@@ -504,14 +506,23 @@
       }
       return payload;
     };
-    const showToast = (message, type="info", duration=5000) => {
+    const TEMPORARY_TOAST_MS = 3000;
+    const showToast = (message, type="info") => {
+      const identity = `${type}:${String(message || "")}`;
+      if (state.toastIdentity === identity && !toast.classList.contains("hidden")) return;
       clearTimeout(state.toastTimer);
+      state.toastIdentity = identity;
       toast.className = `toast ${type === "error" ? "error" : ""}`;
       toast.textContent = message;
-      state.toastTimer = setTimeout(() => toast.classList.add("hidden"), duration);
+      state.toastTimer = setTimeout(() => {
+        toast.classList.add("hidden");
+        toast.textContent = "";
+        state.toastIdentity = "";
+        state.toastTimer = null;
+      }, TEMPORARY_TOAST_MS);
     };
     const showSkeleton = () => {
-      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      view.innerHTML = '<div class="sc-loading-only" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
     };
     const timerMirror = (timer) => timer?.id ? {
       id:String(timer.id), sheet_id:String(timer.sheet_id || ""), task_type:String(timer.task_type || ""),
@@ -656,7 +667,7 @@
     const enableAudio = async () => {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
-        showToast("Browser audio is unavailable. Check site and system sound settings.", "error", 8000);
+        showToast("Browser audio is unavailable. Check site and system sound settings.", "error");
         return false;
       }
       state.audio = state.audio || new AudioContext();
@@ -664,7 +675,7 @@
         await state.audio.resume();
         return state.audio.state === "running";
       } catch (_error) {
-        showToast("Sound is blocked. Allow audio for Sports Cave OS, then turn Sound off and on again.", "error", 9000);
+        showToast("Sound is blocked. Allow audio for Sports Cave OS, then turn Sound off and on again.", "error");
         return false;
       }
     };
@@ -884,7 +895,7 @@
     };
     const renderWeekPlan = () => {
       const data = state.weekPlan || {};
-      if (state.weekPlanLoading) return renderModal("Week Plan", '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>');
+      if (state.weekPlanLoading) return renderModal("Week Plan", '<div class="sc-loading-only compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>');
       const cycle = data.cycle || {};
       if (!cycle.id) {
         return renderModal("Week Plan", `<div class="notice info">Set up one 12-week cycle. Existing daily tasks remain independent.</div><div class="week-grid"><label>Cycle name<input data-cycle-field="name" value=""></label><label>First Monday<input type="date" data-cycle-field="start_date" value="${escapeHtml(mondayOf(isoToday()))}"></label><label class="wide">Overall 12-week objective<textarea data-cycle-field="overall_objective"></textarea></label></div>`, '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button primary" data-action="create-cycle">Create cycle</button>');
@@ -913,7 +924,7 @@
         const payload = await requestJson("/api/os/daily-planner/week-plan", {method:"POST",body:JSON.stringify({action:"save",cycle_id:state.weekPlan.cycle.id,week_start:state.weekPlan.week_start,theme:plan.theme,quote_text:plan.quote_text,quote_author:plan.quote_author,objectives:plan.objectives,expected_version:plan.version || 0,request_id:crypto.randomUUID()})});
         state.weekPlan = {...state.weekPlan,...payload};
         showToast("Week Plan saved.","success"); closePlannerModal(); return true;
-      } catch (error) { showToast(error.message,"error",8000); return false; }
+      } catch (error) { showToast(error.message,"error"); return false; }
     };
     const openCoach = async (kind) => {
       const targetDate = kind === "weekly"
@@ -942,7 +953,7 @@
     const renderCoach = () => {
       const coach = state.coach || {};
       const title = coach.kind === "weekly" ? "Weekly planning help" : "Daily planning help";
-      if (coach.loading) return renderModal(title, '<div class="skeleton short"></div><div class="skeleton"></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>', {compact:true});
+      if (coach.loading) return renderModal(title, '<div class="sc-loading-only compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>', '<button class="button" data-action="close-planner-modal">Cancel</button>', {compact:true});
       if (coach.error) return renderModal(title, `<div class="notice error">${escapeHtml(coach.error)}</div>`, `<button class="button" data-action="close-planner-modal">Cancel</button><button class="button" data-action="${coach.errorStage === "questions" ? "retry-coach-questions" : "regenerate-coach"}">Retry</button>`, {compact:true});
       if (coach.draft) return renderModal(title, coachDraftMarkup(coach), '<button class="button" data-action="close-planner-modal">Cancel</button><button class="button" data-action="edit-coach">Edit</button><button class="button" data-action="regenerate-coach">Regenerate</button><button class="button primary" data-action="apply-coach">Apply plan</button>', {compact:true});
       const question = coach.questions[coach.index];
@@ -972,7 +983,7 @@
         if (await saveSheet()) closePlannerModal();
         return;
       }
-      if (!state.weekPlan?.cycle?.id) { showToast("Create a 12-week cycle before applying the weekly draft.","error",7000); return; }
+      if (!state.weekPlan?.cycle?.id) { showToast("Create a 12-week cycle before applying the weekly draft.","error"); return; }
       if (!window.confirm("Apply this draft to the selected Week Plan? The proposed changes shown here will replace its editable fields.")) return;
       const dayIndex = {Monday:0,Tuesday:1,Wednesday:2,Thursday:3,Friday:4,Saturday:5,Sunday:6};
       state.weekPlan.plan = normalWeekPlan({...(state.weekPlan.plan || {}),theme:draft.theme,quote_text:draft.quote?.text || "",quote_author:draft.quote?.author || "",objectives:(draft.objectives || []).map((objective) => ({title:objective.title,measurable_target:objective.measurable_target,deadline:"",tactics:(objective.tactics || []).map((tactic) => ({action:tactic.action,due_day:dayIndex[tactic.due_day] ?? 0,status:"open",estimated_minutes:tactic.estimated_minutes}))}))});
@@ -1152,7 +1163,7 @@
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
           if (state.seenEvents.has(key)) return;
           state.seenEvents.add(key);
-          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`, "info", 7000));
+          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`, "info"));
           if (event.event === "expired") showOutcomeClaimed({...timer, task:event.task || timer.task});
         });
         if (activeTimer().outcome_required || activeTimer().status === "expired") showOutcomeClaimed(activeTimer());
@@ -1240,7 +1251,7 @@
         state.lastSaveAt = Date.now();
         invalidateReports();
         statusText.textContent = "Saved planner state connected";
-        showToast("Plan saved.", "success", 3500);
+        showToast("Plan saved.", "success");
         return true;
       } catch (error) {
         if (requestId !== state.saveRequestId || targetDate !== String(state.bundle?.work_date || "")) return false;
@@ -1276,7 +1287,7 @@
         stopChime(); closeOutcomeModal({restoreFocus:false});
         broadcastTimer(mirror, [], "", terminalTimerIds, action === "start_timer" ? mirror.id : "");
         await loadPlanner(extra.work_date || state.bundle.work_date);
-      } catch (error) { showToast(error.message,"error",8000); }
+      } catch (error) { showToast(error.message,"error"); }
     };
     const savedTaskFor = (sheet, taskType, taskIndex) => {
       const tasks = taskType === "top" ? sheet?.top_tasks : sheet?.additional_items;
@@ -1410,7 +1421,7 @@
         did_not_finish:"Task recorded as not completed.",
         reopen:"Task reopened.",
       }[selectedOutcome] || "Task updated.";
-      showToast(outcomeMessage, "success", 3500);
+      showToast(outcomeMessage, "success");
       await loadPlanner(result.sheet.sheet_date || state.bundle.work_date, {preserveView:true, restoreFocus:true});
       return result;
     };
@@ -1491,7 +1502,7 @@
           const key = `${event.event}:${timer.id}:${timer.updated_at || ""}`;
           if (state.seenEvents.has(key)) return;
           state.seenEvents.add(key);
-          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`,"info",7000));
+          if (event.event === "halfway") runClaimedSideEffect("halfway", timer, () => showToast(`Halfway through: ${event.task || timer.task || "Daily Planner task"} \u2014 ${formatClock(timer.remaining_seconds)} remaining.`,"info"));
           if (event.event === "expired") showOutcomeClaimed({...timer, task:event.task || timer.task});
         });
         const timer = activeTimer();
@@ -1521,7 +1532,7 @@
     const loadHistory = async () => {
       const [start,end] = periodDates(state.historyPeriod);
       if (end < start) return showToast("End date must be on or after the start date.","error");
-      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      showSkeleton();
       try {
         const payload = await requestJson(`/api/os/daily-planner/history?start=${start}&end=${end}`);
         state.historyRows = payload.rows || []; state.historyLoaded = true; renderHistory();
@@ -1534,7 +1545,7 @@
     };
     const loadWeekly = async () => {
       const anchor = state.weeklyAnchor || state.bundle?.work_date || isoToday();
-      view.innerHTML = '<div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div>';
+      showSkeleton();
       try { state.weekly = await requestJson(`/api/os/daily-planner/weekly-review?date=${anchor}`); state.weeklyLoaded = true; renderWeekly(); }
       catch (error) { view.innerHTML = `<div class="notice error">${escapeHtml(error.message)}</div>`; }
     };
@@ -1581,7 +1592,7 @@
         try {
           const payload = await requestJson("/api/os/daily-planner/week-plan", {method:"POST",body:JSON.stringify({action:"create_cycle",...fields})});
           state.weekPlan = {...payload,view:"this"}; showToast("12-week cycle created.","success"); renderWeekPlan();
-        } catch (error) { showToast(error.message,"error",8000); }
+        } catch (error) { showToast(error.message,"error"); }
         return;
       }
       if (action === "add-objective") { state.weekPlan.plan.objectives.push(blankObjective()); return renderWeekPlan(); }
@@ -1600,7 +1611,7 @@
         const question = state.coach.questions[state.coach.index];
         if (question) {
           const answer = String(modalRoot.querySelector("[data-coach-answer]")?.value || "").trim();
-          if (!answer) { showToast("Add a short answer to continue.","error",5000); return; }
+          if (!answer) { showToast("Add a short answer to continue.","error"); return; }
           state.coach.answers[question.key] = answer;
           state.coach.index += 1;
         }
@@ -1733,7 +1744,7 @@
           showToast("Daily Review complete.","success");
           await loadPlanner(state.bundle.work_date);
         }
-        catch (error) { showToast(error.message,"error",8000); }
+        catch (error) { showToast(error.message,"error"); }
         return;
       }
       if (action === "start-timer") {
