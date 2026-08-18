@@ -3,10 +3,12 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 from typing import Mapping
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 import shopify_order_reconciliation_worker
 
@@ -21,6 +23,12 @@ SHOPIFY_WEBHOOK_SECRET_ENV_NAMES = (
 SHOPIFY_ADMIN_TOKEN_PREFIXES = ("shpat_", "shpca_", "shppa_", "shpss_")
 
 app = FastAPI(title="Sports Cave OS Webhooks")
+
+# Paid-order requests were previously serialized by virtue of doing all work on
+# Uvicorn's single event-loop thread. Keep that ordering guarantee after moving
+# the blocking persistence pipeline to a worker thread. Database advisory locks
+# and immutable Shopify identities remain the authoritative cross-process guards.
+_PAID_ORDER_PIPELINE_LOCK = threading.Lock()
 
 
 def _webhook_log(event, **fields):
@@ -156,6 +164,51 @@ def _process_collector_vault_background(payload, webhook_id, topic):
         )
 
 
+def _process_paid_order_durably(payload, webhook_id, topic, shop_domain):
+    """Run the existing durable paid-order pipeline away from the ASGI loop."""
+    with _PAID_ORDER_PIPELINE_LOCK:
+        try:
+            import supabase_backend
+
+            if not supabase_backend.is_configured():
+                return {"state": "not_configured"}
+
+            claim = supabase_backend.claim_order_paid_webhook_receipt(
+                payload,
+                webhook_id,
+                topic,
+                shop_domain=shop_domain,
+            )
+        except Exception as error:
+            return {"state": "receipt_failed", "error": error}
+
+        if claim.get("duplicate"):
+            return {"state": "duplicate", "claim": claim}
+
+        durable_webhook_id = claim.get("webhook_id") or webhook_id
+        try:
+            result = supabase_backend.process_order_paid_webhook(
+                payload,
+                durable_webhook_id,
+                topic,
+                claim_event=False,
+            )
+        except Exception as error:
+            return {
+                "state": "processing_failed",
+                "claim": claim,
+                "durable_webhook_id": durable_webhook_id,
+                "error": error,
+            }
+
+        return {
+            "state": "processed",
+            "claim": claim,
+            "durable_webhook_id": durable_webhook_id,
+            "result": result,
+        }
+
+
 @app.post("/webhooks/shopify/orders-paid")
 async def shopify_orders_paid_webhook(request: Request, background_tasks: BackgroundTasks):
     raw_body = await request.body()
@@ -238,21 +291,30 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
         return Response("Invalid JSON payload.", status_code=400)
 
     try:
-        import supabase_backend
-
-        if not supabase_backend.is_configured():
-            return Response("Supabase is not configured for webhook processing.", status_code=500)
-
-        claim = supabase_backend.claim_order_paid_webhook_receipt(
+        pipeline = await run_in_threadpool(
+            _process_paid_order_durably,
             payload,
             webhook_id,
             topic,
-            shop_domain=shop_domain,
+            shop_domain,
         )
     except Exception as error:
+        _webhook_log(
+            "webhook_order_processing_failed",
+            webhook_id=webhook_id,
+            topic=topic,
+            error=error.__class__.__name__,
+        )
+        return Response("Shopify order persistence failed; retry this webhook.", status_code=500)
+    pipeline_state = pipeline.get("state")
+    if pipeline_state == "not_configured":
+        return Response("Supabase is not configured for webhook processing.", status_code=500)
+    if pipeline_state == "receipt_failed":
+        error = pipeline.get("error")
         _webhook_log("webhook_receipt_record_failed", webhook_id=webhook_id, topic=topic, error=str(error))
         return Response("Webhook receipt could not be recorded.", status_code=500)
-    if claim.get("duplicate"):
+    claim = pipeline.get("claim") or {}
+    if pipeline_state == "duplicate":
         _webhook_log("webhook_duplicate_skipped", status="completed", webhook_id=webhook_id, topic=topic)
         return {
             "ok": True,
@@ -260,15 +322,9 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
             "source": "webhook",
             "webhook_id": webhook_id,
         }
-    durable_webhook_id = claim.get("webhook_id") or webhook_id
-    try:
-        result = supabase_backend.process_order_paid_webhook(
-            payload,
-            durable_webhook_id,
-            topic,
-            claim_event=False,
-        )
-    except Exception as error:
+    durable_webhook_id = pipeline.get("durable_webhook_id") or claim.get("webhook_id") or webhook_id
+    if pipeline_state == "processing_failed":
+        error = pipeline.get("error")
         _webhook_log(
             "webhook_order_processing_failed",
             webhook_id=durable_webhook_id,
@@ -276,6 +332,15 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
             error=error.__class__.__name__,
         )
         return Response("Shopify order persistence failed; retry this webhook.", status_code=500)
+    if pipeline_state != "processed":
+        _webhook_log(
+            "webhook_order_processing_failed",
+            webhook_id=durable_webhook_id,
+            topic=topic,
+            error="InvalidPipelineState",
+        )
+        return Response("Shopify order persistence failed; retry this webhook.", status_code=500)
+    result = pipeline.get("result") or {}
 
     if not result.get("processed"):
         response_status = "skipped"
