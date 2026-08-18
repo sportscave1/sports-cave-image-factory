@@ -9,6 +9,7 @@ import meta_ads_client
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 import supabase_backend
 import ui_styles
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 DATE_RANGE_OPTIONS = {
@@ -1265,8 +1266,8 @@ def render_page():
     with table_tab:
         _section("Meta Ads Performance")
         filter_cols = st.columns([1, 1.25, 0.8, 1.2])
-        action_options = ["All"] + sorted({row.get("action_label") for row in ad_rows if row.get("action_label")})
-        campaign_options = ["All"] + sorted({row.get("campaign") for row in ad_rows if row.get("campaign")})
+        action_options = alphabetize_options(["All", *{row.get("action_label") for row in ad_rows if row.get("action_label")}])
+        campaign_options = alphabetize_options(["All", *{row.get("campaign") for row in ad_rows if row.get("campaign")}])
         action_filter = filter_cols[0].selectbox("Action label", action_options)
         campaign_filter = filter_cols[1].selectbox("Campaign", campaign_options)
         min_spend = filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0)
@@ -1307,7 +1308,7 @@ def render_page():
             empty_message = "No stored rows for this report yet. Click Sync Platform for this date range."
 
         demo_filter_cols = st.columns([1.2, 1.2, 0.8])
-        campaign_options = ["All"] + sorted({row.get("campaign_name") for row in active_rows if row.get("campaign_name")})
+        campaign_options = alphabetize_options(["All", *{row.get("campaign_name") for row in active_rows if row.get("campaign_name")}])
         selected_campaign = demo_filter_cols[0].selectbox("Campaign", campaign_options, key=f"demo-campaign-{report_view}")
         product_query = demo_filter_cols[1].text_input("Product / mapping", key=f"demo-product-{report_view}")
         min_spend = demo_filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key=f"demo-min-spend-{report_view}")
@@ -1350,11 +1351,11 @@ def render_page():
             ui_styles.empty_state("Sync base Meta performance to see creative copy, tags, and winner patterns.")
         else:
             filter_cols = st.columns([1, 1, 1, 1, 1, 0.7])
-            country_options = ["All"] + sorted({value for row in ad_rows for value in (row.get("country"), row.get("country_focus")) if value and value != "All"})
-            campaign_options = ["All"] + sorted({row.get("campaign") for row in ad_rows if row.get("campaign")})
-            product_options = ["All"] + sorted({row.get("product_title") or row.get("product_handle") or "Untagged" for row in ad_rows})
-            format_options = ["All"] + sorted({row.get("creative_format") or "unknown" for row in ad_rows})
-            action_options = ["All"] + sorted({row.get("action_label") for row in ad_rows if row.get("action_label")})
+            country_options = alphabetize_options(["All", *{value for row in ad_rows for value in (row.get("country"), row.get("country_focus")) if value and value != "All"}])
+            campaign_options = alphabetize_options(["All", *{row.get("campaign") for row in ad_rows if row.get("campaign")}])
+            product_options = alphabetize_options(["All", *{row.get("product_title") or row.get("product_handle") or "Untagged" for row in ad_rows}])
+            format_options = alphabetize_options(["All", *{row.get("creative_format") or "unknown" for row in ad_rows}])
+            action_options = alphabetize_options(["All", *{row.get("action_label") for row in ad_rows if row.get("action_label")}])
             creative_country = filter_cols[0].selectbox("Country", country_options, key="creative-country-filter")
             creative_campaign = filter_cols[1].selectbox("Campaign", campaign_options, key="creative-campaign-filter")
             creative_product = filter_cols[2].selectbox("Product", product_options, key="creative-product-filter")
@@ -1421,7 +1422,7 @@ def render_page():
 
             filter_cols = st.columns([1, 1.1, 1.1, 0.7, 1.2])
             status_filter = filter_cols[0].selectbox("Mapping status", MAPPING_STATUS_OPTIONS)
-            campaign_options = ["All"] + sorted({row.get("campaign_name") for row in mapping_rows if row.get("campaign_name")})
+            campaign_options = alphabetize_options(["All", *{row.get("campaign_name") for row in mapping_rows if row.get("campaign_name")}])
             campaign_filter = filter_cols[1].selectbox("Campaign", campaign_options, key="mapping-campaign-filter")
             product_filter = filter_cols[2].text_input("Product", key="mapping-product-filter")
             min_spend_filter = filter_cols[3].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key="mapping-min-spend")
@@ -1463,22 +1464,52 @@ def render_page():
                     f"Ad: {selected_ad.get('ad_name') or ''} | Campaign: {selected_ad.get('campaign_name') or ''} | "
                     f"Ad set: {selected_ad.get('adset_name') or ''}"
                 )
-                candidate_options = ["Manual / keep current"]
+                manual_candidate = "manual"
+                candidate_options = [manual_candidate]
                 candidate_lookup = {}
-                for candidate in product_candidates:
-                    label = _product_option_label(candidate)
-                    candidate_options.append(label)
-                    candidate_lookup[label] = candidate
+                for index, candidate in enumerate(product_candidates):
+                    candidate_id = str(
+                        candidate.get("product_id")
+                        or candidate.get("shopify_product_id")
+                        or candidate.get("product_handle")
+                        or f"candidate-{index}"
+                    )
+                    while candidate_id in candidate_lookup or candidate_id == manual_candidate:
+                        candidate_id = f"{candidate_id}-{index}"
+                    candidate_options.append(candidate_id)
+                    candidate_lookup[candidate_id] = candidate
+                candidate_options = alphabetize_options(
+                    candidate_options,
+                    label=lambda candidate_id: (
+                        "Manual / keep current"
+                        if candidate_id == manual_candidate
+                        else _product_option_label(candidate_lookup[candidate_id])
+                    ),
+                    first=("Manual / keep current",),
+                )
                 suggested_handle = selected_ad.get("suggested_product_handle") or selected_ad.get("product_handle") or ""
                 default_index = 0
                 if suggested_handle:
-                    for index, label in enumerate(candidate_options):
-                        candidate = candidate_lookup.get(label) or {}
-                        if candidate.get("product_handle") == suggested_handle:
-                            default_index = index
-                            break
-                selected_product_label = st.selectbox("Product candidate", candidate_options, index=default_index)
-                selected_product = candidate_lookup.get(selected_product_label) or {}
+                    suggested_label = next(
+                        (
+                            candidate_id
+                            for candidate_id in candidate_options
+                            if (candidate_lookup.get(candidate_id) or {}).get("product_handle") == suggested_handle
+                        ),
+                        None,
+                    )
+                    default_index = selected_option_index(candidate_options, suggested_label)
+                selected_product_id = st.selectbox(
+                    "Product candidate",
+                    candidate_options,
+                    index=default_index,
+                    format_func=lambda candidate_id: (
+                        "Manual / keep current"
+                        if candidate_id == manual_candidate
+                        else _product_option_label(candidate_lookup[candidate_id])
+                    ),
+                )
+                selected_product = candidate_lookup.get(selected_product_id) or {}
                 with st.form("ads-product-mapping-form"):
                     col_a, col_b, col_c = st.columns(3)
                     default_handle = selected_product.get("product_handle") or selected_ad.get("product_handle") or selected_ad.get("suggested_product_handle") or ""
@@ -1529,7 +1560,7 @@ def render_page():
         _section("ChatGPT Analysis Pack")
         template = st.selectbox(
             "Template",
-            [
+            alphabetize_options([
                 "Daily Ads Review",
                 "Creative Pattern Finder",
                 "Country Creative Report",
@@ -1542,7 +1573,7 @@ def render_page():
                 "Product Tagging Review",
                 "New Creative Based on Product Winners",
                 "Country/Product Creative Plan",
-            ],
+            ]),
         )
         prompt_text = _prompt_for(
             template,

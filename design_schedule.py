@@ -6,6 +6,7 @@ import streamlit as st
 
 import design_studio_styles
 import sports_cave_dashboard
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 SELECTED_DESIGN_TASK_KEY = "design-studio-v2-selected-task"
@@ -328,7 +329,10 @@ def _render_add_dialog():
         if category == sports_cave_dashboard.DESIGN_TASK_GROUP:
             design_style = st.selectbox(
                 "Design style",
-                ["", *design_studio_styles.style_slugs()],
+                alphabetize_options(
+                    ["", *design_studio_styles.style_slugs()],
+                    label=design_studio_styles.design_style_label,
+                ),
                 format_func=design_studio_styles.design_style_label,
                 key="design-schedule-add-style",
             )
@@ -400,7 +404,7 @@ def _render_idea_generator(copy_prompt_renderer=None):
         top = st.columns([1.7, .8], gap="medium")
         sport = top[0].selectbox(
             "Sport or collection",
-            sports_cave_dashboard.DESIGN_IDEA_SPORTS,
+            alphabetize_options(sports_cave_dashboard.DESIGN_IDEA_SPORTS),
             key="design-schedule-idea-sport",
         )
         total = top[1].number_input(
@@ -518,11 +522,14 @@ def _render_details_dialog(user=None):
     def dialog():
         if (task.get("section") or task.get("category")) == sports_cave_dashboard.DESIGN_TASK_GROUP:
             current_style = sports_cave_dashboard.task_design_style(task)
-            style_options = ["", *design_studio_styles.style_slugs()]
+            style_options = alphabetize_options(
+                ["", *design_studio_styles.style_slugs()],
+                label=design_studio_styles.design_style_label,
+            )
             selected_style = st.selectbox(
                 "Design style",
                 style_options,
-                index=style_options.index(current_style) if current_style in style_options else 0,
+                index=selected_option_index(style_options, current_style),
                 format_func=design_studio_styles.design_style_label,
                 key=f"design-schedule-edit-style::{task_id}",
             )
@@ -798,14 +805,20 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
             placeholder="Search designs",
             key=f"design-schedule-search::{group_key}",
         )
-        style_options = ["", *sorted({row.get("design_style") for row in authoritative_rows if row.get("design_style")})]
+        style_options = alphabetize_options(
+            ["", *{row.get("design_style") for row in authoritative_rows if row.get("design_style")}],
+            label=lambda value: "All styles" if not value else design_studio_styles.design_style_label(value),
+        )
         style = filters[1].selectbox(
             "Design style",
             style_options,
             format_func=lambda value: "All styles" if not value else design_studio_styles.design_style_label(value),
             key=f"design-schedule-style::{group_key}",
         )
-        sports = ["", *sorted({row.get("sport") for row in authoritative_rows if row.get("sport")})]
+        sports = alphabetize_options(
+            ["", *{row.get("sport") for row in authoritative_rows if row.get("sport")}],
+            label=lambda value: value or "All sports",
+        )
         sport = filters[2].selectbox(
             "Sport",
             sports,

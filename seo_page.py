@@ -27,6 +27,7 @@ import seo_reporting_runtime
 import seo_sync_progress
 import seo_technical_audit
 import seo_workspace as seo
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 SEO_OVERVIEW_CACHE_TTL_SECONDS = 15
@@ -285,7 +286,10 @@ def _record_selector(records, label, key, *, title_field):
     by_id = {str(row.get("id")): row for row in records}
     return st.selectbox(
         label,
-        tuple(by_id),
+        alphabetize_options(
+            by_id,
+            label=lambda record_id: str(by_id[record_id].get(title_field) or "Untitled"),
+        ),
         format_func=lambda record_id: str(by_id[record_id].get(title_field) or "Untitled"),
         key=key,
     )
@@ -601,20 +605,26 @@ def _render_google_controls(user, store, config_status, connection):
             }
             selected_gsc = str(connection.get("gsc_site_url") or "")
             selected_ga4 = str(connection.get("ga4_property_id") or "")
-            gsc_ids = tuple(gsc_by_id)
-            ga4_ids = tuple(ga4_by_id)
+            gsc_ids = alphabetize_options(
+                gsc_by_id,
+                label=lambda value: f"{gsc_by_id[value].get('name') or value} ({value})",
+            )
+            ga4_ids = alphabetize_options(
+                ga4_by_id,
+                label=lambda value: f"{ga4_by_id[value].get('name') or value} ({value})",
+            )
             selectors = st.columns(2)
             gsc_value = selectors[0].selectbox(
                 "Search Console property",
                 gsc_ids,
-                index=gsc_ids.index(selected_gsc) if selected_gsc in gsc_ids else 0,
+                index=selected_option_index(gsc_ids, selected_gsc),
                 format_func=lambda value: f"{gsc_by_id[value].get('name') or value} ({value})",
                 key="seo-google-gsc-property",
             )
             ga4_value = selectors[1].selectbox(
                 "Google Analytics 4 property",
                 ga4_ids,
-                index=ga4_ids.index(selected_ga4) if selected_ga4 in ga4_ids else 0,
+                index=selected_option_index(ga4_ids, selected_ga4),
                 format_func=lambda value: f"{ga4_by_id[value].get('name') or value} ({value})",
                 key="seo-google-ga4-property",
             )
@@ -1025,13 +1035,19 @@ def _render_manual_url_mapping_admin(user, phase4_store):
         selectors = st.columns(2)
         alias_key = selectors[0].selectbox(
             "Source URL",
-            tuple(alias_by_key),
+            alphabetize_options(
+                alias_by_key,
+                label=lambda key: alias_by_key[key].get("raw_url") or key,
+            ),
             format_func=lambda key: alias_by_key[key].get("raw_url") or key,
             key="seo-url-review-alias",
         )
         page_key = selectors[1].selectbox(
             "Canonical Shopify page",
-            tuple(page_by_key),
+            alphabetize_options(
+                page_by_key,
+                label=lambda key: page_by_key[key].get("title") or page_by_key[key].get("canonical_url") or key,
+            ),
             format_func=lambda key: page_by_key[key].get("title") or page_by_key[key].get("canonical_url") or key,
             key="seo-url-review-page",
         )
@@ -1185,22 +1201,27 @@ def _reporting_filters():
     )
     market = columns[1].selectbox(
         "Market",
-        ("All markets", "Australia", "United States", "United Kingdom", "Canada", "New Zealand"),
+        alphabetize_options(
+            ("All markets", "Australia", "United States", "United Kingdom", "Canada", "New Zealand"),
+            first=("All markets",),
+        ),
         key="seo-phase4-market",
     )
     device = columns[2].selectbox(
         "Device",
-        ("All devices", "Desktop", "Mobile", "Tablet"),
+        alphabetize_options(("All devices", "Desktop", "Mobile", "Tablet"), first=("All devices",)),
         key="seo-phase4-device",
     )
+    search_type_options = alphabetize_options(("web", "image", "video", "news"))
     search_type = columns[3].selectbox(
         "Search type",
-        ("web", "image", "video", "news"),
+        search_type_options,
+        index=selected_option_index(search_type_options, "web"),
         key="seo-phase4-search-type",
     )
     query_class = columns[4].selectbox(
         "Queries",
-        ("All known queries", "Branded", "Non-branded"),
+        alphabetize_options(("All known queries", "Branded", "Non-branded"), first=("All known queries",)),
         key="seo-phase4-query-class",
     )
     comparison = columns[5].selectbox(
@@ -1535,9 +1556,11 @@ TREND_SOURCES = {
 
 
 def _render_performance_chart(snapshot):
+    metric_options = alphabetize_options(TREND_METRICS)
     selected = st.selectbox(
         "Chart metric",
-        tuple(TREND_METRICS),
+        metric_options,
+        index=selected_option_index(metric_options, next(iter(TREND_METRICS))),
         key="seo-performance-chart-metric",
     )
     key = TREND_METRICS[selected]
@@ -2073,10 +2096,10 @@ def _render_citations(store, state, user):
         filters = st.columns(4)
         search = filters[0].text_input("Search platform", key="seo-citation-search")
         status_filter = filters[1].selectbox("Status", ("All", *seo.CITATION_STATUSES), key="seo-citation-status-filter")
-        category_values = sorted({row.get("category") for row in citations if row.get("category")})
-        category_filter = filters[2].selectbox("Category", ("All", *category_values), key="seo-citation-category-filter")
-        owner_values = sorted({row.get("owner") for row in citations if row.get("owner")})
-        owner_filter = filters[3].selectbox("Owner", ("All", *owner_values), key="seo-citation-owner-filter")
+        category_values = alphabetize_options({row.get("category") for row in citations if row.get("category")})
+        category_filter = filters[2].selectbox("Category", alphabetize_options(("All", *category_values)), key="seo-citation-category-filter")
+        owner_values = alphabetize_options({row.get("owner") for row in citations if row.get("owner")})
+        owner_filter = filters[3].selectbox("Owner", alphabetize_options(("All", *owner_values)), key="seo-citation-owner-filter")
         filtered = seo.filter_citations(
             citations,
             search=search,
@@ -2136,15 +2159,19 @@ def _blog_dialog(store, state, user, record=None):
         columns = st.columns(2)
         sport_topic = columns[0].text_input("Sport or topic", value=record.get("sport_topic") or "")
         primary_keyword = columns[1].text_input("Primary keyword", value=record.get("primary_keyword") or "")
+        search_intent_options = alphabetize_options(
+            ("Player Legacy", "Greatest Moments", "Historic Rivalry", "Sports Culture", "Memorabilia Collecting", "Man Cave Inspiration", "Gift Guide", "Sports Decor Ideas", "Other")
+        )
         search_intent = columns[0].selectbox(
             "Search intent",
-            ("Player Legacy", "Greatest Moments", "Historic Rivalry", "Sports Culture", "Memorabilia Collecting", "Man Cave Inspiration", "Gift Guide", "Sports Decor Ideas", "Other"),
-            index=0,
+            search_intent_options,
+            index=selected_option_index(search_intent_options, record.get("search_intent") or "Player Legacy"),
         )
+        target_market_options = alphabetize_options(seo.TARGET_MARKETS)
         target_market = columns[1].selectbox(
             "Target market",
-            seo.TARGET_MARKETS,
-            index=seo.TARGET_MARKETS.index(record.get("target_market")) if record.get("target_market") in seo.TARGET_MARKETS else 0,
+            target_market_options,
+            index=selected_option_index(target_market_options, record.get("target_market") or seo.TARGET_MARKETS[0]),
         )
         target_collection = columns[0].text_input("Target collection", value=record.get("target_collection") or "")
         status = columns[1].selectbox(
@@ -2197,7 +2224,15 @@ def _render_blog_builder(store, state, user, blogs):
         st.info("Create a blog brief to start the builder.")
         return
     by_id = {str(row["id"]): row for row in blogs}
-    blog_id = st.selectbox("Blog record", tuple(by_id), format_func=lambda key: by_id[key].get("article_title") or by_id[key].get("primary_keyword") or "Untitled", key="seo-blog-builder-record")
+    blog_id = st.selectbox(
+        "Blog record",
+        alphabetize_options(
+            by_id,
+            label=lambda key: by_id[key].get("article_title") or by_id[key].get("primary_keyword") or "Untitled",
+        ),
+        format_func=lambda key: by_id[key].get("article_title") or by_id[key].get("primary_keyword") or "Untitled",
+        key="seo-blog-builder-record",
+    )
     blog = by_id[blog_id]
     step = _active_view(
         ("1 Brief", "2 Article", "3 SEO and Links", "4 Assets", "5 Review"),
@@ -2208,7 +2243,8 @@ def _render_blog_builder(store, state, user, blogs):
             columns = st.columns(2)
             article_title = columns[0].text_input("Article title", value=blog.get("article_title") or "")
             sport_topic = columns[1].text_input("Sport, player, team, rivalry or topic", value=blog.get("sport_topic") or "")
-            target_market = columns[0].selectbox("Target market", seo.TARGET_MARKETS, index=seo.TARGET_MARKETS.index(blog.get("target_market")) if blog.get("target_market") in seo.TARGET_MARKETS else 0)
+            target_market_options = alphabetize_options(seo.TARGET_MARKETS)
+            target_market = columns[0].selectbox("Target market", target_market_options, index=selected_option_index(target_market_options, blog.get("target_market") or seo.TARGET_MARKETS[0]))
             content_angle = columns[1].text_input("Content angle", value=blog.get("content_angle") or "")
             search_intent = columns[0].text_input("Search intent", value=blog.get("search_intent") or "")
             primary_keyword = columns[1].text_input("Primary keyword", value=blog.get("primary_keyword") or "")
@@ -2314,7 +2350,12 @@ def _render_blog_builder(store, state, user, blogs):
 def _render_prompt_templates(state):
     templates = seo.active_records(state, "prompt_templates")
     by_id = {row["id"]: row for row in templates}
-    selected_id = st.selectbox("Saved template", tuple(by_id), format_func=lambda key: by_id[key].get("name"), key="seo-template-preview")
+    selected_id = st.selectbox(
+        "Saved template",
+        alphabetize_options(by_id, label=lambda key: by_id[key].get("name")),
+        format_func=lambda key: by_id[key].get("name"),
+        key="seo-template-preview",
+    )
     template = by_id[selected_id]
     placeholders = sorted(set(re.findall(r"{{([a-zA-Z0-9_]+)}}", template.get("template") or "")))
     variables = {}
@@ -2340,7 +2381,7 @@ def _render_blog(store, state, user):
         filters = st.columns(3)
         search = filters[0].text_input("Search articles", key="seo-blog-search")
         status_filter = filters[1].selectbox("Status", ("All", *seo.BLOG_STATUSES), key="seo-blog-status-filter")
-        market_filter = filters[2].selectbox("Target market", ("All", *seo.TARGET_MARKETS), key="seo-blog-market-filter")
+        market_filter = filters[2].selectbox("Target market", alphabetize_options(("All", *seo.TARGET_MARKETS)), key="seo-blog-market-filter")
         filtered = [row for row in blogs if (not search or search.casefold() in json.dumps(row).casefold()) and (status_filter == "All" or row.get("status") == status_filter) and (market_filter == "All" or row.get("target_market") == market_filter)]
         _table([{"Article Title": row.get("article_title"), "Sport or Topic": row.get("sport_topic"), "Primary Keyword": row.get("primary_keyword"), "Search Intent": row.get("search_intent"), "Target Market": row.get("target_market"), "Target Collection": row.get("target_collection") or row.get("collection_name"), "Status": row.get("status"), "Owner": row.get("owner"), "Due Date": row.get("due_date"), "Last Updated": row.get("updated_at")} for row in filtered], empty="No blog records yet. Create a brief to start the editorial pipeline.")
     elif view == "Blog Builder":
@@ -2362,7 +2403,11 @@ def _link_plan_dialog(store, state, user, record=None):
     blog_options = {row["id"]: row for row in blogs}
     with st.form(f"seo-link-plan-form::{record_id or 'new'}"):
         if blog_options:
-            source_blog_id = st.selectbox("Source blog *", tuple(blog_options), format_func=lambda key: blog_options[key].get("article_title") or blog_options[key].get("primary_keyword") or "Untitled", index=list(blog_options).index(record.get("source_blog_id")) if record.get("source_blog_id") in blog_options else 0)
+            source_blog_options = alphabetize_options(
+                blog_options,
+                label=lambda key: blog_options[key].get("article_title") or blog_options[key].get("primary_keyword") or "Untitled",
+            )
+            source_blog_id = st.selectbox("Source blog *", source_blog_options, format_func=lambda key: blog_options[key].get("article_title") or blog_options[key].get("primary_keyword") or "Untitled", index=selected_option_index(source_blog_options, record.get("source_blog_id")))
             source_blog = blog_options[source_blog_id].get("article_title") or blog_options[source_blog_id].get("primary_keyword")
         else:
             source_blog_id = ""
@@ -2414,7 +2459,12 @@ def _render_internal_linking(store, state, user):
         st.caption("Seeded targets are deliberately marked Needs Verification until an owner confirms the current live URL.")
         if targets:
             by_id = {row["id"]: row for row in targets}
-            target_id = st.selectbox("Target to verify", tuple(by_id), format_func=lambda key: by_id[key].get("label"), key="seo-target-verify-select")
+            target_id = st.selectbox(
+                "Target to verify",
+                alphabetize_options(by_id, label=lambda key: by_id[key].get("label")),
+                format_func=lambda key: by_id[key].get("label"),
+                key="seo-target-verify-select",
+            )
             with st.form(f"seo-target-edit::{target_id}"):
                 label = st.text_input("Label", value=by_id[target_id].get("label") or "")
                 url = st.text_input("URL", value=by_id[target_id].get("url") or "")
@@ -2449,18 +2499,21 @@ def _outreach_dialog(store, state, user, record=None):
         contact_email = columns[1].text_input("Contact email", value=record.get("contact_email") or "")
         creator_profile = columns[0].text_input("Creator or social profile", value=record.get("creator_profile") or "")
         niche = columns[1].text_input("Niche", value=record.get("niche") or "")
-        target_market = columns[0].selectbox("Target market", seo.TARGET_MARKETS, index=seo.TARGET_MARKETS.index(record.get("target_market")) if record.get("target_market") in seo.TARGET_MARKETS else 0)
-        opportunity_type = columns[1].selectbox("Opportunity type", ("Editorial Mention", "Guest Article", "Creator Feature", "Gift Guide", "Resource/List", "Podcast Show Notes", "Genuine Community Contribution", "Other"), index=0)
+        target_market_options = alphabetize_options(seo.TARGET_MARKETS)
+        target_market = columns[0].selectbox("Target market", target_market_options, index=selected_option_index(target_market_options, record.get("target_market") or seo.TARGET_MARKETS[0]))
+        opportunity_options = alphabetize_options(("Editorial Mention", "Guest Article", "Creator Feature", "Gift Guide", "Resource/List", "Podcast Show Notes", "Genuine Community Contribution", "Other"))
+        opportunity_type = columns[1].selectbox("Opportunity type", opportunity_options, index=selected_option_index(opportunity_options, record.get("opportunity_type") or "Editorial Mention"))
         relevant_article_url = st.text_input("Relevant article URL", value=record.get("relevant_article_url") or "")
         observed_topic = st.text_input("Specific article or topic observed", value=record.get("observed_topic") or "")
         target_page = st.text_input("Sports Cave target page", value=record.get("target_page") or "")
         anchor_columns = st.columns(2)
-        anchor_category = anchor_columns[0].selectbox("Proposed anchor category", ("Brand / Naked URL", "Descriptive / Partial Match", "Exact Keyword", "Unknown"), index=0)
+        anchor_options = alphabetize_options(("Brand / Naked URL", "Descriptive / Partial Match", "Exact Keyword", "Unknown"), last=("Unknown",))
+        anchor_category = anchor_columns[0].selectbox("Proposed anchor category", anchor_options, index=selected_option_index(anchor_options, record.get("anchor_category") or "Brand / Naked URL"))
         anchor_text = anchor_columns[1].text_input("Proposed anchor text", value=record.get("anchor_text") or "")
         quality_result = columns[0].selectbox("Quality result", ("Needs Review", "Approved", "Rejected"), index=("Needs Review", "Approved", "Rejected").index(record.get("quality_result")) if record.get("quality_result") in ("Needs Review", "Approved", "Rejected") else 0)
         status = columns[1].selectbox("Status", seo.OUTREACH_STATUSES, index=seo.OUTREACH_STATUSES.index(record.get("status")) if record.get("status") in seo.OUTREACH_STATUSES else 0)
         rejection_reason = st.text_input("Rejection reason", value=record.get("rejection_reason") or "", disabled=status != "Rejected" and quality_result != "Rejected")
-        quality_checks = st.multiselect("Qualification checklist", ("Site is active", "Content appears written for humans", "Topic is relevant to Sports Cave", "Site is brand-safe", "Outbound links appear reasonable", "Page can be indexed", "Site is not a link farm", "Site is not a PBN", "Site is not primarily selling backlinks", "A real reader could benefit"), default=record.get("quality_checks") or [])
+        quality_checks = st.multiselect("Qualification checklist", alphabetize_options(("Site is active", "Content appears written for humans", "Topic is relevant to Sports Cave", "Site is brand-safe", "Outbound links appear reasonable", "Page can be indexed", "Site is not a link farm", "Site is not a PBN", "Site is not primarily selling backlinks", "A real reader could benefit")), default=record.get("quality_checks") or [])
         outreach_draft = st.text_area("Outreach draft", value=record.get("outreach_draft") or "", height=160)
         dates = st.columns(3)
         date_contacted = dates[0].date_input("Date contacted", value=date.fromisoformat(record["date_contacted"]) if record.get("date_contacted") else None)
@@ -2469,7 +2522,8 @@ def _outreach_dialog(store, state, user, record=None):
         live_url = st.text_input("Live URL", value=record.get("live_url") or "")
         relevant_placement = st.checkbox("Placement is relevant", value=bool(record.get("relevant_placement")))
         verification_date = st.date_input("Verification date", value=date.fromisoformat(record["verification_date"]) if record.get("verification_date") else None)
-        disclosure = st.selectbox("Link disclosure", ("Unknown/Needs Review", "Sponsored", "Nofollow", "Editorial with no material exchange"), index=0)
+        disclosure_options = alphabetize_options(("Unknown/Needs Review", "Sponsored", "Nofollow", "Editorial with no material exchange"), first=("Unknown/Needs Review",))
+        disclosure = st.selectbox("Link disclosure", disclosure_options, index=selected_option_index(disclosure_options, record.get("disclosure") or "Unknown/Needs Review"))
         owner = st.text_input("Owner", value=record.get("owner") or _actor_name(user))
         notes = st.text_area("Notes", value=record.get("notes") or "", height=80)
         submitted = st.form_submit_button("Update prospect" if record_id else "Add prospect", type="primary", use_container_width=True)
@@ -2541,11 +2595,13 @@ def _keyword_dialog(store, state, user, record):
         columns = st.columns(2)
         category = columns[0].text_input("Category", value=record.get("category") or "")
         sport_player = columns[1].text_input("Sport or player", value=record.get("sport_player") or "")
-        page_type = columns[0].selectbox("Intended page type", seo.KEYWORD_PAGE_TYPES, index=seo.KEYWORD_PAGE_TYPES.index(record.get("page_type")) if record.get("page_type") in seo.KEYWORD_PAGE_TYPES else 2)
+        page_type_options = alphabetize_options(seo.KEYWORD_PAGE_TYPES)
+        page_type = columns[0].selectbox("Intended page type", page_type_options, index=selected_option_index(page_type_options, record.get("page_type"), default=selected_option_index(page_type_options, "Blog")))
         buyer_intent = columns[1].selectbox("Buyer intent", seo.KEYWORD_INTENTS, index=seo.KEYWORD_INTENTS.index(record.get("buyer_intent")) if record.get("buyer_intent") in seo.KEYWORD_INTENTS else 4)
         priority = columns[0].selectbox("Priority", seo.KEYWORD_PRIORITIES, index=seo.KEYWORD_PRIORITIES.index(record.get("priority")) if record.get("priority") in seo.KEYWORD_PRIORITIES else 1)
         mapping_status = columns[1].selectbox("Mapping status", seo.KEYWORD_MAPPING_STATUSES, index=seo.KEYWORD_MAPPING_STATUSES.index(record.get("mapping_status")) if record.get("mapping_status") in seo.KEYWORD_MAPPING_STATUSES else 0)
-        target_market = columns[0].selectbox("Target market", ("", *seo.TARGET_MARKETS), index=("", *seo.TARGET_MARKETS).index(record.get("target_market")) if record.get("target_market") in ("", *seo.TARGET_MARKETS) else 0)
+        target_market_options = alphabetize_options(("", *seo.TARGET_MARKETS))
+        target_market = columns[0].selectbox("Target market", target_market_options, index=selected_option_index(target_market_options, record.get("target_market") or ""))
         target_url = st.text_input("Target URL", value=record.get("target_url") or "")
         notes = st.text_input("Notes or tags", value=record.get("notes") or "")
         submitted = st.form_submit_button("Save keyword review", type="primary", use_container_width=True)
@@ -2564,11 +2620,11 @@ def _keyword_dialog(store, state, user, record):
 def _render_keyword_library(store, state, user, keywords):
     filters = st.columns(4)
     search = filters[0].text_input("Search keywords", key="seo-keyword-search")
-    page_type_filter = filters[1].selectbox("Page type", ("All", *seo.KEYWORD_PAGE_TYPES), key="seo-keyword-type-filter")
+    page_type_filter = filters[1].selectbox("Page type", alphabetize_options(("All", *seo.KEYWORD_PAGE_TYPES)), key="seo-keyword-type-filter")
     intent_filter = filters[2].selectbox("Intent", ("All", *seo.KEYWORD_INTENTS), key="seo-keyword-intent-filter")
     status_filter = filters[3].selectbox("Mapping status", ("All", *seo.KEYWORD_MAPPING_STATUSES), key="seo-keyword-status-filter")
     second = st.columns(4)
-    market_filter = second[0].selectbox("Target market", ("All", "Unassigned", *seo.TARGET_MARKETS), key="seo-keyword-market-filter")
+    market_filter = second[0].selectbox("Target market", alphabetize_options(("All", "Unassigned", *seo.TARGET_MARKETS), first=("Unassigned",)), key="seo-keyword-market-filter")
     has_target = second[1].selectbox("Has target URL", ("All", "Yes", "No"), key="seo-keyword-target-filter")
     max_position = second[2].number_input("Maximum position", min_value=0.0, value=0.0, step=1.0)
     min_impressions = second[3].number_input("Minimum impressions", min_value=0, value=0, step=10)
@@ -2650,12 +2706,19 @@ def _render_page_mapping(store, state, user, keywords):
     if not keywords:
         return
     by_id = {row["id"]: row for row in keywords}
-    keyword_id = st.selectbox("Keyword", tuple(by_id), format_func=lambda key: by_id[key].get("keyword"), key="seo-map-keyword")
+    keyword_id = st.selectbox(
+        "Keyword",
+        alphabetize_options(by_id, label=lambda key: by_id[key].get("keyword")),
+        format_func=lambda key: by_id[key].get("keyword"),
+        key="seo-map-keyword",
+    )
     keyword = by_id[keyword_id]
     with st.form("seo-keyword-map-form"):
         columns = st.columns(2)
-        page_type = columns[0].selectbox("Page type", seo.KEYWORD_PAGE_TYPES, index=seo.KEYWORD_PAGE_TYPES.index(keyword.get("page_type")) if keyword.get("page_type") in seo.KEYWORD_PAGE_TYPES else 2)
-        market = columns[1].selectbox("Market", seo.TARGET_MARKETS, index=seo.TARGET_MARKETS.index(keyword.get("target_market")) if keyword.get("target_market") in seo.TARGET_MARKETS else 0)
+        page_type_options = alphabetize_options(seo.KEYWORD_PAGE_TYPES)
+        market_options = alphabetize_options(seo.TARGET_MARKETS)
+        page_type = columns[0].selectbox("Page type", page_type_options, index=selected_option_index(page_type_options, keyword.get("page_type"), default=selected_option_index(page_type_options, "Blog")))
+        market = columns[1].selectbox("Market", market_options, index=selected_option_index(market_options, keyword.get("target_market") or seo.TARGET_MARKETS[0]))
         target_page = st.text_input("Verified target page URL", value=keyword.get("target_url") or "")
         supporting_keywords = st.text_input("Supporting keywords")
         submitted = st.form_submit_button("Save mapping", type="primary")
@@ -2695,7 +2758,11 @@ def _render_saved_query_intelligence(*, growth_store=None):
     )
     opportunity_type = st.selectbox(
         "Opportunity type",
-        opportunity_options,
+        alphabetize_options(
+            opportunity_options,
+            label=lambda value: "All opportunities" if value == "All" else _opportunity_label(value),
+            first=("All opportunities",),
+        ),
         format_func=lambda value: "All opportunities" if value == "All" else _opportunity_label(value),
         key="seo-keyword-saved-opportunity-type",
     )
@@ -2916,9 +2983,11 @@ def _render_reports_strategy(
 ):
     _header(seo.SEO_REPORTS_ROUTE)
     growth_store = growth_store or seo_growth_intelligence.default_store()
+    analysis_modes = alphabetize_options(seo_growth_intelligence.ANALYSIS_MODES)
     mode = st.selectbox(
         "Report type",
-        seo_growth_intelligence.ANALYSIS_MODES,
+        analysis_modes,
+        index=selected_option_index(analysis_modes, seo_growth_intelligence.ANALYSIS_MODES[0]),
         key="seo-growth-analysis-mode",
     )
     filters = _reporting_filters()
@@ -3905,7 +3974,7 @@ def _render_seo_health(user, *, google_store=None, import_store=None, phase4_sto
     urls = sorted({str(row.get("canonical_url") or "") for row in rows if row.get("canonical_url")})
     if urls:
         controls = st.columns([3, 1, 1])
-        selected_url = controls[0].selectbox("Affected URL", urls, key="seo-v2-technical-url")
+        selected_url = controls[0].selectbox("Affected URL", alphabetize_options(urls), key="seo-v2-technical-url")
         if controls[1].button("Queue recheck", use_container_width=True, key="seo-v2-technical-recheck"):
             try:
                 queued = seo_technical_audit.PostgresTechnicalAuditStore().queue_recheck(
@@ -4056,7 +4125,10 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
     by_id = {str(row.get("project_id")): row for row in projects}
     selected_id = actions[1].selectbox(
         "Project",
-        tuple(by_id),
+        alphabetize_options(
+            by_id,
+            label=lambda key: by_id[key].get("title") or by_id[key].get("primary_keyword") or "Untitled brief",
+        ),
         format_func=lambda key: by_id[key].get("title") or by_id[key].get("primary_keyword") or "Untitled brief",
         key=f"{seo_blog_workflow.STATE_PREFIX}project",
     )
@@ -4144,7 +4216,10 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
     }
     target_id = st.selectbox(
         "Shopify product or collection",
-        ("", *targets),
+        alphabetize_options(
+            ("", *targets),
+            label=lambda key: "Choose a saved Shopify target" if not key else targets[key].get("title") or targets[key].get("name") or targets[key].get("url") or key,
+        ),
         format_func=lambda key: "Choose a saved Shopify target" if not key else targets[key].get("title") or targets[key].get("name") or targets[key].get("url") or key,
         key=f"{seo_blog_workflow.STATE_PREFIX}target::{selected_id}",
     ) if targets else ""
@@ -4161,15 +4236,17 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
 
     key_root = f"{seo_blog_workflow.STATE_PREFIX}{selected_id}"
     first = st.columns(3)
-    brief["target_market"] = first[0].selectbox("Target market", seo_blog_workflow.MARKETS, index=seo_blog_workflow.MARKETS.index(brief.get("target_market")) if brief.get("target_market") in seo_blog_workflow.MARKETS else 0, key=f"{key_root}-market")
+    blog_market_options = alphabetize_options(seo_blog_workflow.MARKETS)
+    brief["target_market"] = first[0].selectbox("Target market", blog_market_options, index=selected_option_index(blog_market_options, brief.get("target_market") or seo_blog_workflow.MARKETS[0]), key=f"{key_root}-market")
     brief["sport"] = first[1].text_input("Sport", value=brief.get("sport") or "", key=f"{key_root}-sport")
     brief["search_intent"] = first[2].text_input("Search intent / article type", value=brief.get("search_intent") or "", key=f"{key_root}-intent")
     context = st.columns(2)
     default_language = brief.get("language") or seo_blog_workflow.MARKET_LANGUAGE.get(brief["target_market"])
+    language_options = alphabetize_options(seo_blog_workflow.LANGUAGES)
     brief["language"] = context[0].selectbox(
         "Language",
-        seo_blog_workflow.LANGUAGES,
-        index=seo_blog_workflow.LANGUAGES.index(default_language) if default_language in seo_blog_workflow.LANGUAGES else 0,
+        language_options,
+        index=selected_option_index(language_options, default_language),
         key=f"{key_root}-language",
     )
     brief["publication_preference"] = context[1].selectbox(

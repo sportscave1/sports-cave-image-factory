@@ -14,6 +14,7 @@ import streamlit as st
 
 from activity_log import record_activity_log
 import shopify_sync
+from ui_option_ordering import alphabetize_options
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1961,7 +1962,11 @@ def _editor_visible_rows(rows):
         handle = str(row.get("handle") or row.get("shopify_handle") or "").strip()
         labels[row_key] = f"{title} ({handle})" if handle else title
 
-    options = [ALL_PRODUCTS_SELECTION, *keyed_rows]
+    options = alphabetize_options(
+        [ALL_PRODUCTS_SELECTION, *keyed_rows],
+        label=lambda value: labels.get(value, value),
+        first=(labels[ALL_PRODUCTS_SELECTION],),
+    )
     selected = st.session_state.get(EDITOR_PRODUCT_SELECTION_KEY, ALL_PRODUCTS_SELECTION)
     if selected not in options:
         st.session_state[EDITOR_PRODUCT_SELECTION_KEY] = ALL_PRODUCTS_SELECTION

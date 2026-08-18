@@ -13,6 +13,7 @@ import design_schedule
 import design_studio_styles
 import prompt_store
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+from ui_option_ordering import alphabetize_options
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -3962,7 +3963,10 @@ def render_new_design_tab():
     if task_options:
         selected_task = st.selectbox(
             "Choose design task",
-            [MANUAL_NEW_DESIGN_TASK_OPTION, *task_options],
+            alphabetize_options(
+                [MANUAL_NEW_DESIGN_TASK_OPTION, *task_options],
+                first=(MANUAL_NEW_DESIGN_TASK_OPTION,),
+            ),
             key="design-studio-new-design-task-select",
         )
         selected_task_text = "" if selected_task == MANUAL_NEW_DESIGN_TASK_OPTION else selected_task
@@ -4199,7 +4203,10 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
         st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = _task_design_style(selected_task)
         details_memory.pop(task_identity, None)
 
-    style_options = ["", *design_studio_styles.style_slugs()]
+    style_options = alphabetize_options(
+        ["", *design_studio_styles.style_slugs()],
+        label=design_studio_styles.design_style_label,
+    )
     if st.session_state.get(DESIGN_STUDIO_V2_STYLE_KEY) not in style_options:
         st.session_state[DESIGN_STUDIO_V2_STYLE_KEY] = _task_design_style(selected_task)
     selected_style = st.selectbox(

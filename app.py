@@ -59,6 +59,7 @@ import design_studio_styles
 import sports_cave_pricing
 import sports_sales_calendar
 import top_bar
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 db = None
 image_factory = None
@@ -9089,7 +9090,7 @@ def render_mockups_page():
 
     sport_option = st.selectbox(
         "Sport category",
-        options=SPORT_OPTIONS,
+        options=alphabetize_options(SPORT_OPTIONS, last=("Custom",)),
         index=0,
     )
 
@@ -11316,11 +11317,11 @@ def render_passwords_section(user):
 
 def _country_select(label, *, value="", key="account-country"):
     clean_country = os_accounts.normalise_country(value, role=(current_os_user() or {}).get("role"))
-    options = os_accounts.COUNTRY_OPTIONS
+    options = alphabetize_options(os_accounts.COUNTRY_OPTIONS)
     return st.selectbox(
         label,
         options,
-        index=options.index(clean_country) if clean_country in options else 0,
+        index=selected_option_index(options, clean_country),
         key=key,
     )
 
@@ -11606,7 +11607,12 @@ def render_accounts_access_page():
     worker_by_id = {worker["id"]: worker for worker in workers}
     selected_worker_id = st.selectbox(
         "Worker",
-        tuple(worker_by_id),
+        alphabetize_options(
+            worker_by_id,
+            label=lambda worker_id: worker_by_id[worker_id].get("display_name")
+            or worker_by_id[worker_id].get("username")
+            or "Worker",
+        ),
         format_func=lambda worker_id: worker_by_id[worker_id].get("display_name")
         or worker_by_id[worker_id].get("username")
         or "Worker",
@@ -12574,7 +12580,7 @@ def render_todays_design_ideas(local_now, events):
         setup_columns = st.columns([1.7, 0.8], gap="medium")
         sport = setup_columns[0].selectbox(
             "Sport or collection",
-            sports_cave_dashboard.DESIGN_IDEA_SPORTS,
+            alphabetize_options(sports_cave_dashboard.DESIGN_IDEA_SPORTS),
             key=DASHBOARD_DESIGN_IDEA_SPORT_KEY,
         )
         total_ideas = setup_columns[1].number_input(
@@ -13384,11 +13390,14 @@ def render_design_task_details(task):
     task_id = str(task.get("id") or "")
     current_style = sports_cave_dashboard.task_design_style(task)
     current_details = sports_cave_dashboard.design_task_details(task)
-    style_options = ["", *design_studio_styles.style_slugs()]
+    style_options = alphabetize_options(
+        ["", *design_studio_styles.style_slugs()],
+        label=design_studio_styles.design_style_label,
+    )
     selected_style = st.selectbox(
         "Design style",
         style_options,
-        index=style_options.index(current_style) if current_style in style_options else 0,
+        index=selected_option_index(style_options, current_style),
         format_func=lambda value: design_studio_styles.design_style_label(value),
         key=f"dashboard-design-edit-style::{task_id}",
     )
@@ -13655,14 +13664,20 @@ def render_task_group(group, tasks):
             placeholder="Search designs",
             key=f"dashboard-task-search::{group_key}",
         )
-        style_options = ["", *sorted({row.get("design_style") for row in authoritative_rows if row.get("design_style")})]
+        style_options = alphabetize_options(
+            ["", *{row.get("design_style") for row in authoritative_rows if row.get("design_style")}],
+            label=lambda value: "All styles" if not value else design_studio_styles.design_style_label(value),
+        )
         design_style = filter_columns[1].selectbox(
             "Design style",
             style_options,
             format_func=lambda value: "All styles" if not value else design_studio_styles.design_style_label(value),
             key=f"dashboard-task-style-filter::{group_key}",
         )
-        sport_options = ["", *sorted({row.get("sport") for row in authoritative_rows if row.get("sport")})]
+        sport_options = alphabetize_options(
+            ["", *{row.get("sport") for row in authoritative_rows if row.get("sport")}],
+            label=lambda value: value or "All sports",
+        )
         sport = filter_columns[2].selectbox(
             "Sport",
             sport_options,
@@ -13788,7 +13803,10 @@ def render_dashboard_tasks(state):
         if category == sports_cave_dashboard.DESIGN_TASK_GROUP:
             design_style = columns[2].selectbox(
                 "Design style",
-                ["", *design_studio_styles.style_slugs()],
+                alphabetize_options(
+                    ["", *design_studio_styles.style_slugs()],
+                    label=design_studio_styles.design_style_label,
+                ),
                 format_func=lambda value: design_studio_styles.design_style_label(value),
                 label_visibility="collapsed",
                 key="dashboard-add-task-style",
@@ -13941,17 +13959,17 @@ def render_activity_log(local_now, *, show_denied=True):
         filter_cols = st.columns([1, 1, 1, 1, 1, 1.25])
         user_filter = filter_cols[0].selectbox(
             "User",
-            sports_cave_dashboard.activity_filter_options(records, "User"),
+            alphabetize_options(sports_cave_dashboard.activity_filter_options(records, "User")),
             key="dashboard-activity-filter-user",
         )
         action_filter = filter_cols[1].selectbox(
             "Action",
-            sports_cave_dashboard.activity_filter_options(records, "Action"),
+            alphabetize_options(sports_cave_dashboard.activity_filter_options(records, "Action")),
             key="dashboard-activity-filter-action",
         )
         area_filter = filter_cols[2].selectbox(
             "Page/Area",
-            sports_cave_dashboard.activity_filter_options(records, "Page/Area"),
+            alphabetize_options(sports_cave_dashboard.activity_filter_options(records, "Page/Area")),
             key="dashboard-activity-filter-area",
         )
         status_filter = filter_cols[3].selectbox(

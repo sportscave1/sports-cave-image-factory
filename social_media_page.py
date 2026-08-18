@@ -9,6 +9,7 @@ import os_accounts
 import social_media
 import social_media_store
 import social_media_workspace
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 HISTORY_PAGE_SIZE = 15
@@ -206,7 +207,7 @@ def _admin_staff_selector(user, staff):
     by_id = {account["id"]: account for account in staff}
     selected_id = st.selectbox(
         "Staff member",
-        tuple(by_id),
+        alphabetize_options(by_id, label=lambda account_id: by_id[account_id]["display_name"]),
         format_func=lambda account_id: by_id[account_id]["display_name"],
         key="social-media-staff-selector",
     )
@@ -319,7 +320,7 @@ def _render_today(user, target, store, account_store):
         st.markdown("#### Today's focus")
         focus_areas = st.multiselect(
             "Focus",
-            social_media.FOCUS_OPTIONS,
+            alphabetize_options(social_media.FOCUS_OPTIONS),
             default=plan.get("focus_areas") or [],
             disabled=completed,
         )
@@ -353,7 +354,7 @@ def _render_today(user, target, store, account_store):
         )
         planned_platforms = st.multiselect(
             "Which platforms are planned?",
-            social_media.PLATFORMS,
+            alphabetize_options(social_media.PLATFORMS),
             default=plan.get("planned_platforms") or [],
             disabled=completed,
         )
@@ -561,7 +562,7 @@ def _render_post_tracker(user, target, store, account_store):
     platform_defaults = list(_platform_map(selected_post))
     selected_platforms = st.multiselect(
         "Platforms",
-        social_media.PLATFORMS,
+        alphabetize_options(social_media.PLATFORMS),
         default=platform_defaults,
         key=f"social-post-platforms::{selected_post.get('id') or 'new'}",
     )
@@ -581,23 +582,17 @@ def _render_post_tracker(user, target, store, account_store):
             value=selected_post.get("campaign") or "",
             max_chars=240,
         )
+        content_format_options = alphabetize_options(social_media.CONTENT_FORMATS)
         content_format = main_columns[0].selectbox(
             "Content format",
-            social_media.CONTENT_FORMATS,
-            index=(
-                social_media.CONTENT_FORMATS.index(selected_post.get("content_format"))
-                if selected_post.get("content_format") in social_media.CONTENT_FORMATS
-                else 0
-            ),
+            content_format_options,
+            index=selected_option_index(content_format_options, selected_post.get("content_format") or social_media.CONTENT_FORMATS[0]),
         )
+        market_options = alphabetize_options(social_media.MARKETS)
         market = main_columns[1].selectbox(
             "Market",
-            social_media.MARKETS,
-            index=(
-                social_media.MARKETS.index(selected_post.get("market"))
-                if selected_post.get("market") in social_media.MARKETS
-                else social_media.MARKETS.index("Global")
-            ),
+            market_options,
+            index=selected_option_index(market_options, selected_post.get("market") or "Global"),
         )
         created_date = main_columns[0].date_input(
             "Created date",
@@ -944,12 +939,12 @@ def _render_history(user, target, store, account_store):
     )
     platform = filter_columns[2].selectbox(
         "Platform",
-        ("All",) + social_media.PLATFORMS,
+        alphabetize_options(("All",) + social_media.PLATFORMS),
         key="social-history-platform",
     )
     content_format = filter_columns[3].selectbox(
         "Format",
-        ("All",) + social_media.CONTENT_FORMATS,
+        alphabetize_options(("All",) + social_media.CONTENT_FORMATS),
         key="social-history-format",
     )
     status = filter_columns[4].selectbox(

@@ -11,6 +11,7 @@ import email_service
 import os_accounts
 import reporting_store
 import sports_cave_dashboard
+from ui_option_ordering import alphabetize_options
 
 
 ARCHIVE_PAGE_SIZE = 15
@@ -572,11 +573,11 @@ def _render_staff_week_activity(user, anchor_date):
     details = snapshot.get("details") or []
     account_options = {row["Account"]: row["staff_id"] for row in rows}
     filter_cols = st.columns([1.4, 1, 1.4, 1.4])
-    account = filter_cols[0].selectbox("Account", tuple(account_options), key="reporting-staff-detail-account")
+    account = filter_cols[0].selectbox("Account", alphabetize_options(account_options), key="reporting-staff-detail-account")
     day = filter_cols[1].selectbox("Day", ("All", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), key="reporting-staff-detail-day")
-    areas = ("All", *sorted({str(row.get("Area") or "") for row in details if row.get("Area")}))
+    areas = alphabetize_options(("All", *{str(row.get("Area") or "") for row in details if row.get("Area")}))
     area = filter_cols[2].selectbox("Area", areas, key="reporting-staff-detail-area")
-    sources = ("All", *sorted({str(row.get("Source") or "") for row in details if row.get("Source")}))
+    sources = alphabetize_options(("All", *{str(row.get("Source") or "") for row in details if row.get("Source")}))
     source = filter_cols[3].selectbox("Activity type", sources, key="reporting-staff-detail-source")
     selected = [
         {key: value for key, value in row.items() if key not in {"staff_id", "day"}}

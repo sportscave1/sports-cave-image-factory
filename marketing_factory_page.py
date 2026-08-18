@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 
 import supabase_backend
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 COUNTRY_RULES = {
@@ -951,7 +952,8 @@ def _render_header():
 
 
 def _product_selector(products):
-    options = ["Manual / no product"] + [_product_label(row) for row in products]
+    products = list(alphabetize_options(products, label=_product_label))
+    options = ["Manual / no product", *[_product_label(row) for row in products]]
     selected_label = st.selectbox("Product", options, key="mf_product_select")
     if selected_label == "Manual / no product":
         return {}
@@ -1121,11 +1123,23 @@ def _render_ad_builder():
         st.session_state["mf_selected_stage"] = derived_stage
 
         with _card("Market", "Choose the country tone before writing copy."):
-            country = st.selectbox("Country target", COUNTRY_OPTIONS, index=0, key="mf_country")
+            country_options = alphabetize_options(COUNTRY_OPTIONS)
+            country = st.selectbox(
+                "Country target",
+                country_options,
+                index=selected_option_index(country_options, COUNTRY_OPTIONS[0]),
+                key="mf_country",
+            )
             st.caption(COUNTRY_RULES[country])
 
         with _card("Ad Format", "Choose the output pack you are building today."):
-            ad_format = st.selectbox("Ad format", AD_FORMAT_OPTIONS, index=0, key="mf_ad_format")
+            ad_format_options = alphabetize_options(AD_FORMAT_OPTIONS)
+            ad_format = st.selectbox(
+                "Ad format",
+                ad_format_options,
+                index=selected_option_index(ad_format_options, AD_FORMAT_OPTIONS[0]),
+                key="mf_ad_format",
+            )
             st.caption(AD_FORMAT_RULES[ad_format])
 
         with _card("Funnel Stage", "This decides how hard the copy can push."):
@@ -1146,10 +1160,16 @@ def _render_ad_builder():
                 st.warning("Only use exact edition numbers if the ad will be updated when numbers move.")
 
         with _card("Copy Angle", "Pick one primary angle and optional supporting angles."):
-            primary_angle = st.selectbox("Primary angle", ANGLE_OPTIONS, index=0, key="mf_primary_angle")
+            angle_options = alphabetize_options(ANGLE_OPTIONS)
+            primary_angle = st.selectbox(
+                "Primary angle",
+                angle_options,
+                index=selected_option_index(angle_options, ANGLE_OPTIONS[0]),
+                key="mf_primary_angle",
+            )
             secondary_angles = st.multiselect(
                 "Secondary angles",
-                ANGLE_OPTIONS,
+                angle_options,
                 default=["Collector Value", "Scarcity"] if primary_angle not in {"Collector Value", "Scarcity"} else ["Nostalgia"],
                 key="mf_secondary_angles",
             )
@@ -1300,7 +1320,7 @@ def _render_meta_intelligence_tab():
     st.subheader("Meta Signals")
     st.caption("Use past ad results to choose better hooks. This page only helps build copy packs.")
     date_range = st.selectbox("Date range", ["last_7_days", "last_14_days", "last_30_days", "last_90_days", "all"], index=2, key="mf-meta-date")
-    market = st.selectbox("Market", ["All", *COUNTRY_OPTIONS], key="mf-meta-market")
+    market = st.selectbox("Market", alphabetize_options(["All", *COUNTRY_OPTIONS]), key="mf-meta-market")
     product_query = st.text_input("Product filter", key="mf-meta-product-filter")
     signal_cols = st.columns([1, 1, 2])
     if signal_cols[0].button("Load Meta Signals", use_container_width=True, key="mf-load-meta-tab"):
@@ -1437,7 +1457,7 @@ def _render_prompt_library_tab():
         "Creative Refresh Prompt": "Create new hooks for weak ads without copying winners word-for-word.",
         "Product Opportunity Prompt": "Use product, edition, and stored Meta opportunity signals to decide what to test next.",
     }
-    selected = st.selectbox("Template", list(templates), key="mf-template")
+    selected = st.selectbox("Template", alphabetize_options(templates), key="mf-template")
     variables = st.text_area(
         "Editable variables",
         value="Product:\nCountry:\nEdition stage:\nFan base:\nStory notes:\nMeta signal:",

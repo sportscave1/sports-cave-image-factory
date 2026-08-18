@@ -24,6 +24,7 @@ import shopify_sync
 import supabase_backend
 from certificate_logging import certificate_stage_log
 from services import r2_storage
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
@@ -2122,8 +2123,11 @@ def render_shopify_sync_panel():
                 if suggestion:
                     st.info(f"Suggested internal match: {internal_by_id[suggestion]['product_name']}")
                 match_columns = st.columns([3, 1, 1])
-                product_options = [None, *internal_by_id.keys()]
-                default_index = product_options.index(suggestion) if suggestion in product_options else 0
+                product_options = alphabetize_options(
+                    [None, *internal_by_id.keys()],
+                    label=lambda value: "Choose a product" if value is None else internal_by_id[value]["product_name"],
+                )
+                default_index = selected_option_index(product_options, suggestion)
                 selected_product_id = match_columns[0].selectbox(
                     "Match to internal product",
                     product_options,
@@ -2312,8 +2316,11 @@ def render_shopify_sync_page():
                 if suggestion:
                     st.info(f"Suggested internal match: {internal_by_id[suggestion]['product_name']}")
                 match_columns = st.columns([3, 1, 1])
-                product_options = [None, *internal_by_id.keys()]
-                default_index = product_options.index(suggestion) if suggestion in product_options else 0
+                product_options = alphabetize_options(
+                    [None, *internal_by_id.keys()],
+                    label=lambda value: "Choose a product" if value is None else internal_by_id[value]["product_name"],
+                )
+                default_index = selected_option_index(product_options, suggestion)
                 selected_product_id = match_columns[0].selectbox(
                     "Match to internal product",
                     product_options,
@@ -2342,20 +2349,22 @@ def render_shopify_sync_page():
 
 def product_form_fields(prefix, product=None):
     product = product or {}
+    sport_options = alphabetize_options(db.SPORT_CATEGORIES)
+    country_options = alphabetize_options(db.COUNTRY_FOCUS_OPTIONS)
     left, right = st.columns(2)
     with left:
         product_name = st.text_input("Product name *", value=product.get("product_name", ""), key=f"{prefix}-name")
         handle = st.text_input("Handle", value=product.get("handle", ""), key=f"{prefix}-handle")
         sport_category = st.selectbox(
             "Sport category",
-            list(db.SPORT_CATEGORIES),
-            index=select_index(list(db.SPORT_CATEGORIES), product.get("sport_category", "Other"), len(db.SPORT_CATEGORIES) - 1),
+            sport_options,
+            index=selected_option_index(sport_options, product.get("sport_category", "Other"), default=len(sport_options) - 1),
             key=f"{prefix}-sport",
         )
         country_focus = st.selectbox(
             "Country focus",
-            list(db.COUNTRY_FOCUS_OPTIONS),
-            index=select_index(list(db.COUNTRY_FOCUS_OPTIONS), product.get("country_focus", "Global"), len(db.COUNTRY_FOCUS_OPTIONS) - 1),
+            country_options,
+            index=selected_option_index(country_options, product.get("country_focus", "Global"), default=len(country_options) - 1),
             key=f"{prefix}-country",
         )
         status = st.selectbox(
@@ -2661,8 +2670,8 @@ def render_products_page():
 
     filter_columns = st.columns([2.2, 1.1, 1.1, 1.1, 1.2])
     search = filter_columns[0].text_input("Search products", placeholder="Product name or handle")
-    sport_filter = filter_columns[1].selectbox("Sport category", ["All", *db.SPORT_CATEGORIES])
-    country_filter = filter_columns[2].selectbox("Country focus", ["All", *db.COUNTRY_FOCUS_OPTIONS])
+    sport_filter = filter_columns[1].selectbox("Sport category", alphabetize_options(["All", *db.SPORT_CATEGORIES]))
+    country_filter = filter_columns[2].selectbox("Country focus", alphabetize_options(["All", *db.COUNTRY_FOCUS_OPTIONS]))
     status_filter = filter_columns[3].selectbox("Status", ["All", *db.PRODUCT_STATUSES])
     edition_filter = filter_columns[4].selectbox("Edition status", ["All", *db.EDITION_STATUSES[:-1]])
 
@@ -2711,18 +2720,20 @@ def render_product_overview(product):
     edit_requested = st.session_state.get("editing_product_id") == product["id"]
     with st.expander("Edit Product Overview", expanded=edit_requested):
         with st.form(f"edit-product-{product['id']}"):
+            sport_options = alphabetize_options(db.SPORT_CATEGORIES)
+            country_options = alphabetize_options(db.COUNTRY_FOCUS_OPTIONS)
             left, right = st.columns(2)
             product_name = left.text_input("Product name *", value=product.get("product_name") or "")
             handle = left.text_input("Handle", value=product.get("handle") or "")
             sport_category = left.selectbox(
                 "Sport category",
-                list(db.SPORT_CATEGORIES),
-                index=select_index(list(db.SPORT_CATEGORIES), product.get("sport_category"), len(db.SPORT_CATEGORIES) - 1),
+                sport_options,
+                index=selected_option_index(sport_options, product.get("sport_category"), default=len(sport_options) - 1),
             )
             country_focus = left.selectbox(
                 "Country focus",
-                list(db.COUNTRY_FOCUS_OPTIONS),
-                index=select_index(list(db.COUNTRY_FOCUS_OPTIONS), product.get("country_focus"), len(db.COUNTRY_FOCUS_OPTIONS) - 1),
+                country_options,
+                index=selected_option_index(country_options, product.get("country_focus"), default=len(country_options) - 1),
             )
             status = right.selectbox(
                 "Product status",
@@ -3142,7 +3153,7 @@ def render_files_page():
 
     file_filter = st.selectbox(
         "File status filter",
-        (
+        alphabetize_options((
             "All products",
             "Missing PSD",
             "Missing JPG",
@@ -3157,7 +3168,7 @@ def render_files_page():
             "Needs Review",
             "Approved",
             "All Connected",
-        ),
+        ), first=("All products",)),
     )
     try:
         products = db.list_file_hub_products(file_filter)
@@ -8755,13 +8766,16 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
                 st.warning("No Shopify handles are available for manual linking yet. Sync Shopify products first.")
                 return
             manual_columns = st.columns([1.4, 1.6, 1])
-            unmatched_options = [
+            unmatched_options = alphabetize_options([
                 f"{row['asset_name'] or row['shopify_handle']} | {index}"
                 for index, row in enumerate(unmatched)
-            ]
+            ])
             selected_unmatched = manual_columns[0].selectbox("Unmatched PSD", unmatched_options)
             selected_index = int(selected_unmatched.rsplit("|", 1)[-1].strip())
-            selected_product_label = manual_columns[1].selectbox("Link to Shopify product", list(product_options.keys()))
+            selected_product_label = manual_columns[1].selectbox(
+                "Link to Shopify product",
+                alphabetize_options(product_options),
+            )
             overwrite_manual = st.checkbox(
                 "Overwrite this product's existing PSD link",
                 value=False,
@@ -8880,7 +8894,11 @@ def render_product_assets_page():
     filter_columns = st.columns([1, 1, 2])
     asset_type_filter = filter_columns[0].selectbox(
         "Asset type filter",
-        ["All", *list(supabase_backend.ASSET_TYPES)],
+        alphabetize_options(
+            ["All", *list(supabase_backend.ASSET_TYPES)],
+            label=lambda value: "All asset types" if value == "All" else supabase_backend.ASSET_LABELS.get(value, value),
+            first=("All asset types",),
+        ),
         format_func=lambda value: "All asset types" if value == "All" else supabase_backend.ASSET_LABELS.get(value, value),
         key="supabase-assets-type-filter",
     )
@@ -8898,15 +8916,18 @@ def render_product_assets_page():
 
     with st.container(border=True):
         st.subheader("Add or Update Asset Link")
-        product_options = [
+        product_options = alphabetize_options([
             f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}"
             for item in products
-        ]
+        ])
         selected = st.selectbox("Product", product_options, key="supabase-asset-product")
         selected_handle = selected.rsplit("|", 1)[-1].strip()
         asset_type = st.selectbox(
             "Asset type",
-            list(supabase_backend.ASSET_TYPES),
+            alphabetize_options(
+                supabase_backend.ASSET_TYPES,
+                label=lambda value: supabase_backend.ASSET_LABELS.get(value, value),
+            ),
             format_func=lambda value: supabase_backend.ASSET_LABELS.get(value, value),
             key="supabase-asset-type",
         )

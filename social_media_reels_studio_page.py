@@ -25,6 +25,7 @@ from sports_cave_prompt_blocks import (
     SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK,
     append_sports_cave_image_realism_rules,
 )
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
@@ -2873,7 +2874,8 @@ def _sport_selectbox(current_value: str) -> str:
     options = list(SPORT_CATEGORY_OPTIONS)
     if current_value and current_value not in options:
         options.append(current_value)
-    index = options.index(current_value) if current_value in options else 0
+    options = alphabetize_options(options)
+    index = selected_option_index(options, current_value)
     return st.selectbox(
         "Sport category",
         options,
@@ -3266,11 +3268,11 @@ Optional final archive location:
             key="smrs_final_sport_category",
             placeholder="Choose or add sport category",
         )
-        final_scene_labels = list(scene_options.keys())
+        final_scene_labels = alphabetize_options(scene_options)
         final_scene_label = st.selectbox(
             "Scene",
             final_scene_labels,
-            index=final_scene_labels.index(selected_scene_label) if selected_scene_label in final_scene_labels else 0,
+            index=selected_option_index(final_scene_labels, selected_scene_label),
             key="smrs_final_scene_label",
         )
         final_scene_slug = scene_options[final_scene_label]

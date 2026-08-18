@@ -19,6 +19,7 @@ import ads_page
 import dropbox_integration
 import os_accounts
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
+from ui_option_ordering import alphabetize_options
 
 
 STATE_PREFIX = "ads_creative_refresh_"
@@ -35,7 +36,7 @@ ORIGINAL_PROMPT_UPLOAD_KEY = f"{STATE_PREFIX}original_prompt_upload"
 META_CSV_UPLOAD_KEY = f"{STATE_PREFIX}meta_csv_upload"
 
 CREATIVE_REFRESH_VERSION = "SPORTS CAVE CREATIVE REFRESH V1"
-WINNING_ANGLE_OPTIONS = (
+WINNING_ANGLE_OPTIONS = alphabetize_options((
     "Select emotional angle",
     "Nostalgia",
     "Scarcity",
@@ -45,15 +46,15 @@ WINNING_ANGLE_OPTIONS = (
     "Rivalry",
     "Gifting",
     "Other",
-)
+))
 PERFORMANCE_MODES = (
     "Manual metrics",
     "Meta CSV upload",
     "No metrics available",
 )
-AUDIENCE_TYPES = ("Broad", "Interest", "Lookalike", "Retargeting", "Other")
+AUDIENCE_TYPES = alphabetize_options(("Broad", "Interest", "Lookalike", "Retargeting", "Other"))
 REFRESH_INTENSITIES = ("Balanced", "Conservative", "Bold")
-PROTECTED_ELEMENTS = (
+PROTECTED_ELEMENTS = alphabetize_options((
     "Exact product and frame",
     "Proven emotional territory",
     "Premium Sports Cave positioning",
@@ -62,7 +63,7 @@ PROTECTED_ELEMENTS = (
     "Verified scarcity facts",
     "Collector-led CTA intent",
     "Country localisation",
-)
+))
 CONFOUNDERS = (
     "Price changed",
     "Offer changed",
@@ -1280,7 +1281,10 @@ def _render_product_campaign_section():
         if records:
             selector_value = st.selectbox(
                 "Product name",
-                options=tuple(records_by_identity),
+                options=alphabetize_options(
+                    records_by_identity,
+                    label=lambda identity: records_by_identity.get(identity, {}).get("label") or identity,
+                ),
                 index=None,
                 placeholder="Select or enter a product",
                 accept_new_options=True,

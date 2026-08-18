@@ -26,6 +26,7 @@ from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
     build_sports_cave_image_realism_rules,
 )
+from ui_option_ordering import alphabetize_options
 
 
 class _LazyModuleProxy:
@@ -44,7 +45,7 @@ ads_image_workflow = _LazyModuleProxy("ads_image_workflow")
 image_factory = _LazyModuleProxy("image_factory")
 
 
-CATEGORY_OPTIONS = [
+CATEGORY_OPTIONS = list(alphabetize_options([
     "Select category",
     "NBA",
     "Motorsport",
@@ -59,34 +60,34 @@ CATEGORY_OPTIONS = [
     "Rugby Union",
     "Tennis",
     "Other",
-]
+]))
 
-COUNTRY_OPTIONS = [
+COUNTRY_OPTIONS = list(alphabetize_options([
     "Select country",
     "Australia",
     "USA",
     "UK",
     "Canada",
     "New Zealand",
-]
+]))
 
-CAMPAIGN_TYPE_OPTIONS = [
+CAMPAIGN_TYPE_OPTIONS = list(alphabetize_options([
     "Select campaign type",
     "Carousel",
     "Instant Experience",
     "Single Image / Video",
-]
+]))
 
-CAMPAIGN_MOMENT_TYPE_OPTIONS = [
+CAMPAIGN_MOMENT_TYPE_OPTIONS = list(alphabetize_options([
     "Gifting Occasion",
     "Sporting Event",
     "Sale Period",
     "Product Drop",
     "Seasonal Moment",
     "Other",
-]
+]))
 
-CAMPAIGN_MOMENT_MARKET_OPTIONS = [
+CAMPAIGN_MOMENT_MARKET_OPTIONS = list(alphabetize_options([
     "Use selected ad country",
     "Australia",
     "USA",
@@ -94,7 +95,7 @@ CAMPAIGN_MOMENT_MARKET_OPTIONS = [
     "Canada",
     "New Zealand",
     "Global",
-]
+], first=("Use selected ad country",)))
 
 CAMPAIGN_MOMENT_STRENGTH_OPTIONS = [
     "Subtle",
@@ -8488,7 +8489,10 @@ def render_product_name_input(*, rows=None, result=None):
     if records:
         selector_value = st.selectbox(
             "Product name",
-            options=tuple(records_by_identity),
+            options=alphabetize_options(
+                records_by_identity,
+                label=lambda identity: records_by_identity.get(identity, {}).get("label") or identity,
+            ),
             index=None,
             placeholder="Example: Six Laps Ahead",
             accept_new_options=True,

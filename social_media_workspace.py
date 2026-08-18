@@ -18,6 +18,7 @@ import social_media_branding
 import social_media_catalog
 import social_media_creator
 import social_media_store
+from ui_option_ordering import alphabetize_options, selected_option_index
 
 
 CREATOR_RESULT_KEY = "social_creator_result"
@@ -308,10 +309,11 @@ def _editable_selectbox(label, suggestions, *, key, placeholder):
     options = list(suggestions)
     if current and current not in options:
         options.insert(0, current)
+    options = alphabetize_options(options)
     value = st.selectbox(
         label,
         options,
-        index=_select_index(options, current) if current else None,
+        index=selected_option_index(options, current) if current else None,
         placeholder=placeholder,
         accept_new_options=True,
         filter_mode="fuzzy",
@@ -566,8 +568,14 @@ def _render_creator_form(products):
         for product in products
         if _product_option_id(product)
     }
-    product_options = ("",) + tuple(product_by_id)
-    collections = ("",) + social_media_catalog.collection_options(products)
+    product_options = alphabetize_options(
+        ("", *product_by_id),
+        label=lambda identity: product_by_id[identity]["title"] if identity else "Select a product",
+    )
+    collections = alphabetize_options(
+        ("", *social_media_catalog.collection_options(products)),
+        label=lambda value: value or "Select a collection",
+    )
 
     with st.container(border=True):
         st.markdown('<div class="sc-social-stage"><div class="sc-social-stage-title">1. What are we promoting?</div></div>', unsafe_allow_html=True)
@@ -644,50 +652,57 @@ def _render_creator_form(products):
                 key=FIELD_KEYS["event"],
             )
         row = st.columns(2)
+        market_options = alphabetize_options(social_media_creator.MARKET_OPTIONS)
         market = row[0].selectbox(
             "Market",
-            social_media_creator.MARKET_OPTIONS,
-            index=_select_index(
-                social_media_creator.MARKET_OPTIONS,
+            market_options,
+            index=selected_option_index(
+                market_options,
                 st.session_state.get(FIELD_KEYS["market"], "Global"),
             ),
             key=FIELD_KEYS["market"],
         )
+        sport_options = alphabetize_options(social_media_creator.SPORT_OPTIONS)
         sport = row[1].selectbox(
             "Sport",
-            social_media_creator.SPORT_OPTIONS,
-            index=_select_index(
-                social_media_creator.SPORT_OPTIONS,
+            sport_options,
+            index=selected_option_index(
+                sport_options,
                 st.session_state.get(FIELD_KEYS["sport"], "Other"),
-                default=len(social_media_creator.SPORT_OPTIONS) - 1,
+                default=len(sport_options) - 1,
             ),
             key=FIELD_KEYS["sport"],
         )
 
         st.markdown('<div class="sc-social-stage"><div class="sc-social-stage-title">2. What are we making?</div></div>', unsafe_allow_html=True)
         row = st.columns(2)
+        format_options = alphabetize_options(social_media_creator.FORMAT_OPTIONS)
         content_format = row[0].selectbox(
             "Format",
-            social_media_creator.FORMAT_OPTIONS,
-            index=_select_index(
-                social_media_creator.FORMAT_OPTIONS,
+            format_options,
+            index=selected_option_index(
+                format_options,
                 st.session_state.get(FIELD_KEYS["format"], "Reel"),
             ),
             key=FIELD_KEYS["format"],
         )
+        series_options = alphabetize_options(social_media_creator.SERIES_OPTIONS)
         series = row[1].selectbox(
             "Sports Cave series",
-            social_media_creator.SERIES_OPTIONS,
-            index=_select_index(
-                social_media_creator.SERIES_OPTIONS,
+            series_options,
+            index=selected_option_index(
+                series_options,
                 st.session_state.get(FIELD_KEYS["series"], "THE MOMENT"),
-                default=1,
+                default=selected_option_index(series_options, "THE MOMENT"),
             ),
             key=FIELD_KEYS["series"],
         )
         platforms = st.multiselect(
             "Platforms",
-            social_media_creator.PLATFORM_OPTIONS,
+            alphabetize_options(
+                social_media_creator.PLATFORM_OPTIONS,
+                first=("All suitable platforms",),
+            ),
             default=st.session_state.get(
                 FIELD_KEYS["platforms"],
                 ["All suitable platforms"],
@@ -696,11 +711,12 @@ def _render_creator_form(products):
         )
         production_method = ""
         if content_format == "Reel":
+            production_options = alphabetize_options(social_media_creator.PRODUCTION_METHOD_OPTIONS)
             production_method = st.selectbox(
                 "Production method",
-                social_media_creator.PRODUCTION_METHOD_OPTIONS,
-                index=_select_index(
-                    social_media_creator.PRODUCTION_METHOD_OPTIONS,
+                production_options,
+                index=selected_option_index(
+                    production_options,
                     st.session_state.get(
                         FIELD_KEYS["production_method"],
                         "AI Reels Studio",
@@ -726,11 +742,16 @@ def _render_creator_form(products):
             unsafe_allow_html=True,
         )
         row = st.columns(2)
+        room_options = alphabetize_options(
+            social_media_creator.ROOM_TYPE_OPTIONS,
+            first=(social_media_creator.ROOM_TYPE_OPTIONS[0],),
+            last=(social_media_creator.SCENE_CUSTOM_OPTION,),
+        )
         room_type = row[0].selectbox(
             "Room type",
-            social_media_creator.ROOM_TYPE_OPTIONS,
-            index=_select_index(
-                social_media_creator.ROOM_TYPE_OPTIONS,
+            room_options,
+            index=selected_option_index(
+                room_options,
                 st.session_state.get(
                     FIELD_KEYS["room_type"],
                     social_media_creator.ROOM_TYPE_OPTIONS[0],
@@ -742,11 +763,16 @@ def _render_creator_form(products):
         wall_controls_disabled = (
             room_type == social_media_creator.NO_ROOM_STUDIO_OPTION
         )
+        camera_options = alphabetize_options(
+            social_media_creator.CAMERA_ANGLE_OPTIONS,
+            first=(social_media_creator.CAMERA_ANGLE_OPTIONS[0],),
+            last=(social_media_creator.SCENE_CUSTOM_OPTION,),
+        )
         camera_angle = row[1].selectbox(
             "Camera angle",
-            social_media_creator.CAMERA_ANGLE_OPTIONS,
-            index=_select_index(
-                social_media_creator.CAMERA_ANGLE_OPTIONS,
+            camera_options,
+            index=selected_option_index(
+                camera_options,
                 st.session_state.get(
                     FIELD_KEYS["camera_angle"],
                     social_media_creator.CAMERA_ANGLE_OPTIONS[0],
@@ -769,11 +795,16 @@ def _render_creator_form(products):
         )
 
         row = st.columns(2)
+        wall_colour_options = alphabetize_options(
+            social_media_creator.WALL_COLOUR_OPTIONS,
+            first=(social_media_creator.WALL_COLOUR_OPTIONS[0],),
+            last=(social_media_creator.SCENE_CUSTOM_OPTION,),
+        )
         wall_colour = row[0].selectbox(
             "Wall colour",
-            social_media_creator.WALL_COLOUR_OPTIONS,
-            index=_select_index(
-                social_media_creator.WALL_COLOUR_OPTIONS,
+            wall_colour_options,
+            index=selected_option_index(
+                wall_colour_options,
                 st.session_state.get(
                     FIELD_KEYS["wall_colour"],
                     social_media_creator.WALL_COLOUR_OPTIONS[0],
@@ -783,11 +814,16 @@ def _render_creator_form(products):
             key=FIELD_KEYS["wall_colour"],
             disabled=wall_controls_disabled,
         )
+        wall_material_options = alphabetize_options(
+            social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
+            first=(social_media_creator.WALL_MATERIAL_FINISH_OPTIONS[0],),
+            last=(social_media_creator.SCENE_CUSTOM_OPTION,),
+        )
         wall_material_finish = row[1].selectbox(
             "Wall material/finish",
-            social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
-            index=_select_index(
-                social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
+            wall_material_options,
+            index=selected_option_index(
+                wall_material_options,
                 st.session_state.get(
                     FIELD_KEYS["wall_material_finish"],
                     social_media_creator.WALL_MATERIAL_FINISH_OPTIONS[0],
@@ -839,11 +875,16 @@ def _render_creator_form(products):
             filter_mode="fuzzy",
             key=FIELD_KEYS["shot_distance_product_prominence"],
         )
+        lighting_options = alphabetize_options(
+            social_media_creator.LIGHTING_STYLE_OPTIONS,
+            first=(social_media_creator.LIGHTING_STYLE_OPTIONS[0],),
+            last=(social_media_creator.SCENE_CUSTOM_OPTION,),
+        )
         lighting_style = row[1].selectbox(
             "Lighting style",
-            social_media_creator.LIGHTING_STYLE_OPTIONS,
-            index=_select_index(
-                social_media_creator.LIGHTING_STYLE_OPTIONS,
+            lighting_options,
+            index=selected_option_index(
+                lighting_options,
                 st.session_state.get(
                     FIELD_KEYS["lighting_style"],
                     social_media_creator.LIGHTING_STYLE_OPTIONS[0],
@@ -873,11 +914,12 @@ def _render_creator_form(products):
 
         st.markdown('<div class="sc-social-stage"><div class="sc-social-stage-title">3. Brief details</div></div>', unsafe_allow_html=True)
         row = st.columns(2)
+        objective_options = alphabetize_options(social_media_creator.OBJECTIVE_OPTIONS)
         objective = row[0].selectbox(
             "Objective",
-            social_media_creator.OBJECTIVE_OPTIONS,
-            index=_select_index(
-                social_media_creator.OBJECTIVE_OPTIONS,
+            objective_options,
+            index=selected_option_index(
+                objective_options,
                 st.session_state.get(FIELD_KEYS["objective"], "Reach"),
             ),
             key=FIELD_KEYS["objective"],
@@ -1495,11 +1537,12 @@ def render_plan(user, target, store, account_store=None):
         with st.expander("Set this week's priorities", expanded=not bool(priority)):
             with st.form("social-weekly-priority-form"):
                 row = st.columns(2)
+                priority_market_options = alphabetize_options(social_media_creator.MARKET_OPTIONS)
                 priority_market = row[0].selectbox(
                     "Priority market",
-                    social_media_creator.MARKET_OPTIONS,
-                    index=_select_index(
-                        social_media_creator.MARKET_OPTIONS,
+                    priority_market_options,
+                    index=selected_option_index(
+                        priority_market_options,
                         priority.get("priority_market") or "Global",
                     ),
                 )
@@ -1510,7 +1553,7 @@ def render_plan(user, target, store, account_store=None):
                 )
                 hero_products = st.multiselect(
                     "Hero products or collections",
-                    product_titles,
+                    alphabetize_options(product_titles),
                     default=[
                         item
                         for item in priority.get("hero_products") or ()
