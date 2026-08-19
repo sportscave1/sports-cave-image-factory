@@ -116,24 +116,30 @@ class PostgresSEOInteractiveReader:
                     """
                     SELECT latest.status AS latest_status,
                            latest.error_code AS latest_error_code,
+                           latest.error_summary AS latest_error_summary,
                            completed.id AS snapshot_id,
+                           completed.gsc_reporting_through_date,
                            completed.common_reporting_date,
+                           completed.gsc_source_revision AS snapshot_revision,
                            completed.refreshed_at,
                            COALESCE(connection.gsc_canonical_revision, 0) AS source_revision,
                            connection.gsc_site_url
                     FROM seo_google_connections AS connection
                     LEFT JOIN LATERAL (
-                        SELECT status, error_code
+                        SELECT status, error_code, error_summary
                         FROM seo_reporting_snapshot_runs
                         WHERE workspace_key=connection.workspace_key
                         ORDER BY refreshed_at DESC
                         LIMIT 1
                     ) AS latest ON TRUE
                     LEFT JOIN LATERAL (
-                        SELECT id, common_reporting_date, refreshed_at
+                        SELECT id, gsc_reporting_through_date,
+                               common_reporting_date, gsc_source_revision, refreshed_at
                         FROM seo_reporting_snapshot_runs
                         WHERE workspace_key=connection.workspace_key AND status='completed'
-                        ORDER BY refreshed_at DESC
+                          AND COALESCE(gsc_reporting_through_date, common_reporting_date) IS NOT NULL
+                        ORDER BY COALESCE(gsc_reporting_through_date, common_reporting_date) DESC,
+                                 refreshed_at DESC
                         LIMIT 1
                     ) AS completed ON TRUE
                     WHERE connection.workspace_key=%s
@@ -141,23 +147,31 @@ class PostgresSEOInteractiveReader:
                     (WORKSPACE_KEY,),
                     one=True,
                 )
-        available = bool(row.get("snapshot_id") and row.get("common_reporting_date"))
-        stale = str(row.get("latest_status") or "") in {"failed", "partial"}
+        through_date = row.get("gsc_reporting_through_date") or row.get("common_reporting_date")
+        available = bool(row.get("snapshot_id") and through_date)
+        source_revision = _integer(row.get("source_revision"))
+        snapshot_revision = _integer(row.get("snapshot_revision"))
+        stale = (
+            str(row.get("latest_status") or "") in {"failed", "partial"}
+            or (available and snapshot_revision < source_revision)
+        )
         watermark = "|".join(
             (
                 str(row.get("snapshot_id") or "none"),
-                _iso(row.get("common_reporting_date")),
-                str(_integer(row.get("source_revision"))),
+                _iso(through_date),
+                str(source_revision),
             )
         )
         result = {
             "available": available,
             "status": "stale_last_good" if available and stale else ("ready" if available else "snapshot_unavailable"),
-            "through_date": _iso(row.get("common_reporting_date")),
+            "through_date": _iso(through_date),
             "refreshed_at": _iso(row.get("refreshed_at")),
             "watermark": watermark,
-            "source_revision": _integer(row.get("source_revision")),
+            "source_revision": source_revision,
+            "snapshot_revision": snapshot_revision,
             "error_code": str(row.get("latest_error_code") or ""),
+            "error_summary": str(row.get("latest_error_summary") or ""),
             "gsc_site_url": str(row.get("gsc_site_url") or ""),
         }
         logging.info(
@@ -630,35 +644,66 @@ class PostgresSEOInteractiveReader:
         if not period:
             return {"rows": [], "total": 0, "unavailable": True, "diagnostics": dict(self.diagnostics)}
         scope, scope_params = self._scope(filters)
-        where = ["metric.workspace_key=%s", "metric.date BETWEEN %s AND %s", *[item.replace("market_code", "metric.market_code").replace("device_category", "metric.device_category") for item in scope]]
+        metric_scope = [
+            item.replace("market_code", "metric.market_code").replace(
+                "device_category", "metric.device_category"
+            )
+            for item in scope
+        ]
+        gsc_where = [
+            "metric.workspace_key=%s", "metric.date BETWEEN %s AND %s", *metric_scope,
+        ]
+        enrichment_where = [
+            "enrichment.workspace_key=%s", "enrichment.date BETWEEN %s AND %s",
+            *[
+                item.replace("market_code", "enrichment.market_code").replace(
+                    "device_category", "enrichment.device_category"
+                )
+                for item in scope
+            ],
+        ]
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
                 rows = self._execute(
                     cursor,
                     "landing_pages",
                     f"""
-                    WITH metrics AS (
-                        SELECT canonical_page_key,
+                    WITH gsc_metrics AS (
+                        SELECT page_url,
                                SUM(organic_clicks) AS clicks,
                                SUM(organic_impressions) AS impressions,
-                               SUM(position_weight) AS position_weight,
-                               SUM(organic_sessions) AS sessions,
-                               SUM(engaged_sessions) AS engaged_sessions,
-                               COUNT(*) OVER() AS source_rows
-                        FROM seo_reporting_landing_page_daily AS metric
-                        WHERE {' AND '.join(where)}
-                        GROUP BY canonical_page_key
+                               SUM(position_weight) AS position_weight
+                        FROM seo_reporting_page_daily AS metric
+                        WHERE {' AND '.join(gsc_where)}
+                        GROUP BY page_url
+                    ), enrichment_metrics AS (
+                        SELECT page.canonical_url AS page_url,
+                               SUM(enrichment.organic_sessions) AS sessions,
+                               SUM(enrichment.engaged_sessions) AS engaged_sessions
+                        FROM seo_reporting_landing_page_daily AS enrichment
+                        JOIN seo_canonical_pages AS page
+                          ON page.page_key=enrichment.canonical_page_key
+                        WHERE {' AND '.join(enrichment_where)}
+                        GROUP BY page.canonical_url
                     )
-                    SELECT page.canonical_url, page.title, page.page_type,
-                           metrics.clicks, metrics.impressions, metrics.position_weight,
-                           metrics.sessions, metrics.engaged_sessions,
+                    SELECT gsc.page_url AS canonical_url,
+                           COALESCE(page.title, '') AS title,
+                           COALESCE(page.page_type, '') AS page_type,
+                           gsc.clicks, gsc.impressions, gsc.position_weight,
+                           COALESCE(enrichment.sessions, 0) AS sessions,
+                           COALESCE(enrichment.engaged_sessions, 0) AS engaged_sessions,
                            COUNT(*) OVER() AS total_count
-                    FROM metrics
-                    JOIN seo_canonical_pages AS page ON page.page_key=metrics.canonical_page_key
-                    ORDER BY metrics.clicks DESC, metrics.impressions DESC, page.canonical_url ASC
+                    FROM gsc_metrics AS gsc
+                    LEFT JOIN seo_canonical_pages AS page ON page.canonical_url=gsc.page_url
+                    LEFT JOIN enrichment_metrics AS enrichment ON enrichment.page_url=gsc.page_url
+                    ORDER BY gsc.clicks DESC, gsc.impressions DESC, gsc.page_url ASC
                     LIMIT %s
                     """,
-                    (WORKSPACE_KEY, period["start_date"], period["end_date"], *scope_params, max(1, min(int(limit), 100))),
+                    (
+                        WORKSPACE_KEY, period["start_date"], period["end_date"], *scope_params,
+                        WORKSPACE_KEY, period["start_date"], period["end_date"], *scope_params,
+                        max(1, min(int(limit), 100)),
+                    ),
                 )
         for row in rows:
             impressions = _decimal(row.get("impressions"))

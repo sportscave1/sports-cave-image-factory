@@ -1108,7 +1108,10 @@ def _render_growth_pipeline_admin(user, *, growth_store=None):
             _set_notice("Daily SEO Growth Intelligence pipeline queued.")
             invalidate_seo_overview_summary_cache()
         st.rerun()
-    actions[1].caption("The scheduled command is safe to run repeatedly; each stage uses durable locks and idempotent writes.")
+    actions[1].caption(
+        "This reporting pipeline imports APIs and refreshes saved data only. It never requests the public Shopify storefront; "
+        "Technical Audit is a separately leased background-maintenance command."
+    )
     if stages:
         _table(
             [
@@ -1127,10 +1130,11 @@ def _render_growth_pipeline_admin(user, *, growth_store=None):
         )
 
 
-def _render_analytics_refresh_admin(user, *, growth_store=None):
+def _render_analytics_refresh_admin(user, *, growth_store=None, phase4_store=None):
     if not os_accounts.is_admin(user):
         return
     growth_store = growth_store or seo_growth_intelligence.default_store()
+    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
     if st.button(
         "Refresh analytics",
         type="primary",
@@ -1162,8 +1166,56 @@ def _render_analytics_refresh_admin(user, *, growth_store=None):
             invalidate_seo_overview_summary_cache()
         st.rerun()
 
+    if st.button(
+        "Sync / Repair SEO Data",
+        icon=":material/build:",
+        key="seo-repair-gsc-reporting",
+        use_container_width=True,
+    ):
+        try:
+            result = google_seo_import.queue_gsc_reporting_repair(
+                user,
+                phase4_store=phase4_store,
+            )
+        except (
+            google_seo.GoogleSEOError,
+            google_seo_import.SEOImportError,
+            google_seo_phase4.SEOPhase4Error,
+        ) as error:
+            _set_notice(getattr(error, "public_message", str(error)), success=False)
+        else:
+            repair = dict(result.get("reporting_repair") or {})
+            _set_notice(
+                "SEO repair queued. The background worker will refresh a bounded GSC range "
+                "and rebuild the compact snapshot."
+            )
+            st.session_state["seo-reporting-repair-job-id"] = repair.get("id") or ""
+            invalidate_seo_overview_summary_cache()
+        st.rerun()
+
     st.caption("Refreshes recent Google data, reads the existing Shopify/Supabase ledger and updates saved reporting.")
     with st.expander("Developer details", expanded=False):
+        try:
+            source = phase4_store.connection_record()
+            context = seo_reporting_runtime.default_reader().reporting_context()
+        except Exception:
+            source, context = {}, {}
+        if source or context:
+            st.caption(
+                "GSC pipeline: "
+                f"property={source.get('gsc_site_url') or context.get('gsc_site_url') or 'Not selected'}"
+                f" | canonical through={source.get('gsc_canonical_data_through_date') or 'Unavailable'}"
+                f" | last Google sync={source.get('gsc_canonical_synced_at') or source.get('last_successful_sync_at') or 'Unavailable'}"
+                f" | source revision={source.get('gsc_canonical_revision') or 0}"
+                f" | snapshot={context.get('status') or 'Unavailable'}"
+                f" | snapshot through={context.get('through_date') or 'Unavailable'}"
+                f" | snapshot revision={context.get('snapshot_revision') or 0}"
+            )
+            if context.get("error_code"):
+                st.caption(
+                    f"Latest snapshot issue: {context.get('error_code')} — "
+                    f"{context.get('error_summary') or 'No safe detail was saved.'}"
+                )
         try:
             status = growth_store.recent_pipeline_status()
         except Exception:
@@ -1178,6 +1230,22 @@ def _render_analytics_refresh_admin(user, *, growth_store=None):
             )
             if run.get("error_summary"):
                 st.caption(str(run.get("error_summary")))
+        try:
+            repair = phase4_store.recent_reporting_repair()
+        except Exception:
+            repair = {}
+        if repair:
+            st.caption(
+                "SEO repair: "
+                f"{str(repair.get('status') or 'unknown').replace('_', ' ').title()}"
+                f" | Requested: {repair.get('requested_at') or 'Unknown'}"
+                f" | Completed: {repair.get('completed_at') or 'Not completed'}"
+            )
+            if repair.get("error_code"):
+                st.caption(
+                    f"Repair issue: {repair.get('error_code')} — "
+                    f"{repair.get('error_summary') or 'No safe detail was saved.'}"
+                )
 
 
 def _load_reporting_health(phase4_store=None):
@@ -1943,7 +2011,9 @@ def _render_data_connections_admin(
         )
     _render_google_controls(user, google_store, config_status, connection)
 
-    _render_analytics_refresh_admin(user, growth_store=growth_store)
+    _render_analytics_refresh_admin(
+        user, growth_store=growth_store, phase4_store=phase4_store
+    )
     with st.expander("Historical import recovery", expanded=False):
         _render_historical_import_controls(
             user,
@@ -3968,8 +4038,31 @@ def _render_seo_health(user, *, google_store=None, import_store=None, phase4_sto
     except Exception:
         rows = []
     _table(rows, empty="No saved technical URL findings are available yet.", height=480)
+    try:
+        audit_runs = reader._query_all(
+            "technical_runs",
+            """
+            SELECT id AS audit_run_id, trigger_source, mode, status, started_at, completed_at,
+                   pages_scheduled, pages_fetched, head_requests, get_requests, cache_hits,
+                   duplicate_urls_skipped, redirects, failed_requests,
+                   total_storefront_requests, runtime_seconds, lock_state, error_summary
+            FROM seo_technical_audit_runs
+            WHERE workspace_key=%s
+            ORDER BY started_at DESC
+            LIMIT 20
+            """,
+            (google_seo.GOOGLE_SEO_WORKSPACE_KEY,),
+        )
+    except Exception:
+        audit_runs = []
+    with st.expander("Recent background audit runs", expanded=False):
+        _table(
+            audit_runs,
+            empty="No controlled Technical Audit run has been saved yet.",
+            height=300,
+        )
     st.caption(
-        "URL Inspection evidence, sitemap checks and HTML audits run in background jobs. "
+        "URL Inspection evidence, sitemap checks and HTML audits run only in the separately leased background-maintenance command. "
         "URL Inspection is Google's saved indexed-version evidence, not a live test. Opening this page performs no crawl or Google request."
     )
     urls = sorted({str(row.get("canonical_url") or "") for row in rows if row.get("canonical_url")})

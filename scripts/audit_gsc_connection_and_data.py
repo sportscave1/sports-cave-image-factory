@@ -28,6 +28,7 @@ import google_seo  # noqa: E402
 import google_seo_import  # noqa: E402
 import run_migrations  # noqa: E402
 import seo_live_analytics  # noqa: E402
+import seo_reporting_runtime  # noqa: E402
 
 
 WORKSPACE_KEY = google_seo.GOOGLE_SEO_WORKSPACE_KEY
@@ -63,6 +64,13 @@ TABLE_SPECS = {
         "date": "source_date", "property": "property_id", "search_type": "search_type",
         "data_state": "data_state",
     },
+}
+REPORTING_TABLES = {
+    "seo_reporting_daily_metrics": "date",
+    "seo_reporting_query_daily": "date",
+    "seo_reporting_page_daily": "date",
+    "seo_reporting_landing_page_daily": "date",
+    "seo_reporting_opportunities": "measurement_date",
 }
 
 
@@ -256,6 +264,48 @@ def _sync_report(cur, property_id):
     return report
 
 
+def _compact_reporting_report(cur):
+    tables = {}
+    for table, date_column in REPORTING_TABLES.items():
+        if not _table_exists(cur, table):
+            tables[table] = {"exists": False, "rows": 0}
+            continue
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS rows, MIN({date_column}) AS earliest_date,
+                   MAX({date_column}) AS latest_date
+            FROM {table} WHERE workspace_key=%s
+            """,
+            (WORKSPACE_KEY,),
+        )
+        tables[table] = {"exists": True, **_clean_row(cur.fetchone() or {})}
+    snapshots = []
+    if _table_exists(cur, "seo_reporting_snapshot_runs"):
+        optional = {
+            column: column if _column_exists(cur, "seo_reporting_snapshot_runs", column)
+            else f"NULL AS {column}"
+            for column in (
+                "gsc_reporting_through_date", "gsc_source_revision",
+                "trigger_source", "completed_at",
+            )
+        }
+        cur.execute(
+            f"""
+            SELECT id, status, common_reporting_date,
+                   {optional['gsc_reporting_through_date']},
+                   {optional['gsc_source_revision']},
+                   {optional['trigger_source']},
+                   error_code, error_summary, refreshed_at,
+                   {optional['completed_at']}
+            FROM seo_reporting_snapshot_runs
+            WHERE workspace_key=%s ORDER BY refreshed_at DESC LIMIT 10
+            """,
+            (WORKSPACE_KEY,),
+        )
+        snapshots = [_clean_row(row) for row in cur.fetchall() or []]
+    return {"tables": tables, "recent_snapshot_runs": snapshots}
+
+
 def _direct_google_report(connection, start_date, end_date):
     config = google_seo.load_config()
     store = ReadOnlyConnectionStore(connection)
@@ -281,6 +331,39 @@ def _direct_google_report(connection, start_date, end_date):
     queries = client.fetch_gsc_query_range(
         exact_site_url, start_date, end_date, data_state="final", search_type="web"
     )
+    query_probe = google_seo.gsc_search_analytics_request(
+        access_token,
+        exact_site_url,
+        start_date=start_date,
+        end_date=end_date,
+        dimensions=("query",),
+        search_type="web",
+        data_state="final",
+        row_limit=25,
+        stage="gsc_audit_query_probe",
+    )
+    page_probe = google_seo.gsc_search_analytics_request(
+        access_token,
+        exact_site_url,
+        start_date=start_date,
+        end_date=end_date,
+        dimensions=("page",),
+        search_type="web",
+        data_state="final",
+        row_limit=25,
+        stage="gsc_audit_page_probe",
+    )
+    query_page_probe = google_seo.gsc_search_analytics_request(
+        access_token,
+        exact_site_url,
+        start_date=start_date,
+        end_date=end_date,
+        dimensions=("query", "page"),
+        search_type="web",
+        data_state="final",
+        row_limit=25,
+        stage="gsc_audit_query_page_probe",
+    )
     scopes = list(secret.get("granted_scopes") or [])
     return {
         "refresh_token_exists": bool(secret.get("encrypted_refresh_token")),
@@ -301,32 +384,38 @@ def _direct_google_report(connection, start_date, end_date):
         "query_pagination_truncated": bool(queries.get("truncated")),
         "query_data_state": queries.get("data_state"),
         "query_search_type": queries.get("search_type"),
+        "query_probe_rows": len(query_probe.get("rows") or []),
+        "page_probe_rows": len(page_probe.get("rows") or []),
+        "query_page_probe_rows": len(query_page_probe.get("rows") or []),
     }
 
 
 def _reader_report(start_date, end_date):
-    reader = seo_live_analytics.default_reader()
-    health = reader.source_health()
-    snapshot = reader.snapshot(
-        preset="Custom range",
-        custom_start=start_date,
-        custom_end=end_date,
-        comparison="Off",
-        search_type="web",
-        query_class="All known queries",
-        source_scope="seo",
-        source_health=health,
+    reader = seo_reporting_runtime.default_reader()
+    context = reader.reporting_context()
+    snapshot = reader.overview_base(
+        {
+            "preset": "Custom range",
+            "custom_start": start_date,
+            "custom_end": end_date,
+            "comparison": "Off",
+            "compare": False,
+            "search_type": "web",
+            "query_class": "All known queries",
+            "market": "All markets",
+            "device": "All devices",
+        },
+        context=context,
     )
     current = dict(snapshot.get("current") or {})
     return {
-        "health": dict(health.get("gsc") or {}),
+        "context": context,
         "metrics": {
             key: _json_value(current.get(key))
             for key in ("organic_clicks", "organic_impressions", "ctr", "average_position")
         },
-        "top_query_rows": len(snapshot.get("top_queries") or []),
-        "top_page_rows": len(snapshot.get("top_pages") or []),
-        "read_errors": dict(snapshot.get("read_errors") or {}),
+        "rank_quality": _json_value((snapshot.get("rank_quality") or {}).get("score")),
+        "diagnostics": dict(snapshot.get("diagnostics") or {}),
     }
 
 
@@ -350,6 +439,14 @@ def _first_divergence(report):
         or Decimal(str(direct_totals.get("impressions") or 0)) != Decimal(str(saved.get("impressions") or 0))
     ):
         return "canonical_property_totals_storage"
+    reporting = dict(database.get("compact_reporting") or {})
+    completed = [
+        row for row in reporting.get("recent_snapshot_runs") or []
+        if row.get("status") == "completed"
+        and (row.get("gsc_reporting_through_date") or row.get("common_reporting_date"))
+    ]
+    if saved.get("source_dates") and not completed:
+        return "canonical_gsc_to_compact_reporting_snapshot"
     reader = dict(report.get("seo_reader") or {}).get("metrics") or {}
     if saved.get("source_dates") and reader.get("organic_clicks") is None:
         return "canonical_seo_reader_filter_or_cache"
@@ -407,6 +504,13 @@ def run_audit(end_date):
                 "canonical_sync_error_message": str(
                     connection.get("gsc_canonical_sync_error_message") or ""
                 ),
+                "canonical_revision": int(connection.get("gsc_canonical_revision") or 0),
+                "connection_tested_at": _json_value(
+                    connection.get("gsc_connection_tested_at")
+                ),
+                "connection_permission_level": str(
+                    connection.get("gsc_connection_permission_level") or ""
+                ),
             }
             report["stored_connection"] = safe_connection
             report["database"] = {
@@ -419,6 +523,7 @@ def run_audit(end_date):
                     cur, safe_connection["selected_property"], start_date, end_date
                 ),
                 "sync": _sync_report(cur, safe_connection["selected_property"]),
+                "compact_reporting": _compact_reporting_report(cur),
             }
     try:
         report["direct_google"] = _direct_google_report(connection, start_date, end_date)

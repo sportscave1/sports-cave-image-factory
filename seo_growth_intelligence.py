@@ -24,7 +24,6 @@ import google_seo_phase4
 import analytics_reporting
 import os_accounts
 import seo_live_analytics
-import seo_technical_audit
 import seo_workspace as seo_workspace
 
 
@@ -47,7 +46,6 @@ PIPELINE_STAGES = (
     ("url_mapping", "URL mapping"),
     ("revenue_reconciliation", "Revenue reconciliation"),
     ("joined_reporting", "Joined reporting snapshots"),
-    ("technical_audit", "Technical URL audit"),
     ("opportunities", "Opportunity detection"),
     ("measurements", "28/56/90-day measurements"),
 )
@@ -555,10 +553,10 @@ class PostgresSEOGrowthStore:
                 cursor.execute(
                     """
                     SELECT * FROM seo_growth_pipeline_runs
-                    WHERE workspace_key=%s AND status IN ('queued', 'running')
+                    WHERE workspace_key=%s AND mode=%s AND status IN ('queued', 'running')
                     ORDER BY created_at LIMIT 1
                     """,
-                    (WORKSPACE_KEY,),
+                    (WORKSPACE_KEY, str(mode or "daily")[:40]),
                 )
                 row = cursor.fetchone()
                 if not row:
@@ -575,9 +573,10 @@ class PostgresSEOGrowthStore:
             connection.commit()
         return dict(row or {})
 
-    def claim_pipeline_run(self, worker_id, *, lease_seconds=PIPELINE_LEASE_SECONDS):
+    def claim_pipeline_run(self, worker_id, *, modes=None, lease_seconds=PIPELINE_LEASE_SECONDS):
         self.ensure_schema()
         now = utc_now()
+        modes = tuple(str(value or "")[:40] for value in (modes or ("daily", "manual", "analytics")))
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -585,6 +584,7 @@ class PostgresSEOGrowthStore:
                     WITH candidate AS (
                         SELECT id FROM seo_growth_pipeline_runs
                         WHERE status IN ('queued', 'running')
+                          AND mode=ANY(%s)
                           AND (status='queued' OR lease_expires_at IS NULL OR lease_expires_at < %s)
                         ORDER BY created_at
                         FOR UPDATE SKIP LOCKED
@@ -599,6 +599,7 @@ class PostgresSEOGrowthStore:
                     RETURNING run.*
                     """,
                     (
+                        list(modes),
                         now,
                         str(worker_id or "")[:200],
                         now,
@@ -1483,7 +1484,10 @@ def run_daily_analytics_refresh(
     connection_store = connection_store or google_seo.default_store()
     worker_id = str(worker_id or f"seo-analytics-{secrets.token_hex(6)}")[:200]
     queued = store.queue_pipeline_run(mode="analytics", requested_by=requested_by)
-    run = store.claim_pipeline_run(worker_id)
+    try:
+        run = store.claim_pipeline_run(worker_id, modes=("analytics",))
+    except TypeError:
+        run = store.claim_pipeline_run(worker_id)
     if not run:
         return {"status": "already_running", "run": queued, "failed_stages": []}
     pipeline_id = run["id"]
@@ -1610,7 +1614,6 @@ def run_daily_growth_pipeline(
     connection_store=None,
     requested_by="render-cron",
     worker_id="",
-    technical_auditor=None,
     fresh_gsc_refresher=None,
 ):
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
@@ -1619,7 +1622,10 @@ def run_daily_growth_pipeline(
     connection_store = connection_store or google_seo.default_store()
     worker_id = str(worker_id or f"seo-growth-{secrets.token_hex(6)}")[:200]
     queued = store.queue_pipeline_run(mode="daily", requested_by=requested_by)
-    run = store.claim_pipeline_run(worker_id)
+    try:
+        run = store.claim_pipeline_run(worker_id, modes=("daily", "manual"))
+    except TypeError:
+        run = store.claim_pipeline_run(worker_id)
     if not run:
         return {"status": "already_running", "run": queued}
     pipeline_id = run["id"]
@@ -1691,9 +1697,6 @@ def run_daily_growth_pipeline(
         "url_mapping": lambda: (queue_phase4_once() or phase4_worker.run_once(source="mapping") or phase4_store.map_saved_urls()),
         "revenue_reconciliation": lambda: (queue_phase4_once() or phase4_worker.run_once(source="reconciliation") or phase4_store.reconcile_revenue()),
         "joined_reporting": lambda: phase4_store.refresh_reporting_snapshots(),
-        "technical_audit": technical_auditor or (
-            lambda: seo_technical_audit.run_background_audit(connection_store=connection_store)
-        ),
         "opportunities": lambda: phase4_store.refresh_reporting_snapshots(),
         "measurements": lambda: store.refresh_due_measurements(),
     }

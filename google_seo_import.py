@@ -1537,6 +1537,7 @@ class PostgresSEOImportStore:
         import_status_column = "gsc_import_status" if source == "GSC" else "ga4_import_status"
         error_column = "gsc_import_error" if source == "GSC" else "ga4_import_error"
         canonical = {}
+        reporting_repair = {}
         if source == "GSC" and status == "completed":
             with self._backend().connect() as conn:
                 with conn.cursor() as cur:
@@ -1607,6 +1608,20 @@ class PostgresSEOImportStore:
                             (status, WORKSPACE_KEY),
                         )
             conn.commit()
+        if row and source == "GSC" and status == "completed":
+            try:
+                import google_seo_phase4
+
+                reporting_repair = google_seo_phase4.default_phase4_store().queue_reporting_repair(
+                    trigger_source="gsc_revision",
+                    requested_by=str(row.get("requested_by") or "seo_import_worker")[:200],
+                    gsc_sync_run_id=str(run_id or ""),
+                )
+            except Exception:
+                # The canonical import remains valid. The daily pipeline also
+                # runs the builder directly, and a later worker pass can queue
+                # another idempotent repair without refetching GSC history.
+                reporting_repair = {"status": "queue_failed"}
         clean = _clean_run(row)
         if clean and source == "GSC":
             counts = {
@@ -1622,6 +1637,7 @@ class PostgresSEOImportStore:
             clean["canonical_data_through_date"] = _iso(
                 canonical.get("latest_date") or clean.get("latest_stored_data_date")
             )
+            clean["reporting_repair"] = reporting_repair
         if clean:
             record_activity_log(
                 "google_seo_import_completed",
@@ -2063,6 +2079,49 @@ def queue_daily_runs(*, import_store=None, connection_store=None, requested_by="
     ]
 
 
+def queue_gsc_reporting_repair(
+    user,
+    *,
+    import_store=None,
+    connection_store=None,
+    phase4_store=None,
+):
+    """Queue a bounded GSC refresh followed by a compact-snapshot repair."""
+    google_seo.require_admin(user)
+    import_store = import_store or default_import_store()
+    connection_store = connection_store or google_seo.default_store()
+    connection = connection_store.get_connection_secret()
+    site_url = str(connection.get("gsc_site_url") or "")
+    if not connection.get("encrypted_refresh_token"):
+        raise SEOImportError(
+            "Connect Google before repairing SEO reporting.",
+            code="google_connection_required",
+            retryable=False,
+        )
+    if not site_url:
+        raise SEOImportError(
+            "Select a Search Console property before repairing SEO reporting.",
+            code="property_selection_required",
+            retryable=False,
+        )
+    requested_by = str(user.get("id") or "manual-seo-repair")[:200]
+    sync_run = import_store.queue_run(
+        "GSC",
+        "manual",
+        property_identifier=site_url,
+        requested_by=requested_by,
+    )
+    import google_seo_phase4
+
+    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
+    repair_job = phase4_store.queue_reporting_repair(
+        trigger_source="manual_seo_repair",
+        requested_by=requested_by,
+        gsc_sync_run_id=str(sync_run.get("id") or ""),
+    )
+    return {"status": "queued", "gsc_sync_run": sync_run, "reporting_repair": repair_job}
+
+
 def refresh_gsc_fresh_data(*, import_store=None, connection_store=None, today=None):
     """Persist today's explicitly preliminary Search Console grain from a worker."""
     import_store = import_store or default_import_store()
@@ -2111,9 +2170,14 @@ def run_complete_daily_pipeline():
 def _run_worker_loop(worker, *, once=False, poll_seconds=15):
     while True:
         result = worker.run_once()
+        import google_seo_phase4
+
+        repair = google_seo_phase4.process_queued_reporting_repair(
+            worker_id=f"{worker.worker_id}-reporting"
+        )
         if once:
             return 0
-        if result is None:
+        if result is None and repair is None:
             time.sleep(max(2, int(poll_seconds)))
 
 

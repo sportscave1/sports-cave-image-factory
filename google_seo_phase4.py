@@ -27,11 +27,13 @@ PHASE4_MIGRATION = "20260813_google_seo_phase4_join.sql"
 PHASE4_REPORTING_MIGRATION = "20260814_google_seo_phase4_reporting_snapshots.sql"
 PHASE4_GROWTH_MIGRATION = "20260814_seo_growth_intelligence_v1.sql"
 PHASE4_PERFORMANCE_MIGRATION = "20260818_seo_interactive_performance.sql"
+PHASE4_GSC_REPORTING_REPAIR_MIGRATION = "20260819_gsc_reporting_snapshot_repair.sql"
 PHASE4_MIGRATIONS = (
     PHASE4_MIGRATION,
     PHASE4_REPORTING_MIGRATION,
     PHASE4_GROWTH_MIGRATION,
     PHASE4_PERFORMANCE_MIGRATION,
+    PHASE4_GSC_REPORTING_REPAIR_MIGRATION,
 )
 WORKSPACE_KEY = google_seo.GOOGLE_SEO_WORKSPACE_KEY
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,6 +47,7 @@ PHASE4_SOURCES = (
 EXTERNAL_PHASE4_SOURCES = {"shopify_pages", "shopify_orders", "ga4_transactions"}
 ACTIVE_STATUSES = ("queued", "running")
 LEASE_SECONDS = 10 * 60
+REPORTING_REPAIR_LEASE_SECONDS = 20 * 60
 GA4_PAGE_SIZE = 250_000
 GA4_TRANSACTION_REQUIRED_DIMENSIONS = (
     "date",
@@ -918,6 +921,17 @@ def _clean_run(row):
     return row
 
 
+def _clean_reporting_repair_job(row):
+    row = dict(row or {})
+    for field in (
+        "requested_at", "next_attempt_at", "started_at", "completed_at",
+        "lease_expires_at", "updated_at",
+    ):
+        row[field] = _iso(row.get(field))
+    row["attempt_count"] = _integer(row.get("attempt_count"))
+    return row
+
+
 class PostgresSEOPhase4Store:
     def __init__(self, backend=None):
         self.backend = backend
@@ -1302,12 +1316,247 @@ class PostgresSEOPhase4Store:
                     """
                     SELECT gsc_site_url, ga4_property_id, ga4_property_timezone,
                            ga4_property_currency, gsc_data_through_date,
-                           ga4_data_through_date, shopify_data_through_date
-                    FROM seo_google_connections WHERE workspace_key=%s
+                           ga4_data_through_date, shopify_data_through_date,
+                           gsc_canonical_data_through_date,
+                           COALESCE(gsc_canonical_revision, 0) AS gsc_canonical_revision,
+                           gsc_canonical_sync_status,
+                           gsc_canonical_sync_error_code,
+                           gsc_canonical_sync_error_message,
+                           gsc_canonical_synced_at, last_successful_sync_at,
+                           gsc_connection_test_status,
+                           gsc_connection_tested_at,
+                           gsc_connection_permission_level,
+                           (
+                               SELECT MAX(total.source_date)
+                               FROM seo_gsc_property_totals_v2 AS total
+                               WHERE total.workspace_key=connection.workspace_key
+                                 AND total.property_id=connection.gsc_site_url
+                                 AND total.search_type='web'
+                                 AND total.data_state='final'
+                                 AND total.is_complete=TRUE
+                           ) AS gsc_final_reporting_through_date
+                    FROM seo_google_connections AS connection WHERE workspace_key=%s
                     """,
                     (WORKSPACE_KEY,),
                 )
                 return dict(cursor.fetchone() or {})
+
+    def queue_reporting_repair(
+        self,
+        *,
+        trigger_source="gsc_revision",
+        requested_by="background",
+        gsc_sync_run_id="",
+    ):
+        """Queue one durable compact-snapshot repair for this workspace."""
+        self.ensure_schema()
+        job_id = str(uuid.uuid4())
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"seo-reporting-repair:{WORKSPACE_KEY}",),
+                )
+                cursor.execute(
+                    """
+                    SELECT * FROM seo_reporting_repair_jobs
+                    WHERE workspace_key=%s AND status IN ('queued', 'running')
+                    ORDER BY requested_at LIMIT 1
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute(
+                        """
+                        INSERT INTO seo_reporting_repair_jobs(
+                            id, workspace_key, status, trigger_source,
+                            gsc_sync_run_id, requested_by
+                        ) VALUES (%s, %s, 'queued', %s, NULLIF(%s, ''), %s)
+                        RETURNING *
+                        """,
+                        (
+                            job_id,
+                            WORKSPACE_KEY,
+                            str(trigger_source or "background")[:100],
+                            str(gsc_sync_run_id or "")[:100],
+                            str(requested_by or "background")[:200],
+                        ),
+                    )
+                    row = cursor.fetchone()
+            connection.commit()
+        return _clean_reporting_repair_job(row)
+
+    def claim_reporting_repair(
+        self,
+        worker_id,
+        *,
+        lease_seconds=REPORTING_REPAIR_LEASE_SECONDS,
+    ):
+        """Claim an eligible job and safely reclaim an expired lease."""
+        self.ensure_schema()
+        worker_id = str(worker_id or "seo-reporting-worker")[:200]
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE seo_reporting_repair_jobs
+                    SET status='queued', lease_owner='', lease_expires_at=NULL,
+                        error_code='expired_lease_reclaimed',
+                        error_summary='An expired reporting repair lease was reclaimed.',
+                        updated_at=now()
+                    WHERE workspace_key=%s AND status='running'
+                      AND lease_expires_at IS NOT NULL AND lease_expires_at<now()
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+                cursor.execute(
+                    """
+                    UPDATE seo_reporting_repair_jobs AS job
+                    SET status='failed', completed_at=now(),
+                        error_code='gsc_sync_dependency_failed',
+                        error_summary='The bounded GSC refresh failed before the reporting repair could run.',
+                        updated_at=now()
+                    FROM seo_sync_runs AS sync
+                    WHERE job.workspace_key=%s AND job.status='queued'
+                      AND job.gsc_sync_run_id=sync.id
+                      AND sync.status IN ('failed', 'partial')
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+                cursor.execute(
+                    """
+                    WITH candidate AS (
+                        SELECT job.id
+                        FROM seo_reporting_repair_jobs AS job
+                        LEFT JOIN seo_sync_runs AS sync ON sync.id=job.gsc_sync_run_id
+                        WHERE job.workspace_key=%s AND job.status='queued'
+                          AND job.next_attempt_at<=now()
+                          AND (job.gsc_sync_run_id IS NULL OR sync.status='completed')
+                        ORDER BY job.requested_at
+                        FOR UPDATE OF job SKIP LOCKED
+                        LIMIT 1
+                    )
+                    UPDATE seo_reporting_repair_jobs AS job
+                    SET status='running', started_at=COALESCE(started_at, now()),
+                        lease_owner=%s,
+                        lease_expires_at=now() + (%s * interval '1 second'),
+                        attempt_count=attempt_count + 1,
+                        error_code='', error_summary='', updated_at=now()
+                    FROM candidate
+                    WHERE job.id=candidate.id
+                    RETURNING job.*
+                    """,
+                    (WORKSPACE_KEY, worker_id, max(60, int(lease_seconds or 0))),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return _clean_reporting_repair_job(row)
+
+    def complete_reporting_repair(self, job_id, worker_id, snapshot_result):
+        snapshot_result = dict(snapshot_result or {})
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE seo_reporting_repair_jobs
+                    SET status='completed', completed_at=now(), lease_owner='',
+                        lease_expires_at=NULL, snapshot_run_id=%s,
+                        error_code='', error_summary='', updated_at=now()
+                    WHERE id=%s AND workspace_key=%s AND status='running'
+                      AND lease_owner=%s
+                    RETURNING *
+                    """,
+                    (
+                        str(snapshot_result.get("snapshot_run_id") or "")[:100],
+                        str(job_id or ""), WORKSPACE_KEY, str(worker_id or "")[:200],
+                    ),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return _clean_reporting_repair_job(row)
+
+    def fail_reporting_repair(self, job_id, worker_id, error):
+        code = str(getattr(error, "code", "reporting_snapshot_failed"))[:100]
+        summary = str(
+            getattr(error, "public_message", "The compact GSC reporting repair failed.")
+        )[:300]
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE seo_reporting_repair_jobs
+                    SET status=CASE WHEN attempt_count<3 THEN 'queued' ELSE 'failed' END,
+                        completed_at=CASE WHEN attempt_count<3 THEN NULL ELSE now() END,
+                        next_attempt_at=CASE
+                            WHEN attempt_count<3 THEN now() + (attempt_count * interval '5 minutes')
+                            ELSE next_attempt_at
+                        END,
+                        lease_owner='', lease_expires_at=NULL,
+                        error_code=%s, error_summary=%s, updated_at=now()
+                    WHERE id=%s AND workspace_key=%s AND status='running'
+                      AND lease_owner=%s
+                    RETURNING *
+                    """,
+                    (code, summary, str(job_id or ""), WORKSPACE_KEY, str(worker_id or "")[:200]),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        return _clean_reporting_repair_job(row)
+
+    def record_reporting_snapshot_failure(self, *, trigger_source, error):
+        """Persist a redacted failure without replacing any last-good snapshot."""
+        refresh_id = str(uuid.uuid4())
+        code = str(getattr(error, "code", "reporting_snapshot_failed"))[:100]
+        summary = str(
+            getattr(error, "public_message", "The compact GSC reporting snapshot failed.")
+        )[:300]
+        record = self.connection_record()
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO seo_reporting_snapshot_runs(
+                        id, workspace_key, status, common_reporting_date,
+                        gsc_reporting_through_date, gsc_source_revision,
+                        trigger_source, error_code, error_summary, completed_at
+                    ) VALUES (%s, %s, 'failed', NULL, NULL, %s, %s, %s, %s, now())
+                    """,
+                    (
+                        refresh_id, WORKSPACE_KEY,
+                        _integer(record.get("gsc_canonical_revision")),
+                        str(trigger_source or "background")[:100], code, summary,
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE seo_phase4_health
+                    SET last_failed_joined_refresh_at=now(),
+                        joined_refresh_error_code=%s,
+                        joined_refresh_error_summary=%s,
+                        gsc_snapshot_status='failed',
+                        gsc_snapshot_error_code=%s,
+                        gsc_snapshot_error_summary=%s,
+                        updated_at=now()
+                    WHERE workspace_key=%s
+                    """,
+                    (code, summary, code, summary, WORKSPACE_KEY),
+                )
+            connection.commit()
+        return {"snapshot_run_id": refresh_id, "error_code": code, "error_summary": summary}
+
+    def recent_reporting_repair(self):
+        self.ensure_schema()
+        with self._backend().connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM seo_reporting_repair_jobs
+                    WHERE workspace_key=%s ORDER BY requested_at DESC LIMIT 1
+                    """,
+                    (WORKSPACE_KEY,),
+                )
+                return _clean_reporting_repair_job(cursor.fetchone())
 
     def ga4_completed_bounds(self, property_id):
         self.ensure_schema()
@@ -2336,6 +2585,8 @@ class PostgresSEOPhase4Store:
             f"WHEN UPPER({column_name}) IN ('AU', 'AUS') THEN 'AU' "
             f"WHEN UPPER({column_name}) IN ('US', 'USA') THEN 'US' "
             f"WHEN UPPER({column_name}) IN ('GB', 'GBR', 'UK') THEN 'UK' "
+            f"WHEN UPPER({column_name}) IN ('CA', 'CAN') THEN 'CA' "
+            f"WHEN UPPER({column_name}) IN ('NZ', 'NZL') THEN 'NZ' "
             f"ELSE '' END"
         )
 
@@ -2346,7 +2597,7 @@ class PostgresSEOPhase4Store:
             return "FALSE", []
         return " OR ".join(f"LOWER({column_name}) LIKE %s" for _term in terms), [f"%{term}%" for term in terms]
 
-    def refresh_reporting_snapshots(self):
+    def refresh_reporting_snapshots(self, *, trigger_source="background"):
         self.ensure_schema()
         settings = self.get_settings()
         brand_expr, brand_params = self._brand_expression_sql("query", settings.get("brand_terms") or [])
@@ -2355,22 +2606,33 @@ class PostgresSEOPhase4Store:
         connection_record = self.connection_record()
         gsc_site_url = str(connection_record.get("gsc_site_url") or "")
         ga4_property_id = str(connection_record.get("ga4_property_id") or "")
+        gsc_through = _as_date(
+            connection_record.get("gsc_final_reporting_through_date")
+        )
+        gsc_source_revision = _integer(connection_record.get("gsc_canonical_revision"))
+        ga4_through = _as_date(
+            health.get("latest_ga4_date") or connection_record.get("ga4_data_through_date")
+        )
         refresh_id = str(uuid.uuid4())
-        if not common:
+        if not gsc_site_url or not gsc_through:
             with self._backend().connect() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
                         INSERT INTO seo_reporting_snapshot_runs(
                             id, workspace_key, status, common_reporting_date,
-                            error_code, error_summary
-                        ) VALUES (%s, %s, 'partial', NULL, %s, %s)
+                            gsc_reporting_through_date, gsc_source_revision,
+                            trigger_source, error_code, error_summary, completed_at
+                        ) VALUES (%s, %s, 'partial', %s, NULL, %s, %s, %s, %s, now())
                         """,
                         (
                             refresh_id,
                             WORKSPACE_KEY,
-                            str(health.get("data_status") or "common_reporting_date_unavailable")[:100],
-                            str(health.get("health_reason") or "common_reporting_date_unavailable")[:300],
+                            common,
+                            gsc_source_revision,
+                            str(trigger_source or "background")[:100],
+                            "gsc_reporting_date_unavailable",
+                            "No completed canonical GSC reporting date is available for the exact saved property.",
                         ),
                     )
                     cursor.execute(
@@ -2379,34 +2641,60 @@ class PostgresSEOPhase4Store:
                         SET last_failed_joined_refresh_at=now(),
                             joined_refresh_error_code=%s,
                             joined_refresh_error_summary=%s,
+                            gsc_snapshot_status='partial',
+                            gsc_snapshot_error_code='gsc_reporting_date_unavailable',
+                            gsc_snapshot_error_summary=%s,
                             updated_at=now()
                         WHERE workspace_key=%s
                         """,
                         (
-                            str(health.get("data_status") or "common_reporting_date_unavailable")[:100],
-                            str(health.get("health_reason") or "common_reporting_date_unavailable")[:300],
+                            "gsc_reporting_date_unavailable",
+                            "No completed canonical GSC reporting date is available for the exact saved property.",
+                            "No completed canonical GSC reporting date is available for the exact saved property.",
                             WORKSPACE_KEY,
                         ),
                     )
                 connection.commit()
-            return {"status": "partial", "common_reporting_date": ""}
+            return {
+                "status": "partial",
+                "common_reporting_date": _iso(common),
+                "gsc_reporting_through_date": "",
+                "snapshot_run_id": refresh_id,
+            }
 
         market_country = self._market_case_sql("country_code")
         gsc_market = self._market_case_sql("country_code")
         ga4_market = self._market_case_sql("country_code")
-        start_28 = common - timedelta(days=27)
+        start_28 = gsc_through - timedelta(days=27)
         prev_end = start_28 - timedelta(days=1)
         prev_start = prev_end - timedelta(days=27)
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_try_advisory_xact_lock(hashtext(%s)) AS acquired",
+                    (f"seo-reporting-snapshot:{WORKSPACE_KEY}",),
+                )
+                if not bool((cursor.fetchone() or {}).get("acquired")):
+                    return {
+                        "status": "already_running",
+                        "common_reporting_date": _iso(common),
+                        "gsc_reporting_through_date": _iso(gsc_through),
+                    }
                 for table in (
                     "seo_reporting_query_daily",
-                    "seo_reporting_landing_page_revenue_daily",
-                    "seo_reporting_landing_page_daily",
-                    "seo_reporting_revenue_daily",
+                    "seo_reporting_page_daily",
                     "seo_reporting_daily_metrics",
                 ):
                     cursor.execute(f"DELETE FROM {table} WHERE workspace_key=%s", (WORKSPACE_KEY,))
+                if common:
+                    for table in (
+                        "seo_reporting_landing_page_revenue_daily",
+                        "seo_reporting_landing_page_daily",
+                        "seo_reporting_revenue_daily",
+                    ):
+                        cursor.execute(
+                            f"DELETE FROM {table} WHERE workspace_key=%s", (WORKSPACE_KEY,)
+                        )
 
                 cursor.execute(
                     """
@@ -2415,15 +2703,16 @@ class PostgresSEOPhase4Store:
                         device_category, search_class, organic_clicks,
                         organic_impressions, position_weight, source_gsc_rows
                     )
-                    SELECT %s, date, '', '', 'all', 'all',
+                    SELECT %s, source_date, '', '', 'all', 'all',
                            COALESCE(SUM(clicks), 0),
                            COALESCE(SUM(impressions), 0),
                            COALESCE(SUM(average_position * impressions), 0),
                            COUNT(*)
-                    FROM seo_gsc_daily_totals
-                    WHERE workspace_key=%s AND gsc_site_url=%s
-                      AND date<=%s AND is_complete=TRUE AND is_final=TRUE
-                    GROUP BY date
+                    FROM seo_gsc_property_totals_v2
+                    WHERE workspace_key=%s AND property_id=%s
+                      AND source_date<=%s AND search_type='web'
+                      AND data_state='final' AND is_complete=TRUE
+                    GROUP BY source_date
                     ON CONFLICT (workspace_key, date, country_code, device_category, search_class)
                     DO UPDATE SET
                         organic_clicks=EXCLUDED.organic_clicks,
@@ -2432,22 +2721,23 @@ class PostgresSEOPhase4Store:
                         source_gsc_rows=EXCLUDED.source_gsc_rows,
                         updated_at=now()
                     """,
-                    (WORKSPACE_KEY, WORKSPACE_KEY, gsc_site_url, common),
+                    (WORKSPACE_KEY, WORKSPACE_KEY, gsc_site_url, gsc_through),
                 )
                 cursor.execute(
                     f"""
                     WITH base AS (
-                        SELECT date, UPPER(country_code) AS country_code,
-                               LOWER(device) AS device_category, query,
-                               clicks, impressions, average_position
-                        FROM seo_gsc_daily_details
-                        WHERE workspace_key=%s AND gsc_site_url=%s
-                          AND date<=%s AND is_complete=TRUE
+                        SELECT source_date AS date, UPPER(country_code) AS country_code,
+                               LOWER(device) AS device_category, raw_query AS query,
+                               clicks, impressions, position_weight
+                        FROM seo_gsc_query_daily_v2
+                        WHERE workspace_key=%s AND property_id=%s
+                          AND source_date<=%s AND search_type='web'
+                          AND data_state='final' AND is_complete=TRUE
                     ), grouped AS (
                         SELECT date, country_code, {gsc_market} AS market_code,
                                device_category, 'all'::TEXT AS search_class,
                                SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                               SUM(average_position * impressions) AS position_weight,
+                               SUM(position_weight) AS position_weight,
                                COUNT(*) AS source_rows
                         FROM base
                         GROUP BY date, country_code, device_category
@@ -2456,7 +2746,7 @@ class PostgresSEOPhase4Store:
                                device_category,
                                CASE WHEN {brand_expr} THEN 'brand' ELSE 'nonbrand' END AS search_class,
                                SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                               SUM(average_position * impressions) AS position_weight,
+                               SUM(position_weight) AS position_weight,
                                COUNT(*) AS source_rows
                         FROM base
                         GROUP BY date, country_code, device_category, search_class
@@ -2480,7 +2770,7 @@ class PostgresSEOPhase4Store:
                         source_gsc_rows=EXCLUDED.source_gsc_rows,
                         updated_at=now()
                     """,
-                    [WORKSPACE_KEY, gsc_site_url, common, *brand_params, WORKSPACE_KEY],
+                    [WORKSPACE_KEY, gsc_site_url, gsc_through, *brand_params, WORKSPACE_KEY],
                 )
                 cursor.execute(
                     f"""
@@ -2533,7 +2823,7 @@ class PostgresSEOPhase4Store:
                         source_ga4_rows=EXCLUDED.source_ga4_rows,
                         updated_at=now()
                     """,
-                    (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
+                    (WORKSPACE_KEY, ga4_property_id, ga4_through, WORKSPACE_KEY),
                 )
                 cursor.execute(
                     f"""
@@ -2596,27 +2886,41 @@ class PostgresSEOPhase4Store:
                     """,
                     (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
                 )
-                self._refresh_landing_page_snapshots(cursor, gsc_site_url, ga4_property_id, common)
-                self._refresh_query_snapshots(cursor, gsc_site_url, common, brand_expr, brand_params)
-                self._refresh_reporting_opportunities(cursor, common, start_28, prev_start, prev_end)
+                self._refresh_landing_page_snapshots(
+                    cursor, gsc_site_url, ga4_property_id, gsc_through, common
+                )
+                self._refresh_query_snapshots(
+                    cursor, gsc_site_url, gsc_through, brand_expr, brand_params
+                )
+                self._refresh_reporting_opportunities(
+                    cursor, gsc_through, start_28, prev_start, prev_end
+                )
                 cursor.execute(
                     """
                     SELECT
-                        (SELECT COUNT(*) FROM seo_gsc_daily_details WHERE workspace_key=%s AND gsc_site_url=%s) +
-                        (SELECT COUNT(*) FROM seo_gsc_daily_totals WHERE workspace_key=%s AND gsc_site_url=%s) AS gsc_rows,
+                        (SELECT COUNT(*) FROM seo_gsc_property_totals_v2 WHERE workspace_key=%s AND property_id=%s) +
+                        (SELECT COUNT(*) FROM seo_gsc_query_daily_v2 WHERE workspace_key=%s AND property_id=%s) +
+                        (SELECT COUNT(*) FROM seo_gsc_page_daily_v2 WHERE workspace_key=%s AND property_id=%s) AS gsc_rows,
                         (SELECT COUNT(*) FROM seo_ga4_daily_landing_pages WHERE workspace_key=%s AND ga4_property_id=%s) AS ga4_rows,
                         (SELECT COUNT(*) FROM seo_ga4_transactions WHERE workspace_key=%s AND ga4_property_id=%s) AS ga4_transaction_rows,
                         (SELECT COUNT(*) FROM seo_shopify_order_facts WHERE workspace_key=%s) AS shopify_order_rows,
                         (SELECT COUNT(*) FROM seo_url_aliases WHERE workspace_key=%s AND source IN ('GSC', 'GA4')) AS mapped_url_rows,
-                        (SELECT COUNT(*) FROM seo_revenue_reconciliations WHERE workspace_key=%s AND ga4_property_id=%s) AS reconciled_transaction_rows
+                        (SELECT COUNT(*) FROM seo_revenue_reconciliations WHERE workspace_key=%s AND ga4_property_id=%s) AS reconciled_transaction_rows,
+                        (SELECT COUNT(*) FROM seo_reporting_daily_metrics WHERE workspace_key=%s) AS daily_metric_rows,
+                        (SELECT COUNT(*) FROM seo_reporting_query_daily WHERE workspace_key=%s) AS query_metric_rows,
+                        (SELECT COUNT(*) FROM seo_reporting_page_daily WHERE workspace_key=%s) AS page_metric_rows,
+                        (SELECT COUNT(*) FROM seo_reporting_opportunities WHERE workspace_key=%s AND status='open') AS opportunity_rows
                     """,
                     (
-                        WORKSPACE_KEY, gsc_site_url, WORKSPACE_KEY, gsc_site_url,
+                        WORKSPACE_KEY, gsc_site_url,
+                        WORKSPACE_KEY, gsc_site_url,
+                        WORKSPACE_KEY, gsc_site_url,
                         WORKSPACE_KEY, ga4_property_id,
                         WORKSPACE_KEY, ga4_property_id,
                         WORKSPACE_KEY,
                         WORKSPACE_KEY,
                         WORKSPACE_KEY, ga4_property_id,
+                        WORKSPACE_KEY, WORKSPACE_KEY, WORKSPACE_KEY, WORKSPACE_KEY,
                     ),
                 )
                 counts = dict(cursor.fetchone() or {})
@@ -2624,21 +2928,34 @@ class PostgresSEOPhase4Store:
                     """
                     INSERT INTO seo_reporting_snapshot_runs(
                         id, workspace_key, status, common_reporting_date,
+                        gsc_reporting_through_date, gsc_source_revision,
+                        trigger_source, completed_at,
                         gsc_rows, ga4_rows, ga4_transaction_rows,
                         shopify_order_rows, mapped_url_rows,
-                        reconciled_transaction_rows
-                    ) VALUES (%s, %s, 'completed', %s, %s, %s, %s, %s, %s, %s)
+                        reconciled_transaction_rows, daily_metric_rows,
+                        query_metric_rows, page_metric_rows, opportunity_rows
+                    ) VALUES (
+                        %s, %s, 'completed', %s, %s, %s, %s, now(),
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
                     """,
                     (
                         refresh_id,
                         WORKSPACE_KEY,
                         common,
+                        gsc_through,
+                        gsc_source_revision,
+                        str(trigger_source or "background")[:100],
                         _integer(counts.get("gsc_rows")),
                         _integer(counts.get("ga4_rows")),
                         _integer(counts.get("ga4_transaction_rows")),
                         _integer(counts.get("shopify_order_rows")),
                         _integer(counts.get("mapped_url_rows")),
                         _integer(counts.get("reconciled_transaction_rows")),
+                        _integer(counts.get("daily_metric_rows")),
+                        _integer(counts.get("query_metric_rows")),
+                        _integer(counts.get("page_metric_rows")),
+                        _integer(counts.get("opportunity_rows")),
                     ),
                 )
                 cursor.execute(
@@ -2648,16 +2965,77 @@ class PostgresSEOPhase4Store:
                         last_successful_joined_refresh_at=now(),
                         joined_refresh_error_code='',
                         joined_refresh_error_summary='',
+                        gsc_reporting_through_date=%s,
+                        gsc_snapshot_source_revision=%s,
+                        gsc_snapshot_status='completed',
+                        gsc_snapshot_error_code='',
+                        gsc_snapshot_error_summary='',
                         updated_at=now()
                     WHERE workspace_key=%s
                     """,
-                    (WORKSPACE_KEY,),
+                    (gsc_through, gsc_source_revision, WORKSPACE_KEY),
+                )
+                cursor.execute(
+                    """
+                    UPDATE seo_reporting_repair_jobs
+                    SET status='completed', completed_at=now(), snapshot_run_id=%s,
+                        error_code='', error_summary='', updated_at=now()
+                    WHERE workspace_key=%s AND status='queued'
+                      AND (
+                          gsc_sync_run_id IS NULL OR EXISTS (
+                              SELECT 1 FROM seo_sync_runs
+                              WHERE id=seo_reporting_repair_jobs.gsc_sync_run_id
+                                AND status='completed'
+                          )
+                      )
+                    """,
+                    (refresh_id, WORKSPACE_KEY),
                 )
             connection.commit()
-        return {"status": "completed", "common_reporting_date": common.isoformat()}
+        return {
+            "status": "completed",
+            "common_reporting_date": _iso(common),
+            "gsc_reporting_through_date": gsc_through.isoformat(),
+            "gsc_source_revision": gsc_source_revision,
+            "snapshot_run_id": refresh_id,
+            "daily_metric_rows": _integer(counts.get("daily_metric_rows")),
+            "query_metric_rows": _integer(counts.get("query_metric_rows")),
+            "page_metric_rows": _integer(counts.get("page_metric_rows")),
+            "opportunity_rows": _integer(counts.get("opportunity_rows")),
+        }
 
-    def _refresh_landing_page_snapshots(self, cursor, gsc_site_url, ga4_property_id, common):
+    def _refresh_landing_page_snapshots(
+        self, cursor, gsc_site_url, ga4_property_id, gsc_through, common
+    ):
         market = self._market_case_sql("country_code")
+        cursor.execute(
+            f"""
+            INSERT INTO seo_reporting_page_daily(
+                workspace_key, date, page_hash, page_url, country_code,
+                market_code, device_category, organic_clicks,
+                organic_impressions, position_weight
+            )
+            SELECT %s, source_date, page_hash, page_url,
+                   UPPER(country_code) AS country_code,
+                   {market} AS market_code, LOWER(device) AS device_category,
+                   SUM(clicks), SUM(impressions), SUM(position_weight)
+            FROM seo_gsc_page_daily_v2
+            WHERE workspace_key=%s AND property_id=%s AND source_date<=%s
+              AND search_type='web' AND data_state='final' AND is_complete=TRUE
+            GROUP BY source_date, page_hash, page_url, country_code, device_category
+            ON CONFLICT (workspace_key, date, page_hash, country_code, device_category)
+            DO UPDATE SET
+                page_url=EXCLUDED.page_url,
+                market_code=EXCLUDED.market_code,
+                organic_clicks=EXCLUDED.organic_clicks,
+                organic_impressions=EXCLUDED.organic_impressions,
+                position_weight=EXCLUDED.position_weight,
+                updated_at=now()
+            """,
+            (WORKSPACE_KEY, WORKSPACE_KEY, gsc_site_url, gsc_through),
+        )
+        if not common:
+            return
         cursor.execute(
             f"""
             INSERT INTO seo_reporting_landing_page_daily(
@@ -2760,23 +3138,26 @@ class PostgresSEOPhase4Store:
             (WORKSPACE_KEY, ga4_property_id, common, WORKSPACE_KEY),
         )
 
-    def _refresh_query_snapshots(self, cursor, gsc_site_url, common, brand_expr, brand_params):
+    def _refresh_query_snapshots(
+        self, cursor, gsc_site_url, gsc_through, brand_expr, brand_params
+    ):
         market = self._market_case_sql("country_code")
         cursor.execute(
             f"""
             WITH base AS (
-                SELECT date, query, COALESCE(canonical_page_key, '') AS canonical_page_key,
+                SELECT source_date AS date, raw_query AS query,
+                       ''::TEXT AS canonical_page_key,
                        UPPER(country_code) AS country_code,
                        LOWER(device) AS device_category, clicks, impressions,
-                       average_position
-                FROM seo_gsc_daily_details
-                WHERE workspace_key=%s AND gsc_site_url=%s AND date<=%s
-                  AND is_complete=TRUE
+                       position_weight
+                FROM seo_gsc_query_daily_v2
+                WHERE workspace_key=%s AND property_id=%s AND source_date<=%s
+                  AND search_type='web' AND data_state='final' AND is_complete=TRUE
             ), grouped AS (
                 SELECT date, query, canonical_page_key, country_code,
                        {market} AS market_code, device_category, 'all'::TEXT AS search_class,
                        SUM(clicks) AS clicks, SUM(impressions) AS impressions,
-                       SUM(average_position * impressions) AS position_weight
+                       SUM(position_weight) AS position_weight
                 FROM base
                 GROUP BY date, query, canonical_page_key, country_code, device_category
                 UNION ALL
@@ -2784,7 +3165,7 @@ class PostgresSEOPhase4Store:
                        {market} AS market_code, device_category,
                        CASE WHEN {brand_expr} THEN 'brand' ELSE 'nonbrand' END AS search_class,
                        SUM(clicks), SUM(impressions),
-                       SUM(average_position * impressions)
+                       SUM(position_weight)
                 FROM base
                 GROUP BY date, query, canonical_page_key, country_code, device_category, search_class
             )
@@ -2810,7 +3191,7 @@ class PostgresSEOPhase4Store:
                 position_weight=EXCLUDED.position_weight,
                 updated_at=now()
             """,
-            [WORKSPACE_KEY, gsc_site_url, common, *brand_params, WORKSPACE_KEY],
+            [WORKSPACE_KEY, gsc_site_url, gsc_through, *brand_params, WORKSPACE_KEY],
         )
 
     def _refresh_reporting_opportunities(self, cursor, common, start_28, prev_start, prev_end):
@@ -3494,7 +3875,7 @@ class PostgresSEOPhase4Store:
             "last_reconciliation_at", "reporting_snapshot_refreshed_at",
             "latest_common_gsc_ga4_date", "latest_confirmed_revenue_date",
             "earliest_historical_date", "last_successful_joined_refresh_at",
-            "last_failed_joined_refresh_at", "updated_at",
+            "last_failed_joined_refresh_at", "gsc_reporting_through_date", "updated_at",
         ):
             row[field] = _iso(row.get(field))
         for field in (
@@ -3502,7 +3883,7 @@ class PostgresSEOPhase4Store:
             "ambiguous_page_count", "mapping_source_url_count",
             "mapped_page_count", "invalid_page_count",
             "reconciled_transaction_count", "confirmed_transaction_count",
-            "disputed_transaction_count",
+            "disputed_transaction_count", "gsc_snapshot_source_revision",
         ):
             row[field] = _integer(row.get(field))
         return row
@@ -3595,6 +3976,42 @@ def default_phase4_store():
     if _DEFAULT_PHASE4_STORE is None:
         _DEFAULT_PHASE4_STORE = PostgresSEOPhase4Store()
     return _DEFAULT_PHASE4_STORE
+
+
+def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):
+    """Process at most one durable compact-reporting repair job."""
+    store = phase4_store or default_phase4_store()
+    worker_id = str(worker_id or f"seo-reporting-{secrets.token_hex(6)}")[:200]
+    job = store.claim_reporting_repair(worker_id)
+    if not job:
+        return None
+    try:
+        result = store.refresh_reporting_snapshots(
+            trigger_source=str(job.get("trigger_source") or "background")
+        )
+        if str(result.get("status") or "") == "already_running":
+            raise SEOPhase4Error(
+                "Another compact GSC snapshot build already owns the reporting lease.",
+                code="reporting_snapshot_already_running",
+            )
+        if str(result.get("status") or "") != "completed":
+            raise SEOPhase4Error(
+                "The compact GSC reporting snapshot could not be completed.",
+                code="reporting_snapshot_incomplete",
+            )
+        store.complete_reporting_repair(job.get("id"), worker_id, result)
+        return {**result, "repair_job_id": job.get("id")}
+    except Exception as error:
+        store.record_reporting_snapshot_failure(
+            trigger_source=str(job.get("trigger_source") or "background"),
+            error=error,
+        )
+        store.fail_reporting_repair(job.get("id"), worker_id, error)
+        return {
+            "status": "failed",
+            "repair_job_id": job.get("id"),
+            "error_code": str(getattr(error, "code", "reporting_snapshot_failed"))[:100],
+        }
 
 
 def queue_phase4_pipeline(user, mode, *, phase4_store=None, connection_store=None):
