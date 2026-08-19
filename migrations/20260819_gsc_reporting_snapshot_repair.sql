@@ -80,35 +80,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_seo_reporting_repair_one_active
 CREATE INDEX IF NOT EXISTS idx_seo_reporting_repair_claim
     ON seo_reporting_repair_jobs(workspace_key, status, requested_at);
 
--- Existing canonical GSC history is enough to build the compact model. Queue
--- one idempotent backfill when this migration first reaches an affected
--- workspace; the existing background worker owns execution.
-INSERT INTO seo_reporting_repair_jobs(
-    id, workspace_key, status, trigger_source, requested_by
-)
-SELECT md5('gsc-reporting-initial-backfill|' || connection.workspace_key),
-       connection.workspace_key, 'queued', 'migration_backfill', 'migration'
-FROM seo_google_connections AS connection
-WHERE EXISTS (
-    SELECT 1 FROM seo_gsc_property_totals_v2 AS total
-    WHERE total.workspace_key=connection.workspace_key
-      AND total.property_id=connection.gsc_site_url
-      AND total.search_type='web' AND total.data_state='final'
-      AND total.is_complete=TRUE
-)
-AND NOT EXISTS (
-    SELECT 1 FROM seo_reporting_snapshot_runs AS snapshot
-    WHERE snapshot.workspace_key=connection.workspace_key
-      AND snapshot.status='completed'
-      AND snapshot.gsc_reporting_through_date IS NOT NULL
-      AND snapshot.gsc_source_revision>=connection.gsc_canonical_revision
-)
-AND NOT EXISTS (
-    SELECT 1 FROM seo_reporting_repair_jobs AS active
-    WHERE active.workspace_key=connection.workspace_key
-      AND active.status IN ('queued', 'running')
-)
-ON CONFLICT DO NOTHING;
-
 ALTER TABLE seo_reporting_page_daily ENABLE ROW LEVEL SECURITY;
 ALTER TABLE seo_reporting_repair_jobs ENABLE ROW LEVEL SECURITY;

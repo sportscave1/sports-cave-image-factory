@@ -1387,6 +1387,136 @@ class PostgresSEOPhase4Store:
             connection.commit()
         return _clean_reporting_repair_job(row)
 
+    def ensure_initial_gsc_reporting_repair(self, *, schema_ready=False):
+        """Queue the initial compact GSC backfill without doing repair work inline.
+
+        ``schema_ready`` is reserved for the startup path immediately after the
+        reviewed migrations have succeeded. Other callers prepare the additive
+        schema before inspecting or writing the durable queue.
+        """
+        if not schema_ready:
+            self.ensure_schema()
+        job_id = str(uuid.uuid4())
+        try:
+            with self._backend().connect() as connection:
+                with connection.cursor() as cursor:
+                    # All producers of reporting repair jobs use this lock. The
+                    # partial unique index is the final cross-process safeguard.
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        (f"seo-reporting-repair:{WORKSPACE_KEY}",),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT connection.gsc_site_url,
+                               COALESCE(connection.gsc_canonical_revision, 0)
+                                   AS source_revision,
+                               EXISTS (
+                                   SELECT 1
+                                   FROM seo_gsc_property_totals_v2 AS total
+                                   WHERE total.workspace_key=connection.workspace_key
+                                     AND total.property_id=connection.gsc_site_url
+                                     AND total.search_type='web'
+                                     AND total.data_state='final'
+                                     AND total.is_complete=TRUE
+                               ) AS canonical_ready,
+                               EXISTS (
+                                   SELECT 1
+                                   FROM seo_reporting_snapshot_runs AS snapshot
+                                   WHERE snapshot.workspace_key=connection.workspace_key
+                                     AND snapshot.status='completed'
+                                     AND snapshot.gsc_reporting_through_date IS NOT NULL
+                                     AND snapshot.gsc_source_revision >=
+                                         connection.gsc_canonical_revision
+                               ) AS current_snapshot_ready
+                        FROM seo_google_connections AS connection
+                        WHERE connection.workspace_key=%s
+                        """,
+                        (WORKSPACE_KEY,),
+                    )
+                    state = dict(cursor.fetchone() or {})
+                    if not str(state.get("gsc_site_url") or "").strip():
+                        result = {
+                            "status": "not_required",
+                            "reason": "gsc_property_not_selected",
+                        }
+                    elif not bool(state.get("canonical_ready")):
+                        result = {
+                            "status": "not_required",
+                            "reason": "canonical_gsc_data_unavailable",
+                        }
+                    elif bool(state.get("current_snapshot_ready")):
+                        result = {
+                            "status": "not_required",
+                            "reason": "current_snapshot_available",
+                            "source_revision": _integer(state.get("source_revision")),
+                        }
+                    else:
+                        cursor.execute(
+                            """
+                            SELECT * FROM seo_reporting_repair_jobs
+                            WHERE workspace_key=%s
+                              AND status IN ('queued', 'running')
+                            ORDER BY requested_at
+                            LIMIT 1
+                            """,
+                            (WORKSPACE_KEY,),
+                        )
+                        active = cursor.fetchone()
+                        if active:
+                            result = {
+                                "status": "already_active",
+                                "job": _clean_reporting_repair_job(active),
+                            }
+                        else:
+                            cursor.execute(
+                                """
+                                INSERT INTO seo_reporting_repair_jobs(
+                                    id, workspace_key, status, trigger_source,
+                                    requested_by
+                                ) VALUES (
+                                    %s, %s, 'queued',
+                                    'initial_gsc_reporting_backfill', 'startup'
+                                )
+                                ON CONFLICT DO NOTHING
+                                RETURNING *
+                                """,
+                                (job_id, WORKSPACE_KEY),
+                            )
+                            queued = cursor.fetchone()
+                            if queued:
+                                result = {
+                                    "status": "queued",
+                                    "job": _clean_reporting_repair_job(queued),
+                                }
+                            else:
+                                # A concurrent producer can only win here if it
+                                # does not participate in the advisory lock. The
+                                # unique active-job index still prevents a duplicate.
+                                cursor.execute(
+                                    """
+                                    SELECT * FROM seo_reporting_repair_jobs
+                                    WHERE workspace_key=%s
+                                      AND status IN ('queued', 'running')
+                                    ORDER BY requested_at
+                                    LIMIT 1
+                                    """,
+                                    (WORKSPACE_KEY,),
+                                )
+                                result = {
+                                    "status": "already_active",
+                                    "job": _clean_reporting_repair_job(
+                                        cursor.fetchone()
+                                    ),
+                                }
+                connection.commit()
+            return result
+        except Exception as error:
+            raise SEOPhase4Error(
+                "The initial compact GSC reporting repair could not be queued.",
+                code="initial_reporting_repair_enqueue_failed",
+            ) from error
+
     def claim_reporting_repair(
         self,
         worker_id,
@@ -3976,6 +4106,12 @@ def default_phase4_store():
     if _DEFAULT_PHASE4_STORE is None:
         _DEFAULT_PHASE4_STORE = PostgresSEOPhase4Store()
     return _DEFAULT_PHASE4_STORE
+
+
+def ensure_initial_gsc_reporting_repair(*, phase4_store=None, schema_ready=False):
+    """Idempotently enqueue initial compact reporting after schema readiness."""
+    store = phase4_store or default_phase4_store()
+    return store.ensure_initial_gsc_reporting_repair(schema_ready=schema_ready)
 
 
 def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):

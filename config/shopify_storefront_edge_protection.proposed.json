@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "status": "PROPOSAL_ONLY_DO_NOT_APPLY",
+  "prepared_at": "2026-08-19",
+  "production_domains": [
+    "www.sportscaveshop.com",
+    "sportscaveshop.com"
+  ],
+  "excluded_domains": [
+    "sportscave.com.au",
+    "www.sportscave.com.au"
+  ],
+  "current_edge": {
+    "provider": "Shopify-managed Cloudflare edge",
+    "merchant_controlled": false,
+    "customer_cloudflare_proxy_supported_by_shopify": false
+  },
+  "country_block": {
+    "name": "sports-cave-block-sg-public-storefront",
+    "owner": "Shopify Support / Shopify edge security",
+    "expression": "(http.host in {\"www.sportscaveshop.com\" \"sportscaveshop.com\"} and ip.src.country eq \"SG\" and not (cf.bot_management.verified_bot and cf.verified_bot_category eq \"Search Engine Crawler\"))",
+    "action": "block",
+    "response_status": 403,
+    "response_body": "provider-native minimal block response",
+    "notes": [
+      "Apply before the apex canonical redirect so the apex cannot bypass the rule.",
+      "Do not replace verified-bot identity with a User-Agent allow rule.",
+      "Ask Shopify to confirm how verified Google Merchant, Storebot and AdsBot traffic is classified before activation.",
+      "Ask Shopify to confirm a WAF block is excluded from Online Store session creation."
+    ]
+  },
+  "rate_limit_pilot": {
+    "name": "sports-cave-product-enumeration-managed-challenge",
+    "status": "DISABLED_PENDING_EDGE_LOG_BASELINE",
+    "expression": "(http.host in {\"www.sportscaveshop.com\" \"sportscaveshop.com\"} and http.request.method in {\"GET\" \"HEAD\"} and (starts_with(http.request.uri.path, \"/products/\") or starts_with(http.request.uri.path, \"/collections/\") or http.request.uri.path eq \"/search\") and not (cf.bot_management.verified_bot and cf.verified_bot_category eq \"Search Engine Crawler\"))",
+    "initial_threshold": {
+      "requests": 120,
+      "period_seconds": 300,
+      "characteristic": "source IP"
+    },
+    "action": "managed_challenge",
+    "mitigation_timeout_seconds": 600,
+    "notes": [
+      "The threshold is a conservative starting proposal, not a validated production value.",
+      "Run in log/simulate mode first and tune from actual human and bot request distributions.",
+      "Use Shopify/Cloudflare bot score, JA4 or detection signals if Shopify makes them available; do not block an ASN globally without evidence."
+    ]
+  },
+  "observability": {
+    "system_of_record": "Shopify/edge-provider security analytics",
+    "do_not_copy_raw_ip_history_to_sports_cave_os": true,
+    "required_aggregates": [
+      "rule matches and blocks by day",
+      "blocked country",
+      "blocked host and path",
+      "request method",
+      "ASN and network aggregate",
+      "bot classification",
+      "verified bot category bypass",
+      "rate-limit events"
+    ]
+  }
+}

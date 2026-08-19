@@ -356,12 +356,36 @@ class GSCReaderAndOrchestrationTests(unittest.TestCase):
     def test_startup_applies_every_gsc_pipeline_migration(self):
         with patch.object(sports_cave_server.run_migrations, "get_database_url", return_value=("db", "test")), patch.object(
             sports_cave_server.run_migrations, "run_migrations"
-        ) as migrate:
+        ) as migrate, patch(
+            "google_seo_phase4.ensure_initial_gsc_reporting_repair",
+            return_value={"status": "not_required"},
+        ) as initial_repair:
             self.assertTrue(sports_cave_server.prepare_google_seo_storage())
         self.assertEqual(
             [call.kwargs["only"] for call in migrate.call_args_list],
             list(google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS),
         )
+        initial_repair.assert_called_once_with(schema_ready=True)
+
+    def test_startup_pipeline_migrations_all_pass_the_real_safety_gate(self):
+        real_run_migrations = sports_cave_server.run_migrations.run_migrations
+
+        def safety_only(*, only):
+            return real_run_migrations(only=only, check=True)
+
+        with patch.object(
+            sports_cave_server.run_migrations,
+            "get_database_url",
+            return_value=("db", "test"),
+        ), patch.object(
+            sports_cave_server.run_migrations,
+            "run_migrations",
+            side_effect=safety_only,
+        ), patch(
+            "google_seo_phase4.ensure_initial_gsc_reporting_repair",
+            return_value={"status": "not_required"},
+        ):
+            self.assertTrue(sports_cave_server.prepare_google_seo_storage())
 
     def test_audit_is_ready_for_render_when_local_database_is_absent(self):
         with patch.object(audit_gsc_connection_and_data.run_migrations, "get_database_url", return_value=("", "")):

@@ -6,6 +6,7 @@ from unittest.mock import patch
 import google_seo
 import google_seo_import
 import google_seo_phase4
+import run_migrations
 import seo_page
 import seo_reporting_runtime
 
@@ -225,6 +226,133 @@ class ReportingRepairQueueTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
 
+class _InitialRepairCursor:
+    def __init__(
+        self,
+        *,
+        canonical_ready=True,
+        current_snapshot_ready=False,
+        source_revision=44,
+        active_job=None,
+    ):
+        self.canonical_ready = canonical_ready
+        self.current_snapshot_ready = current_snapshot_ready
+        self.source_revision = source_revision
+        self.active_job = dict(active_job or {})
+        self.jobs = [self.active_job] if self.active_job else []
+        self.statements = []
+        self._row = None
+
+    def execute(self, sql, params=()):
+        clean = " ".join(str(sql).split())
+        self.statements.append((clean, params))
+        if "AS canonical_ready" in clean:
+            self._row = {
+                "gsc_site_url": "https://www.sportscaveshop.com/",
+                "source_revision": self.source_revision,
+                "canonical_ready": self.canonical_ready,
+                "current_snapshot_ready": self.current_snapshot_ready,
+            }
+        elif clean.startswith("SELECT * FROM seo_reporting_repair_jobs"):
+            self._row = dict(self.jobs[0]) if self.jobs else None
+        elif clean.startswith("INSERT INTO seo_reporting_repair_jobs"):
+            if self.jobs:
+                self._row = None
+            else:
+                self._row = {
+                    "id": params[0],
+                    "workspace_key": params[1],
+                    "status": "queued",
+                    "trigger_source": "initial_gsc_reporting_backfill",
+                    "requested_by": "startup",
+                    "attempt_count": 0,
+                }
+                self.jobs.append(dict(self._row))
+        else:
+            self._row = None
+
+    def fetchone(self):
+        return dict(self._row) if self._row else None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class InitialReportingRepairTests(unittest.TestCase):
+    @staticmethod
+    def store_for(cursor):
+        store = google_seo_phase4.PostgresSEOPhase4Store(_Backend(cursor))
+        store._schema_ready = True
+        return store
+
+    def test_existing_canonical_data_queues_exactly_one_initial_repair(self):
+        cursor = _InitialRepairCursor()
+        store = self.store_for(cursor)
+
+        first = store.ensure_initial_gsc_reporting_repair()
+        second = store.ensure_initial_gsc_reporting_repair()
+
+        self.assertEqual(first["status"], "queued")
+        self.assertEqual(second["status"], "already_active")
+        self.assertEqual(len(cursor.jobs), 1)
+        sql = "\n".join(statement for statement, _params in cursor.statements)
+        self.assertIn("total.property_id=connection.gsc_site_url", sql)
+        self.assertIn("total.search_type='web'", sql)
+        self.assertIn("total.data_state='final'", sql)
+        self.assertIn("total.is_complete=TRUE", sql)
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("ON CONFLICT DO NOTHING", sql)
+
+        migration = (
+            ROOT / "migrations" / "20260819_gsc_reporting_snapshot_repair.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("idx_seo_reporting_repair_one_active", migration)
+        self.assertIn("WHERE status IN ('queued', 'running')", migration)
+
+    def test_current_revision_snapshot_does_not_queue(self):
+        cursor = _InitialRepairCursor(current_snapshot_ready=True)
+        result = self.store_for(cursor).ensure_initial_gsc_reporting_repair()
+
+        self.assertEqual(result["status"], "not_required")
+        self.assertEqual(result["reason"], "current_snapshot_available")
+        self.assertEqual(cursor.jobs, [])
+
+    def test_existing_active_repair_is_reused(self):
+        active = {
+            "id": "existing",
+            "workspace_key": google_seo.GOOGLE_SEO_WORKSPACE_KEY,
+            "status": "running",
+            "attempt_count": 1,
+        }
+        cursor = _InitialRepairCursor(active_job=active)
+        result = self.store_for(cursor).ensure_initial_gsc_reporting_repair()
+
+        self.assertEqual(result["status"], "already_active")
+        self.assertEqual(result["job"]["id"], "existing")
+        self.assertEqual(len(cursor.jobs), 1)
+
+    def test_missing_complete_canonical_data_does_not_queue(self):
+        cursor = _InitialRepairCursor(canonical_ready=False)
+        result = self.store_for(cursor).ensure_initial_gsc_reporting_repair()
+
+        self.assertEqual(result["status"], "not_required")
+        self.assertEqual(result["reason"], "canonical_gsc_data_unavailable")
+        self.assertEqual(cursor.jobs, [])
+
+    def test_startup_enqueue_only_inspects_database_and_queue(self):
+        source = inspect.getsource(
+            google_seo_phase4.PostgresSEOPhase4Store.ensure_initial_gsc_reporting_repair
+        )
+        for forbidden in (
+            "requests.", "googleapis.com", "refresh_reporting_snapshots",
+            "sportscaveshop.com/products", "seo_technical_audit",
+        ):
+            self.assertNotIn(forbidden, source)
+
+
 class MigrationTests(unittest.TestCase):
     def test_reporting_repair_migration_is_additive_and_registered(self):
         name = "20260819_gsc_reporting_snapshot_repair.sql"
@@ -234,6 +362,9 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("seo_reporting_repair_jobs", sql)
         self.assertNotIn("DROP ", sql.upper())
         self.assertNotIn("DELETE ", sql.upper())
+        self.assertNotIn("INSERT ", sql.upper())
+        self.assertNotIn("UPDATE ", sql.upper())
+        self.assertTrue(run_migrations.safe_migration_sql(sql))
         self.assertIn(name, google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS)
         self.assertIn(name, google_seo_phase4.PHASE4_MIGRATIONS)
 
