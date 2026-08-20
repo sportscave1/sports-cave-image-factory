@@ -1,6 +1,7 @@
 import os
 import inspect
 import unittest
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -707,7 +708,11 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
             supabase_backend,
             "sync_latest_paid_orders_to_supabase",
             return_value={"shopify_orders_fetched": 2, "new_orders_inserted": 1},
-        ) as sync:
+        ) as sync, patch.object(
+            supabase_backend,
+            "shopify_order_reconciliation_lease",
+            return_value=nullcontext(True),
+        ):
             shopify_order_reconciliation_worker.run_once()
 
         sync.assert_called_once_with(
@@ -727,7 +732,11 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
             supabase_backend,
             "sync_latest_paid_orders_to_supabase",
             return_value={"shopify_orders_fetched": 1, "new_orders_inserted": 1},
-        ) as sync:
+        ) as sync, patch.object(
+            supabase_backend,
+            "shopify_order_reconciliation_lease",
+            return_value=nullcontext(True),
+        ):
             shopify_order_reconciliation_worker.run_once()
 
         sync.assert_called_once_with(
@@ -736,6 +745,29 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
             ensure_schema_first=False,
             allow_unrelated_allocation_duplicates=True,
         )
+
+    def test_overlapping_background_reconciliation_does_not_fetch_or_advance(self):
+        with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+            supabase_backend,
+            "shopify_order_reconciliation_lease",
+            return_value=nullcontext(False),
+        ), patch.object(
+            supabase_backend,
+            "sync_latest_paid_orders_to_supabase",
+        ) as sync:
+            result = shopify_order_reconciliation_worker.run_once()
+
+        sync.assert_not_called()
+        self.assertEqual(result["status"], "already_running")
+        self.assertTrue(result["sync_blocked"])
+
+    def test_reconciliation_lease_is_database_backed_and_crash_safe(self):
+        source = inspect.getsource(supabase_backend.shopify_order_reconciliation_lease)
+
+        self.assertIn("pg_try_advisory_xact_lock", source)
+        self.assertIn("idle_in_transaction_session_timeout = 0", source)
+        self.assertIn("lease_connection.rollback()", source)
+        self.assertIn("with connect() as lease_connection", source)
 
 
 if __name__ == "__main__":

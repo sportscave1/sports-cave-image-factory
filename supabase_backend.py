@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -7020,6 +7021,38 @@ def apply_daily_execution_timer_outcome(user_id, timer_id, outcome, *, actor="sp
     )
 
 
+SHOPIFY_ORDER_RECONCILIATION_LEASE_KEY = "sports_cave:shopify_order_reconciliation:v1"
+
+
+@contextmanager
+def shopify_order_reconciliation_lease():
+    """Hold a crash-safe, cross-process lease for one full reconciliation.
+
+    A PostgreSQL transaction advisory lock remains safe through transaction
+    poolers and is released automatically on rollback, disconnect, or worker
+    crash.  The dedicated connection is intentionally held for the full
+    reconciliation while business writes keep their existing short
+    transactions.
+    """
+
+    acquired = False
+    with connect() as lease_connection:
+        with lease_connection.cursor() as lease_cursor:
+            # Normal short database calls deliberately use an 8-second idle
+            # transaction timeout. This dedicated lease transaction must stay
+            # open while reconciliation works through its own connections.
+            lease_cursor.execute("SET LOCAL idle_in_transaction_session_timeout = 0")
+            lease_cursor.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0)) AS acquired",
+                (SHOPIFY_ORDER_RECONCILIATION_LEASE_KEY,),
+            )
+            acquired = bool((lease_cursor.fetchone() or {}).get("acquired"))
+        try:
+            yield acquired
+        finally:
+            lease_connection.rollback()
+
+
 def start_sync_run(sync_type, *, ensure_schema_first=True):
     if ensure_schema_first:
         ensure_schema()
@@ -11375,9 +11408,17 @@ def _acquire_order_sync_lock(cur, *, shopify_order_id="", shopify_order_name="",
     return inserted
 
 
-def get_order_line_assignment_snapshot(line_item_ids):
-    ensure_order_read_schema()
-    values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
+def get_order_line_assignment_snapshot(line_item_ids, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_order_read_schema()
+    values = sorted(
+        {
+            candidate
+            for line_item_id in (line_item_ids or [])
+            for candidate in _shopify_id_candidates("LineItem", line_item_id)
+            if candidate
+        }
+    )
     if not values:
         return {}
     with connect() as conn:
@@ -11412,15 +11453,52 @@ def get_order_line_assignment_snapshot(line_item_ids):
                 (values,),
             )
             rows = cur.fetchall()
-    return {
-        str(row.get("shopify_line_item_id") or "").strip(): {
+    snapshots = {}
+    for row in rows:
+        stored_line_item_id = str(row.get("shopify_line_item_id") or "").strip()
+        if not stored_line_item_id:
+            continue
+        snapshot = {
             "assignment_status": str(row.get("assignment_status") or "").strip(),
             "last_error": str(row.get("last_error") or "").strip(),
             "assignments": row.get("assignments") or [],
         }
-        for row in rows
-        if str(row.get("shopify_line_item_id") or "").strip()
+        for candidate in _shopify_id_candidates("LineItem", stored_line_item_id):
+            if candidate:
+                snapshots[candidate] = snapshot
+    return snapshots
+
+
+def _assignment_snapshot_for_line(assignment_snapshot, line_item_id):
+    snapshots = assignment_snapshot or {}
+    for candidate in _shopify_id_candidates("LineItem", line_item_id):
+        snapshot = snapshots.get(candidate)
+        if snapshot:
+            return snapshot
+    return {}
+
+
+def _assignment_snapshot_covers_line(order, line_item, line_index, assignment_snapshot):
+    quantity = max(1, int((line_item or {}).get("quantity") or 1))
+    line_item_id = str(
+        (line_item or {}).get("shopify_line_item_id")
+        or f"{order.get('shopify_order_id')}:line:{line_index}"
+    )
+    snapshot = _assignment_snapshot_for_line(assignment_snapshot, line_item_id)
+    assignments_by_index = {
+        max(_int_value(assignment.get("allocation_index"), 1), 1): assignment
+        for assignment in (snapshot.get("assignments") or [])
+        if isinstance(assignment, dict)
     }
+    if any(index not in assignments_by_index for index in range(1, quantity + 1)):
+        return False, snapshot
+    for allocation_index in range(1, quantity + 1):
+        promised = promised_edition_hint_for_order_line(order, line_item, allocation_index)
+        promised_number = _int_value(promised.get("edition_number"), 0)
+        existing_number = _int_value(assignments_by_index[allocation_index].get("edition_number"), 0)
+        if promised_number and existing_number and promised_number != existing_number:
+            return False, snapshot
+    return True, snapshot
 
 
 def _prodigi_int_value(value, default=0):
@@ -15536,6 +15614,9 @@ def process_paid_order(
     allocation_skip_reason="",
     ensure_schema_first=True,
     ingestion_method="reconciliation",
+    known_assignment_snapshot=None,
+    known_order_lock=False,
+    known_ingestion_complete=False,
 ):
     processing_started = time.perf_counter()
     if ensure_schema_first:
@@ -15619,6 +15700,23 @@ def process_paid_order(
             line_item.get("shopify_line_item_id")
             or f"{order['shopify_order_id']}:line:{line_index}"
         )
+        existing_line_is_complete, existing_line_snapshot = _assignment_snapshot_covers_line(
+            order,
+            line_item,
+            line_index,
+            known_assignment_snapshot,
+        )
+        if existing_line_is_complete:
+            existing_assignments_skipped += quantity
+            mapping_methods.add("existing_assignment")
+            if str(existing_line_snapshot.get("assignment_status") or "").strip().casefold() != "assigned":
+                line_status_started = time.perf_counter()
+                with connect() as conn:
+                    with conn.cursor() as cur:
+                        _set_order_line_status(cur, line_item_id, "Assigned", last_error="")
+                    conn.commit()
+                line_status_ms += (time.perf_counter() - line_status_started) * 1000
+            continue
         line_cache_keys = [
             str(line_item.get("shopify_product_id") or "").strip(),
             str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
@@ -15840,7 +15938,7 @@ def process_paid_order(
         for message in errors:
             log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
     _sync_perf_log("audit log write time", audit_error_started, warnings=len(errors))
-    if assignments_created or existing_assignments_skipped:
+    if (assignments_created or existing_assignments_skipped) and not known_order_lock:
         with connect() as conn:
             with conn.cursor() as cur:
                 _ensure_order_sync_lock_table_with_cursor(cur)
@@ -15874,15 +15972,30 @@ def process_paid_order(
         ingestion_status = "complete"
         import_result = "inserted_or_updated"
         ingestion_reason = ""
-    _set_order_ingestion_outcome(
-        order,
-        ingestion_method=ingestion_method,
-        ingestion_status=ingestion_status,
-        import_result=import_result,
-        reason=ingestion_reason,
-        duration_ms=int((time.perf_counter() - processing_started) * 1000),
-        mapping_methods=mapping_methods,
-    )
+    ingestion_duration_ms = int((time.perf_counter() - processing_started) * 1000)
+    if (
+        known_ingestion_complete
+        and ingestion_status == "complete"
+        and not assignments_created
+        and not errors
+    ):
+        _order_ingestion_log(
+            order,
+            ingestion_method=ingestion_method,
+            import_result="refreshed_existing_assignments",
+            duration_ms=ingestion_duration_ms,
+            mapping_methods=mapping_methods,
+        )
+    else:
+        _set_order_ingestion_outcome(
+            order,
+            ingestion_method=ingestion_method,
+            ingestion_status=ingestion_status,
+            import_result=import_result,
+            reason=ingestion_reason,
+            duration_ms=ingestion_duration_ms,
+            mapping_methods=mapping_methods,
+        )
     return {
         "assignments_created": assignments_created,
         "existing_assignments_skipped": existing_assignments_skipped,
@@ -15909,6 +16022,9 @@ def process_shopify_order_for_editions(
     allocation_skip_reason="",
     ensure_schema_first=True,
     ingestion_method="reconciliation",
+    known_assignment_snapshot=None,
+    known_order_lock=False,
+    known_ingestion_complete=False,
 ):
     """Persist one Shopify order, assign editions, and sync product widget metafields."""
     order = dict(order_payload or {})
@@ -15924,6 +16040,9 @@ def process_shopify_order_for_editions(
         allocation_skip_reason=allocation_skip_reason,
         ensure_schema_first=ensure_schema_first,
         ingestion_method=ingestion_method,
+        known_assignment_snapshot=known_assignment_snapshot,
+        known_order_lock=known_order_lock,
+        known_ingestion_complete=known_ingestion_complete,
     )
 
 
@@ -17241,6 +17360,31 @@ def sync_latest_paid_orders_to_supabase(
             existing_orders=existing_orders_preserved,
             existing_lines=existing_lines_preserved,
         )
+        assignment_snapshot_started = time.perf_counter()
+        candidate_existing_line_item_ids = sorted(
+            {
+                line_item_id
+                for order in candidate_orders
+                for line_item in (order.get("line_items") or [])
+                for line_item_id in [str((line_item or {}).get("shopify_line_item_id") or "").strip()]
+                if line_item_id
+                and set(_shopify_id_candidates("LineItem", line_item_id)).intersection(existing_line_item_ids)
+            }
+        )
+        known_assignment_snapshot = (
+            get_order_line_assignment_snapshot(
+                candidate_existing_line_item_ids,
+                ensure_schema_first=ensure_schema_first,
+            )
+            if candidate_existing_line_item_ids
+            else {}
+        )
+        _sync_perf_log(
+            "existing assignment bulk lookup time",
+            assignment_snapshot_started,
+            line_items=len(candidate_existing_line_item_ids),
+            snapshots=len({id(snapshot) for snapshot in known_assignment_snapshot.values()}),
+        )
         known_repair_candidates = {
             str(order.get("order_name") or "").strip()
             for order in candidate_orders
@@ -17271,6 +17415,24 @@ def sync_latest_paid_orders_to_supabase(
         _orders_sync_log("allocation_started", orders=len(candidate_orders))
         _orders_sync_log("edition_allocation_started", orders=len(candidate_orders))
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
+            order_id = _shopify_order_id(order)
+            order_name = _shopify_order_name(order)
+            order_state = (existing_order_states or {}).get(order_id) or {}
+            if not order_state:
+                order_state = next(
+                    (
+                        (existing_order_states or {}).get(candidate) or {}
+                        for candidate in _shopify_id_candidates("Order", order_id)
+                        if (existing_order_states or {}).get(candidate)
+                    ),
+                    {},
+                )
+            order_lock_known = bool(
+                set(_order_sync_lock_keys(order_id, order_name)).intersection(existing_order_sync_locks)
+            )
+            ingestion_is_complete = (
+                str(order_state.get("ingestion_status") or "").strip().casefold() == "complete"
+            )
             try:
                 result = process_shopify_order_for_editions(
                     order,
@@ -17281,6 +17443,9 @@ def sync_latest_paid_orders_to_supabase(
                     assign_editions=True,
                     ensure_schema_first=ensure_schema_first,
                     ingestion_method="reconciliation",
+                    known_assignment_snapshot=known_assignment_snapshot,
+                    known_order_lock=order_lock_known,
+                    known_ingestion_complete=ingestion_is_complete,
                 )
             except Exception as order_error:
                 retryable_error_orders += 1
@@ -17313,7 +17478,6 @@ def sync_latest_paid_orders_to_supabase(
             elif ingestion_status == "retryable_error":
                 retryable_error_orders += 1
                 candidate_processing_errors += max(len(result_errors), 1)
-            order_id = _shopify_order_id(order)
             if order_id in imported_shopify_order_ids and ingestion_status != "retryable_error":
                 successfully_imported_order_ids.add(order_id)
         allocation_elapsed_ms = (time.perf_counter() - allocation_started) * 1000
@@ -18160,6 +18324,7 @@ def _update_webhook_event_status(
                 ),
             )
         conn.commit()
+
 
     if not any((source_name, import_result, rejection_reason)):
         return

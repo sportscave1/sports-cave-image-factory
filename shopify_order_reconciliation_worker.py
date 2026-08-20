@@ -45,12 +45,20 @@ def run_once():
         if not supabase_backend.is_configured():
             _log("shopify_order_reconciliation_skipped", reason="database_not_configured")
             return {"status": "skipped", "reason": "database_not_configured"}
-        result = supabase_backend.sync_latest_paid_orders_to_supabase(
-            limit=50,
-            lookback_days=14,
-            ensure_schema_first=False,
-            allow_unrelated_allocation_duplicates=True,
-        )
+        with supabase_backend.shopify_order_reconciliation_lease() as lease_acquired:
+            if not lease_acquired:
+                _log("shopify_order_reconciliation_already_running", reason="durable_lease_held")
+                return {
+                    "status": "already_running",
+                    "sync_blocked": True,
+                    "block_reason": "Another full reconciliation holds the durable database lease.",
+                }
+            result = supabase_backend.sync_latest_paid_orders_to_supabase(
+                limit=50,
+                lookback_days=14,
+                ensure_schema_first=False,
+                allow_unrelated_allocation_duplicates=True,
+            )
         if result.get("sync_blocked"):
             _log(
                 "shopify_order_reconciliation_blocked",

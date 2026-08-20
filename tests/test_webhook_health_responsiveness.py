@@ -1,7 +1,7 @@
 import threading
 import time
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -149,6 +149,10 @@ class WebhookHealthResponsivenessTests(unittest.TestCase):
             supabase_backend,
             "sync_latest_paid_orders_to_supabase",
             side_effect=slow_reconciliation,
+        ), patch.object(
+            supabase_backend,
+            "shopify_order_reconciliation_lease",
+            return_value=nullcontext(True),
         ), TestClient(webhook_server.app) as client:
             worker = threading.Thread(target=shopify_order_reconciliation_worker.run_once, name="test-reconciliation")
             worker.start()

@@ -4569,6 +4569,126 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(any("UPDATE edition_runs" in statement for statement in statements))
         self.assertFalse(any("INSERT INTO edition_orders" in statement for statement in statements))
 
+    def test_known_existing_assignment_skips_redundant_mapping_and_allocation_queries(self):
+        order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        line_id = order["line_items"][0]["shopify_line_item_id"]
+        assignment_snapshot = {
+            line_id: {
+                "assignment_status": "Assigned",
+                "last_error": "",
+                "assignments": [
+                    {
+                        "id": "existing-edition-1",
+                        "allocation_index": 1,
+                        "edition_number": 25,
+                        "shopify_handle": "messi-the-final-crown-wall-art",
+                    }
+                ],
+            }
+        }
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            side_effect=AssertionError("Existing assignment must bypass product resolution."),
+        ), patch.object(
+            supabase_backend,
+            "allocate_edition_for_order_line",
+            side_effect=AssertionError("Existing assignment must not be allocated again."),
+        ), patch.object(
+            supabase_backend,
+            "connect",
+            side_effect=AssertionError("Known lock/status must not cause another database round trip."),
+        ), patch.object(
+            supabase_backend,
+            "_set_order_ingestion_outcome",
+            side_effect=AssertionError("Known-complete ingestion must not be rewritten."),
+        ):
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+                known_assignment_snapshot=assignment_snapshot,
+                known_order_lock=True,
+                known_ingestion_complete=True,
+            )
+
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["existing_assignments_skipped"], 1)
+        self.assertEqual(result["ingestion_status"], "complete")
+
+    def test_partial_known_assignment_retains_normal_idempotent_allocation_checks(self):
+        order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        order["line_items"][0]["quantity"] = 2
+        line_id = order["line_items"][0]["shopify_line_item_id"]
+        assignment_snapshot = {
+            line_id: {
+                "assignment_status": "Needs Edition",
+                "assignments": [{"id": "existing-edition-1", "allocation_index": 1, "edition_number": 25}],
+            }
+        }
+        allocations = []
+
+        def fake_allocate(**kwargs):
+            allocations.append(kwargs["allocation_index"])
+            if kwargs["allocation_index"] == 1:
+                return {
+                    "created": False,
+                    "assignment": {"id": "existing-edition-1", "allocation_index": 1, "edition_number": 25},
+                    "sold_out": False,
+                    "error": "",
+                }
+            return {
+                "created": True,
+                "assignment": {
+                    "id": "new-edition-2",
+                    "shopify_handle": "messi-the-final-crown-wall-art",
+                    "allocation_index": 2,
+                    "edition_number": 26,
+                    "edition_total": 100,
+                },
+                "sold_out": False,
+                "error": "",
+            }
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={
+                "product": {
+                    "handle": "messi-the-final-crown-wall-art",
+                    "title": "Messi The Final Crown Wall Art",
+                    "shopify_product_id": "gid://shopify/Product/999",
+                    "active": True,
+                }
+            },
+        ), patch.object(
+            supabase_backend,
+            "allocate_edition_for_order_line",
+            side_effect=fake_allocate,
+        ), patch.object(supabase_backend, "connect"), patch.object(
+            supabase_backend,
+            "_set_order_line_status",
+        ), patch.object(supabase_backend, "_set_order_ingestion_outcome"):
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+                known_assignment_snapshot=assignment_snapshot,
+            )
+
+        self.assertEqual(allocations, [1, 2])
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(result["existing_assignments_skipped"], 1)
+
     def test_one_item_order_allocates_one_unit_and_marks_processed_lock(self):
         order = self.paid_order(
             processed_at="2026-06-19T00:05:00Z",

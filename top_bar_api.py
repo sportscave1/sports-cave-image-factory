@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -814,7 +815,8 @@ async def top_bar_search_index(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    index = build_search_index(claims, load_search_sources(claims))
+    sources = await run_in_threadpool(load_search_sources, claims)
+    index = await run_in_threadpool(build_search_index, claims, sources)
     return _json({"ok": True, "results": index})
 
 
@@ -822,7 +824,7 @@ async def top_bar_notifications(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    activity_rows, alerts = load_notification_sources(claims)
+    activity_rows, alerts = await run_in_threadpool(load_notification_sources, claims)
     return _json(
         {
             "ok": True,
@@ -906,7 +908,8 @@ async def top_bar_order_status(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    return _json({"ok": True, **load_order_status(claims)})
+    status = await run_in_threadpool(load_order_status, claims)
+    return _json({"ok": True, **status})
 
 
 def _daily_planner_timer_mirror(timer):
@@ -978,7 +981,8 @@ async def top_bar_daily_planner_status(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    return _json({"ok": True, **load_daily_planner_status(claims)})
+    status = await run_in_threadpool(load_daily_planner_status, claims)
+    return _json({"ok": True, **status})
 
 
 TOP_BAR_ROUTE_HANDLERS = (

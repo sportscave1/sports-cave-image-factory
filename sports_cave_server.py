@@ -28,13 +28,52 @@ routes = [
 routes.extend(app_branding.public_branding_routes())
 
 
+MAIN_HEALTH_PATHS = frozenset({"/_stcore/health", "/healthz"})
+
+
+class ConstantTimeHealthMiddleware:
+    """Answer Render liveness checks without consulting Streamlit or storage.
+
+    Render currently checks Streamlit's ``/_stcore/health`` path.  Keep that
+    public contract, but make liveness independent of Streamlit runtime state,
+    sessions, database locks, and external services.  ``/healthz`` is exposed
+    as the explicit equivalent for local verification and any future Render
+    configuration change.
+    """
+
+    def __init__(self, application):
+        self.application = application
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in MAIN_HEALTH_PATHS:
+            method = str(scope.get("method") or "GET").upper()
+            status = 204 if method == "OPTIONS" else 200
+            body = b"" if method in {"HEAD", "OPTIONS"} else b"ok\n"
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": [
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                        (b"cache-control", b"no-store"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.application(scope, receive, send)
+
+
 class _GoogleOAuthAccessLogFilter(logging.Filter):
     def filter(self, record):
         return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
 
 logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
 streamlit_app = App("app.py", routes=routes)
-app = app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
+app = ConstantTimeHealthMiddleware(
+    app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
+)
 
 
 def prepare_google_seo_storage():
@@ -79,7 +118,9 @@ if __name__ == "__main__":
     import uvicorn
 
     prepare_google_seo_storage()
-    collector_vault.log_collector_vault_readiness(check_shopify=True)
+    # Readiness logging is diagnostic only. Never delay port binding on a
+    # Shopify Admin API call during a process restart.
+    collector_vault.log_collector_vault_readiness(check_shopify=False)
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),
