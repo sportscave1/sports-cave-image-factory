@@ -63,7 +63,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         self.assertEqual(
             design_studio_styles.STYLE_REGISTRY_VERSION,
-            "sports_cave_design_styles_v4_moment_jersey_locked",
+            "sports_cave_design_styles_v5_distinct_type_contracts",
         )
 
     def test_every_style_builds_all_four_prompts(self):
@@ -129,10 +129,10 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
             )
             with self.subTest(style=slug):
                 max_length = {
-                    "ultimate_moment": 11000,
-                    "rivalry_faceoff": 14500,
-                    "legends_jersey_display": 17000,
-                }.get(slug, 9500)
+                    "ultimate_moment": 16000,
+                    "rivalry_faceoff": 20000,
+                    "legends_jersey_display": 22000,
+                }.get(slug, 15000)
                 self.assertLess(len(prompt), max_length)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
@@ -644,7 +644,7 @@ class DesignStudioImageContractTests(unittest.TestCase):
         )
         fixed_body = prompt.split("TASK VARIABLES", 1)[0]
 
-        self.assertLessEqual(len(fixed_body), 6500)
+        self.assertLessEqual(len(fixed_body), 9000)
         self.assertIn("immediately preceding Research response", fixed_body)
         self.assertIn("Do not repeat or redo the research", fixed_body)
         self.assertIn("three strongest final-use photographs per principal", fixed_body)

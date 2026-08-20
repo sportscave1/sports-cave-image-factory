@@ -5,7 +5,7 @@ import re
 
 
 STYLE_REQUIRED_LABEL = "Style required"
-STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v4_moment_jersey_locked"
+STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v5_distinct_type_contracts"
 
 DESIGN_DETAIL_FIELDS = (
     ("design_title", "Design title"),
@@ -143,15 +143,52 @@ If a candidate cannot render inline or its preview is broken, replace it with th
 
 Keep each principal in a separate labelled image group. Return no more than the three strongest final-use photographs per principal, no more than one relevant venue or shared-moment image, and exactly one clearest verified signature candidate per named human principal, placed last.
 
-Each candidate may show only: the actual image preview; principal name; one short role label such as "Primary hero - chest-up"; source and available resolution; and a source-page attribution link. Preserve asset_id, supported role, subject mapping and use_mode in the image card metadata or concise alt text so later stages can reference the exact asset. Do not turn that metadata into an essay or expose a raw URL as the primary output.
+Every selected photograph card must state: principal name; Primary or Backup mapping; Hero, Secondary or Background role; supported use mode as visible_cutout, visible_whole_photo or reference_only; original source as a secondary source-page attribution link; available resolution; estimated useful resolution after the proposed crop; and one concise reason the authentic crop, camera angle, expression, uniform and era support the selected design type. Preserve asset_id, supported role, subject mapping and use_mode in the image card metadata or concise alt text so later stages can reference the exact asset. Do not turn that metadata into an essay or expose a raw URL as the primary output.
+
+The final selected photographs must remain present as actual tool-native image cards or supported inline previews and must be supplied to Generation as actual image inputs. A webpage link or source-page URL alone is not a usable generation asset. If the platform cannot carry an approved image forward as an image input, mark it REPLACE and find a renderable authentic alternative.
 """.strip()
 
 
 GENERATION_ASSET_VALIDATION_CONTRACT = """
 VISIBLE PRE-GENERATION ASSET VALIDATION
 
-Before generating, show one concise PASS/REPLACE line per selected hero asset. Confirm that the exact principal and role mapping are correct, the authentic source supports the intended crop, useful crop resolution is sufficient, no principal will be distant, full-body or accidentally secondary, no face or body must be reconstructed, and the proposed composition fits inside the landscape 4:3 Sports Cave border. Replace an unsuitable source through Find Images before generating.
+Before generating, show one concise PASS/REPLACE line per selected hero asset. Confirm that the exact principal and role mapping are correct, the authentic source supports the intended crop, useful crop resolution is sufficient, no principal will be distant, full-body or accidentally secondary, no face or body must be reconstructed, and the proposed composition fits inside the landscape 4:3 Sports Cave border. Confirm that every visible final-use photograph is attached to the generation request as an actual image input rather than represented only by a webpage link. Replace an unsuitable or unavailable source through Find Images before generating.
 """.strip()
+
+
+AUTHENTIC_SOURCE_ASSET_LOCK = """
+AUTHENTIC SOURCE ASSET LOCK - IMMUTABLE AFTER APPROVAL
+
+Every approved photograph is an immutable source asset. Composite its real photographic pixels. Never redraw or regenerate a face, loosely imitate a principal, face-swap or re-pose a person. Do not mirror or reverse a principal. Do not turn a head, redirect an eye-line, change an authentic expression or proportion, invent missing arms, hands, shoulders or other anatomy, combine a face from one photograph with another body, or reconstruct a uniform, jersey surname, number, trophy, piece of equipment or vehicle.
+
+Allowed operations are non-generative cropping, proportional scaling, positioning, masking, cutout extraction, restrained colour grading and lighting integration that preserve the source identity and factual details. If a source cannot support the selected composition without prohibited reconstruction, stop and replace it during Find Images. Generation and correction must never repair an unsuitable source by inventing identity-bearing pixels.
+""".strip()
+
+
+PHOTOGRAPHIC_REALISM_CONTRACT = """
+PHOTOGRAPHIC REALISM AND ANATOMY LOCK - MANDATORY
+
+Preserve the authentic photographic identity and texture of every principal. Maintain natural skin pores and realistic subsurface scattering across all visible skin, with no beautification or artificial smoothing. Skin across the face, ears, neck, shoulders, arms and chest must have a consistent natural tone, fine texture, subtle imperfections and believable lighting. Preserve natural age lines, facial structure, hair detail and the original expression. Avoid waxy skin, plastic highlights, excessive sharpening, artificial muscles or flawless AI-style skin.
+
+Inspect every visible hand and finger; arm, elbow and shoulder; hairline and facial-hair edge; tooth, eye and ear; neck-to-body transition; clothing edge; jersey fabric and stitching; helmet and piece of equipment; cutout edge; contact shadow; and lighting transition. Any warped, fused, duplicated, smoothed, reconstructed or inconsistently lit detail fails photographic realism. Correct only the named local defect from the immutable source; never regenerate the principal.
+""".strip()
+
+
+VERIFIED_SIGNATURE_CONTRACT = """
+VERIFIED SIGNATURE CONTRACT - NO GENERATION OR APPROXIMATION
+
+Every signature must come from one clear, verifiable reference mapped to the correct named principal. Composite the complete authentic handwritten mark while preserving its stroke path, proportions and orientation. Never invent, approximate, trace, redraw, rewrite, font-set or ask the image-generation model to create a signature. If no clear verified reference exists, state SIGNATURE UNAVAILABLE and leave it absent rather than fabricating it.
+
+When multiple signatures appear, preserve each authentic individual form while presenting them with the same colour, comparable displayed size, similar visual weight, matching apparent line thickness, brightness and opacity, balanced border spacing and clear readability at Shopify-thumbnail size. No signature may dominate another. Placement must follow the selected design type and the corresponding principal; consistency does not require an identical layout for every style.
+""".strip()
+
+
+TARGETED_CORRECTION_EDIT_LOCK = (
+    "EDIT LOCK: Change only the specifically identified problem. Preserve the existing canvas, "
+    "composition, source photographs, faces, expressions, poses, uniforms, background, typography, "
+    "title, border, plaque, colours, lighting, sizing and placement exactly as supplied. Do not "
+    "regenerate, redesign or reinterpret any approved element."
+)
 
 
 @dataclass(frozen=True)
@@ -268,7 +305,9 @@ INLINE IMAGE RESULT CONTRACT - FIND IMAGES IS NOT COMPLETE WITHOUT VISIBLE PHOTO
 
 Use the platform's dedicated image-search capability, not a regular web-search link list. Display every selected candidate as an actual tool-native image-result card or supported inline image preview. A source URL, markdown link, filename or text description by itself is not an image result. Do not use screenshots of search-result pages.
 
-If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate. Keep the original source page as secondary attribution. Each short candidate label may include only the actual image preview, principal name, concise crop role, source, available resolution and source-page attribution. Preserve asset_id, supported role, subject mapping and use_mode in metadata or concise alt text. Follow the exact two-group candidate and signature limits in the style photo targets below; return no separate supporting-asset group.
+If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate. Keep the original source page as secondary attribution. Each short candidate label must include the actual image preview; principal name; Primary or Backup mapping; Rival One or Rival Two hero role; visible_cutout use mode; source; available resolution; estimated useful resolution after the intended crop; and why its crop, natural angle, expression, uniform and era support this specific face-off. Preserve asset_id, supported role and subject mapping in metadata or concise alt text. Follow the exact two-group candidate and signature limits in the style photo targets below; return no separate supporting-asset group.
+
+Carry the selected pair forward as actual image inputs for Generation. A link alone is not an approved face-off source. Replace any candidate that cannot remain visibly attached or supplied as an image input.
 """.strip()
 
 RIVALRY_FACE_OFF_GENERATION_RULES = f"""
@@ -464,11 +503,11 @@ Use the verified names, jersey-display surnames, numbers, teams/countries, eras 
 
 Use the platform's dedicated image-search capability. Display each selected candidate as an actual tool-native image-result card or supported inline preview, with the source page as secondary attribution. A link, filename or description without a visible image is not a result. Replace broken previews. Never use screenshots of search results.
 
-Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show: actual preview; Primary rear source or Backup rear source rank; why it is suitable; visible surname; visible number; correct team/country, sport, era, uniform and equipment; available resolution and crop suitability; source; supported role; subject mapping; use mode; and any authenticity risk. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
+Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show: actual preview; principal name; Primary rear source or Backup rear source rank; Hero role; visible_cutout use mode; why the crop, natural angle and genuine rear silhouette suit this display; visible surname; visible number; correct team/country, sport, era, uniform and equipment; available resolution; estimated useful resolution after the intended crop; source as secondary attribution; supported role; subject mapping; and any authenticity risk. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
 
 After both groups, score every viable two-photo combination and recommend one strongest PAIR. Pair scoring must cover matching rear orientation, crop and body scale where authentic sources permit; camera height; perspective; lighting; comparable visual importance; clear authentic surnames and numbers; complete heads, shoulders and arms; and ability to fit the locked landscape 4:3 layout. Authenticity outranks perfect symmetry. A strong individual image must lose if it creates an unusable pair, but never choose a less authentic jersey merely for a cleaner background or manufactured symmetry.
 
-Finish with JERSEY SOURCE LOCK. Map Principal One and Principal Two to their exact approved image cards/assets, verified surname, number, team/country, era, uniform, role and use mode; then map each verified signature. State that these exact photographs are immutable final-use assets for Generation. If no compatible authentic pair exists, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
+Finish with JERSEY SOURCE LOCK. Map Principal One and Principal Two to their exact approved image cards/assets, verified surname, number, team/country, era, uniform, role and use mode; then map each verified signature. State that these exact photographs are immutable final-use assets and must be supplied to Generation as actual image inputs, not webpage links alone. If no compatible authentic pair exists or a selected image cannot be carried forward as an image input, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES = """
@@ -618,15 +657,15 @@ _STYLES = (
         ("hero_exact_photo",),
         ("venue_reference", "historical_reference", "signature_asset"),
         """
-Identify the strongest emotionally recognisable gesture, farewell, candid expression, celebration or personal moment. Verify the era and venue and explain why that image unlocks affection rather than feeling generic.
+Choose one verified memory that supporters from the era would recognise without explanation: a farewell, embrace, candid expression, lap of honour, restrained celebration or culturally important personal moment. Verify its date, venue, uniform, equipment, participants and emotional context. Explain why this memory creates affection and belonging rather than achievement or championship spectacle. The source brief must ask for genuine period photography whose expression, crop and available surroundings already carry that feeling without mirroring, re-posing or reconstructed anatomy.
 """,
         """
-Return the strongest emotionally specific final-use hero candidates first, then a small set of genuine alternatives, then the correct nostalgic venue or era reference, then one verified signature last.
+Search for genuine period photographs from the selected memory, not modern portraits or generic career highlights. Return the strongest emotionally specific hero candidates first, then only materially different authentic backups, one correct venue or era reference and one verified signature last. Prefer candid expression, human gesture, correct period uniform and enough original environment to preserve the memory. Reject modern re-enactments, colourised inventions, wrong-era kit, generic action and sources that require invented limbs or scenery.
 """,
         """
-Use one dominant authentic hero photograph, or two authentic subjects when the shared memory genuinely requires both. Do not duplicate the athlete; when two supplied subjects are required, do not duplicate either one. Support the memory with restrained warm light, stadium shadow, gentle haze, authentic grain and dark edges. Avoid fantasy lighting, synthetic crowds and generic action montage treatment.
+Make the finished piece feel like an authentic memory from its era. Use one dominant genuine period photograph, or two authentic principals only when the verified shared memory requires both. Preserve period grain, uniforms, equipment, venue colour and age character. Use restrained archival typography, warm but truthful grading, stadium shadow, gentle haze and dark edges. Do not duplicate the athlete or any other subject, modernise the image, turn it into a generic digital montage, add fantasy lighting or manufacture a crowd. The emotion must come from the photographed memory rather than effects or an old date pasted onto a modern graphic.
 """,
-        "Judge emotional specificity, authentic memory and restraint. Reject generic action, duplicated athletes or fantasy styling.",
+        "The style passes only when the era and chosen memory are immediately felt through genuine period photography, restrained archival typography, truthful grain and emotional atmosphere. Reject a modern collector graphic with an old date, generic action, duplicated athletes, invented scenery, wrong-period treatment or fantasy styling; cap it at 6/10 when Nostalgic Tribute is not immediately recognisable.",
         minimum=1,
     ),
     _style(
@@ -639,15 +678,15 @@ Use one dominant authentic hero photograph, or two authentic subjects when the s
         ("driver_photo", "vehicle_exact_photo"),
         ("venue_reference", "equipment_reference", "historical_reference", "signature_asset"),
         """
-Verify the driver, season, race, team, car model, race number, sponsors, suit, helmet, wheels, body shape, livery, circuit and achievement as one historically matched set.
+Select one verified driver-and-car story, then lock the driver, season, race, team, exact chassis/model, race number, sponsors, suit, helmet, wheels, body shape, livery, circuit and result as one historically matched set. Explain whether the commercial hero is the car, the driver, or their relationship. Specify compatible genuine camera angles and scale without fabricating a shared pose or mixing seasons.
 """,
         """
-Return separate groups for the driver in the correct suit and era; the exact car and livery from useful authentic angles; the exact circuit and event atmosphere; then one verified driver signature last.
+Return separate visible groups for the driver in the correct suit and helmet era, the exact car and livery from useful authentic angles, and one restrained circuit/event reference, followed by one verified driver signature. Record enough resolution to read sponsor marks, race number, wheel and body details after cropping. Reject replicas, tribute liveries, later demonstrations, model cars, wrong-season suits, mismatched helmets and any source that would require the vehicle or driver to be regenerated.
 """,
         """
-Use one driver and one exact real car from the same verified season, race, team and livery. Never modernise, reliver or regenerate the car, and never pair a driver from one season with another season's car. The car may be largest. Keep track atmosphere restrained.
+Create a historically exact driver-and-machine portrait using one authentic driver source and one authentic photograph of the verified car from the same verified season, race, team and livery. The car may be the largest visual object, with the driver providing human authority; neither should look pasted into an impossible shared moment. Preserve sponsor typography, race number, bodywork, wheels, helmet and suit. Use restrained pit-lane, garage, circuit or mountain-road atmosphere appropriate to the event. Never modernise, reliver, mirror or regenerate the car, and never pair a driver from one season with another season's machine.
 """,
-        "Verify the exact car, livery, race number, sponsors, suit, helmet, race, season and circuit. Reject every cross-era mismatch.",
+        "First test whether this reads immediately as the verified driver with the exact defining car, not a generic motorsport poster. Verify car model, bodywork, livery, race number, sponsors, wheels, suit, helmet, race, season and circuit. Reject and cap at 6/10 for any cross-era pairing, invented sponsor detail, reliveried car, synthetic vehicle surface or generic racing background that overwhelms the matched driver-and-car story.",
         minimum=1,
         exact=1,
     ),
@@ -661,15 +700,15 @@ Use one driver and one exact real car from the same verified season, race, team 
         ("hero_exact_photo",),
         ("secondary_exact_photo", "equipment_reference", "signature_asset"),
         """
-Verify the athlete, correct kit, season and equipment; identify the strongest clean action pose and minimal title direction that remains readable at Shopify-thumbnail size.
+Define one clear emotional idea for one verified athlete, then verify the exact kit, season and equipment supporting it. Choose one authentic pose with a clean silhouette and recognisable face that can dominate without additional narrative imagery. Specify the negative-space plan, one restrained title and the minimum supporting colour; reject concepts that need statistics, duplicate portraits, trophy collages or background storytelling.
 """,
         """
-Return clean, high-resolution, cutout-friendly action candidates first; optionally one genuinely complementary second image of the same athlete; then accurate kit/equipment detail; then one authentic signature last. Do not return stadium or trophy montages.
+Return clean, high-resolution, cutout-friendly hero candidates with strong silhouettes and sufficient useful crop resolution. A backup must provide a genuinely different usable crop, not another decorative pose. Include only the factual kit/equipment reference required and one verified signature last. Do not return stadium panoramas, trophy montages, crowd scenes, stat cards, extra athletes or photography that cannot stand confidently against negative space.
 """,
         """
-Use one distinct athlete. Default to one dominant source photograph. A second real photograph may be visible only when it is the same athlete and clearly strengthens the design; maximum two visible figures. Use black or charcoal, restrained gold texture, minimal typography and genuine negative space. No detailed stadium, crowd, trophy collage or extra player.
+Use one dominant authentic subject, one disciplined focal idea, genuine negative space, limited typography and a tightly controlled palette. Default to one source photograph; a second photograph of the same athlete is exceptional and must strengthen the same idea without becoming a collage, with maximum two visible figures of that same person. Use flat or subtly textured black/charcoal, restrained team colour and a small gold collector accent. Avoid unnecessary statistics, duplicate portraits, large effects, detailed stadiums, crowds, trophy collages, extra players and decorative filler.
 """,
-        "Check that one athlete dominates, no more than two real poses of that same person appear, negative space is genuine and unnecessary detail is absent.",
+        "Minimalist Hero passes only when one authentic athlete, one emotion and one disciplined hierarchy remain immediately clear at thumbnail size. Confirm meaningful negative space, limited typography and absence of decorative filler. Cap at 6/10 when clutter, statistics, duplicate portraits, oversized effects, background spectacle or a second visual story prevents the selected minimalist type from being immediately recognisable.",
         minimum=1,
         exact=1,
     ),
@@ -683,15 +722,15 @@ Use one distinct athlete. Default to one dominant source photograph. A second re
         ("hero_exact_photo", "trophy_exact_photo"),
         ("secondary_exact_photo", "venue_reference", "historical_reference", "signature_asset"),
         """
-Verify the achievement, trophy or award, exact result, date, event, venue, uniform and celebration. Mark hypothetical concepts internally and never present them as verified history.
+Classify the verified story before directing the artwork. If it is a championship or title victory, lock the exact trophy, competition, season, winning event, date, venue, uniform and genuine victory moment. If it is a record, award, milestone or career accomplishment, lock the exact award or evidential object, statistic, date, equipment and defining photograph without pretending it was a title. Choose one mode and explain why fans would collect that specific proof of greatness. Mark hypothetical concepts internally and never present them as history.
 """,
         """
-Return the exact trophy or achievement photograph first, then exact celebration/action, correct trophy close-up, subtle venue/city/scoreboard references and one signature last.
+For championship mode, prioritise genuine trophy lifts, podiums, title celebrations and the exact championship-winning aftermath, followed by the correct trophy and restrained venue/title cues. For achievement mode, prioritise the real award, record-setting action, milestone equipment, verified statistic/date evidence and defining photograph. Return only sources from the correct event and era, then one verified signature last. Reject ordinary portraits labelled Champion, unrelated celebration, substitute trophies and generic award imagery.
 """,
         """
-Use one distinct athlete and a dominant authentic trophy, celebration or achievement photograph. A second visible photograph may only show the same athlete and only when needed. Preserve the exact trophy, result, date, event, venue and uniform. Never invent a future or hypothetical achievement as fact.
+Build the hierarchy around visible proof of the verified accomplishment. Championship mode must use an authentic trophy lift, podium or directly relevant title celebration with strong upward victorious energy, accurate trophy, season, venue and confetti cues when supported. Achievement mode must centre the correct award, record, statistic, date, equipment or defining photograph and communicate authority without falsely implying a championship. Use one distinct athlete; a second real photograph may show only that athlete and only when essential. Never turn an ordinary portrait into a champion with typography or use unrelated celebration imagery. Never invent a future or hypothetical achievement as fact.
 """,
-        "Verify the trophy, result, date, event and uniform. Reject invented achievements and confirm no second distinct hero was added.",
+        "First classify the artwork as championship/title or achievement/record and judge it against that verified mode. Confirm visible factual evidence, exact trophy or award, result/statistic, date, event, venue, uniform and emotional hierarchy. Cap at 6/10 when it is merely an ordinary portrait with Champion text, generic celebration, an unrelated trophy, a fabricated statistic or a championship treatment for a non-title achievement.",
         minimum=1,
         exact=1,
     ),
@@ -705,15 +744,15 @@ Use one distinct athlete and a dominant authentic trophy, celebration or achieve
         ("archival_restoration_source",),
         ("historical_reference", "signature_asset"),
         """
-Identify the definitive original photograph, event, date, venue, participants, result and most credible high-resolution archival source. Verify historical names, car numbers and context. Do not propose a modern re-enactment.
+Identify one definitive original archival photograph and verify its event, date, venue, participants, result, uniform/equipment/vehicle details, photographer or holding archive where available and largest credible scan. Define exactly which physical defects may be repaired and which grain, tonal character, crop and historical marks must remain. Do not propose a modern re-enactment, synthetic colourisation or a collage of later photographs.
 """,
         """
-Return the definitive authentic archival photograph and largest credible scan first. Add another authentic photograph only if it is a genuinely stronger final option, then exact historical fact references, then a verified signature only when appropriate. Do not fill a carousel with duplicate scans or alternate crops.
+Return the definitive authentic archival photograph and largest credible scan first, identifying whether each candidate is the same negative, a materially different original frame or merely a derivative crop. Add another photograph only when it is a genuinely stronger final option, then concise historical verification and a verified signature only when appropriate. Reject modern re-enactments, AI-upscaled hallucinations, colourised derivatives presented as originals, merchandise scans and car/people composites.
 """,
         """
-Use the whole archival photograph wherever possible. Preserve authentic film grain, age, contrast and period character. Correct dust, fading, levels and print damage conservatively only. Never rebuild faces, hands, cars, crowds, track details or missing scenery; never smooth grain into AI detail; never colourise unless explicitly requested. Incidental people already inside the source may remain but must not become new heroes.
+Treat the selected archival frame as the artwork's historical object, not raw material for a modern scene. Use the whole photograph wherever possible. Preserve authentic film grain, age, contrast, edge character and period atmosphere. Correct only verified dust, fading, tonal imbalance and local print damage conservatively. Use restrained archival typography and mounting treatment. Never rebuild faces, hands, uniforms, cars, crowds, track details or missing scenery; never smooth grain into AI detail; never colourise unless explicitly requested. Incidental people already in the source may remain but must not become newly composed heroes.
 """,
-        "Confirm authentic grain and period character remain. Reject invented restoration detail, modern re-enactment, synthetic sharpening or generated people and vehicles.",
+        "Judge the integrity of the original frame before polish. Confirm authentic grain, tonal character, crop, era and documentary detail remain while only legitimate damage is repaired. Cap at 6/10 for invented restoration detail, synthetic sharpening, plastic faces, generative scene extension, modern re-enactment, unauthorised colourisation or generated people, uniforms and vehicles.",
     ),
     _style(
         "update_existing",
@@ -725,21 +764,93 @@ Use the whole archival photograph wherever possible. Preserve authentic film gra
         ("existing_artwork_target",),
         ("signature_asset",),
         """
-Inspect the existing approved artwork and the exact requested change. Verify only the replacement facts or assets needed. Do not research unrelated redesign directions.
+Inspect the existing approved artwork as an immutable master and restate the one exact requested correction. Verify only the replacement fact or asset required for that local change, including spelling, number, signature identity, plaque or date where applicable. Define a precise edit mask/region and explicit non-target list. Do not research unrelated redesign directions or propose a visual refresh.
 """,
         """
-Skip Find Images by default. If the requested edit needs a replacement asset, return only that exact verified replacement and no general inspiration carousel.
+Skip Find Images by default. If the requested edit genuinely requires a replacement photograph, signature, plaque or factual asset, return only that exact verified replacement as a visible image result with its mapping and allowed local use. Do not return inspiration, alternative layouts, new heroes, backgrounds or general style references.
 """,
         """
-Treat the uploaded completed design as the immutable edit target. Change only the requested element. Preserve every unrequested subject, face, pose, layout, title, typography, signature, border, plaque and colour treatment. Do not regenerate the whole artwork for a local edit. Add no people. If a legacy design already contains more than two people, preserve them and warn rather than silently removing anyone.
+Treat the uploaded completed design as the immutable edit target. Change only the requested element, applying the exact replacement only inside the smallest possible local region. Preserve every unrequested subject, face, expression, pose, layout, title, typography, signature, border, plaque, colour, crop, shadow and texture pixel-for-pixel. Do not enhance, modernise or regenerate the artwork for a local edit. Add no people. If a legacy design already contains more than two people, preserve them and warn rather than silently removing anyone.
 """,
-        "Confirm only the requested elements changed and every unrequested pixel-level design decision, subject and signature was preserved.",
+        "Use a before/after change audit: identify the requested element, confirm only that region changed and confirm every unrequested pixel-level decision, subject, signature, source, typography, border, plaque, colour and crop was preserved. Any redesign, global relighting, face change, layout drift or collateral correction fails and caps the score at 6/10.",
         skip_find_images=True,
         legacy_prompt_key="design-studio::upgrade-existing-design",
     ),
 )
 
 _STYLE_REGISTRY = MappingProxyType({style.slug: style for style in _STYLES})
+
+
+STYLE_TYPE_CONTRACTS = MappingProxyType(
+    {
+        "ultimate_moment": """
+ULTIMATE MOMENT TYPE CONTRACT - ONE DEFINING COMMERCIAL INSTANT
+Select the single strongest verified moment of the subject's career, not a career summary. The exact action or immediate emotional aftermath must control the photography, title, crop, background and tone. Preserve the real opponent, score/result, season, venue, uniform and equipment visible in that event. Use the approved moment photograph as the dominant narrative evidence; supporting material may clarify its real setting but may not turn it into a generic portrait collage. Motion, impact and event atmosphere must come from the photographed event, never invented action.
+""".strip(),
+        "rivalry_faceoff": """
+RIVALRY FACE-OFF TYPE CONTRACT - BALANCED COMPETITIVE TENSION
+Communicate a verified competitive history through exactly two co-equal principals. Use two genuine high-resolution photographs with compatible crops, scale and camera angles so both rivals naturally face toward the central tension where their real eye-lines and body directions support it. Balance facial size, brightness, sharpness and visual weight. Preserve authentic era, teams/countries, uniforms and rivalry cues without making the scene a shared celebration. Never mirror, rotate, re-pose, turn a head or reconstruct anatomy to manufacture a face-off; Find Images must replace an incompatible source. Include trophies only when directly relevant to the rivalry story.
+""".strip(),
+        "legends_jersey_display": """
+LEGENDS JERSEY DISPLAY TYPE CONTRACT - LOCKED REAR-JERSEY SERIES
+Preserve the established LEGENDS NEVER DIE collector-series identity with exactly two genuine rear or restrained rear-three-quarter photographs. Authenticate each principal through the real silhouette, jersey surname, number, team, uniform and era; never reconstruct a front-facing face, replacement body, jersey back, name or number. Keep both principals side by side with comparable scale and authority in one dark archival environment. Preserve the fixed title system, ordered surnames, matched lower nameplates, verified signatures, official Collector Series badge, limited-edition plaque and restrained single gold border.
+""".strip(),
+        "nostalgic_tribute": """
+NOSTALGIC TRIBUTE TYPE CONTRACT - A MEMORY OF THE ERA
+Build one emotionally specific remembrance from genuine period photography, uniforms, equipment, venue cues and colours. The hero gesture, expression or shared memory must create affection, farewell, belonging or era nostalgia rather than championship spectacle. Preserve authentic grain and age where appropriate; use restrained archival typography, period-sensitive grading, warm truthful atmosphere and dark edges. It must feel like a memory held by supporters from that era, not a modern digital graphic with an old date or vintage filter added.
+""".strip(),
+        "motorsport_driver_car": """
+MOTORSPORT DRIVER AND CAR TYPE CONTRACT - ONE HISTORICALLY MATCHED MACHINE
+Pair one verified driver with the exact car that defines the selected race, season or achievement. Lock the car model/body shape, livery, race number, sponsors, wheels, team, circuit, driver suit and helmet to the same historical set. Let the car carry mechanical scale and the driver carry human authority, using compatible genuine sources without pretending they shared an unphotographed pose. Use restrained garage, pit-lane, track or mountain-road atmosphere. Never modernise, reliver, mirror, rebuild or cross-pair the driver and car across seasons.
+""".strip(),
+        "minimalist_hero": """
+MINIMALIST HERO TYPE CONTRACT - ONE SUBJECT, ONE IDEA, CONTROLLED SPACE
+Use one dominant authentic athlete and one clear emotional idea. Design with strong negative space, a limited palette, minimal supporting texture and only essential typography. Default to one photograph; never add statistics, duplicate portraits, extra players, trophy montages, detailed stadium scenery or oversized effects merely to fill space. The face, silhouette and verified uniform/equipment must remain recognisable at Shopify-thumbnail size. Restraint and hierarchy—not emptiness plus decoration—define this type.
+""".strip(),
+        "championship_achievement": """
+CHAMPIONSHIP / ACHIEVEMENT TYPE CONTRACT - VISIBLE VERIFIED EVIDENCE
+Choose one truthful mode. Championship mode must immediately communicate a verified title victory through a genuine trophy lift, podium, title celebration or directly relevant winning aftermath, with accurate trophy, competition, season, venue and supported confetti/title cues plus strong upward victorious energy. Achievement mode must centre a verified record, award, milestone or career accomplishment through its correct award, statistic, date, equipment or defining photograph, conveying authority without pretending it was a championship. Never use an ordinary portrait with Champion text, an unrelated celebration or a substitute trophy.
+""".strip(),
+        "vintage_restoration": """
+VINTAGE RESTORATION TYPE CONTRACT - THE ORIGINAL FRAME IS THE ARTEFACT
+Use one genuine archival photograph as the historical object and preserve its real crop, film grain, tonal character, uniforms, equipment, people, vehicles and venue. Repair only dust, fading, level imbalance and local print damage conservatively. Use restrained archival typography and mounting treatment subordinate to the photograph. Never produce a modern re-enactment, generative scene extension, invented sharp detail, replacement anatomy, synthetic vehicle, smoothed grain or unrequested colourisation.
+""".strip(),
+        "update_existing": """
+UPDATE EXISTING DESIGN TYPE CONTRACT - SURGICAL CHANGE ONLY
+Treat the supplied approved artwork as an immutable master. Define one requested replacement and its smallest local edit region, then preserve every unrequested source photograph, face, expression, pose, uniform, layout, typography, title, signature, plaque, border, colour, light, crop and texture exactly. Do not refresh, enhance, modernise or reinterpret the artwork. A replacement asset is allowed only when required for the named correction and must be verified before use.
+""".strip(),
+    }
+)
+
+
+STYLE_SIGNATURE_PLACEMENT_RULES = MappingProxyType(
+    {
+        "ultimate_moment": "Place the verified signature in controlled negative space that belongs to the defining event, close enough to map to the hero but clear of the decisive action, score/event evidence and authentic equipment. It must not interrupt the moment's motion or atmosphere.",
+        "rivalry_faceoff": f"{RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES}\n\nPlace each verified signature on its corresponding rival's side with balanced border spacing. Preserve the central confrontation and never cross-map a signature across the rivalry divide.",
+        "legends_jersey_display": LEGENDS_JERSEY_DISPLAY_SIGNATURE_PLACEMENT_RULES,
+        "nostalgic_tribute": "Place the verified signature like a restrained archival inscription in calm negative space near the remembered subject. Preserve the period mood and grain; do not add a bright modern glow or cover a meaningful gesture, face or historical detail.",
+        "motorsport_driver_car": "Place the verified driver's signature in clean garage, track or title negative space mapped unmistakably to the driver. Keep it clear of the car's livery, sponsors, race number, wheels and silhouette; never invent a vehicle-related autograph.",
+        "minimalist_hero": "Use the verified signature as the only optional memorabilia accent in disciplined negative space near the hero. Keep it modest and quiet so it does not destroy the minimalist hierarchy or compete with the single title.",
+        "championship_achievement": "Place the verified signature in controlled negative space beside the hero or below the verified achievement evidence. Keep the trophy, award, statistic, date and victory gesture unobstructed; the signature must support authority rather than become decorative celebration clutter.",
+        "vintage_restoration": "Use a verified signature only when historically appropriate and supplied from a clear reference. Place it like a restrained archival annotation outside critical photographic evidence, preserving the original frame and grain; do not modernise or simulate an autograph on the historical photograph.",
+        "update_existing": "Change a signature only when the task explicitly identifies that signature. Replace it inside the existing signature footprint with the correct verified asset and preserve every other pixel, including all other signatures, names, spacing, opacity and surrounding artwork.",
+    }
+)
+
+
+STYLE_TARGETED_CORRECTION_RULES = MappingProxyType(
+    {
+        "ultimate_moment": "Preserve the locked decisive event and all authentic action. Correct only the named local defect; never substitute a generic career image or change the opponent, score, venue, uniform, equipment or emotional instant.",
+        "rivalry_faceoff": "Preserve both authentic source photographs, natural eye-lines, body directions, equal scale and central tension. Never mirror, turn, regenerate or rebalance a compliant rival while correcting the named local defect.",
+        "legends_jersey_display": "Preserve both authentic rear sources, jersey surnames and numbers, LEGENDS NEVER DIE system, ordered surnames, matched nameplates, signatures, badge and plaque. Correct only the named local defect without constructing identity-bearing pixels.",
+        "nostalgic_tribute": "Preserve the genuine period photograph, grain, colour age, emotional gesture and archival atmosphere. A local correction must not modernise, smooth, colourise or restage the remembered era.",
+        "motorsport_driver_car": "Preserve the exact driver, car body, livery, race number, sponsors, suit, helmet, wheels, season and circuit context. Correct only the named defect without relivery, vehicle reconstruction or cross-era substitution.",
+        "minimalist_hero": "Preserve the one-subject hierarchy, negative space, limited palette and minimal typography. Correct only the named defect and do not fill space, add effects, duplicate the hero or introduce a second visual story.",
+        "championship_achievement": "Preserve the verified accomplishment mode and its exact trophy, award, record, statistic, date, event, uniform and evidence. Correct only the named defect and do not turn an achievement into a championship or replace real proof with generic celebration.",
+        "vintage_restoration": "Preserve the original archival frame, crop, grain, tonal character and every genuine person, uniform, vehicle and venue detail. Repair only the named physical defect; do not generate missing history or apply global AI enhancement.",
+        "update_existing": "Use the smallest possible edit mask around the requested element. Preserve all unrequested pixels exactly and provide a before/after change statement proving no collateral redesign occurred.",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -791,6 +902,31 @@ def get_design_style(value):
 def design_style_label(value, fallback=STYLE_REQUIRED_LABEL):
     style = get_design_style(value)
     return style.label if style else fallback
+
+
+def _selected_design_type_block(style):
+    return f"SELECTED DESIGN TYPE: {style.label}"
+
+
+def _design_type_contract_block(style):
+    contract = STYLE_TYPE_CONTRACTS.get(style.slug)
+    if not contract:
+        raise ValueError(f"Missing dedicated design-type contract for {style.slug}.")
+    return f"FULL DESIGN-TYPE CONTRACT - {style.label}\n{contract}"
+
+
+def _signature_placement_contract_block(style):
+    rules = STYLE_SIGNATURE_PLACEMENT_RULES.get(style.slug)
+    if not rules:
+        raise ValueError(f"Missing dedicated signature-placement contract for {style.slug}.")
+    return f"TYPE-SPECIFIC SIGNATURE PLACEMENT - {style.label}\n{rules}"
+
+
+def _targeted_correction_contract_block(style):
+    rules = STYLE_TARGETED_CORRECTION_RULES.get(style.slug)
+    if not rules:
+        raise ValueError(f"Missing dedicated targeted-correction contract for {style.slug}.")
+    return f"TYPE-SPECIFIC CORRECTION BOUNDARY - {style.label}\n{rules}"
 
 
 def normalize_design_details(values=None):
@@ -1357,7 +1493,7 @@ def _adapter_block(adapter_key):
 COMMON_RESEARCH_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - RESEARCH
 
-A winning design starts with one confident commercial concept and a clear photo brief. Use reliable current and archival research to verify facts, names, dates, results, uniforms, equipment, vehicles, venue and era. Do not find or display images yet. Do not generate artwork. Do not return a menu of equal options.
+A winning design starts with one confident commercial concept and a composition-ready photo brief written specifically for the selected design type. Use reliable current and archival research to verify facts, names, dates, results, uniforms, equipment, vehicles, venue and era. Explain why the concept belongs to the selected type and what would make it fail that type. Do not find or display images yet. Do not generate artwork. Do not return a menu of equal options.
 
 Return this concise handoff:
 1. Recommended defining moment, season, rivalry or identity
@@ -1370,6 +1506,7 @@ Return this concise handoff:
 8. Exact full principal names requiring signatures
 9. Three focused image-search phrases per principal
 10. One fallback moment if preferred photography is unavailable
+11. A source rejection rule confirming that no selected photograph may require mirroring, re-posing, changed eye-lines, face/body reconstruction or invented anatomy
 
 For rivalry or group designs, choose photographs that can coexist naturally in one restrained composition and match the intended eras.
 """.strip()
@@ -1377,7 +1514,7 @@ For rivalry or group designs, choose photographs that can coexist naturally in o
 COMMON_FIND_IMAGES_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
 
-Use the recommended moment and crop brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for close and medium-close authentic photography that can produce the intended final composition.
+Use the recommended moment and type-specific crop brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for authentic photography that can produce the selected design type's intended composition without mirroring, re-posing, changed eye-lines or reconstructed anatomy.
 
 Return only the three strongest final-use photographs per principal, no more than one relevant shared-moment or venue image, and exactly one clearest verified signature candidate per named human principal last. Keep principals in separate labelled image groups. Use very short labels.
 
@@ -1402,7 +1539,7 @@ MANDATORY NAMES
 Every name in the required principal-name section must be visible in the finished artwork. Names must be correctly spelled, readable at Shopify-thumbnail size, secondary to the design title and hero photography, and mapped clearly to the correct person. No completed design may omit a named principal's full name.
 
 MANDATORY VERIFIED SIGNATURES
-Every mapped human principal must receive the correct verified signature asset. Composite the actual signature mark, remove only its external background, preserve handwriting shape, and keep it thin, elegant, small and subtle. Never type a name in a script font. Never invent, redraw or imitate a missing signature. If a verified signature is missing, make that explicit rather than pretending the design is final.
+Every mapped human principal must receive the correct verified signature asset. Composite the actual signature mark, remove only its external background and preserve the complete handwriting shape, proportions and orientation. Never type a name in a script font. Never invent, redraw or imitate a missing signature. If a verified signature is missing, make that explicit rather than pretending the design is final.
 
 LIMITED-EDITION PLAQUE
 Use the exact Sports Cave limited-edition plaque asset from the plaque mapping section whenever available. Preserve its proportions and wording. Do not retype, regenerate or fake a serial number.
@@ -1420,9 +1557,11 @@ SPORTS CAVE SIGNATURE PLACEMENT PASS - MANDATORY
 
 Use the artwork generated in the immediately preceding step plus the verified signature assets selected during Find Images. This is a surgical collector-detail edit, not permission to redesign the artwork.
 
+The dedicated selected-design-type placement rules are authoritative. Where they prohibit adding or moving a signature, preserve the approved artwork and do not apply a generic placement convention.
+
 Preserve the complete approved artwork unchanged. Do not regenerate people, vehicles, background or composition. Do not alter faces, bodies, uniforms, title, colours, border or plaque.
 
-Add or correct every principal's printed full name and place the correct authentic signature beside the corresponding person or in nearby clean negative space. Remove only the signature image's external background. Preserve the real handwritten form. Make signatures consistent in colour and visual weight, small, thin, elegant, premium and clearly visible.
+Add or correct every principal's printed full name and place the correct verified authentic signature according to the selected design type's dedicated placement rules. Remove only the signature image's external background. Preserve the complete real handwritten form, proportions and orientation. When more than one signature appears, keep the same colour, comparable displayed size, similar visual weight, matching apparent line thickness, brightness and opacity, balanced border spacing and thumbnail readability without changing either person's authentic strokes.
 
 Keep names and signatures fully inside the safe area and border. Never place signatures over faces, bodies, hands, key uniform details, vehicles, plaque or main title. If a verified signature is missing, do not fabricate one; mark that detail as not complete.
 """.strip()
@@ -1430,13 +1569,30 @@ Keep names and signatures fully inside the safe area and border. Never place sig
 COMMON_REVIEW_RULES = """
 SPORTS CAVE DESIGN STUDIO V2 - HARSH REVIEW
 
-Give a direct commercial review of the supplied finished design using only the current task variables, names and asset mappings below. Ignore stale names, signatures or research details from previous tasks. Score it out of 10, identify visible failures, then give one precise correction brief. A polished, premium result that satisfies the contracts and needs only minimal changes may score 10/10; do not invent trivial faults merely to avoid a high score.
+Give a direct commercial review of the supplied finished design using only the current selected design type, task variables, names and asset mappings below. Ignore stale names, signatures or research details from previous tasks. Score it out of 10, identify visible failures, then give one precise correction brief. A polished, premium result that satisfies the contracts and needs only minimal changes may score 10/10; do not invent trivial faults merely to avoid a high score.
 
-Check: actual source photographs were used; every principal is clearly recognisable; faces are large and readable at Shopify-thumbnail size; heroes dominate; no principal is unnecessarily distant or full-body; background has not forced the subjects to become too small; rivalry subjects have comparable visual importance unless the task says otherwise; face, expression, uniform, number, equipment and anatomy remain authentic; no AI reconstruction is visible; every required name and verified signature is present, authentic, correctly mapped and readable; the exact plaque is present, subtle and correctly positioned; title and names are readable; no extra people or generated crowd figures appear; composition follows premium Sports Cave best-seller discipline; landscape 4:3, border containment, print readiness and framed collector appeal are intact.
+Check: actual approved source photographs were used; every principal is clearly recognisable; faces are large and readable at Shopify-thumbnail size; heroes dominate; no principal is unnecessarily distant or full-body; background has not forced the subjects to become too small; rivalry subjects have comparable visual importance unless the task says otherwise; face, expression, uniform, number, equipment and era remain authentic; hands and fingers, arms, elbows and shoulders, hairlines and facial hair, teeth, eyes and ears, neck-to-body transitions, clothing edges, jersey fabric and stitching, helmets and equipment, cutout edges, shadows and lighting consistency all remain photographic; no AI reconstruction is visible; every required name and verified signature is present, authentic, correctly mapped and readable; multiple signatures have consistent colour, comparable size, visual weight, line thickness, brightness, opacity and border spacing; the exact plaque is present, subtle and correctly positioned; title and names are readable; no extra people or generated crowd figures appear; composition follows premium Sports Cave best-seller discipline; landscape 4:3, border containment, print readiness and framed collector appeal are intact.
 
 Hard-cap the score at 6/10 if a required principal is too small to recognise at thumbnail size; a distant or full-body source materially weakens the hero treatment; one of two principals is a minor background element; an unsuitable crop makes the face, jersey or sporting identity unclear; the Find Images response contained only links instead of visible candidates; or any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
 
 The correction brief must preserve the existing artwork and specify the smallest exact crop, proportional scale or positioning correction. If the authentic source itself is unsuitable, require replacing only that source photograph through Find Images. Never propose rebuilding the person.
+""".strip()
+
+
+STYLE_FIRST_REVIEW_GATE = """
+STYLE-FIRST REVIEW GATE
+
+Judge the selected design type before general polish. Return STYLE CONTRACT: PASS or FAIL. If the selected type is not immediately recognisable from the composition, emotional purpose and authentic photography, STYLE CONTRACT fails and the score is capped at 6/10. State the exact missing type cue rather than substituting a generic collector-art preference.
+""".strip()
+
+
+TARGETED_CORRECTION_HANDOFF_RULES = f"""
+TARGETED CORRECTION HANDOFF
+
+Return the correction brief as a directly reusable surgical edit prompt. Its first sentence must be exactly:
+{TARGETED_CORRECTION_EDIT_LOCK}
+
+Then identify one failed element, its smallest local edit region, the verified source asset to use when relevant and the acceptance check. A signature correction changes only the identified signature. A hand correction changes only the identified hand using authentic source information. A skin-texture correction changes only the affected skin region and must not redesign, relight or reinterpret the artwork.
 """.strip()
 
 
@@ -1460,7 +1616,10 @@ def build_research_prompt(style_slug, task_text, details=None):
         source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     return "\n\n".join(
         (
+            _selected_design_type_block(style),
             base_rules,
+            _design_type_contract_block(style),
+            AUTHENTIC_SOURCE_ASSET_LOCK,
             source_contract,
             _style_task_variables(style, task_text, details, subjects),
             f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
@@ -1495,7 +1654,10 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     else:
         source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     return "\n\n".join(
-        (*base_rules,
+        (_selected_design_type_block(style),
+            *base_rules,
+            _design_type_contract_block(style),
+            AUTHENTIC_SOURCE_ASSET_LOCK,
             source_contract,
             _style_task_variables(style, task_text, details, subjects),
             f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
@@ -1533,8 +1695,13 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
     return "\n\n".join(
         section
         for section in (
+            _selected_design_type_block(style),
+            _design_type_contract_block(style),
             COMMON_GENERATION_RULES,
             GENERATION_ASSET_VALIDATION_CONTRACT,
+            AUTHENTIC_SOURCE_ASSET_LOCK,
+            PHOTOGRAPHIC_REALISM_CONTRACT,
+            VERIFIED_SIGNATURE_CONTRACT,
             source_contract,
             (
                 f"STYLE-SPECIFIC COMPOSITION - {style.label}\n"
@@ -1563,15 +1730,7 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
     assets = normalise_selected_assets(selected_assets)
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     signatures = verified_signature_assets(assets, subjects)
-    style_signature_rules = (
-        RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES
-        if style.slug == "rivalry_faceoff"
-        else (
-            LEGENDS_JERSEY_DISPLAY_SIGNATURE_PLACEMENT_RULES
-            if style.slug == "legends_jersey_display"
-            else ""
-        )
-    )
+    style_signature_rules = _signature_placement_contract_block(style)
     collector_mapping = (
         _legends_collector_asset_mapping_block(assets)
         if style.slug == "legends_jersey_display"
@@ -1580,8 +1739,11 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
     return "\n\n".join(
         section
         for section in (
-            COMMON_SIGNATURE_PLACEMENT_RULES,
+            _selected_design_type_block(style),
+            _design_type_contract_block(style),
             style_signature_rules,
+            COMMON_SIGNATURE_PLACEMENT_RULES,
+            VERIFIED_SIGNATURE_CONTRACT,
             _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
@@ -1626,7 +1788,13 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
     return "\n\n".join(
         section
         for section in (
+            _selected_design_type_block(style),
             review_rules,
+            STYLE_FIRST_REVIEW_GATE,
+            _design_type_contract_block(style),
+            AUTHENTIC_SOURCE_ASSET_LOCK,
+            PHOTOGRAPHIC_REALISM_CONTRACT,
+            VERIFIED_SIGNATURE_CONTRACT,
             source_contract,
             _style_task_variables(style, task_text, details, subjects),
             target_asset_plan,
@@ -1635,6 +1803,48 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
             _signature_mapping_block(subjects, signatures),
             collector_mapping,
             f"STYLE-SPECIFIC REVIEW - {style.label}\n{style.harsh_review_rules}",
+            _targeted_correction_contract_block(style),
+            TARGETED_CORRECTION_HANDOFF_RULES,
+        )
+        if section
+    )
+
+
+def build_targeted_correction_prompt(
+    style_slug,
+    task_text,
+    correction_issue,
+    details=None,
+    selected_assets=None,
+):
+    """Build a type-aware surgical edit prompt without changing the V2 UI schema."""
+
+    style = get_design_style(style_slug)
+    if style is None:
+        return STYLE_REQUIRED_LABEL
+    assets = normalise_selected_assets(selected_assets)
+    subjects = _principal_subjects_for_prompt(details, task_text, assets)
+    signatures = verified_signature_assets(assets, subjects)
+    issue = " ".join(str(correction_issue or "").split()) or "[IDENTIFY ONE SPECIFIC FAILED ELEMENT]"
+    return "\n\n".join(
+        section
+        for section in (
+            TARGETED_CORRECTION_EDIT_LOCK,
+            _selected_design_type_block(style),
+            f"SPECIFIC CORRECTION: {issue}",
+            _design_type_contract_block(style),
+            _targeted_correction_contract_block(style),
+            AUTHENTIC_SOURCE_ASSET_LOCK,
+            PHOTOGRAPHIC_REALISM_CONTRACT,
+            VERIFIED_SIGNATURE_CONTRACT,
+            _style_task_variables(style, task_text, details, subjects),
+            _selected_asset_use_plan(assets, signatures),
+            _signature_mapping_block(subjects, signatures),
+            (
+                "CORRECTION ACCEPTANCE: change only the specifically identified local problem. "
+                "Compare the edited result with the supplied approved artwork and reject any "
+                "collateral change to an approved element."
+            ),
         )
         if section
     )
