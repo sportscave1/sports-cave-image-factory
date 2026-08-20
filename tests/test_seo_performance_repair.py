@@ -105,7 +105,7 @@ class SEOSnapshotReaderRepairTests(unittest.TestCase):
                 return Connection()
 
         context = seo_reporting_runtime.PostgresSEOInteractiveReader(Backend()).reporting_context()
-        self.assertEqual(context["watermark"], "snapshot|snapshot-9|2026-08-17|42|")
+        self.assertEqual(context["watermark"], "snapshot|snapshot-9|2026-08-17|42||||")
         self.assertTrue(context["available"])
 
     def test_cache_key_contract_accepts_watermark(self):
@@ -180,6 +180,7 @@ class SEOProgressivePaginationTests(unittest.TestCase):
         page_source = inspect.getsource(seo_page._progressive_query_rows)
         self.assertIn("_export_all=True", reader_source)
         self.assertIn("Prepare filtered CSV", page_source)
+        self.assertIn('"Load all"', page_source)
         self.assertNotIn("Show all", page_source)
 
 

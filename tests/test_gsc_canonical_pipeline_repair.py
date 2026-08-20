@@ -3,7 +3,7 @@ from decimal import Decimal
 import inspect
 from pathlib import Path
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import google_seo
 import google_seo_import
@@ -145,6 +145,15 @@ class GSCPropertyIdentityTests(unittest.TestCase):
         }
         self.assertEqual(len(keys), 4)
 
+    def test_shared_identity_preserves_exact_site_url_and_property_type(self):
+        prefix = google_seo.gsc_property_identity("https://WWW.sportscaveshop.com/")
+        domain = google_seo.gsc_property_identity("sc-domain:sportscaveshop.com")
+        self.assertEqual(prefix["site_url"], "https://WWW.sportscaveshop.com/")
+        self.assertEqual(prefix["property_key"], "url:https://www.sportscaveshop.com")
+        self.assertEqual(prefix["property_type"], "url_prefix")
+        self.assertEqual(domain["property_type"], "domain")
+        self.assertNotEqual(prefix["property_key"], domain["property_key"])
+
 
 class GSCConnectionStateTests(unittest.TestCase):
     def connection(self, **overrides):
@@ -259,6 +268,37 @@ class GSCAPIContractTests(unittest.TestCase):
         self.assertEqual(post.call_args_list[0].kwargs["json"]["startRow"], 0)
         self.assertEqual(post.call_args_list[1].kwargs["json"]["startRow"], 2)
 
+    def test_daily_property_totals_paginate_beyond_one_thousand_rows(self):
+        first = [
+            {
+                "keys": [f"2023-01-{(index % 28) + 1:02d}"],
+                "clicks": 1, "impressions": 10, "ctr": .1, "position": 5,
+            }
+            for index in range(1000)
+        ]
+        second = [{
+            "keys": ["2026-08-17"],
+            "clicks": 2, "impressions": 20, "ctr": .1, "position": 4,
+        }]
+        post = Mock(side_effect=[
+            FakeResponse({"responseAggregationType": "byProperty", "rows": first}),
+            FakeResponse({"responseAggregationType": "byProperty", "rows": second}),
+        ])
+        client = google_seo_import.GoogleSEOReportingClient("token", request_post=post)
+        with patch.object(google_seo_import, "GSC_PAGE_SIZE", 1000):
+            result = client.fetch_gsc_property_totals_daily_range(
+                "https://www.sportscaveshop.com/",
+                date(2023, 1, 1),
+                date(2026, 8, 17),
+            )
+        self.assertEqual(result["row_count"], 1001)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["aggregation_type"], "property")
+        self.assertEqual(
+            [call.kwargs["json"]["startRow"] for call in post.call_args_list],
+            [0, 1000],
+        )
+
 
 class GSCCanonicalWriterTests(unittest.TestCase):
     def test_successful_slice_writes_all_canonical_grains_and_manifest(self):
@@ -276,6 +316,12 @@ class GSCCanonicalWriterTests(unittest.TestCase):
         self.assertIn("INSERT INTO seo_gsc_query_page_daily_v2", many_sql)
         self.assertIn("INSERT INTO seo_gsc_canonical_date_status", sql)
         self.assertTrue(result["canonical_complete"])
+        totals_insert = next(
+            params for statement, params in backend.cursor.calls
+            if "INSERT INTO seo_gsc_property_totals_v2" in statement
+        )
+        self.assertIn("property", totals_insert)
+        self.assertNotIn("byProperty", totals_insert)
 
     def test_repeated_slice_replaces_same_date_before_insert(self):
         backend = RecordingBackend()
@@ -308,6 +354,119 @@ class GSCCanonicalWriterTests(unittest.TestCase):
         source = inspect.getsource(google_seo_import.PostgresSEOImportStore.complete_run)
         self.assertIn("canonical_gsc_range_status", source)
         self.assertIn("gsc_canonical_incomplete", source)
+
+    def test_property_total_repair_upserts_without_rewriting_dimension_rows(self):
+        backend = RecordingBackend()
+        store = google_seo_import.PostgresSEOImportStore(backend)
+        store._schema_ready = True
+        result = store.upsert_gsc_property_totals_daily(
+            "https://www.sportscaveshop.com/",
+            [{
+                "source_date": date(2026, 8, 17),
+                "clicks": 12, "impressions": 300, "ctr": .04,
+                "average_position": 8.5,
+            }],
+            aggregation_type="byProperty",
+        )
+        sql = "\n".join(statement for statement, _params in backend.cursor.calls)
+        many_sql = "\n".join(statement for statement, _rows in backend.cursor.many_calls)
+        self.assertIn("ON CONFLICT", many_sql)
+        self.assertIn("seo_gsc_property_totals_v2", many_sql)
+        self.assertNotIn("seo_gsc_query_daily_v2", many_sql)
+        self.assertNotIn("DELETE FROM seo_gsc_", sql + many_sql)
+        self.assertEqual(result["inserted"], 1)
+
+
+class GSCPropertyTotalsWorkerTests(unittest.TestCase):
+    def test_totals_only_worker_uses_bounded_range_api_not_full_grain_fetch(self):
+        store = Mock()
+        store.prepare_run_range.side_effect = lambda _id, _owner, start, end: {
+            "id": "run-1",
+            "sync_scope": "property_totals",
+            "requested_start_date": start,
+            "requested_end_date": end,
+        }
+        store.renew_lease.return_value = True
+        store.upsert_gsc_property_totals_daily.return_value = {
+            "inserted": 2, "replaced": 0,
+        }
+        store.complete_run.return_value = {"status": "completed"}
+        client = Mock()
+        client.discover_gsc_range.return_value = (date(2024, 1, 1), date(2026, 8, 17))
+        client.fetch_gsc_property_totals_daily_range.return_value = {
+            "rows": [{"source_date": date(2026, 8, 17)}],
+            "row_count": 1,
+            "data_state": "final",
+            "aggregation_type": "property",
+        }
+        worker = google_seo_import.SEOImportWorker(
+            import_store=store,
+            connection_store=Mock(),
+            worker_id="worker-1",
+            sleep=lambda _seconds: None,
+        )
+        result = worker._process_gsc(
+            {
+                "id": "run-1",
+                "sync_scope": "property_totals",
+                "requested_start_date": date(2026, 8, 1),
+                "requested_end_date": date(2026, 8, 17),
+            },
+            client,
+            "https://www.sportscaveshop.com/",
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(client.fetch_gsc_property_totals_daily_range.call_count, 4)
+        client.fetch_gsc_date.assert_not_called()
+        self.assertEqual(store.upsert_gsc_property_totals_daily.call_count, 4)
+        store.checkpoint_date.assert_called_once()
+
+    @staticmethod
+    def store_with_state(state):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = state
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value.__enter__.return_value = cursor
+        backend = Mock()
+        backend.connect.return_value = connection
+        store = google_seo_import.PostgresSEOImportStore(backend)
+        store._schema_ready = True
+        return store
+
+    def test_startup_queues_one_totals_repair_for_incomplete_daily_coverage(self):
+        store = self.store_with_state({
+            "gsc_site_url": "https://www.sportscaveshop.com/",
+            "property_key": "url:https://www.sportscaveshop.com",
+            "totals_earliest": date(2026, 8, 3),
+            "totals_latest": date(2026, 8, 17),
+            "queries_earliest": date(2026, 8, 3),
+            "queries_latest": date(2026, 8, 17),
+            "gsc_earliest_stored_date": date(2025, 1, 1),
+            "gsc_data_through_date": date(2026, 8, 17),
+            "invalid_aggregation_rows": 15,
+            "active": False,
+        })
+        with patch.object(
+            store,
+            "queue_run",
+            return_value={"id": "repair-1", "sync_scope": "property_totals"},
+        ) as queue:
+            result = store.ensure_gsc_property_totals_repair()
+        self.assertEqual(result["status"], "queued")
+        queue.assert_called_once()
+        self.assertEqual(queue.call_args.kwargs["sync_scope"], "property_totals")
+        self.assertEqual(queue.call_args.kwargs["end_date"], date(2026, 8, 17))
+
+    def test_startup_does_not_duplicate_an_active_gsc_job(self):
+        store = self.store_with_state({
+            "gsc_site_url": "https://www.sportscaveshop.com/",
+            "active": True,
+        })
+        with patch.object(store, "queue_run") as queue:
+            result = store.ensure_gsc_property_totals_repair()
+        self.assertEqual(result["status"], "already_active")
+        queue.assert_not_called()
 
 
 class GSCReaderAndOrchestrationTests(unittest.TestCase):
@@ -354,21 +513,28 @@ class GSCReaderAndOrchestrationTests(unittest.TestCase):
         self.assertNotIn("googleapis.com", source)
 
     def test_startup_applies_every_gsc_pipeline_migration(self):
+        totals_store = Mock()
+        totals_store.ensure_gsc_property_totals_repair.return_value = {"status": "not_required"}
         with patch.object(sports_cave_server.run_migrations, "get_database_url", return_value=("db", "test")), patch.object(
             sports_cave_server.run_migrations, "run_migrations"
         ) as migrate, patch(
             "google_seo_phase4.ensure_initial_gsc_reporting_repair",
             return_value={"status": "not_required"},
-        ) as initial_repair:
+        ) as initial_repair, patch(
+            "google_seo_import.default_import_store", return_value=totals_store
+        ):
             self.assertTrue(sports_cave_server.prepare_google_seo_storage())
         self.assertEqual(
             [call.kwargs["only"] for call in migrate.call_args_list],
             list(google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS),
         )
         initial_repair.assert_called_once_with(schema_ready=True)
+        totals_store.ensure_gsc_property_totals_repair.assert_called_once_with(schema_ready=True)
 
     def test_startup_pipeline_migrations_all_pass_the_real_safety_gate(self):
         real_run_migrations = sports_cave_server.run_migrations.run_migrations
+        totals_store = Mock()
+        totals_store.ensure_gsc_property_totals_repair.return_value = {"status": "not_required"}
 
         def safety_only(*, only):
             return real_run_migrations(only=only, check=True)
@@ -384,6 +550,8 @@ class GSCReaderAndOrchestrationTests(unittest.TestCase):
         ), patch(
             "google_seo_phase4.ensure_initial_gsc_reporting_repair",
             return_value={"status": "not_required"},
+        ), patch(
+            "google_seo_import.default_import_store", return_value=totals_store
         ):
             self.assertTrue(sports_cave_server.prepare_google_seo_storage())
 
@@ -409,6 +577,16 @@ class GSCPipelineMigrationTests(unittest.TestCase):
         self.assertIn("CREATE INDEX IF NOT EXISTS idx_seo_gsc_totals_v2_canonical_range", sql)
         self.assertNotIn("DROP TABLE", sql.upper())
         self.assertNotIn("TRUNCATE", sql.upper())
+
+    def test_property_totals_repair_migration_is_additive_and_registered(self):
+        name = "20260820_gsc_property_totals_repair.sql"
+        sql = (ROOT / "migrations" / name).read_text(encoding="utf-8")
+        self.assertIn("ADD COLUMN IF NOT EXISTS sync_scope", sql)
+        self.assertNotIn("DROP ", sql.upper())
+        self.assertNotIn("DELETE ", sql.upper())
+        self.assertNotIn("INSERT ", sql.upper())
+        self.assertNotIn("UPDATE ", sql.upper())
+        self.assertIn(name, google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS)
 
 
 if __name__ == "__main__":

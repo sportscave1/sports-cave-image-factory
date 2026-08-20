@@ -133,8 +133,12 @@ class PostgresSEOInteractiveReader:
                            completed.refreshed_at,
                            COALESCE(connection.gsc_canonical_revision, 0) AS source_revision,
                            connection.gsc_site_url,
+                           connection.gsc_canonical_property_key,
+                           canonical_identity.property_id AS canonical_property_id,
                            COALESCE(settings.brand_terms, '[]'::jsonb) AS brand_terms,
-                           canonical.canonical_through_dates
+                           property_totals.through_dates AS property_total_through_dates,
+                           queries.through_dates AS query_through_dates,
+                           pages.through_dates AS page_through_dates
                     FROM seo_google_connections AS connection
                     LEFT JOIN seo_reporting_settings AS settings
                       ON settings.workspace_key=connection.workspace_key
@@ -156,18 +160,70 @@ class PostgresSEOInteractiveReader:
                         LIMIT 1
                     ) AS completed ON TRUE
                     LEFT JOIN LATERAL (
+                        SELECT candidate.property_id, candidate.property_key
+                        FROM (
+                            SELECT property_id, property_key, MAX(source_date) AS latest
+                            FROM (
+                                SELECT property_id, property_key, source_date
+                                FROM seo_gsc_property_totals_v2
+                                WHERE workspace_key=connection.workspace_key AND data_state='final'
+                                UNION ALL
+                                SELECT property_id, property_key, source_date
+                                FROM seo_gsc_query_daily_v2
+                                WHERE workspace_key=connection.workspace_key AND data_state='final'
+                                UNION ALL
+                                SELECT property_id, property_key, source_date
+                                FROM seo_gsc_page_daily_v2
+                                WHERE workspace_key=connection.workspace_key AND data_state='final'
+                            ) AS available
+                            GROUP BY property_id, property_key
+                        ) AS candidate
+                        WHERE candidate.property_id=connection.gsc_site_url
+                           OR (
+                               connection.gsc_canonical_property_key<>''
+                               AND candidate.property_key=connection.gsc_canonical_property_key
+                           )
+                        ORDER BY (candidate.property_id=connection.gsc_site_url) DESC,
+                                 candidate.latest DESC
+                        LIMIT 1
+                    ) AS canonical_identity ON TRUE
+                    LEFT JOIN LATERAL (
                         SELECT jsonb_object_agg(source.search_type, source.through_date)
-                                   AS canonical_through_dates
+                                   AS through_dates
                         FROM (
                             SELECT total.search_type, MAX(total.source_date) AS through_date
                             FROM seo_gsc_property_totals_v2 AS total
                             WHERE total.workspace_key=connection.workspace_key
-                              AND total.property_id=connection.gsc_site_url
+                              AND total.property_id=canonical_identity.property_id
                               AND total.data_state='final'
                               AND total.is_complete=TRUE
                             GROUP BY total.search_type
                         ) AS source
-                    ) AS canonical ON TRUE
+                    ) AS property_totals ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT jsonb_object_agg(source.search_type, source.through_date)
+                                   AS through_dates
+                        FROM (
+                            SELECT item.search_type, MAX(item.source_date) AS through_date
+                            FROM seo_gsc_query_daily_v2 AS item
+                            WHERE item.workspace_key=connection.workspace_key
+                              AND item.property_id=canonical_identity.property_id
+                              AND item.data_state='final' AND item.is_complete=TRUE
+                            GROUP BY item.search_type
+                        ) AS source
+                    ) AS queries ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT jsonb_object_agg(source.search_type, source.through_date)
+                                   AS through_dates
+                        FROM (
+                            SELECT item.search_type, MAX(item.source_date) AS through_date
+                            FROM seo_gsc_page_daily_v2 AS item
+                            WHERE item.workspace_key=connection.workspace_key
+                              AND item.property_id=canonical_identity.property_id
+                              AND item.data_state='final' AND item.is_complete=TRUE
+                            GROUP BY item.search_type
+                        ) AS source
+                    ) AS pages ON TRUE
                     WHERE connection.workspace_key=%s
                     """,
                     (WORKSPACE_KEY,),
@@ -177,11 +233,35 @@ class PostgresSEOInteractiveReader:
         snapshot_available = bool(row.get("snapshot_id") and snapshot_through)
         source_revision = _integer(row.get("source_revision"))
         snapshot_revision = _integer(row.get("snapshot_revision"))
-        canonical_through_dates = {
+        property_total_through_dates = {
             str(key or "").casefold(): _iso(value)
-            for key, value in dict(row.get("canonical_through_dates") or {}).items()
+            for key, value in dict(
+                row.get("property_total_through_dates")
+                or row.get("canonical_through_dates")
+                or {}
+            ).items()
             if key and value
         }
+        query_through_dates = {
+            str(key or "").casefold(): _iso(value)
+            for key, value in dict(row.get("query_through_dates") or {}).items()
+            if key and value
+        }
+        page_through_dates = {
+            str(key or "").casefold(): _iso(value)
+            for key, value in dict(row.get("page_through_dates") or {}).items()
+            if key and value
+        }
+        canonical_through_dates = {}
+        for search_type in set(property_total_through_dates) | set(query_through_dates) | set(page_through_dates):
+            available_dates = [
+                value for value in (
+                    property_total_through_dates.get(search_type),
+                    query_through_dates.get(search_type),
+                    page_through_dates.get(search_type),
+                ) if value
+            ]
+            canonical_through_dates[search_type] = min(available_dates) if available_dates else ""
         canonical_through = canonical_through_dates.get("web", "")
         snapshot_stale = (
             str(row.get("latest_status") or "") in {"failed", "partial"}
@@ -218,6 +298,9 @@ class PostgresSEOInteractiveReader:
                 _iso(through_date),
                 str(source_revision),
                 canonical_through,
+                property_total_through_dates.get("web", ""),
+                query_through_dates.get("web", ""),
+                page_through_dates.get("web", ""),
             )
         )
         result = {
@@ -228,6 +311,12 @@ class PostgresSEOInteractiveReader:
             "snapshot_current": snapshot_current,
             "canonical_available": canonical_available,
             "canonical_through_dates": canonical_through_dates,
+            "property_total_through_dates": property_total_through_dates,
+            "query_through_dates": query_through_dates,
+            "page_through_dates": page_through_dates,
+            "property_totals_available": bool(property_total_through_dates.get("web")),
+            "queries_available": bool(query_through_dates.get("web")),
+            "pages_available": bool(page_through_dates.get("web")),
             "through_date": _iso(through_date),
             "refreshed_at": _iso(row.get("refreshed_at")),
             "watermark": watermark,
@@ -236,6 +325,10 @@ class PostgresSEOInteractiveReader:
             "error_code": str(row.get("latest_error_code") or ""),
             "error_summary": str(row.get("latest_error_summary") or ""),
             "gsc_site_url": str(row.get("gsc_site_url") or ""),
+            "gsc_property_key": str(row.get("gsc_canonical_property_key") or ""),
+            "canonical_property_id": str(
+                row.get("canonical_property_id") or row.get("gsc_site_url") or ""
+            ),
             "brand_terms": [
                 str(value or "").strip().casefold()
                 for value in row.get("brand_terms") or []
@@ -348,6 +441,15 @@ class PostgresSEOInteractiveReader:
                     "status": "canonical_fallback",
                     "reader_path": "canonical",
                     "through_date": _iso(canonical_through),
+                    "property_totals_available": bool(
+                        (effective.get("property_total_through_dates") or {}).get(search_type)
+                    ),
+                    "queries_available": bool(
+                        (effective.get("query_through_dates") or {}).get(search_type)
+                    ),
+                    "pages_available": bool(
+                        (effective.get("page_through_dates") or {}).get(search_type)
+                    ),
                     "watermark": "|".join(
                         (
                             str(effective.get("watermark") or "none"),
@@ -395,7 +497,11 @@ class PostgresSEOInteractiveReader:
         ]
         params = [
             WORKSPACE_KEY,
-            str(context.get("gsc_site_url") or ""),
+            str(
+                context.get("canonical_property_id")
+                or context.get("gsc_site_url")
+                or ""
+            ),
             start_date,
             end_date,
             str(filters.get("search_type") or "web").strip().casefold(),
@@ -526,6 +632,44 @@ class PostgresSEOInteractiveReader:
                 "average_position": _decimal(row.get("position_weight")) / impressions if impressions else None,
             })
         ready = bool(_integer(metrics.get("current_rows")))
+        if not ready:
+            search_type = str(filters.get("search_type") or "web").strip().casefold()
+            canonical_through = str(
+                (context.get("canonical_through_dates") or {}).get(search_type) or ""
+            )
+            if canonical_through and context.get("canonical_property_id"):
+                fallback_context = dict(context)
+                fallback_context.update(
+                    {
+                        "available": True,
+                        "status": "canonical_fallback",
+                        "reader_path": "canonical",
+                        "through_date": canonical_through,
+                        "watermark": "|".join(
+                            (
+                                str(context.get("watermark") or "none"),
+                                "compact-summary-empty",
+                                search_type,
+                                canonical_through,
+                            )
+                        ),
+                    }
+                )
+                fallback_period = self._period_payload(filters, fallback_context)
+                if fallback_period:
+                    logging.warning(
+                        "SEO_REPORTING_FALLBACK reason=compact_summary_empty property=%s "
+                        "search_type=%s start=%s end=%s",
+                        fallback_context.get("gsc_site_url") or "",
+                        search_type,
+                        fallback_period["start_date"],
+                        fallback_period["end_date"],
+                    )
+                    return self._canonical_overview_base(
+                        filters,
+                        fallback_context,
+                        fallback_period,
+                    )
         return {
             "ready": ready,
             "reason": "" if ready else "no_saved_gsc_data_for_range",
@@ -544,6 +688,7 @@ class PostgresSEOInteractiveReader:
             "known_query_impressions": known,
             "watermark": context.get("watermark") or "",
             "fallback_mode": False,
+            "summary_dataset": "property_totals" if search_class == "all" and not detail_scope else "query_dimensions",
             "diagnostics": dict(self.diagnostics),
         }
 
@@ -562,7 +707,9 @@ class PostgresSEOInteractiveReader:
                 start_date=first_date,
                 end_date=period["end_date"],
             )
-            where.append("aggregation_type='property'")
+            # Historical rows contain Google's response value ``byProperty``;
+            # new writes use the schema's canonical ``property`` value.
+            where.append("LOWER(aggregation_type) IN ('property', 'byproperty')")
         else:
             table = "seo_gsc_query_daily_v2"
             position_weight = "position_weight"
@@ -686,9 +833,16 @@ class PostgresSEOInteractiveReader:
             self.diagnostics["query_ms"],
         )
         ready = bool(_integer(metrics.get("current_rows")))
+        reason = ""
+        if not ready:
+            reason = (
+                "property_totals_missing_for_range"
+                if use_property_totals and context.get("queries_available") and known > 0
+                else "no_saved_gsc_data_for_range"
+            )
         return {
             "ready": ready,
-            "reason": "" if ready else "no_saved_gsc_data_for_range",
+            "reason": reason,
             "health": self._health(context),
             "filters": dict(filters),
             "period": {key: _iso(value) for key, value in period.items()},
@@ -704,6 +858,7 @@ class PostgresSEOInteractiveReader:
             "known_query_impressions": known,
             "watermark": context.get("watermark") or "",
             "fallback_mode": True,
+            "summary_dataset": "property_totals" if use_property_totals else "query_dimensions",
             "diagnostics": dict(self.diagnostics),
         }
 
@@ -855,7 +1010,7 @@ class PostgresSEOInteractiveReader:
             "Quick wins": "average_position BETWEEN 4 AND 20",
             "Rising": "ranking_change>0",
             "Declining": "ranking_change<0",
-            "New": "previous_impressions=0",
+            "New": "COALESCE(previous_impressions, 0)=0",
             "Top 3": "average_position>0 AND average_position<=3",
             "Positions 4-10": "average_position BETWEEN 4 AND 10",
             "Positions 11-20": "average_position BETWEEN 11 AND 20",
@@ -904,8 +1059,8 @@ class PostgresSEOInteractiveReader:
             previous_where, previous_params = self._canonical_where(
                 filters,
                 context,
-                start_date=period.get("previous_start_date") or period["start_date"],
-                end_date=period.get("previous_end_date") or period["end_date"],
+                start_date=period.get("previous_start_date"),
+                end_date=period.get("previous_end_date"),
                 query_rows=True,
             )
             current_where.append("normalized_query<>''")
@@ -994,14 +1149,16 @@ class PostgresSEOInteractiveReader:
                 {previous_cte}
             ), enriched AS (
                 SELECT current_metrics.*,
-                       COALESCE(previous_metrics.previous_clicks, 0) AS previous_clicks,
-                       COALESCE(previous_metrics.previous_impressions, 0) AS previous_impressions,
-                       COALESCE(previous_metrics.previous_position_weight, 0) AS previous_position_weight,
+                       previous_metrics.previous_clicks,
+                       previous_metrics.previous_impressions,
+                       previous_metrics.previous_position_weight,
                        CASE WHEN current_metrics.impressions>0
                             THEN current_metrics.clicks/current_metrics.impressions ELSE 0 END AS ctr,
                        CASE WHEN current_metrics.impressions>0
                             THEN current_metrics.position_weight/current_metrics.impressions ELSE 0 END AS average_position,
-                       current_metrics.clicks-COALESCE(previous_metrics.previous_clicks, 0) AS click_change,
+                       CASE WHEN previous_metrics.query_key IS NOT NULL
+                            THEN current_metrics.clicks-previous_metrics.previous_clicks
+                            ELSE NULL END AS click_change,
                        CASE WHEN COALESCE(previous_metrics.previous_impressions, 0)>0
                             THEN previous_metrics.previous_position_weight/previous_metrics.previous_impressions ELSE NULL END AS previous_position,
                        CASE WHEN COALESCE(previous_metrics.previous_impressions, 0)>0
@@ -1017,7 +1174,7 @@ class PostgresSEOInteractiveReader:
                            + CASE WHEN average_position BETWEEN 4 AND 20
                                   THEN 30-ABS(average_position-10) ELSE 0 END
                            + LEAST(15, GREATEST(0, 0.05-ctr)*300)
-                           + LEAST(10, GREATEST(0, click_change))
+                           + LEAST(10, GREATEST(0, COALESCE(click_change, 0)))
                            + CASE WHEN canonical_page_key IS NULL THEN 15 ELSE 0 END
                        )
                        AS opportunity_score

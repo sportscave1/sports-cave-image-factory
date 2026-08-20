@@ -54,6 +54,16 @@ def prepare_google_seo_storage():
             str(repair.get("status") or "unknown"),
             str(repair.get("reason") or ""),
         )
+        import google_seo_import
+
+        totals_repair = google_seo_import.default_import_store().ensure_gsc_property_totals_repair(
+            schema_ready=True
+        )
+        logging.info(
+            "Initial GSC property totals repair enqueue status=%s reason=%s",
+            str(totals_repair.get("status") or "unknown"),
+            str(totals_repair.get("reason") or ""),
+        )
     except Exception as error:
         # GSC imports also queue revision-triggered repairs. A transient queue
         # inspection failure must not turn an otherwise valid schema migration

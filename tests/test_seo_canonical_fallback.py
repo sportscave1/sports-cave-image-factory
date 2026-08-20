@@ -1,10 +1,12 @@
 from decimal import Decimal
+from datetime import date
 import inspect
 import unittest
 
 from pglast import parse_sql
 
 import seo_reporting_runtime
+import seo_live_analytics
 
 
 PROPERTY = "https://www.sportscaveshop.com/"
@@ -88,11 +90,18 @@ def _canonical_context(**overrides):
         "snapshot_current": False,
         "canonical_available": True,
         "canonical_through_dates": {"web": "2026-08-16"},
+        "property_total_through_dates": {"web": "2026-08-16"},
+        "query_through_dates": {"web": "2026-08-16"},
+        "page_through_dates": {"web": "2026-08-16"},
         "through_date": "2026-08-16",
         "watermark": "canonical|none|2026-08-16|44|2026-08-16",
         "source_revision": 44,
         "snapshot_revision": 0,
         "gsc_site_url": PROPERTY,
+        "canonical_property_id": PROPERTY,
+        "property_totals_available": True,
+        "queries_available": True,
+        "pages_available": True,
         "brand_terms": ["sports cave"],
     }
     result.update(overrides)
@@ -139,6 +148,26 @@ class SEOCanonicalContextTests(unittest.TestCase):
         self.assertEqual(context["status"], "canonical_fallback")
         self.assertEqual(context["through_date"], "2026-08-16")
 
+    def test_query_rows_without_property_totals_remain_available_but_identified(self):
+        backend = _Backend(
+            [{
+                "source_revision": 44,
+                "gsc_site_url": PROPERTY,
+                "canonical_property_id": PROPERTY,
+                "property_total_through_dates": {},
+                "query_through_dates": {"web": "2026-08-17"},
+                "page_through_dates": {"web": "2026-08-17"},
+            }]
+        )
+        context = seo_reporting_runtime.PostgresSEOInteractiveReader(backend).reporting_context()
+        self.assertTrue(context["available"])
+        self.assertFalse(context["property_totals_available"])
+        self.assertTrue(context["queries_available"])
+        self.assertEqual(context["through_date"], "2026-08-17")
+        statement, params = backend.cursor.statements[0]
+        self.assertEqual(statement.count("%s"), len(params))
+        self.assertTrue(parse_sql(statement.replace("%s", "NULL")))
+
     def test_stale_snapshot_uses_newer_canonical_revision(self):
         backend = _Backend(
             [
@@ -175,6 +204,70 @@ class SEOCanonicalContextTests(unittest.TestCase):
 
 
 class SEOCanonicalFallbackReadTests(unittest.TestCase):
+    def test_empty_current_snapshot_summary_retries_bounded_canonical_totals(self):
+        backend = _Backend(
+            [
+                {
+                    "current_clicks": 0,
+                    "current_impressions": 0,
+                    "current_weight": 0,
+                    "current_rows": 0,
+                    "previous_clicks": 0,
+                    "previous_impressions": 0,
+                    "previous_weight": 0,
+                    "previous_rows": 0,
+                },
+                [],
+                {"known_clicks": 0, "known_impressions": 0, "quality_weight": 0},
+                {
+                    "current_clicks": 12,
+                    "current_impressions": 120,
+                    "current_weight": 360,
+                    "current_rows": 17,
+                    "previous_clicks": 8,
+                    "previous_impressions": 100,
+                    "previous_weight": 400,
+                    "previous_rows": 17,
+                },
+                [],
+                {"known_clicks": 10, "known_impressions": 100, "quality_weight": 75},
+            ]
+        )
+        context = _canonical_context(
+            reader_path="snapshot",
+            status="ready",
+            snapshot_available=True,
+            snapshot_current=True,
+            fallback_mode=False,
+        )
+
+        result = seo_reporting_runtime.PostgresSEOInteractiveReader(backend).overview_base(
+            _filters(),
+            context=context,
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertTrue(result["fallback_mode"])
+        self.assertEqual(result["current"]["organic_clicks"], Decimal("12"))
+        self.assertIn(
+            "FROM seo_gsc_property_totals_v2",
+            "\n".join(statement for statement, _params in backend.cursor.statements),
+        )
+
+    def test_requested_range_is_clamped_to_gsc_available_through_date(self):
+        period = seo_live_analytics.matching_period(
+            preset="Custom range",
+            through_date="2026-08-17",
+            custom_start=date(2026, 8, 1),
+            custom_end=date(2026, 8, 20),
+            comparison="Previous period",
+            today=date(2026, 8, 20),
+        )
+        self.assertEqual(period["start_date"], date(2026, 8, 1))
+        self.assertEqual(period["end_date"], date(2026, 8, 17))
+        self.assertEqual(period["previous_start_date"], date(2026, 7, 15))
+        self.assertEqual(period["previous_end_date"], date(2026, 7, 31))
+
     def test_overview_returns_weighted_real_metrics_and_previous_period(self):
         backend = _Backend(
             [
@@ -242,6 +335,33 @@ class SEOCanonicalFallbackReadTests(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertEqual(result["reason"], "no_saved_gsc_data_for_range")
 
+    def test_query_rows_present_but_property_totals_missing_names_exact_dataset(self):
+        backend = _Backend(
+            [
+                {
+                    "current_clicks": 0,
+                    "current_impressions": 0,
+                    "current_weight": 0,
+                    "current_rows": 0,
+                    "previous_rows": 0,
+                },
+                [],
+                {"known_clicks": 9, "known_impressions": 90, "quality_weight": 45},
+            ]
+        )
+        context = _canonical_context(
+            property_totals_available=False,
+            property_total_through_dates={},
+            queries_available=True,
+        )
+        result = seo_reporting_runtime.PostgresSEOInteractiveReader(backend).overview_base(
+            _filters(), context=context
+        )
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["reason"], "property_totals_missing_for_range")
+        self.assertEqual(result["known_query_clicks"], Decimal("9"))
+        self.assertIn("'property', 'byproperty'", backend.cursor.statements[0][0])
+
     def test_query_page_reads_canonical_rows_with_filters_and_stable_pagination(self):
         backend = _Backend(
             [
@@ -285,6 +405,66 @@ class SEOCanonicalFallbackReadTests(unittest.TestCase):
         self.assertEqual(params.count(PROPERTY), 2)
         self.assertEqual(statement.count("%s"), len(params))
         self.assertTrue(parse_sql(statement.replace("%s", "NULL")))
+
+    def test_all_819_filtered_keywords_are_available_without_database_row_cap(self):
+        rows = [
+            {
+                "query": f"keyword {index:03d}",
+                "query_key": f"keyword {index:03d}",
+                "clicks": 1,
+                "impressions": 10,
+                "position_weight": 50,
+                "ctr": Decimal("0.1"),
+                "average_position": Decimal("5"),
+                "previous_clicks": None,
+                "previous_impressions": None,
+                "previous_position": None,
+                "ranking_change": None,
+                "click_change": None,
+                "market_mix": ["AU"],
+                "device_mix": ["desktop"],
+                "sort_score": 1,
+                "total_count": 819,
+            }
+            for index in range(819)
+        ]
+        backend = _Backend([rows])
+        result = seo_reporting_runtime.PostgresSEOInteractiveReader(backend).query_export(
+            _filters(), context=_canonical_context()
+        )
+        self.assertEqual(result["total"], 819)
+        self.assertEqual(len(result["rows"]), 819)
+        statement, params = backend.cursor.statements[0]
+        self.assertNotIn("LIMIT", statement)
+        self.assertNotIn("OFFSET", statement)
+        self.assertNotIn(1000, params)
+
+    def test_missing_previous_period_does_not_copy_current_clicks_into_change(self):
+        backend = _Backend(
+            [[{
+                "query": "current only",
+                "query_key": "current only",
+                "clicks": 8,
+                "impressions": 80,
+                "position_weight": 400,
+                "previous_clicks": None,
+                "previous_impressions": None,
+                "previous_position": None,
+                "ranking_change": None,
+                "click_change": None,
+                "market_mix": ["AU"],
+                "device_mix": ["desktop"],
+                "sort_score": 8,
+                "total_count": 1,
+            }]]
+        )
+        result = seo_reporting_runtime.PostgresSEOInteractiveReader(backend).query_page(
+            _filters(), context=_canonical_context()
+        )
+        self.assertIsNone(result["rows"][0]["click_change"])
+        sql = backend.cursor.statements[0][0]
+        self.assertIn("CASE WHEN previous_metrics.query_key IS NOT NULL", sql)
+        self.assertNotIn("current_metrics.clicks-COALESCE", sql)
 
     def test_landing_pages_use_saved_gsc_pages_without_ga4(self):
         backend = _Backend(

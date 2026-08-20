@@ -43,6 +43,7 @@ GOOGLE_SEO_PIPELINE_MIGRATIONS = (
     "20260817_gsc_canonical_pipeline_repair.sql",
     "20260818_seo_interactive_performance.sql",
     "20260819_gsc_reporting_snapshot_repair.sql",
+    "20260820_gsc_property_totals_repair.sql",
 )
 GOOGLE_SEO_WORKSPACE_KEY = "sports-cave"
 GOOGLE_OAUTH_STATE_SECONDS = 10 * 60
@@ -102,22 +103,54 @@ def _iso(value):
     return str(value)
 
 
-def canonical_gsc_property_key(site_url):
-    """Return a comparison key without changing Google's exact API siteUrl."""
+def gsc_property_identity(site_url):
+    """Describe one exact Google property and its safe comparison identity.
+
+    Google's returned ``siteUrl`` remains the storage/API identifier.  The
+    canonical key is used only for safe matching of equivalent spellings such
+    as a URL-prefix property's trailing slash; it deliberately keeps domain
+    properties, protocols, hosts (including ``www``), and paths distinct.
+    """
     raw = str(site_url or "").strip()
     if not raw:
-        return ""
+        return {"site_url": "", "property_key": "", "property_type": "unknown"}
     if raw.casefold().startswith("sc-domain:"):
         domain = raw.split(":", 1)[1].strip().casefold().rstrip(".")
-        return f"domain:{domain}" if domain else ""
+        return {
+            "site_url": raw,
+            "property_key": f"domain:{domain}" if domain else "",
+            "property_type": "domain",
+        }
     parsed = urlparse(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return f"raw:{raw.casefold().rstrip('/')}"
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.netloc:
+        return {
+            "site_url": raw,
+            "property_key": f"raw:{raw.casefold().rstrip('/')}",
+            "property_type": "unknown",
+        }
     host = (parsed.hostname or "").casefold().rstrip(".")
     port = f":{parsed.port}" if parsed.port else ""
     path = parsed.path or ""
     path = "/" + "/".join(part for part in path.split("/") if part) if path.strip("/") else ""
-    return f"url:{parsed.scheme.casefold()}://{host}{port}{path}"
+    return {
+        "site_url": raw,
+        "property_key": f"url:{scheme}://{host}{port}{path}",
+        "property_type": "url_prefix",
+    }
+
+
+def canonical_gsc_property_key(site_url):
+    """Return the shared safe comparison key for a Google ``siteUrl``."""
+    return gsc_property_identity(site_url)["property_key"]
+
+
+def canonical_gsc_aggregation_type(value):
+    """Normalise Google's and the schema's names for dimensionless totals."""
+    clean = str(value or "").strip().casefold().replace("_", "").replace("-", "")
+    if clean in {"", "property", "byproperty"}:
+        return "property"
+    return clean[:50]
 
 
 def gsc_properties_match(first, second):

@@ -3290,6 +3290,13 @@ def _load_interactive_overview(filters, reader, context, *, use_cache, route):
 
 def _snapshot_unavailable_notice(snapshot):
     reason = str((snapshot or {}).get("reason") or "")
+    if reason == "property_totals_missing_for_range":
+        st.warning(
+            "Saved Search Console keyword data is available, but the exact daily "
+            "property-total dataset is missing for this range. A background repair "
+            "has been queued; keyword rows remain available."
+        )
+        return
     if reason == "no_saved_gsc_data_for_range":
         st.info(
             "No saved Google Search Console data is available for this property and date range."
@@ -3322,7 +3329,7 @@ def _progressive_query_rows(
     excluded_queries=(),
 ):
     del use_cache  # Pages live in session state so prior rows are never refetched.
-    controls = st.columns([1, 1.2, 2.3, 2.4])
+    controls = st.columns([1, 1.2, 1.5, 1.5, 2.4])
     page_size = controls[0].selectbox(
         "Rows",
         (25, 50, 100),
@@ -3389,13 +3396,30 @@ def _progressive_query_rows(
         ui_loading.render_spinner(controls[2], compact=True)
         state = seo_pagination.append_page(state, fetch(25))
         st.session_state[state_key] = state
+    load_all = controls[3].button(
+        "Load all",
+        key=f"{key}-load-all::{signature}::{len(state.get('rows') or [])}",
+        disabled=bool(state.get("complete")),
+        help="Load every row in the current filtered result using the same server-side scope.",
+    )
+    if load_all and not state.get("complete"):
+        ui_loading.render_spinner(controls[3], compact=True)
+        complete_page = reader.query_export(
+            filters,
+            view=view,
+            search=search,
+            context=context,
+            excluded_queries=excluded_queries,
+        )
+        state = seo_pagination.append_page(state, complete_page)
+        st.session_state[state_key] = state
     export_key = f"{key}-csv-export"
     export_state = dict(st.session_state.get(export_key) or {})
     if export_state.get("signature") != signature:
         export_state = {}
         st.session_state[export_key] = export_state
     if export_state.get("data"):
-        controls[3].download_button(
+        controls[4].download_button(
             f"Download {int(export_state.get('count') or 0):,} rows",
             export_state["data"],
             file_name=f"sports-cave-{key.replace('seo-v2-', '')}.csv",
@@ -3403,13 +3427,13 @@ def _progressive_query_rows(
             key=f"{key}-download::{signature}",
             use_container_width=True,
         )
-    elif controls[3].button(
+    elif controls[4].button(
         "Prepare filtered CSV",
         key=f"{key}-prepare-export::{signature}",
         help="Query the complete filtered result without rendering it in the browser.",
         use_container_width=True,
     ):
-        controls[3].caption("Preparing the filtered CSV…")
+        controls[4].caption("Preparing the filtered CSV…")
         export = reader.query_export(
             filters,
             view=view,
@@ -3432,8 +3456,8 @@ def _progressive_query_rows(
                     "impressions": row.get("impressions") or 0,
                     "ctr": row.get("ctr") or 0,
                     "average_position": row.get("average_position") or 0,
-                    "click_change": row.get("click_change") or 0,
-                    "ranking_change": row.get("ranking_change") or 0,
+                    "click_change": row.get("click_change"),
+                    "ranking_change": row.get("ranking_change"),
                     "current_page": row.get("current_page") or "",
                     "markets": ", ".join(row.get("market_mix") or []),
                     "devices": ", ".join(row.get("device_mix") or []),
@@ -3565,10 +3589,16 @@ def _render_search_overview(
             st.warning(health_notice)
         else:
             st.error(health_notice)
-    through = health.get("through_date") or "Unavailable"
+    through = _display_progress_date(health.get("through_date"), "Unavailable")
     source_label = health.get("source_label") or "Google Search Console"
+    summary_label = {
+        "property_totals": "Exact saved property totals",
+        "query_dimensions": "Saved dimensioned Search Console rows",
+    }.get(str(snapshot.get("summary_dataset") or ""), "Saved SEO reporting data")
+    if snapshot.get("reason") == "property_totals_missing_for_range":
+        summary_label = "Exact property totals pending background repair"
     st.caption(
-        f"Source: {source_label} | Exact saved property totals | Data through {through} | "
+        f"Source: {source_label} | {summary_label} | Data through {through} | "
         "Rank Quality is impression-weighted across known query rows."
     )
     if coverage.get("click_coverage") is not None:
