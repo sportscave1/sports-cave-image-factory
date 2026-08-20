@@ -63,7 +63,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         self.assertEqual(
             design_studio_styles.STYLE_REGISTRY_VERSION,
-            "sports_cave_design_styles_v3_legends_locked",
+            "sports_cave_design_styles_v4_moment_jersey_locked",
         )
 
     def test_every_style_builds_all_four_prompts(self):
@@ -128,11 +128,11 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 STYLE_DETAILS[slug],
             )
             with self.subTest(style=slug):
-                max_length = (
-                    14500
-                    if slug in {"rivalry_faceoff", "legends_jersey_display"}
-                    else 9500
-                )
+                max_length = {
+                    "ultimate_moment": 11000,
+                    "rivalry_faceoff": 14500,
+                    "legends_jersey_display": 17000,
+                }.get(slug, 9500)
                 self.assertLess(len(prompt), max_length)
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
@@ -173,6 +173,172 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertIn("Skip Find Images by default", find_prompt)
         self.assertIn("immutable edit target", generation)
         self.assertIn("Add no people", generation)
+
+    def test_target_contract_markers_never_leak_into_other_design_types(self):
+        for slug in set(design_studio_styles.style_slugs()) - {
+            "ultimate_moment",
+            "legends_jersey_display",
+        }:
+            bundle = design_studio_styles.build_prompt_bundle(
+                slug,
+                "Create the requested collector artwork",
+                STYLE_DETAILS[slug],
+            )
+            with self.subTest(style=slug):
+                for stage in ("research", "find_images", "generation", "review"):
+                    self.assertNotIn(
+                        design_studio_styles.ULTIMATE_MOMENT_CONTRACT_VERSION,
+                        bundle[stage],
+                    )
+                    self.assertNotIn(
+                        design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION,
+                        bundle[stage],
+                    )
+
+
+class UltimateMomentLockedContractTests(unittest.TestCase):
+    DETAILS = {
+        "design_title": "The Golden Point",
+        "sport": "Basketball",
+        "principal_subject_one": "Michael Jordan",
+        "team_country": "Chicago Bulls / United States",
+        "season_era": "1998",
+        "event_moment": "1998 NBA Finals Game 6 winning shot",
+        "venue_location": "Delta Center",
+        "uniform_equipment_livery": "Chicago Bulls red #23",
+    }
+    ASSETS = [
+        {
+            "file_path": "jordan-1998-game-six-shot.jpg",
+            "role": "exact_moment_photo",
+            "subject_name": "Michael Jordan",
+        },
+        {
+            "file_path": "game-six-scoreboard.jpg",
+            "role": "venue_reference",
+        },
+        {
+            "file_path": "jordan-signature.png",
+            "role": "signature_asset",
+            "subject_name": "Michael Jordan",
+        },
+    ]
+
+    def bundle(self):
+        return design_studio_styles.build_prompt_bundle(
+            "ultimate_moment",
+            "Michael Jordan's defining career moment",
+            self.DETAILS,
+            self.ASSETS,
+        )
+
+    def test_research_scores_career_candidates_and_returns_complete_moment_lock(self):
+        prompt = self.bundle()["research"]
+        self.assertIn(design_studio_styles.ULTIMATE_MOMENT_CONTRACT_VERSION, prompt)
+        self.assertIn("at least five strongest candidate moments", prompt)
+        for weight in (
+            "30% career/legacy importance",
+            "25% fan recognition and nostalgia",
+            "20% emotional power",
+            "15% strength of authentic available photography",
+            "10% premium wall-art potential",
+        ):
+            self.assertIn(weight, prompt)
+        lock_start = prompt.index("ULTIMATE MOMENT LOCK")
+        for field in (
+            "Athlete:",
+            "Defining moment:",
+            "Date:",
+            "Opponent:",
+            "Competition/event:",
+            "Venue:",
+            "Exact achievement/story:",
+            "Why this is the athlete's defining moment:",
+            "What fans emotionally remember:",
+            "Required visual evidence:",
+            "Preferred hero photograph:",
+            "Acceptable alternate photograph:",
+            "Required environmental/background details:",
+            "Headline/story direction:",
+            "Facts/numbers/date that may appear in artwork:",
+            "Things that must NOT be substituted:",
+        ):
+            self.assertGreater(prompt.index(field), lock_start)
+
+    def test_find_images_searches_the_locked_event_and_returns_role_mappings(self):
+        prompt = self.bundle()["find_images"]
+        for phrase in (
+            "[ATHLETE] [EXACT EVENT] [DATE] [OPPONENT]",
+            "PRIMARY HERO",
+            "SECONDARY MOMENT IMAGE",
+            "ENVIRONMENT / STORY SUPPORT",
+            "MOMENT LOCK CONFIRMATION",
+            "exact approved mappings are the handoff to Generation",
+            "Reject random portraits",
+            "search again rather than asking Generation to repair it",
+        ):
+            self.assertIn(phrase, prompt)
+        self.assertNotIn(
+            "A famous historical moment does not outrank a photograph",
+            prompt,
+        )
+
+    def test_generation_uses_exact_sources_and_does_not_default_to_rivalry(self):
+        prompt = self.bundle()["generation"]
+        for phrase in (
+            "MOMENT LOCK HANDOFF - AUTHORITATIVE",
+            "jordan-1998-game-six-shot.jpg | role=exact_moment_photo",
+            "one definitive authentic photograph of the exact moment",
+            "Ultimate Moments is not Rivalry Face-Off",
+            "Make clear within about three seconds why this photograph matters",
+            "background is atmospheric evidence from the same story",
+            "restrained antique gold",
+            "001 / 100 treatment small",
+        ):
+            self.assertIn(phrase, prompt)
+        self.assertNotIn("two equal principals", prompt)
+
+    def test_harsh_review_checks_moment_before_polish_and_caps_failures(self):
+        prompt = self.bundle()["review"]
+        self.assertLess(
+            prompt.index("First return MOMENT CONTRACT: PASS or FAIL"),
+            prompt.index("Then score out of 10"),
+        )
+        for phrase in (
+            "maximum score is 6/10",
+            "hero is generic or from another event/season/uniform",
+            "AI reconstructed the historic photograph",
+            "Shopify-thumbnail readability",
+            "may score 10/10",
+            "EXACT ULTIMATE MOMENT SOURCE MAPPING",
+            "Primary Hero -> jordan-1998-game-six-shot.jpg",
+        ):
+            self.assertIn(phrase, prompt)
+
+    def test_legacy_context_helpers_route_ultimate_moment_to_v2_contract(self):
+        context = {
+            "title": "Michael Jordan's defining career moment",
+            "design_style": "Ultimate Moment",
+            "metadata": {
+                "design_style": "ultimate_moment",
+                "design_details": self.DETAILS,
+                "selected_assets": self.ASSETS,
+            },
+        }
+        prompts = (
+            design_studio_page.build_design_research_prompt(
+                context["title"], design_context=context
+            ),
+            design_studio_page.build_design_image_carousel_prompt(
+                context["title"], "stale broad concept", design_context=context
+            ),
+            design_studio_page.build_design_generation_prompt(
+                context["title"], design_context=context
+            ),
+        )
+        for prompt in prompts:
+            self.assertIn(design_studio_styles.ULTIMATE_MOMENT_CONTRACT_VERSION, prompt)
+            self.assertIn("1998 NBA Finals Game 6 winning shot", prompt)
 
 
 class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
@@ -247,6 +413,9 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
         self.assertIn("2000 px or more preferred, 1200 px minimum", prompt)
         self.assertIn("Reject front-facing portraits, face-offs, dramatic action", prompt)
         self.assertIn("never compensate by inventing a pose, uniform, surname, number, body or face", prompt)
+        self.assertIn("Primary rear source or Backup rear source", prompt)
+        self.assertIn("JERSEY SOURCE LOCK", prompt)
+        self.assertIn("Authenticity outranks perfect symmetry", prompt)
 
     def test_generation_has_exact_source_signature_badge_and_plaque_mappings(self):
         prompt = self.bundle()["generation"]
@@ -264,6 +433,16 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
             self.assertIn(phrase, prompt)
         self.assertIn("Use the actual selected source photographs", prompt)
         self.assertIn("Do not create a fake back, fake number, AI-generated jersey lettering", prompt)
+        for phrase in (
+            "JERSEY SOURCE LOCK HANDOFF - AUTHORITATIVE",
+            "DARK ARCHIVAL PHOTOGRAPHIC FINISH",
+            "Reduce overall brightness",
+            "slightly desaturate them toward archival printed sports photography",
+            "museum-quality vintage sports print",
+            "Avoid glossy or plastic jerseys",
+            "No split tunnel",
+        ):
+            self.assertIn(phrase, prompt)
 
     def test_missing_official_collector_assets_block_invention(self):
         prompt = design_studio_styles.build_generation_prompt(
@@ -293,6 +472,10 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
 
     def test_harsh_review_enforces_style_pass_and_six_point_cap(self):
         prompt = self.bundle()["review"]
+        self.assertLess(
+            prompt.index("First return JERSEY SOURCE CONTRACT: PASS or FAIL"),
+            prompt.index("STYLE CONTRACT: PASS or FAIL"),
+        )
         self.assertIn("STYLE CONTRACT: PASS or FAIL", prompt)
         self.assertIn("Hard-cap the commercial score at 6/10", prompt)
         for failure in (
@@ -305,6 +488,17 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
         ):
             self.assertIn(failure, prompt)
         self.assertIn("Do not penalise the artwork merely because full front-facing faces are absent", prompt)
+        for phrase in (
+            "appears AI-generated",
+            "invented or rebuilt jersey, surname or number",
+            "plastic/synthetic fabric",
+            "excessively bright, glossy or artificially lit",
+            "Score jersey authenticity, source photography, anatomy, textile realism",
+            "EXACT LEGENDS REAR-SOURCE MAPPING",
+            "Shohei Ohtani -> ohtani-rear.jpg",
+            "Aaron Judge -> judge-rear.jpg",
+        ):
+            self.assertIn(phrase, prompt)
 
     def test_style_requires_two_explicit_principals_not_title_inference(self):
         self.assertEqual(

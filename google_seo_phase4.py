@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import html
 import json
+import logging
 from pathlib import Path
 import re
 import secrets
@@ -4121,6 +4122,12 @@ def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):
     job = store.claim_reporting_repair(worker_id)
     if not job:
         return None
+    logging.info(
+        "GSC_REPORTING_REPAIR claimed job_id=%s trigger=%s attempt=%s",
+        str(job.get("id") or ""),
+        str(job.get("trigger_source") or "background"),
+        _integer(job.get("attempt_count")),
+    )
     try:
         result = store.refresh_reporting_snapshots(
             trigger_source=str(job.get("trigger_source") or "background")
@@ -4136,6 +4143,17 @@ def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):
                 code="reporting_snapshot_incomplete",
             )
         store.complete_reporting_repair(job.get("id"), worker_id, result)
+        logging.info(
+            "GSC_REPORTING_REPAIR completed job_id=%s snapshot_run_id=%s "
+            "through=%s daily_rows=%s query_rows=%s page_rows=%s opportunity_rows=%s",
+            str(job.get("id") or ""),
+            str(result.get("snapshot_run_id") or ""),
+            str(result.get("gsc_reporting_through_date") or ""),
+            _integer(result.get("daily_metric_rows")),
+            _integer(result.get("query_metric_rows")),
+            _integer(result.get("page_metric_rows")),
+            _integer(result.get("opportunity_rows")),
+        )
         return {**result, "repair_job_id": job.get("id")}
     except Exception as error:
         store.record_reporting_snapshot_failure(
@@ -4143,6 +4161,12 @@ def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):
             error=error,
         )
         store.fail_reporting_repair(job.get("id"), worker_id, error)
+        logging.warning(
+            "GSC_REPORTING_REPAIR failed job_id=%s trigger=%s code=%s",
+            str(job.get("id") or ""),
+            str(job.get("trigger_source") or "background"),
+            str(getattr(error, "code", "reporting_snapshot_failed"))[:100],
+        )
         return {
             "status": "failed",
             "repair_job_id": job.get("id"),

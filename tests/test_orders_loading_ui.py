@@ -157,6 +157,10 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Final error check", prodigi_page)
         self.assertIn("Save Issue", prodigi_page)
         self.assertIn("Generate + Upload Certificate", prodigi_page)
+        self.assertIn("Variant not found in standard fulfilment mapping", prodigi_page)
+        self.assertIn("I have manually checked this order and confirm the fulfilment details are correct.", prodigi_page)
+        self.assertIn("Confirm Manual Override & Complete", prodigi_page)
+        self.assertIn("prodigi_complete_with_manual_override", prodigi_page)
         self.assertIn("certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)", prodigi_page)
         self.assertIn('status="Complete"', prodigi_page)
         self.assertIn("Submitted Dispatch Log", prodigi_page)
@@ -478,6 +482,232 @@ class EditionOpsUiTests(unittest.TestCase):
             self.assertEqual(row["prodigi_frame_colour"], frame_colour)
             self.assertIn(code, os_pages.prodigi_required_confirmation_question(row))
             self.assertIn(product, os_pages.prodigi_variant_copy_text(row))
+
+    def test_etsy_normalised_variant_with_standard_size_uses_normal_strict_path(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3019",
+                "channel": "Etsy",
+                "customer": "Marketplace customer",
+                "product": "Taylor Walker Crows Art",
+                "variant": "oak / m - 30 x 45 cm",
+                "edition_number": 42,
+                "shipping": "Australia Post",
+            }
+        )
+
+        self.assertEqual("Etsy", row["channel"])
+        self.assertEqual("M", row["size"])
+        self.assertEqual("GLOBAL-CFP-A3", row["prodigi_code"])
+        self.assertTrue(os_pages.prodigi_has_standard_fulfilment_mapping(row))
+
+    def test_etsy_dimension_only_variant_stays_unmapped_and_allows_controlled_override(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3020",
+                "channel": "Etsy",
+                "customer": "Marketplace customer",
+                "product": "Taylor Walker Crows Art",
+                "variant": "Oak / 30 × 45 cm",
+                "edition_number": 42,
+                "shipping": "Australia Post",
+                "shopify_order_id": "gid://shopify/Order/7352665145651",
+                "shopify_line_item_id": "gid://shopify/LineItem/30201",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "No",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        eligibility = os_pages.prodigi_manual_override_eligibility(row, answers)
+
+        self.assertEqual("Oak", row["frame"])
+        self.assertEqual("", row["size"])
+        self.assertEqual("", row["prodigi_code"])
+        self.assertIn("Missing size", eligibility["original_errors"])
+        self.assertIn("Missing Fulfilment mapping", eligibility["original_errors"])
+        self.assertTrue(eligibility["available"])
+        self.assertTrue(eligibility["can_complete"])
+        self.assertEqual([], eligibility["required_errors"])
+
+    def test_manual_override_requires_confirmation_and_persists_complete_audit_state(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3020",
+                "channel": "Etsy",
+                "customer": "Marketplace customer",
+                "product": "Taylor Walker Crows Art",
+                "variant": "Oak / 30 × 45 cm",
+                "edition_number": 42,
+                "shipping": "Australia Post",
+                "shopify_order_id": "gid://shopify/Order/7352665145651",
+                "shopify_line_item_id": "gid://shopify/LineItem/30201",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "No",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        with patch.object(os_pages, "prodigi_save_dispatch_row") as save:
+            with self.assertRaisesRegex(ValueError, "confirmation is required"):
+                os_pages.prodigi_complete_with_manual_override(
+                    row,
+                    qa_answers=answers,
+                    confirmed=False,
+                    actor="Nathan",
+                )
+        save.assert_not_called()
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "upsert_prodigi_dispatch_row",
+            return_value={"upserted": 1},
+        ) as upsert_row, patch.object(os_pages, "record_activity_log") as activity:
+            saved = os_pages.prodigi_complete_with_manual_override(
+                row,
+                qa_answers=answers,
+                confirmed=True,
+                notes="Checked against the Etsy order.",
+                actor="Nathan",
+            )
+
+        persisted = upsert_row.call_args.args[0]
+        self.assertEqual("Complete", saved["prodigi_status"])
+        self.assertTrue(saved["qa_confirmed"])
+        self.assertEqual("manual_override", saved["fulfilment_validation_status"])
+        self.assertTrue(saved["fulfilment_override"])
+        self.assertEqual("Nathan", saved["fulfilment_override_by"])
+        self.assertTrue(saved["fulfilment_override_at"])
+        self.assertEqual("", saved["prodigi_code"])
+        self.assertEqual("", saved["prodigi_product_name"])
+        self.assertIn("Missing size", saved["fulfilment_override_original_errors"])
+        self.assertEqual(saved["row_id"], persisted["row_id"])
+        self.assertEqual("Complete", persisted["prodigi_status"])
+        activity.assert_called_once()
+        self.assertEqual("manual_fulfilment_override", activity.call_args.args[0])
+        self.assertEqual("Etsy", activity.call_args.kwargs["metadata"]["channel"])
+        self.assertIn("Missing size", activity.call_args.kwargs["metadata"]["original_validation"])
+
+        reloaded = supabase_backend._prodigi_payload_from_db_row(
+            {
+                "row_json": persisted,
+                "row_id": persisted["row_id"],
+                "prodigi_status": "Complete",
+            }
+        )
+        self.assertEqual("Complete", reloaded["prodigi_status"])
+        self.assertTrue(reloaded["fulfilment_override"])
+        self.assertEqual("manual_override", reloaded["fulfilment_validation_status"])
+
+    def test_manual_override_upsert_changes_only_the_selected_etsy_order(self):
+        target = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3020",
+                "channel": "Etsy",
+                "product": "Taylor Walker Crows Art",
+                "variant": "Oak / 30 × 45 cm",
+                "edition_number": 42,
+                "shipping": "Australia Post",
+            }
+        )
+        other = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3021",
+                "channel": "Shopify",
+                "product": "Other Wall Art",
+                "variant": "Black / L",
+                "edition_number": 43,
+                "shipping": "Australia Post",
+            }
+        )
+        original_other = deepcopy(other)
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "No",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+        override_state = {
+            "fulfilment_validation_status": "manual_override",
+            "fulfilment_override": True,
+            "fulfilment_override_reason": "Checked manually.",
+            "fulfilment_override_by": "Nathan",
+            "fulfilment_override_at": "2026-08-20T00:00:00Z",
+            "fulfilment_override_original_errors": ["Missing size"],
+        }
+
+        rows, saved = os_pages.prodigi_upsert_dispatch_row(
+            [other],
+            target,
+            status="Complete",
+            qa_answers=answers,
+            manual_override=override_state,
+        )
+
+        self.assertEqual(2, len(rows))
+        self.assertEqual("Complete", saved["prodigi_status"])
+        untouched = next(row for row in rows if row["row_id"] == other["row_id"])
+        self.assertEqual(original_other, untouched)
+        self.assertEqual(original_other["prodigi_status"], untouched["prodigi_status"])
+        self.assertFalse(untouched["fulfilment_override"])
+
+    def test_manual_override_cannot_bypass_unrelated_required_checks(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC3020",
+                "channel": "Etsy",
+                "product": "Taylor Walker Crows Art",
+                "variant": "Oak / 30 × 45 cm",
+                "edition_number": 42,
+                "shipping": "Australia Post",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "No",
+            "product_option": "No",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        eligibility = os_pages.prodigi_manual_override_eligibility(row, answers)
+
+        self.assertFalse(eligibility["can_complete"])
+        self.assertIn("Artwork quality not confirmed", eligibility["required_errors"])
+        with patch.object(os_pages, "prodigi_save_dispatch_row") as save:
+            with self.assertRaisesRegex(ValueError, "remaining required checks"):
+                os_pages.prodigi_complete_with_manual_override(
+                    row,
+                    qa_answers=answers,
+                    confirmed=True,
+                    actor="Nathan",
+                )
+        save.assert_not_called()
 
     def test_prodigi_tracker_builds_multiline_order_rows(self):
         order_rows = [
@@ -1176,6 +1406,10 @@ class EditionOpsUiTests(unittest.TestCase):
         }
 
         self.assertIn("Fulfilment variant not confirmed", os_pages.prodigi_dispatch_blockers(row, answers))
+        eligibility = os_pages.prodigi_manual_override_eligibility(row, answers)
+        self.assertFalse(eligibility["automatic_mapping_uncertain"])
+        self.assertFalse(eligibility["available"])
+        self.assertFalse(eligibility["can_complete"])
 
     def test_prodigi_submission_blocks_missing_code_and_duplicate_submit(self):
         missing = os_pages.prodigi_tracker_row_from_order(

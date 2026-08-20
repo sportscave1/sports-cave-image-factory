@@ -3290,6 +3290,16 @@ def _load_interactive_overview(filters, reader, context, *, use_cache, route):
 
 def _snapshot_unavailable_notice(snapshot):
     reason = str((snapshot or {}).get("reason") or "")
+    if reason == "no_saved_gsc_data_for_range":
+        st.info(
+            "No saved Google Search Console data is available for this property and date range."
+        )
+        return
+    if bool((snapshot or {}).get("fallback_mode")):
+        st.info(
+            "Using saved Google Search Console data. The compact reporting snapshot is pending refresh."
+        )
+        return
     if reason == "search_type_snapshot_unavailable":
         st.info("This search type is not in the saved interactive reporting snapshot yet. Select Web or wait for the next background reporting refresh.")
     elif reason in {"reporting_snapshot_unavailable", "saved_data_unavailable"}:
@@ -3556,8 +3566,9 @@ def _render_search_overview(
         else:
             st.error(health_notice)
     through = health.get("through_date") or "Unavailable"
+    source_label = health.get("source_label") or "Google Search Console"
     st.caption(
-        f"Source: Google Search Console | Exact saved property totals | Data through {through} | "
+        f"Source: {source_label} | Exact saved property totals | Data through {through} | "
         "Rank Quality is impression-weighted across known query rows."
     )
     if coverage.get("click_coverage") is not None:

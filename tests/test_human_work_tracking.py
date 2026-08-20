@@ -64,6 +64,7 @@ class HumanWorkTrackingTests(unittest.TestCase):
             ("ad_images_saved", "Ads", "ad_creative_saved", "Ad creative saved"),
             ("keyword_updated", "SEO", "seo_keyword_mapping_updated", "SEO keyword mapping updated"),
             ("order_fulfilled_certificate_generated", "Orders", "order_fulfilled_certificate_generated", "Order fulfilled"),
+            ("manual_fulfilment_override", "Orders", "manual_fulfilment_override", "Manual fulfilment override"),
             ("daily_planner_task_completed", "Daily Planner", "daily_planner_task_completed", "Planner task completed"),
         )
         for action, area, canonical, label in cases:

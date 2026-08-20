@@ -5,7 +5,7 @@ import re
 
 
 STYLE_REQUIRED_LABEL = "Style required"
-STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v3_legends_locked"
+STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v4_moment_jersey_locked"
 
 DESIGN_DETAIL_FIELDS = (
     ("design_title", "Design title"),
@@ -311,17 +311,138 @@ Use exactly one verified authentic signature for each principal. Keep each signa
 """.strip()
 
 
+ULTIMATE_MOMENT_CONTRACT_VERSION = (
+    "SPORTS CAVE ULTIMATE MOMENT CONTRACT V4 - MOMENT LOCKED"
+)
+
+ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK = """
+ULTIMATE MOMENT AUTHENTIC SOURCE-PHOTOGRAPHY LOCK
+
+Every selected final-use photograph is an immutable record of the locked historic event. Composite the real source photographs; never recreate history with AI. Preserve the athlete's face, expression, pose, anatomy, skin texture, uniform, jersey number, equipment, vehicle livery, perspective, photographic lighting and texture.
+
+Never redraw or regenerate the athlete, face-swap, re-pose, invent anatomy, extend a crop with generated limbs, replace a uniform, manufacture a number, combine a face from one source with another body, or fabricate a photograph of the event. Do not present another season, uniform, venue, celebration or event as the locked moment. Build the artwork around what the approved sources genuinely contain. If a source cannot support the design without reconstruction, return to Find Images and replace it.
+""".strip()
+
+ULTIMATE_MOMENT_RESEARCH_BASE_RULES = f"""
+SPORTS CAVE DESIGN STUDIO V2 - ULTIMATE MOMENT RESEARCH
+
+{ULTIMATE_MOMENT_CONTRACT_VERSION}
+
+ULTIMATE MOMENTS MUST BEGIN WITH THE MOMENT
+Follow this hierarchy: ATHLETE -> GREATEST MOMENT -> EXACT EVENT -> BEST PHOTOGRAPH -> COLLECTOR STORY -> DESIGN. Never begin with a generic concept and then find interchangeable sports photographs.
+
+Research the athlete's career properly before choosing. Establish at least five strongest candidate moments, including the most relevant record, championship, defining play, signature performance, rivalry, comeback, trophy, iconic celebration or culturally permanent image. For every candidate verify the exact event and date, opponent, competition/game/race, venue where relevant, what happened, historical importance, fan memory and authentic photographic evidence. Do not rely on vague career knowledge or select the first famous event with easy photography.
+
+Compare the candidates using approximately: 30% career/legacy importance; 25% fan recognition and nostalgia; 20% emotional power; 15% strength of authentic available photography; and 10% premium wall-art potential. The first three factors outrank convenience. Select the moment a serious fan would most immediately associate with the athlete. If its photography appears difficult, search and research harder before considering the second-ranked moment. Never override a user's explicitly locked event; verify it and build the contract around it.
+
+Do not find or display image results yet and do not generate artwork. Return a concise candidate comparison followed by exactly one authoritative handoff using every field below:
+
+ULTIMATE MOMENT LOCK
+Athlete:
+Defining moment:
+Date:
+Opponent:
+Competition/event:
+Venue:
+Exact achievement/story:
+Why this is the athlete's defining moment:
+What fans emotionally remember:
+Required visual evidence:
+Preferred hero photograph:
+Acceptable alternate photograph:
+Required environmental/background details:
+Headline/story direction:
+Facts/numbers/date that may appear in artwork:
+Things that must NOT be substituted:
+
+The lock must be factual, event-specific and composition-ready. Later stages must inherit it without switching game, race, season, uniform, equipment, venue, celebration or story.
+""".strip()
+
+ULTIMATE_MOMENT_RESEARCH_RULES = """
+Choose one original collector-story direction suited to the winning moment, not a generic victory, winner-versus-loser or two-player poster concept. Identify whether the primary photograph should be chest-up, waist-up, three-quarter or full-action according to the recognisable silhouette and emotion. Specify minimum useful crop resolution and exact details that must remain visible.
+
+Another athlete is a principal only when essential to understanding the historic moment. The locked athlete must otherwise own the artwork. Recommend a concise event-specific 2-5 word headline direction without inventing a quote or falling back to generic words such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY unless the phrase has a recognised athlete-specific meaning. Specify one authentic signature requirement only when a verified source is available.
+""".strip()
+
+ULTIMATE_MOMENT_FIND_IMAGES_BASE_RULES = f"""
+SPORTS CAVE DESIGN STUDIO V2 - ULTIMATE MOMENT FIND IMAGES
+
+{ULTIMATE_MOMENT_CONTRACT_VERSION}
+
+Use the exact ULTIMATE MOMENT LOCK in the immediately preceding Research response. Do not redo the concept, weaken the moment or silently substitute a different event, date, opponent, season, uniform, venue, celebration or generic athlete portrait.
+
+Use dedicated image search for the locked event. Adapt focused searches to the sport, including: "[ATHLETE] [EXACT EVENT] [DATE] [OPPONENT]"; "[ATHLETE] [EXACT PLAY / RECORD / CELEBRATION]"; "[ATHLETE] [VENUE] [YEAR] high resolution"; "[ATHLETE] immediately after [MOMENT] celebration"; and "[EVENT] stadium scoreboard crowd".
+
+Search three visual roles:
+1. PRIMARY HERO - the strongest genuine photograph from the exact moment, with clear identity, emotion/action, authentic uniform/equipment, useful crop, strong silhouette and sufficient subject size and resolution for Shopify-thumbnail and print readability.
+2. SECONDARY MOMENT IMAGE - optional and only when another authentic frame or angle from the same event materially improves the story. Do not automatically add an opponent or second superstar.
+3. ENVIRONMENT / STORY SUPPORT - authentic same-event venue, crowd, scoreboard, trophy, goal, car, court, field, track, lights or architecture. If exact-event support is unavailable, use only clearly labelled era-appropriate reference that cannot misrepresent another event as the real one.
+
+Display only the strongest usable candidates as tool-native image cards or supported inline previews with source attribution. Links, filenames, descriptions or broken previews alone are not results. After the candidates, return a concise MOMENT LOCK CONFIRMATION that repeats the locked event and maps the approved Primary Hero, optional Secondary Moment Image, Environment/Story Support and verified Signature asset. State any unresolved authenticity risk. These exact approved mappings are the handoff to Generation.
+""".strip()
+
+ULTIMATE_MOMENT_FIND_IMAGES_RULES = """
+Reject random portraits, generic season photography, unrelated celebrations, wrong dates/seasons/uniforms/equipment/cars/liveries/venues, tiny or distant figures, awkward crops, unrecognisable athletes, low-resolution or compressed files, intrusive watermarks, AI images, illustrations, posters, trading cards and any source requiring regenerated anatomy, pose, uniform or identity. Reject a visually convenient source when it is not evidence of the locked moment. If the strongest source is unsuitable, search again rather than asking Generation to repair it.
+
+Rank candidates by exact-moment truth first, then athlete recognition, emotion/action, useful crop and resolution, photographic authenticity and collector-art potential. Photography convenience cannot overrule the career significance established by Research.
+""".strip()
+
+ULTIMATE_MOMENT_GENERATION_RULES = f"""
+{ULTIMATE_MOMENT_CONTRACT_VERSION}
+
+MOMENT LOCK HANDOFF - AUTHORITATIVE
+Use the ULTIMATE MOMENT LOCK and MOMENT LOCK CONFIRMATION from the preceding Research and Find Images responses plus the exact selected-asset mappings below. Stop and return to Find Images if a selected source depicts another event, season, uniform, venue or celebration, or if the composition would require reconstructing history. Never reinterpret the lock as a generic sports-poster brief.
+
+PREMIUM LIMITED-EDITION SPORTING ARTEFACT
+Build an original composition around one definitive authentic photograph of the exact moment. The default hierarchy is: historic photograph; emotion/action; event-specific headline; event context; athlete name where required; authentic signature; concise verified stat/date line; then subtle Sports Cave/Limited Edition details. The hero must dominate at Shopify-thumbnail size. Choose chest-up, waist-up, strong three-quarter or complete iconic action according to what best communicates the real moment; do not shrink the athlete for decoration or force every source into the same crop.
+
+Use one of these quality principles according to the lock, never as a template copy: an iconic single action with restrained stadium context; defining-event storytelling with one commanding hero and an exact historic line; or a premium photographic collage where every additional authentic same-event image strengthens the story and one hero remains unmistakably dominant. A second athlete or equal principal is prohibited unless the locked moment genuinely requires that person. Ultimate Moments is not Rivalry Face-Off.
+
+EVENT-SPECIFIC STORYTELLING
+Make clear within about three seconds why this photograph matters. Use a strong 2-5 word collector headline tied directly to the athlete and event. Do not invent a quote or use generic AI copy such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY without a verified athlete-specific meaning. Where useful, include one quiet factual line for the verified milestone, result, record, date, opponent, venue or competition; do not fill the design with statistics.
+
+The background is atmospheric evidence from the same story: the genuine venue, crowd, scoreboard, track, court, field, trophy environment, architecture or event lighting. Do not use a random smoky arena, unrelated crowd, fake scoreboard, generic AI stadium, arbitrary spotlights, fantasy sparks or dramatic clouds. Reference-only environment images guide factual setting and must not be presented as another event's real photograph.
+
+SPORTS CAVE FINISH
+Landscape 4:3 with one refined, continuous inset border and every important element inside the safe area. Use deep black, charcoal, muted grey, warm ivory, restrained antique gold, controlled highlights, cinematic contrast, subtle photographic grain and understated archival texture. Fine film grain, gentle vignette, faded pigment, light paper texture, minute scratches or controlled distressed type may support a premium archival collectible. Avoid neon/orange glow, fake HDR, plastic skin, bloom, glowing outlines, obvious particles, cheap lens flare, excessive sparks, gaming-poster styling and oversaturated team colours.
+
+Use only an authentic verified signature asset, secondary and tastefully integrated; never invent cursive and present it as authentic. Keep the Sports Cave Collector Series mark, LIMITED EDITION and 001 / 100 treatment small, engraved/printed/editorial and subordinate to the photograph rather than UI-like.
+""".strip()
+
+ULTIMATE_MOMENT_REVIEW_BASE_RULES = f"""
+SPORTS CAVE DESIGN STUDIO V2 - ULTIMATE MOMENT HARSH REVIEW
+
+{ULTIMATE_MOMENT_CONTRACT_VERSION}
+
+Review the supplied artwork against only the current task, ULTIMATE MOMENT LOCK, MOMENT LOCK CONFIRMATION and exact asset mappings. Ignore stale names, moments, signatures, sources or instructions from previous tasks.
+
+First return MOMENT CONTRACT: PASS or FAIL. FAIL if the artwork does not visibly represent the locked defining moment; the hero is generic or from another event/season/uniform; the environment misrepresents the event; another athlete steals focus without being essential; a major event detail is wrong; or AI reconstructed the historic photograph. If MOMENT CONTRACT fails, the maximum score is 6/10 regardless of visual polish, and the triggering failure must be stated.
+
+Then score out of 10, list visible failures and provide one exact correction brief. A genuinely exceptional, factual and fully compliant design may score 10/10; do not invent trivial faults to suppress the score.
+""".strip()
+
+ULTIMATE_MOMENT_REVIEW_RULES = """
+Assess source-photo authenticity, athlete recognition, moment recognition, hierarchy, collector feel, photographic realism, emotional impact, background relevance, typography, authentic signature treatment, factual event line, border, restrained badge/edition treatment, Shopify-thumbnail readability and premium wall-art value.
+
+Confirm that one locked hero owns the canvas; any secondary photograph is genuinely from the same event and supports rather than competes; the headline is specific; the event is understandable in about three seconds; source faces, poses, anatomy, uniform, equipment and texture were preserved; the background supplies truthful event context; colours and gold are restrained; grunge is archival rather than preset-like; and every required collector element remains subtle and contained. If a source is unsuitable, require replacing that exact source through Find Images, never rebuilding the athlete or event.
+""".strip()
+
+
 LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION = (
-    "SPORTS CAVE LEGENDS JERSEY DISPLAY CONTRACT V3 - LOCKED"
+    "SPORTS CAVE LEGENDS JERSEY DISPLAY CONTRACT V4 - JERSEY SOURCE LOCKED"
 )
 LEGENDS_JERSEY_DISPLAY_FIXED_TITLE = "LEGENDS NEVER DIE"
 
 LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK = """
 LEGENDS JERSEY SOURCE-PHOTO AND IDENTITY LOCK
 
-This is intentionally a rear-facing jersey-display series. Use the actual selected source photographs and preserve the real source pixels wherever technically possible. Identity is established through authentic source photography, body silhouette, uniform, jersey surname and jersey number. Do not penalise a compliant artwork merely because full front-facing faces are not visible. If a genuine restrained rear three-quarter source includes part of a face, preserve it exactly.
+This is intentionally a rear-facing jersey-display series. Use the actual selected source photographs. The athlete's body and jersey must come from the actual selected source photograph, with real source pixels preserved wherever technically possible. Identity is established through authentic rear or rear-three-quarter body shape, head/helmet/hair, shoulders, proportions, uniform, jersey surname and number. Do not penalise a compliant artwork merely because full front-facing faces are not visible. If a genuine restrained rear-three-quarter source includes part of a face, preserve it exactly.
 
-Never redraw, regenerate, face-swap, rotate, mirror, re-pose or reconstruct either athlete. Preserve authentic anatomy, skin, hair, helmet, equipment, clothing folds, uniform markings, surnames, numbers, badges and logos. Do not create a fake back, fake number, AI-generated jersey lettering, invented anatomy or an extended body. Minor non-generative cropping, masking, proportional scaling, colour grading and lighting integration are allowed. Introduce no extra people.
+Never generate a generic jersey; rebuild the athlete; paint a surname or number onto an invented shirt; recreate shoulders, neck, head shape, hair or helmet; rotate a front source into a rear pose; mirror a source to fabricate orientation; face-swap, re-pose or extend anatomy; or create a synthetic matching pose for symmetry. Preserve authentic skin, fabric weave, wrinkles, seams, stitching, shoulder construction, sleeve shape, number material, real shadows, natural compression, era-correct fit, wear, markings, badges and logos.
+
+Do not create a fake back, fake number, AI-generated jersey lettering, invented surname or approximate rear pose.
+
+Minor non-generative cropping, masking, proportional scaling, exposure/curves, colour grading, believable shadow, restrained edge light, unified grain and careful source-edge integration are allowed. Never smooth the jersey into plastic, manufacture folds, inflate shoulders, add glowing numbers, make white fabric impossibly clean or replace genuine photographic texture. If a source cannot support the required jersey identity, Find Images must replace it. Introduce no extra people.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_RESEARCH_RULES = f"""
@@ -331,7 +452,7 @@ Treat Ohtani vs Judge as the primary master reference because it contains the ne
 
 Verify exactly two task principals. For each principal verify the full printed name, authentic jersey-display surname, jersey number, team or country, sport, era, uniform, equipment and a genuine rear or restrained rear-three-quarter photo direction. Verify that the two selected eras and uniforms are correct for the task. The artwork identity is fixed: main title {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; subtitle [PRINCIPAL ONE SURNAME] VS [PRINCIPAL TWO SURNAME]. The task's creative title remains metadata only and must never become artwork text.
 
-Return one concise handoff containing: the two verified full names; exact display surnames and jersey numbers; correct team/country, era and uniform for each; the strongest compatible rear-photo direction for each; the shared sporting environment; one verified signature requirement per principal; and exact search phrases for rear, rear-three-quarter and verified-signature sources. Do not propose an alternative headline, face-off, action montage, split location or Purple Reign treatment.
+Return one concise JERSEY SOURCE REQUIREMENTS handoff containing: the two verified full names; exact display surnames and jersey numbers; correct team/country, sport, era, uniform and equipment for each; mandatory rear or rear-three-quarter body direction; surname/number visibility requirements; useful crop and minimum resolution; authenticity risks to reject; the shared dark historical sporting environment; one verified signature requirement per principal; and exact search phrases for rear, rear-three-quarter and verified-signature sources. Do not propose an alternative headline, face-off, action montage, split location or Purple Reign treatment. These verified requirements feed Find Images and may not be silently reinterpreted.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES = f"""
@@ -343,9 +464,11 @@ Use the verified names, jersey-display surnames, numbers, teams/countries, eras 
 
 Use the platform's dedicated image-search capability. Display each selected candidate as an actual tool-native image-result card or supported inline preview, with the source page as secondary attribution. A link, filename or description without a visible image is not a result. Replace broken previews. Never use screenshots of search results.
 
-Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show only: actual preview, principal, rank, source, available resolution, verified team/country/era/uniform/number, role, subject mapping and use mode. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
+Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show: actual preview; Primary rear source or Backup rear source rank; why it is suitable; visible surname; visible number; correct team/country, sport, era, uniform and equipment; available resolution and crop suitability; source; supported role; subject mapping; use mode; and any authenticity risk. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
 
-After both groups, score every viable two-photo combination and recommend one strongest PAIR. Pair scoring must cover matching rear orientation, crop and body scale; camera height; perspective; lighting; comparable visual importance; clear authentic surnames and numbers; complete heads, shoulders and arms; and ability to fit the locked landscape 4:3 layout. A strong individual image must lose if it creates a weak pair. If no compatible authentic pair exists, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
+After both groups, score every viable two-photo combination and recommend one strongest PAIR. Pair scoring must cover matching rear orientation, crop and body scale where authentic sources permit; camera height; perspective; lighting; comparable visual importance; clear authentic surnames and numbers; complete heads, shoulders and arms; and ability to fit the locked landscape 4:3 layout. Authenticity outranks perfect symmetry. A strong individual image must lose if it creates an unusable pair, but never choose a less authentic jersey merely for a cleaner background or manufactured symmetry.
+
+Finish with JERSEY SOURCE LOCK. Map Principal One and Principal Two to their exact approved image cards/assets, verified surname, number, team/country, era, uniform, role and use mode; then map each verified signature. State that these exact photographs are immutable final-use assets for Generation. If no compatible authentic pair exists, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES = """
@@ -353,11 +476,14 @@ For each principal rank the three strongest genuine photographs using, in order:
 
 Use focused intent such as "[athlete] jersey back high resolution", "[athlete] from behind jersey number", "[athlete] rear view stadium", "[athlete] walking onto field back jersey" and "[athlete] rear three quarter authentic game photo".
 
-Reject front-facing portraits, face-offs, dramatic action, distant full-body players, direct-to-camera poses, hidden surnames or numbers, wrong teams/numbers/eras/uniforms, AI images, illustrations, trading cards, posters, existing artwork, watermarks, signed memorabilia, thumbnails and any source requiring reconstruction of the athlete, pose, anatomy, jersey, name or number. Reject one-front/one-rear pairings, incompatible crops and any pairing resembling Purple Reign.
+Reject front-facing portraits, face-offs, dramatic action, front photographs that would need synthetic rotation, mirrored poses, distant full-body players, direct-to-camera poses, hidden surnames or numbers, wrong teams/numbers/eras/uniforms/equipment, AI images, illustrations, trading cards, posters, existing artwork, intrusive watermarks, signed memorabilia, thumbnails and any source requiring reconstruction of the athlete, pose, anatomy, neck, shoulders, head/helmet/hair, jersey fabric, name or number. Reject one-front/one-rear pairings, incompatible crops and any pairing resembling Purple Reign. If either approved source cannot authenticate the real jersey, search again.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_GENERATION_RULES = f"""
 {LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+JERSEY SOURCE LOCK HANDOFF - AUTHORITATIVE
+Use only the exact two photographs and exact principal mappings in the preceding JERSEY SOURCE LOCK and selected-asset mapping below. They are immutable final-use sources for the bodies and jerseys. Stop and return to Find Images if a mapping is missing, if a surname/number is not genuinely present and readable, or if the composition would require generating, rotating, mirroring, reconstructing or repainting an athlete or jersey. Never let a legacy prompt, desired symmetry or visual cleanup override this lock.
 
 REFERENCE PRIORITY
 Reproduce the repeatable visual system of the approved Ohtani vs Judge master. Bryant vs Jordan and Messi vs Ronaldo support the same series. Purple Reign is a negative reference only. Do not borrow its custom headline, split-world composition, action subject, purple neon, scale imbalance, ornate double frame or loose collector details.
@@ -371,10 +497,17 @@ MASTER REAR JERSEY COMPOSITION
 Composite exactly one selected genuine rear or restrained rear-three-quarter source photograph per principal. Place them side by side, both looking toward the same field, stadium, arena, court or sporting environment. Give them comparable size, height, crop and visual importance. Use large shoulders and jersey backs; subjects should occupy about 60-70% of artwork height and normally crop around upper thighs or waist. Keep heads, shoulders, jersey surnames and numbers completely visible. Do not mix front and rear orientation, create a face-off, twist either athlete toward the viewer, make one athlete dominant, or place them in separate visual worlds.
 
 BACKGROUND AND ATMOSPHERE
-Use one unified, secondary sporting environment behind both athletes: predominantly black and deep charcoal, restrained antique-gold lighting, subtle stadium or arena lights, fine gold dust/smoke/haze/particles, faint oversized authentic jersey number behind its corresponding athlete, and controlled central separation light. Let authentic team colours come primarily from the real uniforms. No split tunnel, hard diagonal divide, two-location montage, purple neon corridor, giant architecture, extra players, spectators or generated crowd figures.
+Use one unified, dark and minimal sporting environment behind both athletes: deep stadium black, smoked charcoal, a low-detail crowd or architecture, diffused floodlights, dark tunnel/field/court/track atmosphere where relevant, subtle historical texture and controlled central separation. Let authentic team colours come primarily from the real uniforms and slightly desaturate them toward archival printed sports photography. The athlete must emerge naturally from the environment rather than look pasted on. No bright stadium behind a dark jersey, hard halo, split tunnel, hard diagonal divide, two-location montage, purple neon corridor, giant architecture, fake flames, orange sparks, extra players, recognisable spectators or generated crowd figures.
+
+No split tunnel. No bright synthetic jersey-display stage.
+
+DARK ARCHIVAL PHOTOGRAPHIC FINISH
+Reduce overall brightness. Allow shoulders and parts of each jersey to fall naturally into shadow while keeping real surnames and numbers legible. Use believable source exposure, curves, tonal blending, natural shadow and only restrained photographic edge light. Preserve natural neck/skin tone, pores where visible, hair/helmet detail, fabric texture and natural shadow transitions. Avoid glossy or plastic jerseys, porcelain/waxy skin, CG helmets, beauty filtering, hard cutout edges, synthetic stitching, glowing numbers, fake metallic fabric and equal illumination across every surface.
+
+Apply sophisticated collector grunge sparingly: unified film grain, archival print/dark paper texture, minute dust and scratches, faded pigment, slight ink distress, restrained edge wear, gentle vignette, local shadow falloff and subtle stadium haze. Preserve source detail, surnames and numbers. No giant scratches, paint splashes, messy overlays, aggressive masks, excessive smoke, obvious particles or generic grunge-preset finish. The result must feel like a museum-quality vintage sports print, not AI fan art, a video-game render, glossy merchandise poster or new-uniform advertisement.
 
 UPPER TYPOGRAPHY
-Use a large centred uppercase premium serif title reading exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}, widely spaced in antique gold or warm ivory. Put the exact uppercase surname subtitle directly beneath it, optionally with one short thin gold divider on each side. Preserve generous breathing room. Text must not touch the border, athletes or background numbers and must remain legible at Shopify-thumbnail size.
+Use a large centred uppercase premium serif title reading exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}, widely spaced in muted antique gold or warm ivory. Put the exact uppercase surname subtitle directly beneath it, optionally with one short thin gold divider on each side. Preserve generous breathing room. Text must not touch the border, athletes or background numbers and must remain legible at Shopify-thumbnail size. Avoid bright yellow/orange, glowing or chrome gold, heavy 3D bevels and decorative lettering that competes with the jerseys. The jerseys are the hero; typography frames the history.
 
 LOWER COLLECTOR STRUCTURE
 Place one thin rectangular full-name plate beneath each corresponding athlete. Print each principal's complete supplied name exactly once in the correct plate. Place that principal's exact verified signature beneath the same nameplate. Both signatures must have the same colour, apparent stroke thickness, visual scale and finish while preserving their genuine stroke paths. Keep them restrained, mapped correctly, fully contained and clear of athlete, nameplates, badge and plaque. Place the exact official Sports Cave Collector Series circular badge at lower centre, with the exact approved LIMITED EDITION plaque beside or integrated with it. The plaque must visibly preserve LIMITED EDITION and 001 / 100. Badge and plaque stay subtle, premium and uncropped. Never generate, redraw, retype or approximate either asset; if either exact approved asset is not mapped, state that the artwork is incomplete and stop before final generation.
@@ -399,15 +532,19 @@ SPORTS CAVE DESIGN STUDIO V2 - HARSH REVIEW
 
 {LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
 
-Review the supplied finished artwork only against the current task variables and exact asset mappings. Ignore stale task titles, names, signatures, sources or research from another design. First return STYLE CONTRACT: PASS or FAIL. Then score out of 10, list visible failures and provide one exact correction brief. A polished image cannot earn a high score until the locked jersey-display contract passes.
+Review the supplied finished artwork only against the current task variables, preceding JERSEY SOURCE LOCK and exact asset mappings. Ignore stale task titles, names, signatures, sources or research from another design. First return JERSEY SOURCE CONTRACT: PASS or FAIL. Then return STYLE CONTRACT: PASS or FAIL, score out of 10, list visible failures and provide one exact correction brief. A polished image cannot earn a high score until the locked jersey-source and display contracts pass.
 
 Do not penalise the artwork merely because full front-facing faces are absent. For this series, authenticate identity through the selected genuine rear/rear-three-quarter photographs, body silhouettes, uniforms, jersey surnames and jersey numbers. Preserve any partial genuine face exactly. Never recommend reconstructing a person, uniform, name or number; require a replacement authentic source through Find Images when the source is unsuitable.
 """.strip()
 
 LEGENDS_JERSEY_DISPLAY_REVIEW_RULES = f"""
-Confirm first that the title is exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; the subtitle is the exact two surnames in task order; exactly two task principals appear rear-facing or restrained rear-three-quarter, side by side in one environment; scale, crop and importance are comparable; genuine jersey surnames, numbers, teams, eras and uniforms are correct and readable; both complete printed names and correctly mapped verified signatures appear in matched lower nameplates; signature colour, stroke weight, scale and finish are consistent; the exact official Sports Cave badge and LIMITED EDITION / 001 / 100 plaque are present; landscape 4:3, thin single antique-gold border and full containment pass; and no extra person or identity reconstruction appears.
+FAIL the JERSEY SOURCE CONTRACT if any principal appears AI-generated; uses an invented or rebuilt jersey, surname or number; has wrong uniform details; uses a front photograph synthetically converted to a rear view; has suspicious anatomy, shoulders, neck, head/helmet/hair or fabricated folds; has plastic/synthetic fabric; is excessively bright, glossy or artificially lit; does not match the exact source mapping; or fails the dark archival photographic collector mood.
 
-Hard-cap the commercial score at 6/10 if any one of these occurs: title is not exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; subtitle is wrong; rear-facing side-by-side composition is absent; one principal is front-facing or in action; principals have unequal size or importance; surname/number is wrong or unreadable; era/team/uniform is wrong; a full printed name is missing; a signature is missing, wrong, mismapped or inconsistent; official badge is missing/fabricated; LIMITED EDITION or 001 / 100 plaque is missing/wrong/fabricated; the scene is split-world, tunnel, purple-neon or Purple Reign-like; an extra person appears; athlete/uniform/identity pixels were reconstructed; or any required element crosses the gold border. State the triggering cap explicitly. A polished Purple Reign-style output cannot score above 6/10 under this style.
+Then confirm that the title is exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; the subtitle is the exact two surnames in task order; exactly two task principals appear rear-facing or restrained rear-three-quarter, side by side in one environment; scale, crop and importance are comparable; genuine jersey surnames, numbers, teams, eras and uniforms are correct and readable; both complete printed names and correctly mapped verified signatures appear in matched lower nameplates; signature colour, stroke weight, scale and finish are consistent; the exact official Sports Cave badge and LIMITED EDITION / 001 / 100 plaque are present; landscape 4:3, thin single antique-gold border and full containment pass; and no extra person or identity reconstruction appears.
+
+Hard-cap the commercial score at 6/10 if JERSEY SOURCE CONTRACT fails or if any one of these occurs: title is not exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}; subtitle is wrong; rear-facing side-by-side composition is absent; one principal is front-facing or in action; principals have unequal size or importance; surname/number is wrong or unreadable; era/team/uniform is wrong; a full printed name is missing; a signature is missing, wrong, mismapped or inconsistent; official badge is missing/fabricated; LIMITED EDITION or 001 / 100 plaque is missing/wrong/fabricated; the scene is split-world, tunnel, purple-neon, too bright/glossy or Purple Reign-like; an extra person appears; athlete/uniform/identity pixels were reconstructed; or any required element crosses the gold border. State the triggering cap explicitly. A polished Purple Reign-style output cannot score above 6/10 under this style.
+
+Score jersey authenticity, source photography, anatomy, textile realism, surname/number authenticity, lighting, dark collector mood, grunge sophistication, restrained team colour, hierarchy, background integration, typography, signature placement, limited-edition elements, border and Shopify-thumbnail strength.
 
 The correction brief must restore the locked master system, not invent a new rivalry concept. Preserve compliant real source pixels and successful collector elements; replace only an unsuitable source or incorrect local element.
 """.strip()
@@ -422,17 +559,16 @@ _STYLES = (
         3,
         3,
         ("exact_moment_photo",),
-        ("venue_reference", "historical_reference", "signature_asset"),
-        """
-If the task is broad, verify up to five candidate exact moments and select the strongest commercial and emotional choice. Explain why fans recognise it; verify the event, date, venue, result and participants; identify the definitive photographic direction and exact search terms; provide five short collector titles and one final brief. If the task names a precise moment, verify that moment and do not replace it.
-""",
-        """
-Return: EXACT MOMENT candidates first; then exact venue, scoreboard or event details; then SIGNATURES last when useful. Prioritise the highest-resolution authentic photograph of the exact moment and genuinely different authentic angles. Do not create player-by-player face carousels or add a generic portrait.
-""",
-        """
-Use one definitive authentic photograph of the exact moment as the artwork foundation. Prefer the complete photograph. Preserve every participant already inside it; do not extract and rebuild them or add a generic athlete cutout. Use restrained grading, authentic period grain, vignette, negative space, title, event details and border only.
-""",
-        "Confirm the exact historical photograph, participants, event, date, venue and result. Reject any recreated or substituted moment.",
+        (
+            "secondary_exact_photo",
+            "venue_reference",
+            "historical_reference",
+            "signature_asset",
+        ),
+        ULTIMATE_MOMENT_RESEARCH_RULES,
+        ULTIMATE_MOMENT_FIND_IMAGES_RULES,
+        ULTIMATE_MOMENT_GENERATION_RULES,
+        ULTIMATE_MOMENT_REVIEW_RULES,
     ),
     _style(
         "rivalry_faceoff",
@@ -901,6 +1037,46 @@ def _collector_badge_assets(selected_assets=None):
     ]
 
 
+def _ultimate_moment_source_mapping_block(selected_assets=None):
+    assets = normalise_selected_assets(selected_assets)
+    primary = next(
+        (asset for asset in assets if asset.get("role") == "exact_moment_photo"),
+        None,
+    )
+    secondary = next(
+        (asset for asset in assets if asset.get("role") == "secondary_exact_photo"),
+        None,
+    )
+    environment = next(
+        (
+            asset
+            for asset in assets
+            if asset.get("role") in {"venue_reference", "historical_reference"}
+        ),
+        None,
+    )
+
+    def mapping(label, asset, *, required=False):
+        if asset:
+            subject = f" | subject={asset['subject_name']}" if asset.get("subject_name") else ""
+            return (
+                f"* {label} -> {asset['reference']} | role={asset['role']} | "
+                f"use_mode={asset['use_mode']}{subject} | use this exact approved asset"
+            )
+        status = "MISSING REQUIRED APPROVED ASSET" if required else "not selected (optional)"
+        return f"* {label} -> {status}"
+
+    return "\n".join(
+        (
+            "EXACT ULTIMATE MOMENT SOURCE MAPPING",
+            mapping("Primary Hero", primary, required=True),
+            mapping("Secondary Moment Image", secondary),
+            mapping("Environment / Story Support", environment),
+            "The Primary Hero mapping must match the ULTIMATE MOMENT LOCK and MOMENT LOCK CONFIRMATION. A missing or mismatched Primary Hero blocks generation and review; never substitute a generic or reconstructed moment.",
+        )
+    )
+
+
 def _legends_source_mapping_block(selected_assets, subjects):
     assets = normalise_selected_assets(selected_assets)
     lines = ["EXACT LEGENDS REAR-SOURCE MAPPING"]
@@ -1270,16 +1446,18 @@ def build_research_prompt(style_slug, task_text, details=None):
         return STYLE_REQUIRED_LABEL
     subjects = _principal_subjects_for_prompt(details, task_text)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
-    base_rules = (
-        RIVALRY_FACE_OFF_RESEARCH_BASE_RULES
-        if style.slug == "rivalry_faceoff"
-        else COMMON_RESEARCH_RULES
-    )
-    source_contract = (
-        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
-        if style.slug == "legends_jersey_display"
-        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
-    )
+    if style.slug == "ultimate_moment":
+        base_rules = ULTIMATE_MOMENT_RESEARCH_BASE_RULES
+        source_contract = ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK
+    elif style.slug == "rivalry_faceoff":
+        base_rules = RIVALRY_FACE_OFF_RESEARCH_BASE_RULES
+        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
+    elif style.slug == "legends_jersey_display":
+        base_rules = COMMON_RESEARCH_RULES
+        source_contract = LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+    else:
+        base_rules = COMMON_RESEARCH_RULES
+        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     return "\n\n".join(
         (
             base_rules,
@@ -1299,17 +1477,23 @@ def build_find_images_prompt(style_slug, task_text, details=None):
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     roles = ", ".join(style.required_image_roles)
     optional = ", ".join(style.optional_image_roles) or "none"
-    if style.slug == "rivalry_faceoff":
+    if style.slug == "ultimate_moment":
+        base_rules = (
+            ULTIMATE_MOMENT_FIND_IMAGES_BASE_RULES,
+            FIND_IMAGES_INLINE_RESULT_CONTRACT,
+        )
+    elif style.slug == "rivalry_faceoff":
         base_rules = (RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES,)
     elif style.slug == "legends_jersey_display":
         base_rules = (LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES,)
     else:
         base_rules = (COMMON_FIND_IMAGES_RULES, FIND_IMAGES_INLINE_RESULT_CONTRACT)
-    source_contract = (
-        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
-        if style.slug == "legends_jersey_display"
-        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
-    )
+    if style.slug == "ultimate_moment":
+        source_contract = ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK
+    elif style.slug == "legends_jersey_display":
+        source_contract = LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+    else:
+        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     return "\n\n".join(
         (*base_rules,
             source_contract,
@@ -1329,16 +1513,18 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
     signatures = verified_signature_assets(assets, subjects)
-    source_contract = (
-        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
-        if style.slug == "legends_jersey_display"
-        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
-    )
-    source_mapping = (
-        _legends_source_mapping_block(assets, subjects)
-        if style.slug == "legends_jersey_display"
-        else ""
-    )
+    if style.slug == "ultimate_moment":
+        source_contract = ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK
+    elif style.slug == "legends_jersey_display":
+        source_contract = LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+    else:
+        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
+    if style.slug == "ultimate_moment":
+        source_mapping = _ultimate_moment_source_mapping_block(assets)
+    elif style.slug == "legends_jersey_display":
+        source_mapping = _legends_source_mapping_block(assets, subjects)
+    else:
+        source_mapping = ""
     collector_mapping = (
         _legends_collector_asset_mapping_block(assets)
         if style.slug == "legends_jersey_display"
@@ -1412,31 +1598,45 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
     assets = normalise_selected_assets(selected_assets)
     subjects = _principal_subjects_for_prompt(details, task_text, assets)
     signatures = verified_signature_assets(assets, subjects)
-    review_rules = (
-        LEGENDS_JERSEY_DISPLAY_REVIEW_BASE_RULES
-        if style.slug == "legends_jersey_display"
-        else COMMON_REVIEW_RULES
-    )
-    source_contract = (
-        LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
-        if style.slug == "legends_jersey_display"
-        else HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
-    )
+    if style.slug == "ultimate_moment":
+        review_rules = ULTIMATE_MOMENT_REVIEW_BASE_RULES
+        source_contract = ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK
+    elif style.slug == "legends_jersey_display":
+        review_rules = LEGENDS_JERSEY_DISPLAY_REVIEW_BASE_RULES
+        source_contract = LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
+    else:
+        review_rules = COMMON_REVIEW_RULES
+        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     collector_mapping = (
         _legends_collector_asset_mapping_block(assets)
         if style.slug == "legends_jersey_display"
         else _plaque_mapping_block(assets)
     )
+    target_asset_plan = (
+        _selected_asset_use_plan(assets, signatures)
+        if style.slug in {"ultimate_moment", "legends_jersey_display"}
+        else ""
+    )
+    if style.slug == "ultimate_moment":
+        source_mapping = _ultimate_moment_source_mapping_block(assets)
+    elif style.slug == "legends_jersey_display":
+        source_mapping = _legends_source_mapping_block(assets, subjects)
+    else:
+        source_mapping = ""
     return "\n\n".join(
-        (
+        section
+        for section in (
             review_rules,
             source_contract,
             _style_task_variables(style, task_text, details, subjects),
+            target_asset_plan,
+            source_mapping,
             _required_names_block(subjects),
             _signature_mapping_block(subjects, signatures),
             collector_mapping,
             f"STYLE-SPECIFIC REVIEW - {style.label}\n{style.harsh_review_rules}",
         )
+        if section
     )
 
 

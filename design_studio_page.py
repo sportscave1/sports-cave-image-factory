@@ -3653,14 +3653,18 @@ def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
     ]
 
 
-def _locked_legends_v2_prompt_from_context(stage, task_text, design_context=None):
+def _locked_target_v2_prompt_from_context(stage, task_text, design_context=None):
     if not isinstance(design_context, dict):
         return ""
     metadata = design_context.get("metadata") if isinstance(design_context.get("metadata"), dict) else {}
     style_slug = design_studio_styles.normalize_design_style(
         design_context.get("design_style") or metadata.get("design_style")
     )
-    if style_slug != "legends_jersey_display":
+    target_contracts = {
+        "ultimate_moment": design_studio_styles.ULTIMATE_MOMENT_CONTRACT_VERSION,
+        "legends_jersey_display": design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION,
+    }
+    if style_slug not in target_contracts:
         return ""
     details = _task_design_details(design_context)
     selected_assets = _task_selected_assets(design_context)
@@ -3668,8 +3672,8 @@ def _locked_legends_v2_prompt_from_context(stage, task_text, design_context=None
     if errors:
         return "\n".join(
             (
-                design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION,
-                "PROMPT BLOCKED - correct the task's explicit Legends Jersey Display principal fields before continuing.",
+                target_contracts[style_slug],
+                "PROMPT BLOCKED - correct the current task's explicit design fields before continuing.",
                 *errors,
             )
         )
@@ -3687,7 +3691,7 @@ def _locked_legends_v2_prompt_from_context(stage, task_text, design_context=None
 
 
 def build_design_research_prompt(task_text: str, *, design_context=None) -> str:
-    locked_prompt = _locked_legends_v2_prompt_from_context(
+    locked_prompt = _locked_target_v2_prompt_from_context(
         "research",
         task_text,
         design_context,
@@ -3704,7 +3708,7 @@ def build_design_research_prompt(task_text: str, *, design_context=None) -> str:
 
 
 def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, design_context=None) -> str:
-    locked_prompt = _locked_legends_v2_prompt_from_context(
+    locked_prompt = _locked_target_v2_prompt_from_context(
         "find_images",
         task_text,
         design_context,
@@ -3730,7 +3734,7 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, 
 
 
 def build_design_generation_prompt(task_text: str, *, design_context=None) -> str:
-    locked_prompt = _locked_legends_v2_prompt_from_context(
+    locked_prompt = _locked_target_v2_prompt_from_context(
         "generation",
         task_text,
         design_context,

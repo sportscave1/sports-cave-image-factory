@@ -209,6 +209,7 @@ ACTION_RULES = {
     # Orders, certificates and fulfilment.
     "order_fulfilled": _rule("Orders", "order_fulfilled", "Order fulfilled", entity_type="order"),
     "order_fulfilled_certificate_generated": _rule("Orders", "order_fulfilled_certificate_generated", "Order fulfilled + certificate generated", entity_type="order"),
+    "manual_fulfilment_override": _rule("Orders", "manual_fulfilment_override", "Manual fulfilment override", entity_type="order"),
     "prodigi_status_updated": _rule("Orders", "order_status_updated", "Order status updated", entity_type="order"),
     "certificate_generated": _rule("Orders", "certificate_generated", "Certificate generated", entity_type="certificate"),
     "certificate_uploaded": _rule("Orders", "certificate_uploaded", "Certificate uploaded", entity_type="certificate"),

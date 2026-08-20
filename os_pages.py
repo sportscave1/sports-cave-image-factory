@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-from activity_log import record_activity_log
+from activity_log import get_activity_actor, record_activity_log
 import certificate_job
 import db
 import os_accounts
@@ -946,6 +946,7 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "shopify_order_id": order_row.get("shopify_order_id") or stored.get("shopify_order_id") or "",
         "shopify_order_name": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_name") or "",
         "shopify_order_number": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_number") or stored.get("shopify_order_name") or "",
+        "channel": order_row.get("channel") or order_row.get("source_name") or stored.get("channel") or stored.get("source_name") or "Shopify",
         "shopify_line_item_id": order_row.get("shopify_line_item_id") or stored.get("shopify_line_item_id") or "",
         "customer_name": order_row.get("customer") or order_row.get("customer_name") or stored.get("customer_name") or "",
         "customer_email": order_row.get("customer_email") or stored.get("customer_email") or "",
@@ -987,6 +988,12 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "qa_notes": stored.get("qa_notes") or "",
         "qa_completed_at": stored.get("qa_completed_at") or "",
         "qa_answers": stored.get("qa_answers") or {},
+        "fulfilment_validation_status": stored.get("fulfilment_validation_status") or order_row.get("fulfilment_validation_status") or "automatic",
+        "fulfilment_override": _prodigi_bool(stored.get("fulfilment_override") or order_row.get("fulfilment_override")),
+        "fulfilment_override_reason": stored.get("fulfilment_override_reason") or order_row.get("fulfilment_override_reason") or "",
+        "fulfilment_override_by": stored.get("fulfilment_override_by") or order_row.get("fulfilment_override_by") or "",
+        "fulfilment_override_at": stored.get("fulfilment_override_at") or order_row.get("fulfilment_override_at") or "",
+        "fulfilment_override_original_errors": stored.get("fulfilment_override_original_errors") or order_row.get("fulfilment_override_original_errors") or [],
         "linked_order_line_id": stored.get("linked_order_line_id") or order_row.get("shopify_line_item_id") or stored.get("shopify_line_item_id") or "",
         "issue_reason": stored.get("issue_reason") or "",
         "double_checked": _prodigi_bool(stored.get("double_checked")),
@@ -3754,6 +3761,18 @@ PRODIGI_DISPATCH_REASON_LABELS = {
 }
 
 
+PRODIGI_MANUAL_OVERRIDE_MAPPING_BLOCKERS = frozenset(
+    {
+        "Missing frame",
+        "Missing size",
+        "Missing Fulfilment mapping",
+        "Fulfilment variant not confirmed",
+        "Frame mismatch",
+        "Fulfilment variant mismatch",
+    }
+)
+
+
 def _prodigi_parse_date(value):
     if not value:
         return None
@@ -4224,8 +4243,23 @@ def _prodigi_dispatch_has_certificate(row):
     )
 
 
-def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, ensure_schema_first=True):
-    _, saved = prodigi_upsert_dispatch_row([], base_row, status=status, notes=notes, qa_answers=qa_answers)
+def prodigi_save_dispatch_row(
+    base_row,
+    *,
+    status,
+    notes="",
+    qa_answers=None,
+    manual_override=None,
+    ensure_schema_first=True,
+):
+    _, saved = prodigi_upsert_dispatch_row(
+        [],
+        base_row,
+        status=status,
+        notes=notes,
+        qa_answers=qa_answers,
+        manual_override=manual_override,
+    )
     if not supabase_backend.is_configured():
         raise RuntimeError("Supabase dispatch storage is not configured.")
     started = time.perf_counter()
@@ -4238,7 +4272,15 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
     product_label = saved.get("product_title") or saved.get("product") or saved.get("prodigi_product_name") or ""
     completed_status = status in {"Complete", "Fulfilled in Shopify"}
     certificate_done = completed_status and _prodigi_dispatch_has_certificate(saved)
-    if certificate_done:
+    manually_overridden = completed_status and _prodigi_bool(saved.get("fulfilment_override"))
+    if manually_overridden:
+        action_type = "manual_fulfilment_override"
+        message = (
+            f"Manual fulfilment override completed for order {order_ref}"
+            if order_ref
+            else "Manual fulfilment override completed"
+        )
+    elif certificate_done:
         action_type = "order_fulfilled_certificate_generated"
         message = (
             f"Order {order_ref} fulfilled + certificate generated"
@@ -4265,13 +4307,72 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
             "status": status,
             "result": "success",
             "product": product_label,
+            "channel": saved.get("channel") or "",
             "qa_confirmed": saved.get("qa_confirmed"),
             "certificate_generated": certificate_done,
             "certificate_status": "Generated" if certificate_done else saved.get("certificate_status") or "",
+            "fulfilment_validation_status": saved.get("fulfilment_validation_status") or "automatic",
+            "fulfilment_override": manually_overridden,
+            "fulfilment_override_reason": saved.get("fulfilment_override_reason") or "",
+            "fulfilment_override_by": saved.get("fulfilment_override_by") or "",
+            "fulfilment_override_at": saved.get("fulfilment_override_at") or "",
+            "original_validation": saved.get("fulfilment_override_original_errors") or [],
         },
         event_key=event_key,
     )
     return saved
+
+
+def prodigi_complete_with_manual_override(
+    base_row,
+    *,
+    qa_answers,
+    confirmed,
+    notes="",
+    actor="",
+    reason="",
+    ensure_schema_first=True,
+):
+    if not confirmed:
+        raise ValueError("Manual fulfilment confirmation is required.")
+    if _prodigi_dispatch_status(base_row) in {"Submitted", "Complete"}:
+        raise ValueError("This fulfilment row is already complete.")
+
+    eligibility = prodigi_manual_override_eligibility(base_row, qa_answers)
+    if not eligibility["available"]:
+        raise ValueError("Manual override is only available when automatic fulfilment mapping is uncertain.")
+    if eligibility["required_errors"]:
+        raise ValueError(
+            "Complete the remaining required checks first: "
+            + "; ".join(eligibility["required_errors"])
+        )
+
+    override_at = _prodigi_now_iso()
+    override_actor = str(actor or get_activity_actor() or "sports_cave_os").strip()
+    override_reason = str(reason or "Automatic fulfilment variant mapping unavailable; manually checked and confirmed.").strip()
+    saved_answers = dict(qa_answers or {})
+    saved_answers.update(
+        {
+            "manual_override_confirmed": "Yes",
+            "manual_override_original_errors": eligibility["original_errors"],
+        }
+    )
+    override_state = {
+        "fulfilment_validation_status": "manual_override",
+        "fulfilment_override": True,
+        "fulfilment_override_reason": override_reason,
+        "fulfilment_override_by": override_actor,
+        "fulfilment_override_at": override_at,
+        "fulfilment_override_original_errors": eligibility["original_errors"],
+    }
+    return prodigi_save_dispatch_row(
+        base_row,
+        status="Complete",
+        notes=notes,
+        qa_answers=saved_answers,
+        manual_override=override_state,
+        ensure_schema_first=ensure_schema_first,
+    )
 
 
 def prodigi_generate_upload_certificate_for_row(row, *, config=None):
@@ -4452,25 +4553,91 @@ def prodigi_dispatch_blockers(row, answers):
     return blockers
 
 
-def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=None):
+def prodigi_has_standard_fulfilment_mapping(row):
+    return bool(
+        row.get("prodigi_product_name")
+        and row.get("prodigi_code")
+        and row.get("prodigi_size")
+        and row.get("prodigi_frame_colour")
+    )
+
+
+def prodigi_completion_blockers(row, answers):
+    blockers = list(prodigi_dispatch_blockers(row, answers))
+    product_label = row.get("product_title") or "Line"
+    if not prodigi_has_standard_fulfilment_mapping(row):
+        blockers.append(f"{product_label}: missing Fulfilment mapping")
+    if answers.get("product_option") != "Yes":
+        blockers.append(f"{product_label}: exact Fulfilment variant not confirmed")
+    if answers.get("final_check") != "Yes":
+        blockers.append("Final confirmation required")
+    return list(dict.fromkeys(blockers))
+
+
+def _prodigi_manual_override_mapping_blocker(blocker):
+    clean = str(blocker or "").strip()
+    if clean in PRODIGI_MANUAL_OVERRIDE_MAPPING_BLOCKERS:
+        return True
+    return clean.endswith(": missing Fulfilment mapping") or clean.endswith(
+        ": exact Fulfilment variant not confirmed"
+    )
+
+
+def prodigi_manual_override_eligibility(row, answers):
+    original_errors = prodigi_completion_blockers(row, answers)
+    automatic_mapping_uncertain = not prodigi_has_standard_fulfilment_mapping(row)
+    mapping_errors = [
+        blocker
+        for blocker in original_errors
+        if _prodigi_manual_override_mapping_blocker(blocker)
+    ]
+    required_errors = [
+        blocker
+        for blocker in original_errors
+        if not _prodigi_manual_override_mapping_blocker(blocker)
+    ]
+    return {
+        "available": automatic_mapping_uncertain and bool(mapping_errors),
+        "can_complete": automatic_mapping_uncertain and bool(mapping_errors) and not required_errors,
+        "automatic_mapping_uncertain": automatic_mapping_uncertain,
+        "mapping_errors": mapping_errors,
+        "required_errors": required_errors,
+        "original_errors": original_errors,
+    }
+
+
+def prodigi_upsert_dispatch_row(
+    rows,
+    base_row,
+    *,
+    status,
+    notes="",
+    qa_answers=None,
+    manual_override=None,
+):
     qa_answers = qa_answers or {}
+    manual_override = dict(manual_override or {})
     now = _prodigi_now_iso()
     row_id = base_row.get("row_id") or prodigi_tracker_row_id(base_row)
     today_sent = date.today().isoformat()
     issue_reasons = prodigi_dispatch_issue_reasons(base_row, qa_answers)
     completed_status = status in {"Submitted", "Complete"}
-    qa_confirmed = completed_status and all(
-        qa_answers.get(field) in {"Yes", "Not Required"}
-        for field in (
-            "certificate",
-            "artwork_upload",
-            "product_option",
-            "frame",
-            "size",
-            "edition_number",
-            "shipping",
-            "sent_to_production",
-            "final_check",
+    manually_confirmed = _prodigi_bool(manual_override.get("fulfilment_override"))
+    qa_confirmed = completed_status and (
+        manually_confirmed
+        or all(
+            qa_answers.get(field) in {"Yes", "Not Required"}
+            for field in (
+                "certificate",
+                "artwork_upload",
+                "product_option",
+                "frame",
+                "size",
+                "edition_number",
+                "shipping",
+                "sent_to_production",
+                "final_check",
+            )
         )
     )
     qa_notes = str(qa_answers.get("product_confirmation_notes") or notes or "")
@@ -4510,6 +4677,8 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "updated_at": now,
             }
         )
+        if manual_override:
+            merged.update(manual_override)
         saved = prodigi_tracker_row_from_order(merged, merged)
         updated_rows.append(saved)
     if not found:
@@ -4540,6 +4709,8 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "updated_at": now,
             }
         )
+        if manual_override:
+            merged.update(manual_override)
         saved = prodigi_tracker_row_from_order(merged, merged)
         updated_rows.append(saved)
     return sort_prodigi_tracker_rows(updated_rows), saved
@@ -4708,13 +4879,22 @@ def render_prodigi_page():
         already_submitted = existing and _prodigi_dispatch_status(existing) in {"Submitted", "Complete"}
         if already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
+        if existing and _prodigi_bool(existing.get("fulfilment_override")):
+            override_actor = existing.get("fulfilment_override_by") or "a signed-in user"
+            override_at = existing.get("fulfilment_override_at") or existing.get("submitted_at") or ""
+            st.info(
+                "Manual fulfilment override recorded"
+                + (f" by {override_actor}" if override_actor else "")
+                + (f" at {override_at}" if override_at else "")
+                + ". Original validation warnings remain in the audit log."
+            )
 
         _prodigi_selected_line_summary(selected_row)
 
         st.markdown("**QA checklist**")
         default_answers = prodigi_default_qa_answers(existing or selected_row)
         row_key = safe_filename_part(selected_row.get("row_id") or "")
-        has_mapping = bool(selected_row.get("prodigi_product_name") and selected_row.get("prodigi_code") and selected_row.get("prodigi_frame_colour"))
+        has_mapping = prodigi_has_standard_fulfilment_mapping(selected_row)
         stored_confirmation = prodigi_line_confirmation_defaults(existing or selected_row)
         expected_code = selected_row.get("prodigi_product_code") or selected_row.get("prodigi_code") or "-"
         expected_variant = selected_row.get("prodigi_product_name") or "-"
@@ -4795,15 +4975,8 @@ def render_prodigi_page():
         qa_answers["correct_order"] = "Yes"
 
         issue_reasons = prodigi_dispatch_issue_reasons(selected_row, qa_answers)
-        blockers = prodigi_dispatch_blockers(selected_row, qa_answers)
-        line_blockers = []
-        if not has_mapping:
-            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: missing Fulfilment mapping")
-        if qa_answers.get("product_option") != "Yes":
-            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: exact Fulfilment variant not confirmed")
-        if not final_confirmed:
-            line_blockers.append("Final confirmation required")
-        completion_blockers = list(dict.fromkeys(blockers + line_blockers))
+        completion_blockers = prodigi_completion_blockers(selected_row, qa_answers)
+        manual_override_eligibility = prodigi_manual_override_eligibility(selected_row, qa_answers)
         notes = st.text_area(
             "Notes",
             value=(existing or {}).get("notes") or "",
@@ -4816,9 +4989,94 @@ def render_prodigi_page():
             for blocker in completion_blockers:
                 st.warning(blocker)
 
+        manual_override_clicked = False
+        if manual_override_eligibility["available"]:
+            with st.container(border=True):
+                st.markdown("⚠️ **Variant not found in standard fulfilment mapping**")
+                st.write(
+                    "Sports Cave OS could not automatically confirm the exact size/variant for this order."
+                )
+                st.write(
+                    "Only continue if you have manually checked the customer's order and confirmed "
+                    "the correct artwork, size, frame and fulfilment details."
+                )
+                st.markdown("**Are you sure these fulfilment details are correct?**")
+                manual_override_confirmed = st.checkbox(
+                    "I have manually checked this order and confirm the fulfilment details are correct.",
+                    value=False,
+                    key=f"prodigi-manual-override-confirmed-{row_key}",
+                )
+                if manual_override_eligibility["required_errors"]:
+                    st.warning(
+                        "Complete the remaining required checks before using the manual override: "
+                        + "; ".join(manual_override_eligibility["required_errors"])
+                    )
+                manual_override_clicked = st.button(
+                    "Confirm Manual Override & Complete",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=(
+                        not manual_override_confirmed
+                        or not manual_override_eligibility["can_complete"]
+                        or bool(already_submitted)
+                    ),
+                    key=f"prodigi-manual-override-complete-{row_key}",
+                )
+
         st.session_state.setdefault(PRODIGI_CERTIFICATE_ACTION_LOADING_KEY, False)
         st.session_state.setdefault(PRODIGI_CERTIFICATE_ACTION_STATE_KEY, {})
         _prodigi_clear_stale_certificate_action_state()
+        if manual_override_clicked:
+            completion_row = dict(selected_row)
+            try:
+                _prodigi_set_certificate_action_state(completion_row)
+                if _prodigi_is_limited_edition(completion_row):
+                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)
+                    record = certificate_result.get("record") or {}
+                    completion_row.update(
+                        {
+                            "certificate_status": "Uploaded",
+                            "certificate_pdf_url": record.get("certificate_pdf_url")
+                            or record.get("pdf_url")
+                            or completion_row.get("certificate_pdf_url")
+                            or "",
+                            "shopify_file_url": record.get("certificate_file_url")
+                            or record.get("shopify_file_url")
+                            or completion_row.get("shopify_file_url")
+                            or "",
+                        }
+                    )
+                    qa_answers["certificate"] = "Yes"
+                prodigi_complete_with_manual_override(
+                    completion_row,
+                    qa_answers=qa_answers,
+                    confirmed=manual_override_confirmed,
+                    notes=notes,
+                    actor=get_activity_actor(),
+                    ensure_schema_first=False,
+                )
+                st.session_state["prodigi_dispatch_existing_rows"] = prodigi_load_dispatch_rows(
+                    "Search",
+                    search_text=last_query,
+                    limit=100,
+                )
+                st.session_state["prodigi_dispatch_selected_row_id"] = completion_row.get("row_id") or ""
+                st.session_state["prodigi_dispatch_log_view"] = "Last 7 Days"
+                st.success("Fulfilment manually confirmed and marked Complete.")
+                st.rerun()
+            except Exception as error:
+                supabase_backend.log_app_error(
+                    "prodigi_manual_fulfilment_override_failed",
+                    str(error),
+                    {
+                        "source": "prodigi_page",
+                        "order": completion_row.get("shopify_order_name") or "",
+                    },
+                )
+                st.error(f"Manual fulfilment override failed: {error}")
+            finally:
+                _prodigi_clear_certificate_action_state()
+
         action_columns = st.columns([1, 1, 3])
         if action_columns[0].button("Save Issue", use_container_width=True, key="prodigi-dispatch-save-issue"):
             try:

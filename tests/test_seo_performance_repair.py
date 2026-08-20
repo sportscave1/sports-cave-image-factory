@@ -52,11 +52,12 @@ class SEOLazyExecutionRepairTests(unittest.TestCase):
 
 
 class SEOSnapshotReaderRepairTests(unittest.TestCase):
-    def test_interactive_reader_never_uses_raw_gsc_history_or_google(self):
+    def test_interactive_reader_uses_only_bounded_canonical_fallback_or_compact_rows(self):
         source = inspect.getsource(seo_reporting_runtime.PostgresSEOInteractiveReader)
         self.assertIn("seo_reporting_query_daily", source)
         self.assertIn("seo_reporting_landing_page_daily", source)
-        self.assertNotIn("seo_gsc_query_daily_v2", source)
+        self.assertIn("seo_gsc_query_daily_v2", source)
+        self.assertIn("source_date BETWEEN %s AND %s", source)
         self.assertNotIn("seo_gsc_daily_details", source)
         self.assertNotIn("googleapis.com", source)
         self.assertNotIn("requests.", source)
@@ -77,6 +78,7 @@ class SEOSnapshotReaderRepairTests(unittest.TestCase):
                     "latest_status": "completed",
                     "snapshot_id": "snapshot-9",
                     "common_reporting_date": "2026-08-17",
+                    "snapshot_revision": 42,
                     "refreshed_at": "2026-08-18T00:00:00Z",
                     "source_revision": 42,
                     "gsc_site_url": "https://example.test/",
@@ -103,7 +105,7 @@ class SEOSnapshotReaderRepairTests(unittest.TestCase):
                 return Connection()
 
         context = seo_reporting_runtime.PostgresSEOInteractiveReader(Backend()).reporting_context()
-        self.assertEqual(context["watermark"], "snapshot-9|2026-08-17|42")
+        self.assertEqual(context["watermark"], "snapshot|snapshot-9|2026-08-17|42|")
         self.assertTrue(context["available"])
 
     def test_cache_key_contract_accepts_watermark(self):

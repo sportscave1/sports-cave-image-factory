@@ -2192,7 +2192,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     worker = SEOImportWorker()
     if args.command == "daily":
-        run_complete_daily_pipeline()
+        result = run_complete_daily_pipeline() or {}
+        logging.info(
+            "SEO_DAILY_PIPELINE status=%s failed_stages=%s",
+            str(result.get("status") or "unknown"),
+            ",".join(str(value) for value in result.get("failed_stages") or []),
+        )
         return 0
     return _run_worker_loop(worker, once=args.once, poll_seconds=args.poll_seconds)
 
