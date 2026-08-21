@@ -782,6 +782,58 @@ class MockupPromptPreviewTests(unittest.TestCase):
             self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
             self.assertEqual(len(names), 1)
 
+    def test_prompt_card_uploads_do_not_force_full_page_reruns(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        upload_handler = source[
+            source.index("def auto_register_lifestyle_upload")
+            : source.index("\n\ndef render_asset_selection_controls")
+        ]
+        prompt_cards = source[
+            source.index("@st.fragment\ndef render_prompt_cards")
+            : source.index("\n\ndef render_optional_package_controls")
+        ]
+
+        self.assertNotIn("st.rerun", upload_handler)
+        self.assertIn("return updated_result", upload_handler)
+        self.assertLess(
+            prompt_cards.index("uploaded_lifestyle_image = st.file_uploader"),
+            prompt_cards.index('if saved_lifestyle_paths:'),
+        )
+
+    def test_first_prompt_upload_keeps_remaining_upload_slots_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["selected_page"] = "Mockups"
+            app_test.session_state["startup_shell_loaded"] = True
+            app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
+            app_test.run(timeout=20)
+
+            uploader_count = len(app_test.file_uploader)
+            self.assertEqual(uploader_count, 18)
+            app_test.file_uploader[1].set_value(
+                [("first-lifestyle.png", tiny_png_bytes((20, 40, 80)), "image/png")]
+            )
+            app_test.run(timeout=30)
+
+            self.assertEqual(len(app_test.file_uploader), uploader_count)
+            self.assertEqual(len(app_test.exception), 0)
+            self.assertIn(
+                EXPECTED_MOCKUP_PROMPT_FILENAMES[0],
+                app_test.session_state["last_generation_result"]["lifestyle_mockup_paths"],
+            )
+
+            app_test.file_uploader[2].set_value(
+                [("second-lifestyle.png", tiny_png_bytes((80, 40, 20)), "image/png")]
+            )
+            app_test.run(timeout=30)
+
+            saved_paths = app_test.session_state["last_generation_result"]["lifestyle_mockup_paths"]
+            self.assertEqual(len(app_test.file_uploader), uploader_count)
+            self.assertIn(EXPECTED_MOCKUP_PROMPT_FILENAMES[0], saved_paths)
+            self.assertIn(EXPECTED_MOCKUP_PROMPT_FILENAMES[1], saved_paths)
+
     def test_post_generation_prompt_cards_render_copy_prompt_upload_and_zip_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         prompt_cards = source[

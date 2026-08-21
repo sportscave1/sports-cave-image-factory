@@ -7761,7 +7761,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
             updated_result = remove_uploaded_lifestyle_result(result, prompt_path)
             st.session_state.pop(upload_signature_key, None)
             st.session_state.last_generation_result = updated_result
-            st.rerun()
+            return updated_result
         return result
 
     upload_signature = get_uploaded_lifestyle_signature(uploaded_file)
@@ -7771,7 +7771,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
     updated_result = save_uploaded_lifestyle_result(result, prompt_path, uploaded_file)
     st.session_state[upload_signature_key] = upload_signature
     st.session_state.last_generation_result = updated_result
-    st.rerun()
+    return updated_result
 
 
 def render_asset_selection_controls(result):
@@ -8397,9 +8397,17 @@ def render_mockups_dropbox_status(result):
             st.rerun()
 
 
+@st.fragment
 def render_prompt_cards(result, prompt_paths, heading, caption=None):
     if not prompt_paths:
         return
+
+    latest_result = st.session_state.get("last_generation_result")
+    if (
+        isinstance(latest_result, dict)
+        and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
+    ):
+        result = normalize_generation_result(latest_result)
 
     st.subheader(heading)
     if caption:
@@ -8416,23 +8424,6 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
             prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
             render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
-
-            saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
-
-            if saved_lifestyle_paths:
-                saved_preview_path = saved_lifestyle_paths.get("preview_path")
-
-                preview_path = saved_preview_path
-                if preview_path and Path(preview_path).exists():
-                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
-                    render_preview_card(
-                        lifestyle_asset,
-                        result["run_dir"],
-                        image_width=360,
-                        caption_text="Saved. This lightweight preview is shown here, but you can load the full-resolution image before copying it into ChatGPT.",
-                    )
-                    render_asset_download_controls(lifestyle_asset, result["run_dir"])
-                    st.caption("It will be included the next time you save the ZIP.")
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
@@ -8472,6 +8463,19 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
                     st.exception(error)
 
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
+            if saved_lifestyle_paths:
+                saved_preview_path = saved_lifestyle_paths.get("preview_path")
+                if saved_preview_path and Path(saved_preview_path).exists():
+                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
+                    render_preview_card(
+                        lifestyle_asset,
+                        result["run_dir"],
+                        image_width=360,
+                        caption_text="Saved. This lightweight preview is shown here, but you can load the full-resolution image before copying it into ChatGPT.",
+                    )
+                    render_asset_download_controls(lifestyle_asset, result["run_dir"])
+                    st.caption("It will be included the next time you save the ZIP.")
+
             saved_asset = next(
                 (
                     asset
