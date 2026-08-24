@@ -139,6 +139,7 @@ INSTANT_EXPERIENCE_APPROVED_ON_IMAGE_CTAS = (
     "SECURE THIS EDITION",
 )
 ADS_COPY_FILENAME = "Ad Copy.txt"
+CAROUSEL_COPY_FILENAME = "Carousel Copy.csv"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
 PRODUCT_URL_ERROR = "Enter a valid product page URL before submitting."
@@ -507,6 +508,45 @@ INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
     "all headers, schema fields, row order and identity "
     "columns exactly. Return the completed CSV as a downloadable .csv file. Do not place "
     "image-prompt wording inside the copy columns."
+)
+
+CAROUSEL_COPY_VARIATION_COUNT = 5
+CAROUSEL_COPY_CSV_SCHEMA_VERSION = "1"
+CAROUSEL_COPY_CSV_CAMPAIGN_TYPE = "carousel"
+CAROUSEL_COPY_CSV_HEADERS = (
+    "schema_version",
+    "campaign_type",
+    "row_type",
+    "position",
+    "slot_id",
+    "image_filename",
+    "headline",
+    "description",
+    "primary_text",
+    "destination_url",
+    "cta",
+    "setup_notes",
+)
+CAROUSEL_COPY_ROW_TYPES = (
+    "headline",
+    "description",
+    "primary_text",
+    "card",
+    "setup_notes",
+)
+CAROUSEL_CARD_FIELDS = (
+    "headline",
+    "description",
+    "destination_url",
+    "cta",
+    "setup_notes",
+)
+CAROUSEL_COPY_CSV_SUPPORT_INSTRUCTION = (
+    "If a Sports Cave Carousel CSV template is attached in this conversation, complete all five "
+    "headline rows, all five description rows, all five primary_text rows, the five ordered card "
+    "rows and the final setup_notes row. Match every card by position and slot_id. Preserve all "
+    "headers, schema fields, row types, row order and slot identities exactly. Return the completed "
+    "CSV as a downloadable .csv file. Do not combine multiple cards into one cell."
 )
 
 SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1 = """SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1
@@ -6173,6 +6213,13 @@ def build_campaign_visual_output_contract(
             "Do not add Meta link-description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
             f"{INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION}"
         )
+    elif campaign_type == "Carousel":
+        copy_schema_preservation = (
+            "Return the finished existing ad-copy output first, in its existing required schema and order. "
+            "Preserve all five primary-text variations, five headlines, five descriptions, five ordered "
+            "carousel cards, each card CTA and destination, final setup instructions and URL parameters.\n\n"
+            f"{CAROUSEL_COPY_CSV_SUPPORT_INSTRUCTION}"
+        )
     else:
         copy_schema_preservation = (
             "Return the finished existing ad-copy output first, in its existing required schema and order. "
@@ -9178,6 +9225,477 @@ def _preserve_multiline_text(value):
     return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
+class CarouselCopyCSVError(ValueError):
+    pass
+
+
+def _carousel_copy_widget_key(context_key, group_key, position):
+    return f"ads-carousel-copy::{context_key}::{group_key}::{int(position)}"
+
+
+def _carousel_card_widget_key(context_key, position, field_key):
+    return f"ads-carousel-card::{context_key}::{int(position)}::{field_key}"
+
+
+def _carousel_setup_notes_widget_key(context_key):
+    return f"ads-carousel-setup::{context_key}"
+
+
+def _normalise_carousel_variations(raw_values, *, paragraph_mode=False):
+    if isinstance(raw_values, str):
+        normalized = _preserve_multiline_text(raw_values)
+        values = (
+            re.split(r"\n\s*\n", normalized)
+            if paragraph_mode
+            else normalized.splitlines()
+        )
+    elif isinstance(raw_values, (list, tuple)):
+        values = list(raw_values)
+    else:
+        values = []
+    values = [_preserve_multiline_text(value) for value in values]
+    values.extend([""] * CAROUSEL_COPY_VARIATION_COUNT)
+    return values[:CAROUSEL_COPY_VARIATION_COUNT]
+
+
+def _blank_carousel_card(position):
+    slot = ads_image_workflow.campaign_image_slots("Carousel")[int(position) - 1]
+    return {
+        "position": int(position),
+        "slot_id": slot["id"],
+        "image_filename": "",
+        **{field_key: "" for field_key in CAROUSEL_CARD_FIELDS},
+    }
+
+
+def _normalise_carousel_card(raw_card, position):
+    card = _blank_carousel_card(position)
+    if isinstance(raw_card, dict):
+        card["image_filename"] = _preserve_multiline_text(
+            raw_card.get("image_filename")
+        ).strip()
+        for field_key in CAROUSEL_CARD_FIELDS:
+            card[field_key] = _preserve_multiline_text(raw_card.get(field_key))
+    return card
+
+
+def _carousel_actual_image_filename(result, workflow, slot, fallback=""):
+    slot_data = ((workflow or {}).get("slots") or {}).get(slot["id"]) or {}
+    outcome = ((workflow or {}).get("outcomes") or {}).get(slot["id"]) or {}
+    if outcome.get("filename"):
+        return str(outcome["filename"])
+    if slot_data.get("valid"):
+        try:
+            return _meta_output_filename(result, workflow, slot)
+        except (KeyError, TypeError, ValueError):
+            return str(slot_data.get("original_name") or fallback or "")
+    return str(fallback or "")
+
+
+def _carousel_copy_notes_from_workflow(result, workflow):
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    structured = notes.get("carousel")
+    structured = dict(structured) if isinstance(structured, dict) else {}
+    headlines = _normalise_carousel_variations(
+        structured.get("headlines", notes.get("headlines"))
+    )
+    descriptions = _normalise_carousel_variations(
+        structured.get("descriptions", notes.get("descriptions"))
+    )
+    primary_texts = _normalise_carousel_variations(
+        structured.get("primary_texts", notes.get("primary_text_variations")),
+        paragraph_mode=True,
+    )
+    raw_cards = structured.get("cards")
+    raw_cards = list(raw_cards) if isinstance(raw_cards, (list, tuple)) else []
+    cards = []
+    for position, slot in enumerate(
+        ads_image_workflow.campaign_image_slots("Carousel"),
+        start=1,
+    ):
+        raw_card = raw_cards[position - 1] if position <= len(raw_cards) else {}
+        card = _normalise_carousel_card(raw_card, position)
+        card["image_filename"] = _carousel_actual_image_filename(
+            result,
+            workflow,
+            slot,
+            fallback=card.get("image_filename"),
+        )
+        cards.append(card)
+    return {
+        "headlines": headlines,
+        "descriptions": descriptions,
+        "primary_texts": primary_texts,
+        "cards": cards,
+        "setup_notes": _preserve_multiline_text(
+            structured.get("setup_notes", notes.get("cards"))
+        ),
+    }
+
+
+def _carousel_copy_notes_with_widget_state(result, workflow):
+    carousel = _carousel_copy_notes_from_workflow(result, workflow)
+    context_key = str((result or {}).get("context_key") or "")
+    for group_key in ("headlines", "descriptions", "primary_texts"):
+        for position in range(1, CAROUSEL_COPY_VARIATION_COUNT + 1):
+            widget_key = _carousel_copy_widget_key(context_key, group_key, position)
+            if widget_key in st.session_state:
+                carousel[group_key][position - 1] = _preserve_multiline_text(
+                    st.session_state.get(widget_key)
+                )
+    for card in carousel["cards"]:
+        for field_key in CAROUSEL_CARD_FIELDS:
+            widget_key = _carousel_card_widget_key(
+                context_key,
+                card["position"],
+                field_key,
+            )
+            if widget_key in st.session_state:
+                card[field_key] = _preserve_multiline_text(
+                    st.session_state.get(widget_key)
+                )
+    setup_key = _carousel_setup_notes_widget_key(context_key)
+    if setup_key in st.session_state:
+        carousel["setup_notes"] = _preserve_multiline_text(
+            st.session_state.get(setup_key)
+        )
+    return carousel
+
+
+def _store_carousel_copy_notes(workflow, carousel):
+    clean = {
+        "headlines": _normalise_carousel_variations(carousel.get("headlines")),
+        "descriptions": _normalise_carousel_variations(carousel.get("descriptions")),
+        "primary_texts": _normalise_carousel_variations(
+            carousel.get("primary_texts")
+        ),
+        "cards": [
+            _normalise_carousel_card(card, position)
+            for position, card in enumerate(
+                list(carousel.get("cards") or ())[:CAROUSEL_CARD_COUNT],
+                start=1,
+            )
+        ],
+        "setup_notes": _preserve_multiline_text(carousel.get("setup_notes")),
+    }
+    while len(clean["cards"]) < CAROUSEL_CARD_COUNT:
+        clean["cards"].append(_blank_carousel_card(len(clean["cards"]) + 1))
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    notes["carousel"] = clean
+    notes["headlines"] = "\n".join(clean["headlines"])
+    notes["descriptions"] = "\n".join(clean["descriptions"])
+    notes["primary_text_variations"] = "\n\n".join(clean["primary_texts"])
+    notes["cards"] = clean["setup_notes"]
+    workflow["ad_notes"] = notes
+    return clean
+
+
+def _carousel_csv_row(**updates):
+    row = {header: "" for header in CAROUSEL_COPY_CSV_HEADERS}
+    row.update(
+        {
+            "schema_version": CAROUSEL_COPY_CSV_SCHEMA_VERSION,
+            "campaign_type": CAROUSEL_COPY_CSV_CAMPAIGN_TYPE,
+        }
+    )
+    row.update(updates)
+    return row
+
+
+def build_carousel_copy_csv(
+    result,
+    workflow=None,
+    *,
+    template=False,
+    carousel_notes=None,
+):
+    if carousel_notes is None:
+        carousel_notes = (
+            {
+                "headlines": [f"Headline option {index}" for index in range(1, 6)],
+                "descriptions": [f"Description option {index}" for index in range(1, 6)],
+                "primary_texts": [
+                    f"Example primary text variation {index}."
+                    for index in range(1, 6)
+                ],
+                "cards": [
+                    {
+                        **_blank_carousel_card(index),
+                        "image_filename": f"carousel-card-{index:02d}.jpg",
+                        "headline": f"Example hook {index}",
+                        "description": f"Example detail {index}",
+                        "destination_url": "https://example.com/products/example",
+                        "cta": "Shop Now",
+                        "setup_notes": "",
+                    }
+                    for index in range(1, 6)
+                ],
+                "setup_notes": "Example overall carousel setup notes.",
+            }
+            if template
+            else _carousel_copy_notes_with_widget_state(result, workflow or {})
+        )
+    normalized = {
+        "headlines": _normalise_carousel_variations(carousel_notes.get("headlines")),
+        "descriptions": _normalise_carousel_variations(carousel_notes.get("descriptions")),
+        "primary_texts": _normalise_carousel_variations(carousel_notes.get("primary_texts")),
+        "cards": [
+            _normalise_carousel_card(card, position)
+            for position, card in enumerate(
+                list(carousel_notes.get("cards") or ())[:CAROUSEL_CARD_COUNT],
+                start=1,
+            )
+        ],
+        "setup_notes": _preserve_multiline_text(carousel_notes.get("setup_notes")),
+    }
+    while len(normalized["cards"]) < CAROUSEL_CARD_COUNT:
+        normalized["cards"].append(_blank_carousel_card(len(normalized["cards"]) + 1))
+
+    rows = []
+    for row_type, group_key, field_key in (
+        ("headline", "headlines", "headline"),
+        ("description", "descriptions", "description"),
+        ("primary_text", "primary_texts", "primary_text"),
+    ):
+        for position, value in enumerate(normalized[group_key], start=1):
+            rows.append(
+                _carousel_csv_row(
+                    row_type=row_type,
+                    position=str(position),
+                    **{field_key: _preserve_multiline_text(value)},
+                )
+            )
+    for card in normalized["cards"]:
+        rows.append(
+            _carousel_csv_row(
+                row_type="card",
+                position=str(card["position"]),
+                slot_id=card["slot_id"],
+                image_filename=card["image_filename"],
+                headline=card["headline"],
+                description=card["description"],
+                destination_url=card["destination_url"],
+                cta=card["cta"],
+                setup_notes=card["setup_notes"],
+            )
+        )
+    rows.append(
+        _carousel_csv_row(
+            row_type="setup_notes",
+            setup_notes=normalized["setup_notes"],
+        )
+    )
+
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=CAROUSEL_COPY_CSV_HEADERS,
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def parse_carousel_copy_csv(data, result=None):
+    source_bytes = bytes(data or b"")
+    if not source_bytes:
+        raise CarouselCopyCSVError("Choose a Carousel CSV file.")
+    if len(source_bytes) > 2 * 1024 * 1024:
+        raise CarouselCopyCSVError("The Carousel CSV must be smaller than 2 MB.")
+    try:
+        decoded = source_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise CarouselCopyCSVError("Save the Carousel CSV as UTF-8 and try again.") from error
+    if "\x00" in decoded:
+        raise CarouselCopyCSVError("The Carousel CSV contains invalid text data.")
+    try:
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        headers = list(reader.fieldnames or ())
+        if len(headers) != len(set(headers)):
+            raise CarouselCopyCSVError("The Carousel CSV contains duplicate column headers.")
+        if frozenset(headers) != frozenset(CAROUSEL_COPY_CSV_HEADERS):
+            required = ", ".join(CAROUSEL_COPY_CSV_HEADERS)
+            raise CarouselCopyCSVError(
+                f"Use the Carousel CSV headers exactly: {required}."
+            )
+        rows = list(reader)
+    except csv.Error as error:
+        raise CarouselCopyCSVError(
+            "The Carousel CSV could not be read. Check its quoting and line breaks."
+        ) from error
+
+    expected_keys = {
+        *((row_type, position) for row_type in ("headline", "description", "primary_text") for position in range(1, 6)),
+        *(("card", position) for position in range(1, 6)),
+        ("setup_notes", 0),
+    }
+    parsed = {
+        "headlines": [""] * CAROUSEL_COPY_VARIATION_COUNT,
+        "descriptions": [""] * CAROUSEL_COPY_VARIATION_COUNT,
+        "primary_texts": [""] * CAROUSEL_COPY_VARIATION_COUNT,
+        "cards": [_blank_carousel_card(position) for position in range(1, 6)],
+        "setup_notes": "",
+    }
+    seen = set()
+    slot_specs = ads_image_workflow.campaign_image_slots("Carousel")
+    group_by_type = {
+        "headline": ("headlines", "headline"),
+        "description": ("descriptions", "description"),
+        "primary_text": ("primary_texts", "primary_text"),
+    }
+    for row_number, row in enumerate(rows, start=2):
+        if None in row or any(value is None for value in row.values()):
+            raise CarouselCopyCSVError(
+                f"CSV row {row_number} has an unexpected or missing value."
+            )
+        if str(row.get("schema_version") or "").strip() != CAROUSEL_COPY_CSV_SCHEMA_VERSION:
+            raise CarouselCopyCSVError(
+                f"CSV row {row_number} has an incompatible schema_version. Download a fresh template."
+            )
+        if str(row.get("campaign_type") or "").strip() != CAROUSEL_COPY_CSV_CAMPAIGN_TYPE:
+            raise CarouselCopyCSVError(
+                f"CSV row {row_number} is not a Carousel row. Download a fresh template."
+            )
+        row_type = str(row.get("row_type") or "").strip()
+        if row_type not in CAROUSEL_COPY_ROW_TYPES:
+            raise CarouselCopyCSVError(
+                f"CSV row {row_number} has unsupported row_type {row_type!r}."
+            )
+        raw_position = str(row.get("position") or "").strip()
+        if row_type == "setup_notes":
+            if raw_position not in {"", "0"}:
+                raise CarouselCopyCSVError(
+                    f"CSV row {row_number} setup_notes position must be blank."
+                )
+            position = 0
+        else:
+            try:
+                position = int(raw_position)
+            except ValueError as error:
+                raise CarouselCopyCSVError(
+                    f"CSV row {row_number} position must be a number from 1 to 5."
+                ) from error
+            if position not in range(1, CAROUSEL_COPY_VARIATION_COUNT + 1):
+                raise CarouselCopyCSVError(
+                    f"CSV row {row_number} position must be a number from 1 to 5."
+                )
+        row_key = (row_type, position)
+        if row_key in seen:
+            raise CarouselCopyCSVError(
+                f"CSV row {row_number} duplicates {row_type} position {position}."
+            )
+        seen.add(row_key)
+
+        if row_type in group_by_type:
+            group_key, field_key = group_by_type[row_type]
+            parsed[group_key][position - 1] = _preserve_multiline_text(row.get(field_key))
+        elif row_type == "card":
+            expected_slot_id = slot_specs[position - 1]["id"]
+            if str(row.get("slot_id") or "").strip() != expected_slot_id:
+                raise CarouselCopyCSVError(
+                    f"CSV row {row_number} slot_id must be {expected_slot_id} for card {position}."
+                )
+            card = _blank_carousel_card(position)
+            card["image_filename"] = _preserve_multiline_text(
+                row.get("image_filename")
+            ).strip()
+            for field_key in CAROUSEL_CARD_FIELDS:
+                card[field_key] = _preserve_multiline_text(row.get(field_key))
+            for field_key in ("headline", "description"):
+                if len(card[field_key]) > CAROUSEL_CARD_MAX_CHARACTERS:
+                    raise CarouselCopyCSVError(
+                        f"Card {position} {field_key} exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters."
+                    )
+            destination = card["destination_url"].strip()
+            if destination:
+                parsed_url = urlparse(destination)
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                    raise CarouselCopyCSVError(
+                        f"Card {position} destination_url must be a complete http or https URL."
+                    )
+            parsed["cards"][position - 1] = card
+        else:
+            parsed["setup_notes"] = _preserve_multiline_text(row.get("setup_notes"))
+
+    missing = expected_keys - seen
+    unexpected = seen - expected_keys
+    if missing or unexpected or len(rows) != len(expected_keys):
+        raise CarouselCopyCSVError(
+            "The Carousel CSV must contain exactly five headline rows, five description rows, "
+            "five primary_text rows, five card rows and one setup_notes row."
+        )
+    return parsed
+
+
+def apply_carousel_copy_csv(result, workflow, data):
+    parsed = parse_carousel_copy_csv(data, result)
+    context_key = str((result or {}).get("context_key") or "")
+    widget_updates = {}
+    for group_key in ("headlines", "descriptions", "primary_texts"):
+        for position, value in enumerate(parsed[group_key], start=1):
+            widget_updates[
+                _carousel_copy_widget_key(context_key, group_key, position)
+            ] = value
+    for card in parsed["cards"]:
+        for field_key in CAROUSEL_CARD_FIELDS:
+            widget_updates[
+                _carousel_card_widget_key(
+                    context_key,
+                    card["position"],
+                    field_key,
+                )
+            ] = card[field_key]
+    widget_updates[_carousel_setup_notes_widget_key(context_key)] = parsed["setup_notes"]
+
+    for widget_key, value in widget_updates.items():
+        st.session_state[widget_key] = value
+    _store_carousel_copy_notes(workflow, parsed)
+    return {
+        "carousel_notes": parsed,
+        "row_count": 21,
+        "field_count": len(widget_updates),
+    }
+
+
+def _process_carousel_copy_csv_upload(result, workflow, uploaded_file):
+    if uploaded_file is None:
+        return None
+    source_bytes = bytes(uploaded_file.getvalue() or b"")
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if workflow.get("carousel_csv_import_digest") == digest:
+        return workflow.get("carousel_csv_import_status")
+    try:
+        imported = apply_carousel_copy_csv(result, workflow, source_bytes)
+        status = {
+            "ok": True,
+            "message": (
+                f"Imported {imported['row_count']} Carousel rows into "
+                f"{imported['field_count']} editable fields."
+            ),
+        }
+    except CarouselCopyCSVError as error:
+        status = {"ok": False, "message": str(error)}
+    workflow["carousel_csv_import_digest"] = digest
+    workflow["carousel_csv_import_status"] = status
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    return status
+
+
+def _carousel_current_copy_csv_filename(result):
+    product_name = ads_image_workflow.sanitize_product_filename(
+        (result or {}).get("product_name"),
+        max_length=90,
+    )
+    return f"Sports Cave - {product_name} - Carousel Copy.csv"
+
+
+def _carousel_copy_csv_signature(result, workflow):
+    return hashlib.sha256(
+        build_carousel_copy_csv(result, workflow)
+    ).hexdigest()
+
+
 def _human_file_size(size):
     try:
         size = int(size or 0)
@@ -9837,6 +10355,30 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     lines.append(notes["cards"] or "[not supplied]")
 
     if campaign_type == "Carousel":
+        carousel = _carousel_copy_notes_from_workflow(result, workflow)
+        lines.extend(["", "STRUCTURED CAROUSEL CARDS"])
+        for card in carousel["cards"]:
+            slot = slot_specs[card["position"] - 1]
+            outcome = image_outcomes.get(slot["id"]) or {}
+            image_filename = (
+                outcome.get("filename")
+                or card.get("image_filename")
+                or _meta_output_filename(result, workflow, slot)
+            )
+            lines.extend(
+                [
+                    "",
+                    f"CARD {card['position']}",
+                    f"- Image slot: {card['slot_id']}",
+                    f"- Image filename: {image_filename or '[not supplied]'}",
+                    f"- Headline: {card['headline'] or '[not supplied]'}",
+                    f"- Description: {card['description'] or '[not supplied]'}",
+                    f"- Destination URL: {card['destination_url'] or '[not supplied]'}",
+                    f"- CTA: {card['cta'] or '[not supplied]'}",
+                    "- Card setup notes:",
+                    card["setup_notes"] or "[not supplied]",
+                ]
+            )
         lines.extend(
             [
                 "",
@@ -10098,10 +10640,231 @@ def _save_instant_experience_package_to_dropbox(
     return outcomes
 
 
+def _render_carousel_copy_csv_control(result, workflow):
+    context_key = str(result.get("context_key") or "")
+    import_key = f"ads-carousel-copy-csv-import::{context_key}"
+    pending_upload = st.session_state.get(import_key)
+    if pending_upload is not None:
+        _process_carousel_copy_csv_upload(result, workflow, pending_upload)
+
+    heading_column, control_column = st.columns(
+        [5, 1],
+        vertical_alignment="center",
+    )
+    heading_column.subheader("Generated Ad Images")
+    with control_column:
+        with st.popover("Carousel CSV", icon=":material/table_view:"):
+            st.download_button(
+                "Download Carousel CSV Template",
+                data=build_carousel_copy_csv(result, workflow, template=True),
+                file_name="sports-cave-carousel-copy-template.csv",
+                mime="text/csv",
+                key=f"ads-carousel-copy-csv-template::{context_key}",
+                use_container_width=True,
+            )
+            current_download_slot = st.empty()
+            uploaded_file = st.file_uploader(
+                "Import Carousel CSV",
+                type=["csv"],
+                key=import_key,
+                label_visibility="visible",
+            )
+            if uploaded_file is not None:
+                _process_carousel_copy_csv_upload(
+                    result,
+                    workflow,
+                    uploaded_file,
+                )
+            current_download_slot.download_button(
+                "Export Carousel CSV",
+                data=build_carousel_copy_csv(result, workflow),
+                file_name=_carousel_current_copy_csv_filename(result),
+                mime="text/csv",
+                key=f"ads-carousel-copy-csv-current::{context_key}",
+                use_container_width=True,
+            )
+            status = workflow.get("carousel_csv_import_status")
+            if isinstance(status, dict) and status.get("message"):
+                if status.get("ok"):
+                    st.success(status["message"])
+                else:
+                    st.error(status["message"])
+
+
+def _carousel_text_area(label, value, *, key, height=68, placeholder=""):
+    widget_args = {
+        "key": key,
+        "height": height,
+        "placeholder": placeholder,
+    }
+    if key not in st.session_state:
+        widget_args["value"] = _preserve_multiline_text(value)
+    return st.text_area(label, **widget_args)
+
+
+def _carousel_text_input(label, value, *, key, placeholder=""):
+    widget_args = {
+        "key": key,
+        "placeholder": placeholder,
+    }
+    if key not in st.session_state:
+        widget_args["value"] = str(value or "")
+    return st.text_input(label, **widget_args)
+
+
+def _render_carousel_setup_notes(result, workflow):
+    carousel = _carousel_copy_notes_with_widget_state(result, workflow)
+    context_key = str(result.get("context_key") or "")
+    slot_specs = ads_image_workflow.campaign_image_slots("Carousel")
+    with st.container(key="ads-setup-notes"):
+        with st.expander("Ad setup notes (optional)", expanded=False):
+            st.caption(
+                "Edit the five ad-copy variations and the five card records. "
+                "Every card remains permanently mapped to its numbered image slot."
+            )
+            st.markdown("**Ad copy variations**")
+            for position in range(1, CAROUSEL_COPY_VARIATION_COUNT + 1):
+                copy_columns = st.columns(3)
+                with copy_columns[0]:
+                    carousel["headlines"][position - 1] = _carousel_text_area(
+                        f"Headline variation {position}",
+                        carousel["headlines"][position - 1],
+                        key=_carousel_copy_widget_key(
+                            context_key,
+                            "headlines",
+                            position,
+                        ),
+                        placeholder=f"Headline option {position}",
+                    )
+                with copy_columns[1]:
+                    carousel["descriptions"][position - 1] = _carousel_text_area(
+                        f"Description variation {position}",
+                        carousel["descriptions"][position - 1],
+                        key=_carousel_copy_widget_key(
+                            context_key,
+                            "descriptions",
+                            position,
+                        ),
+                        placeholder=f"Description option {position}",
+                    )
+                with copy_columns[2]:
+                    carousel["primary_texts"][position - 1] = _carousel_text_area(
+                        f"Primary text variation {position}",
+                        carousel["primary_texts"][position - 1],
+                        key=_carousel_copy_widget_key(
+                            context_key,
+                            "primary_texts",
+                            position,
+                        ),
+                        height=90,
+                        placeholder=f"Primary text option {position}",
+                    )
+
+            st.markdown("**Carousel cards**")
+            for position, slot in enumerate(slot_specs, start=1):
+                card = carousel["cards"][position - 1]
+                saved_slot = ((workflow.get("slots") or {}).get(slot["id"]) or {})
+                role, _role_description = IMAGE_ORDER[position - 1]
+                with st.container(
+                    border=True,
+                    key=f"ads-carousel-card-copy::{context_key}::{slot['id']}",
+                ):
+                    st.markdown(f"**Card {position} — {role}**")
+                    image_filename = _carousel_actual_image_filename(
+                        result,
+                        workflow,
+                        slot,
+                        fallback=card.get("image_filename"),
+                    )
+                    card["image_filename"] = image_filename
+                    st.caption(
+                        f"Image slot: {slot['id']} · "
+                        f"File: {image_filename or 'No image uploaded yet'}"
+                    )
+                    image_column, details_column = st.columns([1, 3])
+                    with image_column:
+                        if saved_slot.get("valid") and saved_slot.get("data"):
+                            st.image(saved_slot["data"], width="stretch")
+                        else:
+                            st.caption(f"Upload Carousel {position} above.")
+                    with details_column:
+                        first, second = st.columns(2)
+                        with first:
+                            card["headline"] = _carousel_text_input(
+                                f"Card {position} headline",
+                                card["headline"],
+                                key=_carousel_card_widget_key(
+                                    context_key,
+                                    position,
+                                    "headline",
+                                ),
+                                placeholder=f"Up to {CAROUSEL_CARD_MAX_CHARACTERS} characters",
+                            )
+                        with second:
+                            card["description"] = _carousel_text_input(
+                                f"Card {position} description",
+                                card["description"],
+                                key=_carousel_card_widget_key(
+                                    context_key,
+                                    position,
+                                    "description",
+                                ),
+                                placeholder=f"Up to {CAROUSEL_CARD_MAX_CHARACTERS} characters",
+                            )
+                        third, fourth = st.columns([2, 1])
+                        with third:
+                            card["destination_url"] = _carousel_text_input(
+                                f"Card {position} destination URL",
+                                card["destination_url"],
+                                key=_carousel_card_widget_key(
+                                    context_key,
+                                    position,
+                                    "destination_url",
+                                ),
+                                placeholder="https://www.sportscaveshop.com/products/...",
+                            )
+                        with fourth:
+                            card["cta"] = _carousel_text_input(
+                                f"Card {position} CTA",
+                                card["cta"],
+                                key=_carousel_card_widget_key(
+                                    context_key,
+                                    position,
+                                    "cta",
+                                ),
+                                placeholder="Shop Now",
+                            )
+                        card["setup_notes"] = _carousel_text_area(
+                            f"Card {position} setup notes (optional)",
+                            card["setup_notes"],
+                            key=_carousel_card_widget_key(
+                                context_key,
+                                position,
+                                "setup_notes",
+                            ),
+                            height=68,
+                            placeholder="Optional card-specific Meta setup notes",
+                        )
+                carousel["cards"][position - 1] = card
+
+            carousel["setup_notes"] = _carousel_text_area(
+                "Carousel cards / ad setup",
+                carousel["setup_notes"],
+                key=_carousel_setup_notes_widget_key(context_key),
+                height=120,
+                placeholder="Overall Carousel or final Meta ad setup notes.",
+            )
+    _store_carousel_copy_notes(workflow, carousel)
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+
+
 def _render_ads_setup_notes(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
     if _is_instant_experience_result(result):
+        return
+    if result.get("campaign_type") == "Carousel":
+        _render_carousel_setup_notes(result, workflow)
         return
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -10366,7 +11129,10 @@ def _render_ads_image_slots(result, workflow):
     slot_specs = _ads_image_slot_specs_for_render(result, workflow)
     if not slot_specs:
         return
-    st.subheader("Generated Ad Images")
+    if result.get("campaign_type") == "Carousel":
+        _render_carousel_copy_csv_control(result, workflow)
+    else:
+        st.subheader("Generated Ad Images")
     if _is_instant_experience_result(result):
         st.caption(
             "Upload the three Instant Experience covers generated from the prompt above."
@@ -10735,6 +11501,51 @@ def save_ads_images_to_dropbox(
             "error": str((notes_failures[0] if notes_failures else {}).get("error") or "Upload failed."),
             "asset_type": "meta_ads_notes",
         }
+    if result.get("campaign_type") == "Carousel":
+        carousel_csv_bytes = build_carousel_copy_csv(result, workflow)
+        carousel_csv_result = dropbox_integration.upload_batch(
+            access_token,
+            export_folder,
+            [
+                {
+                    "relative_path": CAROUSEL_COPY_FILENAME,
+                    "data": carousel_csv_bytes,
+                    "size": len(carousel_csv_bytes),
+                }
+            ],
+            conflict="replace",
+        )
+        carousel_csv_successes = list(carousel_csv_result.get("successes") or ())
+        carousel_csv_failures = list(carousel_csv_result.get("failures") or ())
+        if carousel_csv_successes:
+            metadata = dict(carousel_csv_successes[0].get("metadata") or {})
+            outcomes["_carousel_copy_csv"] = {
+                "status": "saved",
+                "label": "Carousel copy CSV",
+                "filename": CAROUSEL_COPY_FILENAME,
+                "path": str(
+                    metadata.get("path_display")
+                    or metadata.get("path_lower")
+                    or dropbox_integration.join_upload_path(
+                        export_folder,
+                        CAROUSEL_COPY_FILENAME,
+                    )
+                ),
+                "metadata": metadata,
+                "asset_type": "meta_ads_copy_csv",
+                "signature": hashlib.sha256(carousel_csv_bytes).hexdigest(),
+            }
+        else:
+            outcomes["_carousel_copy_csv"] = {
+                "status": "failed",
+                "label": "Carousel copy CSV",
+                "filename": CAROUSEL_COPY_FILENAME,
+                "error": str(
+                    (carousel_csv_failures[0] if carousel_csv_failures else {}).get("error")
+                    or "Upload failed."
+                ),
+                "asset_type": "meta_ads_copy_csv",
+            }
     workflow["saved_folder_path"] = export_folder
     workflow["ad_notes_saved_signature"] = (
         outcomes.get("_ad_setup_notes") or {}
@@ -10985,8 +11796,18 @@ def _render_ads_image_save(result, workflow):
         notes_outcome.get("status") == "saved"
         and notes_outcome.get("signature") == notes_current_signature
     )
+    carousel_csv_saved = True
+    if result.get("campaign_type") == "Carousel":
+        carousel_csv_outcome = (
+            (workflow.get("outcomes") or {}).get("_carousel_copy_csv") or {}
+        )
+        carousel_csv_saved = (
+            carousel_csv_outcome.get("status") == "saved"
+            and carousel_csv_outcome.get("signature")
+            == _carousel_copy_csv_signature(result, workflow)
+        )
     images_saved = saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
-    all_saved = images_saved and notes_saved
+    all_saved = images_saved and notes_saved and carousel_csv_saved
     if not has_valid_upload:
         st.caption(f"0 of {required_count} images ready.")
     elif not ready:
@@ -11039,7 +11860,7 @@ def _render_ads_image_save(result, workflow):
         else "Retry failed images"
         if failed_count
         else "Update setup notes"
-        if images_saved and not notes_saved
+        if images_saved and (not notes_saved or not carousel_csv_saved)
         else "Save setup notes here"
         if not has_valid_upload
         else f"Save {remaining_count} {'image' if remaining_count == 1 else 'images'} here"
@@ -11147,6 +11968,7 @@ def _render_ads_image_save(result, workflow):
         if slot_id in slot_ids and row.get("status") == "failed"
     ]
     notes_outcome = outcomes.get("_ad_setup_notes") or {}
+    carousel_csv_outcome = outcomes.get("_carousel_copy_csv") or {}
     if successful:
         if failed:
             st.warning(f"{len(successful)} of {save_target_count} images saved. {len(failed)} need attention.")
@@ -11156,6 +11978,16 @@ def _render_ads_image_save(result, workflow):
             st.caption(f"Ad setup notes saved: {notes_outcome.get('filename')}")
         elif notes_outcome.get("status") == "failed":
             st.warning(f"Ad setup notes were not saved: {notes_outcome.get('error') or 'Upload failed.'}")
+        if result.get("campaign_type") == "Carousel":
+            if carousel_csv_outcome.get("status") == "saved":
+                st.caption(
+                    f"Structured Carousel CSV saved: {carousel_csv_outcome.get('filename')}"
+                )
+            elif carousel_csv_outcome.get("status") == "failed":
+                st.warning(
+                    "Structured Carousel CSV was not saved: "
+                    f"{carousel_csv_outcome.get('error') or 'Upload failed.'}"
+                )
         if st.button(
             "Open folder",
             icon=":material/folder_open:",
@@ -11164,6 +11996,16 @@ def _render_ads_image_save(result, workflow):
             _open_ads_files_folder(workflow["destination_path"])
     elif notes_outcome.get("status") == "saved":
         st.success(f"Ad setup notes saved to {workflow['destination_path']}.")
+        if result.get("campaign_type") == "Carousel":
+            if carousel_csv_outcome.get("status") == "saved":
+                st.caption(
+                    f"Structured Carousel CSV saved: {carousel_csv_outcome.get('filename')}"
+                )
+            elif carousel_csv_outcome.get("status") == "failed":
+                st.warning(
+                    "Structured Carousel CSV was not saved: "
+                    f"{carousel_csv_outcome.get('error') or 'Upload failed.'}"
+                )
         if st.button(
             "Open folder",
             icon=":material/folder_open:",

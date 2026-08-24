@@ -144,6 +144,51 @@ def instant_experience_csv_notes():
     return notes
 
 
+def carousel_csv_result():
+    return {
+        "context_key": "carousel-csv-test",
+        "product_name": "Senna’s Legacy — Collector Edition",
+        "campaign_type": "Carousel",
+    }
+
+
+def carousel_csv_notes():
+    return {
+        "headlines": [
+            f"Headline {index}, collector’s choice"
+            for index in range(1, 6)
+        ],
+        "descriptions": [
+            f"Description {index}\nSecond line, with commas & apostrophe’s."
+            for index in range(1, 6)
+        ],
+        "primary_texts": [
+            f"Primary text {index}, first line.\nSecond line — café 🏁"
+            for index in range(1, 6)
+        ],
+        "cards": [
+            {
+                "position": index,
+                "slot_id": f"carousel-{index:02d}",
+                "image_filename": f"carousel-image-{index:02d}.jpg",
+                "headline": f"Hook, {index}",
+                "description": f"Fan's pick {index}",
+                "destination_url": (
+                    f"https://www.sportscaveshop.com/products/example?card={index}&src=carousel"
+                ),
+                "cta": "Shop Now",
+                "setup_notes": (
+                    f"Card {index} note, line one.\nKeep order #{index}."
+                    if index < 5
+                    else ""
+                ),
+            }
+            for index in range(1, 6)
+        ],
+        "setup_notes": "Overall setup, first line.\nSecond line with apostrophe’s & symbols.",
+    }
+
+
 def instant_experience_description_payload(
     product_name,
     category,
@@ -215,6 +260,14 @@ def instant_experience_cover_uploaders(app_test):
         uploader
         for uploader in app_test.file_uploader
         if uploader.label in cover_labels
+    ]
+
+
+def carousel_image_uploaders(app_test):
+    return [
+        uploader
+        for uploader in app_test.file_uploader
+        if uploader.label in {f"Carousel {index}" for index in range(1, 6)}
     ]
 
 
@@ -3865,10 +3918,15 @@ PRIMARY TEXT VARIATIONS
         set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
         note_labels = [text_area.label for text_area in app_test.text_area]
-        self.assertIn("Headlines", note_labels)
-        self.assertIn("Descriptions", note_labels)
+        self.assertIn("Headline variation 1", note_labels)
+        self.assertIn("Headline variation 5", note_labels)
+        self.assertIn("Description variation 1", note_labels)
+        self.assertIn("Description variation 5", note_labels)
         self.assertIn("Carousel cards / ad setup", note_labels)
-        self.assertIn("Primary Text Variations", note_labels)
+        self.assertIn("Primary text variation 1", note_labels)
+        self.assertIn("Primary text variation 5", note_labels)
+        self.assertIn("Card 1 setup notes (optional)", note_labels)
+        self.assertIn("Card 5 setup notes (optional)", note_labels)
 
     def test_instant_experience_copy_fields_are_grouped_by_three_concepts(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
@@ -3917,6 +3975,297 @@ PRIMARY TEXT VARIATIONS
         self.assertNotIn("Descriptions", note_labels)
         self.assertNotIn("Carousel cards / ad setup", note_labels)
         self.assertNotIn("Primary Text Variations", note_labels)
+
+    def test_carousel_csv_template_has_versioned_ordered_example_rows(self):
+        result = carousel_csv_result()
+        data = ads_page.build_carousel_copy_csv(result, {}, template=True)
+        rows = list(
+            csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+        )
+
+        self.assertTrue(data.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(tuple(rows[0]), ads_page.CAROUSEL_COPY_CSV_HEADERS)
+        self.assertEqual(len(rows), 21)
+        self.assertEqual(
+            [(row["row_type"], row["position"]) for row in rows],
+            [
+                *(("headline", str(position)) for position in range(1, 6)),
+                *(("description", str(position)) for position in range(1, 6)),
+                *(("primary_text", str(position)) for position in range(1, 6)),
+                *(("card", str(position)) for position in range(1, 6)),
+                ("setup_notes", ""),
+            ],
+        )
+        card_rows = [row for row in rows if row["row_type"] == "card"]
+        self.assertEqual(
+            [row["slot_id"] for row in card_rows],
+            [f"carousel-{position:02d}" for position in range(1, 6)],
+        )
+        self.assertTrue(all("example.com" in row["destination_url"] for row in card_rows))
+        self.assertNotIn("sportscaveshop.com", data.decode("utf-8-sig").casefold())
+
+    def test_carousel_csv_round_trip_preserves_all_structured_copy_and_cards(self):
+        result = carousel_csv_result()
+        expected = carousel_csv_notes()
+        data = ads_page.build_carousel_copy_csv(
+            result,
+            carousel_notes=expected,
+        )
+
+        parsed = ads_page.parse_carousel_copy_csv(data, result)
+
+        self.assertEqual(parsed, expected)
+        self.assertIn(b"\r\n", data)
+        self.assertIn("🏁", data.decode("utf-8-sig"))
+        self.assertIn("apostrophe’s", data.decode("utf-8-sig"))
+        self.assertEqual(parsed["cards"][4]["setup_notes"], "")
+        self.assertEqual(
+            [card["slot_id"] for card in parsed["cards"]],
+            [f"carousel-{position:02d}" for position in range(1, 6)],
+        )
+        self.assertEqual(
+            [card["position"] for card in parsed["cards"]],
+            list(range(1, 6)),
+        )
+
+    def test_carousel_save_writes_structured_csv_beside_setup_notes(self):
+        result = carousel_csv_result()
+        expected = carousel_csv_notes()
+        workflow = {
+            "export_date": "2026-08-24",
+            "slots": {},
+            "outcomes": {},
+            "ad_notes": {"carousel": expected},
+        }
+        uploaded_items = []
+
+        def upload_batch(_token, folder, items, **_kwargs):
+            item = dict(items[0])
+            uploaded_items.append(item)
+            filename = item["relative_path"]
+            return {
+                "successes": [
+                    {
+                        "metadata": {
+                            "name": filename,
+                            "path_display": f"{folder}/{filename}",
+                            "size": item["size"],
+                        }
+                    }
+                ],
+                "failures": [],
+            }
+
+        with patch.object(
+            ads_page.dropbox_integration,
+            "ensure_folder_path",
+        ), patch.object(
+            ads_page.dropbox_integration,
+            "upload_batch",
+            side_effect=upload_batch,
+        ):
+            outcomes = ads_page.save_ads_images_to_dropbox(
+                "test-token",
+                "/Files",
+                "/Files/Ads",
+                result,
+                workflow,
+            )
+
+        self.assertEqual(
+            [item["relative_path"] for item in uploaded_items],
+            [ads_page.ADS_COPY_FILENAME, ads_page.CAROUSEL_COPY_FILENAME],
+        )
+        saved_notes = uploaded_items[0]["data"].decode("utf-8")
+        self.assertIn("STRUCTURED CAROUSEL CARDS", saved_notes)
+        self.assertIn("- Image slot: carousel-03", saved_notes)
+        self.assertIn(expected["cards"][2]["destination_url"], saved_notes)
+        saved_csv = ads_page.parse_carousel_copy_csv(uploaded_items[1]["data"], result)
+        self.assertEqual(saved_csv, expected)
+        self.assertEqual(outcomes["_carousel_copy_csv"]["status"], "saved")
+        self.assertEqual(outcomes["_carousel_copy_csv"]["asset_type"], "meta_ads_copy_csv")
+
+    def test_carousel_csv_validation_is_transactional(self):
+        result = carousel_csv_result()
+        valid_data = ads_page.build_carousel_copy_csv(
+            result,
+            carousel_notes=carousel_csv_notes(),
+        )
+        valid_rows = list(
+            csv.DictReader(io.StringIO(valid_data.decode("utf-8-sig"), newline=""))
+        )
+        invalid_cases = {}
+
+        missing_header_rows = [
+            {key: value for key, value in row.items() if key != "cta"}
+            for row in valid_rows
+        ]
+        invalid_cases["missing header"] = csv_bytes_from_rows(
+            missing_header_rows,
+            headers=[
+                header for header in ads_page.CAROUSEL_COPY_CSV_HEADERS
+                if header != "cta"
+            ],
+        )
+
+        unsupported = [dict(row) for row in valid_rows]
+        unsupported[0]["row_type"] = "unknown"
+        invalid_cases["unsupported row"] = csv_bytes_from_rows(
+            unsupported,
+            headers=ads_page.CAROUSEL_COPY_CSV_HEADERS,
+        )
+
+        wrong_slot = [dict(row) for row in valid_rows]
+        first_card = next(row for row in wrong_slot if row["row_type"] == "card")
+        first_card["slot_id"] = "carousel-05"
+        invalid_cases["wrong slot"] = csv_bytes_from_rows(
+            wrong_slot,
+            headers=ads_page.CAROUSEL_COPY_CSV_HEADERS,
+        )
+
+        missing_row = [dict(row) for row in valid_rows[:-1]]
+        invalid_cases["missing row"] = csv_bytes_from_rows(
+            missing_row,
+            headers=ads_page.CAROUSEL_COPY_CSV_HEADERS,
+        )
+
+        existing_widget_key = ads_page._carousel_copy_widget_key(
+            result["context_key"],
+            "headlines",
+            1,
+        )
+        for label, invalid_data in invalid_cases.items():
+            with self.subTest(label=label):
+                session_state = {existing_widget_key: "Keep existing headline"}
+                workflow = {
+                    "ad_notes": {
+                        "headlines": "Legacy headline",
+                        "cards": "Keep legacy setup",
+                    }
+                }
+                original_workflow = json.loads(json.dumps(workflow))
+                with patch.object(ads_page.st, "session_state", session_state):
+                    with self.assertRaises(ads_page.CarouselCopyCSVError):
+                        ads_page.apply_carousel_copy_csv(
+                            result,
+                            workflow,
+                            invalid_data,
+                        )
+                self.assertEqual(session_state, {existing_widget_key: "Keep existing headline"})
+                self.assertEqual(workflow, original_workflow)
+
+    def test_carousel_csv_export_reads_current_widget_values(self):
+        result = carousel_csv_result()
+        expected = carousel_csv_notes()
+        workflow = {"ad_notes": {"carousel": expected}}
+        headline_key = ads_page._carousel_copy_widget_key(
+            result["context_key"],
+            "headlines",
+            1,
+        )
+        card_note_key = ads_page._carousel_card_widget_key(
+            result["context_key"],
+            2,
+            "setup_notes",
+        )
+        session_state = {
+            headline_key: "Edited headline, exact",
+            card_note_key: "Edited card note\nwith a second line",
+        }
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            exported = ads_page.build_carousel_copy_csv(result, workflow)
+        parsed = ads_page.parse_carousel_copy_csv(exported, result)
+
+        self.assertEqual(parsed["headlines"][0], "Edited headline, exact")
+        self.assertEqual(
+            parsed["cards"][1]["setup_notes"],
+            "Edited card note\nwith a second line",
+        )
+        self.assertEqual(parsed["cards"][0], expected["cards"][0])
+
+    def test_legacy_carousel_notes_load_without_losing_original_text(self):
+        result = carousel_csv_result()
+        workflow = {
+            "ad_notes": {
+                "headlines": "Legacy one\nLegacy two",
+                "descriptions": "First description\nSecond description",
+                "primary_text_variations": "Primary one\n\nPrimary two, exact.",
+                "cards": "Legacy card and setup notes\nKeep this text.",
+            }
+        }
+
+        structured = ads_page._carousel_copy_notes_from_workflow(result, workflow)
+
+        self.assertEqual(structured["headlines"][:2], ["Legacy one", "Legacy two"])
+        self.assertEqual(
+            structured["primary_texts"][:2],
+            ["Primary one", "Primary two, exact."],
+        )
+        self.assertEqual(
+            structured["setup_notes"],
+            "Legacy card and setup notes\nKeep this text.",
+        )
+        self.assertEqual(len(structured["cards"]), 5)
+        self.assertEqual(
+            [card["slot_id"] for card in structured["cards"]],
+            [f"carousel-{position:02d}" for position in range(1, 6)],
+        )
+
+    def test_rendered_carousel_csv_import_survives_sequential_image_uploads(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        expected = carousel_csv_notes()
+        data = ads_page.build_carousel_copy_csv(
+            result,
+            carousel_notes=expected,
+        )
+
+        uploader_by_label(app_test, "Import Carousel CSV").set_value(
+            [("carousel-copy.csv", data, "text/csv")]
+        )
+        app_test.run(timeout=30)
+
+        self.assertEqual(
+            next(
+                area.value for area in app_test.text_area
+                if area.label == "Headline variation 1"
+            ),
+            expected["headlines"][0],
+        )
+        self.assertEqual(
+            next(
+                field.value for field in app_test.text_input
+                if field.label == "Card 3 destination URL"
+            ),
+            expected["cards"][2]["destination_url"],
+        )
+        image = square_png_bytes()
+        carousel_image_uploaders(app_test)[0].set_value(
+            [("carousel-one.png", image, "image/png")]
+        )
+        app_test.run(timeout=30)
+        carousel_image_uploaders(app_test)[1].set_value(
+            [("carousel-two.png", image, "image/png")]
+        )
+        app_test.run(timeout=30)
+
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        structured = workflow["ad_notes"]["carousel"]
+        self.assertEqual(structured["headlines"], expected["headlines"])
+        self.assertEqual(
+            structured["cards"][2]["destination_url"],
+            expected["cards"][2]["destination_url"],
+        )
+        self.assertEqual(len(workflow["slots"]), 2)
+        self.assertEqual(len(carousel_image_uploaders(app_test)), 5)
+        self.assertEqual(len(app_test.exception), 0)
 
     def test_instant_experience_blank_copy_csv_uses_current_concept_structure(self):
         result = instant_experience_csv_result()
@@ -4265,16 +4614,16 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader[:5]],
+            [uploader.label for uploader in carousel_image_uploaders(app_test)],
             ["Carousel 1", "Carousel 2", "Carousel 3", "Carousel 4", "Carousel 5"],
         )
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         original_result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
         image = square_png_bytes()
-        app_test.file_uploader[0].set_value([("Carousel 1.png", image, "image/png")])
+        carousel_image_uploaders(app_test)[0].set_value([("Carousel 1.png", image, "image/png")])
         app_test.run(timeout=30)
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
-        for uploader in app_test.file_uploader[:5]:
+        for uploader in carousel_image_uploaders(app_test):
             uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
         app_test.run(timeout=30)
 
@@ -4297,7 +4646,7 @@ PRIMARY TEXT VARIATIONS
         set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
         image = square_png_bytes()
-        for uploader in app_test.file_uploader[:5]:
+        for uploader in carousel_image_uploaders(app_test):
             uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
         app_test.run(timeout=30)
 
@@ -4307,7 +4656,7 @@ PRIMARY TEXT VARIATIONS
             len(app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"]),
             4,
         )
-        app_test.file_uploader[0].set_value(
+        carousel_image_uploaders(app_test)[0].set_value(
             [("Carousel 1 replacement.webp", image, "image/webp")]
         )
         app_test.run(timeout=30)
@@ -4899,7 +5248,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Campaign type", "Carousel")
         set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
-        app_test.file_uploader[0].set_value(
+        carousel_image_uploaders(app_test)[0].set_value(
             [("carousel-one.png", square_png_bytes(), "image/png")]
         )
         app_test.run(timeout=30)
