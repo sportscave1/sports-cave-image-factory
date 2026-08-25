@@ -215,7 +215,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
         self.assertEqual(loader.call_count, 1)
         self.assertEqual(loaded["rows"][0]["handle"], "product-2")
 
-    def test_closed_connection_is_discarded_and_successful_retry_is_cached_for_edition_ops(self):
+    def test_closed_connection_is_discarded_and_successful_retry_is_isolated_for_edition_ops(self):
         operational_error = type("OperationalError", (Exception,), {})
         stale = _Connection(_Cursor(error=operational_error("connection to database closed")))
         fresh = _Connection(
@@ -239,7 +239,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
             rows = supabase_backend.list_edition_products_read_only(limit=50)
         self.assertEqual(rows[0]["shopify_handle"], "product-7")
         self.assertEqual(stale.close_calls, 1)
-        self.assertEqual(fresh.close_calls, 0)
+        self.assertEqual(fresh.close_calls, 1)
         self.assertGreaterEqual(stale.rollback_calls, 1)
         self.assertGreaterEqual(fresh.rollback_calls, 1)
         diagnostic = supabase_backend.get_last_database_read_diagnostic()
@@ -388,7 +388,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
         self.assertNotIn("UPDATE EDITION_", upper)
         self.assertNotIn("DELETE FROM", upper)
         self.assertEqual(params[-2:], (1000, 0))
-        self.assertEqual(connection.close_calls, 0)
+        self.assertEqual(connection.close_calls, 1)
         supabase_backend._discard_cached_read_connection()
         self.assertEqual(connection.close_calls, 1)
 

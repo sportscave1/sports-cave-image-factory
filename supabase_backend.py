@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import shopify_sync
 import order_action_state
 import edition_ledger
+import order_line_edition_override
 from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
 from certificate_logging import certificate_stage, certificate_stage_log, set_certificate_log_context
 from services import r2_storage
@@ -102,6 +103,7 @@ _SCHEMA_LOCK = threading.Lock()
 SHOPIFY_MARKETPLACE_RECONCILIATION_MIGRATION = (
     "20260818_shopify_marketplace_order_reconciliation.sql"
 )
+ORDER_LINE_EDITION_OVERRIDE_MIGRATION = "20260825_order_line_edition_overrides.sql"
 SHOPIFY_MARKETPLACE_ORDER_READ_COLUMNS = frozenset(
     {
         "source_name",
@@ -121,6 +123,8 @@ ORDER_MARKETPLACE_CAPABILITY_TTL_SECONDS = 60.0
 _ORDER_MARKETPLACE_READ_CAPABILITY = None
 _ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = 0.0
 _ORDER_MARKETPLACE_READ_CAPABILITY_LOCK = threading.Lock()
+_ORDER_OVERRIDE_READ_CAPABILITY = None
+_ORDER_OVERRIDE_READ_CAPABILITY_LOCK = threading.Lock()
 DROPBOX_CONNECTION_SETTING_KEY = "dropbox_connection"
 _LAST_DATABASE_STATUS = {}
 _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
@@ -709,50 +713,23 @@ def _close_read_connection(conn):
         pass
 
 
-_READ_CONNECTION_LOCK = threading.RLock()
-_CACHED_READ_CONNECTION = None
-_CACHED_READ_CONNECTION_FACTORY = None
-
-
 def _discard_cached_read_connection(conn=None):
-    """Drop a failed or obsolete read resource without affecting write paths."""
-    global _CACHED_READ_CONNECTION
-    global _CACHED_READ_CONNECTION_FACTORY
-    target = conn if conn is not None else _CACHED_READ_CONNECTION
-    if target is not None:
-        _close_read_connection(target)
-    if conn is None or conn is _CACHED_READ_CONNECTION:
-        _CACHED_READ_CONNECTION = None
-        _CACHED_READ_CONNECTION_FACTORY = None
-
-
-def _cached_read_connection():
-    """Return one serialised, reusable read connection for this app process.
-
-    A new Supabase TLS connection costs close to a second from Render. The
-    latest-50 Orders reader performs two bounded bulk statements, and the
-    sidebar performs a third status statement. Reusing the read resource keeps
-    the SQL and transaction boundaries unchanged while removing repeated TLS
-    handshakes. Any stale/failed connection is discarded and retried once by
-    ``_run_read_operation``.
-    """
-    global _CACHED_READ_CONNECTION
-    global _CACHED_READ_CONNECTION_FACTORY
-    factory = connect
-    if _CACHED_READ_CONNECTION_FACTORY is not factory:
-        _discard_cached_read_connection()
-    if _CACHED_READ_CONNECTION is None or bool(getattr(_CACHED_READ_CONNECTION, "closed", False)):
-        _CACHED_READ_CONNECTION = factory()
-        _CACHED_READ_CONNECTION_FACTORY = factory
-    return _CACHED_READ_CONNECTION
+    """Compatibility cleanup hook for callers from the former read cache."""
+    _close_read_connection(conn)
 
 
 def _run_read_operation(operation, read_callable):
-    """Run one bounded read, retrying one recognised stale failure.
+    """Run one bounded read on an isolated connection.
 
     Supabase's transaction pool can accept the client connection and then wait up
     to 60 seconds for a database checkout. PostgreSQL's statement_timeout does
     not cover that pool-side wait, so a watchdog also cancels the client query.
+
+    Do not share a connection between Streamlit sessions, the Orders loader and
+    top-bar polling.  A process-wide cached connection serialized unrelated
+    reads and allowed a cancelled badge/marker query to delay the latest-50
+    reader.  Each operation now owns, rolls back and closes its connection on
+    success, failure and retry.
     """
     started = time.perf_counter()
     first_error_type = ""
@@ -760,10 +737,12 @@ def _run_read_operation(operation, read_callable):
         conn = None
         deadline_timer = None
         deadline_fired = threading.Event()
-        keep_connection = False
-        _READ_CONNECTION_LOCK.acquire()
+        connection_ms = 0
+        query_started = None
         try:
-            conn = _cached_read_connection()
+            connect_started = time.perf_counter()
+            conn = connect()
+            connection_ms = int((time.perf_counter() - connect_started) * 1000)
 
             def cancel_overdue_read():
                 deadline_fired.set()
@@ -785,6 +764,7 @@ def _run_read_operation(operation, read_callable):
             deadline_timer = threading.Timer(deadline_seconds, cancel_overdue_read)
             deadline_timer.daemon = True
             deadline_timer.start()
+            query_started = time.perf_counter()
             with conn.cursor() as cur:
                 value = read_callable(cur)
             deadline_timer.cancel()
@@ -798,6 +778,8 @@ def _run_read_operation(operation, read_callable):
                 "attempts": attempt + 1,
                 "recovered": bool(attempt),
                 "duration_ms": elapsed_ms,
+                "connection_ms": connection_ms,
+                "query_ms": int((time.perf_counter() - query_started) * 1000),
             }
             _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
             print(
@@ -806,7 +788,6 @@ def _run_read_operation(operation, read_callable):
                 f"attempts={attempt + 1} recovered={str(bool(attempt)).lower()}",
                 flush=True,
             )
-            keep_connection = True
             return value, diagnostic
         except Exception as error:
             if deadline_timer is not None:
@@ -824,6 +805,8 @@ def _run_read_operation(operation, read_callable):
                 "attempts": attempt + 1,
                 "recovered": False,
                 "duration_ms": elapsed_ms,
+                "connection_ms": connection_ms,
+                "query_ms": int((time.perf_counter() - query_started) * 1000) if query_started else 0,
             }
             _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
             retry = attempt == 0 and category == "stale_connection"
@@ -847,9 +830,7 @@ def _run_read_operation(operation, read_callable):
         finally:
             if deadline_timer is not None:
                 deadline_timer.cancel()
-            if not keep_connection:
-                _discard_cached_read_connection(conn)
-            _READ_CONNECTION_LOCK.release()
+            _close_read_connection(conn)
 
 
 def _database_undefined_column_name(error):
@@ -899,6 +880,34 @@ def _set_marketplace_order_read_capability(available):
     with _ORDER_MARKETPLACE_READ_CAPABILITY_LOCK:
         _ORDER_MARKETPLACE_READ_CAPABILITY = bool(available)
         _ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = time.monotonic()
+
+
+def _order_override_read_capability():
+    """Probe the additive override table once per process.
+
+    Production must keep loading Orders before the separate override migration
+    is applied.  A negative result is intentionally sticky until process
+    restart, so an absent optional table is not queried on every page refresh.
+    """
+    global _ORDER_OVERRIDE_READ_CAPABILITY
+    with _ORDER_OVERRIDE_READ_CAPABILITY_LOCK:
+        if _ORDER_OVERRIDE_READ_CAPABILITY is not None:
+            return bool(_ORDER_OVERRIDE_READ_CAPABILITY)
+
+        def probe(cur):
+            return table_exists(cur, "order_line_edition_overrides")
+
+        try:
+            available, _diagnostic = _run_read_operation(
+                "orders.manual_overrides.capability",
+                probe,
+            )
+        except DatabaseReadError:
+            # The override table is optional. Core Orders rows must remain
+            # available even when the capability probe itself is unavailable.
+            available = False
+        _ORDER_OVERRIDE_READ_CAPABILITY = bool(available)
+        return bool(_ORDER_OVERRIDE_READ_CAPABILITY)
 
 
 def get_last_database_read_diagnostic():
@@ -11805,6 +11814,22 @@ def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
                 row_id = str(row.get("row_id") or "").strip()
                 if not row_id:
                     continue
+                if (
+                    order_line_edition_override.fulfillment_status_is_locked(
+                        row.get("prodigi_status")
+                    )
+                    or row.get("date_fulfilled_in_shopify")
+                ):
+                    _lock_manual_override_for_fulfilment_cur(
+                        cur,
+                        edition_order_id=str(row.get("edition_order_id") or ""),
+                        shopify_line_item_id=str(
+                            row.get("shopify_line_item_id")
+                            or row.get("linked_order_line_id")
+                            or ""
+                        ),
+                        actor=str(row.get("checked_by") or "Fulfilment"),
+                    )
                 cur.execute(
                     """
                     INSERT INTO prodigi_dispatch_rows(
@@ -14396,6 +14421,14 @@ def _persist_order_snapshot(order):
                 lines_started = time.perf_counter()
                 _upsert_order_lines(cur, order)
                 _sync_perf_log("Supabase line item upsert time", lines_started, lines=len(order.get("line_items") or []))
+                if order_line_edition_override.fulfillment_status_is_locked(
+                    order.get("fulfillment_status")
+                ):
+                    _lock_manual_override_for_fulfilment_cur(
+                        cur,
+                        shopify_order_id=order.get("shopify_order_id") or "",
+                        actor="Shopify reconciliation",
+                    )
                 backfill_started = time.perf_counter()
                 _backfill_edition_customer_details(cur, order)
                 _sync_perf_log("Supabase edition customer backfill time", backfill_started)
@@ -15209,7 +15242,7 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
     try:
         cur.execute(
             """
-            SELECT local_file_path,
+            SELECT edition_number, local_file_path,
                    COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) AS shopify_file_url,
                    certificate_r2_bucket, certificate_r2_key
             FROM certificates
@@ -15218,10 +15251,16 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             (str(assignment["id"]),),
         )
         existing_certificate = cur.fetchone()
-        if not force and existing_certificate and (
+        if (
+            not force
+            and existing_certificate
+            and _int_value(existing_certificate.get("edition_number"), 0)
+            == _int_value(assignment.get("edition_number"), 0)
+            and (
             existing_certificate.get("shopify_file_url")
             or existing_certificate.get("local_file_path")
             or (existing_certificate.get("certificate_r2_bucket") and existing_certificate.get("certificate_r2_key"))
+            )
         ):
             cur.execute(
                 "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
@@ -15295,6 +15334,8 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
                 product_title=EXCLUDED.product_title,
                 variant_title=EXCLUDED.variant_title,
                 certificate_id=EXCLUDED.certificate_id,
+                edition_number=EXCLUDED.edition_number,
+                edition_total=EXCLUDED.edition_total,
                 edition_display=EXCLUDED.edition_display,
                 line_item_unit_index=EXCLUDED.line_item_unit_index,
                 pdf_filename=EXCLUDED.pdf_filename,
@@ -19947,10 +19988,15 @@ def orders_visibility_marker(*, ensure_schema_first=True):
     def load_marker(cur):
         cur.execute(
             """
-            SELECT
-                COUNT(*) AS order_count,
-                COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
-            FROM shopify_orders
+            WITH latest_orders AS (
+                SELECT shopify_order_id, updated_at, synced_at, created_at
+                FROM shopify_orders
+                ORDER BY created_at DESC
+                LIMIT 50
+            )
+            SELECT COUNT(*) AS order_count,
+                   COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
+            FROM latest_orders
             """
         )
         return cur.fetchone() or {}
@@ -20914,7 +20960,7 @@ def _order_sort_clause(sort):
     }.get(sort, "COALESCE(created_at, synced_at) DESC NULLS LAST, order_name DESC")
 
 
-def list_hybrid_order_rows(limit=50, search=""):
+def _legacy_list_hybrid_order_rows(limit=50, search=""):
     """Read a bounded order window plus all matching allocations in two bulk queries."""
     total_started = time.perf_counter()
     limit_value = max(min(int(limit or 50), 200), 1)
@@ -21006,6 +21052,7 @@ def list_hybrid_order_rows(limit=50, search=""):
                 li.sku,
                 COALESCE(pd.prodigi_status, '') AS prodigi_status,
                 COALESCE(pd.row_id, '') AS prodigi_row_id,
+                COALESCE(manual.manual_edition_overrides, '[]'::jsonb) AS manual_edition_overrides,
                 COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
             FROM selected_orders o
             LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
@@ -21040,6 +21087,41 @@ def list_hybrid_order_rows(limit=50, search=""):
                     pd.submitted_at DESC NULLS LAST
                 LIMIT 1
             ) pd ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'id', mo.id,
+                        'active', mo.active,
+                        'allocation_index', mo.allocation_index,
+                        'manual_edition_number', mo.manual_edition_number,
+                        'reason', mo.reason,
+                        'locked_fulfilled_at', mo.locked_fulfilled_at,
+                        'certificate_id', certificate.certificate_id,
+                        'certificate_status', certificate.certificate_status,
+                        'local_file_path', certificate.local_file_path,
+                        'shopify_file_url', COALESCE(NULLIF(certificate.shopify_file_url, ''), NULLIF(certificate.certificate_file_url, '')),
+                        'certificate_pdf_url', certificate.certificate_pdf_url,
+                        'generated_at', certificate.generated_at,
+                        'certificate_preview_r2_key', certificate.certificate_preview_r2_key
+                    ) ORDER BY mo.allocation_index
+                ) AS manual_edition_overrides
+                FROM order_line_edition_overrides mo
+                LEFT JOIN LATERAL (
+                    SELECT c.*
+                    FROM certificates c
+                    WHERE c.edition_order_id='manual:' || mo.id::text
+                    ORDER BY c.updated_at DESC NULLS LAST, c.id DESC
+                    LIMIT 1
+                ) certificate ON TRUE
+                WHERE mo.shopify_line_item_gid =
+                      'gid://shopify/LineItem/' || REGEXP_REPLACE(
+                          COALESCE(li.shopify_line_item_id, ''),
+                          '^gid://shopify/[^/]+/',
+                          '',
+                          'i'
+                      )
+                  AND mo.active=TRUE
+            ) manual ON TRUE
             ORDER BY COALESCE(o.created_at, o.processed_at, o.synced_at) DESC NULLS LAST,
                      o.order_name DESC, li.id ASC NULLS LAST
             """,
@@ -21088,6 +21170,11 @@ def list_hybrid_order_rows(limit=50, search=""):
                     eo.edition_total, eo.allocation_index, eo.assigned_at,
                     eo.certificate_status, eo.status AS edition_order_status,
                     eo.source AS assignment_source, eo.manual_override,
+                    mo.manual_edition_number,
+                    (mo.id IS NOT NULL AND mo.active) AS manual_override_active,
+                    COALESCE(mo.reason, '') AS manual_override_reason,
+                    COALESCE(mo.id::text, '') AS manual_override_id,
+                    COALESCE(mo.locked_fulfilled_at::text, '') AS manual_override_locked_at,
                     c.certificate_id, c.local_file_path,
                     COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
                     c.certificate_pdf_url, c.certificate_print_jpg_url,
@@ -21116,6 +21203,9 @@ def list_hybrid_order_rows(limit=50, search=""):
                         certificate.id DESC
                     LIMIT 1
                 ) c ON TRUE
+                LEFT JOIN order_line_edition_overrides mo
+                  ON mo.edition_order_id=eo.id::text
+                 AND mo.active=TRUE
                 WHERE eo.shopify_line_item_id = ANY(%s)
                    OR eo.shopify_order_id = ANY(%s)
                    OR UPPER(TRIM(COALESCE(eo.shopify_order_name, ''))) = ANY(%s)
@@ -21142,6 +21232,13 @@ def list_hybrid_order_rows(limit=50, search=""):
     assignments_by_line = {}
     assignments_by_order = {}
     assignments_by_order_name = {}
+    manual_overrides_by_line = {}
+    for base_row in base_rows:
+        line_id = canonical_shopify_id(base_row.get("shopify_line_item_id"))
+        if line_id:
+            manual_overrides_by_line[line_id] = list(
+                base_row.get("manual_edition_overrides") or []
+            )
     for edition_row in edition_rows:
         assignment = {
             "edition_order_id": edition_row.get("edition_order_id"),
@@ -21153,6 +21250,11 @@ def list_hybrid_order_rows(limit=50, search=""):
             "assignment_status": edition_row.get("edition_order_status") or "Assigned",
             "assignment_source": edition_row.get("assignment_source"),
             "manual_override": edition_row.get("manual_override"),
+            "manual_edition_number": edition_row.get("manual_edition_number"),
+            "manual_override_active": edition_row.get("manual_override_active"),
+            "manual_override_reason": edition_row.get("manual_override_reason"),
+            "manual_override_id": edition_row.get("manual_override_id"),
+            "manual_override_locked_at": edition_row.get("manual_override_locked_at"),
             "certificate_id": edition_row.get("certificate_id"),
             "local_file_path": edition_row.get("local_file_path"),
             "shopify_file_url": edition_row.get("shopify_file_url") or edition_row.get("certificate_pdf_url"),
@@ -21192,12 +21294,14 @@ def list_hybrid_order_rows(limit=50, search=""):
         # legacy base rows that genuinely have no line identity.
         if line_id:
             merged["assignments"] = assignments_by_line.get(line_id) or []
+            merged["manual_edition_overrides"] = manual_overrides_by_line.get(line_id) or []
         else:
             merged["assignments"] = (
                 assignments_by_order.get(order_id)
                 or assignments_by_order_name.get(order_name)
                 or []
             )
+            merged["manual_edition_overrides"] = []
         merged_rows.append(merged)
     print(
         f"PERF Orders merge time {(time.perf_counter() - merge_started):.3f}s rows={len(merged_rows)}",
@@ -21223,6 +21327,462 @@ def list_hybrid_order_rows(limit=50, search=""):
         "marketplace_schema_optional": True,
     }
     _LAST_DATABASE_READ_DIAGNOSTIC.set(aggregate_diagnostic)
+    return merged_rows
+
+
+def list_hybrid_order_rows(limit=50, search=""):
+    """Load the latest canonical orders through bounded, measured read phases.
+
+    The order window is selected before any line, fulfilment, certificate or
+    optional override enrichment. Query count depends only on which bounded
+    enrichment classes are present, never on database cardinality or row count.
+    """
+    total_started = time.perf_counter()
+    limit_value = max(min(int(limit or 50), 200), 1)
+    raw_search = str(search or "").strip()
+    search_value = f"%{raw_search.casefold()}%"
+    search_where = ""
+    search_params = []
+    if raw_search:
+        search_where = """
+            WHERE LOWER(COALESCE(o.order_name, '')) LIKE %s
+               OR LOWER(COALESCE(o.order_number, '')) LIKE %s
+               OR LOWER(COALESCE(o.customer_name, '')) LIKE %s
+               OR LOWER(COALESCE(o.customer_email, '')) LIKE %s
+               OR EXISTS (
+                    SELECT 1
+                    FROM shopify_order_lines search_li
+                    WHERE search_li.shopify_order_id=o.shopify_order_id
+                      AND (
+                          LOWER(COALESCE(search_li.product_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.variant_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.sku, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.shopify_handle, '')) LIKE %s
+                      )
+               )
+               OR EXISTS (
+                    SELECT 1
+                    FROM edition_orders search_eo
+                    WHERE search_eo.shopify_order_id=o.shopify_order_id
+                      AND (
+                          LOWER(COALESCE(search_eo.product_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_eo.variant_title, '')) LIKE %s
+                          OR COALESCE(search_eo.edition_number::text, '') LIKE %s
+                      )
+               )
+        """
+        search_params = [search_value] * 10 + [f"%{raw_search.lstrip('#')}%"]
+
+    operation_prefix = "orders.search" if raw_search else "orders.latest_50"
+
+    def load_order_ids(cur):
+        cur.execute(
+            f"""
+            SELECT o.shopify_order_id
+            FROM shopify_orders o
+            {search_where}
+            ORDER BY o.created_at DESC
+            LIMIT %s
+            """,
+            (*search_params, limit_value),
+        )
+        return cur.fetchall()
+
+    selected_rows, id_diagnostic = _run_read_operation(
+        f"{operation_prefix}.ids",
+        load_order_ids,
+    )
+    selected_order_ids = [
+        str(row.get("shopify_order_id") or "").strip()
+        for row in selected_rows
+        if str(row.get("shopify_order_id") or "").strip()
+    ]
+    if not selected_order_ids:
+        diagnostic = {
+            "operation": operation_prefix,
+            "category": "ok",
+            "exception_class": "",
+            "sqlstate": "",
+            "attempts": int(id_diagnostic.get("attempts") or 1),
+            "query_count": 1,
+            "recovered": bool(id_diagnostic.get("recovered")),
+            "duration_ms": int((time.perf_counter() - total_started) * 1000),
+            "phase_ms": {"ids": int(id_diagnostic.get("duration_ms") or 0)},
+            "marketplace_schema_optional": True,
+            "manual_override_schema_optional": True,
+        }
+        _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+        return []
+
+    def load_base_rows(cur):
+        cur.execute(
+            """
+            SELECT
+                o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
+                o.customer_name, o.customer_email, o.financial_status,
+                COALESCE(
+                    NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
+                    NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
+                    NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
+                    NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.fulfillment_status, ''),
+                    NULLIF(o.raw_json->>'fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
+                    ''
+                ) AS fulfillment_status,
+                COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
+                         NULLIF(o.raw_json->>'source_display', ''),
+                         NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
+                COALESCE(NULLIF(to_jsonb(o)->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
+                COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
+                COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason,
+                o.total_price, o.currency, o.created_at, o.remote_updated_at,
+                o.processed_at, o.cancelled_at, o.synced_at,
+                o.raw_json AS order_raw_json,
+                li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
+                li.assignment_status, li.last_error,
+                COALESCE(NULLIF(to_jsonb(li)->>'mapping_method', ''),
+                         NULLIF(li.raw_json->>'mapping_method', ''), '') AS mapping_method,
+                li.shopify_handle, li.shopify_product_id,
+                COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''),
+                         NULLIF(li.raw_json->>'variant_id', ''),
+                         NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
+                COALESCE(NULLIF(li.product_title, ''),
+                         NULLIF(li.raw_json->>'product_title', ''),
+                         NULLIF(li.raw_json->>'title', '')) AS product_title,
+                COALESCE(NULLIF(li.variant_title, ''),
+                         NULLIF(li.raw_json->>'variant_title', ''),
+                         NULLIF(li.raw_json->>'variantTitle', ''),
+                         NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
+                li.sku,
+                ''::text AS prodigi_status,
+                ''::text AS prodigi_row_id,
+                COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
+            FROM shopify_orders o
+            LEFT JOIN shopify_order_lines li
+              ON li.shopify_order_id=o.shopify_order_id
+            LEFT JOIN shopify_products sp
+              ON sp.handle=li.shopify_handle
+            WHERE o.shopify_order_id=ANY(%s)
+            ORDER BY o.created_at DESC,
+                     li.id ASC NULLS LAST
+            """,
+            (selected_order_ids,),
+        )
+        return cur.fetchall()
+
+    base_rows, base_diagnostic = _run_read_operation(
+        f"{operation_prefix}.base",
+        load_base_rows,
+    )
+    line_id_lookup_values = sorted({
+        candidate
+        for row in base_rows
+        for candidate in _shopify_id_candidates("LineItem", row.get("shopify_line_item_id"))
+        if candidate
+    })
+    order_id_lookup_values = sorted({
+        candidate
+        for row in base_rows
+        for candidate in _shopify_id_candidates("Order", row.get("shopify_order_id"))
+        if candidate
+    })
+    order_name_lookup_values = sorted({
+        str(row.get("order_name") or "").strip().upper()
+        for row in base_rows
+        if not canonical_shopify_id(row.get("shopify_order_id"))
+        and str(row.get("order_name") or "").strip()
+    })
+
+    fulfilment_rows = []
+    fulfilment_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
+    if line_id_lookup_values:
+        def load_fulfilment_rows(cur):
+            cur.execute(
+                """
+                SELECT row_id, shopify_line_item_id, prodigi_status,
+                       updated_at, submitted_at
+                FROM prodigi_dispatch_rows
+                WHERE shopify_line_item_id=ANY(%s)
+                ORDER BY
+                    CASE
+                        WHEN LOWER(BTRIM(COALESCE(prodigi_status, ''))) IN
+                             ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+                        THEN 0 ELSE 1
+                    END,
+                    updated_at DESC NULLS LAST,
+                    submitted_at DESC NULLS LAST,
+                    row_id DESC
+                """,
+                (line_id_lookup_values,),
+            )
+            return cur.fetchall()
+
+        fulfilment_rows, fulfilment_diagnostic = _run_read_operation(
+            f"{operation_prefix}.fulfilment",
+            load_fulfilment_rows,
+        )
+
+    edition_rows = []
+    allocation_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
+    if line_id_lookup_values or order_id_lookup_values or order_name_lookup_values:
+        name_union = """
+            UNION
+            SELECT id
+            FROM edition_orders
+            WHERE UPPER(TRIM(COALESCE(shopify_order_name, '')))=ANY(%s)
+        """ if order_name_lookup_values else ""
+
+        def load_edition_rows(cur):
+            params = [line_id_lookup_values, order_id_lookup_values]
+            if order_name_lookup_values:
+                params.append(order_name_lookup_values)
+            cur.execute(
+                f"""
+                WITH selected_edition_ids AS (
+                    SELECT id
+                    FROM edition_orders
+                    WHERE shopify_line_item_id=ANY(%s)
+                    UNION
+                    SELECT id
+                    FROM edition_orders
+                    WHERE shopify_order_id=ANY(%s)
+                    {name_union}
+                )
+                SELECT
+                    eo.id AS edition_order_id, eo.shopify_order_id,
+                    eo.shopify_order_name, eo.shopify_line_item_id,
+                    eo.shopify_product_id, eo.shopify_variant_id,
+                    eo.shopify_handle, eo.product_handle, eo.product_title,
+                    eo.variant_title, eo.sku, eo.customer_name, eo.customer_email,
+                    eo.edition_number, eo.edition_total, eo.allocation_index,
+                    eo.assigned_at, eo.certificate_status,
+                    eo.status AS edition_order_status,
+                    eo.source AS assignment_source, eo.manual_override,
+                    c.certificate_id, c.local_file_path,
+                    COALESCE(NULLIF(c.shopify_file_url, ''),
+                             NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                    c.certificate_pdf_url, c.certificate_print_jpg_url,
+                    c.certificate_preview_image_url, c.shopify_pdf_file_id,
+                    c.shopify_print_jpg_file_id, c.shopify_preview_file_id,
+                    c.asset_sync_status, c.asset_sync_error, c.generated_at,
+                    c.certificate_r2_bucket, c.certificate_r2_key,
+                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
+                FROM selected_edition_ids selected
+                JOIN edition_orders eo ON eo.id=selected.id
+                LEFT JOIN LATERAL (
+                    SELECT certificate.*
+                    FROM certificates certificate
+                    WHERE COALESCE(
+                        certificate.related_edition_order_id::text,
+                        certificate.edition_order_id::text
+                    )=eo.id::text
+                    ORDER BY
+                        CASE WHEN COALESCE(
+                            NULLIF(certificate.shopify_file_url, ''),
+                            NULLIF(certificate.certificate_file_url, ''),
+                            NULLIF(certificate.certificate_pdf_url, ''),
+                            NULLIF(certificate.local_file_path, '')
+                        ) IS NOT NULL THEN 0 ELSE 1 END,
+                        certificate.updated_at DESC NULLS LAST,
+                        certificate.generated_at DESC NULLS LAST,
+                        certificate.id DESC
+                    LIMIT 1
+                ) c ON TRUE
+                ORDER BY eo.shopify_line_item_id ASC,
+                         eo.allocation_index ASC NULLS LAST,
+                         eo.edition_number ASC NULLS LAST
+                """,
+                tuple(params),
+            )
+            return cur.fetchall()
+
+        edition_rows, allocation_diagnostic = _run_read_operation(
+            f"{operation_prefix}.allocations",
+            load_edition_rows,
+        )
+
+    manual_rows = []
+    manual_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
+    canonical_line_gids = sorted({
+        edition_ledger.canonical_shopify_gid("LineItem", value)
+        for value in line_id_lookup_values
+        if edition_ledger.canonical_shopify_gid("LineItem", value)
+    })
+    if canonical_line_gids and _order_override_read_capability():
+        def load_manual_rows(cur):
+            cur.execute(
+                """
+                SELECT mo.*,
+                       certificate.certificate_id,
+                       certificate.certificate_status,
+                       certificate.local_file_path,
+                       COALESCE(NULLIF(certificate.shopify_file_url, ''),
+                                NULLIF(certificate.certificate_file_url, '')) AS shopify_file_url,
+                       certificate.certificate_pdf_url,
+                       certificate.generated_at,
+                       certificate.certificate_preview_r2_key
+                FROM order_line_edition_overrides mo
+                LEFT JOIN LATERAL (
+                    SELECT c.*
+                    FROM certificates c
+                    WHERE c.edition_order_id='manual:' || mo.id::text
+                    ORDER BY c.updated_at DESC NULLS LAST, c.id DESC
+                    LIMIT 1
+                ) certificate ON TRUE
+                WHERE mo.shopify_line_item_gid=ANY(%s)
+                  AND mo.active=TRUE
+                ORDER BY mo.shopify_line_item_gid, mo.allocation_index
+                """,
+                (canonical_line_gids,),
+            )
+            return cur.fetchall()
+
+        manual_rows, manual_diagnostic = _run_read_operation(
+            f"{operation_prefix}.manual_overrides",
+            load_manual_rows,
+        )
+
+    merge_started = time.perf_counter()
+    fulfilment_by_line = {}
+    for row in fulfilment_rows:
+        line_id = canonical_shopify_id(row.get("shopify_line_item_id"))
+        if line_id and line_id not in fulfilment_by_line:
+            fulfilment_by_line[line_id] = row
+
+    manual_by_assignment = {
+        str(row.get("edition_order_id")): row
+        for row in manual_rows
+        if str(row.get("edition_order_id") or "").strip()
+    }
+    manual_by_line = {}
+    for row in manual_rows:
+        line_id = canonical_shopify_id(row.get("shopify_line_item_gid"))
+        if line_id:
+            manual_by_line.setdefault(line_id, []).append(row)
+
+    assignments_by_line = {}
+    assignments_by_order = {}
+    assignments_by_order_name = {}
+    for edition_row in edition_rows:
+        override = manual_by_assignment.get(str(edition_row.get("edition_order_id"))) or {}
+        assignment = {
+            "edition_order_id": edition_row.get("edition_order_id"),
+            "edition_number": edition_row.get("edition_number"),
+            "edition_total": edition_row.get("edition_total"),
+            "allocation_index": edition_row.get("allocation_index"),
+            "assigned_at": edition_row.get("assigned_at"),
+            "certificate_status": edition_row.get("certificate_status"),
+            "assignment_status": edition_row.get("edition_order_status") or "Assigned",
+            "assignment_source": edition_row.get("assignment_source"),
+            "manual_override": edition_row.get("manual_override"),
+            "manual_edition_number": override.get("manual_edition_number"),
+            "manual_override_active": bool(override.get("id") and override.get("active")),
+            "manual_override_reason": override.get("reason") or "",
+            "manual_override_id": str(override.get("id") or ""),
+            "manual_override_locked_at": str(override.get("locked_fulfilled_at") or ""),
+            "certificate_id": edition_row.get("certificate_id"),
+            "local_file_path": edition_row.get("local_file_path"),
+            "shopify_file_url": edition_row.get("shopify_file_url") or edition_row.get("certificate_pdf_url"),
+            "certificate_pdf_url": edition_row.get("certificate_pdf_url"),
+            "certificate_print_jpg_url": edition_row.get("certificate_print_jpg_url"),
+            "certificate_preview_image_url": edition_row.get("certificate_preview_image_url"),
+            "shopify_file_id": edition_row.get("shopify_pdf_file_id"),
+            "shopify_pdf_file_id": edition_row.get("shopify_pdf_file_id"),
+            "shopify_print_jpg_file_id": edition_row.get("shopify_print_jpg_file_id"),
+            "shopify_preview_file_id": edition_row.get("shopify_preview_file_id"),
+            "asset_sync_status": edition_row.get("asset_sync_status"),
+            "asset_sync_error": edition_row.get("asset_sync_error"),
+            "generated_at": edition_row.get("generated_at"),
+            "certificate_r2_bucket": edition_row.get("certificate_r2_bucket"),
+            "certificate_r2_key": edition_row.get("certificate_r2_key"),
+            "certificate_preview_r2_bucket": edition_row.get("certificate_preview_r2_bucket"),
+            "certificate_preview_r2_key": edition_row.get("certificate_preview_r2_key"),
+        }
+        line_id = canonical_shopify_id(edition_row.get("shopify_line_item_id"))
+        if line_id:
+            assignments_by_line.setdefault(line_id, []).append(assignment)
+        order_id = canonical_shopify_id(edition_row.get("shopify_order_id"))
+        if order_id:
+            assignments_by_order.setdefault(order_id, []).append(assignment)
+        order_name = str(edition_row.get("shopify_order_name") or "").strip().upper()
+        if order_name:
+            assignments_by_order_name.setdefault(order_name, []).append(assignment)
+
+    merged_rows = []
+    for base_row in base_rows:
+        merged = dict(base_row)
+        line_id = canonical_shopify_id(base_row.get("shopify_line_item_id"))
+        order_id = canonical_shopify_id(base_row.get("shopify_order_id"))
+        order_name = str(base_row.get("order_name") or "").strip().upper()
+        fulfilment = fulfilment_by_line.get(line_id) or {}
+        merged["prodigi_status"] = fulfilment.get("prodigi_status") or ""
+        merged["prodigi_row_id"] = fulfilment.get("row_id") or ""
+        if line_id:
+            merged["assignments"] = assignments_by_line.get(line_id) or []
+            merged["manual_edition_overrides"] = manual_by_line.get(line_id) or []
+        else:
+            merged["assignments"] = (
+                assignments_by_order.get(order_id)
+                or assignments_by_order_name.get(order_name)
+                or []
+            )
+            merged["manual_edition_overrides"] = []
+        merged_rows.append(merged)
+
+    merge_ms = int((time.perf_counter() - merge_started) * 1000)
+    phase_diagnostics = {
+        "ids": id_diagnostic,
+        "base": base_diagnostic,
+        "fulfilment": fulfilment_diagnostic,
+        "allocations": allocation_diagnostic,
+        "manual_overrides": manual_diagnostic,
+    }
+    query_count = sum(1 for value in phase_diagnostics.values() if int(value.get("attempts") or 0))
+    aggregate_diagnostic = {
+        "operation": operation_prefix,
+        "category": "stale_connection_recovered" if any(
+            value.get("recovered") for value in phase_diagnostics.values()
+        ) else "ok",
+        "exception_class": next((
+            str(value.get("exception_class") or "")
+            for value in phase_diagnostics.values()
+            if value.get("exception_class")
+        ), ""),
+        "sqlstate": next((
+            str(value.get("sqlstate") or "")
+            for value in phase_diagnostics.values()
+            if value.get("sqlstate")
+        ), ""),
+        "attempts": sum(int(value.get("attempts") or 0) for value in phase_diagnostics.values()),
+        "query_count": query_count,
+        "recovered": any(value.get("recovered") for value in phase_diagnostics.values()),
+        "duration_ms": int((time.perf_counter() - total_started) * 1000),
+        "phase_ms": {
+            name: int(value.get("duration_ms") or 0)
+            for name, value in phase_diagnostics.items()
+        } | {"merge": merge_ms},
+        "selected_order_count": len(selected_order_ids),
+        "base_row_count": len(base_rows),
+        "marketplace_schema_optional": True,
+        "manual_override_schema_optional": True,
+    }
+    _LAST_DATABASE_READ_DIAGNOSTIC.set(aggregate_diagnostic)
+    print(
+        "PERF Orders phased read "
+        f"duration_ms={aggregate_diagnostic['duration_ms']} "
+        f"queries={query_count} selected_orders={len(selected_order_ids)} "
+        f"base_rows={len(base_rows)} output_rows={len(merged_rows)}",
+        flush=True,
+    )
     return merged_rows
 
 
@@ -21575,6 +22135,743 @@ def get_dashboard_summary():
             return cur.fetchone() or {}
 
 
+def _manual_edition_override_schema_required(cur):
+    if not table_exists(cur, "order_line_edition_overrides"):
+        raise RuntimeError(
+            "Manual edition overrides are not installed. Apply migration "
+            f"{ORDER_LINE_EDITION_OVERRIDE_MIGRATION} before enabling this feature."
+        )
+
+
+def _manual_override_public(row):
+    row = dict(row or {})
+    return {
+        "id": str(row.get("id") or ""),
+        "edition_order_id": str(row.get("edition_order_id") or ""),
+        "shopify_order_gid": str(row.get("shopify_order_gid") or ""),
+        "shopify_line_item_gid": str(row.get("shopify_line_item_gid") or ""),
+        "canonical_product_gid": str(row.get("canonical_product_gid") or ""),
+        "allocation_index": _int_value(row.get("allocation_index"), 1),
+        "manual_edition_number": _int_value(row.get("manual_edition_number"), 0) or None,
+        "previous_effective_edition_number": _int_value(
+            row.get("previous_effective_edition_number"), 0
+        ) or None,
+        "reason": str(row.get("reason") or ""),
+        "active": bool(row.get("active")),
+        "created_by": str(row.get("created_by") or ""),
+        "updated_by": str(row.get("updated_by") or ""),
+        "created_at": str(row.get("created_at") or ""),
+        "updated_at": str(row.get("updated_at") or ""),
+        "removed_at": str(row.get("removed_at") or ""),
+        "removed_by": str(row.get("removed_by") or ""),
+        "locked_fulfilled_at": str(row.get("locked_fulfilled_at") or ""),
+    }
+
+
+def _manual_override_for_assignment(cur, edition_order_id, *, for_update=False):
+    _manual_edition_override_schema_required(cur)
+    suffix = " FOR UPDATE" if for_update else ""
+    cur.execute(
+        f"""
+        SELECT *
+        FROM order_line_edition_overrides
+        WHERE edition_order_id=%s
+        LIMIT 1{suffix}
+        """,
+        (str(edition_order_id),),
+    )
+    return cur.fetchone() or {}
+
+
+def _manual_override_for_identity(cur, identity, *, for_update=False):
+    _manual_edition_override_schema_required(cur)
+    suffix = " FOR UPDATE" if for_update else ""
+    cur.execute(
+        f"""
+        SELECT * FROM order_line_edition_overrides
+        WHERE shopify_order_gid=%s
+          AND shopify_line_item_gid=%s
+          AND allocation_index=%s
+        LIMIT 1{suffix}
+        """,
+        (
+            identity["shopify_order_gid"],
+            identity["shopify_line_item_gid"],
+            identity["allocation_index"],
+        ),
+    )
+    return cur.fetchone() or {}
+
+
+def get_order_line_edition_override(edition_order_id):
+    with connect() as conn:
+        with conn.cursor() as cur:
+            return _manual_override_public(
+                _manual_override_for_assignment(cur, edition_order_id)
+            )
+
+
+def _effective_assignment(assignment, override=None):
+    source = dict(assignment or {})
+    source["automatic_edition_number"] = source.get("edition_number")
+    return order_line_edition_override.apply_effective_edition(source, override)
+
+
+def _manual_override_assignment(cur, override_id):
+    _manual_edition_override_schema_required(cur)
+    cur.execute(
+        """
+        SELECT mo.*,
+               li.shopify_handle, li.product_title, li.variant_title, li.sku,
+               o.order_name, o.customer_id AS shopify_customer_id,
+               o.customer_name, o.customer_email, o.processed_at AS assigned_at
+        FROM order_line_edition_overrides mo
+        JOIN shopify_order_lines li
+          ON li.shopify_line_item_id=ANY(
+              ARRAY[
+                  mo.shopify_line_item_gid,
+                  regexp_replace(mo.shopify_line_item_gid, '^gid://shopify/LineItem/', '', 'i')
+              ]
+          )
+        JOIN shopify_orders o
+          ON o.shopify_order_id=ANY(
+              ARRAY[
+                  mo.shopify_order_gid,
+                  regexp_replace(mo.shopify_order_gid, '^gid://shopify/Order/', '', 'i')
+              ]
+          )
+        WHERE mo.id::text=%s AND mo.active=TRUE
+        LIMIT 1
+        """,
+        (str(override_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise ValueError("Manual edition override was not found.")
+    return {
+        "id": f"manual:{row['id']}",
+        "shopify_order_id": row.get("shopify_order_gid") or "",
+        "shopify_order_name": row.get("order_name") or "",
+        "order_name": row.get("order_name") or "",
+        "shopify_line_item_id": row.get("shopify_line_item_gid") or "",
+        "shopify_product_id": row.get("canonical_product_gid") or "",
+        "shopify_handle": row.get("shopify_handle") or "",
+        "product_handle": row.get("shopify_handle") or "",
+        "product_title": row.get("product_title") or "",
+        "variant_title": row.get("variant_title") or "",
+        "sku": row.get("sku") or "",
+        "shopify_customer_id": row.get("shopify_customer_id") or "",
+        "customer_name": row.get("customer_name") or "",
+        "customer_email": row.get("customer_email") or "",
+        "edition_number": row.get("manual_edition_number"),
+        "automatic_edition_number": None,
+        "manual_edition_number": row.get("manual_edition_number"),
+        "manual_edition_override": True,
+        "manual_override_reason": row.get("reason") or "",
+        "manual_override_id": str(row.get("id") or ""),
+        "manual_override_locked_at": str(row.get("locked_fulfilled_at") or ""),
+        "edition_total": 100,
+        "allocation_index": row.get("allocation_index") or 1,
+        "assigned_at": row.get("assigned_at") or row.get("created_at"),
+    }
+
+
+def get_effective_edition_for_edition_order(edition_order_id):
+    with connect() as conn:
+        with conn.cursor() as cur:
+            reference = str(edition_order_id or "")
+            if reference.startswith("manual:"):
+                return _manual_override_assignment(cur, reference.split(":", 1)[1])
+            cur.execute(
+                "SELECT * FROM edition_orders WHERE id::text=%s LIMIT 1",
+                (str(edition_order_id),),
+            )
+            assignment = cur.fetchone()
+            if not assignment:
+                raise ValueError("Edition order was not found.")
+            override = (
+                _manual_override_for_assignment(cur, edition_order_id)
+                if table_exists(cur, "order_line_edition_overrides")
+                else {}
+            )
+    return _effective_assignment(assignment, override)
+
+
+def _require_manual_override_actor(actor, actor_role):
+    clean_actor = str(actor or "").strip()
+    if not clean_actor or str(actor_role or "").strip().casefold() != "admin":
+        raise PermissionError("Only an authorised administrator can override an edition number.")
+    return clean_actor
+
+
+def _latest_shopify_fulfillment_status(shopify_order_gid):
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        return ""
+    try:
+        orders = shopify_sync.fetch_orders_by_ids([shopify_order_gid], config=config)
+    except Exception as error:
+        raise RuntimeError(
+            "Could not verify the latest Shopify fulfilment state. No override was changed."
+        ) from error
+    order = dict((orders or [{}])[0] or {})
+    if not order:
+        raise RuntimeError(
+            "Could not verify the latest Shopify fulfilment state. No override was changed."
+        )
+    return str(order.get("fulfillment_status") or order.get("display_fulfillment_status") or "")
+
+
+def _assignment_for_override_update(cur, edition_order_id):
+    cur.execute(
+        "SELECT * FROM edition_orders WHERE id::text=%s LIMIT 1 FOR UPDATE",
+        (str(edition_order_id),),
+    )
+    assignment = cur.fetchone()
+    if not assignment:
+        raise ValueError("Edition order was not found.")
+    return assignment
+
+
+def _order_line_assignment_for_override_update(
+    cur,
+    *,
+    shopify_order_gid,
+    shopify_line_item_gid,
+    allocation_index,
+):
+    cur.execute(
+        """
+        SELECT li.shopify_order_id, li.shopify_line_item_id, li.shopify_product_id,
+               li.shopify_handle, li.product_title, li.variant_title, li.sku,
+               o.order_name, o.customer_id AS shopify_customer_id,
+               o.customer_name, o.customer_email, o.processed_at AS assigned_at
+        FROM shopify_order_lines li
+        JOIN shopify_orders o ON o.shopify_order_id=li.shopify_order_id
+        WHERE li.shopify_order_id=ANY(%s)
+          AND li.shopify_line_item_id=ANY(%s)
+        LIMIT 1
+        FOR UPDATE OF li, o
+        """,
+        (
+            _shopify_id_candidates("Order", shopify_order_gid),
+            _shopify_id_candidates("LineItem", shopify_line_item_gid),
+        ),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise ValueError("The selected Shopify order line was not found.")
+    return {
+        **dict(row),
+        "id": "",
+        "shopify_order_name": row.get("order_name") or "",
+        "allocation_index": max(_int_value(allocation_index, 1), 1),
+        "edition_number": None,
+        "edition_total": 100,
+    }
+
+
+def _assignment_or_order_line_for_override_update(
+    cur,
+    edition_order_id,
+    *,
+    shopify_order_gid,
+    shopify_line_item_gid,
+    allocation_index,
+):
+    if str(edition_order_id or "").strip():
+        return _assignment_for_override_update(cur, edition_order_id)
+    return _order_line_assignment_for_override_update(
+        cur,
+        shopify_order_gid=shopify_order_gid,
+        shopify_line_item_gid=shopify_line_item_gid,
+        allocation_index=allocation_index,
+    )
+
+
+def _canonical_override_identity(assignment):
+    product_id = (
+        assignment.get("shopify_product_gid")
+        or assignment.get("shopify_product_id")
+        or ""
+    )
+    return {
+        "shopify_order_gid": edition_ledger.canonical_shopify_gid(
+            "Order", assignment.get("shopify_order_id")
+        ),
+        "shopify_line_item_gid": edition_ledger.canonical_shopify_gid(
+            "LineItem", assignment.get("shopify_line_item_id")
+        ),
+        "canonical_product_gid": edition_ledger.canonical_shopify_gid(
+            "Product", product_id
+        ),
+        "allocation_index": max(_int_value(assignment.get("allocation_index"), 1), 1),
+    }
+
+
+def _verify_override_identity(assignment, *, shopify_order_gid, shopify_line_item_gid, canonical_product_gid):
+    identity = _canonical_override_identity(assignment)
+    expected = {
+        "shopify_order_gid": edition_ledger.canonical_shopify_gid("Order", shopify_order_gid),
+        "shopify_line_item_gid": edition_ledger.canonical_shopify_gid("LineItem", shopify_line_item_gid),
+        "canonical_product_gid": edition_ledger.canonical_shopify_gid("Product", canonical_product_gid),
+    }
+    missing = [key for key, value in identity.items() if key != "allocation_index" and not value]
+    if missing:
+        raise ValueError("The selected allocation is missing stable Shopify identity.")
+    required_prefixes = {
+        "shopify_order_gid": "gid://shopify/Order/",
+        "shopify_line_item_gid": "gid://shopify/LineItem/",
+        "canonical_product_gid": "gid://shopify/Product/",
+    }
+    if any(
+        not str(identity[key]).startswith(prefix)
+        for key, prefix in required_prefixes.items()
+    ):
+        raise ValueError("The selected order line is missing a canonical Shopify GID.")
+    for key, value in expected.items():
+        if not value or value != identity[key]:
+            raise ValueError("The selected order-line identity no longer matches the saved allocation.")
+    return identity
+
+
+def _stored_fulfillment_rows_for_update(cur, identity):
+    order_candidates = _shopify_id_candidates("Order", identity["shopify_order_gid"])
+    line_candidates = _shopify_id_candidates("LineItem", identity["shopify_line_item_gid"])
+    cur.execute(
+        """
+        SELECT fulfillment_status,
+               COALESCE(raw_json->>'fulfillment_status', '') AS raw_fulfillment_status,
+               COALESCE(raw_json->>'displayFulfillmentStatus', '') AS display_fulfillment_status
+        FROM shopify_orders
+        WHERE shopify_order_id=ANY(%s)
+        FOR UPDATE
+        """,
+        (order_candidates,),
+    )
+    order_states = list(cur.fetchall() or [])
+    cur.execute(
+        """
+        SELECT prodigi_status, row_json->>'date_fulfilled_in_shopify' AS fulfilled_at
+        FROM prodigi_dispatch_rows
+        WHERE shopify_line_item_id=ANY(%s)
+        ORDER BY updated_at DESC NULLS LAST
+        FOR UPDATE
+        """,
+        (line_candidates,),
+    )
+    dispatch_states = list(cur.fetchall() or [])
+    return order_states, dispatch_states
+
+
+def _assert_override_is_unfulfilled(cur, identity, *, live_status=""):
+    order_states, dispatch_states = _stored_fulfillment_rows_for_update(cur, identity)
+    statuses = [live_status]
+    for state in order_states:
+        statuses.extend(
+            [
+                state.get("fulfillment_status"),
+                state.get("raw_fulfillment_status"),
+                state.get("display_fulfillment_status"),
+            ]
+        )
+    for state in dispatch_states:
+        statuses.append(state.get("prodigi_status"))
+        if state.get("fulfilled_at"):
+            statuses.append("fulfilled")
+    if any(order_line_edition_override.fulfillment_status_is_locked(value) for value in statuses):
+        raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+
+
+def _archive_and_stale_certificate(cur, assignment, *, override_id, effective_number, reason, actor):
+    cur.execute(
+        """
+        SELECT * FROM certificates
+        WHERE COALESCE(related_edition_order_id::text, edition_order_id::text)=%s
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+        FOR UPDATE
+        """,
+        (str(assignment["id"]),),
+    )
+    certificates = list(cur.fetchall() or [])
+    for certificate in certificates:
+        has_asset = any(
+            certificate.get(key)
+            for key in (
+                "local_file_path",
+                "shopify_file_url",
+                "certificate_file_url",
+                "certificate_pdf_url",
+                "certificate_r2_key",
+            )
+        )
+        if not has_asset:
+            continue
+        cur.execute(
+            """
+            INSERT INTO order_line_edition_override_certificate_history(
+                override_id, edition_order_id, certificate_row_id,
+                effective_edition_number, certificate_snapshot,
+                superseded_reason, superseded_by
+            ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
+            """,
+            (
+                str(override_id) or None,
+                str(assignment["id"]),
+                str(certificate.get("id") or ""),
+                effective_number or None,
+                json_dumps(certificate),
+                reason,
+                actor,
+            ),
+        )
+    if certificates:
+        cur.execute(
+            """
+            UPDATE certificates
+            SET certificate_status='Stale', status='Superseded',
+                asset_sync_status='stale', asset_sync_error=%s,
+                local_file_path=NULL, shopify_file_id=NULL,
+                shopify_file_status=NULL, shopify_file_url=NULL,
+                certificate_file_url=NULL, certificate_pdf_url=NULL,
+                certificate_print_jpg_url=NULL, certificate_preview_image_url=NULL,
+                shopify_pdf_file_id=NULL, shopify_print_jpg_file_id=NULL,
+                shopify_preview_file_id=NULL, certificate_shopify_file_id=NULL,
+                certificate_r2_bucket=NULL, certificate_r2_key=NULL,
+                certificate_preview_r2_bucket=NULL, certificate_preview_r2_key=NULL,
+                updated_at=now()
+            WHERE COALESCE(related_edition_order_id::text, edition_order_id::text)=%s
+            """,
+            (reason, str(assignment["id"])),
+        )
+        cur.execute(
+            "UPDATE edition_orders SET certificate_status='Certificate Missing' WHERE id::text=%s",
+            (str(assignment["id"]),),
+        )
+
+
+def _write_manual_override_audit(cur, override_row, *, action, before_state, after_state, reason, actor):
+    row = _manual_override_public(override_row)
+    cur.execute(
+        """
+        INSERT INTO order_line_edition_override_audit(
+            override_id, action, shopify_order_gid, shopify_line_item_gid,
+            canonical_product_gid, allocation_index, before_state,
+            after_state, reason, actor
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s)
+        """,
+        (
+            row.get("id") or None,
+            action,
+            row["shopify_order_gid"],
+            row["shopify_line_item_gid"],
+            row["canonical_product_gid"],
+            row["allocation_index"],
+            json_dumps(before_state or {}),
+            json_dumps(after_state or {}),
+            str(reason or "")[:500],
+            actor,
+        ),
+    )
+
+
+def save_order_line_edition_override(
+    edition_order_id,
+    *,
+    shopify_order_gid,
+    shopify_line_item_gid,
+    canonical_product_gid,
+    allocation_index=1,
+    manual_edition_number,
+    reason,
+    actor,
+    actor_role,
+):
+    actor = _require_manual_override_actor(actor, actor_role)
+    number = order_line_edition_override.validate_manual_edition_number(manual_edition_number)
+    clean_reason = str(reason or "").strip()
+    if not clean_reason:
+        raise ValueError("A short reason is required.")
+    requested_order_gid = edition_ledger.canonical_shopify_gid("Order", shopify_order_gid)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _manual_edition_override_schema_required(cur)
+            assignment = _assignment_or_order_line_for_override_update(
+                cur,
+                edition_order_id,
+                shopify_order_gid=shopify_order_gid,
+                shopify_line_item_gid=shopify_line_item_gid,
+                allocation_index=allocation_index,
+            )
+            identity = _verify_override_identity(
+                assignment,
+                shopify_order_gid=shopify_order_gid,
+                shopify_line_item_gid=shopify_line_item_gid,
+                canonical_product_gid=canonical_product_gid,
+            )
+            lock_key = "|".join(
+                [identity["shopify_order_gid"], identity["shopify_line_item_gid"], str(identity["allocation_index"])]
+            )
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
+            # Lock the local order/dispatch state before checking Shopify.  A
+            # concurrent webhook or fulfilment write must serialize on these
+            # rows instead of slipping between the modal's live check and save.
+            _assert_override_is_unfulfilled(cur, identity)
+            live_status = _latest_shopify_fulfillment_status(requested_order_gid)
+            if order_line_edition_override.is_fulfillment_locked(live_status):
+                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            current = (
+                _manual_override_for_assignment(cur, edition_order_id, for_update=True)
+                if str(edition_order_id or "").strip()
+                else _manual_override_for_identity(cur, identity, for_update=True)
+            )
+            if current.get("locked_fulfilled_at"):
+                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            before = _manual_override_public(current)
+            previous = _effective_assignment(assignment, current)
+            if (
+                current.get("active")
+                and _int_value(current.get("manual_edition_number"), 0) == number
+                and str(current.get("reason") or "").strip() == clean_reason
+            ):
+                conn.commit()
+                return {"changed": False, "override": before, "effective": previous}
+            cur.execute(
+                """
+                INSERT INTO order_line_edition_overrides(
+                    edition_order_id, shopify_order_gid, shopify_line_item_gid,
+                    canonical_product_gid, allocation_index, manual_edition_number,
+                    previous_effective_edition_number, reason, active,
+                    created_by, updated_by, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, now(), now())
+                ON CONFLICT (shopify_order_gid, shopify_line_item_gid, allocation_index) DO UPDATE SET
+                    edition_order_id=COALESCE(EXCLUDED.edition_order_id, order_line_edition_overrides.edition_order_id),
+                    shopify_order_gid=EXCLUDED.shopify_order_gid,
+                    shopify_line_item_gid=EXCLUDED.shopify_line_item_gid,
+                    canonical_product_gid=EXCLUDED.canonical_product_gid,
+                    allocation_index=EXCLUDED.allocation_index,
+                    manual_edition_number=EXCLUDED.manual_edition_number,
+                    previous_effective_edition_number=EXCLUDED.previous_effective_edition_number,
+                    reason=EXCLUDED.reason, active=TRUE,
+                    updated_by=EXCLUDED.updated_by, updated_at=now(),
+                    removed_at=NULL, removed_by=NULL
+                RETURNING *
+                """,
+                (
+                    str(assignment.get("id") or "") or None,
+                    identity["shopify_order_gid"],
+                    identity["shopify_line_item_gid"],
+                    identity["canonical_product_gid"],
+                    identity["allocation_index"],
+                    number,
+                    previous.get("edition_number") or None,
+                    clean_reason[:500],
+                    actor,
+                    actor,
+                ),
+            )
+            saved = cur.fetchone()
+            after = _manual_override_public(saved)
+            effective = _effective_assignment(assignment, saved)
+            action = "created" if not current.get("active") else "changed"
+            _write_manual_override_audit(
+                cur,
+                saved,
+                action=action,
+                before_state=before,
+                after_state=after,
+                reason=clean_reason,
+                actor=actor,
+            )
+            if previous.get("edition_number") != effective.get("edition_number"):
+                certificate_assignment = dict(assignment)
+                certificate_assignment["id"] = (
+                    certificate_assignment.get("id")
+                    or f"manual:{saved.get('id')}"
+                )
+                _archive_and_stale_certificate(
+                    cur,
+                    certificate_assignment,
+                    override_id=saved.get("id"),
+                    effective_number=previous.get("edition_number"),
+                    reason="Manual edition override changed; regenerate the certificate.",
+                    actor=actor,
+                )
+        conn.commit()
+    return {"changed": True, "override": after, "effective": effective}
+
+
+def remove_order_line_edition_override(
+    edition_order_id,
+    *,
+    shopify_order_gid,
+    shopify_line_item_gid,
+    canonical_product_gid,
+    allocation_index=1,
+    reason,
+    actor,
+    actor_role,
+):
+    actor = _require_manual_override_actor(actor, actor_role)
+    clean_reason = str(reason or "").strip() or "Manual override removed."
+    requested_order_gid = edition_ledger.canonical_shopify_gid("Order", shopify_order_gid)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _manual_edition_override_schema_required(cur)
+            assignment = _assignment_or_order_line_for_override_update(
+                cur,
+                edition_order_id,
+                shopify_order_gid=shopify_order_gid,
+                shopify_line_item_gid=shopify_line_item_gid,
+                allocation_index=allocation_index,
+            )
+            identity = _verify_override_identity(
+                assignment,
+                shopify_order_gid=shopify_order_gid,
+                shopify_line_item_gid=shopify_line_item_gid,
+                canonical_product_gid=canonical_product_gid,
+            )
+            lock_key = "|".join(
+                [identity["shopify_order_gid"], identity["shopify_line_item_gid"], str(identity["allocation_index"])]
+            )
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
+            _assert_override_is_unfulfilled(cur, identity)
+            live_status = _latest_shopify_fulfillment_status(requested_order_gid)
+            if order_line_edition_override.is_fulfillment_locked(live_status):
+                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            current = (
+                _manual_override_for_assignment(cur, edition_order_id, for_update=True)
+                if str(edition_order_id or "").strip()
+                else _manual_override_for_identity(cur, identity, for_update=True)
+            )
+            if current.get("locked_fulfilled_at"):
+                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            before = _manual_override_public(current)
+            if not current or not current.get("active"):
+                conn.commit()
+                return {
+                    "changed": False,
+                    "override": before,
+                    "effective": _effective_assignment(assignment),
+                }
+            previous = _effective_assignment(assignment, current)
+            cur.execute(
+                """
+                UPDATE order_line_edition_overrides
+                SET active=FALSE, removed_at=now(), removed_by=%s,
+                    updated_by=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (actor, actor, current["id"]),
+            )
+            saved = cur.fetchone()
+            after = _manual_override_public(saved)
+            effective = _effective_assignment(assignment)
+            _write_manual_override_audit(
+                cur,
+                saved,
+                action="removed",
+                before_state=before,
+                after_state=after,
+                reason=clean_reason,
+                actor=actor,
+            )
+            if previous.get("edition_number") != effective.get("edition_number"):
+                certificate_assignment = dict(assignment)
+                certificate_assignment["id"] = (
+                    certificate_assignment.get("id")
+                    or f"manual:{saved.get('id')}"
+                )
+                _archive_and_stale_certificate(
+                    cur,
+                    certificate_assignment,
+                    override_id=saved.get("id"),
+                    effective_number=previous.get("edition_number"),
+                    reason="Manual edition override removed; regenerate the certificate.",
+                    actor=actor,
+                )
+        conn.commit()
+    return {"changed": True, "override": after, "effective": effective}
+
+
+def _lock_manual_override_for_fulfilment_cur(
+    cur,
+    *,
+    edition_order_id="",
+    shopify_order_id="",
+    shopify_line_item_id="",
+    actor="Fulfilment",
+):
+    if not table_exists(cur, "order_line_edition_overrides"):
+        return 0
+    reference = str(edition_order_id or "")
+    if reference.startswith("manual:"):
+        where_sql = "id::text=%s"
+        params = (reference.split(":", 1)[1],)
+    elif reference:
+        where_sql = "edition_order_id=%s"
+        params = (reference,)
+    elif shopify_order_id:
+        candidates = [
+            edition_ledger.canonical_shopify_gid("Order", candidate)
+            for candidate in _shopify_id_candidates("Order", shopify_order_id)
+        ]
+        where_sql = "shopify_order_gid=ANY(%s)"
+        params = (list({candidate for candidate in candidates if candidate}),)
+    else:
+        candidates = _shopify_id_candidates("LineItem", shopify_line_item_id)
+        where_sql = "shopify_line_item_gid=ANY(%s)"
+        params = (candidates,)
+    cur.execute(
+        f"""
+        SELECT * FROM order_line_edition_overrides
+        WHERE {where_sql} AND active=TRUE
+        FOR UPDATE
+        """,
+        params,
+    )
+    rows = list(cur.fetchall() or [])
+    for row in rows:
+        if row.get("locked_fulfilled_at"):
+            continue
+        before = _manual_override_public(row)
+        cur.execute(
+            """
+            UPDATE order_line_edition_overrides
+            SET locked_fulfilled_at=now(), updated_by=%s, updated_at=now()
+            WHERE id=%s AND locked_fulfilled_at IS NULL
+            RETURNING *
+            """,
+            (str(actor or "Fulfilment"), row["id"]),
+        )
+        locked = cur.fetchone()
+        if locked:
+            _write_manual_override_audit(
+                cur,
+                locked,
+                action="locked",
+                before_state=before,
+                after_state=_manual_override_public(locked),
+                reason="Order fulfilled; manual edition override permanently locked.",
+                actor=str(actor or "Fulfilment"),
+            )
+    return len(rows)
+
+
+def lock_order_line_edition_override_for_fulfilment(*, edition_order_id="", shopify_line_item_id="", actor="Fulfilment"):
+    with connect() as conn:
+        with conn.cursor() as cur:
+            count = _lock_manual_override_for_fulfilment_cur(
+                cur,
+                edition_order_id=edition_order_id,
+                shopify_line_item_id=shopify_line_item_id,
+                actor=actor,
+            )
+        conn.commit()
+    return count
+
+
 def _edition_order_search_filter(search):
     raw = str(search or "").strip()
     if not raw:
@@ -21676,7 +22973,25 @@ def list_edition_orders(search="", limit=250):
                 """,
                 (*search_params, limit),
             )
-            return cur.fetchall()
+            rows = list(cur.fetchall() or [])
+            if not rows or not table_exists(cur, "order_line_edition_overrides"):
+                return rows
+            edition_order_ids = [str(row.get("id")) for row in rows if row.get("id")]
+            cur.execute(
+                """
+                SELECT * FROM order_line_edition_overrides
+                WHERE edition_order_id=ANY(%s) AND active=TRUE
+                """,
+                (edition_order_ids,),
+            )
+            overrides = {
+                str(row.get("edition_order_id")): row
+                for row in (cur.fetchall() or [])
+            }
+            return [
+                _effective_assignment(row, overrides.get(str(row.get("id"))) or {})
+                for row in rows
+            ]
 
 
 def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend", ensure_schema_first=True):
@@ -21696,18 +23011,30 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
             with conn.cursor() as cur:
                 with certificate_stage("certificate_db_read"):
                     with certificate_stage("certificate_data_loaded"):
-                        cur.execute(
-                            """
-                            SELECT eo.*, o.order_name
-                            FROM edition_orders eo
-                            LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                            WHERE eo.id::text=%s
-                            """,
-                            (str(edition_order_id),),
-                        )
-                        assignment = cur.fetchone()
-                        if not assignment:
-                            raise ValueError("Edition order was not found.")
+                        reference = str(edition_order_id or "")
+                        if reference.startswith("manual:"):
+                            assignment = _manual_override_assignment(
+                                cur, reference.split(":", 1)[1]
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                SELECT eo.*, o.order_name
+                                FROM edition_orders eo
+                                LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                                WHERE eo.id::text=%s
+                                """,
+                                (reference,),
+                            )
+                            assignment = cur.fetchone()
+                            if not assignment:
+                                raise ValueError("Edition order was not found.")
+                            override = (
+                                _manual_override_for_assignment(cur, edition_order_id)
+                                if table_exists(cur, "order_line_edition_overrides")
+                                else {}
+                            )
+                            assignment = _effective_assignment(assignment, override)
                         set_certificate_log_context(
                             source_page=source_page,
                             order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",
