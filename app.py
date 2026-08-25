@@ -8490,6 +8490,28 @@ def render_final_zip_download(result):
         st.button("Download ZIP", key=f"download-filtered-zip-disabled::{result['run_dir']}", disabled=True, use_container_width=True)
         return
 
+    normalized_groups = {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in selected_groups
+    }
+    readiness = result["product_image_readiness"]
+    if (
+        {ASSET_CATEGORY_CORE, ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups)
+        and not readiness["complete"]
+    ):
+        st.warning(
+            "The complete product package is not ready. Missing required images: "
+            + ", ".join(readiness["missing_labels"])
+            + ". Upload them above, or explicitly select a partial recovery group."
+        )
+        st.button(
+            "Download ZIP",
+            key=f"download-filtered-zip-incomplete::{result['run_dir']}",
+            disabled=True,
+            use_container_width=True,
+        )
+        return
+
     if result_is_dropbox_backed(result):
         ordered_assets = image_factory.order_assets_by_product_manifest(
             result["assets"],
@@ -15985,28 +16007,6 @@ def main():
             status="denied",
         )
         log_startup_stage("PAGE ACCESS BLOCKED", current_page)
-        return
-
-    normalized_groups = {
-        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
-        for group in selected_groups
-    }
-    readiness = result["product_image_readiness"]
-    if (
-        {ASSET_CATEGORY_CORE, ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups)
-        and not readiness["complete"]
-    ):
-        st.warning(
-            "The complete product package is not ready. Missing required images: "
-            + ", ".join(readiness["missing_labels"])
-            + ". Upload them above, or explicitly select a partial recovery group."
-        )
-        st.button(
-            "Download ZIP",
-            key=f"download-filtered-zip-incomplete::{result['run_dir']}",
-            disabled=True,
-            use_container_width=True,
-        )
         return
 
     top_bar.render_planner_data_refresh_bridge(st, current_route=current_page)
