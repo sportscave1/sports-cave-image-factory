@@ -8077,14 +8077,13 @@ def _sync_visible_shopify_orders_into_sports_cave(orders):
     errors = []
     for order in orders or []:
         try:
-            result = supabase_backend.process_shopify_order_for_editions(
+            result = supabase_backend.process_single_paid_shopify_order_for_editions(
                 order,
-                generate_certificates=False,
-                sync_product_metafields=True,
+                source="targeted_reconciliation",
             )
             orders_checked += 1
-            assignments_created += int(result.get("assignments_created") or 0)
-            already_assigned += int(result.get("existing_assignments_skipped") or 0)
+            assignments_created += int(result.get("editions_assigned") or 0)
+            already_assigned += int(result.get("skipped_existing_lines") or 0)
             if result.get("errors"):
                 errors.extend(result["errors"])
         except Exception as error:
@@ -8481,69 +8480,22 @@ def render_supabase_orders_page():
 
 
 def fetch_latest_orders(config):
-    run_id = db.start_shopify_order_sync(config["store_domain"], config["api_version"])
     progress = st.progress(0, text="Fetching latest Shopify orders...")
-    orders_seen = 0
-    pages_synced = 0
-    assignments_created = 0
-    changed_product_ids = set()
-    sync_warning = ""
     try:
-        for page in shopify_sync.iter_order_pages(config=config):
-            for order in page["orders"]:
-                result = db.process_shopify_order_for_editions(order)
-                assignments_created += result["assignments_created"]
-                changed_product_ids.update(result["changed_product_ids"])
-            orders_seen += len(page["orders"])
-            pages_synced += 1
-            db.update_shopify_order_sync_run(
-                run_id,
-                orders_seen=orders_seen,
-                assignments_created=assignments_created,
-                pages_synced=pages_synced,
-                api_version=page.get("api_version"),
-            )
-            progress.progress(
-                min(int(orders_seen / max(config["max_orders"], 1) * 100), 99),
-                text=f"Fetched {orders_seen} Shopify orders...",
-            )
-            del page
-            gc.collect()
-
-        if os.getenv("SHOPIFY_AUTO_SYNC_EDITION_WIDGET", "true").lower() == "true":
-            for product_id in changed_product_ids:
-                try:
-                    product = db.get_shopify_edition_product(product_id)
-                    if product:
-                        shopify_sync.sync_edition_metafields(product, config=config)
-                        db.mark_shopify_edition_synced(product_id)
-                except Exception:
-                    sync_warning = "Edition assigned locally, but storefront display sync failed."
-
-        db.update_shopify_order_sync_run(
-            run_id,
-            status="Complete",
-            orders_seen=orders_seen,
-            assignments_created=assignments_created,
-            pages_synced=pages_synced,
+        result = supabase_backend.sync_latest_paid_orders_to_supabase(
+            config=config,
+            limit=min(max(int(config.get("max_orders") or 50), 1), 100),
+            backfill_latest_paid=False,
         )
         progress.progress(100, text="Shopify order fetch complete.")
         return {
-            "orders_seen": orders_seen,
-            "assignments_created": assignments_created,
-            "sync_warning": sync_warning,
+            "orders_seen": int(result.get("shopify_orders_fetched") or result.get("orders_seen") or 0),
+            "assignments_created": int(result.get("assignments_created") or 0),
+            "sync_warning": "; ".join(result.get("errors") or [])[:1000],
         }
-    except Exception as error:
-        db.update_shopify_order_sync_run(
-            run_id,
-            status="Failed",
-            orders_seen=orders_seen,
-            assignments_created=assignments_created,
-            pages_synced=pages_synced,
-            error_message="Shopify order sync failed. Check read_orders scope and API version.",
-        )
+    except Exception:
         progress.empty()
-        raise error
+        raise
 
 
 def active_assignments(assignments):

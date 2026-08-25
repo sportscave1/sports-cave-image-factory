@@ -1029,7 +1029,18 @@ def _sync_order_allocations_with_retry(
     raise last_error
 
 
-def process_shopify_order_for_editions(
+def process_shopify_order_for_editions(*args, **kwargs):
+    """Deprecated Shopify-metafield allocator; the Supabase ledger is mandatory."""
+    return {
+        "processed": False,
+        "reason": "Deprecated direct allocator disabled; use the atomic Supabase edition ledger.",
+        "assignments_created": 0,
+        "issues": [{"status": "Atomic Supabase ledger required"}],
+        "skipped_existing": 0,
+    }
+
+
+def _legacy_process_shopify_order_for_editions(
     order_payload,
     config=None,
     request_post=None,
@@ -1435,6 +1446,22 @@ def _historical_candidate_rows(rows, order_states, cutover_state):
 
 
 def historical_backfill_order_rows(rows, config=None, request_post=None, cutover_state=None):
+    """Historical imports are read-only unless an audited ledger repair is approved."""
+    return {
+        "mode": "dry_run",
+        "assignments_created": 0,
+        "skipped_existing": 0,
+        "skipped_not_historical": 0,
+        "candidate_rows": len([row for row in (rows or []) if isinstance(row, dict)]),
+        "errors": [
+            {"status": "Historical backfill disabled; use scripts/reconcile_edition_ledger.py."}
+        ],
+        "order_payloads": {},
+        "assigned_rows": [],
+    }
+
+
+def _legacy_historical_backfill_order_rows(rows, config=None, request_post=None, cutover_state=None):
     config = config or shopify_sync.get_config()
     cutover = cutover_state or load_cutover_state()
     baselines = cutover.get("baselines") or {}

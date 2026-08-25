@@ -656,6 +656,9 @@ class MockupPromptPreviewTests(unittest.TestCase):
         generation_result = source[
             source.index("def render_generation_result") : source.index("\n\ndef render_recent_runs_sidebar")
         ]
+        prompt_fragment = source[
+            source.index("def _render_prompt_card_group") : source.index("\n\ndef render_optional_package_controls")
+        ]
         mockups_page = source[
             source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
         ]
@@ -665,10 +668,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             generation_result.index("render_generated_previews(result)"),
             generation_result.index("render_prompt_cards("),
         )
-        self.assertLess(
-            generation_result.index("render_prompt_cards("),
-            generation_result.index("render_final_zip_download(result)"),
-        )
+        self.assertIn("render_final_zip_download(result)", prompt_fragment)
         self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
         self.assertNotIn("render_lifestyle_cards=False", mockups_page)
         self.assertNotIn("render_zip=False", mockups_page)
@@ -789,12 +789,13 @@ class MockupPromptPreviewTests(unittest.TestCase):
             : source.index("\n\ndef render_asset_selection_controls")
         ]
         prompt_cards = source[
-            source.index("@st.fragment\ndef render_prompt_cards")
+            source.index("def _render_prompt_card_group")
             : source.index("\n\ndef render_optional_package_controls")
         ]
 
         self.assertNotIn("st.rerun", upload_handler)
         self.assertIn("return updated_result", upload_handler)
+        self.assertIn("@st.fragment\ndef render_prompt_cards", prompt_cards)
         self.assertLess(
             prompt_cards.index("uploaded_lifestyle_image = st.file_uploader"),
             prompt_cards.index('if saved_lifestyle_paths:'),
@@ -837,7 +838,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
     def test_post_generation_prompt_cards_render_copy_prompt_upload_and_zip_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         prompt_cards = source[
-            source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
+            source.index("def _render_prompt_card_group") : source.index("\n\ndef render_optional_package_controls")
         ]
         mockup_actions = source[
             source.index("def render_mockup_prompt_action_row") : source.index("\n\ndef prime_asset_selection_state")

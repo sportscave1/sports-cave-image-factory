@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 
 from certificate_logging import certificate_stage_log
+import edition_ledger
 
 
 DEFAULT_API_VERSION = "2026-04"
@@ -1311,6 +1312,9 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
       updatedAt
       processedAt
       sourceName
+      sourceIdentifier
+      app { id name }
+      tags
       test
       cancelledAt
       note
@@ -1422,6 +1426,9 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
       updatedAt
       processedAt
       sourceName
+      sourceIdentifier
+      app { id name }
+      tags
       test
       cancelledAt
       note
@@ -1533,7 +1540,11 @@ query SportsCaveOrdersLight($first: Int!, $after: String, $query: String, $sortK
       updatedAt
       processedAt
       sourceName
+      sourceIdentifier
+      app { id name }
+      tags
       test
+      cancelledAt
       displayFinancialStatus
       displayFulfillmentStatus
       email
@@ -1610,6 +1621,9 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
       updatedAt
       processedAt
       sourceName
+      sourceIdentifier
+      app { id name }
+      tags
       test
       cancelledAt
       note
@@ -2939,6 +2953,19 @@ def product_edition_metafield_inputs(product):
     ]
 
 
+def complete_product_edition_metafield_inputs(product):
+    """Build one atomic canonical + legacy mirror payload for a product."""
+    canonical = limited_edition_metafield_inputs(
+        product.get("shopify_product_gid") or product.get("shopify_product_id"),
+        product,
+    )
+    legacy = product_edition_metafield_inputs(product)
+    by_identity = {}
+    for item in [*legacy, *canonical]:
+        by_identity[(item.get("namespace"), item.get("key"))] = item
+    return list(by_identity.values())
+
+
 def edition_metafield_inputs(product):
     owner_id = shopify_gid("Product", product["shopify_product_id"])
     display_text = product.get("edition_display_text") or build_edition_display_text(product)
@@ -3031,6 +3058,27 @@ def sync_product_edition_metafields(product, config=None, request_post=None):
     except ShopifyAPIError as error:
         raise ShopifyAPIError(
             f"Could not sync storefront edition display. {error}"
+        ) from error
+
+
+def sync_complete_product_edition_metafields(product, config=None, request_post=None):
+    """Mirror all storefront keys in one metafieldsSet mutation.
+
+    Shopify userErrors are raised by metafields_set, leaving the database ledger
+    committed and this mirror safely retryable.
+    """
+    try:
+        inputs = complete_product_edition_metafield_inputs(product)
+        response = metafields_set(inputs, config=config, request_post=request_post)
+        returned = response.get("metafields") or []
+        if len(returned) != len(inputs):
+            raise ShopifyAPIError(
+                f"Shopify confirmed {len(returned)} of {len(inputs)} Edition Ops metafields."
+            )
+        return response
+    except ShopifyAPIError as error:
+        raise ShopifyAPIError(
+            f"Could not atomically sync canonical and legacy storefront edition fields. {error}"
         ) from error
 
 
@@ -3410,6 +3458,7 @@ def normalize_order(node, store_domain):
                 "product_handle": product.get("handle") or "",
                 "variant_title": item.get("variantTitle") or variant.get("title") or "",
                 "variant_id": variant.get("id") or "",
+                "shopify_variant_id": variant.get("id") or "",
                 "sku": item.get("sku") or variant.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
                 "custom_attributes": custom_attributes,
@@ -3420,11 +3469,9 @@ def normalize_order(node, store_domain):
     financial_status = node.get("displayFinancialStatus") or ""
     metafields = ((node.get("metafields") or {}).get("nodes") or [])
     source_name = str(node.get("sourceName") or "").strip()
-    source_display = {
-        "web": "Online Store",
-        "pos": "Shopify POS",
-        "shopify_draft_order": "Draft order",
-    }.get(source_name.casefold(), source_name.replace("_", " ").strip().title())
+    source_app = node.get("app") or {}
+    tags = list(node.get("tags") or [])
+    source_display = edition_ledger.source_display_name(source_name, tags=tags)
     return {
         "shopify_order_id": node.get("id") or "",
         "legacy_resource_id": legacy_resource_id,
@@ -3438,6 +3485,10 @@ def normalize_order(node, store_domain):
         "processed_at": node.get("processedAt") or "",
         "source_name": source_name,
         "source_display": source_display,
+        "source_identifier": str(node.get("sourceIdentifier") or ""),
+        "source_app_id": str(source_app.get("id") or ""),
+        "source_app_name": str(source_app.get("name") or ""),
+        "tags": tags,
         "test": bool(node.get("test")),
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,

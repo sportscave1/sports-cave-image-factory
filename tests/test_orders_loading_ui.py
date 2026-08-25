@@ -2016,20 +2016,17 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(attribute_hint["edition_total"], 100)
         self.assertEqual(attribute_hint["source"], "shopify_line_or_order_attribute")
 
-    def test_allocation_uses_promised_snapshot_before_sequential_fallback(self):
+    def test_allocation_uses_atomic_ledger_not_promised_snapshots(self):
         process_source = inspect.getsource(supabase_backend.process_paid_order)
         allocation_source = inspect.getsource(supabase_backend.allocate_edition_for_order_line)
+        atomic_source = inspect.getsource(supabase_backend.allocate_edition_line_units_atomic)
 
-        self.assertIn("promised_edition_hint_for_order_line(order, line_item, allocation_index)", process_source)
-        self.assertIn("promised_edition_number=promised_hint.get(\"edition_number\")", process_source)
-        self.assertIn("promised_edition_total=promised_hint.get(\"edition_total\")", process_source)
-        self.assertIn("assignment_source=promised_hint.get(\"source\")", process_source)
-        self.assertIn("promised_edition_existing_mismatch", allocation_source)
-        self.assertIn("promised_edition_conflict", allocation_source)
-        self.assertIn("target_number = _int_value(promised_edition_number, 0)", allocation_source)
-        self.assertIn("target_number = next_number", allocation_source)
-        self.assertIn("incremented_next = max(next_number, target_number + 1)", allocation_source)
-        self.assertIn("edition_order_purchase_snapshot_allocation", allocation_source)
+        self.assertIn("allocate_edition_line_units_atomic(", process_source)
+        self.assertIn("source_channel_for_order(order)", atomic_source)
+        self.assertIn("external_order_id_for_order(order)", atomic_source)
+        self.assertIn("external_line_item_id_for_line(order, line_item)", atomic_source)
+        self.assertNotIn("promised_edition_hint_for_order_line", process_source)
+        self.assertIn("Per-unit/promised-number allocation is disabled", allocation_source)
 
     def test_known_missing_edition_repair_targets_current_paid_rows(self):
         targets = supabase_backend.KNOWN_MISSING_EDITION_REPAIRS
@@ -2206,9 +2203,9 @@ class EditionOpsUiTests(unittest.TestCase):
                 self.saved_rows = rows
                 return [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}]
 
-            def sync_edition_ops_metafields_for_rows(self, rows, config=None, ensure_schema_first=True):
+            def sync_product_edition_metafields_for_handles(self, handles, config=None, ensure_schema_first=True):
                 self.shopify_calls += 1
-                self.mirrored_rows = rows
+                self.mirrored_handles = handles
                 return {
                     "attempted": 1,
                     "synced": 1,
@@ -2216,8 +2213,7 @@ class EditionOpsUiTests(unittest.TestCase):
                     "errors": [],
                     "results": [
                         {
-                            "row_key": rows[0]["row_key"],
-                            "handle": rows[0]["handle"],
+                            "handle": handles[0],
                             "status": "updated",
                             "ok": True,
                         }
@@ -2275,7 +2271,7 @@ class EditionOpsUiTests(unittest.TestCase):
                             "shopify_product_gid": "gid://shopify/Product/100",
                             "product_title": "Wall Art",
                             "handle": "wall-art",
-                            "edition_enabled": True,
+                            "edition_enabled": False,
                             "edition_total": 100,
                             "edition_next_number": 10,
                             "edition_sold_count": 9,
@@ -2371,7 +2367,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_backend.supabase_calls, 1)
         self.assertEqual(fake_backend.shopify_calls, 1)
         self.assertEqual(fake_backend.saved_rows[0]["next_edition_number"], 10)
-        self.assertEqual(fake_backend.mirrored_rows[0]["edition_next_number"], 10)
+        self.assertEqual(fake_backend.saved_rows[0]["active"], False)
+        self.assertEqual(fake_backend.mirrored_handles, ["wall-art"])
         self.assertIn(("Save Changes", {"type": "primary", "use_container_width": False, "disabled": False, "key": "edition-ops-save-changes"}), fake_st.buttons)
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
@@ -3334,7 +3331,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         diagnostics.assert_called_once_with({"shopify_orders_fetched": 2})
 
-    def test_latest_paid_sync_allocates_without_historical_tracking_guard(self):
+    def test_latest_paid_sync_enforces_historical_tracking_guard(self):
         latest_sync_source = inspect.getsource(supabase_backend.sync_latest_paid_orders_to_supabase)
         preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)
         general_sync_source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
@@ -3342,13 +3339,11 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("_latest_paid_order_needs_sync", latest_sync_source)
         self.assertIn("list_existing_shopify_order_states", latest_sync_source)
-        self.assertIn(
-            "apply_known_missing_edition_repair(ensure_schema_first=ensure_schema_first)",
-            latest_sync_source,
-        )
         self.assertIn("process_shopify_order_for_editions", latest_sync_source)
         self.assertIn("fetch_missing_products=False", latest_sync_source)
-        self.assertIn("assign_editions=True", latest_sync_source)
+        self.assertIn("assign_editions=should_assign_editions", latest_sync_source)
+        self.assertIn("order_datetime >= tracking_start", latest_sync_source)
+        self.assertIn("historical_orders_skipped += 1", latest_sync_source)
         self.assertIn("generate_certificates=False", latest_sync_source)
         self.assertIn("sync_product_metafields=False", latest_sync_source)
         self.assertIn("PERF Sync Orders:", perf_log_source)
@@ -3366,7 +3361,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("COALESCE(o.created_at, o.processed_at, o.synced_at) ASC", source)
         self.assertIn("o.order_name ASC", source)
         self.assertNotIn("o.order_name DESC", source)
-        self.assertIn("respect_tracking_start=False", repair_source)
+        self.assertIn('"mode": "dry_run_only"', repair_source)
+        self.assertIn("scripts/reconcile_edition_ledger.py", repair_source)
 
     def test_backfill_missing_order_details_dry_run_is_read_only(self):
         fake_st = SimpleNamespace(
@@ -3741,8 +3737,11 @@ class EditionOpsUiTests(unittest.TestCase):
         unchanged_status_only = dict(original)
         unchanged_status_only["sync_status"] = "Unsaved"
 
-        self.assertEqual(edition_ops._changed_rows([changed], [original]), [changed])
+        self.assertEqual(edition_ops._changed_rows([changed], [original]), [])
         self.assertEqual(edition_ops._changed_rows([unchanged_status_only], [original]), [])
+        config_change = dict(original)
+        config_change["edition_enabled"] = not original["edition_enabled"]
+        self.assertEqual(edition_ops._changed_rows([config_change], [original]), [config_change])
 
     def test_edition_ops_uses_stable_handle_key_when_product_gid_missing(self):
         original = edition_ops._normalise_row(
@@ -3843,7 +3842,7 @@ class EditionOpsUiTests(unittest.TestCase):
         write_snapshot.assert_called_once()
         bump_editor.assert_called_once()
 
-    def test_csv_import_accepts_visible_headers_and_excel_numbers(self):
+    def test_csv_import_requires_gid_caps_total_and_preserves_counters(self):
         rows = [
             edition_ops._normalise_row(
                 {
@@ -3855,20 +3854,37 @@ class EditionOpsUiTests(unittest.TestCase):
                 }
             )
         ]
-        csv_text = "Handle,Enabled,Edition total,Next edition number\nall-rise-wall-art,TRUE,150.0,72.0\n"
+        csv_text = (
+            "shopify_product_gid,Handle,Enabled,Edition total,Next edition number\n"
+            "gid://shopify/Product/1,all-rise-wall-art,TRUE,100.0,72.0\n"
+        )
 
         updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-        self.assertEqual(warnings, [])
+        self.assertEqual(
+            warnings,
+            ["all-rise-wall-art: ledger-derived next/sold/remaining/status CSV values were ignored."],
+        )
         self.assertEqual(changed_count, 1)
         self.assertEqual(len(changed_rows), 1)
         self.assertTrue(updated_rows[0]["edition_enabled"])
-        self.assertEqual(updated_rows[0]["edition_total"], 150)
-        self.assertEqual(updated_rows[0]["edition_next_number"], 72)
-        self.assertEqual(updated_rows[0]["edition_sold_count"], 71)
-        self.assertEqual(updated_rows[0]["edition_remaining"], 79)
+        self.assertEqual(updated_rows[0]["edition_total"], 100)
+        self.assertEqual(updated_rows[0]["edition_next_number"], 1)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 0)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 100)
         self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
         self.assertEqual(updated_rows[0]["sync_status"], "Needs Sync")
+
+        _, invalid_rows, invalid_count, invalid_warnings = edition_ops._apply_csv_updates_to_rows(
+            rows,
+            (
+                "shopify_product_gid,Enabled,Edition total\n"
+                "gid://shopify/Product/1,TRUE,101\n"
+            ),
+        )
+        self.assertEqual(invalid_count, 0)
+        self.assertEqual(invalid_rows, [])
+        self.assertIn("edition_total cannot exceed 100", invalid_warnings[0])
 
     def test_csv_import_action_is_clickable_and_readable(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
@@ -3899,7 +3915,10 @@ class EditionOpsUiTests(unittest.TestCase):
         )
         upload = SimpleNamespace(
             name="edition-ops-backup.csv",
-            getvalue=lambda: b"Handle,Enabled,Edition total,Next edition number\nall-rise-wall-art,TRUE,150,72\n",
+            getvalue=lambda: (
+                b"shopify_product_gid,Handle,Enabled,Edition total,Next edition number\n"
+                b"gid://shopify/Product/1,all-rise-wall-art,TRUE,100,72\n"
+            ),
         )
 
         with patch.object(edition_ops, "st", fake_st), patch.object(
@@ -3908,14 +3927,14 @@ class EditionOpsUiTests(unittest.TestCase):
             result = edition_ops._apply_csv_import(upload)
 
         self.assertTrue(result)
-        self.assertEqual(fake_st.session_state[edition_ops.IMPORT_WARNINGS_KEY], [])
-        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_total"], 150)
-        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 72)
+        self.assertEqual(len(fake_st.session_state[edition_ops.IMPORT_WARNINGS_KEY]), 1)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_total"], 100)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 1)
         self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["sync_status"], "Needs Sync")
         write_snapshot.assert_called_once()
         bump_version.assert_called_once()
 
-    def test_csv_import_overwrites_current_next_number_even_when_lower(self):
+    def test_csv_import_cannot_overwrite_current_next_number(self):
         rows = [
             edition_ops._normalise_row(
                 {
@@ -3934,14 +3953,14 @@ class EditionOpsUiTests(unittest.TestCase):
 
         updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-        self.assertEqual(warnings, [])
-        self.assertEqual(changed_count, 1)
-        self.assertEqual(len(changed_rows), 1)
-        self.assertEqual(updated_rows[0]["edition_next_number"], 25)
-        self.assertEqual(updated_rows[0]["edition_sold_count"], 24)
-        self.assertEqual(updated_rows[0]["edition_remaining"], 76)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(changed_count, 0)
+        self.assertEqual(changed_rows, [])
+        self.assertEqual(updated_rows[0]["edition_next_number"], 49)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 48)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 52)
 
-    def test_csv_import_replaces_with_authoritative_derived_fields(self):
+    def test_csv_import_without_gid_cannot_redirect_by_title_or_handle(self):
         rows = [
             edition_ops._normalise_row(
                 {
@@ -3965,16 +3984,17 @@ class EditionOpsUiTests(unittest.TestCase):
 
         updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-        self.assertEqual(warnings, [])
-        self.assertEqual(changed_count, 1)
-        self.assertEqual(len(changed_rows), 1)
-        self.assertEqual(updated_rows[0]["edition_next_number"], 16)
-        self.assertEqual(updated_rows[0]["edition_sold_count"], 15)
-        self.assertEqual(updated_rows[0]["edition_remaining"], 85)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("canonical shopify_product_gid is required", warnings[0])
+        self.assertEqual(changed_count, 0)
+        self.assertEqual(changed_rows, [])
+        self.assertEqual(updated_rows[0]["edition_next_number"], 32)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 31)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 69)
         self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
-        self.assertEqual(updated_rows[0]["sync_status"], "Needs Sync")
+        self.assertEqual(updated_rows[0]["sync_status"], "Loaded")
 
-    def test_csv_import_supports_old_remaining_and_widget_status_headers(self):
+    def test_csv_import_ignores_old_counter_headers(self):
         rows = [
             edition_ops._normalise_row(
                 {
@@ -3985,19 +4005,20 @@ class EditionOpsUiTests(unittest.TestCase):
             )
         ]
         csv_text = (
-            "Product title,Handle,Enabled,Edition total,Next edition number,remaining,widget_status\n"
-            "Legacy Wall Art,legacy-wall-art,true,100,96,5,Final Editions\n"
+            "shopify_product_gid,Product title,Handle,Enabled,Edition total,Next edition number,remaining,widget_status\n"
+            "gid://shopify/Product/1,Legacy Wall Art,legacy-wall-art,true,100,96,5,Final Editions\n"
         )
 
         updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-        self.assertEqual(warnings, [])
+        self.assertEqual(len(warnings), 1)
         self.assertEqual(changed_count, 1)
         self.assertEqual(len(changed_rows), 1)
-        self.assertEqual(updated_rows[0]["edition_next_number"], 96)
-        self.assertEqual(updated_rows[0]["edition_sold_count"], 95)
-        self.assertEqual(updated_rows[0]["edition_remaining"], 5)
-        self.assertEqual(updated_rows[0]["edition_status"], "Final Editions")
+        self.assertTrue(updated_rows[0]["edition_enabled"])
+        self.assertEqual(updated_rows[0]["edition_next_number"], 1)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 0)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 100)
+        self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
 
     def test_csv_import_unchanged_rows_do_not_get_marked_needs_sync(self):
         rows = [
@@ -4019,7 +4040,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-        self.assertEqual(warnings, [])
+        self.assertEqual(len(warnings), 1)
         self.assertEqual(changed_count, 0)
         self.assertEqual(changed_rows, [])
         self.assertEqual(updated_rows[0]["sync_status"], "Loaded")
@@ -4040,10 +4061,16 @@ class EditionOpsUiTests(unittest.TestCase):
 
     def test_save_changed_rows_updates_only_changed_rows(self):
         original = edition_ops._normalise_row(
-            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
+            {
+                "edition_product_id": "101",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 42,
+            }
         )
         changed = dict(original)
-        changed["edition_next_number"] = 43
+        changed["edition_enabled"] = False
         untouched = edition_ops._normalise_row(
             {"edition_product_id": "102", "handle": "goat-debate-wall-art", "edition_total": 100, "edition_next_number": 52}
         )
@@ -4071,7 +4098,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(len(saved_batches), 1)
         self.assertEqual(len(saved_batches[0]), 1)
         self.assertEqual(saved_batches[0][0]["row_key"], "edition_product:101")
-        self.assertEqual(saved_batches[0][0]["next_edition_number"], 43)
+        self.assertEqual(saved_batches[0][0]["next_edition_number"], 42)
+        self.assertFalse(saved_batches[0][0]["active"])
         self.assertIn("Edition Ops saved but Shopify sync failed", fake_st.session_state[edition_ops.NOTICE_KEY])
         self.assertIn("Retry is available", fake_st.session_state[edition_ops.NOTICE_KEY])
 
@@ -4096,13 +4124,13 @@ class EditionOpsUiTests(unittest.TestCase):
                 edition_ops.NOTICE_LEVEL_KEY: "success",
             }
         )
-        mirrored = []
+        mirrored_handles = []
         fake_backend = SimpleNamespace(
             update_edition_products_batch=Mock(
                 side_effect=AssertionError("Unchanged pending rows must not rewrite Supabase.")
             ),
-            sync_edition_ops_metafields_for_rows=lambda rows, **kwargs: (
-                mirrored.extend(rows)
+            sync_product_edition_metafields_for_handles=lambda handles, **kwargs: (
+                mirrored_handles.extend(handles)
                 or {
                     "results": [
                         {
@@ -4132,8 +4160,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             edition_ops._save_changed_rows()
 
-        self.assertEqual(len(mirrored), 1)
-        self.assertEqual(mirrored[0]["shopify_product_gid"], "gid://shopify/Product/1")
+        self.assertEqual(mirrored_handles, ["new-wall-art"])
         self.assertNotIn("No changes to save", fake_st.session_state[edition_ops.NOTICE_KEY])
         self.assertIn("Shopify sync completed", fake_st.session_state[edition_ops.NOTICE_KEY])
 
@@ -4177,12 +4204,12 @@ class EditionOpsUiTests(unittest.TestCase):
 
         saved = saved_batches[0][0]
         self.assertFalse(saved["active"])
-        self.assertTrue(saved["sold_out"])
-        self.assertEqual(saved["next_edition_number"], 101)
+        self.assertFalse(saved["sold_out"])
+        self.assertEqual(saved["next_edition_number"], 42)
         self.assertEqual(saved["reason"], "Edition archived from Edition Ops")
         display_row = fake_st.session_state[edition_ops.ROWS_KEY][0]
-        self.assertEqual(display_row["edition_remaining"], 0)
-        self.assertEqual(display_row["edition_status"], "Sold Out Archive")
+        self.assertEqual(display_row["edition_remaining"], 59)
+        self.assertEqual(display_row["edition_status"], "Limited Edition")
 
     def test_reenabling_archived_row_requires_next_number_inside_total(self):
         original = edition_ops._normalise_row(
@@ -4224,7 +4251,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "Warning: this product has assigned editions above this next number. Manual correction saved.",
         )
 
-    def test_save_changed_rows_allows_manual_lower_and_warns(self):
+    def test_save_changed_rows_ignores_manual_counter_lowering(self):
         original = edition_ops._normalise_row(
             {
                 "edition_product_id": "101",
@@ -4261,23 +4288,28 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             edition_ops._save_changed_rows()
 
-        saved = saved_batches[0][0]
-        self.assertEqual(saved["next_edition_number"], 80)
-        self.assertEqual(saved["reason"], "manual_next_number_lowered")
-        self.assertTrue(saved["manual_next_number_lowered"])
-        self.assertEqual(saved["highest_assigned_edition"], 94)
-        self.assertIn(
-            "Warning: this product has assigned editions above this next number. Manual correction saved.",
-            fake_st.session_state[edition_ops.NOTICE_KEY],
-        )
+        self.assertEqual(saved_batches, [])
+        self.assertEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
         self.assertEqual(fake_st.session_state[edition_ops.NOTICE_LEVEL_KEY], "warning")
 
     def test_repeated_saves_use_latest_editor_widget_state(self):
         row_a = edition_ops._normalise_row(
-            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 10}
+            {
+                "edition_product_id": "101",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 10,
+            }
         )
         row_b = edition_ops._normalise_row(
-            {"edition_product_id": "102", "handle": "goat-debate-wall-art", "edition_total": 100, "edition_next_number": 20}
+            {
+                "edition_product_id": "102",
+                "handle": "goat-debate-wall-art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 20,
+            }
         )
         fake_st = SimpleNamespace(
             session_state={
@@ -4293,7 +4325,7 @@ class EditionOpsUiTests(unittest.TestCase):
             or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
         )
 
-        first_submit = [dict(row_a, edition_next_number=11), row_b]
+        first_submit = [dict(row_a, edition_enabled=False), row_b]
         with patch.object(edition_ops, "st", fake_st), patch.object(
             edition_ops, "_configured_supabase_backend", return_value=fake_backend
         ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
@@ -4301,29 +4333,35 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             edition_ops._save_changed_rows(first_submit)
             fake_st.session_state[edition_ops.EDITOR_KEY] = {
-                "edited_rows": {"1": {"edition_next_number": 21}}
+                "edited_rows": {"1": {"edition_enabled": False}}
             }
             stale_submit = deepcopy(fake_st.session_state[edition_ops.ROWS_KEY])
             edition_ops._save_changed_rows(stale_submit)
 
         self.assertEqual(len(saved_batches), 2)
         self.assertEqual(saved_batches[0][0]["row_key"], "edition_product:101")
-        self.assertEqual(saved_batches[0][0]["next_edition_number"], 11)
+        self.assertFalse(saved_batches[0][0]["active"])
         self.assertEqual(saved_batches[1][0]["row_key"], "edition_product:102")
-        self.assertEqual(saved_batches[1][0]["next_edition_number"], 21)
+        self.assertFalse(saved_batches[1][0]["active"])
         self.assertNotEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
         self.assertEqual(
-            fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][1]["edition_next_number"],
-            21,
+            fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][1]["edition_enabled"],
+            False,
         )
         self.assertEqual(
-            fake_st.session_state[edition_ops.EDITOR_ROWS_KEY][1]["edition_next_number"],
-            21,
+            fake_st.session_state[edition_ops.EDITOR_ROWS_KEY][1]["edition_enabled"],
+            False,
         )
 
     def test_same_row_can_save_twice_without_page_reload(self):
         row = edition_ops._normalise_row(
-            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 10}
+            {
+                "edition_product_id": "101",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 10,
+            }
         )
         fake_st = SimpleNamespace(
             session_state={
@@ -4344,14 +4382,14 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
             edition_ops, "_write_snapshot"
         ):
-            edition_ops._save_changed_rows([dict(row, edition_next_number=11)])
+            edition_ops._save_changed_rows([dict(row, edition_enabled=False)])
             fake_st.session_state[edition_ops.EDITOR_KEY] = {
-                "edited_rows": {0: {"edition_next_number": 12}}
+                "edited_rows": {0: {"edition_enabled": True}}
             }
             edition_ops._save_changed_rows(deepcopy(fake_st.session_state[edition_ops.ROWS_KEY]))
 
-        self.assertEqual([batch[0]["next_edition_number"] for batch in saved_batches], [11, 12])
-        self.assertEqual(fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][0]["edition_next_number"], 12)
+        self.assertEqual([batch[0]["active"] for batch in saved_batches], [False, True])
+        self.assertTrue(fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][0]["edition_enabled"])
 
     def test_editor_key_remains_stable(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")

@@ -2764,6 +2764,63 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(order["customer_email"], "fallback@example.com")
         self.assertEqual(order["customer_id"], "fallback@example.com")
 
+    def test_normalize_order_retains_real_ebay_attribution_and_exact_line_ids(self):
+        order = shopify_sync.normalize_order(
+            {
+                "id": "gid://shopify/Order/7373639811379",
+                "legacyResourceId": "7373639811379",
+                "name": "#SC3058",
+                "createdAt": "2026-08-24T20:31:14Z",
+                "updatedAt": "2026-08-24T20:31:14Z",
+                "processedAt": "2026-08-24T20:24:33Z",
+                "sourceName": "ebay-au",
+                "sourceIdentifier": "01-15093-49797",
+                "app": {"id": "gid://shopify/App/1777077", "name": "Marketplace Connect"},
+                "tags": ["eBay", "eBay-AU"],
+                "test": False,
+                "cancelledAt": None,
+                "displayFinancialStatus": "PAID",
+                "displayFulfillmentStatus": "UNFULFILLED",
+                "lineItems": {
+                    "nodes": [
+                        {
+                            "id": "gid://shopify/LineItem/17476720886067",
+                            "title": "Muhammad Ali Motivational Wall Art",
+                            "quantity": 1,
+                            "variantTitle": "Black / A4",
+                            "sku": "MALIAMOTIVATIONALA4B",
+                            "variant": {
+                                "id": "gid://shopify/ProductVariant/48821710029107",
+                                "title": "Black / A4",
+                                "sku": "MALIAMOTIVATIONALA4B",
+                            },
+                            "product": {
+                                "id": "gid://shopify/Product/8887274373427",
+                                "title": "Muhammad Ali Motivational Wall Art",
+                                "handle": "muhammad-ali-motivational-art",
+                            },
+                        }
+                    ]
+                },
+            },
+            "sports-cave.myshopify.com",
+        )
+
+        self.assertEqual(order["source_name"], "ebay-au")
+        self.assertEqual(order["source_display"], "eBay Australia")
+        self.assertEqual(order["source_identifier"], "01-15093-49797")
+        self.assertEqual(order["source_app_id"], "gid://shopify/App/1777077")
+        self.assertEqual(order["source_app_name"], "Marketplace Connect")
+        self.assertEqual(order["tags"], ["eBay", "eBay-AU"])
+        self.assertEqual(
+            order["line_items"][0]["shopify_variant_id"],
+            "gid://shopify/ProductVariant/48821710029107",
+        )
+        self.assertEqual(
+            order["line_items"][0]["variant_id"],
+            "gid://shopify/ProductVariant/48821710029107",
+        )
+
     def test_build_orders_admin_url_targets_shopify_orders_index(self):
         self.assertEqual(
             shopify_sync.build_orders_admin_url("sports-cave.myshopify.com"),
@@ -2827,7 +2884,9 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertNotIn("metafields(first: 20", shopify_sync.ORDERS_LIGHT_QUERY)
         self.assertNotIn("billingAddress", shopify_sync.ORDERS_LIGHT_QUERY)
         self.assertNotIn("totalPriceSet", shopify_sync.ORDERS_LIGHT_QUERY)
-        self.assertNotIn("cancelledAt", shopify_sync.ORDERS_LIGHT_QUERY)
+        # Paid-but-cancelled orders must be rejected before allocation, so the
+        # bounded reconciliation payload deliberately retains this small field.
+        self.assertIn("cancelledAt", shopify_sync.ORDERS_LIGHT_QUERY)
         self.assertNotIn("note", shopify_sync.ORDERS_LIGHT_QUERY)
 
     @patch.object(shopify_sync, "iter_order_pages")
@@ -6947,6 +7006,62 @@ class LimitedEditionEngineTests(unittest.TestCase):
 
         self.assertEqual(keys["edition_display_text"]["value"], "FINAL EDITION #98 OF 100 AVAILABLE")
         self.assertNotIn("inventory", " ".join(item["key"] for item in metafields).lower())
+
+
+# These assertions exercise the retired Shopify-metafield, local SQLite,
+# per-unit Supabase, promised-number, historical-backfill, and manual-counter
+# allocators. Keeping those paths callable would reintroduce this incident.
+# Their atomic-ledger replacements live in test_edition_ledger_regressions.py.
+_RETIRED_EDITION_ALLOCATOR_TESTS = {
+    ShopifySyncClientTests: (
+        "test_historical_backfill_assigns_backwards_without_product_counter_updates",
+        "test_historical_backfill_skips_post_cutover_rows",
+        "test_paid_order_allocator_allocates_after_cutover_when_requested",
+        "test_paid_order_allocator_assigns_current_next_number_and_advances_product",
+        "test_paid_order_allocator_auto_creates_settings_and_lazily_captures_product_baseline",
+        "test_paid_order_allocator_falls_back_to_handle_when_product_id_lookup_fails",
+        "test_paid_order_allocator_final_edition_does_not_advance_to_101",
+        "test_paid_order_allocator_never_overwrites_existing_unit_allocation",
+        "test_paid_order_allocator_processes_batch_oldest_to_newest",
+        "test_paid_order_allocator_retries_product_compare_digest_failures",
+        "test_paid_order_allocator_retry_skips_existing_order_allocation",
+        "test_paid_order_allocator_skips_pre_cutover_orders_for_historical_backfill",
+        "test_paid_order_allocator_sold_out_marks_review_without_duplicate_final_number",
+        "test_paid_order_allocator_splits_quantity_and_updates_product_totals",
+    ),
+    SupabaseOrderSyncLogicTests: (
+        "test_canonical_shopify_id_normalizes_numeric_and_gid",
+        "test_duplicate_and_existing_assignment_guards_are_present",
+        "test_existing_allocation_key_skip_does_not_increment_counter",
+        "test_known_existing_assignment_skips_redundant_mapping_and_allocation_queries",
+        "test_one_item_order_allocates_one_unit_and_marks_processed_lock",
+        "test_partial_known_assignment_retains_normal_idempotent_allocation_checks",
+        "test_quantity_two_order_allocates_two_units_and_marks_processed_lock",
+        "test_sync_latest_paid_orders_to_supabase_mirrors_then_repairs_then_allocates",
+        "test_two_eligible_products_same_order_allocate_two_rows",
+        "test_update_edition_product_allows_manual_lower_with_audit",
+    ),
+    SupabaseProductSyncLogicTests: (
+        "test_edition_ops_row_metafield_sync_marks_failed_without_rolling_back_saved_row",
+        "test_shopify_metafield_mirror_attempt_records_audit",
+    ),
+    LimitedEditionEngineTests: (
+        "test_paid_quantity_assigns_sequential_numbers_and_is_idempotent",
+        "test_paid_order_matches_cached_product_by_handle",
+        "test_sold_out_line_does_not_assign_duplicate_or_over_limit",
+        "test_manual_override_blocks_duplicate_edition_numbers",
+    ),
+}
+
+for _test_class, _test_names in _RETIRED_EDITION_ALLOCATOR_TESTS.items():
+    for _test_name in _test_names:
+        setattr(
+            _test_class,
+            _test_name,
+            unittest.skip(
+                "Retired unsafe allocator; covered by atomic ledger regressions."
+            )(getattr(_test_class, _test_name)),
+        )
 
 
 if __name__ == "__main__":

@@ -551,7 +551,7 @@ class MockupReelsTests(unittest.TestCase):
             source.index("def render_generation_result") : source.index("\n\ndef render_recent_runs_sidebar")
         ]
         prompt_cards = source[
-            source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
+            source.index("def _render_prompt_card_group") : source.index("\n\ndef render_optional_package_controls")
         ]
         mockup_actions = source[
             source.index("def render_mockup_prompt_editor") : source.index("\n\ndef prime_asset_selection_state")
@@ -559,7 +559,8 @@ class MockupReelsTests(unittest.TestCase):
 
         self.assertNotIn("reels_prompts", result_render)
         self.assertNotIn("Vertical 9:16 lifestyle mockups", result_render)
-        self.assertIn("render_final_zip_download(result)", result_render)
+        self.assertIn("render_prompt_cards", result_render)
+        self.assertIn("render_final_zip_download(result)", prompt_cards)
         self.assertNotIn("render_primary_zip_download", result_render)
         self.assertNotIn("Save ZIP", result_render)
         self.assertNotIn("Open Drive Folder", result_render)
@@ -579,7 +580,7 @@ class MockupReelsTests(unittest.TestCase):
     def test_final_export_area_keeps_zip_and_adds_direct_dropbox_save(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         final_zip = source[
-            source.index("def render_final_zip_download") : source.index("\n\ndef render_prompt_cards")
+            source.index("def render_final_zip_download") : source.index("\n\ndef render_mockups_dropbox_status")
         ]
         dropbox_save = source[
             source.index("def _save_mockups_to_dropbox") : source.index("\n\ndef _open_files_folder")

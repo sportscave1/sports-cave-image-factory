@@ -1515,6 +1515,21 @@ def find_cached_shopify_product_for_order_line(connection, product_id="", handle
 
 
 def process_shopify_order_for_editions(order):
+    """Disable the legacy SQLite/fuzzy-title allocator.
+
+    Edition allocation is now permitted only through the atomic Supabase ledger.
+    The local database remains readable for historical UI data but can no longer
+    consume an edition number.
+    """
+    return {
+        "processed": False,
+        "assignments_created": 0,
+        "changed_product_ids": [],
+        "reason": "Legacy local allocator disabled; atomic Supabase ledger required.",
+    }
+
+
+def _legacy_process_shopify_order_for_editions(order):
     """Idempotently cache one order and assign editions inside one write lock.
 
     Future webhook endpoint should call this function.

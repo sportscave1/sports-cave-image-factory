@@ -49,7 +49,6 @@ ALL_PRODUCTS_SELECTION = "__all_products__"
 EDITABLE_FIELDS = (
     "edition_enabled",
     "edition_total",
-    "edition_next_number",
 )
 
 VISIBLE_COLUMNS = (
@@ -531,6 +530,7 @@ def _row_from_supabase_product(product):
         _coerce_nonnegative_int(product.get("remaining_editions"), _remaining_from_sold(total, sold)),
     )
     status = str(product.get("status") or "").strip()
+    allocation_blocked = bool(product.get("allocation_blocked"))
     sold_out = bool(product.get("sold_out")) or status.casefold() == "sold_out"
     mirror_status = str(product.get("metafields_sync_status") or "").strip()
     sync_status = "Loaded from Supabase"
@@ -544,21 +544,28 @@ def _row_from_supabase_product(product):
         "never synced",
     }:
         sync_status = "needs_shopify_sync"
+    if allocation_blocked:
+        sync_status = "needs_reconciliation"
+        sync_error = "Non-contiguous allocation history; automatic allocation and storefront mirroring are blocked."
     row = {
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
-        "shopify_product_gid": product.get("shopify_product_id") or product.get("shopify_product_gid") or "",
+        "shopify_product_gid": product.get("shopify_product_gid") or product.get("shopify_product_id") or "",
         "legacy_resource_id": product.get("legacy_resource_id") or "",
         "thumbnail_url": product.get("display_image_url") or product.get("featured_image_url") or "",
         "product_title": product.get("product_title") or product.get("title") or "Untitled Product",
         "shopify_handle": product.get("shopify_handle") or product.get("handle") or "",
         "handle": product.get("shopify_handle") or product.get("handle") or "",
         "status": product.get("shopify_status") or "ACTIVE",
-        "edition_enabled": status != "inactive" and bool(product.get("active", True)),
+        "edition_enabled": not allocation_blocked and status != "inactive" and bool(product.get("active", True)),
         "edition_total": total,
         "edition_next_number": next_number,
         "edition_sold_count": sold,
         "edition_remaining": remaining,
-        "edition_status": "Sold Out Archive" if sold_out else _widget_status(remaining),
+        "edition_status": (
+            "Allocation Blocked — Reconciliation Required"
+            if allocation_blocked
+            else ("Sold Out Archive" if sold_out else _widget_status(remaining))
+        ),
         "edition_label": product.get("edition_name") or product.get("edition_label") or "Numbered Edition",
         "online_store_url": product.get("online_store_url") or "",
         "admin_url": product.get("admin_url") or "",
@@ -768,7 +775,6 @@ def _editable_snapshot(row):
     return {
         "edition_enabled": bool(recalculated.get("edition_enabled")),
         "edition_total": _coerce_int(recalculated.get("edition_total"), 100),
-        "edition_next_number": _coerce_int(recalculated.get("edition_next_number"), 1),
     }
 
 
@@ -854,12 +860,7 @@ def _prepare_rows_for_save(rows, originals):
         old_enabled = bool(original.get("edition_enabled")) if original else bool(updated.get("edition_enabled"))
         new_enabled = bool(updated.get("edition_enabled"))
         if old_enabled and not new_enabled:
-            total = _coerce_int(updated.get("edition_total"), 100)
-            protected_next = _coerce_nonnegative_int((original or {}).get("edition_sold_count"), 0) + 1
-            updated["edition_next_number"] = max(total + 1, protected_next)
-            updated["edition_sold_count"] = max(total, protected_next - 1)
-            updated["edition_remaining"] = 0
-            updated["edition_status"] = "Sold Out Archive"
+            updated["edition_status"] = "Inactive"
             updated["sync_status"] = "Unsaved"
             updated["sync_error"] = ""
         prepared.append(_normalise_row(updated, preserve_derived=True))
@@ -889,6 +890,8 @@ def _save_validation_error(row, original=None):
     enabled = bool(normalised.get("edition_enabled"))
     if total < 1:
         return f"{label}: edition_total must be 1 or higher."
+    if total > 100:
+        return f"{label}: edition_total cannot exceed 100."
     if next_number < 1:
         return f"{label}: next_edition_number must be 1 or higher."
     if original and bool(original.get("edition_enabled")) is False and enabled and next_number > total:
@@ -1611,10 +1614,10 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
             config = shopify_sync.get_config()
             if not config.get("configured"):
                 raise ValueError("Shopify is not configured.")
-            if not hasattr(backend, "sync_edition_ops_metafields_for_rows"):
+            if not hasattr(backend, "sync_product_edition_metafields_for_handles"):
                 raise ValueError("Edition Ops Shopify metafield sync is not available.")
-            mirror_result = backend.sync_edition_ops_metafields_for_rows(
-                mirror_rows,
+            mirror_result = backend.sync_product_edition_metafields_for_handles(
+                [row.get("handle") for row in mirror_rows if row.get("handle")],
                 config=config,
                 ensure_schema_first=False,
             )
@@ -1795,52 +1798,25 @@ def _validate_import_nonnegative_int(raw_value, field_name, row_label, warnings)
 def _apply_csv_updates_to_rows(rows, csv_text):
     rows = [_normalise_row(row) for row in rows]
     by_gid = {row.get("shopify_product_gid"): index for index, row in enumerate(rows) if row.get("shopify_product_gid")}
-    by_handle = {row.get("handle"): index for index, row in enumerate(rows) if row.get("handle")}
-    by_title = {
-        _normalise_title(row.get("product_title")): index
-        for index, row in enumerate(rows)
-        if _normalise_title(row.get("product_title"))
-    }
     warnings = []
     imported_count = 0
     changed_rows = []
-    allow_new_rows = not rows
 
     reader = csv.DictReader(io.StringIO(csv_text))
     for line_number, csv_row in enumerate(reader, start=2):
         gid = str(_csv_value(csv_row, "shopify_product_gid", "shopify product gid", "product id") or "").strip()
         handle = str(_csv_value(csv_row, "handle", "Handle") or "").strip()
         product_title = str(_csv_value(csv_row, "product_title", "Product title", "title") or "").strip()
-        match_index = by_gid.get(gid) if gid else None
-        if match_index is None and handle:
-            match_index = by_handle.get(handle)
-        if match_index is None and product_title:
-            match_index = by_title.get(_normalise_title(product_title))
         row_label = handle or product_title or gid or f"CSV line {line_number}"
-        if match_index is None:
-            if not allow_new_rows:
-                warnings.append(f"{row_label}: not in the loaded table, ignored.")
-                continue
-            match_index = len(rows)
-            rows.append(
-                _normalise_row(
-                    {
-                        "shopify_product_gid": gid,
-                        "legacy_resource_id": _csv_value(csv_row, "legacy_resource_id", "Legacy ID"),
-                        "product_title": product_title,
-                        "handle": handle,
-                        "status": _csv_value(csv_row, "status", "Status") or "ACTIVE",
-                        "online_store_url": _csv_value(csv_row, "online_store_url", "Open live product"),
-                        "admin_url": _csv_value(csv_row, "admin_url", "Open Admin"),
-                    }
-                )
+        if not gid:
+            warnings.append(
+                f"{row_label}: canonical shopify_product_gid is required; title/handle matching is disabled."
             )
-            if gid:
-                by_gid[gid] = match_index
-            if handle:
-                by_handle[handle] = match_index
-            if product_title:
-                by_title[_normalise_title(product_title)] = match_index
+            continue
+        match_index = by_gid.get(gid)
+        if match_index is None:
+            warnings.append(f"{row_label}: Shopify product GID is not in the loaded table, ignored.")
+            continue
 
         total = _validate_import_int(
             _csv_value(csv_row, "edition_total", "Edition total", "edition total"),
@@ -1848,13 +1824,7 @@ def _apply_csv_updates_to_rows(rows, csv_text):
             row_label,
             warnings,
         )
-        next_number = _validate_import_int(
-            _csv_value(csv_row, "edition_next_number", "Next edition number", "edition next number", "next edition"),
-            "edition_next_number",
-            row_label,
-            warnings,
-        )
-        if total == "invalid" or next_number == "invalid":
+        if total == "invalid":
             continue
         enabled_value = _csv_value(csv_row, "edition_enabled", "Enabled", "edition enabled")
         missing_required = []
@@ -1862,42 +1832,27 @@ def _apply_csv_updates_to_rows(rows, csv_text):
             missing_required.append("edition_enabled")
         if total is None:
             missing_required.append("edition_total")
-        if next_number is None:
-            missing_required.append("edition_next_number")
         if missing_required:
             warnings.append(f"{row_label}: missing required field(s): {', '.join(missing_required)}.")
             continue
-
-        sold_count = _validate_import_nonnegative_int(
-            _csv_value(csv_row, "edition_sold_count", "Edition sold count", "Sold count", "sold_count"),
-            "edition_sold_count",
-            row_label,
-            warnings,
-        )
-        edition_remaining = _validate_import_nonnegative_int(
-            _csv_value(csv_row, "edition_remaining", "Edition remaining", "remaining", "Remaining"),
-            "edition_remaining",
-            row_label,
-            warnings,
-        )
-        if sold_count == "invalid" or edition_remaining == "invalid":
+        if total > 100:
+            warnings.append(f"{row_label}: edition_total cannot exceed 100.")
             continue
-        if sold_count is None:
-            sold_count = max(next_number - 1, 0)
-        if edition_remaining is None:
-            edition_remaining = max(total - sold_count, 0)
-        edition_status = str(
-            _csv_value(csv_row, "edition_status", "Edition status", "widget_status", "Widget status")
-            or ""
-        ).strip() or _widget_status(edition_remaining)
+
+        counter_values = [
+            _csv_value(csv_row, "edition_next_number", "Next edition number", "edition next number", "next edition"),
+            _csv_value(csv_row, "edition_sold_count", "Edition sold count", "Sold count", "sold_count"),
+            _csv_value(csv_row, "edition_remaining", "Edition remaining", "remaining", "Remaining"),
+            _csv_value(csv_row, "edition_status", "Edition status", "widget_status", "Widget status"),
+        ]
+        if any(str(value or "").strip() for value in counter_values):
+            warnings.append(
+                f"{row_label}: ledger-derived next/sold/remaining/status CSV values were ignored."
+            )
 
         updated = dict(rows[match_index])
         updated["edition_enabled"] = _coerce_bool(enabled_value)
         updated["edition_total"] = total
-        updated["edition_next_number"] = next_number
-        updated["edition_sold_count"] = sold_count
-        updated["edition_remaining"] = edition_remaining
-        updated["edition_status"] = edition_status
         label_value = _csv_value(csv_row, "edition_label", "Edition label", "edition label")
         if str(label_value or "").strip():
             updated["edition_label"] = str(label_value).strip()
@@ -1934,7 +1889,10 @@ def _apply_csv_import(uploaded_file):
 
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     st.session_state[ROWS_KEY] = rows
-    st.session_state[NOTICE_KEY] = f"Imported and replaced edition fields for {changed_count} rows. Click Save Changes to sync."
+    st.session_state[NOTICE_KEY] = (
+        f"Imported safe Edition Ops configuration for {changed_count} rows. "
+        "Ledger-derived counters were not changed. Click Save Changes to sync."
+    )
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
     st.session_state[ORIGINAL_ROWS_KEY] = originals
     st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
@@ -1995,7 +1953,7 @@ def _column_config():
         "product_title": st.column_config.TextColumn("Product title"),
         "handle": st.column_config.TextColumn("Handle"),
         "edition_enabled": st.column_config.CheckboxColumn("Enabled"),
-        "edition_total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100000, step=1),
+        "edition_total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100, step=1),
         "edition_next_number": st.column_config.NumberColumn("Next edition number", min_value=1, max_value=100000, step=1),
         "edition_sold_count": st.column_config.NumberColumn("Sold count"),
         "edition_remaining": st.column_config.NumberColumn("Remaining"),
@@ -2446,6 +2404,7 @@ def render_page():
                 disabled=[
                     "product_title",
                     "handle",
+                    "edition_next_number",
                     "edition_sold_count",
                     "edition_remaining",
                     "edition_status",

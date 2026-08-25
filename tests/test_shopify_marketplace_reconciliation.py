@@ -498,15 +498,91 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
         self.assertEqual(result["product"]["match_method"], "sku")
         self.assertEqual(len(cursor.statements), 1)
 
+    def test_ebay_shopify_product_and_variant_ids_win_over_modified_title(self):
+        product = {
+            "id": 58,
+            "shopify_product_id": "gid://shopify/Product/8887274373427",
+            "shopify_handle": "muhammad-ali-motivational-art",
+            "product_title": "Muhammad Ali Motivational Wall Art",
+            "active": True,
+        }
+        cursor = MappingCursor(variant_rows=[product])
+        order = paid_marketplace_order(source_name="ebay-au", source_display="eBay Australia")
+        line = {
+            "shopify_line_item_id": "gid://shopify/LineItem/17476720886067",
+            "shopify_product_id": "gid://shopify/Product/8887274373427",
+            "shopify_variant_id": "gid://shopify/ProductVariant/48821710029107",
+            "variant_id": "gid://shopify/ProductVariant/48821710029107",
+            "product_title": "Marketplace-modified title that must not be matched",
+            "product_handle": "wrong-title-derived-handle",
+            "sku": "MALIAMOTIVATIONALA4B",
+            "quantity": 1,
+        }
+
+        result = supabase_backend._resolve_marketplace_product_with_cursor(cursor, order, line)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["match_method"], "shopify_product_and_variant_gid")
+        self.assertEqual(result["product"]["shopify_product_id"], "gid://shopify/Product/8887274373427")
+        self.assertEqual(len(cursor.statements), 1)
+
+    def test_unmatched_ebay_title_never_enters_title_or_handle_fallback(self):
+        cursor = MappingCursor()
+        order = paid_marketplace_order(source_name="eBay Australia", source_display="eBay Australia")
+        line = {
+            "shopify_line_item_id": "gid://shopify/LineItem/999",
+            "product_title": "Shane Warne Tribute Wall Art nearly identical title",
+            "product_handle": "shane-warne-framed-art",
+            "quantity": 1,
+        }
+
+        result = supabase_backend._resolve_marketplace_product_with_cursor(cursor, order, line)
+
+        self.assertEqual(result["status"], "missing")
+        self.assertIn("Title and handle fallback matching is disabled", result["reason"])
+        sql = "\n".join(statement for statement, _ in cursor.statements)
+        self.assertNotIn("ep.shopify_handle", sql)
+        self.assertNotIn("normalized_product_title", sql)
+
+    def test_ebay_product_id_with_unknown_variant_requires_exact_sku_or_review(self):
+        product = {
+            "id": 58,
+            "shopify_product_id": "gid://shopify/Product/8887274373427",
+            "shopify_handle": "muhammad-ali-motivational-art",
+            "product_title": "Muhammad Ali Motivational Wall Art",
+            "active": True,
+        }
+        cursor = MappingCursor(variant_rows=[], sku_rows=[product])
+        order = paid_marketplace_order(source_name="ebay-au", source_display="eBay Australia")
+        line = {
+            "shopify_product_id": "gid://shopify/Product/8887274373427",
+            "shopify_variant_id": "gid://shopify/ProductVariant/unknown",
+            "variant_id": "gid://shopify/ProductVariant/unknown",
+            "sku": "MALIAMOTIVATIONALA4B",
+            "product_title": "Unsafe title fallback",
+        }
+
+        result = supabase_backend._resolve_marketplace_product_with_cursor(cursor, order, line)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["match_method"], "exact_shopify_sku")
+        self.assertEqual(len(cursor.statements), 2)
+
     def test_unmapped_marketplace_item_is_persisted_as_needs_mapping_without_edition(self):
         order = paid_marketplace_order()
         with patch.object(supabase_backend, "_persist_order_snapshot") as persist, patch.object(
             supabase_backend,
+            "edition_tracking_start_for_processing",
+            return_value=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        ), patch.object(
+            supabase_backend,
             "resolve_edition_product_for_order_line",
             return_value={"product": {}, "status": "missing", "reason": "No safe match.", "candidates": []},
         ), patch.object(supabase_backend, "_set_order_line_status") as set_status, patch.object(
-            supabase_backend, "allocate_edition_for_order_line"
+            supabase_backend, "allocate_edition_line_units_atomic"
         ) as allocate, patch.object(supabase_backend, "connect"), patch.object(
+            supabase_backend, "_quarantine_allocation_line"
+        ) as quarantine, patch.object(
             supabase_backend, "_set_order_ingestion_outcome"
         ) as outcome:
             result = supabase_backend.process_paid_order(
@@ -518,6 +594,7 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
 
         persist.assert_called_once_with(order)
         allocate.assert_not_called()
+        quarantine.assert_called_once()
         self.assertEqual(set_status.call_args.args[2], "Needs product mapping")
         self.assertEqual(set_status.call_args.kwargs["mapping_method"], "unmapped")
         self.assertEqual(result["ingestion_status"], "needs_mapping")

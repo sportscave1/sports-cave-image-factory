@@ -269,7 +269,13 @@ def dropbox_asset_path(asset, path_key):
 def dropbox_selected_manifest(assets, selected_groups):
     selected_groups = set(selected_groups or ())
     entries = []
-    for asset in assets or ():
+    for asset in sorted(
+        assets or (),
+        key=lambda item: (
+            int(item.get("product_sort_position") or 10_000),
+            str(item.get("label") or item.get("key") or "").casefold(),
+        ),
+    ):
         group = image_factory.get_asset_zip_group(asset)
         if selected_groups and group not in selected_groups:
             continue
@@ -277,11 +283,17 @@ def dropbox_selected_manifest(assets, selected_groups):
             dropbox_path = dropbox_asset_path(asset, path_key)
             if not dropbox_path:
                 continue
-            relative_path = str(PurePosixPath("WEBP" if path_key == "webp_path" else "jpg") / Path(dropbox_path).name)
+            filename = Path(dropbox_path).name
+            product_output_filename = str(asset.get("product_output_filename") or "")
+            if product_output_filename:
+                filename = str(Path(product_output_filename).with_suffix(Path(dropbox_path).suffix.casefold()))
+            relative_path = str(PurePosixPath("WEBP" if path_key == "webp_path" else "jpg") / filename)
             entries.append(
                 {
                     "asset_key": asset.get("key"),
                     "asset_label": asset.get("label"),
+                    "product_slot_id": asset.get("product_slot_id"),
+                    "product_sort_position": asset.get("product_sort_position"),
                     "category": group,
                     "relative_path": relative_path,
                     "dropbox_path": dropbox_path,

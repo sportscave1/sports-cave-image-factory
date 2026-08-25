@@ -5969,6 +5969,8 @@ def normalize_product_upload_source_context(metadata=None, *, preview=False):
         root_path,
     ):
         raise ValueError("The selected Dropbox product folder is outside the Sports Cave Files root.")
+    product_manifest = [dict(entry) for entry in metadata.get("product_image_manifest") or ()]
+    readiness = dict(metadata.get("product_image_readiness") or {})
     return {
         "dropbox_root_path": root_path,
         "dropbox_product_folder": folder_path,
@@ -5988,6 +5990,10 @@ def normalize_product_upload_source_context(metadata=None, *, preview=False):
             metadata.get("shopify_handle") or metadata.get("product_handle"),
             "Not supplied - resolve through the unchanged product workflow.",
         ),
+        "product_image_manifest": product_manifest,
+        "product_image_readiness": readiness,
+        "shopify_draft_images": [dict(entry) for entry in metadata.get("shopify_draft_images") or ()],
+        "allow_incomplete_product_images": bool(metadata.get("allow_incomplete_product_images")),
     }
 
 
@@ -6039,6 +6045,10 @@ def product_upload_media_reliability_patch(metadata=None, *, update_existing=Fal
         if update_existing
         else PRODUCT_UPLOAD_NEW_MEDIA_SEQUENCE
     )
+    readiness = context["product_image_readiness"]
+    package_complete = bool(readiness.get("complete"))
+    incomplete_authorized = bool(context["allow_incomplete_product_images"])
+    missing_labels = readiness.get("missing_labels") or []
     return f"""{PRODUCT_UPLOAD_MEDIA_PATCH_START}
 
 SOURCE CONTEXT
@@ -6048,6 +6058,14 @@ Product name/context: {json.dumps(context["product_name"], ensure_ascii=False)}
 Shopify product ID: {json.dumps(context["shopify_product_id"], ensure_ascii=False)}
 Shopify product GID: {json.dumps(context["shopify_product_gid"], ensure_ascii=False)}
 Shopify handle: {json.dumps(context["shopify_handle"], ensure_ascii=False)}
+Required product image package complete: {json.dumps(package_complete)}
+Missing required image types: {json.dumps(missing_labels, ensure_ascii=False)}
+Explicit incomplete-package confirmation: {json.dumps(incomplete_authorized)}
+Canonical ordered product image manifest: {json.dumps(context["product_image_manifest"], ensure_ascii=False)}
+Canonical Shopify draft image payload: {json.dumps(context["shopify_draft_images"], ensure_ascii=False)}
+
+Use the canonical manifest above as the only media source and preserve its positions 1 through 8.
+If the package is incomplete and explicit incomplete-package confirmation is false, STOP before creating or updating a Shopify draft. List the missing image types. Never treat five images as the completed package.
 
 Do not place Dropbox access tokens, Shopify credentials, or other secrets in the prompt, manifest, logs, or completion table.
 
@@ -6498,7 +6516,108 @@ def ensure_lifestyle_assets_registered(result):
     return result
 
 
+LEGACY_PRODUCT_ROOM_KEYS = {
+    "01-man-cave-prompt.txt": (
+        "man_cave", "man-cave", "man cave", "man_cave_path", "man_cave_paths",
+        "man-cave-lifestyle", "01-man-cave",
+    ),
+    "02-office-prompt.txt": (
+        "office", "office_path", "office_paths", "office-lifestyle", "02-office",
+    ),
+    "03-living-room-prompt.txt": (
+        "living_room", "living-room", "living room", "living_room_path",
+        "living_room_paths", "living-room-lifestyle", "03-living-room",
+    ),
+}
+
+
+def _legacy_room_identity(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _coerce_legacy_lifestyle_paths(value):
+    if isinstance(value, dict):
+        paths = {
+            key: str(path_value)
+            for key, path_value in value.items()
+            if key in {"webp_path", "jpg_path", "preview_path"} and path_value
+        }
+        generic_path = value.get("path") or value.get("local_path") or value.get("uploaded_image_reference")
+        if generic_path and not paths:
+            value = generic_path
+        else:
+            return paths
+    if not value:
+        return {}
+    path = Path(str(value))
+    suffix = path.suffix.casefold()
+    if suffix == ".webp":
+        return {"webp_path": str(path), "preview_path": str(path)}
+    if suffix in {".jpg", ".jpeg", ".png"}:
+        return {"jpg_path": str(path), "preview_path": str(path)}
+    return {}
+
+
+def migrate_legacy_product_room_state(result):
+    """Restore the three room slots from prior saved-state key shapes."""
+    lifestyle_paths = dict(result.get("lifestyle_mockup_paths") or {})
+    source_maps = [lifestyle_paths]
+    for container_key in (
+        "uploaded_lifestyle_images", "lifestyle_images", "product_page_mockups",
+        "product_images", "mockup_images",
+    ):
+        container = result.get(container_key)
+        if isinstance(container, dict):
+            source_maps.append(container)
+
+    assets = [dict(asset or {}) for asset in result.get("assets") or ()]
+    for prompt_filename, aliases in LEGACY_PRODUCT_ROOM_KEYS.items():
+        existing = _coerce_legacy_lifestyle_paths(lifestyle_paths.get(prompt_filename))
+        if lifestyle_saved_paths_have_downloadable_file(existing):
+            lifestyle_paths[prompt_filename] = existing
+            continue
+        identities = {
+            _legacy_room_identity(prompt_filename),
+            *(_legacy_room_identity(alias) for alias in aliases),
+        }
+        restored = {}
+        for source_map in source_maps:
+            for source_key, source_value in source_map.items():
+                if _legacy_room_identity(source_key) not in identities:
+                    continue
+                candidate = _coerce_legacy_lifestyle_paths(source_value)
+                if lifestyle_saved_paths_have_downloadable_file(candidate):
+                    restored = candidate
+                    break
+            if restored:
+                break
+        if not restored:
+            for asset in assets:
+                asset_identities = {
+                    _legacy_room_identity(asset.get("key")),
+                    _legacy_room_identity(asset.get("prompt_filename")),
+                }
+                if not identities.intersection(asset_identities):
+                    continue
+                candidate = _coerce_legacy_lifestyle_paths(
+                    {
+                        "webp_path": asset.get("webp_path"),
+                        "jpg_path": asset.get("jpg_path"),
+                        "preview_path": asset.get("preview_path"),
+                    }
+                )
+                if lifestyle_saved_paths_have_downloadable_file(candidate):
+                    restored = candidate
+                    break
+        if restored:
+            lifestyle_paths[prompt_filename] = restored
+
+    result["lifestyle_mockup_paths"] = lifestyle_paths
+    return result
+
+
 def normalize_generation_result(result):
+    factory = get_image_factory()
     defaults = {
         "product_name": None,
         "sport_category": None,
@@ -6526,6 +6645,9 @@ def normalize_generation_result(result):
         "shopify_uploads_dir": None,
         "socials_dir": None,
         "shopify_uploads_html_path": None,
+        "product_image_manifest_path": None,
+        "product_image_manifest": [],
+        "product_image_readiness": None,
         "assets": [],
         "lifestyle_mockup_paths": {},
         "lifestyle_pack_error": None,
@@ -6554,7 +6676,16 @@ def normalize_generation_result(result):
     }
     normalized = defaults.copy()
     normalized.update(result or {})
+    normalized = migrate_legacy_product_room_state(normalized)
     normalized = ensure_result_assets(normalized)
+    normalized["product_image_manifest"] = factory.build_product_image_manifest(
+        normalized["assets"],
+        product_slug=normalized.get("product_slug") or "product",
+        sport_slug=normalized.get("sport_slug") or "sports",
+    )
+    normalized["product_image_readiness"] = factory.product_image_readiness(
+        normalized["product_image_manifest"]
+    )
     return normalized
 
 
@@ -7231,6 +7362,31 @@ def write_local_manifest(result, uploaded_files=None):
             "uploaded_files": uploaded_files
             if uploaded_files is not None
             else manifest_data.get("uploaded_files", []),
+            "lifestyle_mockup_paths": {
+                str(prompt_filename): {
+                    str(path_key): str(path_value)
+                    for path_key, path_value in (saved_paths or {}).items()
+                    if path_value
+                }
+                for prompt_filename, saved_paths in result["lifestyle_mockup_paths"].items()
+            },
+            "assets": [
+                {
+                    key: (str(value) if isinstance(value, Path) else value)
+                    for key, value in asset.items()
+                    if key in {
+                        "key", "label", "review_path", "preview_path", "webp_path",
+                        "jpg_path", "include_in_zip", "asset_group", "zip_group",
+                        "prompt_filename", "export_to_shopify", "export_to_socials",
+                        "webp_path_dropbox_path", "jpg_path_dropbox_path",
+                    }
+                }
+                for asset in result["assets"]
+            ],
+            "product_image_manifest": image_factory.product_image_manifest_json(
+                result["product_image_manifest"]
+            ),
+            "product_image_readiness": result["product_image_readiness"],
         }
     )
 
@@ -7320,11 +7476,17 @@ def rebuild_result_artifacts(result):
         result["assets"],
         product_name=result.get("product_name", ""),
         sport_category=result.get("sport_category", ""),
+        product_slug=result.get("product_slug") or "product",
+        sport_slug=result.get("sport_slug") or "sports",
+        product_image_manifest=result.get("product_image_manifest"),
     )
     result["zip_dir"] = zip_dir
     result["shopify_uploads_dir"] = export_dirs["shopify_uploads_dir"]
     result["shopify_uploads_html_path"] = export_dirs.get("shopify_uploads_html_path")
     result["socials_dir"] = export_dirs["socials_dir"]
+    result["product_image_manifest"] = export_dirs["product_image_manifest"]
+    result["product_image_readiness"] = export_dirs["product_image_readiness"]
+    result["product_image_manifest_path"] = export_dirs["product_image_manifest_path"]
 
     for key in ("zip_path", "social_zip_path", "complete_zip_path"):
         existing_path = result.get(key)
@@ -7363,6 +7525,7 @@ def apply_asset_selection_from_session(result):
 
 def build_shopify_zip_package(result):
     result = rebuild_result_artifacts(result)
+    image_factory.require_complete_product_image_manifest(result["product_image_manifest"])
     shopify_uploads_dir = result.get("shopify_uploads_dir")
 
     if not shopify_uploads_dir or not Path(shopify_uploads_dir).exists():
@@ -7374,6 +7537,7 @@ def build_shopify_zip_package(result):
         zip_dir,
         result["product_slug"],
         Path(shopify_uploads_dir),
+        result["product_image_manifest"],
     )
     result["status_text"] = "Shopify ZIP ready."
     write_local_manifest(result)
@@ -7495,6 +7659,7 @@ def ensure_primary_download_zip(result):
         result["product_slug"],
         Path(shopify_uploads_dir),
         Path(socials_dir),
+        result["product_image_manifest"],
     )
     write_local_manifest(result)
     return result
@@ -7550,7 +7715,10 @@ def build_complete_download_pack(result):
         zip_dir,
         result["product_slug"],
         prompt_dir=prompt_dir,
-        assets=result["assets"],
+        assets=image_factory.order_assets_by_product_manifest(
+            result["assets"],
+            result["product_image_manifest"],
+        ),
     )
     result["status_text"] = "Complete download pack ready."
     write_local_manifest(result)
@@ -7559,6 +7727,14 @@ def build_complete_download_pack(result):
 
 def build_filtered_download_zip(result, selected_groups):
     result = normalize_generation_result(result)
+    normalized_groups = {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in selected_groups
+    }
+    if {ASSET_CATEGORY_CORE, ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups):
+        image_factory.require_complete_product_image_manifest(
+            result["product_image_manifest"]
+        )
     zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
     zip_dir.mkdir(parents=True, exist_ok=True)
     selected_assets = get_selected_zip_assets(result, selected_groups)
@@ -7624,13 +7800,18 @@ def result_is_dropbox_backed(result):
 
 
 def get_selected_zip_assets(result, selected_groups):
+    normalized_result = normalize_generation_result(result)
     selected_group_set = {
         ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
         for group in selected_groups
     }
+    ordered_assets = image_factory.order_assets_by_product_manifest(
+        normalized_result["assets"],
+        normalized_result["product_image_manifest"],
+    )
     return [
         asset
-        for asset in normalize_generation_result(result)["assets"]
+        for asset in ordered_assets
         if asset.get("include_in_zip", True)
         and get_asset_zip_group(asset) in selected_group_set
         and get_asset_downloadable_paths(asset)
@@ -8248,11 +8429,20 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
             )
             if saved.get("cancelled"):
                 st.info("Save cancelled.")
+            elif saved.get("successes") and not saved.get("failures"):
+                result["dropbox_saved_path"] = saved["destination"]
+                result["dropbox_save_failures"] = []
+                st.session_state.last_generation_result = result
+                st.success("Saved to Dropbox")
             elif saved.get("successes"):
                 result["dropbox_saved_path"] = saved["destination"]
                 result["dropbox_save_failures"] = list(saved.get("failures") or ())
                 st.session_state.last_generation_result = result
-                st.success("Saved to Dropbox")
+                failed_names = ", ".join(
+                    str(row.get("relative_path") or row.get("path") or "unknown file")
+                    for row in saved["failures"]
+                )
+                st.warning(f"Dropbox save is incomplete. Failed files: {failed_names}")
             else:
                 st.warning("No mockup files were saved.")
         except Exception as error:
@@ -8268,9 +8458,12 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
 
     saved_path = str(result.get("dropbox_saved_path") or "")
     if saved_path:
-        st.success("Saved to Dropbox")
         if result.get("dropbox_save_failures"):
-            st.warning(f"{len(result['dropbox_save_failures'])} files could not be saved.")
+            st.warning(
+                f"Dropbox save is incomplete: {len(result['dropbox_save_failures'])} files could not be saved."
+            )
+        else:
+            st.success("Saved to Dropbox")
         if st.button(
             "Open folder",
             key=f"mockups-dropbox-open::{run_key}",
@@ -8298,8 +8491,12 @@ def render_final_zip_download(result):
         return
 
     if result_is_dropbox_backed(result):
-        selected_manifest = mockup_storage.dropbox_selected_manifest(
+        ordered_assets = image_factory.order_assets_by_product_manifest(
             result["assets"],
+            result["product_image_manifest"],
+        )
+        selected_manifest = mockup_storage.dropbox_selected_manifest(
+            ordered_assets,
             selected_groups,
         )
         selected_file_count = len(selected_manifest)
@@ -8397,17 +8594,9 @@ def render_mockups_dropbox_status(result):
             st.rerun()
 
 
-@st.fragment
-def render_prompt_cards(result, prompt_paths, heading, caption=None):
+def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
     if not prompt_paths:
-        return
-
-    latest_result = st.session_state.get("last_generation_result")
-    if (
-        isinstance(latest_result, dict)
-        and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
-    ):
-        result = normalize_generation_result(latest_result)
+        return result
 
     st.subheader(heading)
     if caption:
@@ -8493,6 +8682,50 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
                 )
                 st.caption(f"Saved - included when {group_label} is selected.")
 
+    return ensure_lifestyle_assets_registered(result)
+
+
+def render_product_image_readiness(result):
+    result = normalize_generation_result(result)
+    readiness = result["product_image_readiness"]
+    status = f"{readiness['ready_count']} of {readiness['required_count']} product images ready"
+    if readiness["complete"]:
+        st.success(status)
+    else:
+        missing = ", ".join(readiness["missing_labels"])
+        st.warning(f"{status}. Missing required images: {missing}.")
+    if result.get("socials_dir"):
+        with suppress(FileNotFoundError):
+            st.caption(
+                f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
+            )
+    return readiness
+
+
+@st.fragment
+def render_prompt_cards(result, prompt_groups):
+    """Keep uploader state and every downstream image consumer in one fragment."""
+    latest_result = st.session_state.get("last_generation_result")
+    if (
+        isinstance(latest_result, dict)
+        and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
+    ):
+        result = normalize_generation_result(latest_result)
+    else:
+        result = normalize_generation_result(result)
+
+    for prompt_paths, heading, caption in prompt_groups:
+        result = _render_prompt_card_group(result, prompt_paths, heading, caption)
+
+    latest_result = st.session_state.get("last_generation_result")
+    if (
+        isinstance(latest_result, dict)
+        and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
+    ):
+        result = normalize_generation_result(latest_result)
+    render_product_image_readiness(result)
+    render_final_zip_download(result)
+
 
 def render_optional_package_controls(result):
     st.subheader("Optional Packs")
@@ -8571,18 +8804,6 @@ def render_generation_result(result):
     else:
         st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
 
-    if result.get("shopify_uploads_dir"):
-        with suppress(FileNotFoundError):
-            st.caption(
-                f"{len(list(Path(result['shopify_uploads_dir']).glob('*.webp')))} WEBP files ready for Shopify uploads."
-            )
-
-    if result.get("socials_dir"):
-        with suppress(FileNotFoundError):
-            st.caption(
-                f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
-            )
-
     if ENABLE_GOOGLE_DRIVE and result["drive_run_url"]:
         st.success("Saved to Google Drive")
         st.markdown(f"[Open Google Drive run folder]({result['drive_run_url']})")
@@ -8621,16 +8842,13 @@ def render_generation_result(result):
 
         render_prompt_cards(
             result,
-            product_page_prompts,
-            "Product Page Lifestyle Mockups",
+            (
+                (product_page_prompts, "Product Page Lifestyle Mockups", None),
+                (social_prompts, "Social Lifestyle Mockups", None),
+            ),
         )
-        render_prompt_cards(
-            result,
-            social_prompts,
-            "Social Lifestyle Mockups",
-        )
-
-    render_final_zip_download(result)
+    else:
+        render_prompt_cards(result, ())
 
 
 def render_recent_runs_sidebar():
@@ -9280,8 +9498,12 @@ def render_mockups_page():
 
 
 def current_product_upload_source_metadata():
+    factory = get_image_factory()
     result = st.session_state.get("last_generation_result")
     result = dict(result) if isinstance(result, dict) else {}
+    normalized_result = normalize_generation_result(result) if result else {}
+    if normalized_result:
+        result = normalized_result
     root_cache = st.session_state.get("files_team_root")
     root_cache = dict(root_cache) if isinstance(root_cache, dict) else {}
     folder_path = str(st.session_state.get("files_browser_path") or "").strip()
@@ -9305,6 +9527,8 @@ def current_product_upload_source_metadata():
         or not dropbox_integration.path_is_within_root(folder_path, root_path)
     ):
         folder_path = ""
+    product_manifest = result.get("product_image_manifest") or []
+    readiness = result.get("product_image_readiness") or {}
     return {
         "dropbox_root_path": root_path,
         "dropbox_product_folder": folder_path,
@@ -9312,6 +9536,12 @@ def current_product_upload_source_metadata():
         "shopify_product_id": result.get("shopify_product_id") or "",
         "shopify_product_gid": result.get("shopify_product_gid") or "",
         "shopify_handle": result.get("shopify_handle") or result.get("product_handle") or "",
+        "product_image_manifest": factory.product_image_manifest_json(product_manifest),
+        "product_image_readiness": readiness,
+        "shopify_draft_images": factory.build_shopify_draft_image_payload(
+            product_manifest,
+            allow_incomplete=True,
+        ),
     }
 
 
@@ -9411,6 +9641,20 @@ def render_product_uploads_page():
 
     st.divider()
     source_metadata = current_product_upload_source_metadata()
+    source_readiness = source_metadata.get("product_image_readiness") or {}
+    allow_incomplete_images = False
+    if source_readiness.get("required_count") and not source_readiness.get("complete"):
+        missing_images = ", ".join(source_readiness.get("missing_labels") or ())
+        st.warning(
+            f"{source_readiness.get('ready_count', 0)} of "
+            f"{source_readiness.get('required_count', 8)} product images ready. "
+            f"Missing required images: {missing_images}."
+        )
+        allow_incomplete_images = st.checkbox(
+            "I explicitly want a recovery prompt for this incomplete package",
+            key="product-upload-confirm-incomplete-images",
+        )
+    source_metadata["allow_incomplete_product_images"] = allow_incomplete_images
     if (
         "product-upload-product-name" not in st.session_state
         and source_metadata.get("product_name")
@@ -15741,6 +15985,28 @@ def main():
             status="denied",
         )
         log_startup_stage("PAGE ACCESS BLOCKED", current_page)
+        return
+
+    normalized_groups = {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in selected_groups
+    }
+    readiness = result["product_image_readiness"]
+    if (
+        {ASSET_CATEGORY_CORE, ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups)
+        and not readiness["complete"]
+    ):
+        st.warning(
+            "The complete product package is not ready. Missing required images: "
+            + ", ".join(readiness["missing_labels"])
+            + ". Upload them above, or explicitly select a partial recovery group."
+        )
+        st.button(
+            "Download ZIP",
+            key=f"download-filtered-zip-incomplete::{result['run_dir']}",
+            disabled=True,
+            use_container_width=True,
+        )
         return
 
     top_bar.render_planner_data_refresh_bridge(st, current_route=current_page)

@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import shopify_sync
 import order_action_state
+import edition_ledger
 from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
 from certificate_logging import certificate_stage, certificate_stage_log, set_certificate_log_context
 from services import r2_storage
@@ -341,16 +342,40 @@ def _shopify_id_candidates(resource_type, value):
     return sorted(candidates)
 
 
-def allocation_identity_key(shopify_order_id, shopify_line_item_id, unit_index):
-    order_id = canonical_shopify_id(shopify_order_id)
-    line_id = canonical_shopify_id(shopify_line_item_id)
-    try:
-        unit = max(int(unit_index or 1), 1)
-    except (TypeError, ValueError):
-        unit = 1
+def allocation_identity_key(
+    shopify_order_id,
+    shopify_line_item_id,
+    unit_index,
+    *,
+    source_channel="shopify",
+    external_order_id="",
+    external_line_item_id="",
+):
+    """Return the channel-aware durable source-unit identity.
+
+    Shopify IDs remain the fallback for rows ingested through Shopify. Etsy and
+    eBay callers should supply their immutable external identities when present.
+    The database uniqueness constraint uses the four individual columns; this
+    text key is retained for diagnostics and backwards-compatible reads.
+    """
+    channel = edition_ledger.normalize_source_channel(source_channel)
+    order_id = str(external_order_id or "").strip() or edition_ledger.canonical_shopify_gid(
+        "Order", shopify_order_id
+    )
+    line_id = str(external_line_item_id or "").strip() or edition_ledger.canonical_shopify_gid(
+        "LineItem", shopify_line_item_id
+    )
     if not order_id or not line_id:
         return ""
-    return f"{order_id}:{line_id}:{unit}"
+    try:
+        return edition_ledger.durable_source_identity(
+            channel,
+            order_id,
+            line_id,
+            unit_index,
+        )
+    except ValueError:
+        return ""
 
 
 def canonical_order_sync_key(shopify_order_id="", shopify_order_name=""):
@@ -8964,6 +8989,7 @@ def _insert_edition_adjustment_with_cursor(
 
 def list_edition_products(search="", limit=500, offset=0):
     ensure_schema()
+    return list_edition_products_read_only(search=search, limit=limit, offset=offset)
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     limit_value = max(min(int(limit or 500), 5000), 1)
     offset_value = max(int(offset or 0), 0)
@@ -9130,6 +9156,7 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
         WITH selected_products AS (
             SELECT ep.id,
                    ep.shopify_product_id,
+                   ep.shopify_product_gid,
                    ep.shopify_handle,
                    ep.product_title,
                    ep.edition_total,
@@ -9155,17 +9182,27 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                    eo.edition_number
             FROM edition_orders eo
             JOIN selected_products selected
-              ON selected.shopify_handle = eo.shopify_handle
-              OR selected.active_edition_run_id = eo.edition_run_id
+              ON eo.shopify_product_gid = COALESCE(
+                     NULLIF(selected.shopify_product_gid, ''),
+                     NULLIF(selected.shopify_product_id, '')
+                 )
               OR (
+                   COALESCE(eo.shopify_product_gid, '') = ''
+                   AND
                    COALESCE(selected.shopify_product_id, '') <> ''
                    AND regexp_replace(selected.shopify_product_id, '^gid://shopify/Product/', '', 'i')
                        = regexp_replace(COALESCE(eo.shopify_product_id, ''), '^gid://shopify/Product/', '', 'i')
               )
+              OR (
+                   COALESCE(eo.shopify_product_gid, '') = ''
+                   AND selected.active_edition_run_id = eo.edition_run_id
+              )
+            WHERE COALESCE(eo.allocation_valid, TRUE)
         ),
         handle_totals AS (
             SELECT current_shopify_handle AS shopify_handle,
                    COUNT(*) AS sold_count,
+                   COALESCE(MIN(edition_number), 0) AS min_assigned,
                    COALESCE(MAX(edition_number), 0) AS max_assigned
             FROM selected_orders
             GROUP BY current_shopify_handle
@@ -9179,12 +9216,16 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
         )
         SELECT ep.id,
                ep.shopify_product_id,
+               ep.shopify_product_gid,
                ep.shopify_handle,
                ep.product_title,
                ep.edition_total,
-               ep.next_edition_number,
+               CASE WHEN COALESCE(ht.sold_count, 0)=0 THEN 1 ELSE ht.max_assigned + 1 END AS next_edition_number,
                ep.active,
-               ep.sold_out,
+               (
+                   COALESCE(ht.sold_count, 0) > 0
+                   AND (ht.min_assigned <> 1 OR ht.sold_count <> ht.max_assigned)
+               ) OR COALESCE(ht.max_assigned, 0) >= COALESCE(ep.edition_total, 100) AS sold_out,
                ep.updated_at,
                ep.edition_name,
                ep.allow_counter_history_override,
@@ -9197,7 +9238,7 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                er.id AS edition_run_id,
                er.edition_name AS run_edition_name,
                er.edition_total AS run_edition_total,
-               er.next_edition_number AS run_next_edition_number,
+               CASE WHEN COALESCE(ht.sold_count, 0)=0 THEN 1 ELSE ht.max_assigned + 1 END AS run_next_edition_number,
                er.status AS run_status,
                er.updated_at AS run_updated_at,
                COALESCE(rt.max_assigned, 0) AS active_run_max_assigned,
@@ -9206,30 +9247,21 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                    NULLIF(shp.featured_image_url, ''),
                    NULLIF(shp.image_url, '')
                ) AS display_image_url,
-               CASE
-                   WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
-                       COALESCE(ep.last_assigned_edition, 0),
-                       GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                   )
-                   ELSE GREATEST(
-                       COALESCE(ep.last_assigned_edition, 0),
-                       COALESCE(ht.max_assigned, 0),
-                       GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                   )
-               END AS last_assigned_edition,
+               COALESCE(ht.min_assigned, 0) AS first_assigned_edition,
+               COALESCE(ht.max_assigned, 0) AS last_assigned_edition,
                COALESCE(ht.sold_count, 0) AS sold_count,
                GREATEST(
-                   COALESCE(ep.edition_total, 100) - GREATEST(
-                       COALESCE(ep.last_assigned_edition, 0),
-                       COALESCE(ht.max_assigned, 0),
-                       GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                   ),
+                   COALESCE(ep.edition_total, 100) - COALESCE(ht.sold_count, 0),
                    0
                ) AS remaining_count,
                GREATEST(
-                   COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1,
+                   COALESCE(ep.edition_total, 100) - COALESCE(ht.sold_count, 0),
                    0
-               ) AS remaining_editions
+               ) AS remaining_editions,
+               (
+                   COALESCE(ht.sold_count, 0) > 0
+                   AND (ht.min_assigned <> 1 OR ht.sold_count <> ht.max_assigned)
+               ) AS allocation_blocked
         FROM selected_products ep
         {active_run_join}
         LEFT JOIN shopify_products shp ON shp.handle = ep.shopify_handle
@@ -9399,54 +9431,63 @@ def _update_edition_product_with_cursor(
     old_sold_out_value = product.get("sold_out")
     old_sold_out = bool(old_sold_out_value) if old_sold_out_value is not None else run.get("status") == SOLD_OUT_RUN_STATUS
     new_total = max(_int_value(edition_total, old_total), 1)
-    if current_edition is not None:
-        current = _int_value(current_edition, 0)
-        if current < 0:
-            raise ValueError("Latest sent cannot be below 0.")
-        proposed_next = current + 1
-    elif next_edition_number is not None:
-        proposed_next = _int_value(next_edition_number, old_next)
-    else:
-        proposed_next = old_next
-
+    product_gid = _shopify_gid(
+        "Product",
+        product.get("shopify_product_gid") or product.get("shopify_product_id"),
+    )
+    if not product_gid:
+        raise ValueError("A canonical Shopify product GID is required before Edition Ops can be edited.")
     cur.execute(
         """
-        SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+        SELECT COUNT(*) AS allocation_count,
+               COALESCE(MIN(edition_number), 0) AS min_assigned,
+               COALESCE(MAX(edition_number), 0) AS max_assigned
         FROM edition_orders
-        WHERE shopify_handle = %s
+        WHERE shopify_product_gid=%s
+          AND COALESCE(allocation_valid, TRUE)
         """,
-        (handle,),
+        (product_gid,),
     )
-    max_assigned = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
-    minimum_next = max_assigned + 1 if max_assigned > 0 else 1
-    manual_lower_correction = proposed_next < minimum_next
-
-    if proposed_next < 1:
-        raise ValueError("Next edition number must be at least 1.")
-    if new_total < 1:
-        raise ValueError("Edition total must be at least 1.")
-    if max_assigned > 0 and new_total < max_assigned:
+    ledger_state = cur.fetchone() or {}
+    allocation_count = _int_value(ledger_state.get("allocation_count"), 0)
+    min_assigned = _int_value(ledger_state.get("min_assigned"), 0)
+    max_assigned = _int_value(ledger_state.get("max_assigned"), 0)
+    if allocation_count and (min_assigned != 1 or allocation_count != max_assigned):
         raise ValueError(
-            f"Edition total cannot be below {max_assigned}; "
-            "editions have already been assigned."
+            "Edition ledger sequence is not contiguous. Run the read-only reconciliation before editing this product."
         )
-    if proposed_next > new_total + 1:
-        raise ValueError("Next edition number cannot be more than one past the edition total.")
+    proposed_next = max_assigned + 1 if allocation_count else 1
+    requested_next = None
+    if current_edition is not None:
+        requested_next = _int_value(current_edition, 0) + 1
+    elif next_edition_number is not None:
+        requested_next = _int_value(next_edition_number, proposed_next)
+    if requested_next is not None and requested_next != proposed_next:
+        raise ValueError(
+            f"Next edition number is ledger-derived ({proposed_next}) and cannot be edited directly."
+        )
+    if new_total > 100:
+        raise ValueError("Edition total cannot exceed 100.")
+    if allocation_count and new_total != old_total:
+        raise ValueError("Edition total is immutable after the first allocation.")
+    if max_assigned > new_total:
+        raise ValueError(f"Edition total cannot be below issued edition #{max_assigned:03d}.")
 
+    ledger_sold_out = max_assigned >= new_total
     requested_status = _clean_edition_run_status(
         status,
         active=bool(active if active is not None else run.get("status") == ACTIVE_RUN_STATUS),
-        sold_out=bool(sold_out if sold_out is not None else run.get("status") == SOLD_OUT_RUN_STATUS),
+        sold_out=ledger_sold_out,
     )
-    if sold_out is True or proposed_next > new_total:
+    if ledger_sold_out:
         requested_status = SOLD_OUT_RUN_STATUS
     elif active is False and status is None:
         requested_status = INACTIVE_RUN_STATUS
-    elif active is True and sold_out is False and status is None:
+    elif active is True and status is None:
         requested_status = ACTIVE_RUN_STATUS
 
-    latest_sent = proposed_next - 1
-    remaining = new_total - latest_sent
+    latest_sent = max_assigned
+    remaining = max(new_total - allocation_count, 0)
 
     new_name = str(edition_name or run.get("edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
     cur.execute(
@@ -9497,7 +9538,7 @@ def _update_edition_product_with_cursor(
             new_total,
             proposed_next,
             latest_sent,
-            latest_sent,
+            allocation_count,
             max(remaining, 0),
             flags["active"],
             flags["active"],
@@ -9545,34 +9586,11 @@ def _update_edition_product_with_cursor(
             actor="edition_ops",
             source="manual_app",
         )
-    if manual_lower_correction:
-        _insert_audit_log(
-            cur,
-            event_type="manual_next_number_lowered",
-            entity_type="edition_product",
-            entity_id=product.get("id"),
-            shopify_handle=handle,
-            old_value={
-                "product_title": product.get("product_title"),
-                "handle": handle,
-                "next_edition_number": old_next,
-                "highest_assigned_edition": max_assigned,
-            },
-            new_value={
-                "product_title": product.get("product_title"),
-                "handle": handle,
-                "next_edition_number": proposed_next,
-                "highest_assigned_edition": max_assigned,
-            },
-            reason="manual_next_number_lowered",
-            actor="edition_ops",
-            source="manual_app",
-        )
     return {
         "handle": handle,
         "next_edition_number": proposed_next,
         "edition_total": new_total,
-        "manual_next_number_lowered": manual_lower_correction,
+        "manual_next_number_lowered": False,
         "highest_assigned_edition": max_assigned,
     }
 
@@ -9652,6 +9670,9 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
 
 
 def start_new_edition_run(shopify_handle, *, edition_name="", edition_total=100, notes="", reason="Start new edition run"):
+    raise RuntimeError(
+        "Starting a replacement edition run is disabled: Shopify product GID owns one immutable #001-#100 ledger."
+    )
     ensure_schema()
     handle = str(shopify_handle or "").strip()
     if not handle:
@@ -9765,6 +9786,7 @@ def list_edition_adjustments(search="", limit=100):
 
 
 def reset_active_edition_counters_to_zero_sold(reason="Developer reset all active edition counters to 0 sold"):
+    raise RuntimeError("Edition counters are ledger-derived and can never be reset.")
     ensure_schema()
     reset_rows = []
     with connect() as conn:
@@ -9872,21 +9894,35 @@ def format_edition_display_number(edition_number, edition_total):
 
 def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
-    stored_next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
-    highest_assigned = max(
-        _safe_int(row.get("highest_assigned_edition"), 0),
-        _safe_int(row.get("max_assigned_edition"), 0),
-        _safe_int(row.get("historical_max_assigned_edition"), 0),
-        _safe_int(row.get("active_run_max_assigned"), 0),
-        _safe_int(row.get("last_assigned_edition"), 0),
-        0,
+    ledger_values_present = "valid_allocation_count" in row
+    if ledger_values_present:
+        highest_assigned = max(_safe_int(row.get("last_assigned_edition"), 0), 0)
+        lowest_assigned = max(_safe_int(row.get("first_assigned_edition"), 0), 0)
+        valid_allocation_count = max(_safe_int(row.get("valid_allocation_count"), 0), 0)
+    else:
+        highest_assigned = max(
+            _safe_int(row.get("highest_assigned_edition"), 0),
+            _safe_int(row.get("max_assigned_edition"), 0),
+            _safe_int(row.get("historical_max_assigned_edition"), 0),
+            _safe_int(row.get("active_run_max_assigned"), 0),
+            _safe_int(row.get("last_assigned_edition"), 0),
+            0,
+        )
+        lowest_assigned = 1 if highest_assigned else 0
+        valid_allocation_count = max(_safe_int(row.get("sold_count"), 0), 0)
+    allocation_blocked = bool(
+        valid_allocation_count
+        and (lowest_assigned != 1 or valid_allocation_count != highest_assigned)
     )
-    next_number = max(stored_next_number, highest_assigned + 1)
+    next_number = highest_assigned + 1
     last_assigned = highest_assigned
-    sold_count = highest_assigned
-    remaining_count = max(edition_total - highest_assigned, 0)
-    is_sold_out = bool(row.get("sold_out")) or next_number > edition_total or remaining_count <= 0
-    if is_sold_out:
+    sold_count = valid_allocation_count
+    remaining_count = max(edition_total - valid_allocation_count, 0)
+    is_sold_out = allocation_blocked or next_number > edition_total or remaining_count <= 0
+    if allocation_blocked:
+        edition_status = "allocation_blocked"
+        edition_display_text = "Edition allocation paused — reconciliation required"
+    elif is_sold_out:
         edition_status = "sold_out"
         edition_display_text = "Sold Out Archive"
     elif remaining_count <= 5:
@@ -9905,6 +9941,7 @@ def calculate_product_edition_metafield_values(row):
         "sold_count": sold_count,
         "remaining_count": remaining_count,
         "is_sold_out": is_sold_out,
+        "allocation_blocked": allocation_blocked,
         "edition_status": edition_status,
         "edition_display_text": edition_display_text,
     }
@@ -9932,31 +9969,39 @@ def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first
                        er.next_edition_number AS run_next_edition_number,
                        er.status AS run_status,
                        er.updated_at AS run_updated_at,
-                       COALESCE((
+                        COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
                            WHERE eo.edition_run_id = er.id
-                       ), 0) AS active_run_max_assigned,
-                       CASE
-                           WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                             AND COALESCE(eo.allocation_valid, TRUE)
+                        ), 0) AS active_run_max_assigned,
+                       COALESCE((
+                           SELECT MIN(eo.edition_number)
+                           FROM edition_orders eo
+                           WHERE eo.shopify_product_gid = COALESCE(
+                               NULLIF(ep.shopify_product_gid, ''),
+                               NULLIF(ep.shopify_product_id, '')
                            )
-                           ELSE GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               COALESCE((
-                                   SELECT MAX(eo.edition_number)
-                                   FROM edition_orders eo
-                                   WHERE eo.shopify_handle = ep.shopify_handle
-                               ), 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                             AND COALESCE(eo.allocation_valid, TRUE)
+                       ), 0) AS first_assigned_edition,
+                       COALESCE((
+                           SELECT MAX(eo.edition_number)
+                           FROM edition_orders eo
+                           WHERE eo.shopify_product_gid = COALESCE(
+                               NULLIF(ep.shopify_product_gid, ''),
+                               NULLIF(ep.shopify_product_id, '')
                            )
-                       END AS last_assigned_edition,
+                             AND COALESCE(eo.allocation_valid, TRUE)
+                       ), 0) AS last_assigned_edition,
                        (
                            SELECT COUNT(*)
                            FROM edition_orders eo
-                           WHERE eo.shopify_handle = ep.shopify_handle
-                       ) AS sold_count
+                           WHERE eo.shopify_product_gid = COALESCE(
+                               NULLIF(ep.shopify_product_gid, ''),
+                               NULLIF(ep.shopify_product_id, '')
+                           )
+                             AND COALESCE(eo.allocation_valid, TRUE)
+                       ) AS valid_allocation_count
                 FROM edition_products ep
                 {active_run_join}
                 LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -9993,50 +10038,87 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
             cur.execute(
                 """
                 UPDATE edition_products
-                SET next_edition_number=GREATEST(COALESCE(next_edition_number, 1), %s),
-                    last_assigned_edition=%s,
-                    sold_count=%s,
-                    remaining_count=%s,
-                    edition_status=%s,
+                SET edition_status=%s,
                     edition_display_text=%s,
                     metafields_synced_at=CASE WHEN %s = 'Synced' THEN now() ELSE metafields_synced_at END,
                     metafields_sync_status=%s,
                     last_metafield_error=%s,
-                    sold_out=%s,
-                    is_sold_out=%s,
                     updated_at=now()
                 WHERE shopify_handle=%s
                 """,
                 (
-                    payload.get("next_edition_number") or 1,
-                    payload.get("last_assigned_edition") or 0,
-                    payload.get("sold_count") or 0,
-                    payload.get("remaining_count") or 0,
                     payload.get("edition_status") or "",
                     payload.get("edition_display_text") or "",
                     status,
                     status,
                     str(error_message or "")[:1000],
-                    bool(payload.get("is_sold_out")),
-                    bool(payload.get("is_sold_out")),
-                    shopify_handle,
-                ),
-            )
-            cur.execute(
-                """
-                UPDATE edition_runs er
-                SET next_edition_number=GREATEST(COALESCE(er.next_edition_number, 1), %s),
-                    updated_at=now()
-                FROM edition_products ep
-                WHERE ep.shopify_handle=%s
-                  AND ep.active_edition_run_id=er.id
-                """,
-                (
-                    payload.get("next_edition_number") or 1,
                     shopify_handle,
                 ),
             )
         conn.commit()
+
+
+def _mark_allocation_metafield_mirror_status(shopify_handle, status, error_message=""):
+    """Keep failed Shopify mirrors retryable without changing allocation identity."""
+    normalized_status = str(status or "pending").strip().casefold()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE edition_orders
+                    SET mirror_status=%s,
+                        mirror_attempted_at=now(),
+                        mirror_error=%s,
+                        updated_at=now()
+                    WHERE shopify_handle=%s
+                      AND COALESCE(mirror_status, 'pending') IN ('pending', 'failed')
+                    """,
+                    (
+                        normalized_status,
+                        str(error_message or "")[:1000],
+                        shopify_handle,
+                    ),
+                )
+            conn.commit()
+        return True
+    except Exception as mark_error:
+        print(
+            "WARN Edition allocation mirror status write failed "
+            f"handle={shopify_handle} error_type={mark_error.__class__.__name__}",
+            flush=True,
+        )
+        return False
+
+
+def pending_allocation_metafield_mirror_handles(*, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT shopify_handle
+                    FROM edition_orders
+                    WHERE COALESCE(allocation_valid, TRUE)
+                      AND COALESCE(mirror_status, 'pending') IN ('pending', 'failed')
+                      AND COALESCE(shopify_handle, '') <> ''
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM edition_orders product_ledger
+                          WHERE product_ledger.shopify_product_gid=edition_orders.shopify_product_gid
+                            AND COALESCE(product_ledger.allocation_valid, TRUE)
+                          GROUP BY product_ledger.shopify_product_gid
+                          HAVING MIN(product_ledger.edition_number) <> 1
+                              OR COUNT(*) <> MAX(product_ledger.edition_number)
+                      )
+                    ORDER BY shopify_handle
+                    """
+                )
+                return [str(row.get("shopify_handle") or "") for row in (cur.fetchall() or [])]
+    except SupabaseNotConfigured:
+        return []
 
 
 CANONICAL_STOREFRONT_EDITION_METAFIELDS = (
@@ -10365,43 +10447,35 @@ def sync_product_edition_metafields(
         shopify_handle,
         ensure_schema_first=ensure_schema_first,
     )
+    if payload.get("allocation_blocked"):
+        raise ValueError(
+            f"{shopify_handle} has a non-contiguous edition ledger; storefront mirroring is blocked pending reconciliation."
+        )
     owner_gid = payload.get("shopify_product_gid") or payload.get("shopify_product_id") or ""
     before_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
     before_metafields = before_snapshot.get("metafields") or []
     try:
-        result = shopify_sync.sync_limited_edition_metafields_for_products(
-            [
-                {
-                    "shopify_product_id": payload.get("shopify_product_id"),
-                    "handle": payload.get("shopify_handle") or shopify_handle,
-                    "title": payload.get("product_title") or payload.get("title") or shopify_handle,
-                    "edition_enabled": not bool(payload.get("is_archived")),
-                    "edition_total": payload.get("edition_total"),
-                    "edition_next_number": payload.get("next_edition_number"),
-                    "edition_sold_count": payload.get("sold_count"),
-                    "edition_remaining": payload.get("remaining_count"),
-                    "edition_status": payload.get("edition_status"),
-                    "edition_label": payload.get("edition_name") or payload.get("run_edition_name") or DEFAULT_EDITION_NAME,
-                }
-            ],
+        mirror_payload = {
+            **payload,
+            "shopify_product_id": payload.get("shopify_product_id"),
+            "shopify_product_gid": payload.get("shopify_product_gid"),
+            "handle": payload.get("shopify_handle") or shopify_handle,
+            "title": payload.get("product_title") or payload.get("title") or shopify_handle,
+            "edition_enabled": not bool(payload.get("is_archived")),
+            "edition_total": payload.get("edition_total"),
+            "edition_next_number": payload.get("next_edition_number"),
+            "edition_sold_count": payload.get("sold_count"),
+            "edition_remaining": payload.get("remaining_count"),
+            "edition_status": payload.get("edition_status"),
+            "edition_label": payload.get("edition_name") or payload.get("run_edition_name") or DEFAULT_EDITION_NAME,
+        }
+        result = shopify_sync.sync_complete_product_edition_metafields(
+            mirror_payload,
             config=config,
             request_post=request_post,
-            raise_on_failure=True,
         )
-        try:
-            shopify_sync.sync_product_edition_metafields(
-                payload,
-                config=config,
-                request_post=request_post,
-            )
-        except Exception as legacy_error:
-            if ensure_schema_first:
-                log_app_error(
-                    "legacy_product_metafield_sync_failed",
-                    str(legacy_error),
-                    {"shopify_handle": shopify_handle},
-                )
         _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
+        _mark_allocation_metafield_mirror_status(shopify_handle, "synced", "")
         after_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
         after_metafields = after_snapshot.get("metafields") or []
         _record_product_metafield_mirror_audit(
@@ -10432,6 +10506,7 @@ def sync_product_edition_metafields(
         }
     except Exception as error:
         _mark_product_metafields_sync(shopify_handle, payload, "Failed", str(error))
+        _mark_allocation_metafield_mirror_status(shopify_handle, "failed", str(error))
         _record_product_metafield_mirror_audit(
             shopify_handle,
             status="failed",
@@ -10453,6 +10528,7 @@ def sync_product_edition_metafields_for_handles(
     handles,
     config=None,
     progress_callback=None,
+    request_post=None,
     *,
     ensure_schema_first=True,
 ):
@@ -10476,6 +10552,7 @@ def sync_product_edition_metafields_for_handles(
                 result = sync_product_edition_metafields(
                     handle,
                     config=config,
+                    request_post=request_post,
                     ensure_schema_first=ensure_schema_first,
                 )
                 results.append(_product_metafield_sync_diagnostic(result, status="updated"))
@@ -10593,6 +10670,17 @@ def sync_edition_ops_metafields_for_rows(
     *,
     ensure_schema_first=True,
 ):
+    """Compatibility entry point; row counters are never trusted for mirroring."""
+    handles = [
+        str((row or {}).get("handle") or (row or {}).get("shopify_handle") or "").strip()
+        for row in (rows or [])
+    ]
+    return sync_product_edition_metafields_for_handles(
+        [handle for handle in handles if handle],
+        config=config,
+        progress_callback=progress_callback,
+        ensure_schema_first=ensure_schema_first,
+    )
     if ensure_schema_first:
         ensure_schema()
     payloads = []
@@ -11437,7 +11525,10 @@ def get_order_line_assignment_snapshot(line_item_ids, *, ensure_schema_first=Tru
                                 'edition_number', eo.edition_number,
                                 'allocation_index', eo.allocation_index,
                                 'shopify_handle', eo.shopify_handle,
+                                'shopify_product_gid', eo.shopify_product_gid,
                                 'product_title', eo.product_title,
+                                'mirror_status', COALESCE(eo.mirror_status, 'pending'),
+                                'mirror_error', COALESCE(eo.mirror_error, ''),
                                 'certificate_status', COALESCE(c.status, eo.certificate_status, '')
                             )
                             ORDER BY eo.allocation_index
@@ -11967,6 +12058,29 @@ def ensure_edition_tracking_start():
     return started_at
 
 
+def edition_tracking_start_for_processing(*, ensure_schema_first=True):
+    """Read the allocation cutover without causing schema writes in thin paths.
+
+    Webhooks and tests deliberately run with ``ensure_schema_first=False``.  In
+    that mode a missing cutover must fail safe for historical allocation, but
+    it must not turn a webhook into an implicit migration runner.
+    """
+    try:
+        existing = get_sync_setting(
+            EDITION_TRACKING_START_KEY,
+            "",
+            ensure_schema_first=ensure_schema_first,
+        )
+    except SupabaseNotConfigured:
+        return utc_now_datetime()
+    parsed = _parse_datetime(existing)
+    if parsed:
+        return parsed
+    if ensure_schema_first:
+        return ensure_edition_tracking_start()
+    return utc_now_datetime()
+
+
 def get_sync_state(*, ensure_schema_first=True):
     ensure_sync_defaults(ensure_schema_first=ensure_schema_first)
     return {
@@ -12380,30 +12494,13 @@ def _truthy_shopify_flag(value):
     return str(value or "").strip().casefold() in {"1", "true", "yes"}
 
 
-def shopify_order_eligibility(order):
-    """Return the explicit, channel-agnostic business eligibility decision.
-
-    Sales channel is attribution only. Operational allocation accepts paid or
-    partially-paid, non-test, non-cancelled orders with an immutable ID and at
-    least one line item.
-    """
-    if not isinstance(order, dict):
-        return {"eligible": False, "reason": "invalid_payload"}
-    if not str(order.get("shopify_order_id") or "").strip():
-        return {"eligible": False, "reason": "missing_shopify_order_id"}
-    if _truthy_shopify_flag(order.get("test")):
-        return {"eligible": False, "reason": "test_order"}
-    if str(order.get("cancelled_at") or "").strip():
-        return {"eligible": False, "reason": "cancelled_order"}
-    financial_status = str(order.get("financial_status") or "").upper()
-    if financial_status not in {"PAID", "PARTIALLY_PAID"}:
-        return {
-            "eligible": False,
-            "reason": "financial_status_missing" if not financial_status else f"financial_status_{financial_status.casefold()}",
-        }
-    if not list(order.get("line_items") or []):
-        return {"eligible": False, "reason": "no_line_items"}
-    return {"eligible": True, "reason": "eligible_paid_non_cancelled_order"}
+def shopify_order_eligibility(order, *, tracking_start=None, allow_historical=False):
+    """Return the shared paid-order policy for every source channel."""
+    return edition_ledger.paid_order_eligibility(
+        order,
+        tracking_start=tracking_start,
+        allow_historical=allow_historical,
+    )
 
 
 def _latest_paid_order_is_processable(order):
@@ -12895,18 +12992,292 @@ def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=
     }
 
 
-def resolve_edition_product_for_order_line(line_item, *, fetch_missing_products=True, ensure_schema_first=True):
+def _resolve_edition_product_by_gid_with_cursor(cur, line_item, *, lock=False):
+    product_ids = _shopify_identifier_candidates(
+        "Product",
+        (line_item or {}).get("shopify_product_id")
+        or (line_item or {}).get("product_id")
+        or (line_item or {}).get("product_gid"),
+    )
+    if not product_ids:
+        return {
+            "product": {},
+            "status": "missing",
+            "reason": "A canonical Shopify product GID is required; title, handle, and SKU fallback matching is disabled.",
+            "candidates": [],
+        }
+    lock_sql = " FOR UPDATE" if lock else ""
+    cur.execute(
+        f"""
+        SELECT ep.*
+        FROM edition_products ep
+        WHERE ep.shopify_product_id = ANY(%s)
+           OR ep.shopify_product_gid = ANY(%s)
+        ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+        {lock_sql}
+        """,
+        (product_ids, product_ids),
+    )
+    return _unique_edition_product_match(
+        cur.fetchall() or [],
+        match_method="shopify_product_gid",
+        missing_reason="No Edition Ops product matched the canonical Shopify product GID.",
+        ambiguous_reason="Multiple Edition Ops products share the canonical Shopify product GID; allocation is blocked.",
+    )
+
+
+def _resolve_marketplace_shopify_identity_with_cursor(cur, line_item, *, lock=False):
+    """Resolve a Shopify-hosted marketplace line by immutable Shopify IDs."""
+    line_item = line_item or {}
+    product_ids = _shopify_identifier_candidates(
+        "Product",
+        line_item.get("shopify_product_id") or line_item.get("product_id") or line_item.get("product_gid"),
+    )
+    variant_ids = _shopify_identifier_candidates(
+        "ProductVariant",
+        line_item.get("shopify_variant_id") or line_item.get("variant_id") or line_item.get("variant_gid"),
+    )
+    if not product_ids and not variant_ids:
+        return {
+            "product": {},
+            "status": "missing",
+            "reason": "The marketplace line has no canonical Shopify product or variant ID.",
+            "candidates": [],
+        }
+    lock_sql = " FOR UPDATE" if lock else ""
+    if product_ids and variant_ids:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM shopify_variants sv
+            JOIN edition_products ep
+              ON ep.shopify_product_id = sv.shopify_product_id
+              OR ep.shopify_product_gid = sv.shopify_product_id
+            WHERE (sv.shopify_variant_id = ANY(%s) OR sv.legacy_resource_id = ANY(%s))
+              AND (ep.shopify_product_id = ANY(%s) OR ep.shopify_product_gid = ANY(%s))
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (variant_ids, variant_ids, product_ids, product_ids),
+        )
+        variant_result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_product_and_variant_gid",
+            missing_reason="The Shopify product/variant pair is not present in the local variant catalogue.",
+            ambiguous_reason="The Shopify product/variant pair resolves to multiple Edition Ops products.",
+        )
+        # When both immutable IDs are present they must agree.  Do not weaken a
+        # failed pair check to product-only matching; the resolver may still try
+        # the exact SKU or an approved marketplace mapping next.
+        return variant_result
+    if product_ids:
+        # The canonical order payload itself establishes the product relationship.
+        # A stale shopify_variants cache must not make a valid eBay order disappear.
+        return _resolve_edition_product_by_gid_with_cursor(cur, line_item, lock=lock)
+    cur.execute(
+        f"""
+        SELECT ep.*
+        FROM shopify_variants sv
+        JOIN edition_products ep
+          ON ep.shopify_product_id = sv.shopify_product_id
+          OR ep.shopify_product_gid = sv.shopify_product_id
+        WHERE sv.shopify_variant_id = ANY(%s)
+           OR sv.legacy_resource_id = ANY(%s)
+        ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+        {lock_sql}
+        """,
+        (variant_ids, variant_ids),
+    )
+    return _unique_edition_product_match(
+        cur.fetchall() or [],
+        match_method="shopify_variant_gid",
+        missing_reason="No Edition Ops product matched the canonical Shopify variant GID.",
+        ambiguous_reason="The Shopify variant GID resolves to multiple Edition Ops products.",
+    )
+
+
+def _resolve_marketplace_sku_with_cursor(cur, line_item, *, lock=False):
+    sku = str((line_item or {}).get("sku") or "").strip()
+    if not sku:
+        return {
+            "product": {},
+            "status": "missing",
+            "reason": "The marketplace line has no SKU.",
+            "candidates": [],
+        }
+    lock_sql = " FOR UPDATE" if lock else ""
+    cur.execute(
+        f"""
+        SELECT ep.*
+        FROM shopify_variants sv
+        JOIN edition_products ep
+          ON ep.shopify_product_id = sv.shopify_product_id
+          OR ep.shopify_product_gid = sv.shopify_product_id
+        WHERE LOWER(BTRIM(COALESCE(sv.sku, ''))) = LOWER(BTRIM(%s))
+        ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+        {lock_sql}
+        """,
+        (sku,),
+    )
+    return _unique_edition_product_match(
+        cur.fetchall() or [],
+        match_method="exact_shopify_sku",
+        missing_reason="No Edition Ops product matched the exact Shopify SKU.",
+        ambiguous_reason="The exact Shopify SKU resolves to multiple Edition Ops products.",
+    )
+
+
+def _resolve_explicit_marketplace_mapping_with_cursor(cur, order, line_item, *, lock=False):
+    channel = edition_ledger.source_channel_for_order(order)
+    candidates = edition_ledger.marketplace_mapping_identity_candidates(line_item)
+    if not candidates:
+        return {
+            "product": {},
+            "status": "missing",
+            "reason": f"{channel.title()} line has no explicit listing, external variant, or SKU mapping identity.",
+            "candidates": [],
+        }
+    lock_sql = " FOR UPDATE" if lock else ""
+    matched_rows = []
+    mapping_evidence = []
+    for identity_type, external_identity in candidates:
+        cur.execute(
+            f"""
+            SELECT ep.*, emm.identity_type AS marketplace_identity_type,
+                   emm.external_identity AS marketplace_external_identity
+            FROM edition_marketplace_mappings emm
+            JOIN edition_products ep
+              ON COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, '')) = emm.shopify_product_gid
+            WHERE emm.source_channel=%s
+              AND emm.identity_type=%s
+              AND emm.external_identity=%s
+              AND emm.active=TRUE
+            ORDER BY emm.updated_at DESC, ep.updated_at DESC NULLS LAST
+            {lock_sql}
+            """,
+            (channel, identity_type, external_identity),
+        )
+        for row in cur.fetchall() or []:
+            matched_rows.append(row)
+            mapping_evidence.append((identity_type, external_identity))
+    result = _unique_edition_product_match(
+        matched_rows,
+        match_method=f"{channel}_explicit_mapping",
+        missing_reason=f"No active explicit {channel.title()} listing/SKU/variant mapping exists.",
+        ambiguous_reason=f"The {channel.title()} mapping resolves to multiple Shopify product GIDs; allocation is quarantined.",
+    )
+    result["mapping_evidence"] = [
+        {"identity_type": identity_type, "external_identity": external_identity}
+        for identity_type, external_identity in mapping_evidence
+    ]
+    return result
+
+
+def _resolve_marketplace_product_with_cursor(cur, order, line_item, *, lock=False):
+    """Apply the safe marketplace resolution priority without title fallback."""
+    shopify_identity = _resolve_marketplace_shopify_identity_with_cursor(
+        cur,
+        line_item,
+        lock=lock,
+    )
+    if shopify_identity.get("product") or shopify_identity.get("status") == "ambiguous":
+        return shopify_identity
+
+    sku_result = _resolve_marketplace_sku_with_cursor(cur, line_item, lock=lock)
+    if sku_result.get("product") or sku_result.get("status") == "ambiguous":
+        return sku_result
+
+    explicit_mapping = _resolve_explicit_marketplace_mapping_with_cursor(
+        cur,
+        order,
+        line_item,
+        lock=lock,
+    )
+    if explicit_mapping.get("product"):
+        return explicit_mapping
+
+    if explicit_mapping.get("status") == "ambiguous":
+        return explicit_mapping
+    return {
+        "product": {},
+        "status": "missing",
+        "reason": (
+            "No exact Shopify product/variant ID, exact SKU, or active marketplace mapping "
+            "resolved this line. Title and handle fallback matching is disabled."
+        ),
+        "candidates": [],
+        "mapping_evidence": explicit_mapping.get("mapping_evidence") or [],
+    }
+
+
+def _quarantine_allocation_line(order, line_item, reason_code, warning):
+    channel = edition_ledger.source_channel_for_order(order)
+    external_order_id = edition_ledger.external_order_id_for_order(order)
+    external_line_item_id = edition_ledger.external_line_item_id_for_line(order, line_item)
+    if not external_order_id:
+        external_order_id = str((order or {}).get("shopify_order_id") or "missing-order-id")
+    if not external_line_item_id:
+        external_line_item_id = str((line_item or {}).get("shopify_line_item_id") or "missing-line-id")
+    redacted_context = {
+        "shopify_order_id": str((order or {}).get("shopify_order_id") or ""),
+        "shopify_line_item_id": str((line_item or {}).get("shopify_line_item_id") or ""),
+        "source_channel": channel,
+        "mapping_identities": edition_ledger.marketplace_mapping_identity_candidates(line_item),
+    }
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO edition_allocation_quarantine(
+                    source_channel, external_order_id, external_line_item_id,
+                    reason_code, warning, redacted_context
+                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (source_channel, external_order_id, external_line_item_id, reason_code)
+                DO UPDATE SET warning=EXCLUDED.warning,
+                              redacted_context=EXCLUDED.redacted_context,
+                              last_seen_at=now(),
+                              occurrence_count=edition_allocation_quarantine.occurrence_count + 1
+                """,
+                (
+                    channel,
+                    external_order_id,
+                    external_line_item_id,
+                    reason_code,
+                    str(warning or "")[:1000],
+                    json_dumps(redacted_context),
+                ),
+            )
+        conn.commit()
+
+
+def resolve_edition_product_for_order_line(
+    line_item,
+    *,
+    order=None,
+    fetch_missing_products=True,
+    ensure_schema_first=True,
+    strict_identity=True,
+):
     if ensure_schema_first:
         ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
-            result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+            if edition_ledger.is_marketplace_order(order or {}):
+                result = _resolve_marketplace_product_with_cursor(cur, order or {}, line_item)
+            elif strict_identity:
+                result = _resolve_edition_product_by_gid_with_cursor(cur, line_item)
+            else:
+                result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
     if result.get("product") or not fetch_missing_products or not line_item.get("shopify_product_id"):
         return result
     fetched = shopify_sync.fetch_product_by_shopify_id(line_item["shopify_product_id"])
     upsert_products([fetched])
     with connect() as conn:
         with conn.cursor() as cur:
+            if edition_ledger.is_marketplace_order(order or {}):
+                return _resolve_marketplace_product_with_cursor(cur, order or {}, line_item)
+            if strict_identity:
+                return _resolve_edition_product_by_gid_with_cursor(cur, line_item)
             return _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
 
 
@@ -13095,7 +13466,19 @@ def _limited_edition_import_values(row):
 
 
 def preview_limited_edition_import_rows(rows):
-    ensure_schema()
+    return {
+        "mode": "retired_read_only",
+        "rows_read": len(rows or []),
+        "matched": [],
+        "createable": [],
+        "unmatched": [],
+        "changes": [],
+        "errors": [
+            "Legacy Limited Edition CSV preview is disabled because it used handle/counter matching. "
+            "Use scripts/reconcile_edition_ledger.py for a canonical-GID, hash-bound dry run."
+        ],
+    }
+    # Retained unreachable implementation below for historical reference only.
     result = {
         "rows_read": 0,
         "matched": [],
@@ -13180,6 +13563,10 @@ def preview_limited_edition_import_rows(rows):
 
 
 def apply_limited_edition_import_rows(rows, *, create_missing_from_shopify=False, reason="Google Sheet CSV import"):
+    raise RuntimeError(
+        "Legacy Limited Edition CSV apply is disabled; use an approved hash-bound ledger reconciliation report."
+    )
+    # Retained unreachable implementation below for historical reference only.
     ensure_schema()
     result = {
         "rows_read": 0,
@@ -13292,6 +13679,10 @@ def import_limited_edition_rows(
     overwrite_existing_orders=False,
     allow_next_number_override=False,
 ):
+    raise RuntimeError(
+        "Direct historical allocation import is disabled; use scripts/reconcile_edition_ledger.py dry-run and approval flow."
+    )
+    # Retained unreachable implementation below for historical reference only.
     ensure_schema()
     run_id = start_sync_run("limited_edition_csv_import")
     result = {
@@ -14961,7 +15352,14 @@ def _resolve_next_edition_number_state(next_number, should_be_next, allow_counte
     return {"next_number": next_number, "mode": "matched"}
 
 
-def allocate_edition_for_order_line(
+def allocate_edition_for_order_line(*args, **kwargs):
+    """Retired per-unit allocator retained only as an explicit safety barrier."""
+    raise RuntimeError(
+        "Per-unit/promised-number allocation is disabled; use allocate_edition_line_units_atomic."
+    )
+
+
+def _legacy_allocate_edition_for_order_line(
     *,
     shopify_order_id,
     shopify_order_name,
@@ -15603,6 +16001,95 @@ def allocate_edition_for_order_line(
             raise
 
 
+def allocate_edition_line_units_atomic(
+    *,
+    order,
+    line_item,
+    product,
+    quantity,
+    allocation_status="assigned",
+):
+    """Allocate a complete source line through the database ledger function."""
+    channel = edition_ledger.source_channel_for_order(order)
+    external_order_id = edition_ledger.external_order_id_for_order(order)
+    external_line_item_id = edition_ledger.external_line_item_id_for_line(order, line_item)
+    product_gid = _shopify_gid(
+        "Product",
+        (product or {}).get("shopify_product_id")
+        or (product or {}).get("shopify_product_gid")
+        or (line_item or {}).get("shopify_product_id"),
+    )
+    if not external_order_id or not external_line_item_id:
+        raise ValueError(
+            f"{channel.title()} order line is missing a durable external order or line item identity."
+        )
+    if not product_gid:
+        raise ValueError("A canonical Shopify product GID is required for edition allocation.")
+    quantity = max(_int_value(quantity, 1), 1)
+    with connect() as conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT result->'allocation' AS allocation,
+                           (result->>'was_created')::boolean AS was_created
+                    FROM allocate_edition_line_units_atomic(
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    ) AS result
+                    ORDER BY ((result->'allocation'->>'unit_ordinal')::integer)
+                    """,
+                    (
+                        channel,
+                        external_order_id,
+                        external_line_item_id,
+                        product_gid,
+                        quantity,
+                        order.get("shopify_order_id") or external_order_id,
+                        order.get("order_name") or order.get("name") or "",
+                        line_item.get("shopify_line_item_id") or external_line_item_id,
+                        line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
+                        (product or {}).get("title") or line_item.get("product_title") or "Sports Cave Artwork",
+                        line_item.get("variant_title") or "",
+                        line_item.get("sku") or "",
+                        _customer_name_for_storage(order),
+                        str(order.get("customer_email") or order.get("email") or "").strip(),
+                        allocation_status or "assigned",
+                    ),
+                )
+                allocation_results = []
+                for result in cur.fetchall() or []:
+                    allocation = result.get("allocation") or {}
+                    if isinstance(allocation, str):
+                        allocation = json.loads(allocation)
+                    allocation_results.append(
+                        {
+                            "assignment": dict(allocation),
+                            "was_created": bool(result.get("was_created")),
+                        }
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    assignments = [result["assignment"] for result in allocation_results]
+    new_assignments = [
+        result["assignment"]
+        for result in allocation_results
+        if result["was_created"]
+    ]
+    return {
+        "assignments": assignments,
+        "new_assignments": new_assignments,
+        "created": len(new_assignments),
+        "existing": len(assignments) - len(new_assignments),
+        "source_channel": channel,
+        "external_order_id": external_order_id,
+        "external_line_item_id": external_line_item_id,
+    }
+
+
 def process_paid_order(
     order,
     *,
@@ -15617,6 +16104,7 @@ def process_paid_order(
     known_assignment_snapshot=None,
     known_order_lock=False,
     known_ingestion_complete=False,
+    allow_historical_allocation=False,
 ):
     processing_started = time.perf_counter()
     if ensure_schema_first:
@@ -15655,6 +16143,22 @@ def process_paid_order(
             "rejection_reason": rejection_reason,
             "errors": [],
         }
+    if allow_historical_allocation:
+        raise RuntimeError(
+            "Historical allocation requires an approved, auditable backfill workflow; direct allocation is disabled."
+        )
+    if assign_editions:
+        order_datetime = _order_effective_datetime(order)
+        if order_datetime:
+            tracking_start = edition_tracking_start_for_processing(
+                ensure_schema_first=ensure_schema_first,
+            )
+            if tracking_start and order_datetime < tracking_start:
+                assign_editions = False
+                allocation_skip_reason = (
+                    allocation_skip_reason
+                    or "Historical order stored without allocation. Use an explicit audited backfill."
+                )
     if not assign_editions:
         _set_order_ingestion_outcome(
             order,
@@ -15709,6 +16213,16 @@ def process_paid_order(
         if existing_line_is_complete:
             existing_assignments_skipped += quantity
             mapping_methods.add("existing_assignment")
+            pending_mirror_assignments = [
+                assignment
+                for assignment in (existing_line_snapshot.get("assignments") or [])
+                if str((assignment or {}).get("mirror_status") or "synced").casefold() != "synced"
+            ]
+            changed_handles.update(
+                str(assignment.get("shopify_handle") or "").strip()
+                for assignment in pending_mirror_assignments
+                if str(assignment.get("shopify_handle") or "").strip()
+            )
             if str(existing_line_snapshot.get("assignment_status") or "").strip().casefold() != "assigned":
                 line_status_started = time.perf_counter()
                 with connect() as conn:
@@ -15717,12 +16231,8 @@ def process_paid_order(
                     conn.commit()
                 line_status_ms += (time.perf_counter() - line_status_started) * 1000
             continue
-        line_cache_keys = [
+        line_cache_keys = [] if edition_ledger.is_marketplace_order(order) else [
             str(line_item.get("shopify_product_id") or "").strip(),
-            str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
-            str(line_item.get("product_handle") or "").strip().lower(),
-            str(line_item.get("product_title") or "").strip().lower(),
-            _normalize_product_title_key(line_item.get("product_title")),
         ]
         cached_product = next((product_cache[key] for key in line_cache_keys if key and key in product_cache), None)
         match_result = {}
@@ -15734,6 +16244,7 @@ def process_paid_order(
                 product_match_started = time.perf_counter()
                 match_result = resolve_edition_product_for_order_line(
                     line_item,
+                    order=order,
                     fetch_missing_products=fetch_missing_products,
                     ensure_schema_first=ensure_schema_first,
                 )
@@ -15768,10 +16279,6 @@ def process_paid_order(
             mapping_methods.add(mapping_method)
             for cache_key in (
                 str(product.get("shopify_product_id") or "").strip(),
-                str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
-                str(product.get("handle") or "").strip().lower(),
-                str(product.get("title") or "").strip().lower(),
-                _normalize_product_title_key(product.get("title")),
                 *line_cache_keys,
             ):
                 if cache_key:
@@ -15784,6 +16291,11 @@ def process_paid_order(
             mapping_methods.add(mapping_method)
             mapping_reason = (match_result or {}).get("reason") or "Could not confidently match the line to an Edition Ops product."
             errors.append(f"Missing product mapping for line item {line_item_id}: {mapping_reason}")
+            if edition_ledger.is_marketplace_order(order):
+                try:
+                    _quarantine_allocation_line(order, line_item, mapping_method, mapping_reason)
+                except Exception as quarantine_error:
+                    errors.append(f"Marketplace quarantine write failed for line item {line_item_id}: {quarantine_error}")
             line_status_started = time.perf_counter()
             with connect() as conn:
                 with conn.cursor() as cur:
@@ -15833,46 +16345,28 @@ def process_paid_order(
         line_errors = []
         line_order_skipped = 0
 
-        for allocation_index in range(1, quantity + 1):
-            promised_hint = promised_edition_hint_for_order_line(order, line_item, allocation_index)
-            allocation_started = time.perf_counter()
-            result = allocate_edition_for_order_line(
-                shopify_order_id=order.get("shopify_order_id"),
-                shopify_order_name=order.get("order_name"),
-                shopify_line_item_id=line_item_id,
-                allocation_index=allocation_index,
-                shopify_handle=handle,
-                shopify_product_id=product_id,
-                shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
-                product_title=product_title,
-                variant_title=line_item.get("variant_title") or "",
-                sku=line_item.get("sku") or "",
-                customer_name=order_customer_name or order_customer_email,
-                customer_email=order_customer_email,
+        allocation_started = time.perf_counter()
+        try:
+            allocation_result = allocate_edition_line_units_atomic(
+                order=order,
+                line_item=line_item,
+                product=product,
+                quantity=quantity,
                 allocation_status=allocation_status,
-                promised_edition_number=promised_hint.get("edition_number"),
-                promised_edition_total=promised_hint.get("edition_total"),
-                assignment_source=promised_hint.get("source") or "supabase_sequential_allocation",
-                ensure_schema_first=ensure_schema_first,
             )
-            allocation_ms += (time.perf_counter() - allocation_started) * 1000
-            if result.get("error"):
-                line_errors.append(result["error"])
-                errors.append(result["error"])
-            assignment = result.get("assignment")
-            if result.get("created") and assignment:
-                assignments_created += 1
-                line_created += 1
+            line_created = int(allocation_result.get("created") or 0)
+            line_existing = int(allocation_result.get("existing") or 0)
+            assignments_created += line_created
+            existing_assignments_skipped += line_existing
+            if line_created:
                 changed_handles.add(handle)
-                new_assignments.append(assignment)
-            elif assignment:
-                existing_assignments_skipped += 1
-                line_existing += 1
-            elif result.get("skipped_by_order_lock"):
-                existing_assignments_skipped += 1
-                line_order_skipped += 1
-            if result.get("sold_out"):
-                line_sold_out = True
+                new_assignments.extend(allocation_result.get("new_assignments") or [])
+        except Exception as allocation_error:
+            message = str(allocation_error)
+            line_errors.append(message)
+            errors.append(message)
+            line_sold_out = "edition limit reached" in message.casefold()
+        allocation_ms += (time.perf_counter() - allocation_started) * 1000
 
         line_status = "Needs Edition"
         line_error = line_errors[0] if line_errors else ""
@@ -17180,6 +17674,9 @@ def sync_latest_paid_orders_to_supabase(
         raise RuntimeError(failure_message) from error
     shopify_fetch_ms = int((time.perf_counter() - shopify_fetch_started) * 1000)
     fetched_orders = payload.get("orders") or []
+    tracking_start = edition_tracking_start_for_processing(
+        ensure_schema_first=ensure_schema_first,
+    )
     seen = len(fetched_orders)
     processed_orders = 0
     assignments = 0
@@ -17218,6 +17715,7 @@ def sync_latest_paid_orders_to_supabase(
     assigned_order_names = set()
     affected_shopify_order_ids = set()
     affected_edition_order_ids = set()
+    historical_orders_skipped = 0
     needs_mapping_orders = 0
     retryable_error_orders = 0
     rejected_orders = skipped_status_orders
@@ -17391,12 +17889,12 @@ def sync_latest_paid_orders_to_supabase(
             if str(order.get("order_name") or "").strip()
         }
         known_repair_started = time.perf_counter()
-        known_repair = (
-            apply_known_missing_edition_repair(ensure_schema_first=ensure_schema_first)
-            if known_repair_candidates
-            and any(repair.get("order_name") in known_repair_candidates for repair in KNOWN_MISSING_EDITION_REPAIRS)
-            else {"applied_rows": 0, "already_exists_consistent": 0, "errors": []}
-        )
+        known_repair = {
+            "applied_rows": 0,
+            "already_exists_consistent": 0,
+            "errors": [],
+            "disabled_reason": "Legacy promised-number backfill is disabled.",
+        }
         _sync_perf_log(
             "known missing-edition repair time",
             known_repair_started,
@@ -17433,6 +17931,13 @@ def sync_latest_paid_orders_to_supabase(
             ingestion_is_complete = (
                 str(order_state.get("ingestion_status") or "").strip().casefold() == "complete"
             )
+            order_datetime = _order_effective_datetime(order)
+            should_assign_editions = bool(
+                not backfill_latest_paid
+                and (not order_datetime or not tracking_start or order_datetime >= tracking_start)
+            )
+            if not should_assign_editions:
+                historical_orders_skipped += 1
             try:
                 result = process_shopify_order_for_editions(
                     order,
@@ -17440,7 +17945,12 @@ def sync_latest_paid_orders_to_supabase(
                     fetch_missing_products=False,
                     generate_certificates=False,
                     sync_product_metafields=False,
-                    assign_editions=True,
+                    assign_editions=should_assign_editions,
+                    allocation_skip_reason=(
+                        "Historical/backfill reconciliation is read-only by default; no edition was allocated."
+                        if not should_assign_editions
+                        else ""
+                    ),
                     ensure_schema_first=ensure_schema_first,
                     ingestion_method="reconciliation",
                     known_assignment_snapshot=known_assignment_snapshot,
@@ -17511,6 +18021,11 @@ def sync_latest_paid_orders_to_supabase(
         if known_applied:
             for order_name in known_repair_candidates:
                 assigned_order_names.add(order_name)
+        changed_handles.update(
+            pending_allocation_metafield_mirror_handles(
+                ensure_schema_first=False,
+            )
+        )
         mirror_handles = sorted(handle for handle in changed_handles if handle)
         _orders_sync_log("affected_handles_count", "completed", count=len(mirror_handles))
         product_metafield_mirror = {
@@ -17723,6 +18238,7 @@ def sync_latest_paid_orders_to_supabase(
             "supabase_rows_inserted": imported_orders + imported_lines,
             "assignments_created": assignments,
             "edition_allocations_created": assignments,
+            "historical_orders_skipped": historical_orders_skipped,
             "new_allocation_units_inserted": assignments,
             "existing_assignments_skipped": existing_skipped,
             "existing_allocations_preserved": existing_skipped,
@@ -17993,11 +18509,13 @@ def normalize_rest_order(payload):
             }
         )
     source_name = str(payload.get("source_name") or payload.get("sourceName") or "").strip()
-    source_display = {
-        "web": "Online Store",
-        "pos": "Shopify POS",
-        "shopify_draft_order": "Draft order",
-    }.get(source_name.casefold(), source_name.replace("_", " ").strip().title())
+    raw_tags = payload.get("tags") or []
+    tags = (
+        [tag.strip() for tag in str(raw_tags).split(",") if tag.strip()]
+        if isinstance(raw_tags, str)
+        else [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+    )
+    source_display = edition_ledger.source_display_name(source_name, tags=tags)
     return {
         "shopify_order_id": _shopify_gid("Order", legacy_order_id),
         "legacy_resource_id": legacy_order_id,
@@ -18019,6 +18537,10 @@ def normalize_rest_order(payload):
         "processed_at": payload.get("processed_at") or "",
         "source_name": source_name,
         "source_display": source_display,
+        "source_identifier": str(payload.get("source_identifier") or payload.get("sourceIdentifier") or ""),
+        "source_app_id": str(payload.get("app_id") or payload.get("appId") or ""),
+        "source_app_name": str(payload.get("app_name") or payload.get("appName") or ""),
+        "tags": tags,
         "test": bool(payload.get("test")),
         "cancelled_at": payload.get("cancelled_at") or "",
         "note": payload.get("note") or "",
@@ -18678,6 +19200,13 @@ def process_single_paid_shopify_order_for_editions(
     order = _load_single_paid_shopify_order(order_id_or_payload, config=config)
     order_name = _shopify_order_name(order)
     order_id = _shopify_order_id(order)
+    tracking_start = edition_tracking_start_for_processing(
+        ensure_schema_first=ensure_schema_first,
+    )
+    order_datetime = _order_effective_datetime(order)
+    should_assign_editions = bool(
+        not order_datetime or not tracking_start or order_datetime >= tracking_start
+    )
     source_name = str(order.get("source_display") or order.get("source_name") or "")
     _webhook_log(
         "webhook_order_processing_started",
@@ -18790,7 +19319,12 @@ def process_single_paid_shopify_order_for_editions(
         allocation_status="assigned",
         generate_certificates=False,
         sync_product_metafields=False,
-        assign_editions=True,
+        assign_editions=should_assign_editions,
+        allocation_skip_reason=(
+            "Historical webhook/replay stored without allocation. Use an explicit audited backfill to allocate it."
+            if not should_assign_editions
+            else ""
+        ),
         ensure_schema_first=ensure_schema_first,
         ingestion_method=source,
     )
@@ -18989,6 +19523,7 @@ def reconcile_single_shopify_order(
     for line in order.get("line_items") or []:
         match = resolve_edition_product_for_order_line(
             line,
+            order=order,
             fetch_missing_products=False,
             ensure_schema_first=False,
         )
@@ -19000,6 +19535,10 @@ def reconcile_single_shopify_order(
                 "mapping_status": match.get("status") or "missing",
                 "mapping_method": product.get("match_method") or "",
                 "mapped_handle": product.get("handle") or "",
+                "mapped_product_gid": product.get("shopify_product_gid") or product.get("shopify_product_id") or "",
+                "shopify_product_id": str(line.get("shopify_product_id") or ""),
+                "shopify_variant_id": str(line.get("shopify_variant_id") or line.get("variant_id") or ""),
+                "sku": str(line.get("sku") or ""),
                 "reason": match.get("reason") or "",
             }
         )
@@ -19009,6 +19548,10 @@ def reconcile_single_shopify_order(
         "shopify_order_id": immutable_order_id,
         "order_name": _shopify_order_name(order),
         "source_name": str(order.get("source_display") or order.get("source_name") or ""),
+        "source_channel": edition_ledger.source_channel_for_order(order),
+        "source_identifier": str(order.get("source_identifier") or ""),
+        "source_app_id": str(order.get("source_app_id") or ""),
+        "source_app_name": str(order.get("source_app_name") or ""),
         "financial_status": str(order.get("financial_status") or ""),
         "fulfillment_status": str(order.get("fulfillment_status") or ""),
         "shipping_method": str(order.get("shipping_method") or order.get("shipping_title") or ""),
@@ -19632,6 +20175,10 @@ def reprocess_cached_problem_orders(
     sync_product_metafields=False,
     respect_tracking_start=True,
 ):
+    if not respect_tracking_start:
+        raise RuntimeError(
+            "Historical allocation is disabled outside the auditable ledger reconciliation workflow."
+        )
     ensure_schema()
     selected_statuses = tuple(statuses or REPAIRABLE_ORDER_LINE_STATUSES)
     if not selected_statuses or int(limit or 0) <= 0:
@@ -19802,22 +20349,18 @@ def preview_missing_edition_repairs(limit=100, statuses=None):
 
 
 def repair_missing_edition_orders(limit=100, statuses=None):
-    result = reprocess_cached_problem_orders(
-        limit=limit,
-        statuses=statuses or MISSING_EDITION_REPAIRABLE_STATUSES,
-        generate_certificates=False,
-        sync_product_metafields=False,
-        respect_tracking_start=False,
-    )
+    preview = preview_missing_edition_repairs(limit=limit, statuses=statuses)
     return {
-        "mode": "apply",
-        "candidate_rows": len(_missing_edition_candidate_rows(limit=limit, statuses=statuses)),
-        "orders_reprocessed": int(result.get("orders_reprocessed") or 0),
-        "edition_allocations_created": int(result.get("assignments_created") or 0),
-        "existing_allocations_preserved": int(result.get("existing_assignments_skipped") or 0),
-        "historical_lines_marked": int(result.get("historical_lines_marked") or 0),
-        "skipped_missing_snapshot": int(result.get("skipped_missing_snapshot") or 0),
-        "errors": result.get("errors") or [],
+        **preview,
+        "mode": "dry_run_only",
+        "orders_reprocessed": 0,
+        "edition_allocations_created": 0,
+        "existing_allocations_preserved": 0,
+        "historical_lines_marked": 0,
+        "skipped_missing_snapshot": 0,
+        "errors": [
+            "Direct missing-edition backfill is disabled; use scripts/reconcile_edition_ledger.py."
+        ],
     }
 
 
@@ -20043,6 +20586,17 @@ def preview_known_missing_edition_repair():
 
 
 def apply_known_missing_edition_repair(*, ensure_schema_first=True):
+    preview = preview_known_missing_edition_repair()
+    return {
+        "mode": "dry_run_only",
+        "applied_rows": 0,
+        "already_exists_consistent": int(preview.get("already_assigned_correct") or 0),
+        "skipped_rows": preview.get("preview_rows") or [],
+        "changed_handles": [],
+        "errors": [
+            "Legacy promised-number backfill is disabled. Use the auditable ledger reconciliation workflow."
+        ],
+    }
     plans = _known_missing_edition_repair_plan(ensure_schema_first=ensure_schema_first)
     applied_rows = []
     skipped_rows = []
@@ -20172,7 +20726,7 @@ def sync_shopify_orders_to_supabase(
         db_phase_started = time.perf_counter()
         if historical_backfill:
             effective_query = query or "financial_status:paid"
-            allocation_status = "backfilled"
+            allocation_status = "historical_read_only"
             generate_certificates_now = False
             sync_product_metafields_now = False
             tracking_start = None
@@ -20248,8 +20802,10 @@ def sync_shopify_orders_to_supabase(
         page_processing_started = time.perf_counter()
         assign_before_batch = assign_ms
         for order in sorted(fetched_orders, key=order_allocation_sort_key):
-            should_assign_editions = True
-            allocation_skip_reason = ""
+            should_assign_editions = not historical_backfill
+            allocation_skip_reason = (
+                HISTORICAL_ORDER_NOTE if historical_backfill else ""
+            )
             if not historical_backfill and respect_tracking_start:
                 order_datetime = _order_effective_datetime(order)
                 if order_datetime and tracking_start and order_datetime < tracking_start:
@@ -21542,6 +22098,9 @@ def _sync_shopify_product_after_override(product_state, config=None):
 
 
 def override_edition_order_number(edition_order_id, new_edition_number, *, reason="", config=None, sync_shopify=True):
+    raise RuntimeError(
+        "Issued edition numbers are immutable. Use the audited reconciliation workflow for invalid, unissued rows."
+    )
     ensure_schema()
     row_id = str(edition_order_id or "").strip()
     new_number = _int_value(new_edition_number, 0)

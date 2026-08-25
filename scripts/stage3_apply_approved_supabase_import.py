@@ -1499,6 +1499,12 @@ def write_next_steps(path: Path, *, mode: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(list(argv if argv is not None else sys.argv[1:]))
+    if args.apply:
+        print(
+            "Refusing to apply: this legacy importer writes synthetic allocations and counters directly. "
+            "Use scripts/reconcile_edition_ledger.py for a canonical-GID, hash-bound repair."
+        )
+        return 2
     database_url = os.getenv(DATABASE_ENV_VAR, "").strip()
     if not database_url:
         print("DATABASE_URL is required.")

@@ -3,6 +3,7 @@ from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
 from contextlib import suppress
 import gc
 import hashlib
+import json
 import logging
 import os
 import zipfile
@@ -310,6 +311,105 @@ PRODUCT_PAGE_PROMPT_FILENAMES = {
     "02-office-prompt.txt",
     "03-living-room-prompt.txt",
 }
+
+# Canonical product gallery contract.  The five generated images keep their
+# historical identities and the three product-page room uploads sit between the
+# featured Black image and Size Guide, matching the established Shopify order.
+PRODUCT_IMAGE_SLOT_SPECS = (
+    {
+        "slot_id": "black-frame",
+        "asset_key": "black",
+        "image_type": "black_frame",
+        "display_label": "Black Framed",
+        "sort_position": 1,
+        "zip_group": ASSET_CATEGORY_CORE,
+        "filename_suffix": "black-framed-{sport}-wall-art",
+        "legacy_keys": ("black-framed", "black_framed", "black frame"),
+        "shopify_alt_text_source": "Black framed product image",
+    },
+    {
+        "slot_id": "man-cave",
+        "asset_key": "lifestyle::01-man-cave-prompt.txt",
+        "prompt_filename": "01-man-cave-prompt.txt",
+        "image_type": "man_cave",
+        "display_label": "Man Cave",
+        "sort_position": 2,
+        "zip_group": ASSET_CATEGORY_PRODUCT,
+        "filename_suffix": "black-framed-{sport}-man-cave-lifestyle",
+        "legacy_keys": ("man-cave", "man_cave", "man cave", "lifestyle::01", "01-man-cave"),
+        "shopify_alt_text_source": "Man Cave lifestyle room",
+    },
+    {
+        "slot_id": "office",
+        "asset_key": "lifestyle::02-office-prompt.txt",
+        "prompt_filename": "02-office-prompt.txt",
+        "image_type": "office",
+        "display_label": "Office",
+        "sort_position": 3,
+        "zip_group": ASSET_CATEGORY_PRODUCT,
+        "filename_suffix": "black-framed-{sport}-office-lifestyle",
+        "legacy_keys": ("office", "lifestyle::02", "02-office"),
+        "shopify_alt_text_source": "Office lifestyle room",
+    },
+    {
+        "slot_id": "living-room",
+        "asset_key": "lifestyle::03-living-room-prompt.txt",
+        "prompt_filename": "03-living-room-prompt.txt",
+        "image_type": "living_room",
+        "display_label": "Living Room",
+        "sort_position": 4,
+        "zip_group": ASSET_CATEGORY_PRODUCT,
+        "filename_suffix": "black-framed-{sport}-living-room-lifestyle",
+        "legacy_keys": ("living-room", "living_room", "living room", "lifestyle::03", "03-living-room"),
+        "shopify_alt_text_source": "Living Room lifestyle room",
+    },
+    {
+        "slot_id": "size-guide",
+        "asset_key": "size-guide",
+        "image_type": "size_guide",
+        "display_label": "Size Guide",
+        "sort_position": 5,
+        "zip_group": ASSET_CATEGORY_CORE,
+        "filename_suffix": "framed-{sport}-wall-art-sizing-guide",
+        "legacy_keys": ("size_guide", "size guide", "sizing-guide"),
+        "shopify_alt_text_source": "Framed wall art size guide",
+    },
+    {
+        "slot_id": "oak-frame",
+        "asset_key": "oak",
+        "image_type": "oak_frame",
+        "display_label": "Oak Framed",
+        "sort_position": 6,
+        "zip_group": ASSET_CATEGORY_CORE,
+        "filename_suffix": "oak-framed-{sport}-wall-art",
+        "legacy_keys": ("oak-framed", "oak_framed", "oak frame"),
+        "shopify_alt_text_source": "Oak framed product image",
+    },
+    {
+        "slot_id": "white-frame",
+        "asset_key": "white",
+        "image_type": "white_frame",
+        "display_label": "White Framed",
+        "sort_position": 7,
+        "zip_group": ASSET_CATEGORY_CORE,
+        "filename_suffix": "white-framed-{sport}-wall-art",
+        "legacy_keys": ("white-framed", "white_framed", "white frame"),
+        "shopify_alt_text_source": "White framed product image",
+    },
+    {
+        "slot_id": "unframed",
+        "asset_key": "unframed",
+        "image_type": "unframed",
+        "display_label": "Unframed",
+        "sort_position": 8,
+        "zip_group": ASSET_CATEGORY_CORE,
+        "filename_suffix": "unframed-{sport}-wall-art",
+        "legacy_keys": ("un-framed", "unframed print"),
+        "shopify_alt_text_source": "Unframed product image",
+    },
+)
+PRODUCT_IMAGE_REQUIRED_COUNT = len(PRODUCT_IMAGE_SLOT_SPECS)
+PRODUCT_IMAGE_MANIFEST_FILENAME = "product-image-manifest.json"
 REELS_PROMPT_FILENAMES = {
     "16-man-cave-reel-prompt.txt",
     "17-living-room-reel-prompt.txt",
@@ -1943,6 +2043,209 @@ def build_asset_record(
     }
 
 
+class IncompleteProductImagePackageError(ValueError):
+    def __init__(self, missing_labels):
+        self.missing_labels = tuple(str(label) for label in missing_labels)
+        super().__init__(
+            "Product image package is incomplete. Missing: "
+            + ", ".join(self.missing_labels)
+        )
+
+
+def _manifest_identity(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").casefold()).strip("-")
+
+
+def _manifest_path(asset, *keys):
+    for key in keys:
+        value = (asset or {}).get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _manifest_local_file(path_value):
+    if not path_value:
+        return None
+    path = Path(path_value)
+    if path.exists() and path.is_file() and path.stat().st_size > 0:
+        return path
+    return None
+
+
+def _product_slot_asset(spec, assets):
+    canonical_key = str(spec["asset_key"])
+    prompt_filename = str(spec.get("prompt_filename") or "")
+    identity_candidates = {
+        _manifest_identity(canonical_key),
+        _manifest_identity(spec["slot_id"]),
+        *(_manifest_identity(value) for value in spec.get("legacy_keys") or ()),
+    }
+    for asset in assets:
+        if str(asset.get("key") or "") == canonical_key:
+            return asset
+    if prompt_filename:
+        for asset in assets:
+            if Path(str(asset.get("prompt_filename") or "")).name == prompt_filename:
+                return asset
+    for asset in assets:
+        if _manifest_identity(asset.get("key")) in identity_candidates:
+            return asset
+    filename_suffix = _manifest_identity(spec.get("filename_suffix", "").replace("{sport}", ""))
+    for asset in assets:
+        for path_key in ("webp_path", "jpg_path", "webp_path_dropbox_path", "jpg_path_dropbox_path"):
+            filename_identity = _manifest_identity(Path(str(asset.get(path_key) or "")).stem)
+            if filename_identity and filename_suffix and filename_suffix in filename_identity:
+                return asset
+    return {}
+
+
+def build_product_image_manifest(assets, *, product_slug="product", sport_slug="sports"):
+    """Return the one ordered eight-slot product image contract.
+
+    Local and Dropbox-backed assets use the same slot identities.  Source files
+    may retain legacy names; downstream outputs receive deterministic names.
+    """
+    product_slug = slugify(product_slug) or "product"
+    sport_slug = slugify(sport_slug) or "sports"
+    normalized_assets = [dict(asset or {}) for asset in assets or ()]
+    entries = []
+    output_names = set()
+    for spec in PRODUCT_IMAGE_SLOT_SPECS:
+        asset = _product_slot_asset(spec, normalized_assets)
+        local_webp = _manifest_local_file(asset.get("webp_path"))
+        local_jpg = _manifest_local_file(asset.get("jpg_path"))
+        local_path = local_webp or local_jpg
+        dropbox_path = _manifest_path(asset, "webp_path_dropbox_path", "jpg_path_dropbox_path")
+        suffix = local_path.suffix.casefold() if local_path else Path(dropbox_path).suffix.casefold()
+        if suffix not in {".webp", ".jpg", ".jpeg", ".png"}:
+            suffix = ".webp"
+        output_filename = (
+            f"{product_slug}-"
+            f"{str(spec['filename_suffix']).format(sport=sport_slug)}{suffix}"
+        )
+        filename_key = output_filename.casefold()
+        if filename_key in output_names:
+            raise ValueError(f"Duplicate product image output filename: {output_filename}")
+        output_names.add(filename_key)
+        included = bool(asset.get("include_in_zip", True)) if asset else True
+        ready = bool(local_path or dropbox_path) and included
+        entries.append(
+            {
+                "slot_id": spec["slot_id"],
+                "asset_key": spec["asset_key"],
+                "image_type": spec["image_type"],
+                "display_label": spec["display_label"],
+                "output_filename": output_filename,
+                "sort_position": int(spec["sort_position"]),
+                "uploaded_image_reference": str(local_path or dropbox_path or ""),
+                "local_path": str(local_path) if local_path else "",
+                "dropbox_path": dropbox_path,
+                "inclusion_status": "included" if ready else ("excluded" if asset and not included else "missing"),
+                "included": included,
+                "ready": ready,
+                "required": True,
+                "zip_group": spec["zip_group"],
+                "shopify_alt_text_source": spec["shopify_alt_text_source"],
+                "prompt_filename": spec.get("prompt_filename") or "",
+            }
+        )
+    return entries
+
+
+def product_image_readiness(manifest):
+    entries = sorted((dict(entry) for entry in manifest or ()), key=lambda entry: entry["sort_position"])
+    missing = [entry["display_label"] for entry in entries if not entry.get("ready")]
+    ready_count = len(entries) - len(missing)
+    return {
+        "ready_count": ready_count,
+        "required_count": PRODUCT_IMAGE_REQUIRED_COUNT,
+        "complete": ready_count == PRODUCT_IMAGE_REQUIRED_COUNT and len(entries) == PRODUCT_IMAGE_REQUIRED_COUNT,
+        "missing_labels": missing,
+    }
+
+
+def require_complete_product_image_manifest(manifest):
+    readiness = product_image_readiness(manifest)
+    if not readiness["complete"]:
+        raise IncompleteProductImagePackageError(readiness["missing_labels"])
+    return sorted((dict(entry) for entry in manifest), key=lambda entry: entry["sort_position"])
+
+
+def build_shopify_draft_image_payload(manifest, *, allow_incomplete=False):
+    ordered = sorted((dict(entry) for entry in manifest or ()), key=lambda entry: entry["sort_position"])
+    if not allow_incomplete:
+        ordered = require_complete_product_image_manifest(ordered)
+    return [
+        {
+            "slot_id": entry["slot_id"],
+            "position": entry["sort_position"],
+            "filename": entry["output_filename"],
+            "source": entry["uploaded_image_reference"],
+            "alt_text_source": entry["shopify_alt_text_source"],
+        }
+        for entry in ordered
+        if entry.get("ready")
+    ]
+
+
+def merge_shopify_draft_images(draft_payload, manifest, *, allow_incomplete=False):
+    """Replace only draft image data; all non-image Shopify fields are preserved."""
+    merged = dict(draft_payload or {})
+    merged["images"] = build_shopify_draft_image_payload(
+        manifest,
+        allow_incomplete=allow_incomplete,
+    )
+    return merged
+
+
+def product_image_manifest_json(manifest):
+    allowed = (
+        "slot_id", "asset_key", "image_type", "display_label", "output_filename",
+        "sort_position", "uploaded_image_reference", "inclusion_status", "included",
+        "ready", "required", "zip_group", "shopify_alt_text_source", "prompt_filename",
+    )
+    return [
+        {key: entry.get(key) for key in allowed}
+        for entry in sorted(manifest or (), key=lambda item: item["sort_position"])
+    ]
+
+
+def order_assets_by_product_manifest(assets, manifest):
+    """Put the eight canonical product assets first and attach slot metadata."""
+    source_assets = [dict(asset or {}) for asset in assets or ()]
+    assets_by_key = {str(asset.get("key") or ""): asset for asset in source_assets}
+    ordered = []
+    consumed_keys = set()
+    for entry in sorted(manifest or (), key=lambda item: item["sort_position"]):
+        asset = assets_by_key.get(str(entry.get("asset_key") or ""))
+        if not asset:
+            spec = next(
+                (item for item in PRODUCT_IMAGE_SLOT_SPECS if item["slot_id"] == entry.get("slot_id")),
+                None,
+            )
+            asset = _product_slot_asset(spec, source_assets) if spec else {}
+        if not asset:
+            continue
+        asset = dict(asset)
+        asset["product_slot_id"] = entry["slot_id"]
+        asset["product_sort_position"] = int(entry["sort_position"])
+        asset["product_output_filename"] = entry["output_filename"]
+        asset["product_image_type"] = entry["image_type"]
+        ordered.append(asset)
+        consumed_keys.add(str(asset.get("key") or ""))
+    ordered.extend(
+        sorted(
+            (
+                asset for asset in source_assets
+                if str(asset.get("key") or "") not in consumed_keys
+            ),
+            key=lambda item: item.get("label", item.get("key", "")).lower(),
+        )
+    )
+    return ordered
+
+
 def is_product_page_prompt_filename(prompt_filename):
     return Path(prompt_filename).name in PRODUCT_PAGE_PROMPT_FILENAMES
 
@@ -1966,9 +2269,24 @@ def reset_directory_contents(directory):
             child.unlink()
 
 
-def create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, sport_category):
+def create_shopify_uploads_html(
+    run_dir,
+    shopify_uploads_dir,
+    product_name,
+    sport_category,
+    product_image_manifest=None,
+):
     shopify_uploads_dir = Path(shopify_uploads_dir)
-    image_files = sorted(shopify_uploads_dir.glob("*.webp"))
+    ordered_image_files = []
+    for entry in sorted(product_image_manifest or (), key=lambda item: item["sort_position"]):
+        image_path = shopify_uploads_dir / str(entry.get("output_filename") or "")
+        if entry.get("ready") and image_path.is_file():
+            ordered_image_files.append((image_path, entry.get("display_label") or image_path.name))
+    if not product_image_manifest:
+        ordered_image_files = [
+            (image_path, image_path.name)
+            for image_path in sorted(shopify_uploads_dir.glob("*.webp"))
+        ]
     index_path = shopify_uploads_dir / "index.html"
 
     html_lines = [
@@ -1992,12 +2310,12 @@ def create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, spor
         "  <div class=\"image-grid\">",
     ]
 
-    if image_files:
-        for image_file in image_files:
+    if ordered_image_files:
+        for image_file, display_label in ordered_image_files:
             html_lines.extend([
                 "    <div class=\"image-card\">",
-                f"      <img src=\"{image_file.name}\" alt=\"{image_file.name}\">",
-                f"      <p>{image_file.name}</p>",
+                f"      <img src=\"{image_file.name}\" alt=\"{display_label}\">",
+                f"      <p>{display_label} &mdash; {image_file.name}</p>",
                 "    </div>",
             ])
     else:
@@ -2014,35 +2332,97 @@ def create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, spor
     return index_path
 
 
-def rebuild_export_folders(run_dir, assets, product_name="", sport_category=""):
+def rebuild_export_folders(
+    run_dir,
+    assets,
+    product_name="",
+    sport_category="",
+    *,
+    product_slug="product",
+    sport_slug="sports",
+    product_image_manifest=None,
+):
     run_dir = Path(run_dir)
     shopify_uploads_dir = run_dir / SHOPIFY_UPLOADS_FOLDER_NAME
     socials_dir = run_dir / SOCIALS_FOLDER_NAME
+    shopify_uploads_dir.mkdir(parents=True, exist_ok=True)
+    socials_dir.mkdir(parents=True, exist_ok=True)
+    manifest = product_image_manifest or build_product_image_manifest(
+        assets,
+        product_slug=product_slug,
+        sport_slug=sport_slug,
+    )
+    product_manifest_path = shopify_uploads_dir / PRODUCT_IMAGE_MANIFEST_FILENAME
 
     log_memory("Before export folder rebuild")
-    reset_directory_contents(shopify_uploads_dir)
-    reset_directory_contents(socials_dir)
+    # Product files are stable per slot. Rebuilding replaces only a slot's own
+    # destination and leaves unrelated/supporting files in an existing folder
+    # untouched.
+    previous_images = []
+    if product_manifest_path.is_file():
+        try:
+            previous_images = json.loads(
+                product_manifest_path.read_text(encoding="utf-8")
+            ).get("images") or []
+        except (OSError, ValueError, TypeError, AttributeError):
+            previous_images = []
+    current_by_slot = {entry["slot_id"]: entry for entry in manifest}
+    for previous in previous_images:
+        current = current_by_slot.get(previous.get("slot_id")) or {}
+        previous_name = str(previous.get("output_filename") or "")
+        should_remove = previous_name and (
+            not current.get("ready")
+            or previous_name.casefold() != str(current.get("output_filename") or "").casefold()
+        )
+        if should_remove and Path(previous_name).name == previous_name:
+            previous_path = shopify_uploads_dir / previous_name
+            if previous_path.is_file():
+                previous_path.unlink()
 
+    for entry in manifest:
+        source_path = _manifest_local_file(entry.get("local_path"))
+        if not entry.get("ready") or not source_path:
+            continue
+        destination = shopify_uploads_dir / str(entry["output_filename"])
+        if source_path.resolve() != destination.resolve():
+            shutil.copy2(source_path, destination)
+
+    # Social exports retain their established filenames and are likewise
+    # idempotent: a retry replaces the matching file only.
     for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
         if not asset.get("include_in_zip", True):
             continue
-
-        webp_path = asset.get("webp_path")
         jpg_path = asset.get("jpg_path")
-
-        if should_export_asset_to_shopify(asset) and webp_path and Path(webp_path).exists():
-            shutil.copy2(webp_path, shopify_uploads_dir / Path(webp_path).name)
-
         if should_export_asset_to_socials(asset) and jpg_path and Path(jpg_path).exists():
             shutil.copy2(jpg_path, socials_dir / Path(jpg_path).name)
 
-    create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, sport_category)
+    product_manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "readiness": product_image_readiness(manifest),
+                "images": product_image_manifest_json(manifest),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    create_shopify_uploads_html(
+        run_dir,
+        shopify_uploads_dir,
+        product_name,
+        sport_category,
+        manifest,
+    )
     log_memory("After export folder rebuild")
 
     return {
         "shopify_uploads_dir": shopify_uploads_dir,
         "shopify_uploads_html_path": shopify_uploads_dir / "index.html",
         "socials_dir": socials_dir,
+        "product_image_manifest": manifest,
+        "product_image_readiness": product_image_readiness(manifest),
+        "product_image_manifest_path": product_manifest_path,
     }
 
 
@@ -2193,12 +2573,33 @@ def generate_size_guide(template_path, artwork_path, review_dir, webp_dir, jpg_d
         gc.collect()
 
 
-def create_shopify_pack_zip(zip_dir, product_slug, shopify_uploads_dir):
+def create_shopify_pack_zip(
+    zip_dir,
+    product_slug,
+    shopify_uploads_dir,
+    product_image_manifest=None,
+):
     zip_path = zip_dir / f"{product_slug}-shopify-pack-webp.zip"
 
     ensure_memory_available("Before zip creation: Shopify pack")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for upload_file in sorted(Path(shopify_uploads_dir).glob("*")):
+        shopify_uploads_dir = Path(shopify_uploads_dir)
+        if product_image_manifest is not None:
+            upload_files = [
+                shopify_uploads_dir / entry["output_filename"]
+                for entry in sorted(product_image_manifest, key=lambda item: item["sort_position"])
+                if entry.get("ready")
+            ]
+            upload_files.extend(
+                path for path in (
+                    shopify_uploads_dir / PRODUCT_IMAGE_MANIFEST_FILENAME,
+                    shopify_uploads_dir / "index.html",
+                )
+                if path.is_file()
+            )
+        else:
+            upload_files = sorted(shopify_uploads_dir.glob("*"))
+        for upload_file in upload_files:
             if upload_file.is_file():
                 zipf.write(upload_file, arcname=upload_file.name)
 
@@ -2207,12 +2608,26 @@ def create_shopify_pack_zip(zip_dir, product_slug, shopify_uploads_dir):
     return zip_path
 
 
-def create_download_bundle_zip(zip_dir, product_slug, shopify_uploads_dir, jpg_dir):
+def create_download_bundle_zip(
+    zip_dir,
+    product_slug,
+    shopify_uploads_dir,
+    jpg_dir,
+    product_image_manifest=None,
+):
     zip_path = zip_dir / f"{product_slug}-download-bundle.zip"
 
     ensure_memory_available("Before zip creation: Download bundle")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for upload_file in sorted(Path(shopify_uploads_dir).glob("*.webp")):
+        if product_image_manifest is not None:
+            upload_files = [
+                Path(shopify_uploads_dir) / entry["output_filename"]
+                for entry in sorted(product_image_manifest, key=lambda item: item["sort_position"])
+                if entry.get("ready")
+            ]
+        else:
+            upload_files = sorted(Path(shopify_uploads_dir).glob("*.webp"))
+        for upload_file in upload_files:
             if upload_file.is_file():
                 zipf.write(upload_file, arcname=f"{SHOPIFY_UPLOADS_FOLDER_NAME}/{upload_file.name}")
 
@@ -2556,7 +2971,13 @@ def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=Tr
     used_names = set()
     entries = []
 
-    for asset in sorted(assets or [], key=lambda item: item.get("label", item.get("key", "")).lower()):
+    for asset in sorted(
+        assets or [],
+        key=lambda item: (
+            int(item.get("product_sort_position") or 10_000),
+            item.get("label", item.get("key", "")).lower(),
+        ),
+    ):
         if not asset.get("include_in_zip", True):
             continue
         asset_group = get_asset_zip_group(asset)
@@ -2574,8 +2995,14 @@ def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=Tr
             file_path = Path(file_path)
             if not file_path.exists() or file_path.stat().st_size <= 0:
                 continue
+            archive_filename = file_path.name
+            product_output_filename = str(asset.get("product_output_filename") or "")
+            if product_output_filename:
+                archive_filename = str(
+                    Path(product_output_filename).with_suffix(file_path.suffix.casefold())
+                )
             archive_name = unique_archive_name(
-                f"{archive_folder}/{file_path.name}",
+                f"{archive_folder}/{archive_filename}",
                 used_names,
                 asset.get("key"),
             )
@@ -2584,6 +3011,8 @@ def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=Tr
                 {
                     "asset_key": asset.get("key"),
                     "asset_label": asset.get("label"),
+                    "product_slot_id": asset.get("product_slot_id"),
+                    "product_sort_position": asset.get("product_sort_position"),
                     "category": asset_group,
                     "path": file_path,
                     "filename": file_path.name,
