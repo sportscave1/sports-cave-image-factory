@@ -163,6 +163,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         self.assertIn("WHERE o.shopify_order_id=ANY", database.statements[1][0])
         self.assertIn("WHERE shopify_line_item_id=ANY", database.statements[2][0])
         self.assertIn("WITH selected_edition_ids AS", database.statements[3][0])
+        self.assertEqual(1, len(database.connections))
         self.assertTrue(all(connection.closed for connection in database.connections))
         self.assertTrue(all(connection.rollback_calls == 1 for connection in database.connections))
 
@@ -235,6 +236,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         present_db, present_rows, _ = self._load()
         self.assertEqual(100, len(present_rows))
         self.assertEqual(5, len(present_db.statements))
+        self.assertEqual(1, len(present_db.connections))
         override_sql, override_params = present_db.statements[-1]
         self.assertIn("FROM order_line_edition_overrides", override_sql)
         self.assertIn("WHERE mo.shopify_line_item_gid=ANY", override_sql)

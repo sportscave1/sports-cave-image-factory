@@ -4567,15 +4567,15 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         statements = []
         selected = [{"shopify_order_id": "gid://shopify/Order/1"}]
         base = [{"shopify_order_id": "gid://shopify/Order/1", "order_name": "#SC1", "shopify_line_item_id": "", "source_name": "Etsy"}]
-        connections = [
-            self.Connection(self.Cursor(rows=selected, statements=statements)),
-            self.Connection(self.Cursor(rows=base, statements=statements)),
-            self.Connection(self.Cursor(rows=[], statements=statements)),
-        ]
-        with patch.object(supabase_backend, "connect", side_effect=connections) as connect:
+        connection = self.Connection(
+            self.Cursor(row_batches=[selected, base, []], statements=statements)
+        )
+        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50)
 
-        self.assertEqual(3, connect.call_count)
+        self.assertEqual(1, connect.call_count)
+        self.assertTrue(connection.closed)
+        self.assertEqual(1, connection.rollback_calls)
         self.assertEqual("Etsy", rows[0]["source_name"])
         self.assertNotIn("shopify_order_lines", statements[0][0])
         self.assertIn("LIMIT %s", statements[0][0])
@@ -4585,6 +4585,35 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         diagnostic = supabase_backend.get_last_database_read_diagnostic()
         self.assertEqual("ok", diagnostic["category"])
         self.assertEqual(3, diagnostic["query_count"])
+
+    def test_bounded_orders_batch_retries_on_a_fresh_connection(self):
+        class StaleOnSecondQuery(self.Cursor):
+            def execute(inner_self, sql, params=None):
+                super(StaleOnSecondQuery, inner_self).execute(sql, params)
+                if len(inner_self.statements) == 2:
+                    raise RuntimeError("EDBHANDLEREXITED connection to database closed")
+
+        selected = [{"shopify_order_id": "gid://shopify/Order/1"}]
+        base = [{"shopify_order_id": "gid://shopify/Order/1", "order_name": "#SC1", "shopify_line_item_id": ""}]
+        stale = self.Connection(
+            StaleOnSecondQuery(row_batches=[selected], statements=[])
+        )
+        fresh = self.Connection(
+            self.Cursor(row_batches=[selected, base, []], statements=[])
+        )
+
+        with patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
+            rows = supabase_backend.list_hybrid_order_rows(limit=50)
+
+        self.assertEqual(2, connect.call_count)
+        self.assertEqual("#SC1", rows[0]["order_name"])
+        self.assertTrue(stale.closed)
+        self.assertTrue(fresh.closed)
+        self.assertEqual(1, stale.rollback_calls)
+        self.assertEqual(1, fresh.rollback_calls)
+        diagnostic = supabase_backend.get_last_database_read_diagnostic()
+        self.assertTrue(diagnostic["batch_recovered"])
+        self.assertTrue(diagnostic["request_owned_connection"])
 
     def test_missing_marketplace_capability_does_not_change_core_reader(self):
         supabase_backend._set_marketplace_order_read_capability(False)
@@ -4660,17 +4689,22 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
                 "allocation_index": 2,
             },
         ]
-        connections = [
-            self.Connection(self.Cursor(rows=[{"shopify_order_id": "gid://shopify/Order/2906"}], statements=statements)),
-            self.Connection(self.Cursor(rows=base_rows, statements=statements)),
-            self.Connection(self.Cursor(rows=[], statements=statements)),
-            self.Connection(self.Cursor(rows=allocations, statements=statements)),
-        ]
+        connection = self.Connection(
+            self.Cursor(
+                row_batches=[
+                    [{"shopify_order_id": "gid://shopify/Order/2906"}],
+                    base_rows,
+                    [],
+                    allocations,
+                ],
+                statements=statements,
+            )
+        )
 
-        with patch.object(supabase_backend, "connect", side_effect=connections) as connect:
+        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50, search="#SC2906")
 
-        self.assertEqual(connect.call_count, 4)
+        self.assertEqual(connect.call_count, 1)
         self.assertEqual(len(statements), 4)
         self.assertIn("SELECT o.shopify_order_id", statements[0][0])
         self.assertNotIn("LEFT JOIN", statements[0][0])
@@ -4695,9 +4729,10 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             os_pages.prodigi_tracker_row_id(snapshot_rows[0]),
             f"edition-order|{snapshot_rows[0]['edition_order_id']}",
         )
-        self.assertTrue(all(connection.closed for connection in connections))
+        self.assertTrue(connection.closed)
+        self.assertEqual(1, connection.rollback_calls)
         supabase_backend._discard_cached_read_connection()
-        self.assertTrue(all(connection.closed for connection in connections))
+        self.assertTrue(connection.closed)
 
     def test_orders_search_is_explicit_and_normal_render_skips_duplicate_audit(self):
         form_source = inspect.getsource(orders_page._render_orders_search_form)

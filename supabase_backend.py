@@ -145,6 +145,10 @@ _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
     "last_database_read_diagnostic",
     default={},
 )
+_ACTIVE_DATABASE_READ_CURSOR = contextvars.ContextVar(
+    "active_database_read_cursor",
+    default=None,
+)
 DEFAULT_EDITION_NAME = "Original Edition"
 ACTIVE_RUN_STATUS = "active"
 SOLD_OUT_RUN_STATUS = "sold_out"
@@ -765,6 +769,46 @@ def _run_read_operation(operation, read_callable):
     success, failure and retry.
     """
     started = time.perf_counter()
+    shared_cursor = _ACTIVE_DATABASE_READ_CURSOR.get()
+    if shared_cursor is not None:
+        try:
+            value = read_callable(shared_cursor)
+        except Exception as error:
+            diagnostic = {
+                "operation": str(operation or "database_read"),
+                "category": _database_error_category(error),
+                "exception_class": error.__class__.__name__,
+                "sqlstate": _database_error_sqlstate(error),
+                "attempts": 1,
+                "recovered": False,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "connection_ms": 0,
+                "query_ms": int((time.perf_counter() - started) * 1000),
+                "shared_connection": True,
+            }
+            _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+            raise
+        diagnostic = {
+            "operation": str(operation or "database_read"),
+            "category": "ok",
+            "exception_class": "",
+            "sqlstate": "",
+            "attempts": 1,
+            "recovered": False,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+            "connection_ms": 0,
+            "query_ms": int((time.perf_counter() - started) * 1000),
+            "shared_connection": True,
+        }
+        _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+        print(
+            "PERF DB read "
+            f"operation={diagnostic['operation']} duration_ms={diagnostic['duration_ms']} "
+            "attempts=1 recovered=false shared_connection=true",
+            flush=True,
+        )
+        return value, diagnostic
+
     first_error_type = ""
     for attempt in range(2):
         conn = None
@@ -864,6 +908,15 @@ def _run_read_operation(operation, read_callable):
             if deadline_timer is not None:
                 deadline_timer.cancel()
             _close_read_connection(conn)
+
+
+@contextmanager
+def _shared_database_read_cursor(cur):
+    token = _ACTIVE_DATABASE_READ_CURSOR.set(cur)
+    try:
+        yield
+    finally:
+        _ACTIVE_DATABASE_READ_CURSOR.reset(token)
 
 
 def _database_undefined_column_name(error):
@@ -21447,7 +21500,38 @@ def list_hybrid_order_rows(limit=50, search=""):
     The order window is selected before any line, fulfilment, certificate or
     optional override enrichment. Query count depends only on which bounded
     enrichment classes are present, never on database cardinality or row count.
+    All phases for one page snapshot share one request-owned connection; the
+    enclosing read closes it on success and discards it on cancellation/retry.
     """
+    if _ACTIVE_DATABASE_READ_CURSOR.get() is None:
+        operation = (
+            "orders.search.batch"
+            if str(search or "").strip()
+            else "orders.latest_50.batch"
+        )
+        phase_diagnostic = {}
+
+        def load_batch(cur):
+            with _shared_database_read_cursor(cur):
+                rows = list_hybrid_order_rows(limit=limit, search=search)
+                phase_diagnostic.update(get_last_database_read_diagnostic())
+                return rows
+
+        rows, batch_diagnostic = _run_read_operation(operation, load_batch)
+        diagnostic = {
+            **phase_diagnostic,
+            "connection_ms": int(batch_diagnostic.get("connection_ms") or 0),
+            "duration_ms": int(batch_diagnostic.get("duration_ms") or 0),
+            "batch_attempts": int(batch_diagnostic.get("attempts") or 1),
+            "batch_recovered": bool(batch_diagnostic.get("recovered")),
+            "request_owned_connection": True,
+        }
+        if batch_diagnostic.get("recovered"):
+            diagnostic["category"] = "stale_connection_recovered"
+            diagnostic["recovered"] = True
+        _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+        return rows
+
     total_started = time.perf_counter()
     limit_value = max(min(int(limit or 50), 200), 1)
     raw_search = str(search or "").strip()
