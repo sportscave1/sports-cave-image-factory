@@ -1,10 +1,9 @@
 -- Edition Ops allocation ledger hardening.
 --
 -- This migration is intentionally fail-closed.  It never deletes, merges, or
--- renumbers existing allocations.  If production contains duplicate source
--- units, duplicate product/edition numbers, or ambiguous product GIDs, the
--- unique indexes below abort the transaction.  Run the read-only reconciliation
--- report and an explicitly approved repair before retrying the migration.
+-- renumbers existing allocations.  Legacy duplicate source identities remain
+-- preserved and replay-blocking, while every allocation created after cutover
+-- is protected by database uniqueness and an immutable edition-run ledger.
 
 BEGIN;
 
@@ -15,6 +14,11 @@ ALTER TABLE edition_orders
     ADD COLUMN IF NOT EXISTS unit_ordinal INTEGER,
     ADD COLUMN IF NOT EXISTS shopify_product_gid TEXT,
     ADD COLUMN IF NOT EXISTS allocation_valid BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Legacy rows predate canonical channel-aware identity enforcement.  They
+    -- remain readable and replay-blocking, but only rows written by the atomic
+    -- function participate in the new unique source-unit index.  This avoids
+    -- silently deleting or renumbering four known historical duplicate pairs.
+    ADD COLUMN IF NOT EXISTS identity_enforced BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS invalidated_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS invalidation_reason TEXT NOT NULL DEFAULT '',
     -- Existing rows are not bulk-mirrored by normal order processing. Repairs
@@ -27,12 +31,12 @@ ALTER TABLE edition_orders
 UPDATE edition_orders eo
 SET source_channel = COALESCE(NULLIF(eo.source_channel, ''), CASE
         WHEN LOWER(BTRIM(COALESCE((
-            SELECT so.source_name FROM shopify_orders so
+            SELECT COALESCE(so.raw_json->>'source_name', '') FROM shopify_orders so
             WHERE so.shopify_order_id = eo.shopify_order_id
             LIMIT 1
         ), ''))) LIKE '%etsy%' THEN 'etsy'
         WHEN LOWER(BTRIM(COALESCE((
-            SELECT so.source_name FROM shopify_orders so
+            SELECT COALESCE(so.raw_json->>'source_name', '') FROM shopify_orders so
             WHERE so.shopify_order_id = eo.shopify_order_id
             LIMIT 1
         ), ''))) LIKE '%ebay%' THEN 'ebay'
@@ -68,8 +72,8 @@ SET source_channel = COALESCE(NULLIF(eo.source_channel, ''), CASE
 -- product identity remains direct GID/run based and never uses handle or title.
 UPDATE edition_orders eo
 SET source_channel = COALESCE(NULLIF(eo.source_channel, ''), CASE
-        WHEN LOWER(BTRIM(COALESCE(so.source_name, ''))) LIKE '%etsy%' THEN 'etsy'
-        WHEN LOWER(BTRIM(COALESCE(so.source_name, ''))) LIKE '%ebay%' THEN 'ebay'
+        WHEN LOWER(BTRIM(COALESCE(so.raw_json->>'source_name', ''))) LIKE '%etsy%' THEN 'etsy'
+        WHEN LOWER(BTRIM(COALESCE(so.raw_json->>'source_name', ''))) LIKE '%ebay%' THEN 'ebay'
         ELSE 'shopify'
     END),
     external_order_id = COALESCE(
@@ -123,13 +127,21 @@ WHERE COALESCE(source_channel, '') <> ''
   AND COALESCE(external_line_item_id, '') <> ''
   AND unit_ordinal > 0;
 
-ALTER TABLE edition_orders
-    ADD CONSTRAINT edition_orders_source_channel_check
-        CHECK (source_channel IN ('shopify', 'etsy', 'ebay')),
-    ADD CONSTRAINT edition_orders_unit_ordinal_check
-        CHECK (unit_ordinal >= 1),
-    ADD CONSTRAINT edition_orders_edition_range_check
-        CHECK (edition_number >= 1 AND edition_number <= edition_total AND edition_total <= 100);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='edition_orders_source_channel_check') THEN
+        ALTER TABLE edition_orders ADD CONSTRAINT edition_orders_source_channel_check
+            CHECK (source_channel IN ('shopify', 'etsy', 'ebay'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='edition_orders_unit_ordinal_check') THEN
+        ALTER TABLE edition_orders ADD CONSTRAINT edition_orders_unit_ordinal_check
+            CHECK (unit_ordinal >= 1);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='edition_orders_edition_range_check') THEN
+        ALTER TABLE edition_orders ADD CONSTRAINT edition_orders_edition_range_check
+            CHECK (edition_number >= 1 AND edition_number <= edition_total AND edition_total <= 100);
+    END IF;
+END $$;
 
 ALTER TABLE edition_orders
     ALTER COLUMN source_channel SET NOT NULL,
@@ -149,16 +161,64 @@ WHERE COALESCE(ep.shopify_product_gid, '') !~ '^gid://shopify/Product/[0-9]+$';
 
 -- A product rename cannot create a new identity.  This index intentionally
 -- fails if existing catalogue rows map one GID to multiple Edition Ops rows.
-CREATE UNIQUE INDEX edition_products_shopify_gid_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS edition_products_shopify_gid_uidx
     ON edition_products ((COALESCE(NULLIF(shopify_product_gid, ''), NULLIF(shopify_product_id, ''))))
     WHERE COALESCE(NULLIF(shopify_product_gid, ''), NULLIF(shopify_product_id, '')) IS NOT NULL;
 
--- A source unit is immutable and a product edition number is never reusable.
-CREATE UNIQUE INDEX edition_orders_source_unit_uidx
-    ON edition_orders (source_channel, external_order_id, external_line_item_id, unit_ordinal);
+-- A newly enforced source unit is immutable.  Historical rows still block a
+-- replay in the allocator's existing-row check, including the four duplicate
+-- identity groups that predate canonical Shopify GIDs.
+CREATE UNIQUE INDEX IF NOT EXISTS edition_orders_source_unit_uidx
+    ON edition_orders (source_channel, external_order_id, external_line_item_id, unit_ordinal)
+    WHERE identity_enforced AND allocation_valid;
 
-CREATE UNIQUE INDEX edition_orders_product_edition_uidx
-    ON edition_orders (shopify_product_gid, edition_number);
+-- Edition numbers are unique within an immutable edition run.  This is
+-- deliberately run-scoped: a superseded design on the same Shopify product GID
+-- must not block a newly authorised active design run.
+CREATE UNIQUE INDEX IF NOT EXISTS edition_orders_run_edition_uidx
+    ON edition_orders (edition_run_id, edition_number)
+    WHERE edition_run_id IS NOT NULL AND allocation_valid;
+
+-- Keep ensure_schema() from repeatedly attempting the old global unique
+-- allocation-key index.  Only atomic rows are admitted to this compatibility
+-- index; legacy duplicate keys remain preserved for a separate audited repair.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_allocation_key_unique
+    ON edition_orders (allocation_key)
+    WHERE identity_enforced AND allocation_valid AND COALESCE(allocation_key, '') <> '';
+
+ALTER TABLE edition_runs
+    ADD COLUMN IF NOT EXISTS allocation_baseline_sold_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS allocation_baseline_recorded_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS allocation_baseline_reason TEXT NOT NULL DEFAULT '';
+
+-- Existing Edition Ops runs were seeded before the durable ledger captured
+-- every customer row.  Record that opening sold count once; all allocations
+-- after this migration are ledger rows and counters become baseline + valid
+-- active-run rows.  This is not a Shopify metafield cursor and it is never
+-- advanced independently by order processing.
+WITH active_rows AS (
+    SELECT ep.active_edition_run_id AS run_id,
+           GREATEST(
+               COALESCE(ep.sold_count, 0)
+               - COUNT(eo.id) FILTER (
+                   WHERE COALESCE(eo.status, '') NOT IN ('voided', 'refunded', 'cancelled', 'superseded')
+               ),
+               0
+           )::INTEGER AS baseline
+    FROM edition_products ep
+    LEFT JOIN edition_orders eo
+      ON eo.edition_run_id = ep.active_edition_run_id
+    WHERE ep.active_edition_run_id IS NOT NULL
+    GROUP BY ep.id, ep.active_edition_run_id, ep.sold_count
+)
+UPDATE edition_runs er
+SET allocation_baseline_sold_count = active_rows.baseline,
+    allocation_baseline_recorded_at = COALESCE(er.allocation_baseline_recorded_at, now()),
+    allocation_baseline_reason = COALESCE(NULLIF(er.allocation_baseline_reason, ''),
+        'Edition Ops sold count at atomic-ledger cutover minus captured active-run rows')
+FROM active_rows
+WHERE er.id = active_rows.run_id
+  AND er.allocation_baseline_recorded_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS edition_marketplace_mappings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -252,6 +312,7 @@ BEGIN
         OR NEW.external_order_id IS DISTINCT FROM OLD.external_order_id
         OR NEW.external_line_item_id IS DISTINCT FROM OLD.external_line_item_id
         OR NEW.unit_ordinal IS DISTINCT FROM OLD.unit_ordinal
+        OR NEW.identity_enforced IS DISTINCT FROM OLD.identity_enforced
         OR NEW.allocation_index IS DISTINCT FROM OLD.allocation_index
         OR NEW.shopify_product_gid IS DISTINCT FROM OLD.shopify_product_gid
         OR NEW.edition_number IS DISTINCT FROM OLD.edition_number
@@ -312,6 +373,10 @@ DECLARE
     v_next INTEGER;
     v_ordinal INTEGER;
     v_sold INTEGER;
+    v_ledger_count INTEGER;
+    v_ledger_min INTEGER;
+    v_ledger_max INTEGER;
+    v_baseline INTEGER;
 BEGIN
     p_source_channel := LOWER(BTRIM(COALESCE(p_source_channel, '')));
     p_external_order_id := BTRIM(COALESCE(p_external_order_id, ''));
@@ -394,18 +459,34 @@ BEGIN
     WHERE er.id = v_product.active_edition_run_id
     FOR UPDATE;
 
-    v_total := LEAST(GREATEST(COALESCE(v_run.edition_total, v_product.edition_total, 100), 1), 100);
-    SELECT COUNT(*), COALESCE(MAX(eo.edition_number), 0)
-    INTO v_sold, v_next
-    FROM edition_orders eo
-    WHERE eo.shopify_product_gid = p_shopify_product_gid
-      AND eo.allocation_valid;
-
-    IF v_sold <> v_next THEN
-        RAISE EXCEPTION 'Edition ledger sequence is not contiguous for %; valid rows %, highest %. Repair is required before allocation',
-            p_shopify_product_gid, v_sold, v_next;
+    IF v_run.id IS NULL THEN
+        RAISE EXCEPTION 'Edition product % has no active edition run', p_shopify_product_gid;
     END IF;
-    v_next := v_next + 1;
+
+    v_total := LEAST(GREATEST(COALESCE(v_run.edition_total, v_product.edition_total, 100), 1), 100);
+    v_baseline := GREATEST(COALESCE(v_run.allocation_baseline_sold_count, 0), 0);
+    SELECT COUNT(*), COALESCE(MIN(eo.edition_number), 0), COALESCE(MAX(eo.edition_number), 0)
+    INTO v_ledger_count, v_ledger_min, v_ledger_max
+    FROM edition_orders eo
+    WHERE eo.edition_run_id = v_run.id
+      AND eo.allocation_valid
+      AND COALESCE(eo.status, '') NOT IN ('voided', 'refunded', 'cancelled', 'superseded');
+    v_sold := v_baseline + v_ledger_count;
+
+    IF (v_ledger_count > 0 AND (
+            v_ledger_min <> v_baseline + 1
+            OR v_ledger_max <> v_sold
+            OR v_ledger_max - v_ledger_min + 1 <> v_ledger_count
+        ))
+       OR v_sold <> COALESCE(v_product.sold_count, 0)
+       OR v_sold <> COALESCE(v_product.last_assigned_edition, 0)
+       OR COALESCE(v_product.next_edition_number, 1) <> v_sold + 1
+       OR COALESCE(v_run.next_edition_number, 1) <> v_sold + 1 THEN
+        RAISE EXCEPTION 'Active edition run is not contiguous for %; baseline %, rows %, min %, max %, product sold %, next %. Repair is required before allocation',
+            p_shopify_product_gid, v_baseline, v_ledger_count, v_ledger_min, v_ledger_max,
+            v_product.sold_count, v_product.next_edition_number;
+    END IF;
+    v_next := v_sold + 1;
 
     IF v_next + (p_quantity - v_existing_count) - 1 > v_total THEN
         RAISE EXCEPTION 'Edition limit reached for %: next %, requested %, total %',
@@ -429,7 +510,7 @@ BEGIN
         END IF;
 
         INSERT INTO edition_orders (
-            source_channel, external_order_id, external_line_item_id, unit_ordinal,
+            source_channel, external_order_id, external_line_item_id, unit_ordinal, identity_enforced,
             allocation_key, shopify_product_gid,
             shopify_order_id, shopify_order_name, shopify_line_item_id,
             shopify_product_id, shopify_variant_id, shopify_handle,
@@ -438,7 +519,7 @@ BEGIN
             edition_number, edition_total, allocation_index, quantity,
             assigned_at, certificate_status, status, source, mirror_status, updated_at
         ) VALUES (
-            p_source_channel, p_external_order_id, p_external_line_item_id, v_ordinal,
+            p_source_channel, p_external_order_id, p_external_line_item_id, v_ordinal, TRUE,
             p_source_channel || ':' || p_external_order_id || ':' || p_external_line_item_id || ':' || v_ordinal::text,
             p_shopify_product_gid,
             p_shopify_order_id, p_shopify_order_name, p_shopify_line_item_id,
@@ -459,11 +540,17 @@ BEGIN
         v_next := v_next + 1;
     END LOOP;
 
-    SELECT COUNT(*), COALESCE(MAX(eo.edition_number), 0)
+    SELECT v_baseline + COUNT(*), COALESCE(MAX(eo.edition_number), v_baseline)
     INTO v_sold, v_next
     FROM edition_orders eo
-    WHERE eo.shopify_product_gid = p_shopify_product_gid
-      AND eo.allocation_valid;
+    WHERE eo.edition_run_id = v_run.id
+      AND eo.allocation_valid
+      AND COALESCE(eo.status, '') NOT IN ('voided', 'refunded', 'cancelled', 'superseded');
+
+    IF v_sold <> v_next THEN
+        RAISE EXCEPTION 'Atomic allocation produced a non-contiguous active run for %; sold %, highest %',
+            p_shopify_product_gid, v_sold, v_next;
+    END IF;
 
     UPDATE edition_products
     SET next_edition_number = v_next + 1,

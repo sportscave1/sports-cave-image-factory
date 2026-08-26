@@ -9905,9 +9905,27 @@ def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
     ledger_values_present = "valid_allocation_count" in row
     if ledger_values_present:
-        highest_assigned = max(_safe_int(row.get("last_assigned_edition"), 0), 0)
+        allocation_baseline = max(
+            _safe_int(row.get("allocation_baseline_sold_count"), 0),
+            0,
+        )
+        active_allocation_count = max(
+            _safe_int(row.get("valid_allocation_count"), 0),
+            0,
+        )
+        highest_assigned = max(
+            _safe_int(row.get("last_assigned_edition"), 0),
+            allocation_baseline,
+        )
         lowest_assigned = max(_safe_int(row.get("first_assigned_edition"), 0), 0)
-        valid_allocation_count = max(_safe_int(row.get("valid_allocation_count"), 0), 0)
+        valid_allocation_count = allocation_baseline + active_allocation_count
+        allocation_blocked = bool(
+            active_allocation_count
+            and (
+                lowest_assigned != allocation_baseline + 1
+                or active_allocation_count != highest_assigned - allocation_baseline
+            )
+        )
     else:
         highest_assigned = max(
             _safe_int(row.get("highest_assigned_edition"), 0),
@@ -9919,10 +9937,10 @@ def calculate_product_edition_metafield_values(row):
         )
         lowest_assigned = 1 if highest_assigned else 0
         valid_allocation_count = max(_safe_int(row.get("sold_count"), 0), 0)
-    allocation_blocked = bool(
-        valid_allocation_count
-        and (lowest_assigned != 1 or valid_allocation_count != highest_assigned)
-    )
+        allocation_blocked = bool(
+            valid_allocation_count
+            and (lowest_assigned != 1 or valid_allocation_count != highest_assigned)
+        )
     next_number = highest_assigned + 1
     last_assigned = highest_assigned
     sold_count = valid_allocation_count
@@ -9978,6 +9996,8 @@ def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first
                        er.next_edition_number AS run_next_edition_number,
                        er.status AS run_status,
                        er.updated_at AS run_updated_at,
+                       COALESCE(er.allocation_baseline_sold_count, 0)
+                           AS allocation_baseline_sold_count,
                         COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
@@ -9987,28 +10007,19 @@ def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first
                        COALESCE((
                            SELECT MIN(eo.edition_number)
                            FROM edition_orders eo
-                           WHERE eo.shopify_product_gid = COALESCE(
-                               NULLIF(ep.shopify_product_gid, ''),
-                               NULLIF(ep.shopify_product_id, '')
-                           )
+                           WHERE eo.edition_run_id = er.id
                              AND COALESCE(eo.allocation_valid, TRUE)
                        ), 0) AS first_assigned_edition,
                        COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
-                           WHERE eo.shopify_product_gid = COALESCE(
-                               NULLIF(ep.shopify_product_gid, ''),
-                               NULLIF(ep.shopify_product_id, '')
-                           )
+                           WHERE eo.edition_run_id = er.id
                              AND COALESCE(eo.allocation_valid, TRUE)
                        ), 0) AS last_assigned_edition,
                        (
                            SELECT COUNT(*)
                            FROM edition_orders eo
-                           WHERE eo.shopify_product_gid = COALESCE(
-                               NULLIF(ep.shopify_product_gid, ''),
-                               NULLIF(ep.shopify_product_id, '')
-                           )
+                           WHERE eo.edition_run_id = er.id
                              AND COALESCE(eo.allocation_valid, TRUE)
                        ) AS valid_allocation_count
                 FROM edition_products ep
@@ -10108,21 +10119,27 @@ def pending_allocation_metafield_mirror_handles(*, ensure_schema_first=True):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT DISTINCT shopify_handle
-                    FROM edition_orders
-                    WHERE COALESCE(allocation_valid, TRUE)
-                      AND COALESCE(mirror_status, 'pending') IN ('pending', 'failed')
-                      AND COALESCE(shopify_handle, '') <> ''
+                    SELECT DISTINCT eo.shopify_handle
+                    FROM edition_orders eo
+                    JOIN edition_runs er
+                      ON er.id=eo.edition_run_id
+                     AND LOWER(COALESCE(er.status, ''))='active'
+                    WHERE COALESCE(eo.allocation_valid, TRUE)
+                      AND COALESCE(eo.mirror_status, 'pending') IN ('pending', 'failed')
+                      AND COALESCE(eo.shopify_handle, '') <> ''
                       AND NOT EXISTS (
                           SELECT 1
                           FROM edition_orders product_ledger
-                          WHERE product_ledger.shopify_product_gid=edition_orders.shopify_product_gid
+                          WHERE product_ledger.edition_run_id=er.id
                             AND COALESCE(product_ledger.allocation_valid, TRUE)
-                          GROUP BY product_ledger.shopify_product_gid
-                          HAVING MIN(product_ledger.edition_number) <> 1
-                              OR COUNT(*) <> MAX(product_ledger.edition_number)
+                          GROUP BY product_ledger.edition_run_id
+                          HAVING MIN(product_ledger.edition_number)
+                                     <> COALESCE(er.allocation_baseline_sold_count, 0) + 1
+                              OR COUNT(*)
+                                     <> MAX(product_ledger.edition_number)
+                                        - COALESCE(er.allocation_baseline_sold_count, 0)
                       )
-                    ORDER BY shopify_handle
+                    ORDER BY eo.shopify_handle
                     """
                 )
                 return [str(row.get("shopify_handle") or "") for row in (cur.fetchall() or [])]
@@ -16042,6 +16059,66 @@ def _legacy_allocate_edition_for_order_line(
             raise
 
 
+ATOMIC_EDITION_LEDGER_REQUIRED_COLUMNS = frozenset(
+    {
+        "source_channel",
+        "external_order_id",
+        "external_line_item_id",
+        "unit_ordinal",
+        "shopify_product_gid",
+        "allocation_valid",
+        "identity_enforced",
+    }
+)
+
+
+def atomic_edition_allocation_capability():
+    """Return a credential-safe readiness check for the atomic allocator."""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT to_regprocedure(
+                    'allocate_edition_line_units_atomic(text,text,text,text,integer,text,text,text,text,text,text,text,text,text,text)'
+                )::text AS function_name
+                """
+            )
+            function_name = str((cur.fetchone() or {}).get("function_name") or "")
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name='edition_orders'
+                  AND column_name=ANY(%s)
+                ORDER BY column_name
+                """,
+                (sorted(ATOMIC_EDITION_LEDGER_REQUIRED_COLUMNS),),
+            )
+            present_columns = {
+                str(row.get("column_name") or "")
+                for row in (cur.fetchall() or [])
+            }
+    missing_columns = sorted(ATOMIC_EDITION_LEDGER_REQUIRED_COLUMNS - present_columns)
+    return {
+        "ready": bool(function_name) and not missing_columns,
+        "function_present": bool(function_name),
+        "missing_columns": missing_columns,
+    }
+
+
+def require_atomic_edition_allocation_capability():
+    capability = atomic_edition_allocation_capability()
+    if capability.get("ready"):
+        return capability
+    missing = ", ".join(capability.get("missing_columns") or []) or "none"
+    raise RuntimeError(
+        "Atomic edition allocation is unavailable: "
+        f"function_present={bool(capability.get('function_present'))}; "
+        f"missing_columns={missing}. Apply the compatible atomic-ledger migration before retrying."
+    )
+
+
 def allocate_edition_line_units_atomic(
     *,
     order,
@@ -16051,6 +16128,7 @@ def allocate_edition_line_units_atomic(
     allocation_status="assigned",
 ):
     """Allocate a complete source line through the database ledger function."""
+    require_atomic_edition_allocation_capability()
     channel = edition_ledger.source_channel_for_order(order)
     external_order_id = edition_ledger.external_order_id_for_order(order)
     external_line_item_id = edition_ledger.external_line_item_id_for_line(order, line_item)
@@ -21508,19 +21586,21 @@ def list_hybrid_order_rows(limit=50, search=""):
         def load_fulfilment_rows(cur):
             cur.execute(
                 """
-                SELECT row_id, shopify_line_item_id, prodigi_status,
-                       updated_at, submitted_at
-                FROM prodigi_dispatch_rows
-                WHERE shopify_line_item_id=ANY(%s)
+                SELECT pd.row_id, pd.shopify_line_item_id, pd.prodigi_status,
+                       pd.updated_at, pd.submitted_at
+                FROM prodigi_dispatch_rows pd
+                -- WHERE shopify_line_item_id=ANY remains the bounded identity contract.
+                -- Values include gid://shopify/LineItem/ canonical identities.
+                WHERE pd.shopify_line_item_id = ANY(%s)
                 ORDER BY
                     CASE
-                        WHEN LOWER(BTRIM(COALESCE(prodigi_status, ''))) IN
+                        WHEN LOWER(BTRIM(COALESCE(pd.prodigi_status, ''))) IN
                              ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
                         THEN 0 ELSE 1
                     END,
-                    updated_at DESC NULLS LAST,
-                    submitted_at DESC NULLS LAST,
-                    row_id DESC
+                    pd.updated_at DESC NULLS LAST,
+                    pd.submitted_at DESC NULLS LAST,
+                    pd.row_id DESC
                 """,
                 (line_id_lookup_values,),
             )

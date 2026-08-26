@@ -282,7 +282,10 @@ class EditionLedgerRegressionTests(unittest.TestCase):
     def test_database_migration_enforces_both_unique_constraints_and_atomic_lock(self):
         sql = MIGRATION.read_text(encoding="utf-8")
         self.assertIn("edition_orders_source_unit_uidx", sql)
-        self.assertIn("edition_orders_product_edition_uidx", sql)
+        self.assertIn("edition_orders_run_edition_uidx", sql)
+        self.assertIn("WHERE identity_enforced AND allocation_valid", sql)
+        self.assertIn("allocation_baseline_sold_count", sql)
+        self.assertIn("WHERE eo.edition_run_id = v_run.id", sql)
         self.assertIn("pg_advisory_xact_lock", sql)
         self.assertIn("FOR UPDATE", sql)
         self.assertIn("allocate_edition_line_units_atomic", sql)
