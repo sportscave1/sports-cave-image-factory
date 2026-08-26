@@ -118,8 +118,6 @@ class ProductionCardinalityDatabase:
                     for index, line_id in enumerate(self.params[0])
                     if line_id.startswith("gid://shopify/LineItem/")
                 ]
-            if "FROM order_line_edition_overrides" in self.sql:
-                return []
             return []
 
         def fetchone(self):
@@ -129,13 +127,6 @@ class ProductionCardinalityDatabase:
 
 
 class OrdersBoundedReaderRegressionTests(unittest.TestCase):
-    def setUp(self):
-        self.original_override_capability = supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY
-        supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY = False
-
-    def tearDown(self):
-        supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY = self.original_override_capability
-
     def _load(self, order_count=100_000):
         database = ProductionCardinalityDatabase(order_count=order_count)
         started = time.perf_counter()
@@ -227,20 +218,13 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         self.assertNotIn("FROM shopify_order_lines", database.statements[0][0])
         self.assertEqual("0|", marker["marker"])
 
-    def test_optional_override_schema_is_absent_safe_and_present_bounded(self):
-        absent_db, absent_rows, _ = self._load()
-        self.assertEqual(100, len(absent_rows))
-        self.assertFalse(any("order_line_edition_overrides" in sql for sql, _ in absent_db.statements))
-
-        supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY = True
-        present_db, present_rows, _ = self._load()
-        self.assertEqual(100, len(present_rows))
-        self.assertEqual(5, len(present_db.statements))
-        self.assertEqual(1, len(present_db.connections))
-        override_sql, override_params = present_db.statements[-1]
-        self.assertIn("FROM order_line_edition_overrides", override_sql)
-        self.assertIn("WHERE mo.shopify_line_item_gid=ANY", override_sql)
-        self.assertLessEqual(len(override_params[0]), 100)
+    def test_reader_has_no_manual_override_capability_or_query(self):
+        database, rows, _ = self._load()
+        self.assertEqual(100, len(rows))
+        self.assertEqual(4, len(database.statements))
+        self.assertFalse(
+            any("order_line_edition_overrides" in sql for sql, _ in database.statements)
+        )
 
 
 if __name__ == "__main__":

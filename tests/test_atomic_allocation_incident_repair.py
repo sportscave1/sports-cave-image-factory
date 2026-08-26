@@ -68,37 +68,47 @@ def _candidate(order_name, product_gid, title, paid_at):
 
 
 class AtomicAllocationIncidentRepairTests(unittest.TestCase):
-    def test_backend_starts_when_optional_manual_override_module_is_not_deployed(self):
+    def test_removed_override_artifacts_and_runtime_references_are_absent(self):
+        self.assertFalse((ROOT / "order_line_edition_override.py").exists())
+        self.assertFalse(
+            (ROOT / "migrations" / "20260825_order_line_edition_overrides.sql").exists()
+        )
+        self.assertFalse(
+            (ROOT / "tests" / "test_order_line_edition_override.py").exists()
+        )
+        for relative_path in (
+            "supabase_backend.py",
+            "orders_page.py",
+            "order_allocator.py",
+            "certificate_job.py",
+        ):
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertNotIn("order_line_edition_override", source)
+            self.assertNotIn("order_line_edition_overrides", source)
+            self.assertNotIn("resolve_effective_edition", source)
+
+    def test_server_entry_imports_without_removed_override_module(self):
         script = textwrap.dedent(
             """
             import builtins
-            import importlib.util
-            from pathlib import Path
 
             original_import = builtins.__import__
 
-            def without_manual_override(name, *args, **kwargs):
+            def reject_removed_override(name, *args, **kwargs):
                 if name == "order_line_edition_override":
-                    error = ModuleNotFoundError("optional manual override is absent")
+                    error = ModuleNotFoundError("removed manual override was imported")
                     error.name = name
                     raise error
                 return original_import(name, *args, **kwargs)
 
-            builtins.__import__ = without_manual_override
-            path = Path("supabase_backend.py").resolve()
-            spec = importlib.util.spec_from_file_location("backend_without_override", path)
-            backend = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(backend)
-            assignment = backend._effective_assignment({"edition_number": 10})
-            assert assignment["edition_number"] == 10
-            assert assignment["manual_edition_override"] is False
-            assert backend._manual_override_fulfillment_status_is_locked("fulfilled")
-            try:
-                backend._manual_override_dependency_required()
-            except RuntimeError as error:
-                assert "not deployed" in str(error)
-            else:
-                raise AssertionError("override-only calls must fail closed")
+            builtins.__import__ = reject_removed_override
+            import supabase_backend
+            import collector_vault
+            import sports_cave_server
+
+            assert supabase_backend is not None
+            assert collector_vault is not None
+            assert sports_cave_server.app is not None
             """
         )
         result = subprocess.run(

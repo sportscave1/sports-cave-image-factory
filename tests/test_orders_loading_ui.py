@@ -4478,16 +4478,13 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         supabase_backend._discard_cached_read_connection()
         self.original_marketplace_capability = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY
         self.original_marketplace_checked_at = supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT
-        self.original_override_capability = supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = None
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = 0.0
-        supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY = False
 
     def tearDown(self):
         supabase_backend._discard_cached_read_connection()
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY = self.original_marketplace_capability
         supabase_backend._ORDER_MARKETPLACE_READ_CAPABILITY_CHECKED_AT = self.original_marketplace_checked_at
-        supabase_backend._ORDER_OVERRIDE_READ_CAPABILITY = self.original_override_capability
 
     class Cursor:
         def __init__(self, rows=None, error=None, statements=None, row_batches=None):
