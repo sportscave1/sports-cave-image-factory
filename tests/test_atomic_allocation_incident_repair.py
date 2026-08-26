@@ -1,4 +1,7 @@
 from pathlib import Path
+import subprocess
+import sys
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -65,6 +68,48 @@ def _candidate(order_name, product_gid, title, paid_at):
 
 
 class AtomicAllocationIncidentRepairTests(unittest.TestCase):
+    def test_backend_starts_when_optional_manual_override_module_is_not_deployed(self):
+        script = textwrap.dedent(
+            """
+            import builtins
+            import importlib.util
+            from pathlib import Path
+
+            original_import = builtins.__import__
+
+            def without_manual_override(name, *args, **kwargs):
+                if name == "order_line_edition_override":
+                    error = ModuleNotFoundError("optional manual override is absent")
+                    error.name = name
+                    raise error
+                return original_import(name, *args, **kwargs)
+
+            builtins.__import__ = without_manual_override
+            path = Path("supabase_backend.py").resolve()
+            spec = importlib.util.spec_from_file_location("backend_without_override", path)
+            backend = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(backend)
+            assignment = backend._effective_assignment({"edition_number": 10})
+            assert assignment["edition_number"] == 10
+            assert assignment["manual_edition_override"] is False
+            assert backend._manual_override_fulfillment_status_is_locked("fulfilled")
+            try:
+                backend._manual_override_dependency_required()
+            except RuntimeError as error:
+                assert "not deployed" in str(error)
+            else:
+                raise AssertionError("override-only calls must fail closed")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_missing_atomic_rpc_and_columns_are_reported_before_allocation(self):
         cursor = _Cursor(function_present=False, columns=("source_channel",))
         with patch.object(supabase_backend, "connect", return_value=_Connection(cursor)):

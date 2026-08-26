@@ -19,7 +19,12 @@ from zoneinfo import ZoneInfo
 import shopify_sync
 import order_action_state
 import edition_ledger
-import order_line_edition_override
+try:
+    import order_line_edition_override
+except ModuleNotFoundError as error:
+    if error.name != "order_line_edition_override":
+        raise
+    order_line_edition_override = None
 from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
 from certificate_logging import certificate_stage, certificate_stage_log, set_certificate_log_context
 from services import r2_storage
@@ -81,6 +86,15 @@ REPAIRABLE_ORDER_LINE_STATUSES = ("Error", "Product Not Found", "Needs product m
 MISSING_EDITION_REPAIRABLE_STATUSES = REPAIRABLE_ORDER_LINE_STATUSES + ("Needs Edition", "Historical Order")
 HISTORICAL_ORDER_NOTE = (
     "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
+)
+MANUAL_OVERRIDE_NOT_DEPLOYED_ERROR = (
+    "Manual edition overrides are not deployed in this environment."
+)
+MANUAL_OVERRIDE_FULFILLED_ERROR = (
+    "This order has already been fulfilled. Its edition number is locked."
+)
+_FULFILLED_OVERRIDE_STATUSES = frozenset(
+    {"complete", "completed", "fulfilled", "fulfilled in shopify", "success"}
 )
 DATABASE_URL_ENV_KEYS = (
     "DATABASE_URL",
@@ -254,6 +268,25 @@ class DatabaseReadError(RuntimeError):
     def __init__(self, message, diagnostic):
         super().__init__(message)
         self.diagnostic = dict(diagnostic or {})
+
+
+def _manual_override_dependency_required():
+    if order_line_edition_override is None:
+        raise RuntimeError(MANUAL_OVERRIDE_NOT_DEPLOYED_ERROR)
+    return order_line_edition_override
+
+
+def _manual_override_fulfillment_status_is_locked(value):
+    if order_line_edition_override is not None:
+        return order_line_edition_override.fulfillment_status_is_locked(value)
+    status = re.sub(r"[\s_-]+", " ", str(value or "").strip().casefold())
+    return status in _FULFILLED_OVERRIDE_STATUSES or status.startswith("fulfilled ")
+
+
+def _manual_override_fulfilled_error():
+    if order_line_edition_override is not None:
+        return order_line_edition_override.FULFILLED_OVERRIDE_ERROR
+    return MANUAL_OVERRIDE_FULFILLED_ERROR
 
 
 def utc_now():
@@ -11832,7 +11865,7 @@ def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
                 if not row_id:
                     continue
                 if (
-                    order_line_edition_override.fulfillment_status_is_locked(
+                    _manual_override_fulfillment_status_is_locked(
                         row.get("prodigi_status")
                     )
                     or row.get("date_fulfilled_in_shopify")
@@ -14438,7 +14471,7 @@ def _persist_order_snapshot(order):
                 lines_started = time.perf_counter()
                 _upsert_order_lines(cur, order)
                 _sync_perf_log("Supabase line item upsert time", lines_started, lines=len(order.get("line_items") or []))
-                if order_line_edition_override.fulfillment_status_is_locked(
+                if _manual_override_fulfillment_status_is_locked(
                     order.get("fulfillment_status")
                 ):
                     _lock_manual_override_for_fulfilment_cur(
@@ -22284,6 +22317,7 @@ def _manual_override_for_identity(cur, identity, *, for_update=False):
 
 
 def get_order_line_edition_override(edition_order_id):
+    _manual_override_dependency_required()
     with connect() as conn:
         with conn.cursor() as cur:
             return _manual_override_public(
@@ -22294,10 +22328,15 @@ def get_order_line_edition_override(edition_order_id):
 def _effective_assignment(assignment, override=None):
     source = dict(assignment or {})
     source["automatic_edition_number"] = source.get("edition_number")
+    if order_line_edition_override is None:
+        source.setdefault("effective_edition_number", source.get("edition_number"))
+        source.setdefault("manual_edition_override", False)
+        return source
     return order_line_edition_override.apply_effective_edition(source, override)
 
 
 def _manual_override_assignment(cur, override_id):
+    _manual_override_dependency_required()
     _manual_edition_override_schema_required(cur)
     cur.execute(
         """
@@ -22559,8 +22598,8 @@ def _assert_override_is_unfulfilled(cur, identity, *, live_status=""):
         statuses.append(state.get("prodigi_status"))
         if state.get("fulfilled_at"):
             statuses.append("fulfilled")
-    if any(order_line_edition_override.fulfillment_status_is_locked(value) for value in statuses):
-        raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+    if any(_manual_override_fulfillment_status_is_locked(value) for value in statuses):
+        raise RuntimeError(_manual_override_fulfilled_error())
 
 
 def _archive_and_stale_certificate(cur, assignment, *, override_id, effective_number, reason, actor):
@@ -22667,8 +22706,9 @@ def save_order_line_edition_override(
     actor,
     actor_role,
 ):
+    override_rules = _manual_override_dependency_required()
     actor = _require_manual_override_actor(actor, actor_role)
-    number = order_line_edition_override.validate_manual_edition_number(manual_edition_number)
+    number = override_rules.validate_manual_edition_number(manual_edition_number)
     clean_reason = str(reason or "").strip()
     if not clean_reason:
         raise ValueError("A short reason is required.")
@@ -22698,15 +22738,15 @@ def save_order_line_edition_override(
             # rows instead of slipping between the modal's live check and save.
             _assert_override_is_unfulfilled(cur, identity)
             live_status = _latest_shopify_fulfillment_status(requested_order_gid)
-            if order_line_edition_override.is_fulfillment_locked(live_status):
-                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            if override_rules.fulfillment_status_is_locked(live_status):
+                raise RuntimeError(override_rules.FULFILLED_OVERRIDE_ERROR)
             current = (
                 _manual_override_for_assignment(cur, edition_order_id, for_update=True)
                 if str(edition_order_id or "").strip()
                 else _manual_override_for_identity(cur, identity, for_update=True)
             )
             if current.get("locked_fulfilled_at"):
-                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+                raise RuntimeError(override_rules.FULFILLED_OVERRIDE_ERROR)
             before = _manual_override_public(current)
             previous = _effective_assignment(assignment, current)
             if (
@@ -22792,6 +22832,7 @@ def remove_order_line_edition_override(
     actor,
     actor_role,
 ):
+    override_rules = _manual_override_dependency_required()
     actor = _require_manual_override_actor(actor, actor_role)
     clean_reason = str(reason or "").strip() or "Manual override removed."
     requested_order_gid = edition_ledger.canonical_shopify_gid("Order", shopify_order_gid)
@@ -22817,15 +22858,15 @@ def remove_order_line_edition_override(
             cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
             _assert_override_is_unfulfilled(cur, identity)
             live_status = _latest_shopify_fulfillment_status(requested_order_gid)
-            if order_line_edition_override.is_fulfillment_locked(live_status):
-                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+            if override_rules.fulfillment_status_is_locked(live_status):
+                raise RuntimeError(override_rules.FULFILLED_OVERRIDE_ERROR)
             current = (
                 _manual_override_for_assignment(cur, edition_order_id, for_update=True)
                 if str(edition_order_id or "").strip()
                 else _manual_override_for_identity(cur, identity, for_update=True)
             )
             if current.get("locked_fulfilled_at"):
-                raise RuntimeError(order_line_edition_override.FULFILLED_OVERRIDE_ERROR)
+                raise RuntimeError(override_rules.FULFILLED_OVERRIDE_ERROR)
             before = _manual_override_public(current)
             if not current or not current.get("active"):
                 conn.commit()
