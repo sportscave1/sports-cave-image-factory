@@ -1811,6 +1811,11 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
                         "edition_offset": max(allocation_index - 1, 0),
                         "allocation_index": allocation_index,
                         "assignment_status": str(assignment.get("assignment_status") or "Assigned"),
+                        "assignment_source": str(assignment.get("assignment_source") or ""),
+                        "manual_edition_override": bool(
+                            assignment.get("manual_edition_override")
+                            or assignment.get("manual_override")
+                        ),
                         "certificate_id": str(assignment.get("certificate_id") or ""),
                         "certificate_status": _certificate_status_from_assignment(assignment),
                         "certificate_pdf_path": certificate_path,

@@ -138,7 +138,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         database, rows, _elapsed_ms = self._load()
 
         self.assertEqual(100, len(rows))
-        self.assertEqual(4, len(database.statements))
+        self.assertEqual(5, len(database.statements))
         id_sql, id_params = database.statements[0]
         self.assertIn("SELECT o.shopify_order_id", id_sql)
         self.assertIn("ORDER BY o.created_at DESC", id_sql)
@@ -154,6 +154,11 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         self.assertIn("WHERE o.shopify_order_id=ANY", database.statements[1][0])
         self.assertIn("WHERE shopify_line_item_id=ANY", database.statements[2][0])
         self.assertIn("WITH selected_edition_ids AS", database.statements[3][0])
+        self.assertIn("information_schema.tables", database.statements[4][0])
+        self.assertEqual(
+            (supabase_backend.MANUAL_ORDER_LINE_EDITION_TABLE,),
+            database.statements[4][1],
+        )
         self.assertEqual(1, len(database.connections))
         self.assertTrue(all(connection.closed for connection in database.connections))
         self.assertTrue(all(connection.rollback_calls == 1 for connection in database.connections))
@@ -163,7 +168,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         large_db, large_rows, _ = self._load(order_count=1_000_000)
 
         self.assertEqual(len(small_db.statements), len(large_db.statements))
-        self.assertEqual(4, len(large_db.statements))
+        self.assertEqual(5, len(large_db.statements))
         self.assertEqual(100, len(small_rows))
         self.assertEqual(100, len(large_rows))
         self.assertEqual(50, len({row["shopify_order_id"] for row in large_rows}))
@@ -218,12 +223,18 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         self.assertNotIn("FROM shopify_order_lines", database.statements[0][0])
         self.assertEqual("0|", marker["marker"])
 
-    def test_reader_has_no_manual_override_capability_or_query(self):
+    def test_reader_has_only_the_new_separate_manual_edition_capability(self):
         database, rows, _ = self._load()
         self.assertEqual(100, len(rows))
-        self.assertEqual(4, len(database.statements))
+        self.assertEqual(5, len(database.statements))
         self.assertFalse(
             any("order_line_edition_overrides" in sql for sql, _ in database.statements)
+        )
+        self.assertTrue(
+            any(
+                supabase_backend.MANUAL_ORDER_LINE_EDITION_TABLE in params
+                for _sql, params in database.statements
+            )
         )
 
 

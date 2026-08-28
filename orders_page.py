@@ -636,6 +636,8 @@ def _normalise_row(row):
     updated["admin_url"] = str(updated.get("admin_url") or "")
     updated["edition_order_id"] = str(updated.get("edition_order_id") or "")
     updated["assignment_status"] = str(updated.get("assignment_status") or "")
+    updated["assignment_source"] = str(updated.get("assignment_source") or "")
+    updated["manual_edition_override"] = bool(updated.get("manual_edition_override"))
     updated["prodigi_status"] = str(updated.get("prodigi_status") or "")
     updated["prodigi_row_id"] = str(updated.get("prodigi_row_id") or "")
     updated["certificate_id"] = str(updated.get("certificate_id") or "")
@@ -2098,6 +2100,110 @@ def _display_table_payload(rows):
     return frame.style.map(_fulfilment_cell_style, subset=["prodigi"])
 
 
+def _manual_edition_eligibility(row, backend):
+    normalised = _normalise_row(row)
+    if not backend or not hasattr(backend, "get_manual_order_line_edition_eligibility"):
+        return {"eligible": False, "reason": "Manual edition entry is unavailable."}
+    return backend.get_manual_order_line_edition_eligibility(
+        source_channel=normalised.get("channel") or "Shopify",
+        external_order_id=normalised.get("shopify_order_id") or "",
+        external_line_item_id=normalised.get("shopify_line_item_id") or "",
+        expected_product_gid=normalised.get("shopify_product_id") or "",
+    )
+
+
+def _render_manual_edition_entry(selected_rows, backend):
+    if not _developer_mode() or not backend or len(selected_rows) != 1:
+        return
+    row = _normalise_row(selected_rows[0])
+    if row.get("edition_number"):
+        return
+    try:
+        eligibility = _manual_edition_eligibility(row, backend)
+    except Exception as error:
+        st.caption(f"Manual edition entry unavailable: {error}")
+        return
+    if not eligibility.get("eligible"):
+        st.caption(f"Manual edition entry unavailable: {eligibility.get('reason') or 'server eligibility checks failed.'}")
+        return
+
+    total = max(int(eligibility.get("canonical_edition_total") or 100), 1)
+    order_label = row.get("order") or eligibility.get("external_order_id") or "selected order"
+    with st.expander(f"Manual expired-edition entry — {order_label}", expanded=True):
+        st.caption(
+            "This value is used only for Orders display and the certificate. "
+            "It does not allocate an edition or change counters."
+        )
+        st.caption(
+            "Verified series: "
+            f"{eligibility.get('series_status') or 'blocked'} · "
+            f"sold {int(eligibility.get('sold_count') or 0)} · "
+            f"remaining {int(eligibility.get('remaining_count') or 0)} · "
+            f"next {int(eligibility.get('next_edition_number') or 0)}"
+        )
+        form_key = (
+            "manual-expired-edition-"
+            + re.sub(r"[^a-zA-Z0-9_-]+", "-", row.get("shopify_line_item_id") or "line")
+        )
+        with st.form(form_key, clear_on_submit=False):
+            input_cols = st.columns(2)
+            edition_number = input_cols[0].number_input(
+                "Edition number",
+                min_value=1,
+                max_value=total,
+                value=total,
+                step=1,
+            )
+            edition_total = input_cols[1].number_input(
+                "Edition total",
+                min_value=1,
+                max_value=100,
+                value=total,
+                step=1,
+            )
+            reason = st.text_input(
+                "Audit reason",
+                placeholder="Why this expired line needs a manual certificate value",
+            )
+            submitted = st.form_submit_button(
+                "Save manual edition",
+                type="primary",
+                use_container_width=False,
+            )
+        if submitted:
+            actor = st.session_state.get("sports_cave_current_user") or {}
+            try:
+                saved = backend.save_manual_order_line_edition(
+                    source_channel=eligibility.get("source_channel") or row.get("channel") or "Shopify",
+                    external_order_id=eligibility.get("external_order_id") or row.get("shopify_order_id") or "",
+                    external_line_item_id=eligibility.get("external_line_item_id") or row.get("shopify_line_item_id") or "",
+                    expected_product_gid=eligibility.get("canonical_product_gid") or row.get("shopify_product_id") or "",
+                    edition_number=int(edition_number),
+                    edition_total=int(edition_total),
+                    reason=reason,
+                    actor=actor,
+                )
+            except Exception as error:
+                st.error(f"Manual edition was not saved: {error}")
+            else:
+                _reload_orders_from_source()
+                st.session_state[NOTICE_KEY] = (
+                    f"Saved {_format_edition_with_total(saved.get('edition_number'), saved.get('edition_total'))} "
+                    f"for {order_label}. Counters were not changed."
+                )
+                _record_order_activity(
+                    "manual_expired_edition_saved",
+                    f"Manual expired-edition value saved: {order_label}",
+                    row=row,
+                    metadata={
+                        "edition_number": saved.get("edition_number"),
+                        "edition_total": saved.get("edition_total"),
+                        "manual_edition_id": saved.get("id"),
+                    },
+                )
+                st.rerun()
+
+
 def _render_top_actions(rows, duplicate_diagnostics=None):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
@@ -2142,6 +2248,7 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
         st.caption("Orders are temporarily unavailable.")
     if selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
+    _render_manual_edition_entry(selected_rows, backend)
 
 
 def _render_sync_diagnostics(result):

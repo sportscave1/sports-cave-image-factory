@@ -4509,6 +4509,14 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
                 return self.row_batches.pop(0)
             return list(self.rows)
 
+        def fetchone(self):
+            if self.statements and "information_schema.tables" in self.statements[-1][0]:
+                return {"exists": False}
+            if self.row_batches:
+                batch = self.row_batches.pop(0)
+                return batch[0] if batch else None
+            return self.rows[0] if self.rows else None
+
         def read(self):
             if self.error:
                 raise self.error
@@ -4702,7 +4710,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             rows = supabase_backend.list_hybrid_order_rows(limit=50, search="#SC2906")
 
         self.assertEqual(connect.call_count, 1)
-        self.assertEqual(len(statements), 4)
+        self.assertEqual(len(statements), 5)
         self.assertIn("SELECT o.shopify_order_id", statements[0][0])
         self.assertNotIn("LEFT JOIN", statements[0][0])
         self.assertEqual(statements[0][1][-1], 50)
@@ -4711,6 +4719,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         self.assertIn("WHERE o.shopify_order_id=ANY", statements[1][0])
         self.assertIn("WHERE shopify_line_item_id=ANY", statements[2][0])
         self.assertIn("WITH selected_edition_ids AS", statements[3][0])
+        self.assertIn("information_schema.tables", statements[4][0])
         for sql, _ in statements:
             upper = sql.upper()
             for write_token in ("INSERT ", "UPDATE ", "DELETE ", "ALTER ", "CREATE "):

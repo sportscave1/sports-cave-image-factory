@@ -81,6 +81,11 @@ MISSING_EDITION_REPAIRABLE_STATUSES = REPAIRABLE_ORDER_LINE_STATUSES + ("Needs E
 HISTORICAL_ORDER_NOTE = (
     "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
 )
+MANUAL_ORDER_LINE_EDITION_TABLE = "manual_order_line_editions"
+MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX = "manual-edition:"
+MANUAL_EDITION_BLOCKED_STATUSES = frozenset(
+    {"sold_out", "sold out", "expired", "disabled", "archived", "inactive"}
+)
 DATABASE_URL_ENV_KEYS = (
     "DATABASE_URL",
     "SUPABASE_DATABASE_URL",
@@ -15331,9 +15336,17 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
                 str(preview_error),
                 {"edition_order_id": assignment.get("id")},
             )
+        manual_certificate = str(assignment.get("id") or "").startswith(
+            MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX
+        )
         generated_certificate_id = certificate_id(
             assignment.get("order_name") or assignment.get("shopify_order_id"),
             assignment.get("edition_number"),
+            (
+                assignment.get("shopify_handle") or assignment.get("product_handle") or ""
+                if manual_certificate
+                else ""
+            ),
         )
         cur.execute(
             """
@@ -21362,6 +21375,371 @@ def _legacy_list_hybrid_order_rows(limit=50, search=""):
     return merged_rows
 
 
+def _manual_edition_source_channel(value):
+    text = str(value or "").strip().casefold()
+    if "etsy" in text:
+        return "etsy"
+    if "ebay" in text:
+        return "ebay"
+    if text in {"", "shopify", "online store", "web"}:
+        return "shopify"
+    try:
+        return edition_ledger.normalize_source_channel(text)
+    except ValueError:
+        return ""
+
+
+def _manual_edition_eligibility_from_state(state):
+    """Return fail-closed manual-entry eligibility from canonical DB facts."""
+
+    row = dict(state or {})
+    result = {
+        "eligible": False,
+        "reason": "Manual edition entry is unavailable.",
+        "source_channel": _manual_edition_source_channel(row.get("actual_source_channel")),
+        "external_order_id": str(row.get("shopify_order_id") or "").strip(),
+        "external_line_item_id": str(row.get("shopify_line_item_id") or "").strip(),
+        "canonical_product_gid": str(row.get("canonical_product_gid") or "").strip(),
+        "canonical_edition_total": _int_value(row.get("canonical_edition_total"), 0),
+        "sold_count": _int_value(row.get("sold_count"), 0),
+        "remaining_count": _int_value(row.get("remaining_count"), 0),
+        "next_edition_number": _int_value(row.get("next_edition_number"), 0),
+        "series_status": str(row.get("series_status") or "").strip(),
+        "assignment_status": str(row.get("assignment_status") or "").strip(),
+        "last_error": str(row.get("last_error") or "").strip(),
+        "existing_manual_id": str(row.get("manual_edition_id") or "").strip(),
+    }
+    if not row.get("schema_available"):
+        result["reason"] = "The manual-edition database migration is not installed."
+        return result
+    if not row.get("line_found"):
+        result["reason"] = "The immutable order and line-item IDs were not found together."
+        return result
+    expected_source = _manual_edition_source_channel(row.get("expected_source_channel"))
+    if not expected_source or result["source_channel"] != expected_source:
+        result["reason"] = "The source channel does not match the immutable order."
+        return result
+    expected_product_gid = str(row.get("expected_product_gid") or "").strip()
+    line_product_gid = str(row.get("line_product_gid") or "").strip()
+    if (
+        not expected_product_gid
+        or expected_product_gid != line_product_gid
+        or expected_product_gid != result["canonical_product_gid"]
+    ):
+        result["reason"] = "The canonical product identity does not match the immutable order line."
+        return result
+    if result["existing_manual_id"]:
+        result["reason"] = "A manual edition value has already been saved for this line."
+        return result
+    if _int_value(row.get("valid_normal_allocation_count"), 0):
+        result["reason"] = "A valid normal edition allocation already exists."
+        return result
+    if bool(row.get("fulfilled")) or _int_value(row.get("terminal_dispatch_count"), 0):
+        result["reason"] = "The order line is already fulfilled."
+        return result
+    if _int_value(row.get("certificate_count"), 0):
+        result["reason"] = "A certificate already exists for this order line."
+        return result
+    if result["assignment_status"].casefold() in {
+        "assigned",
+        "allocated",
+        "complete",
+        "completed",
+    }:
+        result["reason"] = "The order line already reports a completed assignment state."
+        return result
+    if _int_value(row.get("edition_product_count"), 0) != 1:
+        result["reason"] = "The canonical edition design identity is missing or ambiguous."
+        return result
+    if not row.get("edition_product_found") or not row.get("edition_run_found"):
+        result["reason"] = "The canonical edition design or run could not be verified."
+        return result
+
+    failure_text = " ".join(
+        (result["assignment_status"], result["last_error"])
+    ).casefold()
+    disallowed_causes = (
+        "mapping",
+        "not found",
+        "not matched",
+        "missing shopify",
+        "identity mismatch",
+        "product mismatch",
+        "invalid product",
+        "malformed",
+        "corrupt",
+        "contiguous",
+        "database",
+    )
+    if any(token in failure_text for token in disallowed_causes):
+        result["reason"] = "The failure has a mapping, identity, or database cause that requires a normal repair."
+        return result
+
+    total = result["canonical_edition_total"]
+    status = result["series_status"].casefold().replace("-", "_")
+    status_tokens = {token.strip() for token in re.split(r"[/,|]", status) if token.strip()}
+    series_blocked = bool(
+        row.get("sold_out")
+        or not bool(row.get("product_active"))
+        or status in MANUAL_EDITION_BLOCKED_STATUSES
+        or status.replace("_", " ") in MANUAL_EDITION_BLOCKED_STATUSES
+        or any(token in MANUAL_EDITION_BLOCKED_STATUSES for token in status_tokens)
+        or any(token.replace("_", " ") in MANUAL_EDITION_BLOCKED_STATUSES for token in status_tokens)
+        or (total > 0 and result["sold_count"] >= total)
+        or result["remaining_count"] <= 0
+        or (total > 0 and result["next_edition_number"] > total)
+    )
+    if total < 1 or total > 100 or not series_blocked:
+        result["reason"] = "The canonical edition design is still available for normal allocation."
+        return result
+
+    result["eligible"] = True
+    result["reason"] = "Confirmed expired, disabled, or sold out with no valid normal allocation."
+    return result
+
+
+def _manual_edition_state_with_cursor(
+    cur,
+    *,
+    source_channel,
+    external_order_id,
+    external_line_item_id,
+    expected_product_gid,
+):
+    expected_source = _manual_edition_source_channel(source_channel)
+    order_id = str(external_order_id or "").strip()
+    line_id = str(external_line_item_id or "").strip()
+    product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
+    if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+        return {
+            "schema_available": False,
+            "expected_source_channel": expected_source,
+            "shopify_order_id": order_id,
+            "shopify_line_item_id": line_id,
+            "expected_product_gid": product_gid,
+        }
+    cur.execute(
+        """
+        SELECT
+            TRUE AS schema_available,
+            o.shopify_order_id,
+            o.order_name,
+            li.shopify_line_item_id,
+            li.product_title,
+            li.assignment_status,
+            COALESCE(li.last_error, '') AS last_error,
+            COALESCE(
+                NULLIF(to_jsonb(o)->>'source_name', ''),
+                NULLIF(o.raw_json->>'source_name', ''),
+                'shopify'
+            ) AS actual_source_channel,
+            CASE
+                WHEN COALESCE(li.shopify_product_id, '') ~ '^gid://shopify/Product/[0-9]+$'
+                    THEN li.shopify_product_id
+                WHEN COALESCE(li.shopify_product_id, '') ~ '^[0-9]+$'
+                    THEN 'gid://shopify/Product/' || li.shopify_product_id
+                ELSE ''
+            END AS line_product_gid,
+            ep.id IS NOT NULL AS edition_product_found,
+            (
+                SELECT COUNT(*)
+                FROM edition_products ep_count
+                WHERE COALESCE(
+                    NULLIF(ep_count.shopify_product_gid, ''),
+                    NULLIF(ep_count.shopify_product_id, '')
+                )=%s
+            ) AS edition_product_count,
+            er.id IS NOT NULL AS edition_run_found,
+            COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, ''))
+                AS canonical_product_gid,
+            ep.product_title AS canonical_product_title,
+            LEAST(GREATEST(COALESCE(er.edition_total, ep.edition_total, 100), 1), 100)
+                AS canonical_edition_total,
+            COALESCE(ep.sold_count, 0) AS sold_count,
+            COALESCE(ep.remaining_count, 0) AS remaining_count,
+            COALESCE(ep.next_edition_number, 1) AS next_edition_number,
+            COALESCE(ep.sold_out, FALSE) OR COALESCE(ep.is_sold_out, FALSE) AS sold_out,
+            COALESCE(ep.active, ep.is_active, TRUE) AS product_active,
+            BTRIM(COALESCE(er.status, '') || ' / ' || COALESCE(ep.edition_status, '')) AS series_status,
+            manual.id::text AS manual_edition_id,
+            (
+                LOWER(BTRIM(COALESCE(
+                    NULLIF(o.fulfillment_status, ''),
+                    NULLIF(o.raw_json->>'fulfillment_status', ''),
+                    NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
+                    ''
+                ))) IN ('fulfilled', 'complete', 'completed')
+                OR LOWER(BTRIM(COALESCE(
+                    NULLIF(to_jsonb(li)->>'fulfillment_status', ''),
+                    NULLIF(li.raw_json->>'fulfillment_status', ''),
+                    NULLIF(li.raw_json->>'displayFulfillmentStatus', ''),
+                    ''
+                ))) IN ('fulfilled', 'complete', 'completed')
+            ) AS fulfilled,
+            (
+                SELECT COUNT(*)
+                FROM prodigi_dispatch_rows dispatch
+                WHERE dispatch.shopify_line_item_id=li.shopify_line_item_id
+                  AND LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
+                      ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+            ) AS terminal_dispatch_count,
+            (
+                SELECT COUNT(*)
+                FROM edition_orders eo
+                WHERE COALESCE(eo.allocation_valid, TRUE)
+                  AND eo.edition_number BETWEEN 1 AND eo.edition_total
+                  AND (
+                      (eo.source_channel=%s
+                       AND eo.external_order_id=o.shopify_order_id
+                       AND eo.external_line_item_id=li.shopify_line_item_id)
+                      OR eo.shopify_line_item_id=li.shopify_line_item_id
+                  )
+            ) AS valid_normal_allocation_count,
+            (
+                SELECT COUNT(*)
+                FROM certificates certificate
+                WHERE certificate.shopify_order_id=o.shopify_order_id
+                  AND certificate.shopify_line_item_id=li.shopify_line_item_id
+            ) AS certificate_count
+        FROM shopify_orders o
+        JOIN shopify_order_lines li
+          ON li.shopify_order_id=o.shopify_order_id
+         AND li.shopify_line_item_id=%s
+        LEFT JOIN edition_products ep
+          ON COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, ''))=%s
+        LEFT JOIN edition_runs er ON er.id=ep.active_edition_run_id
+        LEFT JOIN manual_order_line_editions manual
+          ON manual.source_channel=%s
+         AND manual.external_order_id=o.shopify_order_id
+         AND manual.external_line_item_id=li.shopify_line_item_id
+        WHERE o.shopify_order_id=%s
+        LIMIT 1
+        """,
+        (
+            product_gid,
+            expected_source,
+            line_id,
+            product_gid,
+            expected_source,
+            order_id,
+        ),
+    )
+    row = dict(cur.fetchone() or {})
+    row.update(
+        {
+            "line_found": bool(row),
+            "expected_source_channel": expected_source,
+            "expected_product_gid": product_gid,
+        }
+    )
+    return row
+
+
+def get_manual_order_line_edition_eligibility(
+    *,
+    source_channel,
+    external_order_id,
+    external_line_item_id,
+    expected_product_gid,
+):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            state = _manual_edition_state_with_cursor(
+                cur,
+                source_channel=source_channel,
+                external_order_id=external_order_id,
+                external_line_item_id=external_line_item_id,
+                expected_product_gid=expected_product_gid,
+            )
+    return _manual_edition_eligibility_from_state(state)
+
+
+def save_manual_order_line_edition(
+    *,
+    source_channel,
+    external_order_id,
+    external_line_item_id,
+    expected_product_gid,
+    edition_number,
+    edition_total,
+    reason,
+    actor,
+):
+    """Insert one immutable display/certificate value after locked DB guards."""
+
+    ensure_schema()
+    source = _manual_edition_source_channel(source_channel)
+    order_id = str(external_order_id or "").strip()
+    line_id = str(external_line_item_id or "").strip()
+    product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
+    actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
+    clean_reason = str(reason or "").strip()
+    number = _int_value(edition_number, 0)
+    total = _int_value(edition_total, 0)
+    if not actor_id:
+        raise PermissionError("Only an authenticated administrator may save a manual edition value.")
+    if not source or not order_id or not line_id or not product_gid:
+        raise ValueError("Source, immutable order, line-item, and product identities are required.")
+    if number < 1 or total < 1 or total > 100 or number > total:
+        raise ValueError("Edition number and total must be positive, and the number cannot exceed the total.")
+    if not clean_reason:
+        raise ValueError("An audit reason is required.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            state = _manual_edition_state_with_cursor(
+                cur,
+                source_channel=source,
+                external_order_id=order_id,
+                external_line_item_id=line_id,
+                expected_product_gid=product_gid,
+            )
+            eligibility = _manual_edition_eligibility_from_state(state)
+            if not eligibility.get("eligible"):
+                raise ValueError(eligibility.get("reason") or "This line is not eligible for manual edition entry.")
+            if total != _int_value(eligibility.get("canonical_edition_total"), 0):
+                raise ValueError("Edition total must match the canonical edition total.")
+            cur.execute(
+                """
+                INSERT INTO manual_order_line_editions (
+                    source_channel, external_order_id, external_line_item_id,
+                    canonical_product_gid, edition_number, edition_total, reason,
+                    created_by_user_id, created_by_email, created_by_display_name,
+                    verified_order_name, verified_product_title,
+                    verified_assignment_status, verified_last_error,
+                    verified_series_status, verified_sold_count,
+                    verified_remaining_count, verified_next_edition_number
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s,
+                    '', '', '', '', '', '', '', 0, 0, 0
+                )
+                RETURNING *
+                """,
+                (
+                    source,
+                    order_id,
+                    line_id,
+                    product_gid,
+                    number,
+                    total,
+                    clean_reason[:1000],
+                    actor_id,
+                ),
+            )
+            saved = dict(cur.fetchone() or {})
+        conn.commit()
+    return {
+        "saved": True,
+        "id": str(saved.get("id") or ""),
+        "source_channel": saved.get("source_channel") or source,
+        "external_order_id": saved.get("external_order_id") or order_id,
+        "external_line_item_id": saved.get("external_line_item_id") or line_id,
+        "edition_number": _int_value(saved.get("edition_number"), number),
+        "edition_total": _int_value(saved.get("edition_total"), total),
+        "created_at": saved.get("created_at"),
+    }
+
+
 def list_hybrid_order_rows(limit=50, search=""):
     """Load the latest canonical orders through bounded, measured read phases.
 
@@ -21631,6 +22009,7 @@ def list_hybrid_order_rows(limit=50, search=""):
                     eo.assigned_at, eo.certificate_status,
                     eo.status AS edition_order_status,
                     eo.source AS assignment_source, eo.manual_override,
+                    eo.allocation_valid,
                     c.certificate_id, c.local_file_path,
                     COALESCE(NULLIF(c.shopify_file_url, ''),
                              NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
@@ -21674,6 +22053,68 @@ def list_hybrid_order_rows(limit=50, search=""):
             load_edition_rows,
         )
 
+    manual_edition_rows = []
+    manual_edition_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
+    if line_id_lookup_values:
+        def load_manual_edition_rows(cur):
+            if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+                return []
+            cur.execute(
+                """
+                SELECT
+                    manual.id AS manual_edition_id,
+                    manual.source_channel,
+                    manual.external_order_id AS shopify_order_id,
+                    manual.external_line_item_id AS shopify_line_item_id,
+                    manual.canonical_product_gid AS shopify_product_id,
+                    manual.edition_number, manual.edition_total,
+                    manual.created_at AS assigned_at,
+                    COALESCE(NULLIF(c.certificate_status, ''),
+                             NULLIF(c.status, ''), 'Certificate Missing') AS certificate_status,
+                    c.certificate_id, c.local_file_path,
+                    COALESCE(NULLIF(c.shopify_file_url, ''),
+                             NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                    c.certificate_pdf_url, c.certificate_print_jpg_url,
+                    c.certificate_preview_image_url, c.shopify_pdf_file_id,
+                    c.shopify_print_jpg_file_id, c.shopify_preview_file_id,
+                    c.asset_sync_status, c.asset_sync_error, c.generated_at,
+                    c.certificate_r2_bucket, c.certificate_r2_key,
+                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
+                FROM manual_order_line_editions manual
+                LEFT JOIN LATERAL (
+                    SELECT certificate.*
+                    FROM certificates certificate
+                    WHERE certificate.edition_order_id=
+                          'manual-edition:' || manual.id::text
+                    ORDER BY certificate.updated_at DESC NULLS LAST,
+                             certificate.generated_at DESC NULLS LAST,
+                             certificate.id DESC
+                    LIMIT 1
+                ) c ON TRUE
+                WHERE manual.external_line_item_id=ANY(%s)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM edition_orders eo
+                      WHERE COALESCE(eo.allocation_valid, TRUE)
+                        AND eo.edition_number BETWEEN 1 AND eo.edition_total
+                        AND (
+                            (eo.source_channel=manual.source_channel
+                             AND eo.external_order_id=manual.external_order_id
+                             AND eo.external_line_item_id=manual.external_line_item_id)
+                            OR eo.shopify_line_item_id=manual.external_line_item_id
+                        )
+                  )
+                ORDER BY manual.external_line_item_id
+                """,
+                (line_id_lookup_values,),
+            )
+            return cur.fetchall()
+
+        manual_edition_rows, manual_edition_diagnostic = _run_read_operation(
+            f"{operation_prefix}.manual_editions",
+            load_manual_edition_rows,
+        )
+
     merge_started = time.perf_counter()
     fulfilment_by_line = {}
     for row in fulfilment_rows:
@@ -21684,6 +22125,7 @@ def list_hybrid_order_rows(limit=50, search=""):
     assignments_by_line = {}
     assignments_by_order = {}
     assignments_by_order_name = {}
+    valid_normal_line_ids = set()
     for edition_row in edition_rows:
         assignment = {
             "edition_order_id": edition_row.get("edition_order_id"),
@@ -21716,12 +22158,53 @@ def list_hybrid_order_rows(limit=50, search=""):
         line_id = canonical_shopify_id(edition_row.get("shopify_line_item_id"))
         if line_id:
             assignments_by_line.setdefault(line_id, []).append(assignment)
+            number = _int_value(edition_row.get("edition_number"), 0)
+            total = _int_value(edition_row.get("edition_total"), 0)
+            if edition_row.get("allocation_valid") is not False and 0 < number <= total:
+                valid_normal_line_ids.add(line_id)
         order_id = canonical_shopify_id(edition_row.get("shopify_order_id"))
         if order_id:
             assignments_by_order.setdefault(order_id, []).append(assignment)
         order_name = str(edition_row.get("shopify_order_name") or "").strip().upper()
         if order_name:
             assignments_by_order_name.setdefault(order_name, []).append(assignment)
+
+    for manual_row in manual_edition_rows:
+        line_id = canonical_shopify_id(manual_row.get("shopify_line_item_id"))
+        if not line_id or line_id in valid_normal_line_ids:
+            continue
+        assignments_by_line[line_id] = [{
+            "edition_order_id": (
+                MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX
+                + str(manual_row.get("manual_edition_id") or "")
+            ),
+            "edition_number": manual_row.get("edition_number"),
+            "edition_total": manual_row.get("edition_total"),
+            "allocation_index": 1,
+            "assigned_at": manual_row.get("assigned_at"),
+            "certificate_status": manual_row.get("certificate_status"),
+            "assignment_status": "Assigned",
+            "assignment_source": "manual_expired_edition_display_certificate",
+            "manual_override": True,
+            "manual_edition_override": True,
+            "certificate_id": manual_row.get("certificate_id"),
+            "local_file_path": manual_row.get("local_file_path"),
+            "shopify_file_url": manual_row.get("shopify_file_url") or manual_row.get("certificate_pdf_url"),
+            "certificate_pdf_url": manual_row.get("certificate_pdf_url"),
+            "certificate_print_jpg_url": manual_row.get("certificate_print_jpg_url"),
+            "certificate_preview_image_url": manual_row.get("certificate_preview_image_url"),
+            "shopify_file_id": manual_row.get("shopify_pdf_file_id"),
+            "shopify_pdf_file_id": manual_row.get("shopify_pdf_file_id"),
+            "shopify_print_jpg_file_id": manual_row.get("shopify_print_jpg_file_id"),
+            "shopify_preview_file_id": manual_row.get("shopify_preview_file_id"),
+            "asset_sync_status": manual_row.get("asset_sync_status"),
+            "asset_sync_error": manual_row.get("asset_sync_error"),
+            "generated_at": manual_row.get("generated_at"),
+            "certificate_r2_bucket": manual_row.get("certificate_r2_bucket"),
+            "certificate_r2_key": manual_row.get("certificate_r2_key"),
+            "certificate_preview_r2_bucket": manual_row.get("certificate_preview_r2_bucket"),
+            "certificate_preview_r2_key": manual_row.get("certificate_preview_r2_key"),
+        }]
 
     merged_rows = []
     for base_row in base_rows:
@@ -21748,6 +22231,7 @@ def list_hybrid_order_rows(limit=50, search=""):
         "base": base_diagnostic,
         "fulfilment": fulfilment_diagnostic,
         "allocations": allocation_diagnostic,
+        "manual_editions": manual_edition_diagnostic,
     }
     query_count = sum(1 for value in phase_diagnostics.values() if int(value.get("attempts") or 0))
     aggregate_diagnostic = {
@@ -22241,6 +22725,89 @@ def list_edition_orders(search="", limit=250):
             return cur.fetchall()
 
 
+def _manual_order_line_edition_assignment(cur, reference):
+    reference = str(reference or "").strip()
+    if not reference.startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+        return None
+    manual_id = reference.removeprefix(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
+    if not UUID_RE.match(manual_id):
+        raise ValueError("Manual edition reference is invalid.")
+    if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+        raise ValueError("Manual edition support is not installed.")
+    cur.execute(
+        """
+        SELECT
+            manual.id AS manual_edition_id,
+            manual.external_order_id AS shopify_order_id,
+            o.order_name,
+            manual.external_line_item_id AS shopify_line_item_id,
+            manual.canonical_product_gid AS shopify_product_id,
+            COALESCE(NULLIF(to_jsonb(li)->>'shopify_variant_id', ''),
+                     NULLIF(li.raw_json->>'shopify_variant_id', ''),
+                     NULLIF(li.raw_json->>'variant_id', '')) AS shopify_variant_id,
+            COALESCE(NULLIF(ep.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
+            COALESCE(NULLIF(ep.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS product_handle,
+            COALESCE(NULLIF(ep.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
+            li.variant_title, li.sku,
+            o.customer_name, o.customer_email,
+            NULLIF(to_jsonb(o)->>'shopify_customer_id', '') AS shopify_customer_id,
+            manual.edition_number, manual.edition_total,
+            1 AS allocation_index,
+            manual.created_at AS assigned_at
+        FROM manual_order_line_editions manual
+        JOIN shopify_orders o
+          ON o.shopify_order_id=manual.external_order_id
+        JOIN shopify_order_lines li
+          ON li.shopify_order_id=manual.external_order_id
+         AND li.shopify_line_item_id=manual.external_line_item_id
+        JOIN edition_products ep
+          ON COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, ''))=
+             manual.canonical_product_gid
+        WHERE manual.id=%s
+          AND (
+              SELECT COUNT(*)
+              FROM edition_products ep_count
+              WHERE COALESCE(
+                  NULLIF(ep_count.shopify_product_gid, ''),
+                  NULLIF(ep_count.shopify_product_id, '')
+              )=manual.canonical_product_gid
+          )=1
+          AND CASE
+                WHEN COALESCE(li.shopify_product_id, '') ~ '^gid://shopify/Product/[0-9]+$'
+                    THEN li.shopify_product_id
+                WHEN COALESCE(li.shopify_product_id, '') ~ '^[0-9]+$'
+                    THEN 'gid://shopify/Product/' || li.shopify_product_id
+                ELSE ''
+              END=manual.canonical_product_gid
+          AND NOT EXISTS (
+              SELECT 1
+              FROM edition_orders eo
+              WHERE COALESCE(eo.allocation_valid, TRUE)
+                AND eo.edition_number BETWEEN 1 AND eo.edition_total
+                AND (
+                    (eo.source_channel=manual.source_channel
+                     AND eo.external_order_id=manual.external_order_id
+                     AND eo.external_line_item_id=manual.external_line_item_id)
+                    OR eo.shopify_line_item_id=manual.external_line_item_id
+                )
+          )
+        """,
+        (manual_id,),
+    )
+    assignment = cur.fetchone()
+    if not assignment:
+        raise ValueError(
+            "Manual edition value was not found, its immutable identity changed, "
+            "or a valid normal allocation now takes precedence."
+        )
+    return {
+        **assignment,
+        "id": reference,
+        "source": "manual_expired_edition_display_certificate",
+        "manual_override": True,
+    }
+
+
 def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend", ensure_schema_first=True):
     started = time.perf_counter()
     path = ""
@@ -22258,16 +22825,19 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
             with conn.cursor() as cur:
                 with certificate_stage("certificate_db_read"):
                     with certificate_stage("certificate_data_loaded"):
-                        cur.execute(
-                            """
-                            SELECT eo.*, o.order_name
-                            FROM edition_orders eo
-                            LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                            WHERE eo.id::text=%s
-                            """,
-                            (str(edition_order_id),),
-                        )
-                        assignment = cur.fetchone()
+                        reference = str(edition_order_id or "").strip()
+                        assignment = _manual_order_line_edition_assignment(cur, reference)
+                        if assignment is None:
+                            cur.execute(
+                                """
+                                SELECT eo.*, o.order_name
+                                FROM edition_orders eo
+                                LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                                WHERE eo.id::text=%s
+                                """,
+                                (reference,),
+                            )
+                            assignment = cur.fetchone()
                         if not assignment:
                             raise ValueError("Edition order was not found.")
                         set_certificate_log_context(
