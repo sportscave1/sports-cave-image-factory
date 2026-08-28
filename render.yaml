@@ -7,6 +7,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: python run_migrations.py --only 20260828_fix_sparse_legacy_allocator.sql
     startCommand: python webhook_server.py
     healthCheckPath: /healthz
     envVars:

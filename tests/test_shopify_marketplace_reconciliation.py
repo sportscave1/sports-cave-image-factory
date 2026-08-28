@@ -398,7 +398,16 @@ class ShopifyMarketplaceReconciliationTests(unittest.TestCase):
     def test_render_services_do_not_gate_core_shopify_on_optional_marketplace_schema(self):
         render = Path("render.yaml").read_text(encoding="utf-8")
 
-        self.assertNotIn("preDeployCommand", render)
+        self.assertIn(
+            "preDeployCommand: python run_migrations.py --only "
+            "20260828_fix_sparse_legacy_allocator.sql",
+            render,
+        )
+        self.assertNotIn(
+            "preDeployCommand: python run_migrations.py --only "
+            "20260818_shopify_marketplace_order_reconciliation.sql",
+            render,
+        )
         self.assertNotIn("startCommand: python sports_cave_server.py", render)
         self.assertIn("startCommand: python webhook_server.py", render)
         self.assertNotIn("--verify-required-schema", render)

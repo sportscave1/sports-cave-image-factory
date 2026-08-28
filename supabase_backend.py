@@ -9375,7 +9375,7 @@ def get_edition_counter_state(shopify_handle):
                        COALESCE(ep.sold_out, ep.is_sold_out, FALSE) AS sold_out,
                        COALESCE(ep.allow_counter_history_override, FALSE) AS allow_counter_history_override,
                        COALESCE(ep.last_assigned_edition, 0) AS stored_last_assigned_edition,
-                       COALESCE((
+                        COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
                            WHERE eo.shopify_handle = ep.shopify_handle
@@ -10019,29 +10019,41 @@ def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first
                        er.updated_at AS run_updated_at,
                        COALESCE(er.allocation_baseline_sold_count, 0)
                            AS allocation_baseline_sold_count,
-                        COALESCE((
+                       COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
                            WHERE eo.edition_run_id = er.id
+                             AND COALESCE(eo.identity_enforced, FALSE)
                              AND COALESCE(eo.allocation_valid, TRUE)
+                             AND COALESCE(eo.status, '') NOT IN
+                                 ('voided', 'refunded', 'cancelled', 'superseded')
                         ), 0) AS active_run_max_assigned,
                        COALESCE((
                            SELECT MIN(eo.edition_number)
                            FROM edition_orders eo
                            WHERE eo.edition_run_id = er.id
+                             AND COALESCE(eo.identity_enforced, FALSE)
                              AND COALESCE(eo.allocation_valid, TRUE)
+                             AND COALESCE(eo.status, '') NOT IN
+                                 ('voided', 'refunded', 'cancelled', 'superseded')
                        ), 0) AS first_assigned_edition,
                        COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
                            WHERE eo.edition_run_id = er.id
+                             AND COALESCE(eo.identity_enforced, FALSE)
                              AND COALESCE(eo.allocation_valid, TRUE)
+                             AND COALESCE(eo.status, '') NOT IN
+                                 ('voided', 'refunded', 'cancelled', 'superseded')
                        ), 0) AS last_assigned_edition,
                        (
                            SELECT COUNT(*)
                            FROM edition_orders eo
                            WHERE eo.edition_run_id = er.id
+                             AND COALESCE(eo.identity_enforced, FALSE)
                              AND COALESCE(eo.allocation_valid, TRUE)
+                             AND COALESCE(eo.status, '') NOT IN
+                                 ('voided', 'refunded', 'cancelled', 'superseded')
                        ) AS valid_allocation_count
                 FROM edition_products ep
                 {active_run_join}
@@ -10152,7 +10164,10 @@ def pending_allocation_metafield_mirror_handles(*, ensure_schema_first=True):
                           SELECT 1
                           FROM edition_orders product_ledger
                           WHERE product_ledger.edition_run_id=er.id
+                            AND COALESCE(product_ledger.identity_enforced, FALSE)
                             AND COALESCE(product_ledger.allocation_valid, TRUE)
+                            AND COALESCE(product_ledger.status, '') NOT IN
+                                ('voided', 'refunded', 'cancelled', 'superseded')
                           GROUP BY product_ledger.edition_run_id
                           HAVING MIN(product_ledger.edition_number)
                                      <> COALESCE(er.allocation_baseline_sold_count, 0) + 1

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -38,6 +39,12 @@ ALLOWED_CONSTRAINT_REPLACEMENTS = frozenset(
     }
 )
 SHOPIFY_MARKETPLACE_MIGRATION = "20260818_shopify_marketplace_order_reconciliation.sql"
+LEGACY_ALLOCATOR_REPAIR_MIGRATION = "20260828_fix_sparse_legacy_allocator.sql"
+REVIEWED_MIGRATION_SHA256 = {
+    LEGACY_ALLOCATOR_REPAIR_MIGRATION: (
+        "488120bb6f36c3b7dcd59a8a933db74c3fb2266e5c5bc06f1d283392e35be4e9"
+    ),
+}
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
     ("shopify_orders", "source_name"): ("text", "NO", "''"),
@@ -74,6 +81,20 @@ def safe_migration_sql(sql):
     reviewed_sql = DROP_CONSTRAINT_PATTERN.sub(remove_reviewed_constraint_drop, sql)
     reviewed_sql = REFERENTIAL_DELETE_PATTERN.sub("", reviewed_sql)
     return not UNSAFE_SQL_PATTERN.search(reviewed_sql)
+
+
+def reviewed_migration_sql(path, sql):
+    """Admit a data-writing function body only when its reviewed bytes match."""
+
+    expected = REVIEWED_MIGRATION_SHA256.get(Path(path).name, "")
+    if not expected:
+        return False
+    actual = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+    return actual == expected
+
+
+def migration_sql_is_allowed(path, sql):
+    return safe_migration_sql(sql) or reviewed_migration_sql(path, sql)
 
 
 def migration_files(only=None):
@@ -231,7 +252,11 @@ def verify_marketplace_schema():
 
 def run_migrations(*, only=None, check=False):
     selected = migration_files(only)
-    unsafe = [path.name for path in selected if not safe_migration_sql(path.read_text(encoding="utf-8"))]
+    unsafe = [
+        path.name
+        for path in selected
+        if not migration_sql_is_allowed(path, path.read_text(encoding="utf-8"))
+    ]
     if unsafe and only:
         raise SystemExit(f"Migration failed the safety check: {unsafe[0]}")
     if check:
@@ -258,7 +283,7 @@ def run_migrations(*, only=None, check=False):
             )
             for path in selected:
                 sql = path.read_text(encoding="utf-8")
-                if not safe_migration_sql(sql):
+                if not migration_sql_is_allowed(path, sql):
                     skipped.append((path.name, "contains data-moving or destructive SQL"))
                     continue
                 cur.execute("SELECT 1 FROM schema_migrations WHERE filename=%s", (path.name,))
