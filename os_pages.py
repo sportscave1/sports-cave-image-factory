@@ -4815,6 +4815,20 @@ def _prodigi_qa_step(number, title, question, *, key, default=False, helper_text
         return confirmed, notes
 
 
+def _prodigi_apply_order_lookup(query, *, state=None, finder=None):
+    target = _prodigi_clean(query)
+    if not target:
+        return [], []
+    state = st.session_state if state is None else state
+    finder = prodigi_find_order_rows_from_cache if finder is None else finder
+    matches, existing_rows = finder(target)
+    state["prodigi_dispatch_matches"] = matches
+    state["prodigi_dispatch_existing_rows"] = existing_rows
+    state["prodigi_dispatch_last_query"] = target
+    state["prodigi_dispatch_selected_row_id"] = matches[0]["row_id"] if len(matches) == 1 else ""
+    return matches, existing_rows
+
+
 def render_prodigi_page():
     page_started = time.perf_counter()
     _prodigi_log_timing("page start", page_started)
@@ -4839,25 +4853,16 @@ def render_prodigi_page():
         if not query:
             st.warning("Enter a Shopify order number first.")
         else:
-            matches, existing_rows = prodigi_find_order_rows_from_cache(query)
-            st.session_state["prodigi_dispatch_matches"] = matches
-            st.session_state["prodigi_dispatch_existing_rows"] = existing_rows
-            st.session_state["prodigi_dispatch_last_query"] = query
-            st.session_state["prodigi_dispatch_selected_row_id"] = matches[0]["row_id"] if len(matches) == 1 else ""
-            if not matches:
-                st.session_state["prodigi_dispatch_selected_row_id"] = ""
+            _prodigi_apply_order_lookup(query, finder=prodigi_find_order_rows_from_cache)
             st.rerun()
 
     autoload_query = _prodigi_clean(st.session_state.get("prodigi_dispatch_autoload_query") or "")
     last_query = st.session_state.get("prodigi_dispatch_last_query") or ""
     if autoload_query and autoload_query != last_query:
-        matches, existing_rows = prodigi_find_order_rows_from_cache(autoload_query)
-        st.session_state["prodigi_dispatch_matches"] = matches
-        st.session_state["prodigi_dispatch_existing_rows"] = existing_rows
-        st.session_state["prodigi_dispatch_last_query"] = autoload_query
-        st.session_state["prodigi_dispatch_selected_row_id"] = matches[0]["row_id"] if len(matches) == 1 else ""
-        if not matches:
-            st.session_state["prodigi_dispatch_selected_row_id"] = ""
+        _prodigi_apply_order_lookup(
+            autoload_query,
+            finder=prodigi_find_order_rows_from_cache,
+        )
         st.session_state["prodigi_dispatch_autoload_query"] = ""
         st.rerun()
 

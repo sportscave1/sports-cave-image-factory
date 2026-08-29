@@ -23,9 +23,38 @@ class TemporaryNotificationLifecycleTests(unittest.TestCase):
         self.assertIn("current.expiresAt > now", source)
         self.assertIn("expiresAt: Date.now() + TEMPORARY_TOAST_MS", source)
         self.assertIn("this.entries.delete(channel)", source)
-        self.assertIn("entry.region.replaceChildren()", source)
+        self.assertIn("region.replaceChildren()", source)
+        self.assertIn("entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS)", source)
         self.assertNotIn("state.orderToastTimer", source)
         self.assertNotIn("state.plannerToastTimer", source)
+
+    def test_parent_toasts_have_accessible_manual_dismiss_controls(self):
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('close.className = "sc-os-toast-close"', source)
+        self.assertIn('close.textContent = "×"', source)
+        self.assertIn('close.setAttribute("aria-label", label)', source)
+        self.assertIn('close.title = label', source)
+        self.assertIn('event.stopPropagation()', source)
+        self.assertIn('appendToastClose(toast, dismissOrderToast)', source)
+        self.assertIn('appendToastClose(toast, dismissPlannerToast)', source)
+
+    def test_expired_and_dismissed_parent_toasts_do_not_return_on_rerun(self):
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+
+        expired_cleanup = source.index("if (current && current.expiresAt <= now)")
+        remembered_check = source.index("if (remember && this.seen.has(seenIdentity))")
+        self.assertLess(expired_cleanup, remembered_check)
+        self.assertIn("this.dismiss(channel);\n          current = null;", source)
+        self.assertIn("this.hide(region);\n          return \"seen\";", source)
+        self.assertIn("parentWindow.sessionStorage.getItem(TOAST_SEEN_STORAGE_KEY)", source)
+        self.assertIn("parentWindow.sessionStorage.setItem(", source)
+        self.assertIn("writeSeenToastIdentities(this.seen)", source)
+        self.assertIn('return "new";', source)
 
     def test_streamlit_temporary_toast_is_rerun_safe_and_clears_temporary_state(self):
         source = ui_feedback.temporary_toast_html("Saved", event_key="save:1")

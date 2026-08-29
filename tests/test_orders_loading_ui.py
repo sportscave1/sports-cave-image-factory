@@ -341,6 +341,94 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("clipboard.writeText(value)", copy_handler_html)
         self.assertIn("Copy order number", copy_handler_html)
 
+    def test_orders_inline_prodigi_action_preserves_table_layout(self):
+        render_table = inspect.getsource(orders_page._render_orders_table)
+        handler = orders_page._order_copy_click_handler_html()
+
+        self.assertEqual(
+            (
+                "order",
+                "edition",
+                "customer",
+                "product",
+                "variant",
+                "shipping",
+                "date",
+                "prodigi",
+                "file",
+            ),
+            orders_page.VISIBLE_COLUMNS,
+        )
+        self.assertIn("_render_inline_prodigi_actions(rows)", render_table)
+        self.assertIn('launchLabel = "Open in Prodigi fulfilment"', handler)
+        self.assertIn('button.setAttribute("aria-label", launchLabel)', handler)
+        self.assertIn("MutationObserver", handler)
+        self.assertIn("event.stopImmediatePropagation()", handler)
+        self.assertIn("triggerProdigi(launch.dataset.orderReference", handler)
+
+    def test_orders_prodigi_handoff_captures_canonical_row_and_replaces_stale_state(self):
+        state = {
+            "prodigi_dispatch_matches": [{"row_id": "old"}],
+            "prodigi_dispatch_existing_rows": [{"id": "old"}],
+            "prodigi_dispatch_last_query": "#SC1",
+            "prodigi_dispatch_selected_row_id": "old",
+        }
+
+        target = orders_page._prepare_prodigi_handoff_state(state, "sc3075")
+
+        self.assertEqual("#SC3075", target)
+        self.assertEqual("#SC3075", state["prodigi-dispatch-order-search"])
+        self.assertEqual("#SC3075", state["prodigi_dispatch_autoload_query"])
+        self.assertEqual("Prodigi", state["pending_page"])
+        self.assertEqual([], state["prodigi_dispatch_matches"])
+        self.assertEqual([], state["prodigi_dispatch_existing_rows"])
+        self.assertEqual("", state["prodigi_dispatch_last_query"])
+        self.assertEqual("", state["prodigi_dispatch_selected_row_id"])
+        self.assertEqual(
+            "orders-prodigi-inline-3075",
+            orders_page._prodigi_inline_button_key(target),
+        )
+
+    def test_inline_prodigi_callback_captures_the_clicked_rows_order(self):
+        fake_st = SimpleNamespace(session_state={})
+
+        with patch.object(orders_page, "st", fake_st):
+            orders_page._open_prodigi_for_row({"order": "#SC3078"})
+
+        self.assertEqual("#SC3078", fake_st.session_state["prodigi-dispatch-order-search"])
+        self.assertEqual("#SC3078", fake_st.session_state["prodigi_dispatch_autoload_query"])
+        self.assertEqual("Prodigi", fake_st.session_state["pending_page"])
+
+    def test_orders_prodigi_handoff_rejects_malformed_order_without_navigation(self):
+        state = {"pending_page": "Orders"}
+
+        self.assertEqual("", orders_page._prepare_prodigi_handoff_state(state, "Etsy 123"))
+        self.assertEqual({"pending_page": "Orders"}, state)
+
+    def test_prodigi_lookup_helper_uses_existing_loader_exactly_once(self):
+        state = {}
+        finder = Mock(return_value=([{"row_id": "line-3075"}], [{"id": "dispatch-1"}]))
+
+        matches, existing = os_pages._prodigi_apply_order_lookup(
+            "#SC3075",
+            state=state,
+            finder=finder,
+        )
+
+        finder.assert_called_once_with("#SC3075")
+        self.assertEqual([{"row_id": "line-3075"}], matches)
+        self.assertEqual([{"id": "dispatch-1"}], existing)
+        self.assertEqual("#SC3075", state["prodigi_dispatch_last_query"])
+        self.assertEqual("line-3075", state["prodigi_dispatch_selected_row_id"])
+
+    def test_manual_prodigi_navigation_has_no_implicit_autoload(self):
+        state = {}
+        finder = Mock()
+
+        self.assertEqual(([], []), os_pages._prodigi_apply_order_lookup("", state=state, finder=finder))
+        finder.assert_not_called()
+        self.assertNotIn("prodigi_dispatch_autoload_query", state)
+
     def test_orders_inline_copy_cells_are_one_per_rendered_order_row(self):
         rows = [
             {"order": "#SC2860"},

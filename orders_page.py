@@ -63,6 +63,9 @@ CERTIFICATE_ACTION_STALE_SECONDS = 300
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
 COPY_ORDER_ICON = "\u29c9"
+PRODIGI_LAUNCH_ICON = "\u2197"
+PRODIGI_INLINE_BUTTON_PREFIX = "orders-prodigi-inline-"
+PRODIGI_INLINE_CONTAINER_KEY = "orders-prodigi-inline-actions"
 ORDERS_FILES_RELATIVE_FOLDER = "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
@@ -1631,14 +1634,40 @@ def _filter_rows(rows, search_text):
     return [row for row in [_normalise_row(item) for item in rows or []] if query in _search_blob(row)]
 
 
-def _open_prodigi_for_row(row):
-    target_order = str((row or {}).get("order") or "").strip()
+def _canonical_prodigi_order_reference(value):
+    match = re.fullmatch(r"#?SC(\d+)", str(value or "").strip(), flags=re.IGNORECASE)
+    return f"#SC{match.group(1)}" if match else ""
+
+
+def _prepare_prodigi_handoff_state(state, order_reference):
+    target_order = _canonical_prodigi_order_reference(order_reference)
     if not target_order:
-        st.session_state[NOTICE_KEY] = "Select one order row first."
+        return ""
+    state["prodigi_dispatch_matches"] = []
+    state["prodigi_dispatch_existing_rows"] = []
+    state["prodigi_dispatch_last_query"] = ""
+    state["prodigi_dispatch_selected_row_id"] = ""
+    state["prodigi_dispatch_autoload_query"] = target_order
+    state["prodigi-dispatch-order-search"] = target_order
+    state["pending_page"] = "Prodigi"
+    return target_order
+
+
+def _open_prodigi_for_row(row):
+    target_order = _prepare_prodigi_handoff_state(
+        st.session_state,
+        (row or {}).get("order"),
+    )
+    if not target_order:
+        st.session_state[NOTICE_KEY] = "This row does not have a valid Sports Cave order number."
         return
-    st.session_state["selected_page"] = "Prodigi"
-    st.session_state["prodigi_dispatch_autoload_query"] = target_order
-    st.session_state["prodigi-dispatch-order-search"] = target_order
+
+
+def _prodigi_inline_button_key(order_reference):
+    target_order = _canonical_prodigi_order_reference(order_reference)
+    if not target_order:
+        return ""
+    return f"{PRODIGI_INLINE_BUTTON_PREFIX}{target_order.removeprefix('#SC')}"
 
 
 def _selected_admin_url(rows):
@@ -1997,14 +2026,18 @@ def _order_copy_click_handler_html():
 <script>
 (() => {{
   const icon = {json.dumps(COPY_ORDER_ICON)};
-  const marker = "sports-cave-order-copy-handler";
+  const launchIcon = {json.dumps(PRODIGI_LAUNCH_ICON)};
+  const launchLabel = "Open in Prodigi fulfilment";
+  const buttonPrefix = {json.dumps(PRODIGI_INLINE_BUTTON_PREFIX)};
+  const marker = "sportsCaveOrderCellActionsV2";
   const parentWindow = window.parent || window;
   const doc = parentWindow.document;
   if (doc.body.dataset[marker] === "1") return;
   doc.body.dataset[marker] = "1";
 
   function cleanOrder(text) {{
-    return String(text || "").replace(icon, "").trim();
+    const match = String(text || "").replace(icon, "").match(/#?SC\\d+/i);
+    return match ? `#SC${{match[0].replace(/\\D/g, "")}}` : "";
   }}
 
   function copyOrder(value) {{
@@ -2013,8 +2046,81 @@ def _order_copy_click_handler_html():
     clipboard.writeText(value);
   }}
 
+  function hiddenButtonKey(orderNumber) {{
+    return orderNumber ? `${{buttonPrefix}}${{orderNumber.replace(/\\D/g, "")}}` : "";
+  }}
+
+  function triggerProdigi(orderNumber) {{
+    const buttonKey = hiddenButtonKey(orderNumber);
+    if (!buttonKey) return;
+    const wrapper = doc.querySelector(`.st-key-${{buttonKey}}`);
+    const button = wrapper && wrapper.querySelector("button:not(:disabled)");
+    if (button) button.click();
+  }}
+
+  function installStyles() {{
+    if (doc.getElementById("sc-orders-inline-prodigi-style")) return;
+    const style = doc.createElement("style");
+    style.id = "sc-orders-inline-prodigi-style";
+    style.textContent = `
+      .sc-orders-prodigi-launch {{
+        align-items: center;
+        appearance: none;
+        background: transparent;
+        border: 0;
+        border-radius: 4px;
+        color: #8a6a29;
+        cursor: pointer;
+        display: inline-flex;
+        font: inherit;
+        font-size: 13px;
+        height: 22px;
+        justify-content: center;
+        margin-left: 5px;
+        padding: 0;
+        vertical-align: middle;
+        width: 22px;
+      }}
+      .sc-orders-prodigi-launch:hover {{ background: rgba(212, 165, 76, .16); color: #5d4316; }}
+      .sc-orders-prodigi-launch:focus-visible {{ outline: 2px solid #d4a54c; outline-offset: 1px; }}
+    `;
+    doc.head.appendChild(style);
+  }}
+
+  function decorateCell(cell) {{
+    const text = cell.textContent || "";
+    if (!text.includes(icon) || cell.querySelector(".sc-orders-prodigi-launch")) return;
+    const orderNumber = cleanOrder(text);
+    if (!orderNumber) return;
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.className = "sc-orders-prodigi-launch";
+    button.textContent = launchIcon;
+    button.title = launchLabel;
+    button.setAttribute("aria-label", launchLabel);
+    button.dataset.orderReference = orderNumber;
+    cell.appendChild(button);
+  }}
+
+  function decorateOrderCells() {{
+    doc.querySelectorAll('[role="gridcell"], [data-testid="stDataFrameCell"]').forEach(decorateCell);
+  }}
+
+  installStyles();
+  decorateOrderCells();
+  const observer = new MutationObserver(() => parentWindow.requestAnimationFrame(decorateOrderCells));
+  observer.observe(doc.body, {{childList: true, subtree: true}});
+
   doc.addEventListener("click", (event) => {{
     const target = event.target;
+    const launch = target && target.closest ? target.closest(".sc-orders-prodigi-launch") : null;
+    if (launch) {{
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      triggerProdigi(launch.dataset.orderReference || "");
+      return;
+    }}
     const cell = target && target.closest ? target.closest('[role="gridcell"], [data-testid="stDataFrameCell"]') : null;
     if (!cell) return;
     const text = cell.textContent || "";
@@ -2029,6 +2135,7 @@ def _order_copy_click_handler_html():
   }}, true);
 
   doc.addEventListener("mouseover", (event) => {{
+    if (event.target && event.target.closest && event.target.closest(".sc-orders-prodigi-launch")) return;
     const cell = event.target && event.target.closest ? event.target.closest('[role="gridcell"], [data-testid="stDataFrameCell"]') : null;
     if (!cell || !(cell.textContent || "").includes(icon)) return;
     cell.title = "Copy order number";
@@ -2043,6 +2150,30 @@ def _render_order_copy_click_handler():
     if getattr(st, "__name__", "") != "streamlit":
         return
     components.html(_order_copy_click_handler_html(), height=0, width=0)
+
+
+def _render_inline_prodigi_actions(rows):
+    if getattr(st, "__name__", "") != "streamlit":
+        return
+    targets = {}
+    for row in rows or []:
+        target_order = _canonical_prodigi_order_reference((row or {}).get("order"))
+        if target_order:
+            targets.setdefault(target_order, {"order": target_order})
+    if not targets:
+        return
+    st.markdown(
+        f"<style>.st-key-{PRODIGI_INLINE_CONTAINER_KEY} {{ display: none !important; }}</style>",
+        unsafe_allow_html=True,
+    )
+    with st.container(key=PRODIGI_INLINE_CONTAINER_KEY):
+        for target_order, row in targets.items():
+            st.button(
+                f"Open {target_order} in Prodigi fulfilment",
+                key=_prodigi_inline_button_key(target_order),
+                on_click=_open_prodigi_for_row,
+                args=(row,),
+            )
 
 
 def _render_files_click_handler():
@@ -2579,6 +2710,7 @@ def _render_admin_panel(rows):
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
+    _render_inline_prodigi_actions(rows)
     with st.container(border=True):
         st.dataframe(
             _display_table_payload(rows),
