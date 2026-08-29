@@ -10,6 +10,7 @@ import supabase_backend
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_NAME = "20260828_manual_expired_order_line_editions.sql"
+IDENTITY_MIGRATION_NAME = "20260829_fix_manual_expired_edition_identity.sql"
 
 
 def eligible_state(**overrides):
@@ -46,6 +47,34 @@ def eligible_state(**overrides):
 
 
 class ManualExpiredEditionEligibilityTests(unittest.TestCase):
+    def test_numeric_shopify_ids_and_channel_ids_are_canonicalized(self):
+        self.assertEqual(
+            "gid://shopify/LineItem/17486226522419",
+            supabase_backend.canonical_shopify_gid_or_raw(
+                "LineItem", "17486226522419"
+            ),
+        )
+        self.assertEqual(
+            "gid://shopify/LineItem/17486226522419",
+            supabase_backend.canonical_shopify_gid_or_raw(
+                "LineItem", "gid://shopify/LineItem/17486226522419"
+            ),
+        )
+        self.assertEqual(
+            "shopify", supabase_backend._manual_edition_source_channel("3890849")
+        )
+
+    def test_etsy_source_is_eligible_only_when_expected_source_is_etsy(self):
+        result = supabase_backend._manual_edition_eligibility_from_state(
+            eligible_state(
+                expected_source_channel="etsy",
+                actual_source_channel="etsy",
+            )
+        )
+
+        self.assertTrue(result["eligible"])
+        self.assertEqual("etsy", result["source_channel"])
+
     def test_confirmed_sold_out_line_is_eligible(self):
         result = supabase_backend._manual_edition_eligibility_from_state(eligible_state())
 
@@ -154,6 +183,29 @@ class ManualExpiredEditionArchitectureTests(unittest.TestCase):
         )
         self.assertTrue(run_migrations.migration_sql_is_allowed(path, sql))
 
+        identity_path = ROOT / "migrations" / IDENTITY_MIGRATION_NAME
+        identity_sql = identity_path.read_text(encoding="utf-8")
+        self.assertEqual(
+            run_migrations.REVIEWED_MIGRATION_SHA256[IDENTITY_MIGRATION_NAME],
+            __import__("hashlib").sha256(identity_sql.encode("utf-8")).hexdigest(),
+        )
+        self.assertTrue(
+            run_migrations.migration_sql_is_allowed(identity_path, identity_sql)
+        )
+
+    def test_identity_followup_is_scoped_to_manual_guard(self):
+        sql = (ROOT / "migrations" / IDENTITY_MIGRATION_NAME).read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("REGEXP_REPLACE", sql)
+        self.assertIn("NEW.source_channel <> v_source_channel", sql)
+        self.assertIn("CREATE OR REPLACE FUNCTION enforce_manual_order_line_edition_insert", sql)
+        self.assertNotIn("allocate_edition_line_units_atomic", sql)
+        self.assertNotIn("UPDATE edition_products", sql)
+        self.assertNotIn("UPDATE edition_runs", sql)
+        self.assertNotIn("INSERT INTO edition_orders", sql)
+
     def test_allocator_never_reads_or_writes_manual_table(self):
         allocator_source = inspect.getsource(supabase_backend.allocate_edition_line_units_atomic)
         migration_source = (ROOT / "migrations" / "20260828_fix_sparse_legacy_allocator.sql").read_text(
@@ -242,6 +294,8 @@ class ManualExpiredEditionArchitectureTests(unittest.TestCase):
         self.assertIn("post_commit_workflow", source)
         self.assertIn("Certificate input did not resolve 100/100", source)
         self.assertIn("INSERT INTO manual_order_line_editions", source)
+        self.assertIn('"source_channel": "etsy"', source)
+        self.assertIn('target["source_channel"]', source)
         self.assertNotIn("INSERT INTO edition_orders", source)
         self.assertNotIn("UPDATE edition_products", source)
         self.assertNotIn("UPDATE edition_runs", source)

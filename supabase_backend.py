@@ -342,6 +342,17 @@ def canonical_shopify_id(value):
     return raw
 
 
+def canonical_shopify_gid_or_raw(resource_type, value):
+    """Canonicalize numeric Shopify identities while preserving marketplace IDs."""
+
+    raw = str(value or "").strip()
+    canonical = canonical_shopify_id(raw)
+    resource = str(resource_type or "").strip()
+    if resource and canonical.isdigit():
+        return f"gid://shopify/{resource}/{canonical}"
+    return raw
+
+
 def _shopify_id_candidates(resource_type, value):
     raw = str(value or "").strip()
     canonical = canonical_shopify_id(raw)
@@ -21386,7 +21397,10 @@ def _manual_edition_source_channel(value):
     try:
         return edition_ledger.normalize_source_channel(text)
     except ValueError:
-        return ""
+        # Shopify source_name may be a numeric app/channel ID. Etsy and eBay
+        # imports are named explicitly above; all other shopify_orders source
+        # values represent a Shopify channel.
+        return "shopify"
 
 
 def _manual_edition_eligibility_from_state(state):
@@ -21507,8 +21521,8 @@ def _manual_edition_state_with_cursor(
     expected_product_gid,
 ):
     expected_source = _manual_edition_source_channel(source_channel)
-    order_id = str(external_order_id or "").strip()
-    line_id = str(external_line_item_id or "").strip()
+    order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
+    line_id = canonical_shopify_gid_or_raw("LineItem", external_line_item_id)
     product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
     if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
         return {
@@ -21579,7 +21593,13 @@ def _manual_edition_state_with_cursor(
             (
                 SELECT COUNT(*)
                 FROM prodigi_dispatch_rows dispatch
-                WHERE dispatch.shopify_line_item_id=li.shopify_line_item_id
+                WHERE REGEXP_REPLACE(
+                        COALESCE(dispatch.shopify_line_item_id, ''),
+                        '^gid://shopify/LineItem/', ''
+                      )=REGEXP_REPLACE(
+                        COALESCE(li.shopify_line_item_id, ''),
+                        '^gid://shopify/LineItem/', ''
+                      )
                   AND LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
                       ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
             ) AS terminal_dispatch_count,
@@ -21590,29 +21610,79 @@ def _manual_edition_state_with_cursor(
                   AND eo.edition_number BETWEEN 1 AND eo.edition_total
                   AND (
                       (eo.source_channel=%s
-                       AND eo.external_order_id=o.shopify_order_id
-                       AND eo.external_line_item_id=li.shopify_line_item_id)
-                      OR eo.shopify_line_item_id=li.shopify_line_item_id
+                       AND REGEXP_REPLACE(
+                             COALESCE(eo.external_order_id, ''),
+                             '^gid://shopify/Order/', ''
+                           )=REGEXP_REPLACE(
+                             COALESCE(o.shopify_order_id, ''),
+                             '^gid://shopify/Order/', ''
+                           )
+                       AND REGEXP_REPLACE(
+                             COALESCE(eo.external_line_item_id, ''),
+                             '^gid://shopify/LineItem/', ''
+                           )=REGEXP_REPLACE(
+                             COALESCE(li.shopify_line_item_id, ''),
+                             '^gid://shopify/LineItem/', ''
+                           ))
+                      OR REGEXP_REPLACE(
+                           COALESCE(eo.shopify_line_item_id, ''),
+                           '^gid://shopify/LineItem/', ''
+                         )=REGEXP_REPLACE(
+                           COALESCE(li.shopify_line_item_id, ''),
+                           '^gid://shopify/LineItem/', ''
+                         )
                   )
             ) AS valid_normal_allocation_count,
             (
                 SELECT COUNT(*)
                 FROM certificates certificate
-                WHERE certificate.shopify_order_id=o.shopify_order_id
-                  AND certificate.shopify_line_item_id=li.shopify_line_item_id
+                WHERE REGEXP_REPLACE(
+                        COALESCE(certificate.shopify_order_id, ''),
+                        '^gid://shopify/Order/', ''
+                      )=REGEXP_REPLACE(
+                        COALESCE(o.shopify_order_id, ''),
+                        '^gid://shopify/Order/', ''
+                      )
+                  AND REGEXP_REPLACE(
+                        COALESCE(certificate.shopify_line_item_id, ''),
+                        '^gid://shopify/LineItem/', ''
+                      )=REGEXP_REPLACE(
+                        COALESCE(li.shopify_line_item_id, ''),
+                        '^gid://shopify/LineItem/', ''
+                      )
             ) AS certificate_count
         FROM shopify_orders o
         JOIN shopify_order_lines li
           ON li.shopify_order_id=o.shopify_order_id
-         AND li.shopify_line_item_id=%s
+         AND REGEXP_REPLACE(
+               COALESCE(li.shopify_line_item_id, ''),
+               '^gid://shopify/LineItem/', ''
+             )=REGEXP_REPLACE(%s, '^gid://shopify/LineItem/', '')
         LEFT JOIN edition_products ep
           ON COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, ''))=%s
         LEFT JOIN edition_runs er ON er.id=ep.active_edition_run_id
         LEFT JOIN manual_order_line_editions manual
           ON manual.source_channel=%s
-         AND manual.external_order_id=o.shopify_order_id
-         AND manual.external_line_item_id=li.shopify_line_item_id
-        WHERE o.shopify_order_id=%s
+         AND REGEXP_REPLACE(
+               manual.external_order_id,
+               '^gid://shopify/Order/', ''
+             )=REGEXP_REPLACE(
+               COALESCE(o.shopify_order_id, ''),
+               '^gid://shopify/Order/', ''
+             )
+         AND REGEXP_REPLACE(
+               manual.external_line_item_id,
+               '^gid://shopify/LineItem/', ''
+             )=REGEXP_REPLACE(
+               COALESCE(li.shopify_line_item_id, ''),
+               '^gid://shopify/LineItem/', ''
+             )
+        WHERE REGEXP_REPLACE(
+                COALESCE(o.shopify_order_id, ''),
+                '^gid://shopify/Order/', ''
+              )=REGEXP_REPLACE(%s, '^gid://shopify/Order/', '')
+        ORDER BY CASE WHEN li.shopify_line_item_id=%s THEN 0 ELSE 1 END,
+                 li.id DESC
         LIMIT 1
         """,
         (
@@ -21622,6 +21692,7 @@ def _manual_edition_state_with_cursor(
             product_gid,
             expected_source,
             order_id,
+            line_id,
         ),
     )
     row = dict(cur.fetchone() or {})
@@ -21670,8 +21741,8 @@ def save_manual_order_line_edition(
 
     ensure_schema()
     source = _manual_edition_source_channel(source_channel)
-    order_id = str(external_order_id or "").strip()
-    line_id = str(external_line_item_id or "").strip()
+    order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
+    line_id = canonical_shopify_gid_or_raw("LineItem", external_line_item_id)
     product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
     actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
     clean_reason = str(reason or "").strip()
@@ -22099,9 +22170,27 @@ def list_hybrid_order_rows(limit=50, search=""):
                         AND eo.edition_number BETWEEN 1 AND eo.edition_total
                         AND (
                             (eo.source_channel=manual.source_channel
-                             AND eo.external_order_id=manual.external_order_id
-                             AND eo.external_line_item_id=manual.external_line_item_id)
-                            OR eo.shopify_line_item_id=manual.external_line_item_id
+                             AND REGEXP_REPLACE(
+                                   COALESCE(eo.external_order_id, ''),
+                                   '^gid://shopify/Order/', ''
+                                 )=REGEXP_REPLACE(
+                                   manual.external_order_id,
+                                   '^gid://shopify/Order/', ''
+                                 )
+                             AND REGEXP_REPLACE(
+                                   COALESCE(eo.external_line_item_id, ''),
+                                   '^gid://shopify/LineItem/', ''
+                                 )=REGEXP_REPLACE(
+                                   manual.external_line_item_id,
+                                   '^gid://shopify/LineItem/', ''
+                                 ))
+                            OR REGEXP_REPLACE(
+                                 COALESCE(eo.shopify_line_item_id, ''),
+                                 '^gid://shopify/LineItem/', ''
+                               )=REGEXP_REPLACE(
+                                 manual.external_line_item_id,
+                                 '^gid://shopify/LineItem/', ''
+                               )
                         )
                   )
                 ORDER BY manual.external_line_item_id
@@ -22756,10 +22845,30 @@ def _manual_order_line_edition_assignment(cur, reference):
             manual.created_at AS assigned_at
         FROM manual_order_line_editions manual
         JOIN shopify_orders o
-          ON o.shopify_order_id=manual.external_order_id
-        JOIN shopify_order_lines li
-          ON li.shopify_order_id=manual.external_order_id
-         AND li.shopify_line_item_id=manual.external_line_item_id
+          ON REGEXP_REPLACE(
+               COALESCE(o.shopify_order_id, ''),
+               '^gid://shopify/Order/', ''
+             )=REGEXP_REPLACE(
+               manual.external_order_id,
+               '^gid://shopify/Order/', ''
+             )
+        JOIN LATERAL (
+            SELECT candidate.*
+            FROM shopify_order_lines candidate
+            WHERE candidate.shopify_order_id=o.shopify_order_id
+              AND REGEXP_REPLACE(
+                    COALESCE(candidate.shopify_line_item_id, ''),
+                    '^gid://shopify/LineItem/', ''
+                  )=REGEXP_REPLACE(
+                    manual.external_line_item_id,
+                    '^gid://shopify/LineItem/', ''
+                  )
+            ORDER BY
+                CASE WHEN candidate.shopify_line_item_id=manual.external_line_item_id
+                     THEN 0 ELSE 1 END,
+                candidate.id DESC
+            LIMIT 1
+        ) li ON TRUE
         JOIN edition_products ep
           ON COALESCE(NULLIF(ep.shopify_product_gid, ''), NULLIF(ep.shopify_product_id, ''))=
              manual.canonical_product_gid
@@ -22786,9 +22895,27 @@ def _manual_order_line_edition_assignment(cur, reference):
                 AND eo.edition_number BETWEEN 1 AND eo.edition_total
                 AND (
                     (eo.source_channel=manual.source_channel
-                     AND eo.external_order_id=manual.external_order_id
-                     AND eo.external_line_item_id=manual.external_line_item_id)
-                    OR eo.shopify_line_item_id=manual.external_line_item_id
+                     AND REGEXP_REPLACE(
+                           COALESCE(eo.external_order_id, ''),
+                           '^gid://shopify/Order/', ''
+                         )=REGEXP_REPLACE(
+                           manual.external_order_id,
+                           '^gid://shopify/Order/', ''
+                         )
+                     AND REGEXP_REPLACE(
+                           COALESCE(eo.external_line_item_id, ''),
+                           '^gid://shopify/LineItem/', ''
+                         )=REGEXP_REPLACE(
+                           manual.external_line_item_id,
+                           '^gid://shopify/LineItem/', ''
+                         ))
+                    OR REGEXP_REPLACE(
+                         COALESCE(eo.shopify_line_item_id, ''),
+                         '^gid://shopify/LineItem/', ''
+                       )=REGEXP_REPLACE(
+                         manual.external_line_item_id,
+                         '^gid://shopify/LineItem/', ''
+                       )
                 )
           )
         """,

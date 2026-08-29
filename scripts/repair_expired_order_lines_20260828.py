@@ -22,13 +22,15 @@ REASON = (
 )
 TARGETS = (
     {
+        "source_channel": "shopify",
         "order_name": "#SC3078",
         "order_id": "gid://shopify/Order/7379111280947",
         "line_item_id": "gid://shopify/LineItem/17486226522419",
         "product_gid": "gid://shopify/Product/9241140658483",
-        "product_title": "Michael Jordan’s Last Shot Quote Wall Art",
+        "product_title": "Michael Jordans Last Shot Quote Wall Art",
     },
     {
+        "source_channel": "shopify",
         "order_name": "#SC3075",
         "order_id": "gid://shopify/Order/7377596514611",
         "line_item_id": "gid://shopify/LineItem/17483709186355",
@@ -36,6 +38,7 @@ TARGETS = (
         "product_title": "The Mentality Jordan vs Bryant Wall Art",
     },
     {
+        "source_channel": "shopify",
         "order_name": "#SC3075",
         "order_id": "gid://shopify/Order/7377596514611",
         "line_item_id": "gid://shopify/LineItem/17483709153587",
@@ -43,6 +46,7 @@ TARGETS = (
         "product_title": "Michael Jordan Six Rings Wall Art",
     },
     {
+        "source_channel": "etsy",
         "order_name": "#SC3067",
         "order_id": "gid://shopify/Order/7376141025587",
         "line_item_id": "gid://shopify/LineItem/17481166717235",
@@ -125,15 +129,24 @@ def _counter_snapshot(cur):
 
 
 def _ledger_counts(cur):
-    line_ids = [target["line_item_id"] for target in TARGETS]
+    line_ids = [
+        supabase_backend.canonical_shopify_id(target["line_item_id"])
+        for target in TARGETS
+    ]
     cur.execute("SELECT COUNT(*) AS count FROM edition_orders")
     global_count = int((cur.fetchone() or {}).get("count") or 0)
     cur.execute(
         """
         SELECT COUNT(*) AS count
         FROM edition_orders
-        WHERE external_line_item_id=ANY(%s)
-           OR shopify_line_item_id=ANY(%s)
+        WHERE REGEXP_REPLACE(
+                COALESCE(external_line_item_id, ''),
+                '^gid://shopify/LineItem/', ''
+              )=ANY(%s)
+           OR REGEXP_REPLACE(
+                COALESCE(shopify_line_item_id, ''),
+                '^gid://shopify/LineItem/', ''
+              )=ANY(%s)
         """,
         (line_ids, line_ids),
     )
@@ -143,7 +156,10 @@ def _ledger_counts(cur):
 
 def _non_target_allocations(cur):
     order_ids = sorted({target["order_id"] for target in TARGETS})
-    target_line_ids = [target["line_item_id"] for target in TARGETS]
+    target_line_ids = [
+        supabase_backend.canonical_shopify_id(target["line_item_id"])
+        for target in TARGETS
+    ]
     cur.execute(
         """
         SELECT id::text, source_channel, external_order_id, external_line_item_id,
@@ -151,7 +167,10 @@ def _non_target_allocations(cur):
                edition_number, edition_total, allocation_valid
         FROM edition_orders
         WHERE (external_order_id=ANY(%s) OR shopify_order_id=ANY(%s))
-          AND COALESCE(NULLIF(external_line_item_id, ''), shopify_line_item_id) <> ALL(%s)
+          AND REGEXP_REPLACE(
+                COALESCE(NULLIF(external_line_item_id, ''), shopify_line_item_id, ''),
+                '^gid://shopify/LineItem/', ''
+              ) <> ALL(%s)
         ORDER BY id
         """,
         (order_ids, order_ids, target_line_ids),
@@ -183,7 +202,7 @@ def _manual_rows(cur):
 def _target_report(cur, target):
     state = supabase_backend._manual_edition_state_with_cursor(
         cur,
-        source_channel="shopify",
+        source_channel=target["source_channel"],
         external_order_id=target["order_id"],
         external_line_item_id=target["line_item_id"],
         expected_product_gid=target["product_gid"],
@@ -316,12 +335,13 @@ def apply(snapshot_sha256, admin_email):
                             verified_series_status, verified_sold_count,
                             verified_remaining_count, verified_next_edition_number
                         ) VALUES (
-                            'shopify', %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s,
                             '', '', '', '', '', '', '', 0, 0, 0
                         )
                         RETURNING id
                         """,
                         (
+                            target["source_channel"],
                             target["order_id"],
                             target["line_item_id"],
                             target["product_gid"],
