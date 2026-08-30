@@ -2537,17 +2537,67 @@ def run_complete_daily_pipeline():
     return seo_growth_intelligence.run_daily_analytics_refresh(requested_by="render-cron")
 
 
-def _run_worker_loop(worker, *, once=False, poll_seconds=15):
-    while True:
+def _validate_worker_startup():
+    """Fail clearly when the durable worker queue cannot be reached at all."""
+    try:
+        import psycopg  # noqa: F401
+    except ImportError as error:
+        raise SEOImportError(
+            "SEO worker startup requires the psycopg Postgres driver.",
+            code="worker_database_driver_missing",
+            retryable=False,
+        ) from error
+
+    import supabase_backend
+
+    if not supabase_backend.is_configured():
+        raise SEOImportError(
+            "SEO worker startup requires DATABASE_URL or a supported Postgres URL alias.",
+            code="worker_database_not_configured",
+            retryable=False,
+        )
+
+
+def _run_worker_cycle(worker):
+    """Run independent queue boundaries without letting one transient failure stop the worker."""
+    result = None
+    repair = None
+    errors = []
+    worker_id = str(getattr(worker, "worker_id", "seo-worker") or "seo-worker")[:200]
+    try:
         result = worker.run_once()
+    except Exception as error:
+        logging.exception(
+            "SEO_WORKER_CYCLE_FAILED stage=google_import worker_id=%s error_type=%s",
+            worker_id,
+            error.__class__.__name__,
+        )
+        errors.append(("google_import", error))
+
+    try:
         import google_seo_phase4
 
         repair = google_seo_phase4.process_queued_reporting_repair(
-            worker_id=f"{worker.worker_id}-reporting"
+            worker_id=f"{worker_id}-reporting"
         )
+    except Exception as error:
+        logging.exception(
+            "SEO_WORKER_CYCLE_FAILED stage=reporting_repair worker_id=%s error_type=%s",
+            worker_id,
+            error.__class__.__name__,
+        )
+        errors.append(("reporting_repair", error))
+    return result, repair, errors
+
+
+def _run_worker_loop(worker, *, once=False, poll_seconds=15):
+    while True:
+        result, repair, errors = _run_worker_cycle(worker)
         if once:
+            if errors:
+                raise errors[0][1]
             return 0
-        if result is None and repair is None:
+        if errors or (result is None and repair is None):
             time.sleep(max(2, int(poll_seconds)))
 
 
@@ -2569,6 +2619,7 @@ def main(argv=None):
             ",".join(str(value) for value in result.get("failed_stages") or []),
         )
         return 0
+    _validate_worker_startup()
     return _run_worker_loop(worker, once=args.once, poll_seconds=args.poll_seconds)
 
 

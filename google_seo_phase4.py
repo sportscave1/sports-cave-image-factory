@@ -1582,7 +1582,7 @@ class PostgresSEOPhase4Store:
                 )
                 row = cursor.fetchone()
             connection.commit()
-        return _clean_reporting_repair_job(row)
+        return _clean_reporting_repair_job(row) if row else None
 
     def complete_reporting_repair(self, job_id, worker_id, snapshot_result):
         snapshot_result = dict(snapshot_result or {})

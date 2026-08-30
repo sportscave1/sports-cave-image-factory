@@ -197,7 +197,9 @@ class ReportingRepairQueueTests(unittest.TestCase):
         self.assertIn('trigger_source="gsc_revision"', source)
 
     def test_worker_processes_import_then_reporting_queue(self):
-        source = inspect.getsource(google_seo_import._run_worker_loop)
+        source = inspect.getsource(google_seo_import._run_worker_loop) + inspect.getsource(
+            google_seo_import._run_worker_cycle
+        )
         self.assertIn("process_queued_reporting_repair", source)
         claim = inspect.getsource(
             google_seo_phase4.PostgresSEOPhase4Store.claim_reporting_repair
