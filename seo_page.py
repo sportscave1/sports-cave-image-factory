@@ -4265,6 +4265,20 @@ def _seed_blog_widget_state(project_id, brief, *, overwrite=False):
         st.session_state[previous_markets_key] = list(st.session_state.get(markets_key) or [])
 
 
+def _normalize_blog_market_widget_state(project_id):
+    """Normalize the market widget inside its callback, before the next render."""
+    key_root = f"{seo_blog_workflow.STATE_PREFIX}{project_id}"
+    markets_key = f"{key_root}-markets"
+    previous_markets_key = f"{key_root}-markets-previous"
+    normalized_markets = seo_blog_workflow.normalize_target_markets(
+        st.session_state.get(markets_key),
+        previous=st.session_state.get(previous_markets_key),
+    )
+    if st.session_state.get(markets_key) != normalized_markets:
+        st.session_state[markets_key] = normalized_markets
+    st.session_state[previous_markets_key] = list(normalized_markets)
+
+
 def _brief_from_blog_widget_state(project_id, brief):
     brief = seo_blog_workflow.normalize_brief(brief)
     key_root = f"{seo_blog_workflow.STATE_PREFIX}{project_id}"
@@ -4276,8 +4290,7 @@ def _brief_from_blog_widget_state(project_id, brief):
         value("markets", brief.get("target_markets")),
         previous=st.session_state.get(f"{key_root}-markets-previous"),
     )
-    st.session_state[f"{key_root}-markets"] = normalized_markets
-    st.session_state[f"{key_root}-markets-previous"] = normalized_markets
+    st.session_state[f"{key_root}-markets-previous"] = list(normalized_markets)
     brief.update(
         {
             "target_markets": normalized_markets,
@@ -4645,6 +4658,8 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
                 "Target markets",
                 seo_blog_workflow.TARGET_MARKET_OPTIONS,
                 key=f"{key_root}-markets",
+                on_change=_normalize_blog_market_widget_state,
+                args=(selected_id,),
             )
             ready_brief["sport"] = review_top[1].selectbox(
                 "Sport",
