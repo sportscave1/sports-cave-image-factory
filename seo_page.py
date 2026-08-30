@@ -4220,16 +4220,110 @@ def _blog_activity(project_store, project, user, action, message, *, content_has
         )
 
 
+def _blog_widget_state_values(project_id, brief):
+    brief = seo_blog_workflow.normalize_brief(brief)
+    key_root = f"{seo_blog_workflow.STATE_PREFIX}{project_id}"
+    return {
+        f"{key_root}-markets": list(brief.get("target_markets") or [seo_blog_workflow.GLOBAL_MARKET]),
+        f"{key_root}-sport": brief.get("sport") or seo_blog_workflow.SPORT_OPTIONS[0],
+        f"{key_root}-sport-custom": brief.get("sport_custom") or "",
+        f"{key_root}-intent": brief.get("search_intent") or seo_blog_workflow.SEARCH_INTENT_OPTIONS[0],
+        f"{key_root}-intent-custom": brief.get("search_intent_custom") or "",
+        f"{key_root}-language": brief.get("language") or seo_blog_workflow.default_language_for_markets(brief.get("target_markets")),
+        f"{key_root}-publication": brief.get("publication_preference") or seo_blog_workflow.PUBLICATION_PREFERENCES[0],
+        f"{key_root}-subject": brief.get("subject") or "",
+        f"{key_root}-hook": brief.get("timely_hook") or "",
+        f"{key_root}-angle": brief.get("recommended_article_angle") or "",
+        f"{key_root}-working-title": brief.get("working_article_title") or "",
+        f"{key_root}-primary": brief.get("primary_keyword") or "",
+        f"{key_root}-supporting": "; ".join(brief.get("supporting_keywords") or []),
+        f"{key_root}-entities": "; ".join(brief.get("related_entities") or []),
+        f"{key_root}-questions": "\n".join(brief.get("fan_questions") or []),
+        f"{key_root}-target-title": brief.get("target_title") or "",
+        f"{key_root}-target-url": brief.get("target_url") or "",
+        f"{key_root}-links": "\n".join(brief.get("internal_links") or []),
+        f"{key_root}-authority": brief.get("link_building_authority_angle") or "",
+        f"{key_root}-youtube": brief.get("youtube_url") or "",
+        f"{key_root}-length": brief.get("target_length") or "",
+        f"{key_root}-tags": "; ".join(brief.get("tags") or []),
+        f"{key_root}-author": brief.get("author") or "",
+        f"{key_root}-blog": brief.get("target_blog") or "News",
+    }
+
+
+def _seed_blog_widget_state(project_id, brief, *, overwrite=False):
+    for key, value in _blog_widget_state_values(project_id, brief).items():
+        if overwrite or key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _brief_from_blog_widget_state(project_id, brief):
+    brief = seo_blog_workflow.normalize_brief(brief)
+    key_root = f"{seo_blog_workflow.STATE_PREFIX}{project_id}"
+
+    def value(suffix, fallback=""):
+        return st.session_state.get(f"{key_root}-{suffix}", fallback)
+
+    brief.update(
+        {
+            "target_markets": seo_blog_workflow.normalize_target_markets(
+                value("markets", brief.get("target_markets")),
+                previous=st.session_state.get(f"{key_root}-markets-previous"),
+            ),
+            "sport": value("sport", brief.get("sport")),
+            "sport_custom": value("sport-custom", brief.get("sport_custom")),
+            "search_intent": value("intent", brief.get("search_intent")),
+            "search_intent_custom": value("intent-custom", brief.get("search_intent_custom")),
+            "language": value("language", brief.get("language")),
+            "publication_preference": value("publication", brief.get("publication_preference")),
+            "subject": value("subject", brief.get("subject")),
+            "timely_hook": value("hook", brief.get("timely_hook")),
+            "recommended_article_angle": value("angle", brief.get("recommended_article_angle")),
+            "working_article_title": value("working-title", brief.get("working_article_title")),
+            "primary_keyword": value("primary", brief.get("primary_keyword")),
+            "supporting_keywords": seo_blog_workflow._clean_list(value("supporting", brief.get("supporting_keywords"))),
+            "related_entities": seo_blog_workflow._clean_list(value("entities", brief.get("related_entities"))),
+            "fan_questions": seo_blog_workflow._clean_list(value("questions", brief.get("fan_questions"))),
+            "target_title": value("target-title", brief.get("target_title")),
+            "target_url": value("target-url", brief.get("target_url")),
+            "internal_links": seo_blog_workflow._clean_list(value("links", brief.get("internal_links"))),
+            "link_building_authority_angle": value("authority", brief.get("link_building_authority_angle")),
+            "youtube_url": value("youtube", brief.get("youtube_url")),
+            "target_length": value("length", brief.get("target_length")),
+            "tags": seo_blog_workflow._clean_list(value("tags", brief.get("tags"))),
+            "author": value("author", brief.get("author")),
+            "target_blog": value("blog", brief.get("target_blog")),
+        }
+    )
+    return seo_blog_workflow.normalize_brief(brief)
+
+
+def _apply_blog_shopify_target(brief, target_id, targets):
+    target = dict((targets or {}).get(target_id) or {})
+    if not target:
+        return seo_blog_workflow.normalize_brief(brief)
+    return seo_blog_workflow.normalize_brief(
+        {
+            **dict(brief or {}),
+            "target_entity_id": target_id,
+            "target_entity_type": target.get("entity_type") or target.get("page_type") or "",
+            "target_title": target.get("title") or target.get("name") or "",
+            "target_url": target.get("url") or "",
+            "target_sport": target.get("sport") or "",
+            "source_artwork": target.get("source_artwork") or target.get("source_asset") or "",
+        }
+    )
+
+
 def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, project_store=None):
     _header(seo.SEO_BLOG_ROUTE)
     with st.expander("How to create and publish a blog", expanded=False):
         st.markdown(
-            "1. Choose a saved SEO opportunity and product or collection.\n"
-            "2. Complete the brief and create Prompt 1.\n"
-            "3. Keep the same ChatGPT conversation while the article and images are created.\n"
-            "4. Import and review the returned content package.\n"
-            "5. Create Prompt 2 for a Shopify draft.\n"
-            "6. Review the draft, then explicitly approve publishing or scheduling."
+            "1. Choose a GSC opportunity and Shopify product or collection.\n"
+            "2. Export the brief CSV and create Prompt 1.\n"
+            "3. Let ChatGPT research the topic and complete the CSV.\n"
+            "4. Import the completed CSV.\n"
+            "5. Create Prompt 2 for the finished blog and images."
         )
     project_store = project_store or seo_blog_workflow.PostgresBlogProjectStore()
     try:
@@ -4268,10 +4362,121 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
         key=f"{seo_blog_workflow.STATE_PREFIX}project",
     )
     project = dict(by_id[selected_id])
-    brief = _json_object(project.get("brief"), {})
+    brief = seo_blog_workflow.normalize_brief(_json_object(project.get("brief"), {}))
     opportunity = _json_object(project.get("opportunity_snapshot"), {})
     actions[2].caption(f"Status: {project.get('status') or 'Idea'} | Project {selected_id}")
 
+    saved_targets = list(seo.active_records(state, "target_library"))
+    try:
+        live_targets = _cached_blog_shopify_targets()
+    except Exception:
+        live_targets = []
+    targets = {
+        str(row.get("id") or row.get("url") or ""): row
+        for row in [*live_targets, *saved_targets]
+        if row.get("id") or row.get("url")
+    }
+    key_root = f"{seo_blog_workflow.STATE_PREFIX}{selected_id}"
+    target_key = f"{seo_blog_workflow.STATE_PREFIX}target::{selected_id}"
+    if target_key not in st.session_state:
+        st.session_state[target_key] = (
+            brief.get("target_entity_id") if brief.get("target_entity_id") in targets else ""
+        )
+    session_target = str(st.session_state.get(target_key) or "")
+    if session_target in targets and session_target != brief.get("target_entity_id"):
+        brief = _apply_blog_shopify_target(brief, session_target, targets)
+
+    brief["project_title"] = project.get("title") or brief.get("project_title") or ""
+
+    csv_nonce_key = f"{key_root}-csv-upload-nonce"
+    csv_nonce = int(st.session_state.get(csv_nonce_key, 0))
+    csv_upload_key = f"{key_root}-brief-csv-upload::{csv_nonce}"
+    csv_status_key = f"{key_root}-csv-status"
+    csv_pending_key = f"{key_root}-csv-pending"
+    csv_apply_key = f"{key_root}-csv-apply"
+    csv_digest_key = f"{key_root}-csv-checked-digest"
+
+    def save_imported_csv(parsed, *, keep_current_target=False):
+        nonlocal project, brief
+        imported = seo_blog_workflow.merge_imported_brief(
+            brief,
+            parsed.get("brief") or {},
+            keep_current_target=keep_current_target,
+        )
+        imported["project_title"] = (
+            (parsed.get("row") or {}).get("project_title")
+            or imported.get("working_article_title")
+            or imported.get("subject")
+            or project.get("title")
+            or ""
+        )
+        project.update(
+            brief=imported,
+            title=imported.get("project_title") or imported.get("working_article_title") or imported.get("subject") or "",
+            primary_keyword=imported.get("primary_keyword") or "",
+            target_url=imported.get("target_url") or "",
+            status="Brief ready",
+        )
+        project = project_store.save_project(project)
+        brief = imported
+        _seed_blog_widget_state(selected_id, imported, overwrite=True)
+        digest = seo_blog_workflow.prompt_hash(
+            json.dumps(parsed.get("row") or {}, sort_keys=True, default=str)
+        )
+        _blog_activity(
+            project_store,
+            project,
+            user,
+            "seo_blog_brief_csv_imported",
+            f"Completed Blog brief CSV imported: {imported.get('primary_keyword') or imported.get('subject')}",
+            content_hash=digest,
+        )
+        st.session_state[csv_status_key] = {
+            "ok": True,
+            "message": "Completed CSV imported. The editable Blog brief is now filled and saved.",
+        }
+        st.session_state.pop(csv_pending_key, None)
+        st.session_state.pop(csv_apply_key, None)
+        st.session_state[csv_nonce_key] = csv_nonce + 1
+        st.session_state.pop(csv_digest_key, None)
+        st.rerun()
+
+    pending = st.session_state.get(csv_pending_key)
+    apply_request = st.session_state.get(csv_apply_key)
+    if pending and apply_request:
+        save_imported_csv(pending, keep_current_target=apply_request == "keep_current")
+    if pending and not seo_blog_workflow._target_conflict(brief, pending.get("brief") or {}):
+        save_imported_csv(pending)
+
+    pending_upload = st.session_state.get(csv_upload_key)
+    if pending_upload is not None:
+        source_bytes = bytes(pending_upload.getvalue() or b"")
+        digest = hashlib.sha256(source_bytes).hexdigest()
+        if digest != st.session_state.get(csv_digest_key):
+            st.session_state[csv_digest_key] = digest
+            try:
+                parsed_csv = seo_blog_workflow.parse_blog_brief_csv(
+                    source_bytes,
+                    filename=pending_upload.name,
+                    current_brief=brief,
+                )
+            except seo_blog_workflow.BlogBriefCSVError as error:
+                st.session_state[csv_status_key] = {
+                    "ok": False,
+                    "message": " ".join(error.issues),
+                }
+            else:
+                if parsed_csv.get("target_conflict"):
+                    st.session_state[csv_pending_key] = parsed_csv
+                    st.session_state[csv_status_key] = {
+                        "ok": False,
+                        "conflict": True,
+                        "message": parsed_csv.get("target_conflict_message") or "The CSV Shopify target does not match.",
+                    }
+                else:
+                    save_imported_csv(parsed_csv)
+
+    st.subheader("1. Find the opportunity")
     filters = _reporting_filters()
     reader, use_cache = _interactive_reader(
         phase4_store=phase4_store,
@@ -4337,115 +4542,117 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
             brief = seo_blog_workflow.prefill_from_opportunity(brief, opportunities[selected_opportunity])
             project.update(brief=brief, opportunity_snapshot=opportunities[selected_opportunity])
             project_store.save_project(project)
+            _seed_blog_widget_state(selected_id, brief, overwrite=True)
             st.rerun()
 
-    saved_targets = list(seo.active_records(state, "target_library"))
-    try:
-        live_targets = _cached_blog_shopify_targets()
-    except Exception:
-        live_targets = []
-    targets = {
-        str(row.get("id") or row.get("url") or ""): row
-        for row in [*live_targets, *saved_targets]
-        if row.get("id") or row.get("url")
-    }
-    target_id = st.selectbox(
-        "Shopify product or collection",
-        alphabetize_options(
-            ("", *targets),
-            label=lambda key: "Choose a saved Shopify target" if not key else targets[key].get("title") or targets[key].get("name") or targets[key].get("url") or key,
+    brief.setdefault("target_markets", [seo_blog_workflow.GLOBAL_MARKET])
+    brief["sport"] = brief.get("sport") or seo_blog_workflow.SPORT_OPTIONS[0]
+    brief["search_intent"] = brief.get("search_intent") or seo_blog_workflow.SEARCH_INTENT_OPTIONS[0]
+    brief["language"] = brief.get("language") or seo_blog_workflow.default_language_for_markets(brief["target_markets"])
+    brief["publication_preference"] = brief.get("publication_preference") or seo_blog_workflow.PUBLICATION_PREFERENCES[0]
+    brief["author"] = brief.get("author") or _actor_name(user)
+    brief["target_blog"] = brief.get("target_blog") or "News"
+    _seed_blog_widget_state(selected_id, brief)
+
+    st.subheader("2. Build the blog brief")
+    setup = st.columns(2)
+    target_options = alphabetize_options(
+        ("", *targets),
+        label=lambda key: (
+            "Choose a saved Shopify target"
+            if not key
+            else f"{targets[key].get('entity_type') or targets[key].get('page_type') or 'Target'} — "
+            f"{targets[key].get('title') or targets[key].get('name') or targets[key].get('url') or key}"
         ),
-        format_func=lambda key: "Choose a saved Shopify target" if not key else targets[key].get("title") or targets[key].get("name") or targets[key].get("url") or key,
-        key=f"{seo_blog_workflow.STATE_PREFIX}target::{selected_id}",
+    )
+    target_id = setup[0].selectbox(
+        "Shopify product or collection",
+        target_options,
+        format_func=lambda key: (
+            "Choose a saved Shopify target"
+            if not key
+            else f"{targets[key].get('entity_type') or targets[key].get('page_type') or 'Target'} — "
+            f"{targets[key].get('title') or targets[key].get('name') or targets[key].get('url') or key}"
+        ),
+        key=target_key,
     ) if targets else ""
     if target_id and target_id != brief.get("target_entity_id"):
-        target = targets[target_id]
-        brief = {
-            **brief,
-            "target_entity_id": target_id,
-            "target_title": brief.get("target_title") or target.get("title") or target.get("name") or "",
-            "target_url": brief.get("target_url") or target.get("url") or "",
-            "target_sport": brief.get("target_sport") or target.get("sport") or "",
-            "source_artwork": brief.get("source_artwork") or target.get("source_artwork") or target.get("source_asset") or "",
-        }
+        brief = _apply_blog_shopify_target(brief, target_id, targets)
+        st.session_state[f"{key_root}-target-title"] = brief.get("target_title") or ""
+        st.session_state[f"{key_root}-target-url"] = brief.get("target_url") or ""
 
-    key_root = f"{seo_blog_workflow.STATE_PREFIX}{selected_id}"
-    first = st.columns(3)
-    blog_market_options = alphabetize_options(seo_blog_workflow.MARKETS)
-    brief["target_market"] = first[0].selectbox("Target market", blog_market_options, index=selected_option_index(blog_market_options, brief.get("target_market") or seo_blog_workflow.MARKETS[0]), key=f"{key_root}-market")
-    brief["sport"] = first[1].text_input("Sport", value=brief.get("sport") or "", key=f"{key_root}-sport")
-    brief["search_intent"] = first[2].text_input("Search intent / article type", value=brief.get("search_intent") or "", key=f"{key_root}-intent")
+    market_key = f"{key_root}-markets"
+    previous_market_key = f"{key_root}-markets-previous"
+    normalized_markets = seo_blog_workflow.normalize_target_markets(
+        st.session_state.get(market_key),
+        previous=st.session_state.get(previous_market_key),
+    )
+    st.session_state[market_key] = normalized_markets
+    st.session_state[previous_market_key] = normalized_markets
+    brief["target_markets"] = setup[1].multiselect(
+        "Target markets",
+        seo_blog_workflow.TARGET_MARKET_OPTIONS,
+        key=market_key,
+        help="All Countries / Global is mutually exclusive with individual countries.",
+    )
+
+    taxonomy = st.columns(2)
+    brief["sport"] = taxonomy[0].selectbox(
+        "Sport",
+        seo_blog_workflow.SPORT_OPTIONS,
+        key=f"{key_root}-sport",
+    )
+    brief["search_intent"] = taxonomy[1].selectbox(
+        "Search intent / article type",
+        seo_blog_workflow.SEARCH_INTENT_OPTIONS,
+        key=f"{key_root}-intent",
+    )
+    custom = st.columns(2)
+    if brief["sport"] == "Other":
+        brief["sport_custom"] = custom[0].text_input(
+            "Custom sport",
+            key=f"{key_root}-sport-custom",
+        )
+    if brief["search_intent"] == "Other / Custom":
+        brief["search_intent_custom"] = custom[1].text_input(
+            "Custom search intent / article type",
+            key=f"{key_root}-intent-custom",
+        )
     context = st.columns(2)
-    default_language = brief.get("language") or seo_blog_workflow.MARKET_LANGUAGE.get(brief["target_market"])
-    language_options = alphabetize_options(seo_blog_workflow.LANGUAGES)
     brief["language"] = context[0].selectbox(
         "Language",
-        language_options,
-        index=selected_option_index(language_options, default_language),
+        seo_blog_workflow.LANGUAGES,
         key=f"{key_root}-language",
     )
     brief["publication_preference"] = context[1].selectbox(
         "Draft / schedule preference",
         seo_blog_workflow.PUBLICATION_PREFERENCES,
-        index=seo_blog_workflow.PUBLICATION_PREFERENCES.index(brief.get("publication_preference")) if brief.get("publication_preference") in seo_blog_workflow.PUBLICATION_PREFERENCES else 0,
         key=f"{key_root}-publication",
     )
-    second = st.columns(2)
-    brief["subject"] = second[0].text_input("Athlete, team, rivalry, event or season", value=brief.get("subject") or "", key=f"{key_root}-subject")
-    brief["timely_hook"] = second[1].text_input("Timely hook", value=brief.get("timely_hook") or "", key=f"{key_root}-hook")
-    brief["primary_keyword"] = st.text_input("Primary keyword", value=brief.get("primary_keyword") or "", key=f"{key_root}-primary")
-    brief["supporting_keywords"] = st.text_input("Supporting keywords", value=", ".join(brief.get("supporting_keywords") or []), key=f"{key_root}-supporting")
-    brief["related_entities"] = st.text_input("Related entities", value=", ".join(brief.get("related_entities") or []), key=f"{key_root}-entities")
-    brief["fan_questions"] = st.text_input("Fan questions", value=", ".join(brief.get("fan_questions") or []), key=f"{key_root}-questions")
-    target_columns = st.columns(2)
-    brief["target_title"] = target_columns[0].text_input("Product / collection title", value=brief.get("target_title") or "", key=f"{key_root}-target-title")
-    brief["target_url"] = target_columns[1].text_input("Exact product / collection URL", value=brief.get("target_url") or "", key=f"{key_root}-target-url")
-    brief["internal_links"] = st.text_area("Verified internal links", value="\n".join(brief.get("internal_links") or []), height=80, key=f"{key_root}-links")
-    with st.expander("Advanced brief", expanded=False):
-        brief["backlink_objective"] = st.text_input("Backlink objective", value=brief.get("backlink_objective") or "", key=f"{key_root}-backlink")
-        brief["link_worthy_angle"] = st.text_input("Link-worthy asset or angle", value=brief.get("link_worthy_angle") or "", key=f"{key_root}-angle")
-        brief["outreach_audience"] = st.text_input("Intended outreach publications / audience", value=brief.get("outreach_audience") or "", key=f"{key_root}-outreach")
-        brief["youtube_url"] = st.text_input("YouTube URL", value=brief.get("youtube_url") or "", key=f"{key_root}-youtube")
-        brief["target_length"] = st.text_input("Target length override", value=brief.get("target_length") or "", key=f"{key_root}-length")
-        brief["tags"] = st.text_input("Tags", value=", ".join(brief.get("tags") or []), key=f"{key_root}-tags")
-    third = st.columns(2)
-    brief["author"] = third[0].text_input("Author", value=brief.get("author") or _actor_name(user), key=f"{key_root}-author")
-    brief["target_blog"] = third[1].text_input("Target Shopify blog", value=brief.get("target_blog") or "News", key=f"{key_root}-blog")
-    brief["approved_source_assets"] = st.text_area("Approved source image references", value="\n".join(brief.get("approved_source_assets") or []), height=80, key=f"{key_root}-assets")
-    uploaded_sources = st.file_uploader(
-        "Approved source image uploads",
-        type=("png", "jpg", "jpeg", "webp"),
-        accept_multiple_files=True,
-        key=f"{key_root}-source-uploads",
-        help="Only file names are persisted in the brief; image bytes remain in the current upload control.",
-    )
-    if uploaded_sources:
-        existing_sources = seo_blog_workflow._clean_list(brief.get("approved_source_assets"))
-        brief["approved_source_assets"] = list(dict.fromkeys([
-            *existing_sources,
-            *(str(item.name) for item in uploaded_sources),
-        ]))
-    permissions = st.columns(2)
-    brief["assets_permitted"] = permissions[0].checkbox("Supplied athlete/product assets are permitted for use", value=bool(brief.get("assets_permitted")), key=f"{key_root}-permitted")
-    brief["safe_non_identifiable_images"] = permissions[1].checkbox("Use non-identifiable editorial imagery when approved athlete imagery is absent", value=bool(brief.get("safe_non_identifiable_images")), key=f"{key_root}-fallback")
-
+    brief = _brief_from_blog_widget_state(selected_id, brief)
+    brief["project_title"] = project.get("title") or brief.get("project_title") or brief.get("subject") or ""
+    workflow_row = st.columns(5)
     draft_hash = seo_blog_workflow.prompt_hash(json.dumps(brief, sort_keys=True, default=str))
-    autosave_key = f"{key_root}-autosaved"
-    if st.session_state.get(autosave_key) != draft_hash:
+    if workflow_row[0].button("Save draft", use_container_width=True, key=f"seo-blog-save::{selected_id}"):
         project.update(
             brief=brief,
-            title=brief.get("article_title") or brief.get("subject") or "",
+            title=brief.get("working_article_title") or brief.get("subject") or project.get("title") or "",
             primary_keyword=brief.get("primary_keyword") or "",
             target_url=brief.get("target_url") or "",
         )
         project = project_store.save_project(project)
-        st.session_state[autosave_key] = draft_hash
-
-    action_row = st.columns(5)
-    if action_row[0].button("Save draft", use_container_width=True, key=f"seo-blog-save::{selected_id}"):
         _blog_activity(project_store, project, user, "seo_blog_brief_saved", f"Blog brief saved: {brief.get('primary_keyword') or brief.get('subject')}", content_hash=draft_hash)
         st.success("Draft saved.")
-    if action_row[1].button("Create Prompt 1", type="primary", use_container_width=True, key=f"seo-blog-prompt1::{selected_id}"):
+    workflow_row[1].download_button(
+        "Export Brief CSV",
+        seo_blog_workflow.blog_brief_csv_bytes(project.get("title") or brief.get("project_title") or "", brief, opportunity=opportunity),
+        file_name=f"{selected_id}-blog-brief.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"seo-blog-csv-export::{selected_id}",
+    )
+    if workflow_row[2].button("Create Prompt 1", type="primary", use_container_width=True, key=f"seo-blog-prompt1::{selected_id}"):
+        brief["project_title"] = project.get("title") or brief.get("project_title") or brief.get("subject") or ""
         try:
             prompt = seo_blog_workflow.build_prompt_1(
                 selected_id,
@@ -4459,89 +4666,170 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
             prompt_hash = seo_blog_workflow.prompt_hash(prompt)
             project.update(status="Brief ready", prompt_1=prompt, prompt_1_hash=prompt_hash, brief=seo_blog_workflow.validate_brief(brief))
             project = project_store.save_project(project)
-            _blog_activity(project_store, project, user, "seo_blog_prompt_1_created", f"Blog Prompt 1 created: {brief.get('primary_keyword')}", content_hash=prompt_hash)
+            _blog_activity(project_store, project, user, "seo_blog_prompt_1_created", f"Research Blog Brief Prompt 1 created: {brief.get('gsc_seed_query')}", content_hash=prompt_hash)
             st.rerun()
     prompt_1 = str(project.get("prompt_1") or "")
-    action_row[2].download_button("Download Prompt 1", prompt_1.encode("utf-8"), file_name=f"{selected_id}-prompt-1.txt", mime="text/plain", disabled=not prompt_1, use_container_width=True)
+    workflow_row[3].download_button(
+        "Download Prompt 1",
+        prompt_1.encode("utf-8"),
+        file_name=f"{selected_id}-prompt-1.txt",
+        mime="text/plain",
+        disabled=not prompt_1,
+        use_container_width=True,
+    )
+    with workflow_row[4]:
+        with st.popover("Import Completed CSV", use_container_width=True):
+            st.file_uploader(
+                "Completed Blog brief CSV",
+                type=("csv",),
+                accept_multiple_files=False,
+                key=csv_upload_key,
+                help="The CSV is validated and imported automatically.",
+            )
 
-    with st.expander("Prompt 1", expanded=bool(prompt_1)):
+    csv_status = st.session_state.get(csv_status_key) or {}
+    if csv_status.get("message"):
+        if csv_status.get("ok"):
+            st.success(csv_status["message"])
+        elif csv_status.get("conflict"):
+            st.warning(csv_status["message"])
+        else:
+            st.error(csv_status["message"])
+    pending = st.session_state.get(csv_pending_key)
+    if pending:
+        conflict_actions = st.columns([1.4, 1, 2.6])
+        if conflict_actions[0].button(
+            "Keep current Shopify target",
+            key=f"{key_root}-csv-keep-target",
+            disabled=not bool(brief.get("target_title") or brief.get("target_url")),
+            use_container_width=True,
+        ):
+            st.session_state[csv_apply_key] = "keep_current"
+            st.rerun()
+        if conflict_actions[1].button(
+            "Cancel import",
+            key=f"{key_root}-csv-cancel",
+            use_container_width=True,
+        ):
+            st.session_state.pop(csv_pending_key, None)
+            st.session_state.pop(csv_apply_key, None)
+            st.session_state.pop(csv_digest_key, None)
+            st.session_state[csv_nonce_key] = csv_nonce + 1
+            st.session_state[csv_status_key] = {
+                "ok": False,
+                "message": "CSV import cancelled; the saved Blog brief was not changed.",
+            }
+            st.rerun()
+        conflict_actions[2].caption(
+            "Or choose the CSV's matching Shopify product/collection above; the import will then continue automatically."
+        )
+
+    with st.expander("Prompt 1 — Research Blog Brief", expanded=False):
         if prompt_1:
-            st.text_area("Prompt 1 output", prompt_1, height=320, key=f"{key_root}-prompt1-preview")
+            st.text_area("Prompt 1 output", prompt_1, height=300, key=f"{key_root}-prompt1-preview")
             _copy_text_button(prompt_1, key=f"copy-prompt1-{selected_id}", label="Copy Prompt 1")
         else:
-            st.caption("Complete the required brief fields, then create Prompt 1.")
+            st.caption("Choose a GSC opportunity and Shopify target, then create Prompt 1.")
 
-    st.subheader("Import Content Package")
-    uploaded = st.file_uploader("JSON package", type=("json",), key=f"{key_root}-package-file")
-    pasted = st.text_area("Or paste the JSON package", height=180, key=f"{key_root}-package-paste")
-    manual_review = st.checkbox("Allow manual review for clearly listed validation issues", key=f"{key_root}-manual-review")
-    validation = _json_object(project.get("qa_results"), {})
-    if st.button("Validate package", disabled=not (uploaded or pasted.strip()), key=f"seo-blog-validate::{selected_id}"):
-        payload = uploaded.getvalue().decode("utf-8") if uploaded else pasted
-        try:
-            validation = seo_blog_workflow.validate_content_package(
-                payload,
-                project_id=selected_id,
-                target_url=brief.get("target_url") or "",
-                allow_manual_review=manual_review,
-            )
-        except seo_blog_workflow.ContentPackageError as error:
-            for issue in error.issues:
-                st.warning(issue)
-        else:
-            project.update(
-                status="Needs review" if validation.get("issues") else "Approved",
-                content_package=validation["package"],
-                image_manifest=validation["image_manifest"],
-                qa_results={key: value for key, value in validation.items() if key not in {"package", "image_manifest"}},
-            )
-            project = project_store.save_project(project)
-            package_hash = seo_blog_workflow.prompt_hash(json.dumps(validation["package"], sort_keys=True))
-            _blog_activity(project_store, project, user, "seo_blog_content_package_imported", f"Blog content package imported: {brief.get('primary_keyword')}", content_hash=package_hash)
-            st.rerun()
-    if validation:
-        if validation.get("issues"):
-            st.warning("Review required: " + "; ".join(validation.get("issues") or []))
-        else:
-            st.success(f"Content package validated. {validation.get('word_count') or 0} words.")
+    st.caption("The completed CSV fills these editable brief fields; the saved Blog project remains the source of truth.")
+    first = st.columns(2)
+    brief["subject"] = first[0].text_input("Topic / athlete / team / rivalry / event / season", key=f"{key_root}-subject")
+    brief["timely_hook"] = first[1].text_input("Timely hook — optional", key=f"{key_root}-hook")
+    angle = st.columns(2)
+    brief["recommended_article_angle"] = angle[0].text_input("Recommended article angle", key=f"{key_root}-angle")
+    brief["working_article_title"] = angle[1].text_input("Working article title", key=f"{key_root}-working-title")
+    keywords = st.columns(2)
+    brief["primary_keyword"] = keywords[0].text_input("Primary keyword", key=f"{key_root}-primary")
+    brief["supporting_keywords"] = seo_blog_workflow._clean_list(
+        keywords[1].text_area("Supporting keywords", height=76, key=f"{key_root}-supporting")
+    )
+    research = st.columns(2)
+    brief["related_entities"] = seo_blog_workflow._clean_list(
+        research[0].text_input("Related entities", key=f"{key_root}-entities")
+    )
+    brief["fan_questions"] = seo_blog_workflow._clean_list(
+        research[1].text_area("Fan questions", height=76, key=f"{key_root}-questions")
+    )
+    target_columns = st.columns(2)
+    brief["target_title"] = target_columns[0].text_input("Product / collection title", key=f"{key_root}-target-title")
+    brief["target_url"] = target_columns[1].text_input("Exact product / collection URL", key=f"{key_root}-target-url")
+    brief["internal_links"] = seo_blog_workflow._clean_list(
+        st.text_area("Verified internal links", height=84, key=f"{key_root}-links")
+    )
+    with st.expander("Advanced brief", expanded=False):
+        advanced = st.columns(2)
+        brief["link_building_authority_angle"] = advanced[0].text_area(
+            "Link-building / authority angle — optional",
+            height=76,
+            key=f"{key_root}-authority",
+        )
+        brief["youtube_url"] = advanced[1].text_input("YouTube URL — optional", key=f"{key_root}-youtube")
+        details = st.columns(2)
+        brief["target_length"] = details[0].text_input("Target word count / length — optional", key=f"{key_root}-length")
+        brief["tags"] = seo_blog_workflow._clean_list(details[1].text_input("Tags", key=f"{key_root}-tags"))
+    owners = st.columns(2)
+    brief["author"] = owners[0].text_input("Author", key=f"{key_root}-author")
+    brief["target_blog"] = owners[1].text_input("Target Shopify blog", key=f"{key_root}-blog")
+    brief = seo_blog_workflow.normalize_brief(brief)
 
-    capability = seo_blog_workflow.shopify_write_capability()
-    if action_row[3].button("Create Prompt 2", disabled=not validation, use_container_width=True, key=f"seo-blog-prompt2::{selected_id}"):
+    autosave_key = f"{key_root}-autosaved"
+    draft_hash = seo_blog_workflow.prompt_hash(json.dumps(brief, sort_keys=True, default=str))
+    if st.session_state.get(autosave_key) != draft_hash:
+        project.update(
+            brief=brief,
+            title=brief.get("working_article_title") or brief.get("subject") or project.get("title") or "",
+            primary_keyword=brief.get("primary_keyword") or "",
+            target_url=brief.get("target_url") or "",
+        )
+        project = project_store.save_project(project)
+        st.session_state[autosave_key] = draft_hash
+
+    st.subheader("3. Create the blog")
+    create = st.columns([1.2, 1.2, 3.6])
+    if create[0].button("Create Prompt 2", type="primary", use_container_width=True, key=f"seo-blog-prompt2::{selected_id}"):
         try:
-            prompt_2 = seo_blog_workflow.build_prompt_2(project, validation, capability=capability)
+            prompt_2 = seo_blog_workflow.build_prompt_2(project, brief)
         except seo_blog_workflow.BlogWorkflowError as error:
             st.warning(str(error))
         else:
             prompt_hash = seo_blog_workflow.prompt_hash(prompt_2)
-            project.update(prompt_2=prompt_2, prompt_2_hash=prompt_hash, status="Approved")
+            project.update(prompt_2=prompt_2, prompt_2_hash=prompt_hash, status="Needs review", brief=brief)
             project = project_store.save_project(project)
-            _blog_activity(project_store, project, user, "seo_blog_prompt_2_created", f"Blog Prompt 2 created: {brief.get('primary_keyword')}", content_hash=prompt_hash)
+            _blog_activity(project_store, project, user, "seo_blog_prompt_2_created", f"Blog article Prompt 2 created: {brief.get('primary_keyword')}", content_hash=prompt_hash)
             st.rerun()
     prompt_2 = str(project.get("prompt_2") or "")
-    action_row[4].download_button("Download Prompt 2", prompt_2.encode("utf-8"), file_name=f"{selected_id}-prompt-2.txt", mime="text/plain", disabled=not prompt_2, use_container_width=True)
-    with st.expander("Prompt 2", expanded=bool(prompt_2)):
+    create[1].download_button(
+        "Download Prompt 2",
+        prompt_2.encode("utf-8"),
+        file_name=f"{selected_id}-prompt-2.txt",
+        mime="text/plain",
+        disabled=not prompt_2,
+        use_container_width=True,
+    )
+    create[2].caption("Prompt 2 creates the finished article and image package. It does not publish or write to Shopify.")
+    with st.expander("Prompt 2 — Create the Blog", expanded=False):
         if prompt_2:
-            st.text_area("Prompt 2 output", prompt_2, height=320, key=f"{key_root}-prompt2-preview")
+            st.text_area("Prompt 2 output", prompt_2, height=300, key=f"{key_root}-prompt2-preview")
             _copy_text_button(prompt_2, key=f"copy-prompt2-{selected_id}", label="Copy Prompt 2")
         else:
-            st.caption("Prompt 2 is available only after package validation and a confirmed Shopify article/file-write capability.")
+            st.caption("Import the completed CSV, then create Prompt 2.")
 
-    st.subheader("History")
-    _table(
-        [
-            {
-                "Title": row.get("title") or "Untitled",
-                "Primary keyword": row.get("primary_keyword") or "",
-                "Target page": row.get("target_url") or "",
-                "Owner": row.get("owner_name") or "",
-                "Status": row.get("status") or "Idea",
-                "Updated": row.get("updated_at") or "",
-            }
-            for row in projects
-        ],
-        empty="No blog history is available.",
-        height=260,
-    )
+    with st.expander("History", expanded=False):
+        _table(
+            [
+                {
+                    "Title": row.get("title") or "Untitled",
+                    "Primary keyword": row.get("primary_keyword") or "",
+                    "Target page": row.get("target_url") or "",
+                    "Owner": row.get("owner_name") or "",
+                    "Status": row.get("status") or "Idea",
+                    "Updated": row.get("updated_at") or "",
+                }
+                for row in projects
+            ],
+            empty="No blog history is available.",
+            height=240,
+        )
 
 
 @st.fragment
