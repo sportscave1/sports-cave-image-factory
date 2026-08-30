@@ -18,6 +18,7 @@ import streamlit.components.v1 as components
 from activity_log import get_activity_actor, record_activity_log
 import certificate_job
 import db
+import fulfilment_handoff
 import os_accounts
 import prompt_store
 import shopify_sync
@@ -4829,6 +4830,26 @@ def _prodigi_apply_order_lookup(query, *, state=None, finder=None):
     return matches, existing_rows
 
 
+def _prodigi_prepare_entry_state(*, state=None, finder=None):
+    """Consume a new Orders handoff once or clear stale state on direct entry."""
+    state = st.session_state if state is None else state
+    finder = prodigi_find_order_rows_from_cache if finder is None else finder
+
+    if fulfilment_handoff.is_direct_fulfilment_entry(state):
+        fulfilment_handoff.clear_lookup_state(
+            state,
+            clear_input=True,
+            clear_request=True,
+        )
+        return ""
+
+    query = fulfilment_handoff.consume_order_handoff(state)
+    if not query:
+        return ""
+    _prodigi_apply_order_lookup(query, state=state, finder=finder)
+    return query
+
+
 def render_prodigi_page():
     page_started = time.perf_counter()
     _prodigi_log_timing("page start", page_started)
@@ -4841,6 +4862,8 @@ def render_prodigi_page():
     with st.expander("Fulfilment Reference", expanded=False):
         st.markdown(prodigi_reference_table_html(prodigi_reference_rows()), unsafe_allow_html=True)
         st.caption(f"Support: {PRODIGI_SUPPORT_EMAIL}")
+
+    _prodigi_prepare_entry_state(finder=prodigi_find_order_rows_from_cache)
 
     search_columns = st.columns([3.2, 1])
     search_value = search_columns[0].text_input(
@@ -4855,16 +4878,6 @@ def render_prodigi_page():
         else:
             _prodigi_apply_order_lookup(query, finder=prodigi_find_order_rows_from_cache)
             st.rerun()
-
-    autoload_query = _prodigi_clean(st.session_state.get("prodigi_dispatch_autoload_query") or "")
-    last_query = st.session_state.get("prodigi_dispatch_last_query") or ""
-    if autoload_query and autoload_query != last_query:
-        _prodigi_apply_order_lookup(
-            autoload_query,
-            finder=prodigi_find_order_rows_from_cache,
-        )
-        st.session_state["prodigi_dispatch_autoload_query"] = ""
-        st.rerun()
 
     matches = st.session_state.get("prodigi_dispatch_matches") or []
     existing_dispatch_rows = st.session_state.get("prodigi_dispatch_existing_rows") or []

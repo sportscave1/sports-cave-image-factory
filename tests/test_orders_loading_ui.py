@@ -378,7 +378,9 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual("#SC3075", target)
         self.assertEqual("#SC3075", state["prodigi-dispatch-order-search"])
-        self.assertEqual("#SC3075", state["prodigi_dispatch_autoload_query"])
+        request = state["fulfilment_order_handoff_request"]
+        self.assertEqual("#SC3075", request["order_reference"])
+        self.assertTrue(request["request_id"])
         self.assertEqual("Prodigi", state["pending_page"])
         self.assertEqual([], state["prodigi_dispatch_matches"])
         self.assertEqual([], state["prodigi_dispatch_existing_rows"])
@@ -396,7 +398,10 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page._open_prodigi_for_row({"order": "#SC3078"})
 
         self.assertEqual("#SC3078", fake_st.session_state["prodigi-dispatch-order-search"])
-        self.assertEqual("#SC3078", fake_st.session_state["prodigi_dispatch_autoload_query"])
+        self.assertEqual(
+            "#SC3078",
+            fake_st.session_state["fulfilment_order_handoff_request"]["order_reference"],
+        )
         self.assertEqual("Prodigi", fake_st.session_state["pending_page"])
 
     def test_orders_prodigi_handoff_rejects_malformed_order_without_navigation(self):

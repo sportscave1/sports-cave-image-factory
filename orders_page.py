@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+import fulfilment_handoff
 import ui_loading
 
 
@@ -529,11 +530,6 @@ def _certificate_label(row):
 
 def _prodigi_label(row):
     return order_action_state.final_fulfilment_status(row)
-
-
-def _can_start_prodigi(row):
-    status = _prodigi_label(row)
-    return status in {"Ready to dispatch", "Not started", "In progress", "Sent to Fulfilment", "Complete", "Issue"}
 
 
 def _allocation_numbers(allocation):
@@ -1635,22 +1631,17 @@ def _filter_rows(rows, search_text):
 
 
 def _canonical_prodigi_order_reference(value):
-    match = re.fullmatch(r"#?SC(\d+)", str(value or "").strip(), flags=re.IGNORECASE)
-    return f"#SC{match.group(1)}" if match else ""
+    return fulfilment_handoff.canonical_order_reference(value)
+
+
+def _fulfilment_qa_order_reference(selected_rows):
+    if len(selected_rows or []) != 1:
+        return ""
+    return _canonical_prodigi_order_reference((selected_rows[0] or {}).get("order"))
 
 
 def _prepare_prodigi_handoff_state(state, order_reference):
-    target_order = _canonical_prodigi_order_reference(order_reference)
-    if not target_order:
-        return ""
-    state["prodigi_dispatch_matches"] = []
-    state["prodigi_dispatch_existing_rows"] = []
-    state["prodigi_dispatch_last_query"] = ""
-    state["prodigi_dispatch_selected_row_id"] = ""
-    state["prodigi_dispatch_autoload_query"] = target_order
-    state["prodigi-dispatch-order-search"] = target_order
-    state["pending_page"] = "Prodigi"
-    return target_order
+    return fulfilment_handoff.queue_order_handoff(state, order_reference)
 
 
 def _open_prodigi_for_row(row):
@@ -2340,7 +2331,8 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     selected_count = len(selected_rows)
     backend = _configured_supabase_backend()
     open_url = _first_pdf_url(selected_rows)
-    can_dispatch = selected_count == 1 and _can_start_prodigi(selected_rows[0]) if selected_rows else False
+    fulfilment_order_reference = _fulfilment_qa_order_reference(selected_rows)
+    can_dispatch = bool(fulfilment_order_reference)
     can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
