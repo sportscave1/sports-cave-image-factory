@@ -246,6 +246,27 @@ class BlogWorkflowTests(unittest.TestCase):
         self.assertNotIn("SELECTED SPORTS CAVE PRODUCT OR COLLECTION", prompt)
         self.assertNotIn("IMAGE PACKAGE CONTRACT", prompt)
 
+    def test_prompt_1_translates_raw_poster_demand_into_brand_vocabulary(self):
+        brief = seed_brief()
+        brief["gsc_seed_query"] = "messi poster"
+        opportunity = {**gsc_opportunity(), "query": "messi poster"}
+        prompt = workflow.build_prompt_1(
+            "project-1",
+            brief,
+            source_date="2026-08-14",
+            opportunity=opportunity,
+            product_context=product_context(),
+        )
+
+        self.assertIn("messi poster", prompt)
+        self.assertIn("Preserve gsc_seed_query exactly", prompt)
+        self.assertIn("real Google demand evidence", prompt)
+        self.assertIn("premium limited-edition sports wall-art and collector brand", prompt)
+        self.assertIn('Never choose "poster" or "posters"', prompt)
+        self.assertIn("Translate that demand", prompt)
+        self.assertIn("athlete wall art", prompt)
+        self.assertIn("verified legacy Sports Cave URL", prompt)
+
     def test_completed_csv_imports_and_multi_values_round_trip(self):
         first = workflow.blog_brief_csv_bytes("ignored", completed_brief())
         parsed = workflow.parse_blog_brief_csv(
@@ -284,6 +305,64 @@ class BlogWorkflowTests(unittest.TestCase):
                 current_brief=seed_brief(),
             )
 
+    def test_raw_gsc_poster_query_and_legacy_url_are_preserved(self):
+        brief = completed_brief()
+        brief["gsc_seed_query"] = "messi poster"
+        brief["selected_opportunity"] = "messi poster"
+        brief["primary_keyword"] = "Lionel Messi wall art"
+        brief["supporting_keywords"] = ["Messi framed wall art", "Argentina football wall art"]
+        brief["working_article_title"] = "The Moments That Made Lionel Messi Immortal"
+        brief["target_title"] = "Lionel Messi Collector Wall Art"
+        brief["target_url"] = "https://www.sportscaveshop.com/products/legacy-messi-poster"
+        brief["internal_links"] = [
+            "https://www.sportscaveshop.com/products/legacy-messi-poster",
+            "https://www.sportscaveshop.com/collections/football-wall-art",
+        ]
+
+        parsed = workflow.parse_blog_brief_csv(
+            workflow.blog_brief_csv_bytes("ignored", brief),
+            filename="completed.csv",
+            current_brief={"gsc_seed_query": "messi poster"},
+        )["brief"]
+
+        self.assertEqual("messi poster", parsed["gsc_seed_query"])
+        self.assertEqual(brief["target_url"], parsed["target_url"])
+        self.assertEqual(brief["internal_links"], parsed["internal_links"])
+        self.assertEqual("Lionel Messi wall art", parsed["primary_keyword"])
+
+    def test_completed_csv_rejects_prohibited_customer_facing_vocabulary(self):
+        invalid_values = (
+            ("primary_keyword", "Shane Warne poster"),
+            ("supporting_keywords", ["Cricket POSTERS"]),
+            ("recommended_article_angle", "The collector poster every fan remembers"),
+            ("working_article_title", "A pOsTeR Tribute to Shane Warne"),
+            ("fan_questions", ["Which posters remember the 2005 Ashes?"]),
+            ("tags", ["Cricket", "Poster"]),
+        )
+        for field, value in invalid_values:
+            with self.subTest(field=field):
+                brief = completed_brief()
+                brief[field] = value
+                with self.assertRaisesRegex(
+                    workflow.BlogBriefCSVError,
+                    "Sports Cave brand rule: replace 'poster' terminology",
+                ):
+                    workflow.parse_blog_brief_csv(
+                        workflow.blog_brief_csv_bytes("ignored", brief),
+                        filename="completed.csv",
+                        current_brief=seed_brief(),
+                    )
+
+    def test_brand_vocabulary_guard_accepts_natural_wall_art_and_collector_language(self):
+        brief = completed_brief()
+        brief["primary_keyword"] = "Shane Warne limited-edition wall art"
+        brief["supporting_keywords"] = [
+            "Shane Warne framed wall art",
+            "cricket collector edition",
+        ]
+        validated = workflow.validate_brief(brief, article_ready=True)
+        self.assertEqual(brief["primary_keyword"], validated["primary_keyword"])
+
     def test_prompt_2_consumes_all_research_and_preserves_article_image_rules(self):
         prompt = workflow.build_prompt_2(
             {"project_id": "project-1", "brief": completed_brief()}
@@ -302,9 +381,60 @@ class BlogWorkflowTests(unittest.TestCase):
             "SPORTS_CAVE_IMAGE_REALISM_RULES_V1",
             "actual image assets",
             "Do not write to Shopify",
+            "CUSTOMER-FACING VOCABULARY LOCK",
+            'Never use "poster" or "posters"',
+            "Raw GSC evidence may remain unchanged",
         ):
             self.assertIn(rule, prompt)
         self.assertNotIn("Publish now", prompt)
+
+    def test_publish_prompt_is_universal_conversation_bound_and_complete(self):
+        project = {
+            "project_id": "project-1",
+            "brief": completed_brief(),
+            "prompt_2": workflow.build_prompt_2(
+                {"project_id": "project-1", "brief": completed_brief()}
+            ),
+        }
+        prompt = workflow.build_publish_prompt(project)
+        prompt_text = " ".join(prompt.split())
+
+        for required in (
+            "SPORTS CAVE SEO BLOG - FINAL SHOPIFY PUBLISH",
+            "SAME ChatGPT conversation",
+            "FINAL approved package",
+            "source of truth",
+            "Prompt 2 may have refined the strategy",
+            "Featured / cover image - 16:9, target 1600x900",
+            "Editorial / support image - 3:2, target 1600x1067",
+            "Product / room mockup - 4:3, target 1600x1200",
+            "permanent Shopify CDN URL",
+            "PREVENT DUPLICATES",
+            "global, key title_tag",
+            "global, key description_tag",
+            "PUBLISH THE APPROVED ARTICLE LIVE once validation succeeds",
+            "PUBLISH AND READ BACK",
+            "LIVE STOREFRONT QA",
+            "SPORTS CAVE VOCABULARY SAFETY GATE",
+            "legacy slug",
+            "Sports Cave vocabulary: PASS",
+            "PROJECT ID: project-1",
+        ):
+            self.assertIn(" ".join(required.split()), prompt_text)
+        for article_specific in (
+            "Messi",
+            "Lionel",
+            "Shane Warne",
+            "King of Spin",
+            "king-of-spin",
+            "shane warne 2005 ashes",
+        ):
+            self.assertNotIn(article_specific, prompt_text)
+
+        source = inspect.getsource(workflow.build_publish_prompt)
+        self.assertNotIn("shopify_sync", source)
+        self.assertNotIn("requests.", source)
+        self.assertNotIn("graphql_request", source)
 
     def test_main_blog_ui_has_only_the_compact_normal_workflow(self):
         source = inspect.getsource(seo_page._render_blog_v2)
@@ -318,6 +448,10 @@ class BlogWorkflowTests(unittest.TestCase):
             'st.expander("Review brief", expanded=False)',
             '"Download Blog Prompt"',
             'st.expander("Prompt 2 preview", expanded=False)',
+            'st.subheader("5. Publish the blog")',
+            '"Download Publish Prompt"',
+            '"seo_blog_publish_prompt_downloaded"',
+            'st.expander("Publish Prompt preview", expanded=False)',
             'st.expander("History", expanded=False)',
         ):
             self.assertIn(required, source)
@@ -331,12 +465,14 @@ class BlogWorkflowTests(unittest.TestCase):
             "Create Prompt 1",
             "Download Prompt 1",
             "Create Prompt 2",
+            "Create Prompt 3",
             "Validate package",
             "JSON package",
             "Approved source image",
         ):
             self.assertNotIn(removed, source)
         self.assertLess(source.index('st.expander("Review brief"'), source.index('"Target markets"'))
+        self.assertLess(source.index('st.subheader("5. Publish the blog")'), source.index('st.expander("History"'))
         self.assertNotIn("edition_", source)
 
     def test_product_context_store_is_saved_read_only_data(self):
@@ -579,6 +715,27 @@ class BlogPageLoadTests(unittest.TestCase):
         self.assertEqual(store.project["brief"]["primary_keyword"], "shane warne 2005 ashes")
         self.assertIn("shane warne 2005 ashes", store.project["prompt_2"])
         self.assertIn("1600x900", store.project["prompt_2"])
+
+        rerun_ui = FakeStreamlit()
+        rerun_ui.session_state.update(ui.session_state)
+        with patch.object(seo_page, "st", rerun_ui), patch.object(
+            seo_page, "_cached_blog_shopify_targets", return_value=product_context()
+        ), patch.object(
+            seo_page.google_seo, "refresh_access_token", side_effect=AssertionError("external Google call")
+        ), patch.object(
+            seo_page.google_seo_import, "queue_imports", side_effect=AssertionError("sync call")
+        ):
+            seo_page._render_blog_v2(
+                {"target_library": []},
+                self.user,
+                reporting_reader=SavedReportingReader(),
+                project_store=store,
+            )
+
+        rendered = " ".join(rerun_ui.events)
+        self.assertIn("5. Publish the blog", rendered)
+        self.assertIn("download:Download Publish Prompt", rendered)
+        self.assertIn("expander:Publish Prompt preview:False", rendered)
 
     def test_dropdown_selection_automatically_replaces_the_current_seed(self):
         next_query = "allan border captain wall art"

@@ -1,4 +1,4 @@
-[server]
+git status --short; git diff --check; git add seo_blog_workflow.py seo_page.py tests/test_seo_blog_workflow.py; git diff --cached --check; git commit -m "Simplify SEO blog research workflow"; if ($LASTEXITCODE -eq 0) { git fetch origin; git rebase origin/main; if ($LASTEXITCODE -eq 0) { git push origin main; git status --short; git log -3 --oneline } else { Write-Host "REBASE STOPPED - do not force push. Send me the terminal output." -ForegroundColor Red } }[server]
 address = "0.0.0.0"
 headless = true
 fileWatcherType = "none"

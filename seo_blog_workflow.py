@@ -206,6 +206,43 @@ CSV_MULTI_VALUE_FIELDS = (
 )
 CSV_MULTI_VALUE_DELIMITER = ";"
 CSV_MAX_BYTES = 2 * 1024 * 1024
+SPORTS_CAVE_VOCABULARY_ERROR = (
+    "Sports Cave brand rule: replace 'poster' terminology with premium "
+    "wall-art / collector terminology."
+)
+PROHIBITED_CUSTOMER_VOCABULARY = re.compile(r"\bposters?\b", re.IGNORECASE)
+CUSTOMER_FACING_BRIEF_FIELDS = (
+    ("subject", "topic / entity"),
+    ("timely_hook", "timely hook"),
+    ("recommended_article_angle", "recommended article angle"),
+    ("working_article_title", "working article title"),
+    ("primary_keyword", "primary keyword"),
+    ("supporting_keywords", "supporting keywords"),
+    ("fan_questions", "fan questions"),
+    ("target_title", "product / collection title"),
+    ("tags", "tags"),
+    ("link_building_authority_angle", "link-building / authority angle"),
+)
+PREFERRED_SPORTS_CAVE_VOCABULARY = (
+    "limited-edition sports wall art",
+    "framed sports wall art",
+    "sports wall art",
+    "collector wall art",
+    "collector edition",
+    "numbered edition",
+    "limited edition",
+    "premium sports art",
+    "framed sports art",
+    "sports artwork",
+    "collector series",
+    "framed collector art",
+    "athlete wall art",
+    "team wall art",
+    "football wall art",
+    "basketball wall art",
+    "motorsport wall art",
+    "cricket wall art",
+)
 RESEARCH_SETUP_FIELDS = (
     "gsc_seed_query",
 )
@@ -412,6 +449,32 @@ def _validate_youtube_url(value):
         raise BlogWorkflowError("YouTube URL must use a real YouTube domain.")
 
 
+def prohibited_customer_vocabulary_fields(brief):
+    """Return derived, customer-facing brief fields that break the brand vocabulary lock.
+
+    Raw GSC evidence and URL fields are intentionally excluded. A real query or verified
+    legacy handle can contain the prohibited search term without being rewritten.
+    """
+    brief = normalize_brief(brief)
+    found = []
+    for field, label in CUSTOMER_FACING_BRIEF_FIELDS:
+        value = brief.get(field)
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        if any(PROHIBITED_CUSTOMER_VOCABULARY.search(str(item or "")) for item in values):
+            found.append(label)
+    return tuple(found)
+
+
+def validate_sports_cave_vocabulary(brief):
+    brief = normalize_brief(brief)
+    fields = prohibited_customer_vocabulary_fields(brief)
+    if fields:
+        raise BlogWorkflowError(
+            f"{SPORTS_CAVE_VOCABULARY_ERROR} Found in: {', '.join(fields)}."
+        )
+    return brief
+
+
 def validate_brief(brief, *, article_ready=False):
     brief = normalize_brief(brief)
     fields = ARTICLE_BRIEF_FIELDS if article_ready else RESEARCH_SETUP_FIELDS
@@ -428,6 +491,7 @@ def validate_brief(brief, *, article_ready=False):
     if missing:
         raise BlogWorkflowError("Complete: " + ", ".join(dict.fromkeys(missing)) + ".")
     if article_ready:
+        validate_sports_cave_vocabulary(brief)
         _validate_sports_cave_url(
             brief.get("target_url"), "Target product or collection URL"
         )
@@ -825,6 +889,21 @@ SPORTS CAVE BRAND AND SEO STANDARD
 - Avoid generic AI filler, fake urgency, spammy keyword stuffing and forced product mentions.
 - Use only verified links. Never expose credentials, secrets, private API payloads or customer/order data.
 
+SPORTS CAVE KEYWORD AND BRAND LOCK - MANDATORY
+- Sports Cave is a premium limited-edition sports wall-art and collector brand, not a poster shop.
+- Never choose "poster" or "posters" as a primary keyword, supporting keyword, article phrase,
+  title/meta phrase, tag, anchor text, image filename, image alt text or caption.
+- A raw GSC seed query may contain that language. Preserve gsc_seed_query exactly because it is real Google demand evidence,
+  but do not blindly copy it into the Sports Cave SEO strategy.
+- Translate that demand into natural premium vocabulary such as athlete wall art, athlete framed wall art,
+  athlete limited-edition wall art, team wall art, collector wall art, numbered sports art or premium
+  framed sports art when relevant to the actual search intent.
+- Shared preferred vocabulary: {', '.join(PREFERRED_SPORTS_CAVE_VOCABULARY)}.
+- Do not mechanically replace every term with "limited edition" and do not keyword-stuff. Choose the
+  most natural wall-art or collector wording for the subject and audience.
+- A verified legacy Sports Cave URL can retain its exact historical slug. Never rename, approximate or
+  break a real URL merely because its machine-readable handle contains prohibited customer-facing wording.
+
 CLASSIFICATION GUIDANCE
 Sport must use one exact Sports Cave taxonomy value below. If none fits, use "Other: <custom sport>".
 {'; '.join(SPORT_OPTIONS)}
@@ -870,6 +949,22 @@ PROJECT ID: {project.get('project_id') or ''}
 COMPLETED BLOG BRIEF
 {_brief_lines(brief)}
 
+SPORTS CAVE CUSTOMER-FACING VOCABULARY LOCK - MANDATORY
+- Sports Cave is a premium limited-edition sports wall-art and collector brand, not a poster shop.
+- Never use "poster" or "posters" in the final customer-facing package, including the article title,
+  SEO title, meta description, excerpt, tags, headings, HTML body, internal-link anchor text, image
+  filenames, alt text or captions.
+- This rule still applies when the raw GSC query, competitors or source research use that terminology.
+  Raw GSC evidence may remain unchanged in research context, but it is not final Sports Cave wording.
+- Use natural language such as wall art, framed wall art, limited-edition wall art, sports artwork,
+  collector edition, numbered edition or premium sports art only where relevant. Do not keyword-stuff
+  or mechanically repeat "limited edition".
+- Shared preferred vocabulary: {', '.join(PREFERRED_SPORTS_CAVE_VOCABULARY)}.
+- Preserve the exact destination of any verified legacy URL even when its immutable slug contains the
+  prohibited term; use a brand-safe descriptive anchor and never rename or approximate the URL.
+- Before returning the final package, run a case-insensitive vocabulary check across every customer-facing
+  field and correct any violation without changing the search intent.
+
 ARTICLE CONTRACT
 - Research current facts using authoritative sources and distinguish sourced facts from editorial interpretation.
 - Fact-check dates, scores, seasons, venues, achievements, quotes and statistics.
@@ -909,9 +1004,233 @@ Return a complete article package with:
 3. A verified internal-link map and concise fact-check/source notes.
 4. The complete three-image plan and the actual image assets or usable final references when available.
 5. A short QA checklist confirming search intent, factual review, exact Sports Cave URL placement in the final third,
-   verified internal links, image roles/ratios/alt text and absence of placeholders.
+   verified internal links, image roles/ratios/alt text, absence of placeholders and compliance with the
+   Sports Cave customer-facing vocabulary lock.
 
 Do not output JSON. Do not write to Shopify, publish, schedule, request credentials or claim that anything was uploaded.
+""".strip()
+
+
+def build_publish_prompt(project=None):
+    """Build the universal, conversation-bound final Shopify publishing contract.
+
+    The final Prompt 2 package in ChatGPT is authoritative. Only the stable project ID is
+    included here so stale CSV or brief values can never overwrite an approved final package.
+    """
+    project = dict(project or {})
+    project_id = str(project.get("project_id") or "").strip()
+    realism = build_sports_cave_image_realism_rules(include_product_lock=True)
+    return f"""SPORTS CAVE SEO BLOG - FINAL SHOPIFY PUBLISH
+
+ROLE
+You are completing the final publishing stage of the Sports Cave SEO Blog workflow in the SAME ChatGPT conversation
+that created the approved article and image package.
+
+Do not restart research, write a different article, redesign Sports Cave artwork or fall back to
+stale CSV values. The FINAL approved package produced earlier in this conversation is the source
+of truth. The Sports Cave OS application only generated this prompt; it has not uploaded images,
+called Shopify or published anything.
+
+PROJECT ID: {project_id}
+
+SOURCE OF TRUTH
+Use the final approved package already present in this conversation for:
+- research decisions, target markets, sport and search intent
+- primary and supporting keywords, article angle and final article title
+- final Shopify-safe HTML
+- SEO title, meta description, Shopify handle and excerpt
+- author and tags
+- verified Sports Cave internal links and product/collection connection
+- fact-check notes
+- image roles, placement markers, filenames, alt text and captions
+
+Prompt 2 may have refined the strategy after the CSV was imported. Its final approved package wins.
+If any required part of that final package is unavailable, stop and identify the missing component.
+Do not reconstruct it from memory or guess.
+
+FINAL APPROVED IMAGE ASSETS
+The user will upload exactly three final approved WebP assets with this prompt:
+1. Featured / cover image - 16:9, target 1600x900.
+2. Editorial / support image - 3:2, target 1600x1067.
+3. Product / room mockup - 4:3, target 1600x1200.
+
+Identify each asset from its filename, dimensions, visible content and the approved image plan from
+earlier in this conversation. Do not guess when roles are genuinely ambiguous. Stop before publishing
+if a mandatory asset is missing, duplicated, corrupt, distorted, the wrong artwork or not the approved file.
+
+Use the actual supplied WebPs directly. Do not create or regenerate an image during publishing unless a
+strictly technical format conversion is required. Upload every approved file to Shopify and use only its
+permanent Shopify CDN URL. Never use a ChatGPT, sandbox, blob, base64, signed temporary or third-party
+hotlink in the final article.
+
+For each image record its role, final filename, Shopify CDN URL, approved unique alt text and dimensions.
+Set the 16:9 asset as the Shopify article image. Insert the editorial and room/product images at their
+approved placement markers with correct width and height attributes and loading="lazy" below the fold.
+Preserve aspect ratios. Do not duplicate the cover at the top of the body unless the approved package
+explicitly requires it.
+
+{realism}
+
+1. INSPECT SHOPIFY BEFORE WRITING
+- Connect to the connected Sports Cave Shopify store and verify the store identity.
+- Locate the established public Sports Cave editorial blog. Normally use the existing News blog unless
+  current Shopify structure proves another established editorial blog is correct.
+- Verify the blog ID and handle. Never create another Shopify blog without explicit user instruction.
+- Discover the CURRENT Shopify Admin API GraphQL query, mutation and input schema before mutation.
+- Validate every GraphQL operation against that schema before executing it. Never guess field names.
+- Re-check every Sports Cave internal URL from the approved package against the live storefront.
+
+2. PREVENT DUPLICATES
+Search existing articles for the exact approved handle, exact title and substantially identical content.
+- No match: create the article.
+- Same unpublished article from this workflow: update that same article.
+- Same correctly published article: do not create another copy; read back and validate the existing article.
+- Same handle attached to different content: stop and report the conflict.
+Never create a second article as a workaround for a partial failure.
+
+3. BUILD THE FINAL SHOPIFY HTML
+- Use the approved final Shopify-safe HTML and make only technical corrections required for valid markup,
+  CDN image insertion, removal of an accidental body H1, exact verified links or Shopify field constraints.
+- Shopify renders the article title as H1. The body must contain no H1.
+- Preserve the approved H2/H3 hierarchy, fan-first article, facts, SEO strategy and natural commercial
+  connection in the final third.
+- Insert inline images with semantic figure/img markup, approved alt text, correct width/height and optional
+  approved captions. Lazy-load below-fold images.
+- Preserve every verified internal URL exactly. Never invent, approximate or silently replace a URL.
+- Remove every placeholder. No temporary URLs, base64 images, scripts or duplicate JSON-LD in the body.
+
+4. SPORTS CAVE VOCABULARY SAFETY GATE - MANDATORY
+Before any Shopify mutation, scan all customer-facing content case-insensitively for the prohibited words
+"poster" and "posters". Check the title, HTML body, headings, excerpt, SEO title, meta description, tags,
+internal-link anchor text, image filenames, alt text and captions.
+
+Sports Cave is a premium limited-edition sports wall-art and collector brand. Use natural alternatives such
+as sports wall art, framed wall art, limited-edition wall art, premium sports art, sports artwork, collector
+wall art, collector edition, numbered edition, collector series, athlete wall art or team wall art as the
+subject and search intent require. Do not mechanically use "limited edition" everywhere and do not keyword-stuff.
+Shared preferred vocabulary: {', '.join(PREFERRED_SPORTS_CAVE_VOCABULARY)}.
+
+If prohibited customer-facing wording exists, make the smallest brand-safe correction before publication.
+Do not redo research, alter the approved search intent or corrupt raw GSC evidence. A verified historical
+Shopify URL may retain its exact legacy slug even if the machine-readable URL contains the prohibited term;
+do not rename it or break redirects. If wording cannot be corrected safely without changing the approved
+strategy, stop instead of publishing.
+
+5. POPULATE SHOPIFY ARTICLE FIELDS
+Using the current supported Admin API schema, populate every applicable native field from the approved package:
+- title
+- complete final HTML body
+- summary / excerpt
+- exact approved handle
+- author
+- concise approved tags
+- featured article WebP and approved alt text
+- immediate published status
+
+PUBLISH THE APPROVED ARTICLE LIVE once validation succeeds. Do not stop at Draft and do not schedule it
+unless the approved package and the user explicitly require scheduling instead of immediate publication.
+
+6. APPLY SHOPIFY SEO METADATA
+Set Shopify's supported article SEO metafields using the current schema and proper supported types:
+- namespace global, key title_tag, value approved SEO title
+- namespace global, key description_tag, value approved meta description
+
+Check sensible metadata length and search intent without rewriting the approved strategy. Never create
+seo.hidden, noindex, nofollow or unsupported SEO fields. The article is intended to be indexable.
+
+7. PRE-PUBLISH INTEGRITY CHECK
+Before mutation verify:
+- approved search intent and primary keyword remain natural
+- title, SEO title, meta description, handle, excerpt, author and tags are present
+- no body H1 and headings are logical
+- all internal URLs are current and verified
+- the Sports Cave commercial link is natural and in its intended section
+- facts remain consistent with the approved package
+- all three WebPs are uploaded, correctly assigned and use unique approved alt text
+- inline images use permanent Shopify CDN URLs with correct proportions
+- no placeholders, temporary URLs, duplicate article or noindex instruction exists
+- the Sports Cave vocabulary safety gate passes
+
+Fix only safe technical or brand-vocabulary issues. Stop when a major requirement cannot be fixed without
+changing the approved content strategy.
+
+8. PUBLISH AND READ BACK
+Execute the validated create or update mutation with immediate live publication. After the mutation, query
+Shopify again and verify the saved article ID, blog, title, handle, body, summary, author, tags, featured image,
+featured alt text where exposed, isPublished=true, publishedAt, global.title_tag and global.description_tag.
+Correct any safe field that did not persist. Do not report success from the mutation request alone.
+
+9. LIVE STOREFRONT QA
+Build the public URL from the verified domain, blog handle and article handle, then open it and validate where
+technically possible:
+- successful public response and visible correct article title
+- exactly one main H1 and no body H1
+- sensible heading hierarchy and readable article HTML
+- featured and inline images load, are not broken or distorted, and expose useful unique alt text
+- internal Sports Cave links work
+- document title and meta description match the approved SEO values
+- canonical points to the exact article URL
+- no noindex directive or accidental nofollow exists
+- no placeholders, temporary image URLs or non-Shopify image hotlinks remain
+- Article or BlogPosting structured data is present when the existing theme supplies it
+- normal Shopify sitemap discoverability where practical
+- Sports Cave vocabulary gate still passes on the rendered customer-facing page
+
+Do not inject duplicate JSON-LD or edit the live theme. Report missing theme structured data separately.
+Never claim Google has indexed, ranked or rewarded the article merely because it was published.
+
+FAILURE RULES
+Never guess through missing assets, ambiguous blog selection, duplicate conflicts, API/schema errors,
+permission failures, image upload failures, invalid HTML, SEO metafield failures or publication failures.
+Do not silently omit SEO metadata, the cover image or live publication. Identify the exact failure and what
+remains. Do not create another article to recover from a partial mutation.
+
+FINAL RESPONSE
+Return this concise evidence-based report and never mark PASS without checking it:
+
+PUBLISHED: YES
+
+Article:
+[final article title]
+
+Live URL:
+[public Sports Cave article URL]
+
+Target keyword:
+[approved primary keyword]
+
+Shopify blog:
+[verified blog title]
+
+SEO title:
+[final SEO title] ([character count])
+
+Meta description:
+[final meta description] ([character count])
+
+Handle:
+[verified handle]
+
+Images:
+- Featured WebP: PASS
+- Editorial WebP: PASS
+- Room/Product WebP: PASS
+
+SEO validation:
+- Published: PASS
+- Indexable: PASS
+- Canonical: PASS
+- One H1: PASS
+- SEO title: PASS
+- Meta description: PASS
+- Internal links: PASS
+- Image alt text: PASS
+- Shopify CDN images: PASS
+- No placeholders: PASS
+- Sports Cave vocabulary: PASS
+
+Mark anything that could not be verified as MANUAL REVIEW REQUIRED. Do not output JSON, request credentials
+or claim an upload/publication occurred when it did not.
 """.strip()
 
 

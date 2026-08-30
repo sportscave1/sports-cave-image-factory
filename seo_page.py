@@ -4741,6 +4741,63 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
         else:
             st.caption("Import ChatGPT's completed CSV to make the Blog Prompt available.")
 
+    if prompt_2:
+        st.subheader("5. Publish the blog")
+        st.caption(
+            "After ChatGPT creates the final article and approved WebPs, upload the final "
+            "images to that same ChatGPT conversation and use this prompt to publish."
+        )
+        publish_prompt = seo_blog_workflow.build_publish_prompt(project)
+        publish_prompt_hash = seo_blog_workflow.prompt_hash(publish_prompt)
+        publish_event_key = f"{key_root}-publish-prompt-event"
+        if st.session_state.get(publish_event_key) != publish_prompt_hash:
+            try:
+                _blog_activity(
+                    project_store,
+                    project,
+                    user,
+                    "seo_blog_publish_prompt_generated",
+                    "Universal Shopify Publish Prompt generated",
+                    content_hash=publish_prompt_hash,
+                )
+            except Exception:
+                logging.exception("Could not record SEO Blog Publish Prompt history")
+            else:
+                st.session_state[publish_event_key] = publish_prompt_hash
+        publish_prompt_downloaded = st.download_button(
+            "Download Publish Prompt",
+            publish_prompt.encode("utf-8"),
+            file_name="SPORTS_CAVE_PUBLISH_PROMPT.txt",
+            mime="text/plain",
+            type="primary",
+            use_container_width=False,
+            key=f"{key_root}-publish-prompt",
+        )
+        if publish_prompt_downloaded:
+            try:
+                _blog_activity(
+                    project_store,
+                    project,
+                    user,
+                    "seo_blog_publish_prompt_downloaded",
+                    "Universal Shopify Publish Prompt downloaded",
+                    content_hash=publish_prompt_hash,
+                )
+            except Exception:
+                logging.exception("Could not record SEO Blog Publish Prompt download history")
+        with st.expander("Publish Prompt preview", expanded=False):
+            st.text_area(
+                "Publish Prompt output",
+                publish_prompt,
+                height=300,
+                key=f"{key_root}-publish-prompt-preview",
+            )
+            _copy_text_button(
+                publish_prompt,
+                key=f"copy-publish-prompt-{selected_id}",
+                label="Copy Publish Prompt",
+            )
+
     with st.expander("History", expanded=False):
         _table(
             [
@@ -4763,7 +4820,9 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
             "1. Choose a Google search opportunity.\n"
             "2. Download the research pack and give it to ChatGPT.\n"
             "3. Import ChatGPT's completed CSV.\n"
-            "4. Download Prompt 2 to create the finished blog and images."
+            "4. Download the Blog Prompt to create the finished article and three WebPs.\n"
+            "5. Upload the approved WebPs to the same ChatGPT conversation and use the "
+            "Publish Prompt to publish and validate the live Shopify article."
         )
 
 

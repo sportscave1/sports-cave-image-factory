@@ -73,8 +73,11 @@ class SEOBlogStreamlitLifecycleTests(unittest.TestCase):
         self.assertIn(keyword, text)
         self.assertIn("Review brief", [item.label for item in app.expander])
         self.assertIn("Prompt 2 preview", [item.label for item in app.expander])
+        self.assertIn("Publish Prompt preview", [item.label for item in app.expander])
         self.assertIn("History", [item.label for item in app.expander])
         self.assertIn("Download Blog Prompt", text)
+        self.assertIn("5. Publish the blog", text)
+        self.assertIn("Download Publish Prompt", text)
         self.assertEqual(1, len(app.file_uploader))
 
     def test_successful_import_rerun_navigation_and_review_edit(self):
@@ -166,6 +169,19 @@ class SEOBlogStreamlitLifecycleTests(unittest.TestCase):
         self.assertEqual([], list(app.exception))
         self.assertTrue(app.error)
         self.assertIn("use the blog brief csv headers exactly", " ".join(item.value for item in app.error).casefold())
+        self.assertEqual(1, len(app.file_uploader))
+        self.assertFalse(app.session_state["_seo_blog_import_store"].project.get("prompt_2"))
+
+    def test_prohibited_customer_vocabulary_shows_compact_validation_error(self):
+        brief = completed_brief(keyword="Shane Warne POSTER")
+        app = self.run_blog()
+        app.file_uploader[0].set_value(upload_value(brief)).run(timeout=20)
+
+        self.assertEqual([], list(app.exception))
+        self.assertTrue(app.error)
+        error_text = " ".join(item.value for item in app.error)
+        self.assertIn("Sports Cave brand rule", error_text)
+        self.assertIn("premium wall-art / collector terminology", error_text)
         self.assertEqual(1, len(app.file_uploader))
         self.assertFalse(app.session_state["_seo_blog_import_store"].project.get("prompt_2"))
 
