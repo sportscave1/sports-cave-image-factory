@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import uuid
 from urllib.parse import urlparse
+import zipfile
 
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
@@ -176,13 +177,10 @@ SEARCH_INTENT_OPTIONS = (
     "Other / Custom",
 )
 CSV_FIELDS = (
-    "project_title",
     "gsc_seed_query",
     "target_markets",
     "sport",
     "search_intent_article_type",
-    "language",
-    "draft_schedule_preference",
     "topic_entity",
     "timely_hook",
     "recommended_article_angle",
@@ -194,12 +192,9 @@ CSV_FIELDS = (
     "product_collection_title",
     "product_collection_url",
     "verified_internal_links",
-    "link_building_authority_angle",
     "youtube_url",
     "target_word_count",
     "tags",
-    "author",
-    "target_shopify_blog",
 )
 CSV_MULTI_VALUE_FIELDS = (
     "target_markets",
@@ -212,13 +207,17 @@ CSV_MULTI_VALUE_FIELDS = (
 CSV_MULTI_VALUE_DELIMITER = ";"
 CSV_MAX_BYTES = 2 * 1024 * 1024
 RESEARCH_SETUP_FIELDS = (
-    "gsc_seed_query", "target_markets", "sport", "search_intent", "language",
-    "publication_preference", "target_title", "target_url", "author", "target_blog",
+    "gsc_seed_query",
 )
 ARTICLE_BRIEF_FIELDS = (
-    *RESEARCH_SETUP_FIELDS,
-    "subject", "recommended_article_angle", "working_article_title", "primary_keyword",
+    "gsc_seed_query", "target_markets", "sport", "search_intent", "subject",
+    "recommended_article_angle", "working_article_title", "primary_keyword",
+    "supporting_keywords", "related_entities", "fan_questions", "target_title",
+    "target_url", "internal_links", "target_length", "tags",
 )
+PRODUCT_REFERENCE_FIELDS = ("page_type", "title", "url", "sport_or_category")
+SPORTS_CAVE_HOSTS = {"sportscaveshop.com", "www.sportscaveshop.com"}
+YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 IMAGE_ROLES = (
     ("featured", "16:9", "1600x900"),
     ("editorial", "3:2", "1600x1067"),
@@ -275,7 +274,7 @@ def normalize_target_markets(value, *, previous=None, reject_mixed=False):
     if invalid:
         raise BlogWorkflowError("Unsupported target market: " + ", ".join(invalid) + ".")
     if not selected:
-        return [GLOBAL_MARKET]
+        return []
     specific = [item for item in selected if item != GLOBAL_MARKET]
     if GLOBAL_MARKET in selected and specific:
         if reject_mixed:
@@ -292,6 +291,8 @@ def normalize_target_markets(value, *, previous=None, reject_mixed=False):
 
 def default_language_for_markets(markets):
     selected = normalize_target_markets(markets)
+    if not selected:
+        return "English (International)"
     if len(selected) == 1:
         return MARKET_LANGUAGE.get(selected[0], "English (International)")
     return "English (International)"
@@ -318,7 +319,7 @@ def normalize_brief(brief):
     brief = dict(brief or {})
     legacy_market = brief.get("target_market")
     brief["target_markets"] = normalize_target_markets(
-        brief.get("target_markets") or ([legacy_market] if legacy_market else None)
+        brief.get("target_markets") or ([legacy_market] if legacy_market else [])
     )
     brief.pop("target_market", None)
     brief["gsc_seed_query"] = str(
@@ -394,49 +395,71 @@ def _validate_url(value, label, *, optional=False):
         raise BlogWorkflowError(f"{label} must be a complete public URL.")
 
 
+def _validate_sports_cave_url(value, label):
+    _validate_url(value, label)
+    host = (urlparse(str(value or "").strip()).hostname or "").casefold()
+    if host not in SPORTS_CAVE_HOSTS:
+        raise BlogWorkflowError(f"{label} must be a real Sports Cave storefront URL.")
+
+
+def _validate_youtube_url(value):
+    text = str(value or "").strip()
+    if not text:
+        return
+    _validate_url(text, "YouTube URL")
+    host = (urlparse(text).hostname or "").casefold()
+    if host not in YOUTUBE_HOSTS:
+        raise BlogWorkflowError("YouTube URL must use a real YouTube domain.")
+
+
 def validate_brief(brief, *, article_ready=False):
     brief = normalize_brief(brief)
     fields = ARTICLE_BRIEF_FIELDS if article_ready else RESEARCH_SETUP_FIELDS
     missing = [field.replace("_", " ") for field in fields if not brief.get(field)]
-    if brief.get("sport") == "Other" and not str(brief.get("sport_custom") or "").strip():
-        missing.append("custom sport")
-    if brief.get("search_intent") == "Other / Custom" and not str(brief.get("search_intent_custom") or "").strip():
-        missing.append("custom search intent / article type")
-    if brief.get("sport") not in SPORT_OPTIONS:
-        missing.append("supported sport")
-    if brief.get("search_intent") not in SEARCH_INTENT_OPTIONS:
-        missing.append("supported search intent / article type")
-    if brief.get("language") not in LANGUAGES:
-        missing.append("supported language")
-    if brief.get("publication_preference") not in PUBLICATION_PREFERENCES:
-        missing.append("draft / schedule preference")
+    if article_ready:
+        if brief.get("sport") == "Other" and not str(brief.get("sport_custom") or "").strip():
+            missing.append("custom sport")
+        if brief.get("search_intent") == "Other / Custom" and not str(brief.get("search_intent_custom") or "").strip():
+            missing.append("custom search intent / article type")
+        if brief.get("sport") not in SPORT_OPTIONS:
+            missing.append("supported sport")
+        if brief.get("search_intent") not in SEARCH_INTENT_OPTIONS:
+            missing.append("supported search intent / article type")
     if missing:
         raise BlogWorkflowError("Complete: " + ", ".join(dict.fromkeys(missing)) + ".")
-    _validate_url(brief.get("target_url"), "Target product or collection URL")
-    _validate_url(brief.get("youtube_url"), "YouTube URL", optional=True)
+    if article_ready:
+        _validate_sports_cave_url(
+            brief.get("target_url"), "Target product or collection URL"
+        )
+        for internal_url in brief.get("internal_links") or []:
+            _validate_sports_cave_url(internal_url, "Verified internal link")
+        _validate_youtube_url(brief.get("youtube_url"))
     return brief
 
 
 def prefill_from_opportunity(brief, opportunity):
-    """Fill blanks only; manual edits always win."""
-    result = dict(brief or {})
+    """Start fresh research from one saved GSC opportunity."""
+    result = normalize_brief(brief)
     opportunity = dict(opportunity or {})
-    recommended_intent = {
-        "New sports editorial": "Search Opportunity - Topical Authority Support",
-        "Supporting guide or existing article refresh": "Search Opportunity - Position 4-20 Support",
-        "Existing article refresh": "Search Opportunity - Low CTR Support",
-    }.get(str(opportunity.get("recommended_article_type") or ""))
-    candidates = {
-        "gsc_seed_query": opportunity.get("query"),
-        "selected_opportunity": opportunity.get("query"),
-        "subject": opportunity.get("query"),
-        "search_intent": recommended_intent,
-        "opportunity_snapshot": opportunity,
-    }
-    for field, value in candidates.items():
-        if not result.get(field) and value:
-            result[field] = value
-    return result
+    seed_query = str(opportunity.get("query") or "").strip()
+    if not seed_query:
+        raise BlogWorkflowError("Choose a saved GSC opportunity first.")
+    for field in (
+        "target_markets", "sport", "sport_custom", "search_intent",
+        "search_intent_custom", "subject", "timely_hook",
+        "recommended_article_angle", "working_article_title", "primary_keyword",
+        "supporting_keywords", "related_entities", "fan_questions", "target_title",
+        "target_url", "internal_links", "youtube_url", "target_length", "tags",
+        "link_building_authority_angle",
+        "target_entity_id", "target_entity_type", "target_sport", "source_artwork",
+    ):
+        result.pop(field, None)
+    result.update(
+        gsc_seed_query=seed_query,
+        selected_opportunity=seed_query,
+        opportunity_snapshot=opportunity,
+    )
+    return normalize_brief(result)
 
 
 def build_blog_opportunities(query_rows, *, data_through_date=""):
@@ -484,7 +507,6 @@ def blog_brief_csv_row(project_title, brief, *, opportunity=None):
     brief = normalize_brief(brief)
     opportunity = dict(opportunity or brief.get("opportunity_snapshot") or {})
     return {
-        "project_title": str(project_title or brief.get("project_title") or "").strip(),
         "gsc_seed_query": str(
             brief.get("gsc_seed_query") or opportunity.get("query") or ""
         ).strip(),
@@ -493,8 +515,6 @@ def blog_brief_csv_row(project_title, brief, *, opportunity=None):
         "search_intent_article_type": _taxonomy_csv_value(
             brief.get("search_intent"), brief.get("search_intent_custom"), "Other / Custom"
         ),
-        "language": str(brief.get("language") or "").strip(),
-        "draft_schedule_preference": str(brief.get("publication_preference") or "").strip(),
         "topic_entity": str(brief.get("subject") or "").strip(),
         "timely_hook": str(brief.get("timely_hook") or "").strip(),
         "recommended_article_angle": str(brief.get("recommended_article_angle") or "").strip(),
@@ -506,14 +526,9 @@ def blog_brief_csv_row(project_title, brief, *, opportunity=None):
         "product_collection_title": str(brief.get("target_title") or "").strip(),
         "product_collection_url": str(brief.get("target_url") or "").strip(),
         "verified_internal_links": CSV_MULTI_VALUE_DELIMITER.join(brief.get("internal_links") or []),
-        "link_building_authority_angle": str(
-            brief.get("link_building_authority_angle") or ""
-        ).strip(),
         "youtube_url": str(brief.get("youtube_url") or "").strip(),
         "target_word_count": str(brief.get("target_length") or "").strip(),
         "tags": CSV_MULTI_VALUE_DELIMITER.join(brief.get("tags") or []),
-        "author": str(brief.get("author") or "").strip(),
-        "target_shopify_blog": str(brief.get("target_blog") or "").strip(),
     }
 
 
@@ -523,6 +538,83 @@ def blog_brief_csv_bytes(project_title, brief, *, opportunity=None):
     writer.writeheader()
     writer.writerow(blog_brief_csv_row(project_title, brief, opportunity=opportunity))
     return output.getvalue().encode("utf-8-sig")
+
+
+def blog_brief_template_csv_bytes(brief, *, opportunity=None):
+    brief = normalize_brief(brief)
+    opportunity = dict(opportunity or brief.get("opportunity_snapshot") or {})
+    row = {field: "" for field in CSV_FIELDS}
+    row["gsc_seed_query"] = str(
+        brief.get("gsc_seed_query") or opportunity.get("query") or ""
+    ).strip()
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerow(row)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def _is_sports_cave_url(value):
+    parsed = urlparse(str(value or "").strip())
+    return (
+        parsed.scheme in {"http", "https"}
+        and (parsed.hostname or "").casefold() in SPORTS_CAVE_HOSTS
+    )
+
+
+def product_reference_csv_bytes(product_context):
+    rows = []
+    seen_urls = set()
+    for source in product_context or ():
+        source = dict(source or {})
+        url = str(source.get("url") or "").strip()
+        normalized_url = url.rstrip("/").casefold()
+        if not _is_sports_cave_url(url) or normalized_url in seen_urls:
+            continue
+        seen_urls.add(normalized_url)
+        rows.append(
+            {
+                "page_type": str(
+                    source.get("entity_type") or source.get("page_type") or ""
+                ).strip(),
+                "title": str(source.get("title") or source.get("name") or "").strip(),
+                "url": url,
+                "sport_or_category": str(source.get("sport") or "").strip(),
+            }
+        )
+    rows.sort(key=lambda row: (row["page_type"].casefold(), row["title"].casefold(), row["url"]))
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=PRODUCT_REFERENCE_FIELDS, lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def build_research_pack(
+    project_id,
+    brief,
+    *,
+    source_date="",
+    opportunity=None,
+    product_context=None,
+):
+    prompt = build_prompt_1(
+        project_id,
+        brief,
+        source_date=source_date,
+        opportunity=opportunity,
+        product_context=product_context,
+    )
+    template = blog_brief_template_csv_bytes(brief, opportunity=opportunity)
+    product_reference = product_reference_csv_bytes(product_context)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("PROMPT_1_RESEARCH.txt", prompt.encode("utf-8"))
+        archive.writestr("BLOG_BRIEF_TEMPLATE.csv", template)
+        reference_text = product_reference.decode("utf-8-sig")
+        if len(reference_text.splitlines()) > 1:
+            archive.writestr("SPORTS_CAVE_PAGE_REFERENCE.csv", product_reference)
+    return output.getvalue()
 
 
 def _decode_blog_csv(data, filename=""):
@@ -548,31 +640,6 @@ def _decode_blog_csv(data, filename=""):
     if "\x00" in text[:4096] or not text.strip():
         raise BlogBriefCSVError(("Choose a valid text CSV file.",))
     return text.lstrip("\ufeff")
-
-
-def _target_conflict(current_brief, imported_brief):
-    current = normalize_brief(current_brief)
-    imported = normalize_brief(imported_brief)
-    current_url = str(current.get("target_url") or "").strip().rstrip("/").casefold()
-    imported_url = str(imported.get("target_url") or "").strip().rstrip("/").casefold()
-    current_title = " ".join(str(current.get("target_title") or "").split()).casefold()
-    imported_title = " ".join(str(imported.get("target_title") or "").split()).casefold()
-    if (imported_url or imported_title) and not (current_url or current_title):
-        return (
-            "No Shopify product/collection is selected for this Blog project. "
-            f"The CSV targets '{imported.get('target_title') or imported.get('target_url')}'. "
-            "Choose that matching Shopify target before importing."
-        )
-    url_conflict = bool(current_url and imported_url and current_url != imported_url)
-    title_conflict = bool(current_title and imported_title and current_title != imported_title)
-    if not (url_conflict or title_conflict):
-        return ""
-    return (
-        "This CSV targets "
-        f"'{imported.get('target_title') or imported.get('target_url')}', but the current Shopify "
-        f"selection is '{current.get('target_title') or current.get('target_url')}'. "
-        "Choose the matching Shopify product/collection, or deliberately keep the current selection."
-    )
 
 
 def parse_blog_brief_csv(data, *, filename="", current_brief=None):
@@ -606,7 +673,6 @@ def parse_blog_brief_csv(data, *, filename="", current_brief=None):
         )
         imported_brief = validate_brief(
             {
-                "project_title": row["project_title"],
                 "gsc_seed_query": row["gsc_seed_query"],
                 "selected_opportunity": row["gsc_seed_query"],
                 "target_markets": target_markets,
@@ -614,8 +680,6 @@ def parse_blog_brief_csv(data, *, filename="", current_brief=None):
                 "sport_custom": sport_custom,
                 "search_intent": search_intent,
                 "search_intent_custom": search_intent_custom,
-                "language": row["language"],
-                "publication_preference": row["draft_schedule_preference"],
                 "subject": row["topic_entity"],
                 "timely_hook": row["timely_hook"],
                 "recommended_article_angle": row["recommended_article_angle"],
@@ -627,49 +691,52 @@ def parse_blog_brief_csv(data, *, filename="", current_brief=None):
                 "target_title": row["product_collection_title"],
                 "target_url": row["product_collection_url"],
                 "internal_links": _semicolon_list(row["verified_internal_links"]),
-                "link_building_authority_angle": row["link_building_authority_angle"],
                 "youtube_url": row["youtube_url"],
                 "target_length": row["target_word_count"],
                 "tags": _semicolon_list(row["tags"]),
-                "author": row["author"],
-                "target_blog": row["target_shopify_blog"],
             },
             article_ready=True,
         )
     except BlogWorkflowError as error:
         raise BlogBriefCSVError((str(error),)) from error
-    conflict = (
-        _target_conflict(current_brief or {}, imported_brief)
-        if current_brief is not None
-        else ""
-    )
+    current_seed = str(
+        normalize_brief(current_brief or {}).get("gsc_seed_query") or ""
+    ).strip()
+    imported_seed = str(imported_brief.get("gsc_seed_query") or "").strip()
+    if current_seed and imported_seed.casefold() != current_seed.casefold():
+        raise BlogBriefCSVError(
+            (
+                "This completed CSV belongs to a different GSC opportunity. "
+                f"Expected '{current_seed}' but received '{imported_seed}'.",
+            )
+        )
     return {
         "row": row,
         "brief": imported_brief,
-        "target_conflict": bool(conflict),
-        "target_conflict_message": conflict,
     }
 
 
-def merge_imported_brief(current_brief, imported_brief, *, keep_current_target=False):
+def merge_imported_brief(current_brief, imported_brief):
     current = normalize_brief(current_brief)
     imported = normalize_brief(imported_brief)
-    preserved_metadata = {
-        key: current.get(key)
-        for key in ("target_entity_id", "target_entity_type", "target_sport", "source_artwork")
-        if current.get(key)
-    }
-    if keep_current_target:
-        imported["target_title"] = current.get("target_title") or ""
-        imported["target_url"] = current.get("target_url") or ""
-    return {**current, **imported, **preserved_metadata}
+    merged = {**current, **imported}
+    for stale_target_field in (
+        "target_entity_id", "target_entity_type", "target_sport", "source_artwork"
+    ):
+        merged.pop(stale_target_field, None)
+    return normalize_brief(merged)
 
 
 def _evidence_lines(brief, opportunity, source_date):
+    reporting_context = dict(opportunity.get("reporting_context") or {})
     values = (
         ("Source", "Google Search Console saved query/page data"),
         ("Data through", source_date or opportunity.get("data_through_date") or "Not available"),
         ("Seed query", brief.get("gsc_seed_query") or opportunity.get("query") or ""),
+        ("Report period", reporting_context.get("period")),
+        ("Report market", reporting_context.get("market")),
+        ("Report device", reporting_context.get("device")),
+        ("Search type", reporting_context.get("search_type")),
         ("Clicks", opportunity.get("clicks")),
         ("Impressions", opportunity.get("impressions")),
         ("CTR", opportunity.get("ctr")),
@@ -682,81 +749,104 @@ def _evidence_lines(brief, opportunity, source_date):
     return "\n".join(f"- {label}: {value if value not in (None, '') else 'Not available'}" for label, value in values)
 
 
-def build_prompt_1(project_id, brief, *, source_date="", opportunity=None):
+def build_prompt_1(
+    project_id,
+    brief,
+    *,
+    source_date="",
+    opportunity=None,
+    product_context=None,
+):
     brief = validate_brief(brief)
     opportunity = dict(opportunity or brief.get("opportunity_snapshot") or {})
-    project_title = str(brief.get("project_title") or brief.get("subject") or "").strip()
-    csv_text = blog_brief_csv_bytes(
-        project_title, brief, opportunity=opportunity
+    csv_text = blog_brief_template_csv_bytes(
+        brief, opportunity=opportunity
     ).decode("utf-8-sig").strip()
-    markets = "; ".join(brief.get("target_markets") or [])
-    market_rule = (
-        "Write for international search and fan intent without unnecessarily localising the whole article. "
-        "A sport may naturally skew towards particular countries, but do not force a country focus."
-        if brief.get("target_markets") == [GLOBAL_MARKET]
-        else f"Account for search audiences in these explicitly selected markets: {markets}."
+    reference_text = product_reference_csv_bytes(product_context).decode("utf-8-sig")
+    reference_count = max(0, len(reference_text.splitlines()) - 1)
+    product_reference_note = (
+        f"The research pack includes SPORTS_CAVE_PAGE_REFERENCE.csv with {reference_count} "
+        "read-only candidates from the existing synced Sports Cave product/canonical-page index. "
+        "Use it for discovery only and verify every chosen page on the public storefront."
+        if reference_count
+        else "No saved product reference is supplied. Research the public Sports Cave storefront directly."
     )
-    return f"""SPORTS CAVE RESEARCH BLOG BRIEF - PROMPT 1
+    return f"""SPORTS CAVE SEO BLOG STRATEGY RESEARCH - PROMPT 1
 
-PURPOSE
-Research and complete one Blog brief CSV. Do not write the final article yet.
+ROLE AND PURPOSE
+You are completing a Sports Cave SEO Blog research brief. Do not write the final article yet.
+Use the Sports Cave project knowledge or memory available in this ChatGPT project as brand context.
+Use live research for current facts, current products and current URLs.
+
+The selected Google Search Console opportunity is the starting point. Do not assume the GSC wording
+is automatically the final target keyword. Research the opportunity and determine the strongest
+SEO, fan-interest and commercially relevant content strategy.
 
 PROJECT ID: {project_id}
-PROJECT TITLE: {project_title or 'Untitled brief'}
 
 SELECTED REAL GSC OPPORTUNITY
 {_evidence_lines(brief, opportunity, source_date)}
-This query is the starting search opportunity, not an instruction to keep it unchanged as the final primary keyword.
-Any stronger keyword or long-tail variation must stay closely tied to the same real search intent.
 
-SELECTED SPORTS CAVE PRODUCT OR COLLECTION
-- Type: {brief.get('target_entity_type') or 'Product or collection'}
-- Title: {brief.get('target_title') or ''}
-- Exact URL: {brief.get('target_url') or ''}
+SPORTS CAVE STOREFRONT CONTEXT
+Public storefront: https://www.sportscaveshop.com/
+{product_reference_note}
 
-TARGETING
-- Target markets: {markets}
-- Market guidance: {market_rule}
-- Sport: {_taxonomy_csv_value(brief.get('sport'), brief.get('sport_custom'), 'Other')}
-- Search intent / article type: {_taxonomy_csv_value(brief.get('search_intent'), brief.get('search_intent_custom'), 'Other / Custom')}
-- Language: {brief.get('language') or ''}
-- Draft / schedule preference: {brief.get('publication_preference') or ''}
+RESEARCH EVERYTHING
+1. Determine what the searcher actually wants.
+2. Choose the best primary keyword closely tied to the real GSC opportunity.
+3. Find useful supporting keywords and long-tail terms without keyword stuffing.
+4. Identify relevant semantic entities.
+5. Identify useful fan questions and People Also Ask-style questions.
+6. Classify the sport.
+7. Determine the dominant search intent.
+8. Choose the best article type and format.
+9. Recommend the strongest fan-first article angle.
+10. Create a compelling working article title.
+11. Define the athlete, team, rivalry, event, season or other central topic.
+12. Include a timely hook only when one genuinely exists; never manufacture urgency.
+13. Decide the best target country or countries using the GSC evidence, sport, subject, likely fan
+    demand and Sports Cave context. Use "All Countries / Global" only when international targeting
+    is genuinely strongest. Do not mechanically assign a sport to a country.
+14. Recommend a useful article length based on search intent and subject depth, never filler.
+15. Choose concise, relevant tags.
+16. Research the CURRENT public Sports Cave storefront and choose the best genuine live product or
+    collection for natural commercial support. Never fabricate a product or assume it is live.
+17. Supply the exact verified Sports Cave product/collection URL. If the ideal product does not exist,
+    choose the most relevant real collection or broader Sports Cave destination.
+18. Find other real Sports Cave internal links that strengthen SEO and navigation. Never invent a URL.
+19. Include a YouTube URL only when it is genuinely useful, relevant and verified; otherwise leave it blank.
+20. Supply every other requested CSV field that Prompt 2 needs to create the strongest article and images.
 
-RESEARCH INSTRUCTIONS
-1. Use the selected real GSC query as the starting search opportunity.
-2. Research the selected topic properly using authoritative, current sources.
-3. Visit and scan the supplied Sports Cave product or collection URL.
-4. Review the wider Sports Cave website where useful.
-5. Find ONLY real, verified Sports Cave internal links. Never invent an internal URL.
-6. Determine the strongest article angle, primary keyword, supporting keywords, relevant entities,
-   fan questions / People Also Ask style questions, genuine timely hook, internal linking opportunities,
-   sensible target length, tags and a link-building angle only where genuinely useful.
-7. Keep the article commercially relevant to Sports Cave without turning it into a product advertisement.
-8. Build around fan interest first, then guide readers naturally towards the selected product or collection.
-9. Avoid keyword stuffing.
-10. Prefer real search intent and useful fan content.
-11. Fact-check athlete, team, event, date, record and history claims where relevant.
-12. When target market is Global, make the brief internationally appropriate.
-13. When target markets are specific countries, account for those search audiences.
-14. Include a YouTube URL only when it is genuinely relevant and verified; otherwise leave youtube_url blank.
-15. If there is no legitimate timely hook, leave timely_hook blank. Never manufacture urgency.
-16. Do not invent a backlink opportunity just to fill the field. Blank optional fields are acceptable.
-17. Preserve operationally fixed fields: selected product/collection title and URL, author, target Shopify blog,
-    explicit target markets, language and draft/schedule preference.
-18. Output the completed CSV in EXACTLY the required schema and preserve semicolon-separated multi-value cells.
+SPORTS CAVE BRAND AND SEO STANDARD
+- Premium sports and collector editorial: knowledgeable, specific, original and fan-first.
+- Attract organic search traffic, build topical authority and lead naturally toward a relevant Sports Cave page.
+- Keep traffic first and conversion second. Never turn the brief into a long product advertisement.
+- Fact-check real names, dates, scores, seasons, venues, results, records and historical claims.
+- Avoid generic AI filler, fake urgency, spammy keyword stuffing and forced product mentions.
+- Use only verified links. Never expose credentials, secrets, private API payloads or customer/order data.
 
-CSV SCHEMA
+CLASSIFICATION GUIDANCE
+Sport must use one exact Sports Cave taxonomy value below. If none fits, use "Other: <custom sport>".
+{'; '.join(SPORT_OPTIONS)}
+
+Search intent/article type must use one exact value below. If none fits, use
+"Other / Custom: <custom classification>".
+{'; '.join(SEARCH_INTENT_OPTIONS)}
+
+CSV SCHEMA — DO NOT ADD, REMOVE, RENAME OR REORDER COLUMNS
 {','.join(CSV_FIELDS)}
 
-PARTIALLY FILLED CSV
+BLANK BLOG BRIEF TEMPLATE
 {csv_text}
 
-OUTPUT RULES
+CSV COMPLETION RULES
+- Preserve gsc_seed_query exactly as supplied.
+- Complete every research field except timely_hook and youtube_url, which may be blank when not legitimate.
+- Use semicolons inside multi-value cells: target_markets, supporting_keywords, related_entities,
+  fan_questions, verified_internal_links and tags.
 - Return the header row and exactly one completed data row.
-- Return no markdown explanation and no text before or after the CSV.
-- Do not use a code fence if possible.
+- Return no markdown, explanation, code fence or text before or after the CSV.
 - Quote CSV cells correctly when they contain commas, quotation marks or line breaks.
-- Never include credentials, secrets, private API payloads or invented Sports Cave URLs.
 """.strip()
 
 
