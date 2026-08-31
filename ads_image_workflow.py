@@ -25,6 +25,24 @@ INSTANT_EXPERIENCE_PREVIEW_QUALITY = 76
 INSTANT_EXPERIENCE_PREVIEW_CACHE_MAXSIZE = 96
 DEFAULT_ACCOUNT_TIMEZONE = "Australia/Sydney"
 MAX_FILENAME_LENGTH = 220
+CREATIVE_REFRESH_CAMPAIGN_TYPE = "Creative Refresh"
+CREATIVE_REFRESH_IMAGE_SLOTS = (
+    {
+        "id": "creative-refresh-winner-evolution",
+        "label": "Winner Evolution",
+        "position": 1,
+    },
+    {
+        "id": "creative-refresh-emotional-collector-expansion",
+        "label": "Emotional / Collector Expansion",
+        "position": 2,
+    },
+    {
+        "id": "creative-refresh-pattern-interrupt",
+        "label": "Pattern Interrupt",
+        "position": 3,
+    },
+)
 InstantExperiencePreviewCacheInfo = namedtuple(
     "InstantExperiencePreviewCacheInfo",
     "hits misses maxsize currsize",
@@ -63,6 +81,8 @@ def campaign_image_slots(campaign_type):
             }
             for concept in INSTANT_EXPERIENCE_CONCEPTS
         )
+    if campaign_type == CREATIVE_REFRESH_CAMPAIGN_TYPE:
+        return tuple(dict(slot) for slot in CREATIVE_REFRESH_IMAGE_SLOTS)
     return ()
 
 
@@ -396,6 +416,8 @@ def build_meta_image_filename(product_name, campaign_type, *, position=1, iso_da
         suffix = f" - Carousel {int(position):02d} - {iso_date}.jpg"
     elif campaign_type == "Instant Experience":
         suffix = f" - Instant Experience {int(position):02d} - {iso_date}.jpg"
+    elif campaign_type == CREATIVE_REFRESH_CAMPAIGN_TYPE:
+        suffix = f" - Creative Refresh {int(position):02d} - {iso_date}.jpg"
     else:
         raise ValueError("This campaign type does not support generated-image export.")
     product_limit = max(1, MAX_FILENAME_LENGTH - len(suffix))

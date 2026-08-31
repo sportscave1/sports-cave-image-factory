@@ -111,6 +111,14 @@ class AdsImageProcessingTests(unittest.TestCase):
                 "Premium Scarcity — Left Angle Cover",
             ],
         )
+        self.assertEqual(
+            [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Creative Refresh")],
+            [
+                "Winner Evolution",
+                "Emotional / Collector Expansion",
+                "Pattern Interrupt",
+            ],
+        )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
 
     def test_instant_experience_future_package_paths_use_canonical_route_slugs(self):
@@ -368,7 +376,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(len(upload_batch.call_args_list), 6)
+        self.assertEqual(len(upload_batch.call_args_list), 7)
         self.assertTrue(
             all(
                 row["status"] == "saved"
@@ -397,7 +405,14 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 for index in range(1, 6)
             ],
         )
-        notes_call = upload_batch.call_args_list[-1]
+        notes_call = upload_batch.call_args_list[-2]
+        carousel_csv_call = upload_batch.call_args_list[-1]
+        self.assertEqual(notes_call.args[2][0]["relative_path"], "Ad Copy.txt")
+        self.assertEqual(
+            carousel_csv_call.args[2][0]["relative_path"],
+            ads_page.CAROUSEL_COPY_FILENAME,
+        )
+        self.assertEqual(outcomes["_carousel_copy_csv"]["status"], "saved")
         self.assertEqual(notes_call.args[1], expected_folder)
         self.assertEqual(notes_call.kwargs["conflict"], "replace")
         notes_item = notes_call.args[2][0]
@@ -552,8 +567,12 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(upload_batch.call_count, 1)
-        self.assertEqual(upload_batch.call_args.args[2][0]["relative_path"], "Ad Copy.txt")
+        self.assertEqual(upload_batch.call_count, 2)
+        self.assertEqual(upload_batch.call_args_list[0].args[2][0]["relative_path"], "Ad Copy.txt")
+        self.assertEqual(
+            upload_batch.call_args_list[1].args[2][0]["relative_path"],
+            ads_page.CAROUSEL_COPY_FILENAME,
+        )
         self.assertEqual(outcomes["_ad_setup_notes"]["status"], "saved")
         self.assertNotIn("carousel-01", outcomes)
 
@@ -598,9 +617,17 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(upload_batch.call_count, 2)
+        self.assertEqual(upload_batch.call_count, 4)
+        self.assertEqual(
+            [call.args[2][0]["relative_path"] for call in upload_batch.call_args_list],
+            [
+                "Ad Copy.txt",
+                ads_page.CAROUSEL_COPY_FILENAME,
+                "Ad Copy.txt",
+                ads_page.CAROUSEL_COPY_FILENAME,
+            ],
+        )
         for call in upload_batch.call_args_list:
-            self.assertEqual(call.args[2][0]["relative_path"], "Ad Copy.txt")
             self.assertEqual(call.kwargs["conflict"], "replace")
         self.assertEqual(second["_ad_setup_notes"]["filename"], "Ad Copy.txt")
 
@@ -945,7 +972,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(upload_batch.call_count, 2)
+        self.assertEqual(upload_batch.call_count, 3)
         self.assertTrue(all(row["status"] == "saved" for row in second.values()))
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
@@ -1010,7 +1037,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(upload_batch.call_count, 2)
+        self.assertEqual(upload_batch.call_count, 3)
         self.assertTrue(all(row["status"] == "saved" for row in second.values()))
 
     def test_destination_outside_secure_root_is_rejected(self):

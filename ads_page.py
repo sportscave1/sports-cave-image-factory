@@ -10345,6 +10345,46 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
             )
         return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
 
+    if campaign_type == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+        lines.extend(
+            [
+                "",
+                "Creative Refresh lineage",
+                "- Source: Creative Refresh",
+                f"- Parent product: {result.get('parent_product') or result.get('product_name') or ''}",
+                "- Three controlled challengers imported from the Sports Cave Creative Refresh CSV.",
+            ]
+        )
+        for challenger in result.get("refresh_challengers") or ():
+            lines.extend(
+                [
+                    "",
+                    f"CHALLENGER {challenger.get('refresh_rank')}: {challenger.get('refresh_variant')}",
+                    f"- Refresh angle: {challenger.get('refresh_angle') or '[not supplied]'}",
+                    "- Primary text:",
+                    _preserve_multiline_text(challenger.get("primary_text")) or "[not supplied]",
+                    f"- Headline: {challenger.get('headline') or '[not supplied]'}",
+                    f"- Description: {challenger.get('description') or '[not supplied]'}",
+                    f"- CTA: {challenger.get('cta') or '[not supplied]'}",
+                    f"- Winner keep: {challenger.get('winner_keep') or '[not supplied]'}",
+                    f"- Winner change: {challenger.get('winner_change') or '[not supplied]'}",
+                    f"- Test reason: {challenger.get('test_reason') or '[not supplied]'}",
+                    "- Image-generation prompt:",
+                    _preserve_multiline_text(challenger.get("image_prompt")) or "[not supplied]",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "Creative Refresh setup checklist",
+                "- Match each saved image to its named challenger slot.",
+                "- Keep the selected Sports Cave product identity exact.",
+                "- Use the imported primary text, headline, description and CTA for the matching challenger.",
+                "- Retain Winner Evolution, Emotional / Collector Expansion and Pattern Interrupt as controlled test labels.",
+            ]
+        )
+        return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
+
     lines.extend(["", "HEADLINES", ""])
     lines.append(notes["headlines"] or "[not supplied]")
     lines.extend(["", "DESCRIPTIONS", ""])
@@ -11546,6 +11586,57 @@ def save_ads_images_to_dropbox(
                 ),
                 "asset_type": "meta_ads_copy_csv",
             }
+    if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+        refresh_csv_bytes = bytes(
+            result.get("creative_refresh_canonical_csv")
+            or result.get("creative_refresh_csv")
+            or b""
+        )
+        refresh_csv_filename = "creative-refresh-challengers.csv"
+        if refresh_csv_bytes:
+            refresh_csv_result = dropbox_integration.upload_batch(
+                access_token,
+                export_folder,
+                [
+                    {
+                        "relative_path": refresh_csv_filename,
+                        "data": refresh_csv_bytes,
+                        "size": len(refresh_csv_bytes),
+                    }
+                ],
+                conflict="replace",
+            )
+            refresh_csv_successes = list(refresh_csv_result.get("successes") or ())
+            refresh_csv_failures = list(refresh_csv_result.get("failures") or ())
+            if refresh_csv_successes:
+                metadata = dict(refresh_csv_successes[0].get("metadata") or {})
+                outcomes["_creative_refresh_csv"] = {
+                    "status": "saved",
+                    "label": "Creative Refresh challenger CSV",
+                    "filename": refresh_csv_filename,
+                    "path": str(
+                        metadata.get("path_display")
+                        or metadata.get("path_lower")
+                        or dropbox_integration.join_upload_path(
+                            export_folder,
+                            refresh_csv_filename,
+                        )
+                    ),
+                    "metadata": metadata,
+                    "asset_type": "meta_ads_copy_csv",
+                    "signature": hashlib.sha256(refresh_csv_bytes).hexdigest(),
+                }
+            else:
+                outcomes["_creative_refresh_csv"] = {
+                    "status": "failed",
+                    "label": "Creative Refresh challenger CSV",
+                    "filename": refresh_csv_filename,
+                    "error": str(
+                        (refresh_csv_failures[0] if refresh_csv_failures else {}).get("error")
+                        or "Upload failed."
+                    ),
+                    "asset_type": "meta_ads_copy_csv",
+                }
     workflow["saved_folder_path"] = export_folder
     workflow["ad_notes_saved_signature"] = (
         outcomes.get("_ad_setup_notes") or {}
@@ -11806,8 +11897,23 @@ def _render_ads_image_save(result, workflow):
             and carousel_csv_outcome.get("signature")
             == _carousel_copy_csv_signature(result, workflow)
         )
+    creative_refresh_csv_saved = True
+    if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+        refresh_csv_bytes = bytes(
+            result.get("creative_refresh_canonical_csv")
+            or result.get("creative_refresh_csv")
+            or b""
+        )
+        refresh_csv_outcome = (
+            (workflow.get("outcomes") or {}).get("_creative_refresh_csv") or {}
+        )
+        creative_refresh_csv_saved = bool(refresh_csv_bytes) and (
+            refresh_csv_outcome.get("status") == "saved"
+            and refresh_csv_outcome.get("signature")
+            == hashlib.sha256(refresh_csv_bytes).hexdigest()
+        )
     images_saved = saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
-    all_saved = images_saved and notes_saved and carousel_csv_saved
+    all_saved = images_saved and notes_saved and carousel_csv_saved and creative_refresh_csv_saved
     if not has_valid_upload:
         st.caption(f"0 of {required_count} images ready.")
     elif not ready:
@@ -11860,7 +11966,7 @@ def _render_ads_image_save(result, workflow):
         else "Retry failed images"
         if failed_count
         else "Update setup notes"
-        if images_saved and (not notes_saved or not carousel_csv_saved)
+        if images_saved and (not notes_saved or not carousel_csv_saved or not creative_refresh_csv_saved)
         else "Save setup notes here"
         if not has_valid_upload
         else f"Save {remaining_count} {'image' if remaining_count == 1 else 'images'} here"
@@ -11969,6 +12075,7 @@ def _render_ads_image_save(result, workflow):
     ]
     notes_outcome = outcomes.get("_ad_setup_notes") or {}
     carousel_csv_outcome = outcomes.get("_carousel_copy_csv") or {}
+    creative_refresh_csv_outcome = outcomes.get("_creative_refresh_csv") or {}
     if successful:
         if failed:
             st.warning(f"{len(successful)} of {save_target_count} images saved. {len(failed)} need attention.")
@@ -11987,6 +12094,17 @@ def _render_ads_image_save(result, workflow):
                 st.warning(
                     "Structured Carousel CSV was not saved: "
                     f"{carousel_csv_outcome.get('error') or 'Upload failed.'}"
+                )
+        if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+            if creative_refresh_csv_outcome.get("status") == "saved":
+                st.caption(
+                    "Creative Refresh challenger CSV saved: "
+                    f"{creative_refresh_csv_outcome.get('filename')}"
+                )
+            elif creative_refresh_csv_outcome.get("status") == "failed":
+                st.warning(
+                    "Creative Refresh challenger CSV was not saved: "
+                    f"{creative_refresh_csv_outcome.get('error') or 'Upload failed.'}"
                 )
         if st.button(
             "Open folder",

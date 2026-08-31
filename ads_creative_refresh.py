@@ -34,8 +34,59 @@ PRODUCT_URL_MANUAL_KEY = f"{STATE_PREFIX}product_url_manual"
 WINNING_CREATIVE_KEY = f"{STATE_PREFIX}winning_creative"
 ORIGINAL_PROMPT_UPLOAD_KEY = f"{STATE_PREFIX}original_prompt_upload"
 META_CSV_UPLOAD_KEY = f"{STATE_PREFIX}meta_csv_upload"
+CHALLENGER_CSV_UPLOAD_KEY = f"{STATE_PREFIX}challenger_csv_upload"
+REVIEW_RESULT_STATE_KEY = f"{STATE_PREFIX}review_result_v2"
+CHALLENGER_RESULT_STATE_KEY = f"{STATE_PREFIX}challenger_result_v2"
+PROMPT_READY_CONTEXT_KEY = f"{STATE_PREFIX}review_prompt_ready_context_v2"
 
 CREATIVE_REFRESH_VERSION = "SPORTS CAVE CREATIVE REFRESH V1"
+CREATIVE_REFRESH_V2_VERSION = "SPORTS CAVE CREATIVE REFRESH V2"
+CREATIVE_REFRESH_CSV_SCHEMA_VERSION = "2"
+CREATIVE_REFRESH_STRATEGIES = (
+    "Winner Evolution",
+    "Emotional / Collector Expansion",
+    "Pattern Interrupt",
+)
+CREATIVE_REFRESH_CSV_HEADERS = (
+    "schema_version",
+    "refresh_variant",
+    "refresh_rank",
+    "refresh_angle",
+    "refresh_parent_product",
+    "primary_text",
+    "headline",
+    "description",
+    "cta",
+    "on_image_headline",
+    "supporting_line",
+    "visual_concept",
+    "composition",
+    "product_placement",
+    "environment_background",
+    "lighting_mood",
+    "text_placement",
+    "hierarchy",
+    "winner_keep",
+    "winner_change",
+    "test_reason",
+    "image_prompt",
+)
+CREATIVE_REFRESH_REQUIRED_CSV_FIELDS = (
+    "schema_version",
+    "refresh_variant",
+    "refresh_rank",
+    "refresh_angle",
+    "refresh_parent_product",
+    "primary_text",
+    "headline",
+    "description",
+    "cta",
+    "visual_concept",
+    "winner_keep",
+    "winner_change",
+    "test_reason",
+    "image_prompt",
+)
 WINNING_ANGLE_OPTIONS = alphabetize_options((
     "Select emotional angle",
     "Nostalgia",
@@ -127,17 +178,20 @@ META_COLUMN_ALIASES = {
     "campaign_name": ("campaign name", "campaign"),
     "ad_set_name": ("ad set name", "adset name", "ad set"),
     "ad_name": ("ad name", "advert name", "ad"),
+    "campaign_delivery": ("campaign delivery", "ad set delivery", "ad delivery", "delivery"),
     "date_start": ("reporting starts", "reporting start", "start date", "date start", "from"),
     "date_end": ("reporting ends", "reporting end", "end date", "date stop", "to"),
     "spend": ("amount spent", "spend", "total spent"),
-    "results": ("website purchases", "purchases", "results", "purchase"),
+    "purchase_results": ("website purchases", "purchases", "purchase"),
+    "results": ("results", "results initial"),
+    "result_indicator": ("result indicator", "results initial indicator"),
     "purchase_value": (
         "website purchase conversion value",
         "purchases conversion value",
         "purchase conversion value",
         "conversion value",
     ),
-    "cpa": ("cost per purchase", "cost per result", "purchase cpa", "cpa"),
+    "cpa": ("cost per purchase", "cost per results", "cost per result", "purchase cpa", "cpa"),
     "roas": (
         "website purchase roas return on ad spend",
         "purchase roas return on ad spend",
@@ -152,6 +206,9 @@ META_COLUMN_ALIASES = {
         "ctr",
     ),
     "link_clicks": ("outbound clicks", "link clicks", "clicks all", "clicks"),
+    "adds_to_cart": ("website adds to cart", "adds to cart", "add to cart"),
+    "checkouts": ("checkouts initiated", "checkout initiated", "initiated checkouts"),
+    "payment_info": ("adds of payment info", "payment info adds"),
     "cpc": ("cpc cost per link click", "cost per outbound click", "cost per link click", "cpc"),
     "cpm": ("cpm cost per 1 000 impressions", "cost per 1 000 impressions", "cpm"),
     "frequency": ("frequency",),
@@ -260,20 +317,44 @@ def percentage_change(before, after):
 
 def derive_period_metrics(period):
     source = dict(period or {})
+    result_indicator = _clean_text(source.get("result_indicator")).casefold()
+    purchase_indicator = _result_indicator_semantic(result_indicator) == "purchase"
+    explicit_purchase_results = parse_metric_number(source.get("purchase_results"))
+    generic_results = parse_metric_number(source.get("results"))
+    purchase_results = explicit_purchase_results
+    if purchase_results is None and purchase_indicator:
+        purchase_results = generic_results
+    # Legacy manual-period callers did not supply an indicator. Keep their existing
+    # result/CPA behaviour while campaign CSVs retain explicit result semantics.
+    result_count_for_legacy_derivation = (
+        purchase_results
+        if purchase_results is not None
+        else generic_results
+        if not result_indicator
+        else None
+    )
     result = {
         "date_start": parse_metric_date(source.get("date_start")),
         "date_end": parse_metric_date(source.get("date_end")),
     }
     for key, _label in METRIC_FIELDS:
         result[key] = parse_metric_number(source.get(key), percentage=key == "ctr")
+    result["results"] = generic_results if generic_results is not None else explicit_purchase_results
+    result["purchase_results"] = purchase_results
+    result["result_indicator"] = result_indicator
+    result["result_semantic"] = _result_indicator_semantic(result_indicator)
+    result["campaign_delivery"] = _clean_text(source.get("campaign_delivery")).casefold()
     result["link_clicks"] = parse_metric_number(source.get("link_clicks"))
+    result["adds_to_cart"] = parse_metric_number(source.get("adds_to_cart"))
+    result["checkouts"] = parse_metric_number(source.get("checkouts"))
+    result["payment_info"] = parse_metric_number(source.get("payment_info"))
     result["campaign_name"] = _clean_text(source.get("campaign_name"))
     result["ad_set_name"] = _clean_text(source.get("ad_set_name"))
     result["ad_name"] = _clean_text(source.get("ad_name"))
     derived = []
 
     spend = result["spend"]
-    results = result["results"]
+    results = result_count_for_legacy_derivation
     purchase_value = result["purchase_value"]
     clicks = result["link_clicks"]
     impressions = result["impressions"]
@@ -301,6 +382,19 @@ def derive_period_metrics(period):
     return result
 
 
+def _result_indicator_semantic(value):
+    indicator = _normalise_header(value)
+    if not indicator:
+        return "unknown"
+    if "purchase" in indicator:
+        return "purchase"
+    if "link click" in indicator or indicator.endswith("click"):
+        return "link_click"
+    if indicator == "reach" or indicator.endswith(" reach"):
+        return "reach"
+    return "other"
+
+
 def _header_matches_alias(header, alias):
     if header == alias:
         return True
@@ -308,10 +402,9 @@ def _header_matches_alias(header, alias):
     return any(header == f"{alias}{suffix}" for suffix in currency_suffixes)
 
 
-def map_meta_csv_columns(fieldnames):
+def _meta_csv_column_candidates(fieldnames):
     normalised = {field: _normalise_header(field) for field in (fieldnames or ()) if field}
-    mapped = {}
-    warnings = []
+    candidate_map = {}
     for canonical, aliases in META_COLUMN_ALIASES.items():
         candidates = []
         for alias_rank, alias in enumerate(aliases):
@@ -321,16 +414,29 @@ def map_meta_csv_columns(fieldnames):
                     candidates.append((alias_rank, field))
         if candidates:
             candidates.sort(key=lambda item: (item[0], str(item[1]).casefold()))
-            mapped[canonical] = candidates[0][1]
             distinct = []
             for _rank, field in candidates:
                 if field not in distinct:
                     distinct.append(field)
-            if len(distinct) > 1:
-                warnings.append(
-                    f"Mapped {canonical.replace('_', ' ')} from '{mapped[canonical]}' using the documented priority rule."
-                )
+            candidate_map[canonical] = tuple(distinct)
+    return candidate_map
+
+
+def map_meta_csv_columns(fieldnames):
+    candidate_map = _meta_csv_column_candidates(fieldnames)
+    mapped = {}
+    warnings = []
+    for canonical, distinct in candidate_map.items():
+        mapped[canonical] = distinct[0]
+        if len(distinct) > 1:
+            warnings.append(
+                f"Recognised multiple {canonical.replace('_', ' ')} columns; each row uses the first non-blank value by documented priority."
+            )
     return mapped, warnings
+
+
+def _meta_cell_is_missing(value):
+    return _clean_text(value).casefold() in {"", "nan", "n/a", "na", "none", "null", "-", "--"}
 
 
 def _decode_csv_bytes(data):
@@ -360,13 +466,29 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
         raise MetaCSVValidationError("The Meta CSV has no header row.")
 
     column_map, warnings = map_meta_csv_columns(reader.fieldnames)
-    missing_dates = [key for key in ("date_start", "date_end") if key not in column_map]
-    if missing_dates:
-        raise MetaCSVValidationError(
-            "Could not map the reporting start and end dates. Include Meta columns such as "
-            "'Reporting starts' and 'Reporting ends'."
+    column_candidates = _meta_csv_column_candidates(reader.fieldnames)
+    mapped_metrics = [
+        key
+        for key in (
+            "spend",
+            "results",
+            "purchase_results",
+            "purchase_value",
+            "cpa",
+            "roas",
+            "ctr",
+            "link_clicks",
+            "cpc",
+            "cpm",
+            "frequency",
+            "reach",
+            "impressions",
+            "adds_to_cart",
+            "checkouts",
+            "payment_info",
         )
-    mapped_metrics = [key for key, _label in METRIC_FIELDS if key in column_map]
+        if key in column_map
+    ]
     if not mapped_metrics:
         raise MetaCSVValidationError(
             "Could not map any performance metrics. Include spend, results, ROAS, CTR, CPA, CPC, CPM, frequency, reach or impressions."
@@ -377,21 +499,29 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
         if not any(str(value or "").strip() for value in raw.values()):
             continue
         period = {}
-        for canonical, source_column in column_map.items():
-            period[canonical] = raw.get(source_column)
+        for canonical, source_columns in column_candidates.items():
+            values = [raw.get(source_column) for source_column in source_columns]
+            period[canonical] = next(
+                (value for value in values if not _meta_cell_is_missing(value)),
+                None,
+            )
         derived = derive_period_metrics(period)
-        if not derived["date_start"] or not derived["date_end"]:
-            raise MetaCSVValidationError(
-                f"Row {source_index} has an invalid reporting date. Use ISO or day/month/year dates."
+        raw_start = _clean_text(period.get("date_start"))
+        raw_end = _clean_text(period.get("date_end"))
+        if (raw_start and not derived["date_start"]) or (raw_end and not derived["date_end"]):
+            warnings.append(
+                f"Row {source_index} contains an unrecognised reporting date; its metrics were still imported."
             )
         identity = derived["ad_name"] or derived["ad_set_name"] or derived["campaign_name"] or "Unlabelled row"
+        start_label = derived["date_start"].isoformat() if derived["date_start"] else "date unavailable"
+        end_label = derived["date_end"].isoformat() if derived["date_end"] else "date unavailable"
         row_id = hashlib.sha256(
             json.dumps(
                 {
                     "source_index": source_index,
                     "identity": identity,
-                    "start": derived["date_start"].isoformat(),
-                    "end": derived["date_end"].isoformat(),
+                    "start": start_label,
+                    "end": end_label,
                 },
                 sort_keys=True,
             ).encode("utf-8")
@@ -401,8 +531,7 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
                 "row_id": row_id,
                 "source_row": source_index,
                 "label": (
-                    f"{identity} | {derived['date_start'].isoformat()} to "
-                    f"{derived['date_end'].isoformat()} | row {source_index}"
+                    f"{identity} | {start_label} to {end_label} | row {source_index}"
                 ),
             }
         )
@@ -411,11 +540,36 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
         raise MetaCSVValidationError("The Meta CSV contains no data rows.")
     if len(rows) < 2:
         warnings.append("At least two rows are needed to compare a winning period with a recent period.")
+    report_level = (
+        "ad"
+        if "ad_name" in column_map
+        else "ad set"
+        if "ad_set_name" in column_map
+        else "campaign"
+        if "campaign_name" in column_map
+        else "unknown"
+    )
+    spend_header = str(column_map.get("spend") or "")
+    currency_match = re.search(r"\b(AUD|USD|CAD|NZD|GBP)\b", spend_header, flags=re.IGNORECASE)
     return {
         "rows": rows,
         "column_map": column_map,
-        "warnings": warnings,
+        "column_candidates": column_candidates,
+        "warnings": list(dict.fromkeys(warnings)),
         "requires_explicit_selection": len(rows) >= 2,
+        "report_level": report_level,
+        "row_count": len(rows),
+        "named_row_count": sum(
+            1
+            for row in rows
+            if row.get("ad_name") or row.get("ad_set_name") or row.get("campaign_name")
+        ),
+        "aggregate_row_count": sum(
+            1
+            for row in rows
+            if not (row.get("ad_name") or row.get("ad_set_name") or row.get("campaign_name"))
+        ),
+        "currency": currency_match.group(1).upper() if currency_match else "",
     }
 
 
@@ -428,6 +582,557 @@ def select_meta_csv_periods(parsed, winning_row_id, recent_row_id):
     if winning_row_id not in rows or recent_row_id not in rows:
         raise MetaCSVValidationError("A selected CSV row is no longer available. Re-select both periods.")
     return rows[winning_row_id], rows[recent_row_id]
+
+
+def _first_row_text(row, *fields):
+    row = row if isinstance(row, dict) else {}
+    for field in fields:
+        value = _clean_text(row.get(field))
+        if value:
+            return value
+    return ""
+
+
+def build_creative_refresh_product_context(selection):
+    """Build prompt-safe product context from the canonical Ads/Edition Ops selection."""
+    selection = dict(selection or {})
+    row = dict(selection.get("row") or {})
+    product_name = _first_row_text(
+        row,
+        "product_title",
+        "Product title",
+        "edition_name",
+        "product_name",
+        "title",
+        "name",
+    ) or _clean_text(selection.get("selected_label"))
+    handle = _first_row_text(
+        row,
+        "shopify_handle",
+        "Shopify handle",
+        "product_handle",
+        "handle",
+        "Handle",
+    )
+    category = _first_row_text(
+        row,
+        "product_sport",
+        "sport",
+        "Sport",
+        "sport_category",
+        "category",
+        "Category",
+        "product_category",
+    )
+    country = _first_row_text(row, "country", "Country", "market", "Market")
+    product_url = _clean_text(selection.get("product_url")) or _first_row_text(
+        row,
+        "online_store_url",
+        "live_product_url",
+        "product_page_url",
+        "product_url",
+        "storefront_url",
+        "url",
+    )
+    asset_reference = _first_row_text(
+        row,
+        "image_url",
+        "product_image_url",
+        "source_image_url",
+        "artwork_url",
+        "psd_url",
+    )
+    metadata = ads_page.instant_experience_product_metadata_from_selection(
+        selection,
+        category=category,
+    )
+    return {
+        "product_name": product_name,
+        "handle": handle,
+        "product_url": product_url,
+        "category": category,
+        "country": country,
+        "product_id": _clean_text(selection.get("product_id")),
+        "record_key": _clean_text(selection.get("record_key")),
+        "product_type": _clean_text(metadata.get("product_type")),
+        "collections": tuple(metadata.get("collections") or ()),
+        "edition_limit": metadata.get("edition_limit"),
+        "edition_limit_source": _clean_text(metadata.get("edition_limit_source")),
+        "asset_reference": asset_reference,
+    }
+
+
+def validate_creative_refresh_v2_inputs(product_context, winning_primary_text, winning_headline):
+    errors = []
+    if not _clean_text((product_context or {}).get("product_name")):
+        errors.append("Select a Sports Cave product.")
+    if not _multiline_text(winning_primary_text):
+        errors.append("Paste the winning primary text.")
+    if not _clean_text(winning_headline):
+        errors.append("Paste the winning headline.")
+    return errors
+
+
+def _sum_available(rows, key):
+    values = [row.get(key) for row in rows if row.get(key) is not None]
+    return math.fsum(float(value) for value in values) if values else None
+
+
+def _product_match_tokens(product_context):
+    candidates = (
+        (product_context or {}).get("product_name"),
+        (product_context or {}).get("handle"),
+    )
+    tokens = set()
+    stop = {"the", "and", "wall", "art", "framed", "tribute", "edition", "limited"}
+    for candidate in candidates:
+        for token in _normalise_header(candidate).split():
+            if len(token) >= 4 and token not in stop:
+                tokens.add(token)
+    return tokens
+
+
+def _row_matches_product(row, product_context):
+    campaign_text = _normalise_header(
+        " ".join(
+            str(row.get(field) or "")
+            for field in ("campaign_name", "ad_set_name", "ad_name")
+        )
+    )
+    tokens = _product_match_tokens(product_context)
+    return bool(campaign_text and tokens and any(token in campaign_text.split() for token in tokens))
+
+
+def _format_evidence_number(value, *, money=False, percent=False, ratio=False, currency=""):
+    if value is None:
+        return "not available"
+    number = float(value)
+    if money:
+        prefix = f"{currency} " if currency else ""
+        return f"{prefix}{number:,.2f}"
+    if percent:
+        return f"{number:,.2f}%"
+    if ratio:
+        return f"{number:,.2f}x"
+    return f"{number:,.0f}" if number.is_integer() else f"{number:,.2f}"
+
+
+def build_meta_evidence_pack(parsed, product_context=None):
+    if not parsed:
+        return {
+            "summary": "No Meta performance CSV was supplied. Treat all performance explanations as hypotheses to test.",
+            "metrics": {},
+            "relevant_rows": (),
+            "context_rows": (),
+            "limitations": (
+                "No Meta performance evidence was supplied, so the attached creative and copy are the only winner evidence.",
+            ),
+        }
+
+    rows = list(parsed.get("rows") or ())
+    named_rows = [
+        row
+        for row in rows
+        if row.get("campaign_name") or row.get("ad_set_name") or row.get("ad_name")
+    ]
+    evidence_rows = named_rows or rows
+    currency = _clean_text(parsed.get("currency"))
+    spend = _sum_available(evidence_rows, "spend")
+    impressions = _sum_available(evidence_rows, "impressions")
+    reach = _sum_available(evidence_rows, "reach")
+    link_clicks = _sum_available(evidence_rows, "link_clicks")
+    adds_to_cart = _sum_available(evidence_rows, "adds_to_cart")
+    checkouts = _sum_available(evidence_rows, "checkouts")
+    purchases = _sum_available(evidence_rows, "purchase_results")
+    purchase_value = _sum_available(evidence_rows, "purchase_value")
+    ctr = (
+        (link_clicks / impressions) * 100
+        if link_clicks is not None and impressions and impressions > 0
+        else None
+    )
+    cpc = spend / link_clicks if spend is not None and link_clicks and link_clicks > 0 else None
+    cpm = (spend / impressions) * 1000 if spend is not None and impressions and impressions > 0 else None
+    frequency = impressions / reach if impressions is not None and reach and reach > 0 else None
+    roas = purchase_value / spend if purchase_value is not None and spend and spend > 0 else None
+    if roas is None:
+        weighted_roas = [
+            (row.get("roas"), row.get("spend"))
+            for row in evidence_rows
+            if row.get("roas") is not None and row.get("spend") is not None and row.get("spend") > 0
+        ]
+        if weighted_roas:
+            roas = sum(float(value) * float(weight) for value, weight in weighted_roas) / sum(
+                float(weight) for _value, weight in weighted_roas
+            )
+
+    metrics = {
+        "spend": spend,
+        "impressions": impressions,
+        "reach": reach,
+        "frequency": frequency,
+        "ctr": ctr,
+        "cpc": cpc,
+        "cpm": cpm,
+        "link_clicks": link_clicks,
+        "purchases": purchases,
+        "roas": roas,
+        "adds_to_cart": adds_to_cart,
+        "checkouts": checkouts,
+    }
+    relevant_rows = [row for row in evidence_rows if _row_matches_product(row, product_context or {})]
+    relevant_rows.sort(key=lambda row: float(row.get("spend") or 0), reverse=True)
+    context_rows = sorted(
+        evidence_rows,
+        key=lambda row: (
+            float(row.get("spend") or 0),
+            float(row.get("purchase_results") or 0),
+        ),
+        reverse=True,
+    )[:3]
+    report_level = parsed.get("report_level") or "unknown"
+    limitations = [
+        f"The uploaded Meta file is {report_level}-level. These metrics provide campaign/account context; they cannot by themselves prove the exact ad-level performance of the attached creative."
+    ]
+    if parsed.get("aggregate_row_count"):
+        limitations.append(
+            "Blank-name aggregate rows were accepted but excluded from totals when named rows were available, preventing double counting."
+        )
+    if not relevant_rows:
+        limitations.append(
+            "No reliable product-name or handle match was found in campaign/ad-set/ad names, so no row is attributed to the selected product."
+        )
+    if any(
+        row.get("results") is not None and row.get("purchase_results") is None
+        for row in evidence_rows
+    ):
+        limitations.append(
+            "Generic Results values whose Result indicator was not purchase were not counted as purchases."
+        )
+
+    lines = [
+        f"Import: {len(rows)} rows ({parsed.get('named_row_count', 0)} named; {parsed.get('aggregate_row_count', 0)} blank-name aggregate), detected at {report_level} level.",
+        "Overall row-level context (blank-name aggregate excluded when named rows exist):",
+        f"- Spend: {_format_evidence_number(spend, money=True, currency=currency)}",
+        f"- Impressions: {_format_evidence_number(impressions)}",
+        f"- Reported reach sum: {_format_evidence_number(reach)}",
+        f"- Derived frequency context: {_format_evidence_number(frequency)}",
+        f"- Link clicks: {_format_evidence_number(link_clicks)}",
+        f"- Derived link CTR: {_format_evidence_number(ctr, percent=True)}",
+        f"- Derived CPC: {_format_evidence_number(cpc, money=True, currency=currency)}",
+        f"- Derived CPM: {_format_evidence_number(cpm, money=True, currency=currency)}",
+        f"- Purchase-semantic results only: {_format_evidence_number(purchases)}",
+        f"- Purchase ROAS context: {_format_evidence_number(roas, ratio=True)}",
+        f"- Adds to cart: {_format_evidence_number(adds_to_cart)}",
+        f"- Checkouts initiated: {_format_evidence_number(checkouts)}",
+    ]
+    if relevant_rows:
+        lines.append("Likely product-name/handle matches (context only):")
+        for row in relevant_rows[:3]:
+            identity = row.get("ad_name") or row.get("ad_set_name") or row.get("campaign_name") or "Unlabelled"
+            lines.append(
+                f"- {identity}: spend {_format_evidence_number(row.get('spend'), money=True, currency=currency)}, "
+                f"purchases {_format_evidence_number(row.get('purchase_results'))}, ROAS {_format_evidence_number(row.get('roas'), ratio=True)}."
+            )
+    lines.append("Highest-spend context rows:")
+    for row in context_rows:
+        identity = row.get("ad_name") or row.get("ad_set_name") or row.get("campaign_name") or "Unlabelled"
+        indicator = row.get("result_indicator") or "not supplied"
+        lines.append(
+            f"- {identity}: spend {_format_evidence_number(row.get('spend'), money=True, currency=currency)}, "
+            f"results {_format_evidence_number(row.get('results'))} ({indicator}), CTR {_format_evidence_number(row.get('ctr'), percent=True)}."
+        )
+    lines.append("Evidence limitations:")
+    lines.extend(f"- {limitation}" for limitation in limitations)
+    return {
+        "summary": "\n".join(lines),
+        "metrics": metrics,
+        "relevant_rows": tuple(relevant_rows[:3]),
+        "context_rows": tuple(context_rows),
+        "limitations": tuple(limitations),
+    }
+
+
+def _product_context_prompt_lines(product_context):
+    context = dict(product_context or {})
+    rows = [f"- Canonical product: {context.get('product_name') or 'not available'}"]
+    optional = (
+        ("Handle", context.get("handle")),
+        ("Product page URL", context.get("product_url")),
+        ("Sport/category", context.get("category")),
+        ("Product type", context.get("product_type")),
+        ("Stored market", context.get("country")),
+        ("Edition limit", context.get("edition_limit")),
+        ("Edition evidence source", context.get("edition_limit_source")),
+        ("Existing exact product asset reference", context.get("asset_reference")),
+    )
+    rows.extend(f"- {label}: {value}" for label, value in optional if value not in (None, "", ()))
+    if context.get("collections"):
+        rows.append(f"- Collections: {', '.join(context['collections'])}")
+    return "\n".join(rows)
+
+
+def build_creative_refresh_review_prompt(
+    product_context,
+    winning_primary_text,
+    winning_headline,
+    *,
+    meta_evidence=None,
+):
+    evidence = meta_evidence or build_meta_evidence_pack(None, product_context)
+    csv_header = ",".join(CREATIVE_REFRESH_CSV_HEADERS)
+    strategies = "\n".join(
+        f"{index}. {strategy}" for index, strategy in enumerate(CREATIVE_REFRESH_STRATEGIES, start=1)
+    )
+    return f"""==================================================
+SPORTS CAVE — CREATIVE REFRESH ANALYSIS
+==================================================
+
+Attach the actual winning ad creative image to this ChatGPT message before running this prompt.
+
+The selected Sports Cave product/artwork is the immutable product identity. The manually attached winning ad image is a creative/composition reference only. Never replace the exact product artwork with imagery extracted or reconstructed from the winning advertisement.
+
+Your job is to study a proven Sports Cave advertisement and develop THREE upgraded controlled challenger ads that preserve the winning DNA without merely duplicating it.
+
+PRODUCT CONTEXT
+{_product_context_prompt_lines(product_context)}
+
+WINNER INPUT
+Winning primary text:
+{_multiline_text(winning_primary_text)}
+
+Winning headline:
+{_clean_text(winning_headline)}
+
+PERFORMANCE EVIDENCE
+{evidence.get('summary') or 'No Meta evidence supplied.'}
+
+ANALYSIS REQUIREMENTS
+
+1. Inspect the attached winning creative carefully. Analyse layout, hierarchy, product prominence, framing, room/environment, colour contrast, text placement, headline visibility, amount of copy, social-feed stopping power, collector appeal, emotional trigger, scarcity treatment, credibility, visual simplicity, mobile readability, likely attention mechanism, possible weaknesses and what must not be lost.
+
+2. Analyse the winning primary text and headline. Determine the hook, emotion, collector motivation, scarcity/FOMO mechanism, fan identity, nostalgia, urgency, product clarity, CTA strength and message-match with the creative.
+
+3. Analyse supplied Meta metrics when available. Use actual evidence rather than guessing. Consider CTR, CPC, CPM, frequency, spend, purchase-semantic results, ROAS, adds to cart, checkouts and plausible deterioration/fatigue signals. Clearly label every important claim as FACT, INFERENCE or HYPOTHESIS. Never treat a generic Results value as a purchase unless its Result indicator proves purchase semantics.
+
+4. Research the product, athlete/team/sport and fan context where useful. Use current web research where appropriate. Research fan identity, collector motivations, relevant sports history, emotional hooks, audience language, competing creative patterns and what makes the product compelling today. Do not change verified sports facts.
+
+5. Diagnose why the winner likely worked without claiming certainty. Return a concise WINNER DNA section with KEEP, IMPROVE, REMOVE and TEST.
+
+6. Analyse the most plausible audience motivations, such as die-hard fan identity, nostalgia, gifting, collecting, legacy/status, man-cave/home decor and verified limited-edition scarcity. Do not claim Meta targeting data exists unless it is actually present.
+
+7. Build exactly THREE refreshed challengers. All must remain recognisably derived from the winner and be controlled enough to learn from:
+{strategies}
+
+- Winner Evolution is the closest, lowest-risk evolution and fixes the weakest elements.
+- Emotional / Collector Expansion preserves core visual DNA while strengthening the emotional or collector reason to care.
+- Pattern Interrupt is the boldest evolution, with a stronger visual/message hook while retaining product and winner lineage.
+
+For each challenger create: angle; strategy/rationale; primary text; Meta headline; Meta description; CTA recommendation; optional on-image headline and supporting line; visual concept; composition; product placement; environment/background; lighting/mood; text placement; hierarchy; what was retained; what deliberately changed; why it deserves a test; and one complete standalone image-generation prompt.
+
+All creative must be premium, realistic, Sports Cave branded, mobile-first, uncluttered, Meta-suitable, emotionally compelling, focused on the exact product, believable rather than AI-looking and controlled enough to learn from. Do not create fake reviews, facts, product claims, scarcity numbers or offers.
+
+8. Rank all three challengers #1, #2 and #3, with a brief test-order reason.
+
+9. Return a machine-importable CSV for Sports Cave OS. Also provide it as a downloadable .csv file if this ChatGPT environment supports file generation.
+
+CSV CONTRACT — EXACT
+- Schema version: {CREATIVE_REFRESH_CSV_SCHEMA_VERSION}
+- Exactly three data rows, in this exact strategy order: {', '.join(CREATIVE_REFRESH_STRATEGIES)}.
+- Use this exact header row and no extra columns:
+{csv_header}
+- refresh_rank must be 1, 2 and 3 respectively.
+- refresh_parent_product must be exactly: {product_context.get('product_name') or ''}
+- Required non-empty fields: {', '.join(CREATIVE_REFRESH_REQUIRED_CSV_FIELDS)}.
+- on_image_headline and supporting_line may be blank when deliberately unnecessary.
+- Quote fields correctly. Preserve commas and line breaks inside quoted fields. Do not put Markdown formatting inside CSV fields.
+- image_prompt must be complete and standalone. It must preserve the exact selected Sports Cave product identity and must not depend on another row or prompt.
+
+Return the concise analysis first, then the downloadable/importable CSV. Do not generate any image until explicitly asked in ChatGPT.
+""".strip()
+
+
+def _normalised_csv_header_map(headers):
+    mapped = {}
+    duplicates = []
+    for header in headers or ():
+        normal = _normalise_header(header)
+        if normal in mapped:
+            duplicates.append(str(header))
+        mapped[normal] = header
+    return mapped, duplicates
+
+
+def _canonical_refresh_strategy(value):
+    normal = _normalise_header(value)
+    aliases = {
+        "winner evolution": CREATIVE_REFRESH_STRATEGIES[0],
+        "emotional collector expansion": CREATIVE_REFRESH_STRATEGIES[1],
+        "emotional expansion": CREATIVE_REFRESH_STRATEGIES[1],
+        "pattern interrupt": CREATIVE_REFRESH_STRATEGIES[2],
+    }
+    return aliases.get(normal, "")
+
+
+def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="creative-refresh.csv"):
+    if not str(filename or "").casefold().endswith(".csv"):
+        raise CreativeRefreshValidationError("Upload the ChatGPT Refresh CSV as a .csv file.")
+    source = bytes(data or b"")
+    if not source:
+        raise CreativeRefreshValidationError("Choose the ChatGPT Refresh CSV.")
+    if len(source) > 2 * 1024 * 1024:
+        raise CreativeRefreshValidationError("The ChatGPT Refresh CSV must be smaller than 2 MB.")
+    try:
+        decoded = source.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise CreativeRefreshValidationError("Save the ChatGPT Refresh CSV as UTF-8 and try again.") from error
+    if "\x00" in decoded:
+        raise CreativeRefreshValidationError("The ChatGPT Refresh CSV contains invalid text data.")
+    try:
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        headers = list(reader.fieldnames or ())
+        header_map, duplicate_headers = _normalised_csv_header_map(headers)
+        if duplicate_headers:
+            raise CreativeRefreshValidationError("The ChatGPT Refresh CSV contains duplicate column headers.")
+        missing = [
+            header
+            for header in CREATIVE_REFRESH_CSV_HEADERS
+            if _normalise_header(header) not in header_map
+        ]
+        if missing:
+            raise CreativeRefreshValidationError(
+                "The ChatGPT Refresh CSV is missing required columns: " + ", ".join(missing) + "."
+            )
+        unexpected = [
+            header
+            for header in headers
+            if _normalise_header(header)
+            not in {_normalise_header(expected) for expected in CREATIVE_REFRESH_CSV_HEADERS}
+        ]
+        if unexpected:
+            raise CreativeRefreshValidationError(
+                "The ChatGPT Refresh CSV contains unexpected columns: " + ", ".join(unexpected) + "."
+            )
+        raw_rows = []
+        for row_number, row in enumerate(reader, start=2):
+            if None in row or any(value is None for value in row.values()):
+                raise CreativeRefreshValidationError(
+                    f"ChatGPT Refresh CSV row {row_number} has an unexpected or missing value. Check its quoting."
+                )
+            if any(_multiline_text(value) for value in row.values()):
+                raw_rows.append(row)
+    except CreativeRefreshValidationError:
+        raise
+    except (csv.Error, AttributeError) as error:
+        raise CreativeRefreshValidationError(
+            "The ChatGPT Refresh CSV could not be read. Check its quoting and line breaks."
+        ) from error
+    if len(raw_rows) != 3:
+        raise CreativeRefreshValidationError(
+            f"Creative Refresh expects exactly 3 challenger rows; this file contains {len(raw_rows)}."
+        )
+
+    challengers = []
+    expected_product = _clean_text(product_name)
+    for index, raw in enumerate(raw_rows, start=1):
+        row = {
+            expected: _multiline_text(raw.get(header_map[_normalise_header(expected)]))
+            for expected in CREATIVE_REFRESH_CSV_HEADERS
+        }
+        missing_values = [field for field in CREATIVE_REFRESH_REQUIRED_CSV_FIELDS if not row.get(field)]
+        if missing_values:
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} is missing required values: {', '.join(missing_values)}."
+            )
+        if row["schema_version"] != CREATIVE_REFRESH_CSV_SCHEMA_VERSION:
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} has schema_version {row['schema_version']!r}; expected {CREATIVE_REFRESH_CSV_SCHEMA_VERSION}."
+            )
+        strategy = _canonical_refresh_strategy(row["refresh_variant"])
+        expected_strategy = CREATIVE_REFRESH_STRATEGIES[index - 1]
+        if strategy != expected_strategy:
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} must use refresh_variant {expected_strategy!r}."
+            )
+        try:
+            rank = int(row["refresh_rank"])
+        except ValueError as error:
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} refresh_rank must be {index}."
+            ) from error
+        if rank != index:
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} refresh_rank must be {index}."
+            )
+        if expected_product and _normalise_header(row["refresh_parent_product"]) != _normalise_header(expected_product):
+            raise CreativeRefreshValidationError(
+                f"Challenger row {index} refresh_parent_product must match the selected product: {expected_product}."
+            )
+        row["refresh_variant"] = strategy
+        row["refresh_rank"] = rank
+        row["refresh_parent_product"] = expected_product or row["refresh_parent_product"]
+        challengers.append(row)
+    return tuple(challengers)
+
+
+def build_creative_refresh_challenger_csv(challengers):
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CREATIVE_REFRESH_CSV_HEADERS, lineterminator="\r\n")
+    writer.writeheader()
+    for challenger in challengers or ():
+        writer.writerow({header: challenger.get(header, "") for header in CREATIVE_REFRESH_CSV_HEADERS})
+    return output.getvalue().encode("utf-8-sig")
+
+
+def build_creative_refresh_ads_result(product_context, challengers, csv_data):
+    canonical_csv = build_creative_refresh_challenger_csv(challengers)
+    context_payload = {
+        "version": CREATIVE_REFRESH_V2_VERSION,
+        "product_id": (product_context or {}).get("product_id"),
+        "record_key": (product_context or {}).get("record_key"),
+        "csv_hash": hashlib.sha256(canonical_csv).hexdigest(),
+    }
+    context_key = hashlib.sha256(
+        json.dumps(context_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:20]
+    category = _clean_text((product_context or {}).get("category")) or "Other"
+    country = _clean_text((product_context or {}).get("country")) or "Unspecified"
+    return {
+        "context_key": f"creative-refresh::{context_key}",
+        "product_name": _clean_text((product_context or {}).get("product_name")),
+        "product_id": _clean_text((product_context or {}).get("product_id")),
+        "record_key": _clean_text((product_context or {}).get("record_key")),
+        "category": category,
+        "country": country,
+        "campaign_type": "Creative Refresh",
+        "product_url": _clean_text((product_context or {}).get("product_url")),
+        "campaign_moment": ads_page.empty_campaign_moment(),
+        "source": "Creative Refresh",
+        "parent_product": _clean_text((product_context or {}).get("product_name")),
+        "refresh_challengers": tuple(challengers or ()),
+        "creative_refresh_csv": bytes(csv_data or canonical_csv),
+        "creative_refresh_canonical_csv": canonical_csv,
+    }
+
+
+def creative_refresh_setup_notes(challengers):
+    sections = []
+    for challenger in challengers or ():
+        sections.extend(
+            [
+                f"CHALLENGER {challenger.get('refresh_rank')}: {challenger.get('refresh_variant')}",
+                f"Angle: {challenger.get('refresh_angle')}",
+                f"Primary text: {challenger.get('primary_text')}",
+                f"Headline: {challenger.get('headline')}",
+                f"Description: {challenger.get('description')}",
+                f"CTA: {challenger.get('cta')}",
+                f"Winner keep: {challenger.get('winner_keep')}",
+                f"Winner change: {challenger.get('winner_change')}",
+                f"Test reason: {challenger.get('test_reason')}",
+                f"Image prompt: {challenger.get('image_prompt')}",
+                "",
+            ]
+        )
+    return "\n".join(sections).strip()
 
 
 def _metric_change_row(metric, label, winning, recent):
@@ -1209,6 +1914,17 @@ def _render_styles():
             margin: -0.45rem 0 0.85rem;
             color: #66615a;
             font-size: 0.92rem;
+        }
+        .sc-creative-refresh-stage-note {
+            margin: -0.2rem 0 0.45rem;
+            color: #6b665f;
+            font-size: 0.82rem;
+        }
+        .sc-creative-refresh-card-copy {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: #24211d;
+            line-height: 1.45;
         }
         .sc-creative-refresh-asset-note {
             border-left: 3px solid #c89b3c;
@@ -2051,121 +2767,306 @@ def _render_generated_result(result, *, winning_upload, original_prompt_upload, 
     _render_package_save(result, items)
 
 
+@st.cache_data(show_spinner=False, max_entries=12)
+def _cached_parse_creative_refresh_challenger_csv(data, product_name, filename):
+    return parse_creative_refresh_challenger_csv(
+        data,
+        product_name=product_name,
+        filename=filename,
+    )
+
+
+def _render_v2_product_selector():
+    product_rows = ads_page.load_edition_ops_product_rows()
+    records = ads_page.build_ads_product_selector_records(product_rows)
+    records_by_identity = {record["identity"]: record for record in records}
+    current = st.session_state.get(PRODUCT_SELECTOR_KEY)
+    if current and current not in records_by_identity:
+        st.session_state.pop(PRODUCT_SELECTOR_KEY, None)
+    if records:
+        selector_value = st.selectbox(
+            "Product",
+            options=alphabetize_options(
+                records_by_identity,
+                label=lambda identity: records_by_identity.get(identity, {}).get("label") or identity,
+            ),
+            index=None,
+            placeholder="Select a Sports Cave product",
+            filter_mode="fuzzy",
+            format_func=lambda identity: records_by_identity.get(identity, {}).get("label") or identity,
+            key=PRODUCT_SELECTOR_KEY,
+        )
+    else:
+        selector_value = st.selectbox(
+            "Product",
+            options=(),
+            index=None,
+            placeholder="No Sports Cave products are available",
+            disabled=True,
+            key=PRODUCT_SELECTOR_KEY,
+        )
+        st.caption("Product data is unavailable right now. Creative Refresh will not guess a product.")
+    selection = ads_page.resolve_ads_product_selector_value(
+        selector_value,
+        rows=product_rows,
+        records=records,
+    )
+    return selection, build_creative_refresh_product_context(selection)
+
+
+def _render_imported_metrics_details(parsed, evidence):
+    with st.expander("View imported metrics", expanded=False):
+        st.caption(
+            f"Detected level: {parsed.get('report_level') or 'unknown'} · "
+            f"Named rows: {parsed.get('named_row_count', 0)} · "
+            f"Blank-name aggregate rows: {parsed.get('aggregate_row_count', 0)}"
+        )
+        st.text(evidence.get("summary") or "No metric summary available.")
+        for warning in parsed.get("warnings") or ():
+            st.caption(f"Note: {warning}")
+
+
+def _mark_review_prompt_ready(context_key):
+    st.session_state[PROMPT_READY_CONTEXT_KEY] = str(context_key or "")
+
+
+def _render_review_winner_stage():
+    with st.container(border=True, key=f"{STATE_PREFIX}review_winner_v2_card"):
+        st.subheader("1. Review Winner")
+        st.markdown(
+            '<div class="sc-creative-refresh-stage-note">Select the product, paste the proven copy, then take one review prompt to ChatGPT.</div>',
+            unsafe_allow_html=True,
+        )
+        _selection, product_context = _render_v2_product_selector()
+        primary_col, headline_col = st.columns([3, 2])
+        with primary_col:
+            winning_primary_text = st.text_area(
+                "Winning primary text",
+                height=112,
+                placeholder="Paste the winning Meta primary text",
+                key=f"{STATE_PREFIX}winning_primary_text",
+            )
+        with headline_col:
+            winning_headline = st.text_input(
+                "Winning headline",
+                placeholder="Paste the winning Meta headline",
+                key=f"{STATE_PREFIX}winning_meta_headline",
+            )
+            meta_upload = st.file_uploader(
+                "Meta performance CSV (optional)",
+                type=["csv"],
+                key=META_CSV_UPLOAD_KEY,
+                max_upload_size=5,
+            )
+
+        parsed = None
+        csv_error = ""
+        if meta_upload is not None:
+            try:
+                parsed = _cached_parse_meta_ads_csv(meta_upload.getvalue(), meta_upload.name)
+            except MetaCSVValidationError as error:
+                csv_error = str(error)
+                st.error(csv_error)
+        evidence = build_meta_evidence_pack(parsed, product_context)
+        if parsed:
+            st.success(f"✓ Meta CSV imported — {parsed.get('row_count', len(parsed.get('rows') or ())) } rows")
+            _render_imported_metrics_details(parsed, evidence)
+
+        errors = validate_creative_refresh_v2_inputs(
+            product_context,
+            winning_primary_text,
+            winning_headline,
+        )
+        prompt = ""
+        review_result = None
+        if not errors and not csv_error:
+            prompt = build_creative_refresh_review_prompt(
+                product_context,
+                winning_primary_text,
+                winning_headline,
+                meta_evidence=evidence,
+            )
+            context_payload = {
+                "product": product_context.get("record_key") or product_context.get("product_name"),
+                "primary_text": _multiline_text(winning_primary_text),
+                "headline": _clean_text(winning_headline),
+                "meta": hashlib.sha256(meta_upload.getvalue()).hexdigest() if meta_upload else "",
+            }
+            context_key = hashlib.sha256(
+                json.dumps(context_payload, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:20]
+            review_result = {
+                "context_key": context_key,
+                "product_context": product_context,
+                "winning_primary_text": _multiline_text(winning_primary_text),
+                "winning_headline": _clean_text(winning_headline),
+                "meta_parsed": parsed,
+                "meta_evidence": evidence,
+                "prompt": prompt,
+            }
+            st.session_state[REVIEW_RESULT_STATE_KEY] = review_result
+
+        filename_product = product_context.get("handle") or product_context.get("product_name") or "product"
+        filename_product = ads_page.ads_image_workflow.sanitize_product_filename(
+            filename_product,
+            max_length=90,
+        ).casefold()
+        st.download_button(
+            "Download Creative Refresh Review Prompt",
+            data=prompt.encode("utf-8"),
+            file_name=f"creative-refresh-review-{filename_product}.txt",
+            mime="text/plain",
+            type="primary",
+            icon=":material/download:",
+            disabled=not bool(prompt),
+            key=f"{STATE_PREFIX}download_review_prompt",
+            on_click=_mark_review_prompt_ready,
+            args=((review_result or {}).get("context_key"),),
+            use_container_width=True,
+        )
+        if errors:
+            st.caption("Complete Product, Winning primary text and Winning headline to create the review prompt.")
+        if prompt:
+            with st.expander("Preview or copy Review Prompt", expanded=False):
+                st.text_area(
+                    "Creative Refresh Review Prompt",
+                    value=prompt,
+                    height=280,
+                    disabled=True,
+                    key=f"{STATE_PREFIX}review_prompt_preview_{review_result['context_key']}",
+                )
+                ads_page.render_prompt_copy_button(
+                    prompt,
+                    f"creative-refresh-v2::{review_result['context_key']}",
+                    label="Copy Review Prompt",
+                    success_label="Creative Refresh Review Prompt copied",
+                )
+    return review_result
+
+
+def _render_challenger_cards(result):
+    for challenger in result.get("refresh_challengers") or ():
+        rank = challenger.get("refresh_rank")
+        strategy = challenger.get("refresh_variant")
+        with st.container(border=True, key=f"{STATE_PREFIX}challenger_card_{rank}"):
+            st.markdown(f"### Challenger {rank} — {strategy}")
+            st.caption(challenger.get("refresh_angle") or "")
+            copy_col, detail_col = st.columns([3, 2])
+            with copy_col:
+                st.markdown("**Primary text**")
+                st.text(challenger.get("primary_text") or "")
+                st.markdown(f"**Headline:** {challenger.get('headline') or ''}")
+                st.markdown(f"**Description:** {challenger.get('description') or ''}")
+                st.markdown(f"**CTA:** {challenger.get('cta') or ''}")
+            with detail_col:
+                st.markdown("**Test logic**")
+                st.write(challenger.get("test_reason") or "")
+                st.markdown("**Winner lineage**")
+                st.write(f"Keep: {challenger.get('winner_keep') or ''}")
+                st.write(f"Change: {challenger.get('winner_change') or ''}")
+            with st.expander("Image-generation prompt", expanded=False):
+                image_prompt = challenger.get("image_prompt") or ""
+                st.text_area(
+                    f"Challenger {rank} image prompt",
+                    value=image_prompt,
+                    height=230,
+                    disabled=True,
+                    key=f"{STATE_PREFIX}challenger_prompt_{result['context_key']}_{rank}",
+                )
+                action_col, download_col = st.columns(2)
+                with action_col:
+                    ads_page.render_prompt_copy_button(
+                        image_prompt,
+                        f"creative-refresh-image::{result['context_key']}::{rank}",
+                        label="Copy image prompt",
+                        success_label=f"Challenger {rank} image prompt copied",
+                    )
+                with download_col:
+                    st.download_button(
+                        "Download image prompt",
+                        data=image_prompt.encode("utf-8"),
+                        file_name=f"creative-refresh-{rank}-{_normalise_header(strategy).replace(' ', '-')}-prompt.txt",
+                        mime="text/plain",
+                        icon=":material/download:",
+                        key=f"{STATE_PREFIX}challenger_prompt_download_{result['context_key']}_{rank}",
+                        use_container_width=True,
+                    )
+
+
+def _render_build_challengers_stage(review_result):
+    st.divider()
+    with st.container(border=True, key=f"{STATE_PREFIX}build_challengers_v2_card"):
+        st.subheader("2. Build Challengers")
+        st.caption("In ChatGPT, attach the actual winning image, run the Review Prompt, then import the returned CSV.")
+        csv_upload = st.file_uploader(
+            "Import ChatGPT Refresh CSV",
+            type=["csv"],
+            key=CHALLENGER_CSV_UPLOAD_KEY,
+            max_upload_size=2,
+        )
+        result = None
+        if csv_upload is not None:
+            try:
+                challengers = _cached_parse_creative_refresh_challenger_csv(
+                    csv_upload.getvalue(),
+                    review_result["product_context"].get("product_name") or "",
+                    csv_upload.name,
+                )
+                result = build_creative_refresh_ads_result(
+                    review_result["product_context"],
+                    challengers,
+                    csv_upload.getvalue(),
+                )
+                st.session_state[CHALLENGER_RESULT_STATE_KEY] = result
+                st.success("✓ ChatGPT Refresh CSV imported — 3 challengers")
+            except CreativeRefreshValidationError as error:
+                st.error(str(error))
+        if result is None:
+            return
+
+    _render_challenger_cards(result)
+    workflow = ads_page._ads_image_workflow(result)
+    workflow["ad_notes"] = {
+        "headlines": "\n\n".join(
+            f"{row['refresh_variant']}: {row['headline']}"
+            for row in result.get("refresh_challengers") or ()
+        ),
+        "descriptions": "\n\n".join(
+            f"{row['refresh_variant']}: {row['description']}"
+            for row in result.get("refresh_challengers") or ()
+        ),
+        "primary_text_variations": "\n\n".join(
+            f"{row['refresh_variant']}:\n{row['primary_text']}"
+            for row in result.get("refresh_challengers") or ()
+        ),
+        "cards": creative_refresh_setup_notes(result.get("refresh_challengers") or ()),
+    }
+    st.session_state[ads_page.ADS_IMAGE_STATE_KEY] = workflow
+    ads_page._render_ads_image_slots(result, workflow)
+    ads_page._render_ads_image_save(result, workflow)
+
+
 def render_page():
     _render_styles()
     st.title("Creative Refresh")
     st.markdown(
-        '<div class="sc-creative-refresh-subtitle">Turn a fatigued winning ad into three controlled challengers without losing what made it work.</div>',
+        '<div class="sc-creative-refresh-subtitle">Turn a proven winner into three stronger controlled challengers.</div>',
         unsafe_allow_html=True,
     )
     with st.expander("How to use", expanded=False):
         st.markdown(
-            "1. Select the product and campaign.\n"
-            "2. Supply the winning ad and copy.\n"
-            "3. Compare the winning period with the recent period.\n"
-            "4. Lock the winning elements.\n"
-            "5. Generate three refreshed challengers.\n"
-            "6. Keep the original winner as the testing control."
+            "1. Select the product and paste the winning primary text and headline.\n"
+            "2. Optionally add a Meta performance CSV, then download the Review Prompt.\n"
+            "3. In ChatGPT, attach the actual winning image and run the prompt.\n"
+            "4. Import ChatGPT's three-row CSV, generate the challenger images and save them through the normal Ads workflow."
         )
-
-    product_inputs = _render_product_campaign_section()
-    winner_inputs = _render_winning_ad_section()
-    performance = _render_performance_section()
-    audience = _render_audience_context()
-    controls = _render_refresh_controls()
-
-    inputs = {
-        **product_inputs,
-        **{key: value for key, value in winner_inputs.items() if not key.endswith("_upload")},
-        **controls,
-        "performance_mode": performance["performance_mode"],
-        "winning_period": performance["winning_period"],
-        "recent_period": performance["recent_period"],
-        "audience_context": audience,
-        "original_prompt_available": bool(
-            _multiline_text(winner_inputs.get("original_prompt_text"))
-            or winner_inputs.get("original_prompt_upload") is not None
-        ),
-        "metrics_csv_available": performance.get("imported_csv") is not None,
-    }
-    reset_col, generate_col = st.columns([1, 3])
-    if reset_col.button(
-        "Reset",
-        icon=":material/restart_alt:",
-        key=f"{STATE_PREFIX}reset",
-        use_container_width=True,
+    review_result = _render_review_winner_stage()
+    if (
+        review_result
+        and review_result.get("prompt")
+        and st.session_state.get(PROMPT_READY_CONTEXT_KEY) == review_result.get("context_key")
     ):
-        reset_creative_refresh_state()
-        st.rerun()
-    generate = generate_col.button(
-        "Generate Creative Refresh Package",
-        type="primary",
-        icon=":material/auto_awesome:",
-        key=f"{STATE_PREFIX}generate",
-        use_container_width=True,
-    )
-    if generate:
-        winning_asset = None
-        upload_errors = []
-        winning_upload = winner_inputs.get("winning_upload")
-        if winning_upload is not None:
-            try:
-                winning_asset = validate_winning_creative(
-                    winning_upload.getvalue(),
-                    filename=winning_upload.name,
-                )
-                inputs["winning_creative_signature"] = winning_asset["signature"]
-                inputs["winning_creative_filename"] = winning_asset["filename"]
-            except CreativeRefreshValidationError as error:
-                upload_errors.append(str(error))
-        original_upload = winner_inputs.get("original_prompt_upload")
-        if original_upload is not None:
-            try:
-                validate_original_prompt_upload(
-                    original_upload.getvalue(),
-                    filename=original_upload.name,
-                )
-            except CreativeRefreshValidationError as error:
-                upload_errors.append(str(error))
-
-        errors = validate_creative_refresh_inputs(
-            inputs,
-            winning_creative=winning_asset,
-            csv_selection_error=performance.get("csv_selection_error") or "",
-        )
-        if upload_errors:
-            errors.setdefault("winning_ad", []).extend(upload_errors)
-        st.session_state[VALIDATION_STATE_KEY] = errors
-        if errors:
-            st.error("Complete the highlighted Creative Refresh fields. Your entered values have been kept.")
-            for messages in errors.values():
-                for message in messages:
-                    st.caption(f"- {message}")
-        else:
-            result = build_creative_refresh_result(inputs, performance["diagnosis"])
-            st.session_state[RESULT_STATE_KEY] = result
-            st.session_state.pop(SAVE_STATE_KEY, None)
-            record_activity_log(
-                "ad_prompt_generated",
-                "Ads",
-                f"Generated Creative Refresh package: {inputs['product_name']}",
-                entity_type="ad_prompt",
-                entity_id=result["context_key"],
-                metadata={
-                    "campaign_type": inputs["campaign_type"],
-                    "country": inputs["country"],
-                    "diagnosis": performance["diagnosis"]["classification"],
-                },
-            )
-
-    result = st.session_state.get(RESULT_STATE_KEY)
-    if isinstance(result, dict) and result.get("prompt"):
-        _render_generated_result(
-            result,
-            winning_upload=winner_inputs.get("winning_upload"),
-            original_prompt_upload=winner_inputs.get("original_prompt_upload"),
-            imported_csv=performance.get("imported_csv"),
-        )
+        _render_build_challengers_stage(review_result)
 
 
 render_creative_refresh_page = render_page
