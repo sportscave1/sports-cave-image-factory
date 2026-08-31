@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from datetime import date, timedelta
@@ -6,12 +7,28 @@ from datetime import date, timedelta
 import requests
 
 
-DEFAULT_META_API_VERSION = "v20.0"
+DEFAULT_META_API_VERSION = "v26.0"
 META_BASE_URL = "https://graph.facebook.com"
+LOGGER = logging.getLogger(__name__)
 
 
 class MetaAdsApiError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message,
+        *,
+        status_code=None,
+        error_code=None,
+        error_subcode=None,
+        error_type="",
+        request_path="",
+    ):
+        super().__init__(sanitize_meta_error(message))
+        self.status_code = status_code
+        self.error_code = error_code
+        self.error_subcode = error_subcode
+        self.error_type = str(error_type or "")
+        self.request_path = str(request_path or "")
 
 
 class MetaAdsAmbiguousResultError(MetaAdsApiError):
@@ -46,6 +63,8 @@ def sanitize_meta_error(message):
         if value and len(value) >= 6:
             cleaned = cleaned.replace(value, "[redacted]")
     cleaned = re.sub(r"access_token=([^&\s]+)", "access_token=[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(app_secret\s*[=:]\s*)[^&\s,;]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(access[_ -]?token\s*[=:]\s*)[^&\s,;]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(Bearer\s+)[A-Za-z0-9_\-.]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bEAA[A-Za-z0-9_\-]{12,}\b", "[redacted]", cleaned)
     return cleaned
@@ -56,7 +75,8 @@ def get_meta_config():
     if account_id and not account_id.startswith("act_"):
         account_id = f"act_{account_id}"
     access_token = str(os.getenv("META_ACCESS_TOKEN", "")).strip()
-    api_version = str(os.getenv("META_API_VERSION", DEFAULT_META_API_VERSION)).strip() or DEFAULT_META_API_VERSION
+    configured_api_version = str(os.getenv("META_API_VERSION", "")).strip()
+    api_version = configured_api_version or DEFAULT_META_API_VERSION
     page_id, page_id_env = _first_env_value(FACEBOOK_PAGE_ID_ENV_KEYS)
     instagram_actor_id, instagram_actor_id_env = _first_env_value(INSTAGRAM_ACTOR_ID_ENV_KEYS)
     return {
@@ -66,10 +86,12 @@ def get_meta_config():
         "app_id_present": bool(str(os.getenv("META_APP_ID", "")).strip()),
         "app_secret_present": bool(str(os.getenv("META_APP_SECRET", "")).strip()),
         "api_version": api_version,
+        "api_version_source": "META_API_VERSION" if configured_api_version else "default",
         "access_token": access_token,
         "page_id": page_id,
         "page_id_env": page_id_env,
         "instagram_actor_id": instagram_actor_id,
+        "instagram_user_id": instagram_actor_id,
         "instagram_actor_id_env": instagram_actor_id_env,
     }
 
@@ -83,27 +105,44 @@ def safe_meta_config_status():
         "app_id_present": config["app_id_present"],
         "app_secret_present": config["app_secret_present"],
         "api_version": config["api_version"],
+        "api_version_source": config["api_version_source"],
         "page_id_present": bool(config["page_id"]),
         "page_id_env": config["page_id_env"],
         "instagram_actor_id_present": bool(config["instagram_actor_id"]),
+        "instagram_user_id_present": bool(config["instagram_user_id"]),
         "instagram_actor_id_env": config["instagram_actor_id_env"],
     }
 
 
-def _raise_for_meta_error(response):
+def _raise_for_meta_error(response, *, request_path=""):
     if response.ok:
         return
     message = f"Meta API error HTTP {response.status_code}"
+    error_code = None
+    error_subcode = None
+    error_type = ""
     try:
         payload = response.json()
         error = payload.get("error") or {}
         if error.get("message"):
             message = f"{message}: {error.get('message')}"
-        if error.get("code"):
-            message = f"{message} (code {error.get('code')})"
+        error_code = error.get("code")
+        error_subcode = error.get("error_subcode")
+        error_type = str(error.get("type") or "")
+        if error_code is not None:
+            message = f"{message} (code {error_code})"
+        if error_subcode is not None:
+            message = f"{message} (subcode {error_subcode})"
     except Exception:
         pass
-    raise MetaAdsApiError(sanitize_meta_error(message))
+    raise MetaAdsApiError(
+        message,
+        status_code=getattr(response, "status_code", None),
+        error_code=error_code,
+        error_subcode=error_subcode,
+        error_type=error_type,
+        request_path=request_path,
+    )
 
 
 def _request(path, params=None, config=None):
@@ -118,7 +157,7 @@ def _request(path, params=None, config=None):
         response = requests.get(url, params=request_params, timeout=30)
     except requests.RequestException as error:
         raise MetaAdsApiError(sanitize_meta_error("Meta is unavailable. Try again shortly.")) from error
-    _raise_for_meta_error(response)
+    _raise_for_meta_error(response, request_path=clean_path)
     return response.json()
 
 
@@ -142,7 +181,7 @@ def _post(path, data=None, files=None, config=None):
         raise MetaAdsAmbiguousResultError(
             "Meta did not confirm the result. Sports Cave OS will reconcile it before any retry."
         )
-    _raise_for_meta_error(response)
+    _raise_for_meta_error(response, request_path=clean_path)
     try:
         return response.json()
     except ValueError as error:
@@ -156,7 +195,7 @@ def _get_next_page(url):
         response = requests.get(url, timeout=30)
     except requests.RequestException as error:
         raise MetaAdsApiError("Meta is unavailable. Try again shortly.") from error
-    _raise_for_meta_error(response)
+    _raise_for_meta_error(response, request_path="pagination")
     return response.json()
 
 
@@ -191,6 +230,14 @@ def fetch_meta_account(config=None):
         config["ad_account_id"],
         params={"fields": "account_id,name,currency,timezone_name"},
         config=config,
+    )
+
+
+def fetch_meta_token_identity(config=None):
+    return _request(
+        "me",
+        params={"fields": "id,name"},
+        config=config or get_meta_config(),
     )
 
 
@@ -231,6 +278,183 @@ def fetch_meta_permissions(config=None):
     )
 
 
+def _connection_error_summary(stage, error):
+    safe_message = sanitize_meta_error(error)
+    lowered = safe_message.casefold()
+    error_code = getattr(error, "error_code", None)
+    if "version" in lowered and any(
+        term in lowered for term in ("unsupported", "deprecated", "no longer", "invalid")
+    ):
+        return "Meta unavailable — API version unsupported."
+    if error_code == 190:
+        return "Meta unavailable — Meta returned error code 190."
+    if stage == "token_identity":
+        return "Meta unavailable — token identity read failed."
+    if stage == "ad_account":
+        if error_code in {10, 200} or "permission" in lowered or "access" in lowered:
+            return "Meta unavailable — ad account access denied."
+        return "Meta unavailable — ad account read failed."
+    if stage == "campaigns":
+        return "Meta unavailable — campaign read failed."
+    return "Meta unavailable — connection check failed."
+
+
+def _failed_connection_check(stage, label, endpoint, error):
+    safe_message = sanitize_meta_error(error)
+    LOGGER.warning(
+        "Meta Posting read-only check failed at %s (%s): %s",
+        stage,
+        endpoint,
+        safe_message,
+    )
+    return {
+        "label": label,
+        "status": "failed",
+        "endpoint": endpoint,
+        "message": safe_message,
+        "error_code": getattr(error, "error_code", None),
+        "summary": _connection_error_summary(stage, error),
+    }
+
+
+def diagnose_meta_posting_connection(config=None):
+    """Run independent, read-only Posting checks and return only safe diagnostics."""
+    config = config or get_meta_config()
+    api_version = str(config.get("api_version") or DEFAULT_META_API_VERSION)
+    api_version_source = str(config.get("api_version_source") or "provided config")
+    checks = {}
+    campaigns = ()
+
+    if config.get("configured"):
+        checks["configuration"] = {
+            "label": "Meta configuration",
+            "status": "ok",
+            "message": "OK",
+        }
+    else:
+        checks["configuration"] = {
+            "label": "Meta configuration",
+            "status": "failed",
+            "message": "Ad account or token configuration is missing.",
+        }
+
+    identities_ready = bool(
+        config.get("page_id")
+        and (config.get("instagram_user_id") or config.get("instagram_actor_id"))
+    )
+    checks["identity"] = {
+        "label": "Identity",
+        "status": "ok" if identities_ready else "failed",
+        "message": "OK" if identities_ready else "Facebook Page or Instagram identity is missing.",
+    }
+
+    if not config.get("configured") or not identities_ready:
+        summary = (
+            "Meta unavailable — base configuration missing."
+            if not config.get("configured")
+            else "Meta identity configuration required."
+        )
+        return {
+            "connected": False,
+            "posting_ready": False,
+            "summary": summary,
+            "api_version": api_version,
+            "api_version_source": api_version_source,
+            "checks": checks,
+            "permission_state": "unverified",
+            "permissions": (),
+            "campaigns": campaigns,
+        }
+
+    core_failures = []
+    read_checks = (
+        (
+            "token_identity",
+            "Token identity",
+            f"/{api_version}/me",
+            lambda: fetch_meta_token_identity(config=config),
+        ),
+        (
+            "ad_account",
+            "Ad account",
+            f"/{api_version}/{config['ad_account_id']}",
+            lambda: fetch_meta_account(config=config),
+        ),
+        (
+            "campaigns",
+            "Campaign read",
+            f"/{api_version}/{config['ad_account_id']}/campaigns",
+            lambda: fetch_meta_campaigns(config=config),
+        ),
+    )
+    for stage, label, endpoint, loader in read_checks:
+        try:
+            result = loader()
+            if stage == "campaigns":
+                campaigns = tuple(dict(row) for row in result.get("rows") or ())
+            checks[stage] = {
+                "label": label,
+                "status": "ok",
+                "endpoint": endpoint,
+                "message": "OK",
+            }
+        except MetaAdsApiError as error:
+            failure = _failed_connection_check(stage, label, endpoint, error)
+            checks[stage] = failure
+            core_failures.append(failure)
+
+    permission_endpoint = f"/{api_version}/me/permissions"
+    permissions = ()
+    permission_state = "unverified"
+    try:
+        permissions = tuple(fetch_meta_permissions(config=config))
+        if "ads_management" in set(permissions):
+            permission_state = "confirmed"
+            permission_message = "confirmed"
+            permission_status = "ok"
+        else:
+            permission_state = "missing"
+            permission_message = "not granted"
+            permission_status = "failed"
+        checks["permissions"] = {
+            "label": "ads_management",
+            "status": permission_status,
+            "endpoint": permission_endpoint,
+            "message": permission_message,
+        }
+    except MetaAdsApiError as error:
+        safe_message = sanitize_meta_error(error)
+        LOGGER.warning(
+            "Meta Posting optional permission introspection failed at %s: %s",
+            permission_endpoint,
+            safe_message,
+        )
+        checks["permissions"] = {
+            "label": "ads_management",
+            "status": "unverified",
+            "endpoint": permission_endpoint,
+            "message": "permission introspection unavailable",
+            "diagnostic": safe_message,
+            "error_code": getattr(error, "error_code", None),
+        }
+
+    connected = not core_failures
+    summary = core_failures[0]["summary"] if core_failures else "Meta connected"
+    if connected and permission_state == "missing":
+        summary = "Meta posting permission required"
+    return {
+        "connected": connected,
+        "posting_ready": connected and permission_state != "missing",
+        "summary": summary,
+        "api_version": api_version,
+        "api_version_source": api_version_source,
+        "checks": checks,
+        "permission_state": permission_state,
+        "permissions": permissions,
+        "campaigns": campaigns,
+    }
+
+
 def fetch_meta_campaign_adsets(campaign_id, config=None):
     config = config or get_meta_config()
     return _paged_get(
@@ -259,7 +483,15 @@ class MetaPostingClient:
 
     @property
     def instagram_actor_id(self):
-        return str(self.config.get("instagram_actor_id") or "")
+        return self.instagram_user_id
+
+    @property
+    def instagram_user_id(self):
+        return str(
+            self.config.get("instagram_user_id")
+            or self.config.get("instagram_actor_id")
+            or ""
+        )
 
     def permissions(self):
         return fetch_meta_permissions(config=self.config)
@@ -331,7 +563,7 @@ class MetaPostingClient:
             link_data["description"] = str(description)
         story_spec = {
             "page_id": self.page_id,
-            "instagram_actor_id": self.instagram_actor_id,
+            "instagram_user_id": self.instagram_user_id,
             "link_data": link_data,
         }
         payload = _post(
@@ -403,7 +635,7 @@ def fetch_meta_ads(config=None):
             "id,name,status,effective_status,campaign_id,adset_id,"
             "creative{id,name,thumbnail_url,effective_object_story_id,object_story_id,"
             "object_story_spec,asset_feed_spec,call_to_action_type,link_url,page_id,"
-            "instagram_actor_id,image_hash,video_id},created_time,updated_time"
+            "instagram_user_id,image_hash,video_id},created_time,updated_time"
         ),
         "limit": 100,
     }

@@ -24120,7 +24120,14 @@ def _extract_creative_fields(creative):
         "asset_titles": asset_titles,
         "asset_descriptions": asset_descriptions,
         "page_id": _first_ads_text(creative.get("page_id"), story_spec.get("page_id")),
-        "instagram_actor_id": _first_ads_text(creative.get("instagram_actor_id"), story_spec.get("instagram_actor_id")),
+        # Keep the legacy database column for backward compatibility while reading
+        # Meta's current instagram_user_id field first.
+        "instagram_actor_id": _first_ads_text(
+            creative.get("instagram_user_id"),
+            story_spec.get("instagram_user_id"),
+            creative.get("instagram_actor_id"),
+            story_spec.get("instagram_actor_id"),
+        ),
     }
 
 

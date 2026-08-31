@@ -283,8 +283,11 @@ class MetaPostingService:
         self.url_tags = str(url_tags or "")
 
     def _validate_destination(self, clean):
-        permissions = set(self.client.permissions())
-        if POSTING_PERMISSION not in permissions:
+        try:
+            permissions = set(self.client.permissions())
+        except MetaAdsApiError:
+            permissions = None
+        if permissions is not None and POSTING_PERMISSION not in permissions:
             raise PostingValidationError("Meta posting permission is unavailable.")
         if not str(self.client.page_id or "").strip():
             raise PostingValidationError("Sports Cave Facebook Page identity is not configured.")

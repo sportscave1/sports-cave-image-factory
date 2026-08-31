@@ -10,6 +10,7 @@ from PIL import Image
 import ads_navigation
 import ads_posting_page
 import meta_ads_client
+import supabase_backend
 from ads_image_workflow import prepare_meta_posting_image
 from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
 from meta_posting_service import (
@@ -237,7 +238,8 @@ class MetaPostingClientTests(unittest.TestCase):
             "configured": True,
             "ad_account_id": "act_123",
             "access_token": "secret-token",
-            "api_version": "v20.0",
+            "api_version": "v26.0",
+            "api_version_source": "default",
             "page_id": "page-1",
             "instagram_actor_id": "instagram-1",
         }
@@ -266,6 +268,32 @@ class MetaPostingClientTests(unittest.TestCase):
             )
         self.assertEqual(calls, ["act_123/campaigns", "campaign-1/adsets"])
 
+    def test_current_default_api_version_and_render_override_source(self):
+        with mock.patch.dict(os.environ, {"META_API_VERSION": ""}, clear=False):
+            default_config = meta_ads_client.get_meta_config()
+        self.assertEqual(default_config["api_version"], "v26.0")
+        self.assertEqual(default_config["api_version_source"], "default")
+
+        with mock.patch.dict(os.environ, {"META_API_VERSION": "v25.0"}, clear=False):
+            override_config = meta_ads_client.get_meta_config()
+        self.assertEqual(override_config["api_version"], "v25.0")
+        self.assertEqual(override_config["api_version_source"], "META_API_VERSION")
+
+    def test_meta_response_error_code_is_preserved_but_secrets_are_sanitized(self):
+        response = mock.Mock(ok=False, status_code=400)
+        response.json.return_value = {
+            "error": {
+                "message": "Invalid token access_token=secret-token-value",
+                "type": "OAuthException",
+                "code": 190,
+            }
+        }
+        with self.assertRaises(meta_ads_client.MetaAdsApiError) as raised:
+            meta_ads_client._raise_for_meta_error(response, request_path="me")
+        self.assertEqual(raised.exception.error_code, 190)
+        self.assertEqual(raised.exception.request_path, "me")
+        self.assertNotIn("secret-token-value", str(raised.exception))
+
     def test_ad_create_payload_is_unconditionally_paused(self):
         client = meta_ads_client.MetaPostingClient(self.config())
         with mock.patch.object(meta_ads_client, "_post", return_value={"id": "ad-1"}) as post_mock:
@@ -278,6 +306,33 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertEqual(call["data"]["status"], "PAUSED")
         self.assertEqual(call["data"]["adset_id"], "adset-1")
 
+    def test_creative_uses_current_instagram_user_identity_field(self):
+        client = meta_ads_client.MetaPostingClient(self.config())
+        with mock.patch.object(meta_ads_client, "_post", return_value={"id": "creative-1"}) as post_mock:
+            client.create_creative(
+                creative_name="SC creative",
+                image_hash="hash-1",
+                primary_text="Primary text",
+                headline="Headline",
+                description="",
+                destination_url="https://www.sportscaveshop.com/products/example",
+                cta_type="SHOP_NOW",
+                url_tags="",
+            )
+        story_spec = json.loads(post_mock.call_args.kwargs["data"]["object_story_spec"])
+        self.assertEqual(story_spec["instagram_user_id"], "instagram-1")
+        self.assertNotIn("instagram_actor_id", story_spec)
+
+    def test_current_and_legacy_instagram_identity_reads_remain_compatible(self):
+        current = supabase_backend._extract_creative_fields(
+            {"object_story_spec": {"instagram_user_id": "instagram-current"}}
+        )
+        legacy = supabase_backend._extract_creative_fields(
+            {"object_story_spec": {"instagram_actor_id": "instagram-legacy"}}
+        )
+        self.assertEqual(current["instagram_actor_id"], "instagram-current")
+        self.assertEqual(legacy["instagram_actor_id"], "instagram-legacy")
+
     def test_posting_has_no_campaign_or_adset_write_method_and_no_live_status_option(self):
         self.assertFalse(hasattr(meta_ads_client.MetaPostingClient, "update_campaign"))
         self.assertFalse(hasattr(meta_ads_client.MetaPostingClient, "update_adset"))
@@ -287,6 +342,147 @@ class MetaPostingClientTests(unittest.TestCase):
         )
         self.assertNotIn('"ACTIVE"', posting_source)
         self.assertNotIn("'ACTIVE'", posting_source)
+
+
+class MetaConnectionDiagnosticTests(unittest.TestCase):
+    def config(self):
+        return {
+            "configured": True,
+            "ad_account_id": "act_123",
+            "access_token": "secret-token-value",
+            "api_version": "v26.0",
+            "api_version_source": "META_API_VERSION",
+            "page_id": "page-1",
+            "instagram_user_id": "instagram-1",
+        }
+
+    def successful_reads(self):
+        return (
+            mock.patch.object(meta_ads_client, "fetch_meta_token_identity", return_value={"id": "system-1"}),
+            mock.patch.object(meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}),
+            mock.patch.object(
+                meta_ads_client,
+                "fetch_meta_campaigns",
+                return_value={"rows": [{"id": "campaign-1", "name": "Collectors"}]},
+            ),
+        )
+
+    def test_permission_endpoint_failure_is_non_fatal_and_sanitized(self):
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        permission_error = meta_ads_client.MetaAdsApiError(
+            "Meta API error HTTP 400: permission introspection unavailable (code 100)",
+            error_code=100,
+        )
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client,
+            "fetch_meta_permissions",
+            side_effect=permission_error,
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertTrue(result["connected"])
+        self.assertTrue(result["posting_ready"])
+        self.assertEqual(result["permission_state"], "unverified")
+        self.assertEqual(
+            result["checks"]["permissions"]["message"],
+            "permission introspection unavailable",
+        )
+
+    def test_campaign_failure_is_identified_even_when_permission_check_succeeds(self):
+        campaign_error = meta_ads_client.MetaAdsApiError(
+            "Meta API error HTTP 403: access denied (code 200)",
+            error_code=200,
+            request_path="act_123/campaigns",
+        )
+        with mock.patch.object(
+            meta_ads_client, "fetch_meta_token_identity", return_value={"id": "system-1"}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_campaigns", side_effect=campaign_error
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertFalse(result["connected"])
+        self.assertEqual(result["summary"], "Meta unavailable — campaign read failed.")
+        self.assertEqual(result["checks"]["campaigns"]["error_code"], 200)
+
+    def test_successful_account_and_campaign_reads_are_connected(self):
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client,
+            "fetch_meta_permissions",
+            return_value=("ads_read", "ads_management"),
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertTrue(result["connected"])
+        self.assertTrue(result["posting_ready"])
+        self.assertEqual(result["summary"], "Meta connected")
+        self.assertEqual(result["campaigns"][0]["id"], "campaign-1")
+
+    def test_secrets_are_never_returned_in_diagnostics(self):
+        token = "secret-token-value"
+        app_secret = "secret-app-value"
+        identity_error = meta_ads_client.MetaAdsApiError(
+            f"access_token={token} app_secret={app_secret} (code 190)",
+            error_code=190,
+        )
+        with mock.patch.object(
+            meta_ads_client, "fetch_meta_token_identity", side_effect=identity_error
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_campaigns", return_value={"rows": []}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        serialized = json.dumps(result)
+        self.assertNotIn(token, serialized)
+        self.assertNotIn(app_secret, serialized)
+        self.assertIn("[redacted]", serialized)
+        self.assertEqual(result["summary"], "Meta unavailable — Meta returned error code 190.")
+
+    def test_effective_api_version_and_source_are_reported_safely(self):
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertEqual(result["api_version"], "v26.0")
+        self.assertEqual(result["api_version_source"], "META_API_VERSION")
+        self.assertNotIn(self.config()["access_token"], json.dumps(result))
+
+    def test_unsupported_version_error_is_understandable(self):
+        version_error = meta_ads_client.MetaAdsApiError(
+            "This API version is no longer supported.",
+            error_code=12,
+        )
+        with mock.patch.object(
+            meta_ads_client, "fetch_meta_token_identity", side_effect=version_error
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_campaigns", return_value={"rows": []}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertEqual(result["summary"], "Meta unavailable — API version unsupported.")
+
+    def test_connection_diagnostic_never_posts(self):
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ), mock.patch.object(meta_ads_client.requests, "post") as post_mock:
+            meta_ads_client.diagnose_meta_posting_connection(self.config())
+        post_mock.assert_not_called()
 
 
 class PostingServiceTests(unittest.TestCase):
@@ -306,6 +502,18 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(result["meta_status"], "PAUSED")
         self.assertEqual(client.creative_payload["cta_type"], META_DEFAULT_CTA)
         self.assertEqual(client.creative_payload["url_tags"], META_AD_URL_PARAMETERS)
+
+    def test_unavailable_permission_introspection_does_not_override_real_api_checks(self):
+        client = FakeMetaClient()
+        client.permissions = lambda: (_ for _ in ()).throw(
+            meta_ads_client.MetaAdsApiError("Permission introspection unavailable")
+        )
+        result = MetaPostingService(client=client, store=FakePostingStore()).create_paused_ad(
+            request_for()
+        )
+
+        self.assertEqual(result["meta_status"], "PAUSED")
+        self.assertEqual(client.ad_create_calls, 1)
 
     def test_double_click_or_rerun_cannot_create_a_second_ad(self):
         client = FakeMetaClient()

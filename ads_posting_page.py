@@ -6,7 +6,11 @@ import html
 import streamlit as st
 
 from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
-from meta_ads_client import MetaAdsApiError, MetaPostingClient, safe_meta_config_status
+from meta_ads_client import (
+    MetaAdsApiError,
+    MetaPostingClient,
+    diagnose_meta_posting_connection,
+)
 from meta_posting_service import (
     MetaPostingService,
     PostingAmbiguousError,
@@ -38,11 +42,7 @@ RESULT_KEY = f"{STATE_PREFIX}result"
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_meta_overview():
-    client = MetaPostingClient()
-    return {
-        "permissions": tuple(client.permissions()),
-        "campaigns": tuple(dict(row) for row in client.campaigns()),
-    }
+    return diagnose_meta_posting_connection()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -121,13 +121,6 @@ def _reset_posting_state():
     st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
 
 
-def _identity_ready(config_status):
-    return bool(
-        config_status.get("page_id_present")
-        and config_status.get("instagram_actor_id_present")
-    )
-
-
 def _status_label(row):
     return str(row.get("effective_status") or row.get("status") or "Unknown").replace("_", " ").title()
 
@@ -140,6 +133,39 @@ def _option_label(row):
 def _connection_status(container, label, *, tone):
     colour = {"success": "green", "warning": "orange", "error": "red"}.get(tone, "gray")
     container.markdown(f":{colour}[● **{label}**]")
+
+
+def _render_connection_details(overview):
+    with st.expander("Connection details", expanded=False):
+        for key in (
+            "configuration",
+            "identity",
+            "token_identity",
+            "ad_account",
+            "campaigns",
+            "permissions",
+        ):
+            check = dict((overview.get("checks") or {}).get(key) or {})
+            if not check:
+                continue
+            status = str(check.get("status") or "unknown")
+            if status == "ok":
+                detail = str(check.get("message") or "OK")
+            elif status == "unverified":
+                diagnostic = str(check.get("diagnostic") or "")
+                detail = "permission introspection unavailable"
+                if diagnostic:
+                    detail = f"{detail} — {diagnostic}"
+            else:
+                detail = str(check.get("message") or "Failed")
+            endpoint = str(check.get("endpoint") or "")
+            endpoint_note = f" — GET `{endpoint}`" if endpoint and status != "ok" else ""
+            st.caption(f"**{check.get('label') or key}:** {detail}{endpoint_note}")
+        source = str(overview.get("api_version_source") or "default")
+        source_label = "Render override" if source == "META_API_VERSION" else "application default"
+        st.caption(
+            f"**API version:** {overview.get('api_version') or 'unknown'} ({source_label})"
+        )
 
 
 def _render_success(result):
@@ -180,39 +206,45 @@ def render_page():
         _render_success(result)
         return
 
-    config_status = safe_meta_config_status()
     status_col, refresh_col = st.columns([5, 1])
-    if not config_status.get("configured"):
-        _connection_status(status_col, "Meta unavailable", tone="error")
-        refresh_col.button("Refresh Meta", disabled=True, use_container_width=True)
-        st.caption("Meta ad account access is not configured.")
-        return
-    if not _identity_ready(config_status):
-        _connection_status(status_col, "Meta identity configuration required", tone="warning")
-        if refresh_col.button("Refresh Meta", use_container_width=True):
-            _clear_meta_cache()
-            st.rerun()
-        st.caption("Configure the Sports Cave Facebook Page and Instagram identity before posting.")
-        return
-
     try:
         overview = _load_meta_overview()
-    except MetaAdsApiError:
-        _connection_status(status_col, "Meta unavailable", tone="error")
+    except MetaAdsApiError as error:
+        _connection_status(status_col, f"Meta unavailable — {error}", tone="error")
         if refresh_col.button("Refresh Meta", use_container_width=True):
             _clear_meta_cache()
             st.rerun()
         return
-    if "ads_management" not in set(overview.get("permissions") or ()):
+
+    configuration_ready = (
+        ((overview.get("checks") or {}).get("configuration") or {}).get("status") == "ok"
+    )
+    if not overview.get("connected"):
+        summary = str(overview.get("summary") or "Meta unavailable")
+        tone = "warning" if summary == "Meta identity configuration required." else "error"
+        _connection_status(status_col, summary, tone=tone)
+        if refresh_col.button(
+            "Refresh Meta",
+            disabled=not configuration_ready,
+            use_container_width=True,
+        ):
+            _clear_meta_cache()
+            st.rerun()
+        _render_connection_details(overview)
+        return
+    if overview.get("permission_state") == "missing":
         _connection_status(status_col, "Meta posting permission required", tone="warning")
         if refresh_col.button("Refresh Meta", use_container_width=True):
             _clear_meta_cache()
             st.rerun()
+        _render_connection_details(overview)
         return
     _connection_status(status_col, "Meta connected", tone="success")
     if refresh_col.button("Refresh Meta", use_container_width=True):
         _clear_meta_cache()
         st.rerun()
+    if overview.get("permission_state") == "unverified":
+        _render_connection_details(overview)
 
     campaigns = tuple(overview.get("campaigns") or ())
     campaign_by_id = {str(row.get("id") or ""): row for row in campaigns if row.get("id")}
