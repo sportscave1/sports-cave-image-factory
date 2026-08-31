@@ -139,7 +139,12 @@ def _render_connection_details(overview):
     with st.expander("Connection details", expanded=False):
         for key in (
             "configuration",
-            "identity",
+            "token_presence",
+            "app_configuration",
+            "account_configuration",
+            "page_identity",
+            "instagram_identity",
+            "token_metadata",
             "token_identity",
             "ad_account",
             "campaigns",
@@ -153,7 +158,7 @@ def _render_connection_details(overview):
                 detail = str(check.get("message") or "OK")
             elif status == "unverified":
                 diagnostic = str(check.get("diagnostic") or "")
-                detail = "permission introspection unavailable"
+                detail = str(check.get("message") or "unverified")
                 if diagnostic:
                     detail = f"{detail} — {diagnostic}"
             else:
@@ -161,11 +166,44 @@ def _render_connection_details(overview):
             endpoint = str(check.get("endpoint") or "")
             endpoint_note = f" — GET `{endpoint}`" if endpoint and status != "ok" else ""
             st.caption(f"**{check.get('label') or key}:** {detail}{endpoint_note}")
+            metadata = []
+            for label, field in (
+                ("HTTP", "http_status"),
+                ("type", "error_type"),
+                ("code", "error_code"),
+                ("subcode", "error_subcode"),
+                ("fbtrace_id", "fbtrace_id"),
+            ):
+                value = check.get(field)
+                if value not in (None, ""):
+                    metadata.append(f"{label}: `{value}`")
+            if metadata:
+                st.caption(" · ".join(metadata))
+            if key == "token_metadata" and check.get("token_app_id"):
+                scope_note = (
+                    "ads_management present"
+                    if "ads_management" in set(check.get("scopes") or ())
+                    else "ads_management not reported"
+                )
+                st.caption(
+                    f"Token type: `{check.get('token_type') or 'unknown'}` · "
+                    f"App ID: `{check.get('token_app_id')}` · {scope_note}"
+                )
         source = str(overview.get("api_version_source") or "default")
         source_label = "Render override" if source == "META_API_VERSION" else "application default"
+        default_version = str(overview.get("default_api_version") or "unknown")
         st.caption(
-            f"**API version:** {overview.get('api_version') or 'unknown'} ({source_label})"
+            f"**Effective API version:** {overview.get('api_version') or 'unknown'} "
+            f"({source_label}; application default {default_version})"
         )
+        version_warning = str(overview.get("version_warning") or "")
+        if version_warning:
+            st.caption(f"**API version action:** {version_warning}")
+        diagnosis = str(overview.get("diagnosis_category") or "")
+        if diagnosis and diagnosis != "connected":
+            st.caption(f"**Diagnosis category:** `{diagnosis}`")
+        for item in overview.get("guidance") or ():
+            st.caption(f"• {item}")
 
 
 def _render_success(result):

@@ -21,6 +21,7 @@ class MetaAdsApiError(RuntimeError):
         error_code=None,
         error_subcode=None,
         error_type="",
+        fbtrace_id="",
         request_path="",
     ):
         super().__init__(sanitize_meta_error(message))
@@ -28,6 +29,7 @@ class MetaAdsApiError(RuntimeError):
         self.error_code = error_code
         self.error_subcode = error_subcode
         self.error_type = str(error_type or "")
+        self.fbtrace_id = str(fbtrace_id or "")[:160]
         self.request_path = str(request_path or "")
 
 
@@ -56,13 +58,15 @@ def _first_env_value(keys):
     return "", ""
 
 
-def sanitize_meta_error(message):
+def sanitize_meta_error(message, extra_secrets=()):
     cleaned = str(message or "")
-    for key in ("META_ACCESS_TOKEN", "META_APP_SECRET"):
-        value = str(os.getenv(key, "")).strip()
+    protected_values = [str(os.getenv(key, "")).strip() for key in ("META_ACCESS_TOKEN", "META_APP_SECRET")]
+    protected_values.extend(str(value or "").strip() for value in extra_secrets)
+    for value in protected_values:
         if value and len(value) >= 6:
             cleaned = cleaned.replace(value, "[redacted]")
     cleaned = re.sub(r"access_token=([^&\s]+)", "access_token=[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"input_token=([^&\s]+)", "input_token=[redacted]", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(app_secret\s*[=:]\s*)[^&\s,;]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(access[_ -]?token\s*[=:]\s*)[^&\s,;]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(Bearer\s+)[A-Za-z0-9_\-.]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
@@ -75,6 +79,8 @@ def get_meta_config():
     if account_id and not account_id.startswith("act_"):
         account_id = f"act_{account_id}"
     access_token = str(os.getenv("META_ACCESS_TOKEN", "")).strip()
+    app_id = str(os.getenv("META_APP_ID", "")).strip()
+    app_secret = str(os.getenv("META_APP_SECRET", "")).strip()
     configured_api_version = str(os.getenv("META_API_VERSION", "")).strip()
     api_version = configured_api_version or DEFAULT_META_API_VERSION
     page_id, page_id_env = _first_env_value(FACEBOOK_PAGE_ID_ENV_KEYS)
@@ -83,8 +89,10 @@ def get_meta_config():
         "configured": bool(account_id and access_token),
         "ad_account_id": account_id,
         "access_token_present": bool(access_token),
-        "app_id_present": bool(str(os.getenv("META_APP_ID", "")).strip()),
-        "app_secret_present": bool(str(os.getenv("META_APP_SECRET", "")).strip()),
+        "app_id_present": bool(app_id),
+        "app_secret_present": bool(app_secret),
+        "app_id": app_id,
+        "app_secret": app_secret,
         "api_version": api_version,
         "api_version_source": "META_API_VERSION" if configured_api_version else "default",
         "access_token": access_token,
@@ -104,6 +112,7 @@ def safe_meta_config_status():
         "token_present": config["access_token_present"],
         "app_id_present": config["app_id_present"],
         "app_secret_present": config["app_secret_present"],
+        "app_id": config["app_id"],
         "api_version": config["api_version"],
         "api_version_source": config["api_version_source"],
         "page_id_present": bool(config["page_id"]),
@@ -114,13 +123,14 @@ def safe_meta_config_status():
     }
 
 
-def _raise_for_meta_error(response, *, request_path=""):
+def _raise_for_meta_error(response, *, request_path="", secrets=()):
     if response.ok:
         return
     message = f"Meta API error HTTP {response.status_code}"
     error_code = None
     error_subcode = None
     error_type = ""
+    fbtrace_id = ""
     try:
         payload = response.json()
         error = payload.get("error") or {}
@@ -129,6 +139,7 @@ def _raise_for_meta_error(response, *, request_path=""):
         error_code = error.get("code")
         error_subcode = error.get("error_subcode")
         error_type = str(error.get("type") or "")
+        fbtrace_id = str(error.get("fbtrace_id") or "")[:160]
         if error_code is not None:
             message = f"{message} (code {error_code})"
         if error_subcode is not None:
@@ -136,28 +147,35 @@ def _raise_for_meta_error(response, *, request_path=""):
     except Exception:
         pass
     raise MetaAdsApiError(
-        message,
+        sanitize_meta_error(message, extra_secrets=secrets),
         status_code=getattr(response, "status_code", None),
         error_code=error_code,
         error_subcode=error_subcode,
         error_type=error_type,
+        fbtrace_id=fbtrace_id,
         request_path=request_path,
     )
 
 
-def _request(path, params=None, config=None):
+def _request(path, params=None, config=None, access_token=None):
     config = config or get_meta_config()
-    if not config.get("configured"):
+    if not config.get("configured") and access_token is None:
         raise MetaAdsApiError("Meta Ads API is not configured.")
     clean_path = str(path or "").lstrip("/")
     url = f"{META_BASE_URL}/{config['api_version']}/{clean_path}"
     request_params = dict(params or {})
-    request_params["access_token"] = config["access_token"]
+    request_params["access_token"] = (
+        config.get("access_token") if access_token is None else str(access_token)
+    )
     try:
         response = requests.get(url, params=request_params, timeout=30)
     except requests.RequestException as error:
         raise MetaAdsApiError(sanitize_meta_error("Meta is unavailable. Try again shortly.")) from error
-    _raise_for_meta_error(response, request_path=clean_path)
+    _raise_for_meta_error(
+        response,
+        request_path=clean_path,
+        secrets=(request_params.get("access_token"), request_params.get("input_token")),
+    )
     return response.json()
 
 
@@ -181,7 +199,11 @@ def _post(path, data=None, files=None, config=None):
         raise MetaAdsAmbiguousResultError(
             "Meta did not confirm the result. Sports Cave OS will reconcile it before any retry."
         )
-    _raise_for_meta_error(response, request_path=clean_path)
+    _raise_for_meta_error(
+        response,
+        request_path=clean_path,
+        secrets=(request_data.get("access_token"),),
+    )
     try:
         return response.json()
     except ValueError as error:
@@ -241,6 +263,22 @@ def fetch_meta_token_identity(config=None):
     )
 
 
+def fetch_meta_token_debug(config=None):
+    """Read safe token metadata using the already-configured Meta app credentials."""
+    config = config or get_meta_config()
+    app_id = str(config.get("app_id") or "").strip()
+    app_secret = str(config.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        raise MetaAdsApiError("Meta app credentials are not configured for token inspection.")
+    payload = _request(
+        "debug_token",
+        params={"input_token": str(config.get("access_token") or "")},
+        config=config,
+        access_token=f"{app_id}|{app_secret}",
+    )
+    return dict(payload.get("data") or {})
+
+
 def fetch_meta_campaigns(config=None):
     config = config or get_meta_config()
     return _paged_get(
@@ -278,33 +316,100 @@ def fetch_meta_permissions(config=None):
     )
 
 
-def _connection_error_summary(stage, error):
+def _classify_meta_error(stage, error):
     safe_message = sanitize_meta_error(error)
     lowered = safe_message.casefold()
     error_code = getattr(error, "error_code", None)
+    error_subcode = getattr(error, "error_subcode", None)
     if "version" in lowered and any(
         term in lowered for term in ("unsupported", "deprecated", "no longer", "invalid")
     ):
-        return "Meta unavailable — API version unsupported."
-    if error_code == 190:
-        return "Meta unavailable — Meta returned error code 190."
+        return {
+            "category": "api_version_unsupported",
+            "summary": "Meta unavailable — API version unsupported.",
+            "guidance": "Use the app's current central Graph API version setting.",
+        }
+    if str(error_code) == "200" and "api access blocked" in lowered:
+        return {
+            "category": "api_access_blocked",
+            "summary": "Meta unavailable — Meta has blocked API access for this token/app.",
+            "guidance": (
+                "This is an app/business/token access block before campaign data can be read; "
+                "verify the token's app and the app/System User/ad-account Business assignments."
+            ),
+        }
+    if str(error_code) == "190":
+        expired = str(error_subcode) == "463" or "expired" in lowered
+        return {
+            "category": "expired_token" if expired else "invalid_token",
+            "summary": (
+                "Meta unavailable — access token expired."
+                if expired
+                else "Meta unavailable — access token is invalid."
+            ),
+            "guidance": (
+                "Verify the existing system-user token in Meta's Access Token Debugger and Render."
+            ),
+        }
+    if stage in {"ad_account", "campaigns"} and (
+        "unsupported get request" in lowered
+        or "object with id" in lowered
+        or "does not exist" in lowered
+    ):
+        return {
+            "category": "ad_account_not_found_or_unassigned",
+            "summary": "Meta unavailable — configured ad account is unavailable to this token.",
+            "guidance": (
+                "Verify META_AD_ACCOUNT_ID and assign that ad account to the System User in "
+                "the same Business Portfolio."
+            ),
+        }
+    if stage in {"ad_account", "campaigns"} and (
+        str(error_code) in {"10", "200"}
+        or "permission" in lowered
+        or "access denied" in lowered
+    ):
+        return {
+            "category": "ad_account_access_denied",
+            "summary": "Meta unavailable — ad account access denied.",
+            "guidance": (
+                "Verify the System User has the configured ad account assigned with permission "
+                "to manage campaigns."
+            ),
+        }
     if stage == "token_identity":
-        return "Meta unavailable — token identity read failed."
+        return {
+            "category": "token_identity_unavailable",
+            "summary": "Meta unavailable — token identity read failed.",
+            "guidance": "The /me result is informational when ad-account reads succeed.",
+        }
     if stage == "ad_account":
-        if error_code in {10, 200} or "permission" in lowered or "access" in lowered:
-            return "Meta unavailable — ad account access denied."
-        return "Meta unavailable — ad account read failed."
+        return {
+            "category": "ad_account_read_failed",
+            "summary": "Meta unavailable — ad account read failed.",
+            "guidance": "Verify the configured account ID and its System User assignment.",
+        }
     if stage == "campaigns":
-        return "Meta unavailable — campaign read failed."
-    return "Meta unavailable — connection check failed."
+        return {
+            "category": "campaign_read_failed",
+            "summary": "Meta unavailable — campaign read failed.",
+            "guidance": "Verify the token can read campaigns in the configured ad account.",
+        }
+    return {
+        "category": "connection_check_failed",
+        "summary": "Meta unavailable — connection check failed.",
+        "guidance": "Review the sanitized Meta response and endpoint below.",
+    }
 
 
 def _failed_connection_check(stage, label, endpoint, error):
     safe_message = sanitize_meta_error(error)
+    classification = _classify_meta_error(stage, error)
     LOGGER.warning(
-        "Meta Posting read-only check failed at %s (%s): %s",
+        "Meta Posting read-only check failed at %s (%s), category=%s: %s",
         stage,
         endpoint,
+        classification["category"],
         safe_message,
     )
     return {
@@ -312,8 +417,78 @@ def _failed_connection_check(stage, label, endpoint, error):
         "status": "failed",
         "endpoint": endpoint,
         "message": safe_message,
+        "http_status": getattr(error, "status_code", None),
         "error_code": getattr(error, "error_code", None),
-        "summary": _connection_error_summary(stage, error),
+        "error_subcode": getattr(error, "error_subcode", None),
+        "error_type": str(getattr(error, "error_type", "") or ""),
+        "fbtrace_id": str(getattr(error, "fbtrace_id", "") or "")[:160],
+        **classification,
+    }
+
+
+def _token_debug_check(config, api_version):
+    app_id = str(config.get("app_id") or "").strip()
+    app_secret = str(config.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        return {
+            "label": "Token/app metadata",
+            "status": "unverified",
+            "endpoint": f"/{api_version}/debug_token",
+            "message": "unavailable — META_APP_ID and META_APP_SECRET are not both configured",
+        }
+    try:
+        metadata = fetch_meta_token_debug(config=config)
+    except MetaAdsApiError as error:
+        failure = _failed_connection_check(
+            "token_metadata",
+            "Token/app metadata",
+            f"/{api_version}/debug_token",
+            error,
+        )
+        failure["diagnostic_error_category"] = failure.get("category")
+        failure["category"] = "token_metadata_unavailable"
+        failure["status"] = "unverified"
+        failure["diagnostic"] = failure.get("message")
+        failure["message"] = "token metadata inspection unavailable"
+        failure["summary"] = "Token/app metadata unavailable."
+        failure["guidance"] = (
+            "Verify META_APP_ID and META_APP_SECRET if the ad-account reads otherwise succeed."
+        )
+        return failure
+
+    token_app_id = str(metadata.get("app_id") or "")
+    token_type = str(metadata.get("type") or "unknown")
+    is_valid = metadata.get("is_valid") is True
+    app_matches = bool(token_app_id and token_app_id == app_id)
+    scopes = tuple(sorted({str(value) for value in metadata.get("scopes") or () if value}))
+    if not is_valid:
+        status = "failed"
+        category = "invalid_token"
+        message = "token is not valid"
+        guidance = "Verify the existing system-user token in Meta's Access Token Debugger and Render."
+    elif not app_matches:
+        status = "failed"
+        category = "token_app_mismatch"
+        message = "token belongs to a different Meta app"
+        guidance = "Generate the System User token for the META_APP_ID configured by Sports Cave OS."
+    else:
+        status = "ok"
+        category = "token_metadata_confirmed"
+        message = f"valid {token_type} token; app matches META_APP_ID"
+        guidance = ""
+    return {
+        "label": "Token/app metadata",
+        "status": status,
+        "endpoint": f"/{api_version}/debug_token",
+        "message": message,
+        "category": category,
+        "guidance": guidance,
+        "token_type": token_type,
+        "token_app_id": token_app_id,
+        "configured_app_id": app_id,
+        "app_matches": app_matches,
+        "is_valid": is_valid,
+        "scopes": scopes,
     }
 
 
@@ -324,6 +499,13 @@ def diagnose_meta_posting_connection(config=None):
     api_version_source = str(config.get("api_version_source") or "provided config")
     checks = {}
     campaigns = ()
+    version_warning = ""
+    if api_version_source == "META_API_VERSION" and api_version != DEFAULT_META_API_VERSION:
+        version_warning = (
+            f"Render META_API_VERSION overrides the application default; change it from "
+            f"{api_version} to {DEFAULT_META_API_VERSION}. This stale override does not by itself "
+            "prove the cause of an API access block."
+        )
 
     if config.get("configured"):
         checks["configuration"] = {
@@ -337,15 +519,56 @@ def diagnose_meta_posting_connection(config=None):
             "status": "failed",
             "message": "Ad account or token configuration is missing.",
         }
+    checks["token_presence"] = {
+        "label": "Access token present",
+        "status": "ok" if bool(config.get("access_token")) else "failed",
+        "message": "yes" if config.get("access_token") else "no",
+    }
+    app_id = str(config.get("app_id") or "").strip()
+    app_secret_present = bool(config.get("app_secret"))
+    checks["app_configuration"] = {
+        "label": "Meta app configuration",
+        "status": "ok" if app_id and app_secret_present else "unverified",
+        "message": (
+            f"App ID {app_id}; app secret present"
+            if app_id and app_secret_present
+            else "META_APP_ID and META_APP_SECRET are not both configured"
+        ),
+    }
+    checks["account_configuration"] = {
+        "label": "Configured ad account",
+        "status": "ok" if bool(config.get("ad_account_id")) else "failed",
+        "message": str(config.get("ad_account_id") or "missing"),
+    }
 
     identities_ready = bool(
         config.get("page_id")
         and (config.get("instagram_user_id") or config.get("instagram_actor_id"))
     )
     checks["identity"] = {
-        "label": "Identity",
+        "label": "Identity configuration",
         "status": "ok" if identities_ready else "failed",
-        "message": "OK" if identities_ready else "Facebook Page or Instagram identity is missing.",
+        "message": (
+            "configured (API access not yet verified)"
+            if identities_ready
+            else "Facebook Page or Instagram identity is missing."
+        ),
+    }
+    checks["page_identity"] = {
+        "label": "Facebook Page identity",
+        "status": "ok" if bool(config.get("page_id")) else "failed",
+        "message": "configured" if config.get("page_id") else "missing",
+    }
+    checks["instagram_identity"] = {
+        "label": "Instagram identity",
+        "status": "ok" if bool(
+            config.get("instagram_user_id") or config.get("instagram_actor_id")
+        ) else "failed",
+        "message": (
+            "configured"
+            if config.get("instagram_user_id") or config.get("instagram_actor_id")
+            else "missing"
+        ),
     }
 
     if not config.get("configured") or not identities_ready:
@@ -360,13 +583,15 @@ def diagnose_meta_posting_connection(config=None):
             "summary": summary,
             "api_version": api_version,
             "api_version_source": api_version_source,
+            "default_api_version": DEFAULT_META_API_VERSION,
+            "version_warning": version_warning,
             "checks": checks,
             "permission_state": "unverified",
             "permissions": (),
             "campaigns": campaigns,
         }
 
-    core_failures = []
+    checks["token_metadata"] = _token_debug_check(config, api_version)
     read_checks = (
         (
             "token_identity",
@@ -401,7 +626,6 @@ def diagnose_meta_posting_connection(config=None):
         except MetaAdsApiError as error:
             failure = _failed_connection_check(stage, label, endpoint, error)
             checks[stage] = failure
-            core_failures.append(failure)
 
     permission_endpoint = f"/{api_version}/me/permissions"
     permissions = ()
@@ -435,19 +659,74 @@ def diagnose_meta_posting_connection(config=None):
             "endpoint": permission_endpoint,
             "message": "permission introspection unavailable",
             "diagnostic": safe_message,
+            "http_status": getattr(error, "status_code", None),
             "error_code": getattr(error, "error_code", None),
+            "error_subcode": getattr(error, "error_subcode", None),
+            "error_type": str(getattr(error, "error_type", "") or ""),
+            "fbtrace_id": str(getattr(error, "fbtrace_id", "") or "")[:160],
         }
 
-    connected = not core_failures
-    summary = core_failures[0]["summary"] if core_failures else "Meta connected"
+    account_ok = checks.get("ad_account", {}).get("status") == "ok"
+    campaigns_ok = checks.get("campaigns", {}).get("status") == "ok"
+    token_metadata_category = str(checks.get("token_metadata", {}).get("category") or "")
+    token_metadata_blocked = token_metadata_category in {"invalid_token", "token_app_mismatch"}
+    connected = account_ok and campaigns_ok and not token_metadata_blocked
+
+    if connected and checks.get("token_identity", {}).get("status") == "failed":
+        checks["token_identity"]["status"] = "unverified"
+        checks["token_identity"]["summary"] = "Token identity introspection unavailable."
+
+    blocking_failures = [
+        checks.get(key, {})
+        for key in ("ad_account", "campaigns")
+        if checks.get(key, {}).get("status") == "failed"
+    ]
+    access_blocked = any(
+        failure.get("category") == "api_access_blocked" for failure in blocking_failures
+    )
+    if token_metadata_blocked:
+        token_check = checks["token_metadata"]
+        summary = (
+            "Meta unavailable — access token is invalid."
+            if token_metadata_category == "invalid_token"
+            else "Meta unavailable — token belongs to a different Meta app."
+        )
+        diagnosis_category = token_metadata_category
+        guidance = (str(token_check.get("guidance") or ""),)
+    elif access_blocked:
+        summary = "Meta unavailable — Meta has blocked API access for this token/app."
+        diagnosis_category = "api_access_blocked"
+        guidance = (
+            "This is an app/business/token access issue rather than a campaign-read failure.",
+            (
+                "Verify that the token was generated for the configured Meta app and that the app, "
+                "System User, and ad account are owned by or shared with the same Business Portfolio."
+            ),
+            "Check the Meta App Dashboard for app restrictions and Marketing API access.",
+        )
+    elif blocking_failures:
+        first_failure = blocking_failures[0]
+        summary = str(first_failure.get("summary") or "Meta unavailable")
+        diagnosis_category = str(first_failure.get("category") or "connection_check_failed")
+        guidance = (str(first_failure.get("guidance") or ""),)
+    else:
+        summary = "Meta connected"
+        diagnosis_category = "connected"
+        guidance = ()
     if connected and permission_state == "missing":
         summary = "Meta posting permission required"
+        diagnosis_category = "ads_management_missing"
+        guidance = ("Generate the System User token with ads_management for this app.",)
     return {
         "connected": connected,
         "posting_ready": connected and permission_state != "missing",
         "summary": summary,
+        "diagnosis_category": diagnosis_category,
+        "guidance": tuple(value for value in guidance if value),
         "api_version": api_version,
         "api_version_source": api_version_source,
+        "default_api_version": DEFAULT_META_API_VERSION,
+        "version_warning": version_warning,
         "checks": checks,
         "permission_state": permission_state,
         "permissions": permissions,

@@ -286,13 +286,63 @@ class MetaPostingClientTests(unittest.TestCase):
                 "message": "Invalid token access_token=secret-token-value",
                 "type": "OAuthException",
                 "code": 190,
+                "error_subcode": 463,
+                "fbtrace_id": "TRACE-SAFE-123",
             }
         }
         with self.assertRaises(meta_ads_client.MetaAdsApiError) as raised:
             meta_ads_client._raise_for_meta_error(response, request_path="me")
         self.assertEqual(raised.exception.error_code, 190)
+        self.assertEqual(raised.exception.error_subcode, 463)
+        self.assertEqual(raised.exception.error_type, "OAuthException")
+        self.assertEqual(raised.exception.fbtrace_id, "TRACE-SAFE-123")
         self.assertEqual(raised.exception.request_path, "me")
         self.assertNotIn("secret-token-value", str(raised.exception))
+
+    def test_token_debug_uses_get_and_returns_only_meta_payload(self):
+        config = {
+            **self.config(),
+            "app_id": "app-123",
+            "app_secret": "secret-app-value",
+        }
+        with mock.patch.object(
+            meta_ads_client,
+            "_request",
+            return_value={"data": {"is_valid": True, "app_id": "app-123", "type": "SYSTEM_USER"}},
+        ) as request_mock:
+            result = meta_ads_client.fetch_meta_token_debug(config=config)
+
+        self.assertTrue(result["is_valid"])
+        call = request_mock.call_args
+        self.assertEqual(call.args[0], "debug_token")
+        self.assertEqual(call.kwargs["params"]["input_token"], "secret-token")
+        self.assertEqual(call.kwargs["access_token"], "app-123|secret-app-value")
+
+    def test_token_debug_response_cannot_echo_token_or_app_secret(self):
+        response = mock.Mock(ok=False, status_code=400)
+        response.json.return_value = {
+            "error": {
+                "message": (
+                    "input_token=secret-token-value "
+                    "access_token=app-123|secret-app-value"
+                ),
+                "type": "OAuthException",
+                "code": 190,
+            }
+        }
+        config = {
+            **self.config(),
+            "access_token": "secret-token-value",
+            "app_id": "app-123",
+            "app_secret": "secret-app-value",
+        }
+        with mock.patch.object(meta_ads_client.requests, "get", return_value=response):
+            with self.assertRaises(meta_ads_client.MetaAdsApiError) as raised:
+                meta_ads_client.fetch_meta_token_debug(config=config)
+        diagnostic = str(raised.exception)
+        self.assertNotIn("secret-token-value", diagnostic)
+        self.assertNotIn("secret-app-value", diagnostic)
+        self.assertIn("[redacted]", diagnostic)
 
     def test_ad_create_payload_is_unconditionally_paused(self):
         client = meta_ads_client.MetaPostingClient(self.config())
@@ -390,8 +440,8 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
 
     def test_campaign_failure_is_identified_even_when_permission_check_succeeds(self):
         campaign_error = meta_ads_client.MetaAdsApiError(
-            "Meta API error HTTP 403: access denied (code 200)",
-            error_code=200,
+            "Meta API error HTTP 500: campaign service unavailable (code 1)",
+            error_code=1,
             request_path="act_123/campaigns",
         )
         with mock.patch.object(
@@ -407,7 +457,7 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
 
         self.assertFalse(result["connected"])
         self.assertEqual(result["summary"], "Meta unavailable — campaign read failed.")
-        self.assertEqual(result["checks"]["campaigns"]["error_code"], 200)
+        self.assertEqual(result["checks"]["campaigns"]["error_code"], 1)
 
     def test_successful_account_and_campaign_reads_are_connected(self):
         identity_patch, account_patch, campaign_patch = self.successful_reads()
@@ -422,6 +472,172 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
         self.assertTrue(result["posting_ready"])
         self.assertEqual(result["summary"], "Meta connected")
         self.assertEqual(result["campaigns"][0]["id"], "campaign-1")
+
+    def test_me_failure_is_non_fatal_when_account_and_campaign_reads_work(self):
+        identity_error = meta_ads_client.MetaAdsApiError(
+            "Meta API error HTTP 400: /me unavailable (code 100)",
+            error_code=100,
+        )
+        with mock.patch.object(
+            meta_ads_client, "fetch_meta_token_identity", side_effect=identity_error
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_campaigns", return_value={"rows": []}
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertTrue(result["connected"])
+        self.assertTrue(result["posting_ready"])
+        self.assertEqual(result["summary"], "Meta connected")
+        self.assertEqual(result["checks"]["token_identity"]["status"], "unverified")
+
+    def test_api_access_blocked_on_every_endpoint_is_classified_as_app_access_issue(self):
+        blocked = meta_ads_client.MetaAdsApiError(
+            "Meta API error HTTP 400: API access blocked. (code 200)",
+            status_code=400,
+            error_code=200,
+            error_type="OAuthException",
+            fbtrace_id="TRACE-BLOCKED-1",
+        )
+        with mock.patch.object(
+            meta_ads_client, "fetch_meta_token_identity", side_effect=blocked
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_account", side_effect=blocked
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_campaigns", side_effect=blocked
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", side_effect=blocked
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+
+        self.assertFalse(result["connected"])
+        self.assertFalse(result["posting_ready"])
+        self.assertEqual(result["diagnosis_category"], "api_access_blocked")
+        self.assertEqual(
+            result["summary"],
+            "Meta unavailable — Meta has blocked API access for this token/app.",
+        )
+        self.assertIn("app/business/token access issue", " ".join(result["guidance"]))
+        self.assertEqual(result["checks"]["ad_account"]["fbtrace_id"], "TRACE-BLOCKED-1")
+
+    def test_invalid_and_expired_tokens_are_distinguished(self):
+        cases = (
+            (
+                meta_ads_client.MetaAdsApiError(
+                    "Invalid OAuth access token. (code 190)", error_code=190
+                ),
+                "invalid_token",
+                "Meta unavailable — access token is invalid.",
+            ),
+            (
+                meta_ads_client.MetaAdsApiError(
+                    "The access token has expired. (code 190) (subcode 463)",
+                    error_code=190,
+                    error_subcode=463,
+                ),
+                "expired_token",
+                "Meta unavailable — access token expired.",
+            ),
+        )
+        for error, category, summary in cases:
+            with self.subTest(category=category), mock.patch.object(
+                meta_ads_client, "fetch_meta_token_identity", side_effect=error
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_account", side_effect=error
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_campaigns", side_effect=error
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_permissions", side_effect=error
+            ):
+                result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+            self.assertFalse(result["connected"])
+            self.assertEqual(result["diagnosis_category"], category)
+            self.assertEqual(result["summary"], summary)
+
+    def test_missing_assignment_and_wrong_account_id_are_actionable(self):
+        cases = (
+            (
+                meta_ads_client.MetaAdsApiError(
+                    "Permissions error (code 200)", error_code=200
+                ),
+                "ad_account_access_denied",
+            ),
+            (
+                meta_ads_client.MetaAdsApiError(
+                    "Unsupported get request. Object with ID does not exist or cannot be loaded.",
+                    error_code=100,
+                ),
+                "ad_account_not_found_or_unassigned",
+            ),
+        )
+        for error, category in cases:
+            with self.subTest(category=category), mock.patch.object(
+                meta_ads_client, "fetch_meta_token_identity", return_value={"id": "system-1"}
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_account", side_effect=error
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_campaigns", side_effect=error
+            ), mock.patch.object(
+                meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+            ):
+                result = meta_ads_client.diagnose_meta_posting_connection(self.config())
+            self.assertFalse(result["connected"])
+            self.assertEqual(result["diagnosis_category"], category)
+
+    def test_token_app_metadata_can_prove_app_match_or_mismatch_without_exposing_secrets(self):
+        config = {
+            **self.config(),
+            "app_id": "app-expected",
+            "app_secret": "secret-app-value",
+        }
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client,
+            "fetch_meta_token_debug",
+            return_value={
+                "is_valid": True,
+                "type": "SYSTEM_USER",
+                "app_id": "app-other",
+                "scopes": ["ads_read", "ads_management"],
+            },
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(config)
+
+        self.assertFalse(result["connected"])
+        self.assertEqual(result["diagnosis_category"], "token_app_mismatch")
+        serialized = json.dumps(result)
+        self.assertNotIn(config["access_token"], serialized)
+        self.assertNotIn(config["app_secret"], serialized)
+        self.assertEqual(result["checks"]["token_metadata"]["token_type"], "SYSTEM_USER")
+
+    def test_failed_token_debug_does_not_override_successful_account_reads(self):
+        config = {
+            **self.config(),
+            "app_id": "app-expected",
+            "app_secret": "secret-app-value",
+        }
+        debug_error = meta_ads_client.MetaAdsApiError(
+            "Invalid app access token (code 190)", error_code=190
+        )
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client, "fetch_meta_token_debug", side_effect=debug_error
+        ), mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(config)
+
+        self.assertTrue(result["connected"])
+        self.assertEqual(result["summary"], "Meta connected")
+        self.assertEqual(
+            result["checks"]["token_metadata"]["category"],
+            "token_metadata_unavailable",
+        )
 
     def test_secrets_are_never_returned_in_diagnostics(self):
         token = "secret-token-value"
@@ -445,7 +661,7 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
         self.assertNotIn(token, serialized)
         self.assertNotIn(app_secret, serialized)
         self.assertIn("[redacted]", serialized)
-        self.assertEqual(result["summary"], "Meta unavailable — Meta returned error code 190.")
+        self.assertEqual(result["summary"], "Meta connected")
 
     def test_effective_api_version_and_source_are_reported_safely(self):
         identity_patch, account_patch, campaign_patch = self.successful_reads()
@@ -456,7 +672,21 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
 
         self.assertEqual(result["api_version"], "v26.0")
         self.assertEqual(result["api_version_source"], "META_API_VERSION")
+        self.assertEqual(result["default_api_version"], "v26.0")
+        self.assertEqual(result["version_warning"], "")
         self.assertNotIn(self.config()["access_token"], json.dumps(result))
+
+    def test_stale_render_api_version_override_is_reported_without_claiming_root_cause(self):
+        config = {**self.config(), "api_version": "v23.0"}
+        identity_patch, account_patch, campaign_patch = self.successful_reads()
+        with identity_patch, account_patch, campaign_patch, mock.patch.object(
+            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+        ):
+            result = meta_ads_client.diagnose_meta_posting_connection(config)
+
+        self.assertEqual(result["api_version"], "v23.0")
+        self.assertIn("change it from v23.0 to v26.0", result["version_warning"])
+        self.assertIn("does not by itself prove", result["version_warning"])
 
     def test_unsupported_version_error_is_understandable(self):
         version_error = meta_ads_client.MetaAdsApiError(
@@ -466,11 +696,11 @@ class MetaConnectionDiagnosticTests(unittest.TestCase):
         with mock.patch.object(
             meta_ads_client, "fetch_meta_token_identity", side_effect=version_error
         ), mock.patch.object(
-            meta_ads_client, "fetch_meta_account", return_value={"id": "act_123"}
+            meta_ads_client, "fetch_meta_account", side_effect=version_error
         ), mock.patch.object(
-            meta_ads_client, "fetch_meta_campaigns", return_value={"rows": []}
+            meta_ads_client, "fetch_meta_campaigns", side_effect=version_error
         ), mock.patch.object(
-            meta_ads_client, "fetch_meta_permissions", return_value=("ads_management",)
+            meta_ads_client, "fetch_meta_permissions", side_effect=version_error
         ):
             result = meta_ads_client.diagnose_meta_posting_connection(self.config())
 
