@@ -113,11 +113,11 @@ class AdsImageProcessingTests(unittest.TestCase):
         )
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Creative Refresh")],
-            [
-                "Winner Evolution",
-                "Emotional / Collector Expansion",
-                "Pattern Interrupt",
-            ],
+            ["Ad 1 Image", "Ad 2 Image", "Ad 3 Image"],
+        )
+        self.assertEqual(
+            [slot["strategy"] for slot in ads_image_workflow.campaign_image_slots("Creative Refresh")],
+            ["Winner Evolution", "Emotional / Collector Expansion", "Pattern Interrupt"],
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
 

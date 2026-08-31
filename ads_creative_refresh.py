@@ -1226,6 +1226,7 @@ def build_creative_refresh_ads_result(
     csv_data,
     *,
     review_context_key="",
+    source_winner=None,
 ):
     standard_ads = tuple(
         _normalise_creative_refresh_ad(
@@ -1260,6 +1261,10 @@ def build_creative_refresh_ads_result(
         "campaign_moment": ads_page.empty_campaign_moment(),
         "source": "Creative Refresh",
         "source_review_context_key": str(review_context_key or ""),
+        "source_winner": {
+            "primary_text": _multiline_text((source_winner or {}).get("primary_text")),
+            "headline": _multiline_text((source_winner or {}).get("headline")),
+        },
         "parent_product": _clean_text((product_context or {}).get("product_name")),
         "standard_ads": standard_ads,
         "refresh_challengers": standard_ads,
@@ -1268,8 +1273,14 @@ def build_creative_refresh_ads_result(
     }
 
 
-def creative_refresh_setup_notes(challengers):
-    sections = []
+def creative_refresh_setup_notes(challengers, *, source_winner=None):
+    source_winner = dict(source_winner or {})
+    sections = [
+        "SOURCE WORKFLOW: Creative Refresh",
+        f"Winning primary text: {_multiline_text(source_winner.get('primary_text'))}",
+        f"Winning headline: {_multiline_text(source_winner.get('headline'))}",
+        "",
+    ]
     for index, raw_challenger in enumerate(challengers or (), start=1):
         challenger = _normalise_creative_refresh_ad(raw_challenger, index)
         sections.extend(
@@ -2991,6 +3002,18 @@ def _meta_csv_ui_state(*, uploaded, parsed=None, evidence=None, error=""):
     return "error"
 
 
+def _completed_ads_csv_ui_state(*, uploaded, result=None, error=""):
+    if not uploaded:
+        return "neutral"
+    if isinstance(result, dict) and len(result.get("standard_ads") or ()) == len(
+        CREATIVE_REFRESH_STRATEGIES
+    ):
+        return "applied"
+    if error:
+        return "error"
+    return "error"
+
+
 def _render_csv_file_state(container_key, state):
     if state not in {"applied", "error"}:
         return
@@ -3185,14 +3208,24 @@ def _render_build_challengers_stage(review_result):
                     challengers,
                     csv_upload.getvalue(),
                     review_context_key=review_result.get("context_key"),
+                    source_winner={
+                        "primary_text": review_result.get("winning_primary_text"),
+                        "headline": review_result.get("winning_headline"),
+                    },
                 )
                 st.session_state[CHALLENGER_RESULT_STATE_KEY] = result
-                _render_csv_file_state(CHALLENGER_CSV_CONTAINER_KEY, "applied")
+                _render_csv_file_state(
+                    CHALLENGER_CSV_CONTAINER_KEY,
+                    _completed_ads_csv_ui_state(uploaded=True, result=result),
+                )
                 st.success("✓ 3 ads imported")
             except CreativeRefreshValidationError as error:
                 result = None
                 st.session_state.pop(CHALLENGER_RESULT_STATE_KEY, None)
-                _render_csv_file_state(CHALLENGER_CSV_CONTAINER_KEY, "error")
+                _render_csv_file_state(
+                    CHALLENGER_CSV_CONTAINER_KEY,
+                    _completed_ads_csv_ui_state(uploaded=True, error=str(error)),
+                )
                 st.error(str(error))
         if result is None:
             return
@@ -3212,7 +3245,10 @@ def _render_build_challengers_stage(review_result):
             f"Ad {row['ad_number']} — {row['strategy']}:\n{row['primary_text']}"
             for row in standard_ads
         ),
-        "cards": creative_refresh_setup_notes(standard_ads),
+        "cards": creative_refresh_setup_notes(
+            standard_ads,
+            source_winner=result.get("source_winner"),
+        ),
     }
     st.session_state[ads_page.ADS_IMAGE_STATE_KEY] = workflow
     ads_page._render_ads_image_slots(result, workflow)

@@ -19,6 +19,7 @@ import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
+from ads_meta_contract import META_AD_URL_PARAMETERS
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import os_accounts
@@ -472,6 +473,15 @@ STANDARD_ADS_CSV_HEADERS = (
     *(field for field, _label in STANDARD_ADS_OUTPUT_FIELDS),
 )
 STANDARD_ADS_CSV_REQUIRED_FIELDS = STANDARD_ADS_CSV_HEADERS
+STANDARD_ADS_IMAGE_PROMPT_MIN_CHARACTERS = 200
+STANDARD_ADS_IMAGE_PROMPT_CROSS_REFERENCES = (
+    "same as previous",
+    "same as above",
+    "see above",
+    "use the shared prompt",
+    "use shared rules",
+    "refer to the previous prompt",
+)
 INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS = (
     {
         "key": "legacy_standard",
@@ -887,11 +897,6 @@ META_BUILD_ORDER = [
     "Paste one generated headline and description into each matching card.",
     "Add the five primary-text variations and allow Meta to test them.",
 ]
-
-META_AD_URL_PARAMETERS = (
-    "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}"
-    "&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"
-)
 
 CAROUSEL_VISUAL_ROLES = {
     "motorsport_carousel": (
@@ -9397,17 +9402,6 @@ def build_standard_ads_csv(
     return output.getvalue().encode("utf-8-sig")
 
 
-def _standard_ads_header_map(headers):
-    header_map = {}
-    duplicates = []
-    for header in headers or ():
-        normalized = re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().casefold()).strip("_")
-        if normalized in header_map:
-            duplicates.append(str(header or ""))
-        header_map[normalized] = header
-    return header_map, duplicates
-
-
 def parse_standard_ads_csv(
     data,
     *,
@@ -9432,26 +9426,16 @@ def parse_standard_ads_csv(
     try:
         reader = csv.DictReader(io.StringIO(decoded, newline=""))
         headers = list(reader.fieldnames or ())
-        header_map, duplicates = _standard_ads_header_map(headers)
-        if duplicates:
+        if len(set(headers)) != len(headers):
             raise StandardAdsCSVError("The completed Sports Cave Ads CSV contains duplicate column headers.")
-        expected_header_keys = {
-            re.sub(r"[^a-z0-9]+", "_", header.casefold()).strip("_")
-            for header in STANDARD_ADS_CSV_HEADERS
-        }
-        missing = [header for header in STANDARD_ADS_CSV_HEADERS if header not in header_map]
+        missing = [header for header in STANDARD_ADS_CSV_HEADERS if header not in headers]
         if missing:
             raise StandardAdsCSVError(
                 "The completed Sports Cave Ads CSV is missing required columns: "
                 + ", ".join(missing)
                 + ". Download a fresh empty CSV and keep its headers unchanged."
             )
-        unexpected = [
-            header
-            for header in headers
-            if re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().casefold()).strip("_")
-            not in expected_header_keys
-        ]
+        unexpected = [header for header in headers if header not in STANDARD_ADS_CSV_HEADERS]
         if unexpected:
             raise StandardAdsCSVError(
                 "The completed Sports Cave Ads CSV contains unexpected columns: "
@@ -9465,7 +9449,7 @@ def parse_standard_ads_csv(
                     f"Sports Cave Ads CSV row {row_number} has a quoting or column-count problem."
                 )
             canonical = {
-                header: _preserve_multiline_text(row.get(header_map[header]))
+                header: _preserve_multiline_text(row.get(header))
                 for header in STANDARD_ADS_CSV_HEADERS
             }
             if any(value.strip() for value in canonical.values()):
@@ -9518,6 +9502,36 @@ def parse_standard_ads_csv(
                     f"Ad {index} strategy must remain {expected_strategy!r}."
                 )
             strategy = expected_strategy
+        placeholder_fields = [
+            field
+            for field in ("primary_text", "headline", "description", "cta", "image_prompt")
+            if row[field].strip().casefold() in {"tbd", "n/a", "na", "todo", "placeholder"}
+        ]
+        if placeholder_fields:
+            raise StandardAdsCSVError(
+                f"Ad {index} still contains placeholders in: {', '.join(placeholder_fields)}."
+            )
+        image_prompt = row["image_prompt"].strip()
+        if len(image_prompt) < STANDARD_ADS_IMAGE_PROMPT_MIN_CHARACTERS:
+            raise StandardAdsCSVError(
+                f"Ad {index} Image Generation Prompt is too short to be complete and standalone."
+            )
+        cross_reference = next(
+            (
+                phrase
+                for phrase in STANDARD_ADS_IMAGE_PROMPT_CROSS_REFERENCES
+                if phrase in image_prompt.casefold()
+            ),
+            "",
+        )
+        if cross_reference:
+            raise StandardAdsCSVError(
+                f"Ad {index} Image Generation Prompt must be standalone and cannot use {cross_reference!r}."
+            )
+        if expected_product and expected_product.casefold() not in image_prompt.casefold():
+            raise StandardAdsCSVError(
+                f"Ad {index} Image Generation Prompt must name the selected product: {expected_product}."
+            )
         parsed.append(
             {
                 **row,

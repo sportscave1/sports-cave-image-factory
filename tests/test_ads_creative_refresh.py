@@ -132,19 +132,49 @@ def sample_product_context():
     }
 
 
+def sample_image_prompt(rank):
+    return (
+        f"Create Ad {rank} as a true 1:1 square premium Sports Cave advertisement for "
+        "Shane Warne Tribute Wall Art. Use the supplied product artwork as the exact immutable "
+        "framed product, preserve every pixel, face, word, colour and frame detail, and keep the "
+        "complete frame dominant and readable on mobile. Use realistic glass, controlled reflections, "
+        "natural contact shadows, believable premium Australian residential architecture, restrained "
+        "black, gold and warm-white styling, uncluttered composition and physically coherent lighting."
+    )
+
+
 def sample_challengers():
     rows = []
     for rank, strategy in enumerate(ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES, start=1):
         rows.append(
             {
                 "schema_version": ads_creative_refresh.CREATIVE_REFRESH_CSV_SCHEMA_VERSION,
+                "ad_number": rank,
+                "product_name": "Shane Warne Tribute Wall Art",
+                "strategy": strategy,
+                "primary_text": f"Primary text {rank}\n\nSecure your edition.",
+                "headline": f"Headline {rank}",
+                "description": f"Description {rank}",
+                "cta": "Shop Now",
+                "image_prompt": sample_image_prompt(rank),
+            }
+        )
+    return rows
+
+
+def sample_legacy_challengers():
+    rows = []
+    for rank, strategy in enumerate(ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES, start=1):
+        rows.append(
+            {
+                "schema_version": ads_creative_refresh.LEGACY_CREATIVE_REFRESH_CSV_SCHEMA_VERSION,
                 "refresh_variant": strategy,
                 "refresh_rank": str(rank),
                 "refresh_angle": f"Controlled angle {rank}",
                 "refresh_parent_product": "Shane Warne Tribute Wall Art",
-                "primary_text": f"Primary text {rank}\n\nSecure your edition.",
-                "headline": f"Headline {rank}",
-                "description": f"Description {rank}",
+                "primary_text": f"Legacy primary text {rank}",
+                "headline": f"Legacy headline {rank}",
+                "description": f"Legacy description {rank}",
                 "cta": "Shop Now",
                 "on_image_headline": f"ON IMAGE {rank}",
                 "supporting_line": "Only 100 worldwide.",
@@ -158,36 +188,48 @@ def sample_challengers():
                 "winner_keep": "Product prominence",
                 "winner_change": f"Controlled change {rank}",
                 "test_reason": f"Test reason {rank}",
-                "image_prompt": f"Complete standalone image prompt {rank}",
+                "image_prompt": sample_image_prompt(rank),
             }
         )
     return rows
 
 
 class CreativeRefreshNavigationTests(unittest.TestCase):
-    def test_ads_registry_has_one_top_level_parent_and_one_explicit_child(self):
+    def test_ads_registry_has_one_top_level_parent_and_two_explicit_children(self):
         self.assertEqual(
             ads_navigation.ADS_ROUTES,
-            ("Ads", "Creative Refresh"),
+            ("Ads", "Creative Refresh", "Posting"),
         )
         parent = os_accounts.PAGE_BY_KEY[ads_navigation.ADS_PAGE_KEY]
         child = os_accounts.PAGE_BY_KEY[ads_navigation.CREATIVE_REFRESH_PAGE_KEY]
+        posting = os_accounts.PAGE_BY_KEY[ads_navigation.POSTING_PAGE_KEY]
         top_level_routes = tuple(page["route"] for page in os_accounts.navigation_pages())
 
         self.assertEqual(parent["route"], ads_navigation.ADS_CREATE_ROUTE)
         self.assertEqual(child["parent_key"], parent["key"])
         self.assertTrue(child["navigation_child"])
         self.assertFalse(child["worker_assignable"])
+        self.assertEqual(posting["parent_key"], parent["key"])
+        self.assertTrue(posting["navigation_child"])
+        self.assertFalse(posting["worker_assignable"])
         self.assertEqual(top_level_routes.count(ads_navigation.ADS_CREATE_ROUTE), 1)
         self.assertNotIn(ads_navigation.CREATIVE_REFRESH_ROUTE, top_level_routes)
 
-    def test_ads_submenu_uses_shared_child_filter_and_never_renders_create_ads(self):
+    def test_ads_submenu_uses_shared_order_with_new_ads_overview(self):
         self.assertEqual(
             navigation_runtime.disclosure_child_routes(
                 ads_navigation.ADS_ROUTES,
                 ads_navigation.ADS_CREATE_ROUTE,
             ),
-            (ads_navigation.CREATIVE_REFRESH_ROUTE,),
+            (ads_navigation.CREATIVE_REFRESH_ROUTE, ads_navigation.POSTING_ROUTE),
+        )
+        self.assertEqual(
+            navigation_runtime.disclosure_child_routes(
+                ads_navigation.ADS_ROUTES,
+                ads_navigation.ADS_CREATE_ROUTE,
+                include_overview=True,
+            ),
+            ads_navigation.ADS_ROUTES,
         )
         self.assertEqual(
             navigation_runtime.active_disclosure_group(
@@ -205,6 +247,7 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         ads_source = source[ads_start:seo_start]
         self.assertIn("navigation_runtime.disclosure_child_routes(", ads_source)
         self.assertIn("ads_nav.ADS_CREATE_ROUTE,", ads_source)
+        self.assertIn("include_overview=True,", ads_source)
         self.assertNotIn("for route in ads_nav.ADS_ROUTES:", ads_source)
         self.assertLess(
             source.index('key="sidebar-ads-children"'),
@@ -287,6 +330,8 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
             ("Creative Refresh", "sidebar-child::Creative Refresh"),
             sidebar_buttons,
         )
+        self.assertIn(("New Ads", "sidebar-child::Ads"), sidebar_buttons)
+        self.assertIn(("Posting", "sidebar-child::Posting"), sidebar_buttons)
         self.assertNotIn(("Create Ads", "sidebar-child::Ads"), sidebar_buttons)
         self.assertEqual(app_test.session_state["sidebar-open-group"], "ads")
         page_source = (ROOT / "ads_creative_refresh.py").read_text(encoding="utf-8")
@@ -763,7 +808,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             meta_evidence=evidence,
         )
         self.assertIn(
-            "Attach the actual winning ad creative image to this ChatGPT message before running this prompt.",
+            "Attach the actual winning ad creative image and the empty Sports Cave Ads CSV",
             prompt,
         )
         self.assertIn("Shane Warne Tribute Wall Art", prompt)
@@ -775,9 +820,18 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         for strategy in ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES:
             self.assertIn(strategy, prompt)
         self.assertIn(
-            ",".join(ads_creative_refresh.CREATIVE_REFRESH_CSV_HEADERS),
+            ",".join(ads_page.STANDARD_ADS_CSV_HEADERS),
             prompt,
         )
+        self.assertIn(
+            ads_page.build_standard_ads_output_contract(
+                strategies=ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES,
+            ),
+            prompt,
+        )
+        self.assertIn("Populate the attached empty Sports Cave Ads CSV", prompt)
+        self.assertIn("Do not invent a Creative Refresh-specific schema", prompt)
+        self.assertIn("exactly THREE complete standalone Image Generation Prompts", prompt)
         self.assertIn("immutable product identity", prompt)
 
     def test_review_prompt_is_complete_without_meta_csv(self):
@@ -905,6 +959,126 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             "applied",
         )
 
+    def test_empty_csv_uses_the_canonical_standard_ads_headers_and_three_identity_rows(self):
+        data = ads_creative_refresh.build_creative_refresh_empty_csv(sample_product_context())
+        reader = csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+        rows = list(reader)
+        self.assertEqual(reader.fieldnames, list(ads_page.STANDARD_ADS_CSV_HEADERS))
+        self.assertEqual(
+            ads_creative_refresh.CREATIVE_REFRESH_CSV_HEADERS,
+            ads_page.STANDARD_ADS_CSV_HEADERS,
+        )
+        self.assertEqual([row["ad_number"] for row in rows], ["1", "2", "3"])
+        self.assertEqual(
+            [row["strategy"] for row in rows],
+            list(ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES),
+        )
+        self.assertTrue(all(row["product_name"] == "Shane Warne Tribute Wall Art" for row in rows))
+        for row in rows:
+            for field, _label in ads_page.STANDARD_ADS_OUTPUT_FIELDS:
+                self.assertEqual(row[field], "")
+
+    def test_standard_output_contract_requests_three_ads_and_three_complete_prompts(self):
+        contract = ads_page.build_standard_ads_output_contract(
+            strategies=ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES,
+        )
+        self.assertEqual(contract.count("Image Generation Prompt:\n"), 3)
+        for ad_number in range(1, 4):
+            self.assertIn(f"AD {ad_number}", contract)
+        prompt = ads_creative_refresh.build_creative_refresh_review_prompt(
+            sample_product_context(),
+            "Greatness doesn’t fade. It gets framed...",
+            "Only 100 Shane Warne Editions",
+        )
+        self.assertIn("WINNER DNA", prompt)
+        self.assertIn("KEEP, IMPROVE, REMOVE and TEST", prompt)
+        self.assertIn("The readable three-ad response and CSV must contain the same production data", prompt)
+        self.assertIn("return the completed csv as a downloadable .csv file", prompt.casefold())
+
+    def test_standard_ads_csv_round_trip_preserves_order_multiline_unicode_and_long_prompts(self):
+        rows = sample_challengers()
+        rows[0]["primary_text"] = (
+            "Greatness doesn’t fade. It gets framed...\n\n"
+            "Nathan's collector pick says, \"Only 100, worldwide.\""
+        )
+        rows[1]["description"] = "Premium, framed, and ready for a fan’s collection."
+        rows[2]["image_prompt"] = sample_image_prompt(3) + "\n\n" + ("Detailed independent direction. " * 250)
+        data = ads_creative_refresh.build_creative_refresh_challenger_csv(rows)
+        parsed = ads_creative_refresh.parse_creative_refresh_challenger_csv(
+            data,
+            product_name="Shane Warne Tribute Wall Art",
+            filename="completed.csv",
+        )
+        self.assertEqual(tuple(row["ad_number"] for row in parsed), (1, 2, 3))
+        self.assertEqual(parsed[0]["primary_text"], rows[0]["primary_text"])
+        self.assertEqual(parsed[1]["description"], rows[1]["description"])
+        self.assertEqual(parsed[2]["image_prompt"], rows[2]["image_prompt"].rstrip())
+
+    def test_completed_csv_success_state_requires_three_imported_standard_ads(self):
+        result = ads_creative_refresh.build_creative_refresh_ads_result(
+            sample_product_context(),
+            sample_challengers(),
+            ads_creative_refresh.build_creative_refresh_challenger_csv(sample_challengers()),
+        )
+        self.assertEqual(
+            ads_creative_refresh._completed_ads_csv_ui_state(uploaded=True, result=result),
+            "applied",
+        )
+        self.assertEqual(
+            ads_creative_refresh._completed_ads_csv_ui_state(
+                uploaded=True,
+                error="Missing required columns",
+            ),
+            "error",
+        )
+        self.assertEqual(
+            ads_creative_refresh._completed_ads_csv_ui_state(uploaded=False),
+            "neutral",
+        )
+
+    def test_standard_ads_csv_rejects_missing_values_and_non_standalone_image_prompts(self):
+        missing = sample_challengers()
+        missing[1]["description"] = ""
+        with self.assertRaisesRegex(
+            ads_creative_refresh.CreativeRefreshValidationError,
+            "Ad 2 is missing required values: description",
+        ):
+            ads_creative_refresh.parse_creative_refresh_challenger_csv(
+                ads_creative_refresh.build_creative_refresh_challenger_csv(missing),
+                product_name="Shane Warne Tribute Wall Art",
+                filename="missing.csv",
+            )
+
+        cross_reference = sample_challengers()
+        cross_reference[2]["image_prompt"] = (
+            "Use the same as previous prompt for Shane Warne Tribute Wall Art, with enough repeated "
+            "filler wording to pass a basic length check while still depending on another prompt. " * 3
+        )
+        with self.assertRaisesRegex(
+            ads_creative_refresh.CreativeRefreshValidationError,
+            "must be standalone",
+        ):
+            ads_creative_refresh.parse_creative_refresh_challenger_csv(
+                ads_creative_refresh.build_creative_refresh_challenger_csv(cross_reference),
+                product_name="Shane Warne Tribute Wall Art",
+                filename="cross-reference.csv",
+            )
+
+    def test_legacy_creative_refresh_csv_still_maps_into_standard_ads_fields(self):
+        legacy_data = csv_bytes(
+            sample_legacy_challengers(),
+            ads_creative_refresh.LEGACY_CREATIVE_REFRESH_CSV_HEADERS,
+        )
+        parsed = ads_creative_refresh.parse_creative_refresh_challenger_csv(
+            legacy_data,
+            product_name="Shane Warne Tribute Wall Art",
+            filename="legacy-refresh.csv",
+        )
+        self.assertEqual(tuple(row["ad_number"] for row in parsed), (1, 2, 3))
+        self.assertEqual(parsed[0]["strategy"], "Winner Evolution")
+        self.assertEqual(parsed[0]["primary_text"], "Legacy primary text 1")
+        self.assertEqual(parsed[2]["image_prompt"], sample_image_prompt(3))
+
     def test_stage_two_csv_imports_exactly_three_challengers_and_prompts(self):
         data = ads_creative_refresh.build_creative_refresh_challenger_csv(sample_challengers())
         parsed = ads_creative_refresh.parse_creative_refresh_challenger_csv(
@@ -914,19 +1088,34 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         self.assertEqual(len(parsed), 3)
         self.assertEqual(
-            tuple(row["refresh_variant"] for row in parsed),
+            tuple(row["strategy"] for row in parsed),
             ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES,
         )
+        self.assertEqual(tuple(row["ad_number"] for row in parsed), (1, 2, 3))
         self.assertEqual(parsed[1]["headline"], "Headline 2")
-        self.assertEqual(parsed[2]["image_prompt"], "Complete standalone image prompt 3")
+        self.assertEqual(parsed[2]["image_prompt"], sample_image_prompt(3))
         result = ads_creative_refresh.build_creative_refresh_ads_result(
             sample_product_context(),
             parsed,
             data,
+            source_winner={
+                "primary_text": "Greatness doesn’t fade. It gets framed...",
+                "headline": "Only 100 Shane Warne Editions",
+            },
         )
         self.assertEqual(result["source"], "Creative Refresh")
         self.assertEqual(result["parent_product"], "Shane Warne Tribute Wall Art")
         self.assertEqual(result["campaign_type"], "Creative Refresh")
+        self.assertEqual(
+            result["source_winner"]["headline"],
+            "Only 100 Shane Warne Editions",
+        )
+        notes = ads_creative_refresh.creative_refresh_setup_notes(
+            result["standard_ads"],
+            source_winner=result["source_winner"],
+        )
+        self.assertIn("SOURCE WORKFLOW: Creative Refresh", notes)
+        self.assertIn("Greatness doesn’t fade. It gets framed...", notes)
 
     def test_stage_two_csv_reports_missing_columns_and_wrong_row_count(self):
         rows = sample_challengers()
@@ -952,7 +1141,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             )
         with self.assertRaisesRegex(
             ads_creative_refresh.CreativeRefreshValidationError,
-            "exactly 3 challenger rows; this file contains 2",
+            "exactly 3 completed ad rows; this file contains 2",
         ):
             ads_creative_refresh.parse_creative_refresh_challenger_csv(
                 ads_creative_refresh.build_creative_refresh_challenger_csv(rows[:2]),
@@ -1013,7 +1202,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         app_test.session_state[ads_creative_refresh.PROMPT_READY_CONTEXT_KEY] = review["context_key"]
         app_test.run(timeout=30)
         self.assertIn(
-            "Import ChatGPT Refresh CSV",
+            "Import Completed CSV",
             [uploader.label for uploader in app_test.file_uploader],
         )
 
@@ -1023,13 +1212,69 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         next(
             uploader
             for uploader in app_test.file_uploader
-            if uploader.label == "Import ChatGPT Refresh CSV"
+            if uploader.label == "Import Completed CSV"
         ).set_value([("refresh.csv", refresh_csv, "text/csv")])
         app_test.run(timeout=30)
         self.assertFalse(app_test.exception)
         labels = [uploader.label for uploader in app_test.file_uploader]
-        for strategy in ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES:
-            self.assertIn(strategy, labels)
+        for ad_number in range(1, 4):
+            self.assertIn(f"Ad {ad_number} Image", labels)
+        self.assertEqual(
+            [field.value for field in app_test.text_area if field.label == "Primary Text"],
+            [row["primary_text"] for row in sample_challengers()],
+        )
+        self.assertEqual(
+            [field.value for field in app_test.text_input if field.label == "Headline"],
+            [row["headline"] for row in sample_challengers()],
+        )
+        self.assertEqual(
+            [field.value for field in app_test.text_area if field.label == "Description"],
+            [row["description"] for row in sample_challengers()],
+        )
+        self.assertEqual(
+            [field.value for field in app_test.text_input if field.label == "CTA"],
+            [row["cta"] for row in sample_challengers()],
+        )
+        self.assertEqual(
+            [
+                field.value
+                for field in app_test.text_area
+                if field.label.endswith("Image Generation Prompt")
+            ],
+            [row["image_prompt"] for row in sample_challengers()],
+        )
+        for ad_number in range(1, 4):
+            next(
+                uploader
+                for uploader in app_test.file_uploader
+                if uploader.label == f"Ad {ad_number} Image"
+            ).set_value(
+                [(f"ad-{ad_number}.png", square_png_bytes(), "image/png")]
+            )
+        app_test.run(timeout=30)
+        self.assertFalse(app_test.exception)
+        workflow_before = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        slot_names_before = {
+            slot_id: slot_data.get("original_name")
+            for slot_id, slot_data in workflow_before["slots"].items()
+        }
+        self.assertEqual(
+            slot_names_before,
+            {
+                "creative-refresh-winner-evolution": "ad-1.png",
+                "creative-refresh-emotional-collector-expansion": "ad-2.png",
+                "creative-refresh-pattern-interrupt": "ad-3.png",
+            },
+        )
+        app_test.run(timeout=30)
+        workflow_after = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertEqual(
+            {
+                slot_id: slot_data.get("original_name")
+                for slot_id, slot_data in workflow_after["slots"].items()
+            },
+            slot_names_before,
+        )
         self.assertEqual(
             app_test.session_state[f"{ads_creative_refresh.STATE_PREFIX}winning_meta_headline"],
             "Only 100 Shane Warne Editions",
@@ -1043,7 +1288,11 @@ class CreativeRefreshV2Tests(unittest.TestCase):
 
     def test_creative_refresh_uses_exactly_three_shared_ads_image_slots(self):
         slots = ads_page.ads_image_workflow.campaign_image_slots("Creative Refresh")
-        self.assertEqual([slot["label"] for slot in slots], list(ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES))
+        self.assertEqual([slot["label"] for slot in slots], ["Ad 1 Image", "Ad 2 Image", "Ad 3 Image"])
+        self.assertEqual(
+            [slot["strategy"] for slot in slots],
+            list(ads_creative_refresh.CREATIVE_REFRESH_STRATEGIES),
+        )
         result = ads_creative_refresh.build_creative_refresh_ads_result(
             sample_product_context(),
             sample_challengers(),
@@ -1118,7 +1367,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         self.assertEqual(outcomes["_creative_refresh_csv"]["status"], "saved")
         self.assertEqual(
             outcomes["_creative_refresh_csv"]["filename"],
-            "creative-refresh-challengers.csv",
+            ads_page.STANDARD_ADS_CSV_FILENAME,
         )
 
 

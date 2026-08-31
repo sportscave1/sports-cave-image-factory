@@ -274,6 +274,72 @@ def _convert_to_srgb(image):
     return flattened if flattened.mode == "RGB" else flattened.convert("RGB")
 
 
+def prepare_meta_posting_image(data, *, original_name=""):
+    """Validate one Meta image and convert WebP without resizing or cropping it."""
+
+    source_bytes = bytes(data or b"")
+    details = _source_image_details(source_bytes, original_name=original_name)
+    clean_name = PurePath(str(original_name or "ad-image")).name or "ad-image"
+    source_format = details["source_format"]
+    if source_format in {"JPEG", "PNG"}:
+        extension = ".jpg" if source_format == "JPEG" else ".png"
+        if PurePath(clean_name).suffix.casefold() not in ({".jpg", ".jpeg"} if source_format == "JPEG" else {".png"}):
+            clean_name = f"{PurePath(clean_name).stem or 'ad-image'}{extension}"
+        return {
+            **details,
+            "data": source_bytes,
+            "upload_name": clean_name,
+            "upload_format": source_format,
+            "content_type": "image/jpeg" if source_format == "JPEG" else "image/png",
+            "converted": False,
+        }
+
+    source = None
+    oriented = None
+    converted = None
+    try:
+        source = Image.open(io.BytesIO(source_bytes))
+        oriented = ImageOps.exif_transpose(source)
+        oriented.load()
+        converted = _convert_to_srgb(oriented)
+        output = io.BytesIO()
+        converted.save(
+            output,
+            format="PNG",
+            optimize=False,
+            compress_level=6,
+            icc_profile=srgb_profile_bytes(),
+        )
+        output_bytes = output.getvalue()
+        if len(output_bytes) > META_IMAGE_MAX_UPLOAD_BYTES:
+            raise AdsImageValidationError(
+                "This WebP becomes too large after safe conversion. Upload a JPEG or PNG under 20 MB."
+            )
+        with Image.open(io.BytesIO(output_bytes)) as check:
+            check.load()
+            if check.format != "PNG" or check.size != (details["source_width"], details["source_height"]):
+                raise AdsImageValidationError("The Meta-ready image could not be verified.")
+        return {
+            **details,
+            "data": output_bytes,
+            "upload_name": f"{PurePath(clean_name).stem or 'ad-image'}.png",
+            "upload_format": "PNG",
+            "content_type": "image/png",
+            "converted": True,
+        }
+    except AdsImageValidationError:
+        raise
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as error:
+        raise AdsImageValidationError("The WebP image could not be prepared for Meta.") from error
+    finally:
+        for image in (converted, oriented, source):
+            if image is not None:
+                try:
+                    image.close()
+                except Exception:
+                    pass
+
+
 def srgb_profile_bytes():
     return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 

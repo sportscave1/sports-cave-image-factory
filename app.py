@@ -75,6 +75,7 @@ social_media_reels_studio_page_module = None
 social_media_page_module = None
 ads_page_module = None
 ads_creative_refresh_module = None
+ads_posting_page_module = None
 reporting_page_module = None
 seo_page_module = None
 analytics_page_module = None
@@ -218,6 +219,15 @@ def get_ads_creative_refresh_page():
         ads_creative_refresh_module = importlib.import_module("ads_creative_refresh")
         log_startup_stage("ADS CREATIVE REFRESH IMPORT DONE")
     return ads_creative_refresh_module
+
+
+def get_ads_posting_page():
+    global ads_posting_page_module
+    if ads_posting_page_module is None:
+        log_startup_stage("ADS POSTING PAGE IMPORT START")
+        ads_posting_page_module = importlib.import_module("ads_posting_page")
+        log_startup_stage("ADS POSTING PAGE IMPORT DONE")
+    return ads_posting_page_module
 
 
 def get_marketing_factory_page():
@@ -8890,6 +8900,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Design Studio": ":material/palette:",
     "Ads": ":material/ads_click:",
     ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
+    ads_nav.POSTING_ROUTE: ":material/publish:",
     analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
@@ -9068,6 +9079,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             for route in navigation_runtime.disclosure_child_routes(
                 ads_nav.ADS_ROUTES,
                 ads_nav.ADS_CREATE_ROUTE,
+                include_overview=True,
             ):
                 child_button(
                     children,
@@ -15927,6 +15939,8 @@ def render_selected_page(current_page):
         get_ads_page().render_page()
     elif current_page == ads_nav.CREATIVE_REFRESH_ROUTE:
         get_ads_creative_refresh_page().render_page()
+    elif current_page == ads_nav.POSTING_ROUTE:
+        get_ads_posting_page().render_page()
     elif current_page in {"Settings", "Developer"}:
         render_settings_page()
     else:

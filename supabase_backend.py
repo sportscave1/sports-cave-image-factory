@@ -23620,6 +23620,7 @@ ADS_SCHEMA_MIGRATIONS = (
     BASE_DIR / "migrations" / "20260626_ads_intelligence_v2_breakdowns.sql",
     BASE_DIR / "migrations" / "20260626_ads_product_mapping_v1.sql",
     BASE_DIR / "migrations" / "20260707_marketing_factory_copy_packs.sql",
+    BASE_DIR / "migrations" / "20260831_meta_posting_v1.sql",
 )
 
 
