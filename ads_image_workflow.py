@@ -29,17 +29,20 @@ CREATIVE_REFRESH_CAMPAIGN_TYPE = "Creative Refresh"
 CREATIVE_REFRESH_IMAGE_SLOTS = (
     {
         "id": "creative-refresh-winner-evolution",
-        "label": "Winner Evolution",
+        "label": "Ad 1 Image",
+        "strategy": "Winner Evolution",
         "position": 1,
     },
     {
         "id": "creative-refresh-emotional-collector-expansion",
-        "label": "Emotional / Collector Expansion",
+        "label": "Ad 2 Image",
+        "strategy": "Emotional / Collector Expansion",
         "position": 2,
     },
     {
         "id": "creative-refresh-pattern-interrupt",
-        "label": "Pattern Interrupt",
+        "label": "Ad 3 Image",
+        "strategy": "Pattern Interrupt",
         "position": 3,
     },
 )

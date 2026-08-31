@@ -454,6 +454,24 @@ INSTANT_EXPERIENCE_COPY_FIELDS = (
     ("headline", "Headline"),
     ("cta", "CTA"),
 )
+STANDARD_ADS_OUTPUT_FIELDS = (
+    ("primary_text", "Primary Text"),
+    ("headline", "Headline"),
+    ("description", "Description"),
+    ("cta", "CTA"),
+    ("image_prompt", "Image Generation Prompt"),
+)
+STANDARD_ADS_COUNT = 3
+STANDARD_ADS_CSV_SCHEMA_VERSION = "1"
+STANDARD_ADS_CSV_FILENAME = "Sports Cave Ads.csv"
+STANDARD_ADS_CSV_HEADERS = (
+    "schema_version",
+    "ad_number",
+    "product_name",
+    "strategy",
+    *(field for field, _label in STANDARD_ADS_OUTPUT_FIELDS),
+)
+STANDARD_ADS_CSV_REQUIRED_FIELDS = STANDARD_ADS_CSV_HEADERS
 INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS = (
     {
         "key": "legacy_standard",
@@ -2622,6 +2640,33 @@ Country direction: {country_direction}
 Do not create sporting atmosphere through obvious props. Do not add sports balls, bats, helmets, jerseys, trophies, figurines, toy cars, novelty signs, fake memorabilia, recognisable team logos, random athlete photographs, team-coloured clutter, extra framed sports art, retail display fixtures, fake collector items or neon signs unless an existing approved creative direction explicitly requires an extremely subtle one.
 
 Do not use forced slang, cultural stereotypes or novelty sport decor."""
+
+
+def build_standard_ads_image_prompt_requirements(product_name, category, country):
+    clean_product = _clean_product_name(product_name)
+    return f"""STANDARD SPORTS CAVE IMAGE-GENERATION REQUIREMENTS
+
+Every returned Image Generation Prompt must be a complete standalone production prompt. It must repeat all relevant requirements below in full so it can be pasted into a fresh image-generation conversation without relying on another ad, shared preamble or prior message.
+
+Selected exact product: {clean_product}
+
+Each prompt must specify a true 1:1 square 1024 × 1024 Meta-ready composition, exact selected product/artwork fidelity, realistic premium framing and glass, believable mounting and shadows, product-dominant mobile readability, a purposeful layout, camera position and product scale, premium black/gold/warm-white Sports Cave language where appropriate, restrained typography where the ad requires it, and an uncluttered environment appropriate to the selected sport and country. It must state the exact headline, supporting text and CTA that may appear on-image, or explicitly state that no on-image wording is required. Never put the full Primary Text on the image.
+
+Do not use "same as previous", "use the shared rules above", a short visual description or any other cross-reference. Do not reconstruct the product artwork from the winning-ad reference. Do not add unnecessary people, props or visual clutter unless that ad's controlled strategy genuinely requires them.
+
+{build_carousel_square_format_lock()}
+
+{build_product_lock_visual_rules()}
+
+{build_frame_and_glass_visual_rules()}
+
+{build_room_realism_visual_rules()}
+
+{build_last_image_variation_visual_rules()}
+
+{build_sport_country_visual_adaptation(category, country)}
+
+{build_sports_cave_image_realism_rules(include_product_lock=True)}"""
 
 
 def get_carousel_visual_roles(template_key):
@@ -9264,6 +9309,227 @@ def _preserve_multiline_text(value):
     return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
+class StandardAdsCSVError(ValueError):
+    pass
+
+
+def build_standard_ads_output_contract(*, strategies=(), ad_count=STANDARD_ADS_COUNT):
+    strategy_values = tuple(strategies or ())
+    sections = ["THREE STANDARD SPORTS CAVE ADS"]
+    for ad_number in range(1, int(ad_count) + 1):
+        strategy = (
+            _preserve_multiline_text(strategy_values[ad_number - 1]).strip()
+            if ad_number <= len(strategy_values)
+            else ""
+        )
+        heading = f"AD {ad_number}"
+        if strategy:
+            heading += f" — {strategy}"
+        sections.append(
+            "\n".join(
+                [
+                    heading,
+                    f"Strategy: {strategy or '[complete strategy name]'}",
+                    *(f"{label}:\n[complete {label.casefold()}]" for _field, label in STANDARD_ADS_OUTPUT_FIELDS),
+                ]
+            )
+        )
+    return "\n\n".join(sections)
+
+
+def _standard_ads_template_rows(product_name, strategies, row_count):
+    clean_product = _clean_product_name(product_name)
+    strategy_values = tuple(strategies or ())
+    rows = []
+    for index in range(1, int(row_count) + 1):
+        row = {header: "" for header in STANDARD_ADS_CSV_HEADERS}
+        row.update(
+            {
+                "schema_version": STANDARD_ADS_CSV_SCHEMA_VERSION,
+                "ad_number": index,
+                "product_name": clean_product,
+                "strategy": (
+                    _preserve_multiline_text(strategy_values[index - 1]).strip()
+                    if index <= len(strategy_values)
+                    else ""
+                ),
+            }
+        )
+        rows.append(row)
+    return rows
+
+
+def build_standard_ads_csv(
+    ads=None,
+    *,
+    product_name="",
+    strategies=(),
+    row_count=STANDARD_ADS_COUNT,
+):
+    rows = list(ads) if ads is not None else _standard_ads_template_rows(
+        product_name,
+        strategies,
+        row_count,
+    )
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=STANDARD_ADS_CSV_HEADERS,
+        lineterminator="\r\n",
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    for index, raw_row in enumerate(rows, start=1):
+        raw_row = dict(raw_row or {})
+        row = {
+            header: _preserve_multiline_text(raw_row.get(header))
+            for header in STANDARD_ADS_CSV_HEADERS
+        }
+        if not row["schema_version"]:
+            row["schema_version"] = STANDARD_ADS_CSV_SCHEMA_VERSION
+        if not row["ad_number"]:
+            row["ad_number"] = str(index)
+        if not row["product_name"]:
+            row["product_name"] = _clean_product_name(product_name)
+        if not row["strategy"] and index <= len(tuple(strategies or ())):
+            row["strategy"] = _preserve_multiline_text(tuple(strategies or ())[index - 1]).strip()
+        writer.writerow(row)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def _standard_ads_header_map(headers):
+    header_map = {}
+    duplicates = []
+    for header in headers or ():
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().casefold()).strip("_")
+        if normalized in header_map:
+            duplicates.append(str(header or ""))
+        header_map[normalized] = header
+    return header_map, duplicates
+
+
+def parse_standard_ads_csv(
+    data,
+    *,
+    product_name="",
+    expected_rows=STANDARD_ADS_COUNT,
+    strategies=(),
+    filename="sports-cave-ads.csv",
+):
+    if not str(filename or "").casefold().endswith(".csv"):
+        raise StandardAdsCSVError("Upload the completed Sports Cave Ads CSV as a .csv file.")
+    source = bytes(data or b"")
+    if not source:
+        raise StandardAdsCSVError("Choose the completed Sports Cave Ads CSV.")
+    if len(source) > 2 * 1024 * 1024:
+        raise StandardAdsCSVError("The completed Sports Cave Ads CSV must be smaller than 2 MB.")
+    try:
+        decoded = source.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise StandardAdsCSVError("Save the completed Sports Cave Ads CSV as UTF-8 and try again.") from error
+    if "\x00" in decoded:
+        raise StandardAdsCSVError("The completed Sports Cave Ads CSV contains invalid text data.")
+    try:
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        headers = list(reader.fieldnames or ())
+        header_map, duplicates = _standard_ads_header_map(headers)
+        if duplicates:
+            raise StandardAdsCSVError("The completed Sports Cave Ads CSV contains duplicate column headers.")
+        expected_header_keys = {
+            re.sub(r"[^a-z0-9]+", "_", header.casefold()).strip("_")
+            for header in STANDARD_ADS_CSV_HEADERS
+        }
+        missing = [header for header in STANDARD_ADS_CSV_HEADERS if header not in header_map]
+        if missing:
+            raise StandardAdsCSVError(
+                "The completed Sports Cave Ads CSV is missing required columns: "
+                + ", ".join(missing)
+                + ". Download a fresh empty CSV and keep its headers unchanged."
+            )
+        unexpected = [
+            header
+            for header in headers
+            if re.sub(r"[^a-z0-9]+", "_", str(header or "").strip().casefold()).strip("_")
+            not in expected_header_keys
+        ]
+        if unexpected:
+            raise StandardAdsCSVError(
+                "The completed Sports Cave Ads CSV contains unexpected columns: "
+                + ", ".join(unexpected)
+                + ". Download a fresh empty CSV and keep its headers unchanged."
+            )
+        raw_rows = []
+        for row_number, row in enumerate(reader, start=2):
+            if None in row or any(value is None for value in row.values()):
+                raise StandardAdsCSVError(
+                    f"Sports Cave Ads CSV row {row_number} has a quoting or column-count problem."
+                )
+            canonical = {
+                header: _preserve_multiline_text(row.get(header_map[header]))
+                for header in STANDARD_ADS_CSV_HEADERS
+            }
+            if any(value.strip() for value in canonical.values()):
+                raw_rows.append(canonical)
+    except StandardAdsCSVError:
+        raise
+    except (csv.Error, AttributeError) as error:
+        raise StandardAdsCSVError(
+            "The completed Sports Cave Ads CSV could not be read. Check its quoting and line breaks."
+        ) from error
+
+    expected_rows = int(expected_rows)
+    if len(raw_rows) != expected_rows:
+        raise StandardAdsCSVError(
+            f"Sports Cave Ads expects exactly {expected_rows} completed ad rows; this file contains {len(raw_rows)}."
+        )
+    expected_product = _clean_product_name(product_name)
+    expected_strategies = tuple(strategies or ())
+    parsed = []
+    for index, row in enumerate(raw_rows, start=1):
+        missing_values = [
+            field
+            for field in STANDARD_ADS_CSV_REQUIRED_FIELDS
+            if not _preserve_multiline_text(row.get(field)).strip()
+        ]
+        if missing_values:
+            raise StandardAdsCSVError(
+                f"Ad {index} is missing required values: {', '.join(missing_values)}."
+            )
+        if row["schema_version"].strip() != STANDARD_ADS_CSV_SCHEMA_VERSION:
+            raise StandardAdsCSVError(
+                f"Ad {index} has schema_version {row['schema_version']!r}; expected {STANDARD_ADS_CSV_SCHEMA_VERSION}."
+            )
+        try:
+            ad_number = int(row["ad_number"].strip())
+        except ValueError as error:
+            raise StandardAdsCSVError(f"Ad row {index} must have ad_number {index}.") from error
+        if ad_number != index:
+            raise StandardAdsCSVError(f"Ad row {index} must have ad_number {index}.")
+        row_product = _clean_product_name(row["product_name"])
+        if expected_product and row_product.casefold() != expected_product.casefold():
+            raise StandardAdsCSVError(
+                f"Ad {index} product_name must match the selected product: {expected_product}."
+            )
+        strategy = row["strategy"].strip()
+        if index <= len(expected_strategies):
+            expected_strategy = _preserve_multiline_text(expected_strategies[index - 1]).strip()
+            if strategy.casefold() != expected_strategy.casefold():
+                raise StandardAdsCSVError(
+                    f"Ad {index} strategy must remain {expected_strategy!r}."
+                )
+            strategy = expected_strategy
+        parsed.append(
+            {
+                **row,
+                "schema_version": STANDARD_ADS_CSV_SCHEMA_VERSION,
+                "ad_number": ad_number,
+                "product_name": expected_product or row_product,
+                "strategy": strategy,
+            }
+        )
+    return tuple(parsed)
+
+
 class CarouselCopyCSVError(ValueError):
     pass
 
@@ -11221,9 +11487,81 @@ def _render_ads_image_slots(result, workflow):
             "Upload the images generated from the prompt above. They will be optimized and saved as individual Meta-ready files."
         )
 
+    def standard_ad_for_slot(slot):
+        if result.get("campaign_type") != ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+            return {}
+        position = int(slot.get("position") or 0)
+        for raw_ad in result.get("standard_ads") or result.get("refresh_challengers") or ():
+            raw_ad = dict(raw_ad or {})
+            try:
+                ad_number = int(raw_ad.get("ad_number") or raw_ad.get("refresh_rank") or 0)
+            except (TypeError, ValueError):
+                continue
+            if ad_number == position:
+                return {
+                    "ad_number": ad_number,
+                    "strategy": str(
+                        raw_ad.get("strategy") or raw_ad.get("refresh_variant") or slot.get("strategy") or ""
+                    ),
+                    "primary_text": _preserve_multiline_text(raw_ad.get("primary_text")),
+                    "headline": _preserve_multiline_text(raw_ad.get("headline")),
+                    "description": _preserve_multiline_text(raw_ad.get("description")),
+                    "cta": _preserve_multiline_text(raw_ad.get("cta")),
+                    "image_prompt": _preserve_multiline_text(
+                        raw_ad.get("image_prompt") or raw_ad.get("image_generation_prompt")
+                    ),
+                }
+        return {}
+
     def render_slot(slot, index):
         with st.container(border=True, key=f"ads-image-slot::{result['context_key']}::{slot['id']}"):
-            st.markdown(f"**{slot['label']}**")
+            standard_ad = standard_ad_for_slot(slot)
+            if standard_ad:
+                ad_number = standard_ad["ad_number"]
+                st.markdown(f"**AD {ad_number} — {standard_ad['strategy']}**")
+                st.text_area(
+                    "Primary Text",
+                    value=standard_ad["primary_text"],
+                    height=130,
+                    disabled=True,
+                    key=f"ads-standard-primary::{result['context_key']}::{ad_number}",
+                )
+                st.text_input(
+                    "Headline",
+                    value=standard_ad["headline"],
+                    disabled=True,
+                    key=f"ads-standard-headline::{result['context_key']}::{ad_number}",
+                )
+                st.text_area(
+                    "Description",
+                    value=standard_ad["description"],
+                    height=76,
+                    disabled=True,
+                    key=f"ads-standard-description::{result['context_key']}::{ad_number}",
+                )
+                st.text_input(
+                    "CTA",
+                    value=standard_ad["cta"],
+                    disabled=True,
+                    key=f"ads-standard-cta::{result['context_key']}::{ad_number}",
+                )
+                with st.expander("Image Generation Prompt", expanded=False):
+                    st.text_area(
+                        f"Ad {ad_number} Image Generation Prompt",
+                        value=standard_ad["image_prompt"],
+                        height=230,
+                        disabled=True,
+                        key=f"ads-standard-image-prompt::{result['context_key']}::{ad_number}",
+                    )
+                    render_prompt_copy_button(
+                        standard_ad["image_prompt"],
+                        key=f"ads-standard-image-prompt-copy::{result['context_key']}::{ad_number}",
+                        label="Copy Image Generation Prompt",
+                        success_label=f"Ad {ad_number} prompt copied",
+                    )
+                st.markdown(f"**{slot['label']}**")
+            else:
+                st.markdown(f"**{slot['label']}**")
             if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
                 title, body = IMAGE_ORDER[index]
                 st.caption(f"Card {index + 1}: {title}")
@@ -11631,7 +11969,7 @@ def save_ads_images_to_dropbox(
             or result.get("creative_refresh_csv")
             or b""
         )
-        refresh_csv_filename = "creative-refresh-challengers.csv"
+        refresh_csv_filename = STANDARD_ADS_CSV_FILENAME
         if refresh_csv_bytes:
             refresh_csv_result = dropbox_integration.upload_batch(
                 access_token,
@@ -11651,7 +11989,7 @@ def save_ads_images_to_dropbox(
                 metadata = dict(refresh_csv_successes[0].get("metadata") or {})
                 outcomes["_creative_refresh_csv"] = {
                     "status": "saved",
-                    "label": "Creative Refresh challenger CSV",
+                    "label": "Sports Cave Ads CSV",
                     "filename": refresh_csv_filename,
                     "path": str(
                         metadata.get("path_display")
@@ -11668,7 +12006,7 @@ def save_ads_images_to_dropbox(
             else:
                 outcomes["_creative_refresh_csv"] = {
                     "status": "failed",
-                    "label": "Creative Refresh challenger CSV",
+                    "label": "Sports Cave Ads CSV",
                     "filename": refresh_csv_filename,
                     "error": str(
                         (refresh_csv_failures[0] if refresh_csv_failures else {}).get("error")
@@ -12137,12 +12475,12 @@ def _render_ads_image_save(result, workflow):
         if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
             if creative_refresh_csv_outcome.get("status") == "saved":
                 st.caption(
-                    "Creative Refresh challenger CSV saved: "
+                    "Sports Cave Ads CSV saved: "
                     f"{creative_refresh_csv_outcome.get('filename')}"
                 )
             elif creative_refresh_csv_outcome.get("status") == "failed":
                 st.warning(
-                    "Creative Refresh challenger CSV was not saved: "
+                    "Sports Cave Ads CSV was not saved: "
                     f"{creative_refresh_csv_outcome.get('error') or 'Upload failed.'}"
                 )
         if st.button(

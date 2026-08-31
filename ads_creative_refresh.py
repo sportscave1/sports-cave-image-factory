@@ -36,19 +36,23 @@ ORIGINAL_PROMPT_UPLOAD_KEY = f"{STATE_PREFIX}original_prompt_upload"
 META_CSV_UPLOAD_KEY = f"{STATE_PREFIX}meta_csv_upload"
 META_CSV_CONTAINER_KEY = f"{STATE_PREFIX}meta_csv_state"
 CHALLENGER_CSV_UPLOAD_KEY = f"{STATE_PREFIX}challenger_csv_upload"
+CHALLENGER_CSV_CONTAINER_KEY = f"{STATE_PREFIX}challenger_csv_state"
 REVIEW_RESULT_STATE_KEY = f"{STATE_PREFIX}review_result_v2"
 CHALLENGER_RESULT_STATE_KEY = f"{STATE_PREFIX}challenger_result_v2"
 PROMPT_READY_CONTEXT_KEY = f"{STATE_PREFIX}review_prompt_ready_context_v2"
 
 CREATIVE_REFRESH_VERSION = "SPORTS CAVE CREATIVE REFRESH V1"
 CREATIVE_REFRESH_V2_VERSION = "SPORTS CAVE CREATIVE REFRESH V2"
-CREATIVE_REFRESH_CSV_SCHEMA_VERSION = "2"
+CREATIVE_REFRESH_CSV_SCHEMA_VERSION = ads_page.STANDARD_ADS_CSV_SCHEMA_VERSION
 CREATIVE_REFRESH_STRATEGIES = (
     "Winner Evolution",
     "Emotional / Collector Expansion",
     "Pattern Interrupt",
 )
-CREATIVE_REFRESH_CSV_HEADERS = (
+CREATIVE_REFRESH_CSV_HEADERS = ads_page.STANDARD_ADS_CSV_HEADERS
+CREATIVE_REFRESH_REQUIRED_CSV_FIELDS = ads_page.STANDARD_ADS_CSV_REQUIRED_FIELDS
+LEGACY_CREATIVE_REFRESH_CSV_SCHEMA_VERSION = "2"
+LEGACY_CREATIVE_REFRESH_CSV_HEADERS = (
     "schema_version",
     "refresh_variant",
     "refresh_rank",
@@ -72,7 +76,7 @@ CREATIVE_REFRESH_CSV_HEADERS = (
     "test_reason",
     "image_prompt",
 )
-CREATIVE_REFRESH_REQUIRED_CSV_FIELDS = (
+LEGACY_CREATIVE_REFRESH_REQUIRED_CSV_FIELDS = (
     "schema_version",
     "refresh_variant",
     "refresh_rank",
@@ -911,15 +915,23 @@ def build_creative_refresh_review_prompt(
     meta_evidence=None,
 ):
     evidence = meta_evidence or build_meta_evidence_pack(None, product_context)
-    csv_header = ",".join(CREATIVE_REFRESH_CSV_HEADERS)
+    csv_header = ",".join(ads_page.STANDARD_ADS_CSV_HEADERS)
     strategies = "\n".join(
         f"{index}. {strategy}" for index, strategy in enumerate(CREATIVE_REFRESH_STRATEGIES, start=1)
+    )
+    standard_output_contract = ads_page.build_standard_ads_output_contract(
+        strategies=CREATIVE_REFRESH_STRATEGIES,
+    )
+    standard_image_requirements = ads_page.build_standard_ads_image_prompt_requirements(
+        (product_context or {}).get("product_name"),
+        (product_context or {}).get("category"),
+        (product_context or {}).get("country"),
     )
     return f"""==================================================
 SPORTS CAVE — CREATIVE REFRESH ANALYSIS
 ==================================================
 
-Attach the actual winning ad creative image to this ChatGPT message before running this prompt.
+Attach the actual winning ad creative image and the empty Sports Cave Ads CSV supplied by Sports Cave OS to this ChatGPT conversation before running this prompt.
 
 The selected Sports Cave product/artwork is the immutable product identity. The manually attached winning ad image is a creative/composition reference only. Never replace the exact product artwork with imagery extracted or reconstructed from the winning advertisement.
 
@@ -959,27 +971,42 @@ ANALYSIS REQUIREMENTS
 - Emotional / Collector Expansion preserves core visual DNA while strengthening the emotional or collector reason to care.
 - Pattern Interrupt is the boldest evolution, with a stronger visual/message hook while retaining product and winner lineage.
 
-For each challenger create: angle; strategy/rationale; primary text; Meta headline; Meta description; CTA recommendation; optional on-image headline and supporting line; visual concept; composition; product placement; environment/background; lighting/mood; text placement; hierarchy; what was retained; what deliberately changed; why it deserves a test; and one complete standalone image-generation prompt.
+For each challenger create the standard Sports Cave Ads production fields shown below. The analysis may explain the angle, what is retained, what changes and why the challenger deserves a test, but those analysis headings must not replace or rename the production fields.
 
 All creative must be premium, realistic, Sports Cave branded, mobile-first, uncluttered, Meta-suitable, emotionally compelling, focused on the exact product, believable rather than AI-looking and controlled enough to learn from. Do not create fake reviews, facts, product claims, scarcity numbers or offers.
 
 8. Rank all three challengers #1, #2 and #3, with a brief test-order reason.
 
-9. Return a machine-importable CSV for Sports Cave OS. Also provide it as a downloadable .csv file if this ChatGPT environment supports file generation.
+9. After completing the concise analysis, switch to the standard SPORTS CAVE ADS OUTPUT FORMAT below. Do not invent a Creative Refresh-specific schema, alternative ad headings or replacement production fields. The strategy names are analysis/internal metadata only; they do not replace Primary Text, Headline, Description, CTA or Image Generation Prompt.
+
+STANDARD SPORTS CAVE ADS OUTPUT FORMAT — EXACT
+
+{standard_output_contract}
+
+Every field must be complete. Preserve intentional paragraph breaks in Primary Text. Do not return placeholders such as TBD, N/A, same as previous or see above.
+
+10. Return exactly THREE complete standalone Image Generation Prompts — one inside each standard ad. Each prompt must be independently usable in a fresh image-generation conversation and must repeat all relevant technical, product-lock, realism, layout, mobile-readability and brand requirements in full. The three prompts must be meaningfully different while following the controlled strategy order above.
+
+{standard_image_requirements}
+
+11. Populate the attached empty Sports Cave Ads CSV with the same three ads and return the completed CSV as a downloadable .csv file. The readable three-ad response and CSV must contain the same production data and must not contradict each other.
 
 CSV CONTRACT — EXACT
 - Schema version: {CREATIVE_REFRESH_CSV_SCHEMA_VERSION}
 - Exactly three data rows, in this exact strategy order: {', '.join(CREATIVE_REFRESH_STRATEGIES)}.
-- Use this exact header row and no extra columns:
+- Populate the supplied empty Sports Cave Ads CSV. Preserve every header and identity cell already present.
+- Use this exact canonical Sports Cave Ads header row and no extra columns:
 {csv_header}
-- refresh_rank must be 1, 2 and 3 respectively.
-- refresh_parent_product must be exactly: {product_context.get('product_name') or ''}
+- ad_number must remain 1, 2 and 3 in row order.
+- product_name must remain exactly: {product_context.get('product_name') or ''}
+- strategy must remain in this order: {', '.join(CREATIVE_REFRESH_STRATEGIES)}.
 - Required non-empty fields: {', '.join(CREATIVE_REFRESH_REQUIRED_CSV_FIELDS)}.
-- on_image_headline and supporting_line may be blank when deliberately unnecessary.
 - Quote fields correctly. Preserve commas and line breaks inside quoted fields. Do not put Markdown formatting inside CSV fields.
 - image_prompt must be complete and standalone. It must preserve the exact selected Sports Cave product identity and must not depend on another row or prompt.
+- Do not rename, add or remove columns. Do not leave placeholders. Fill every required field.
+- Return the populated supplied CSV as a downloadable file, not a Markdown approximation of a CSV.
 
-Return the concise analysis first, then the downloadable/importable CSV. Do not generate any image until explicitly asked in ChatGPT.
+Return the concise CREATIVE REFRESH ANALYSIS and WINNER DNA first, then the THREE STANDARD SPORTS CAVE ADS in the exact format above, then the downloadable completed CSV. Do not generate any image until explicitly asked in ChatGPT.
 """.strip()
 
 
@@ -1005,7 +1032,12 @@ def _canonical_refresh_strategy(value):
     return aliases.get(normal, "")
 
 
-def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="creative-refresh.csv"):
+def _parse_legacy_creative_refresh_challenger_csv(
+    data,
+    *,
+    product_name="",
+    filename="creative-refresh.csv",
+):
     if not str(filename or "").casefold().endswith(".csv"):
         raise CreativeRefreshValidationError("Upload the ChatGPT Refresh CSV as a .csv file.")
     source = bytes(data or b"")
@@ -1027,7 +1059,7 @@ def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="cr
             raise CreativeRefreshValidationError("The ChatGPT Refresh CSV contains duplicate column headers.")
         missing = [
             header
-            for header in CREATIVE_REFRESH_CSV_HEADERS
+            for header in LEGACY_CREATIVE_REFRESH_CSV_HEADERS
             if _normalise_header(header) not in header_map
         ]
         if missing:
@@ -1038,7 +1070,7 @@ def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="cr
             header
             for header in headers
             if _normalise_header(header)
-            not in {_normalise_header(expected) for expected in CREATIVE_REFRESH_CSV_HEADERS}
+            not in {_normalise_header(expected) for expected in LEGACY_CREATIVE_REFRESH_CSV_HEADERS}
         ]
         if unexpected:
             raise CreativeRefreshValidationError(
@@ -1068,16 +1100,20 @@ def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="cr
     for index, raw in enumerate(raw_rows, start=1):
         row = {
             expected: _multiline_text(raw.get(header_map[_normalise_header(expected)]))
-            for expected in CREATIVE_REFRESH_CSV_HEADERS
+            for expected in LEGACY_CREATIVE_REFRESH_CSV_HEADERS
         }
-        missing_values = [field for field in CREATIVE_REFRESH_REQUIRED_CSV_FIELDS if not row.get(field)]
+        missing_values = [
+            field
+            for field in LEGACY_CREATIVE_REFRESH_REQUIRED_CSV_FIELDS
+            if not row.get(field)
+        ]
         if missing_values:
             raise CreativeRefreshValidationError(
                 f"Challenger row {index} is missing required values: {', '.join(missing_values)}."
             )
-        if row["schema_version"] != CREATIVE_REFRESH_CSV_SCHEMA_VERSION:
+        if row["schema_version"] != LEGACY_CREATIVE_REFRESH_CSV_SCHEMA_VERSION:
             raise CreativeRefreshValidationError(
-                f"Challenger row {index} has schema_version {row['schema_version']!r}; expected {CREATIVE_REFRESH_CSV_SCHEMA_VERSION}."
+                f"Challenger row {index} has schema_version {row['schema_version']!r}; expected {LEGACY_CREATIVE_REFRESH_CSV_SCHEMA_VERSION}."
             )
         strategy = _canonical_refresh_strategy(row["refresh_variant"])
         expected_strategy = CREATIVE_REFRESH_STRATEGIES[index - 1]
@@ -1106,22 +1142,106 @@ def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="cr
     return tuple(challengers)
 
 
+def _normalise_creative_refresh_ad(raw_ad, index, *, product_name=""):
+    raw_ad = dict(raw_ad or {})
+    clean_product = _clean_text(
+        product_name
+        or raw_ad.get("product_name")
+        or raw_ad.get("refresh_parent_product")
+    )
+    strategy = _clean_text(
+        raw_ad.get("strategy")
+        or raw_ad.get("refresh_variant")
+        or (CREATIVE_REFRESH_STRATEGIES[index - 1] if index <= len(CREATIVE_REFRESH_STRATEGIES) else "")
+    )
+    try:
+        ad_number = int(raw_ad.get("ad_number") or raw_ad.get("refresh_rank") or index)
+    except (TypeError, ValueError):
+        ad_number = index
+    return {
+        "schema_version": CREATIVE_REFRESH_CSV_SCHEMA_VERSION,
+        "ad_number": ad_number,
+        "product_name": clean_product,
+        "strategy": strategy,
+        "primary_text": _multiline_text(raw_ad.get("primary_text")),
+        "headline": _multiline_text(raw_ad.get("headline")),
+        "description": _multiline_text(raw_ad.get("description")),
+        "cta": _multiline_text(raw_ad.get("cta")),
+        "image_prompt": _multiline_text(
+            raw_ad.get("image_prompt") or raw_ad.get("image_generation_prompt")
+        ),
+    }
+
+
+def parse_creative_refresh_challenger_csv(data, *, product_name="", filename="creative-refresh.csv"):
+    source = bytes(data or b"")
+    try:
+        decoded = source.decode("utf-8-sig")
+        headers = list(csv.DictReader(io.StringIO(decoded, newline="")).fieldnames or ())
+    except (UnicodeDecodeError, csv.Error, AttributeError):
+        headers = []
+    normalized_headers = {_normalise_header(header) for header in headers}
+    legacy_headers = {_normalise_header(header) for header in LEGACY_CREATIVE_REFRESH_CSV_HEADERS}
+    if normalized_headers == legacy_headers:
+        legacy_rows = _parse_legacy_creative_refresh_challenger_csv(
+            source,
+            product_name=product_name,
+            filename=filename,
+        )
+        return tuple(
+            _normalise_creative_refresh_ad(row, index, product_name=product_name)
+            for index, row in enumerate(legacy_rows, start=1)
+        )
+    try:
+        return ads_page.parse_standard_ads_csv(
+            source,
+            product_name=product_name,
+            expected_rows=len(CREATIVE_REFRESH_STRATEGIES),
+            strategies=CREATIVE_REFRESH_STRATEGIES,
+            filename=filename,
+        )
+    except ads_page.StandardAdsCSVError as error:
+        raise CreativeRefreshValidationError(str(error)) from error
+
+
 def build_creative_refresh_challenger_csv(challengers):
-    output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=CREATIVE_REFRESH_CSV_HEADERS, lineterminator="\r\n")
-    writer.writeheader()
-    for challenger in challengers or ():
-        writer.writerow({header: challenger.get(header, "") for header in CREATIVE_REFRESH_CSV_HEADERS})
-    return output.getvalue().encode("utf-8-sig")
+    rows = [
+        _normalise_creative_refresh_ad(challenger, index)
+        for index, challenger in enumerate(challengers or (), start=1)
+    ]
+    return ads_page.build_standard_ads_csv(rows)
 
 
-def build_creative_refresh_ads_result(product_context, challengers, csv_data):
-    canonical_csv = build_creative_refresh_challenger_csv(challengers)
+def build_creative_refresh_empty_csv(product_context):
+    return ads_page.build_standard_ads_csv(
+        product_name=(product_context or {}).get("product_name"),
+        strategies=CREATIVE_REFRESH_STRATEGIES,
+        row_count=len(CREATIVE_REFRESH_STRATEGIES),
+    )
+
+
+def build_creative_refresh_ads_result(
+    product_context,
+    challengers,
+    csv_data,
+    *,
+    review_context_key="",
+):
+    standard_ads = tuple(
+        _normalise_creative_refresh_ad(
+            challenger,
+            index,
+            product_name=(product_context or {}).get("product_name"),
+        )
+        for index, challenger in enumerate(challengers or (), start=1)
+    )
+    canonical_csv = build_creative_refresh_challenger_csv(standard_ads)
     context_payload = {
         "version": CREATIVE_REFRESH_V2_VERSION,
         "product_id": (product_context or {}).get("product_id"),
         "record_key": (product_context or {}).get("record_key"),
         "csv_hash": hashlib.sha256(canonical_csv).hexdigest(),
+        "review_context_key": str(review_context_key or ""),
     }
     context_key = hashlib.sha256(
         json.dumps(context_payload, sort_keys=True).encode("utf-8")
@@ -1139,8 +1259,10 @@ def build_creative_refresh_ads_result(product_context, challengers, csv_data):
         "product_url": _clean_text((product_context or {}).get("product_url")),
         "campaign_moment": ads_page.empty_campaign_moment(),
         "source": "Creative Refresh",
+        "source_review_context_key": str(review_context_key or ""),
         "parent_product": _clean_text((product_context or {}).get("product_name")),
-        "refresh_challengers": tuple(challengers or ()),
+        "standard_ads": standard_ads,
+        "refresh_challengers": standard_ads,
         "creative_refresh_csv": bytes(csv_data or canonical_csv),
         "creative_refresh_canonical_csv": canonical_csv,
     }
@@ -1148,18 +1270,15 @@ def build_creative_refresh_ads_result(product_context, challengers, csv_data):
 
 def creative_refresh_setup_notes(challengers):
     sections = []
-    for challenger in challengers or ():
+    for index, raw_challenger in enumerate(challengers or (), start=1):
+        challenger = _normalise_creative_refresh_ad(raw_challenger, index)
         sections.extend(
             [
-                f"CHALLENGER {challenger.get('refresh_rank')}: {challenger.get('refresh_variant')}",
-                f"Angle: {challenger.get('refresh_angle')}",
+                f"AD {challenger.get('ad_number')}: {challenger.get('strategy')}",
                 f"Primary text: {challenger.get('primary_text')}",
                 f"Headline: {challenger.get('headline')}",
                 f"Description: {challenger.get('description')}",
                 f"CTA: {challenger.get('cta')}",
-                f"Winner keep: {challenger.get('winner_keep')}",
-                f"Winner change: {challenger.get('winner_change')}",
-                f"Test reason: {challenger.get('test_reason')}",
                 f"Image prompt: {challenger.get('image_prompt')}",
                 "",
             ]
@@ -2872,7 +2991,7 @@ def _meta_csv_ui_state(*, uploaded, parsed=None, evidence=None, error=""):
     return "error"
 
 
-def _render_meta_csv_file_state(state):
+def _render_csv_file_state(container_key, state):
     if state not in {"applied", "error"}:
         return
     if state == "applied":
@@ -2882,12 +3001,12 @@ def _render_meta_csv_file_state(state):
     st.markdown(
         f"""
         <style>
-        .st-key-{META_CSV_CONTAINER_KEY} [data-testid="stFileUploaderFile"] {{
+        .st-key-{container_key} [data-testid="stFileUploaderFile"] {{
             background: {background} !important;
             border-color: {border} !important;
             color: {foreground} !important;
         }}
-        .st-key-{META_CSV_CONTAINER_KEY} [data-testid="stFileUploaderFile"] svg {{
+        .st-key-{container_key} [data-testid="stFileUploaderFile"] svg {{
             color: {foreground} !important;
             fill: {foreground} !important;
         }}
@@ -2895,6 +3014,10 @@ def _render_meta_csv_file_state(state):
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_meta_csv_file_state(state):
+    _render_csv_file_state(META_CSV_CONTAINER_KEY, state)
 
 
 def _render_primary_review_prompt_copy(prompt, context_key):
@@ -2998,10 +3121,23 @@ def _render_review_winner_stage():
             }
             st.session_state[REVIEW_RESULT_STATE_KEY] = review_result
 
-        _render_primary_review_prompt_copy(
-            prompt,
-            (review_result or {}).get("context_key"),
-        )
+        template_column, prompt_column = st.columns([1, 2])
+        with template_column:
+            st.download_button(
+                "Download Empty CSV",
+                data=build_creative_refresh_empty_csv(product_context),
+                file_name="sports-cave-ads-empty.csv",
+                mime="text/csv",
+                icon=":material/table_view:",
+                disabled=not bool(prompt),
+                key=f"{STATE_PREFIX}download_empty_ads_csv",
+                use_container_width=True,
+            )
+        with prompt_column:
+            _render_primary_review_prompt_copy(
+                prompt,
+                (review_result or {}).get("context_key"),
+            )
         if errors:
             st.caption("Complete Product, Winning primary text and Winning headline to create the review prompt.")
         if prompt:
@@ -3022,67 +3158,21 @@ def _render_review_winner_stage():
     return review_result
 
 
-def _render_challenger_cards(result):
-    for challenger in result.get("refresh_challengers") or ():
-        rank = challenger.get("refresh_rank")
-        strategy = challenger.get("refresh_variant")
-        with st.container(border=True, key=f"{STATE_PREFIX}challenger_card_{rank}"):
-            st.markdown(f"### Challenger {rank} — {strategy}")
-            st.caption(challenger.get("refresh_angle") or "")
-            copy_col, detail_col = st.columns([3, 2])
-            with copy_col:
-                st.markdown("**Primary text**")
-                st.text(challenger.get("primary_text") or "")
-                st.markdown(f"**Headline:** {challenger.get('headline') or ''}")
-                st.markdown(f"**Description:** {challenger.get('description') or ''}")
-                st.markdown(f"**CTA:** {challenger.get('cta') or ''}")
-            with detail_col:
-                st.markdown("**Test logic**")
-                st.write(challenger.get("test_reason") or "")
-                st.markdown("**Winner lineage**")
-                st.write(f"Keep: {challenger.get('winner_keep') or ''}")
-                st.write(f"Change: {challenger.get('winner_change') or ''}")
-            with st.expander("Image-generation prompt", expanded=False):
-                image_prompt = challenger.get("image_prompt") or ""
-                st.text_area(
-                    f"Challenger {rank} image prompt",
-                    value=image_prompt,
-                    height=230,
-                    disabled=True,
-                    key=f"{STATE_PREFIX}challenger_prompt_{result['context_key']}_{rank}",
-                )
-                action_col, download_col = st.columns(2)
-                with action_col:
-                    ads_page.render_prompt_copy_button(
-                        image_prompt,
-                        f"creative-refresh-image::{result['context_key']}::{rank}",
-                        label="Copy image prompt",
-                        success_label=f"Challenger {rank} image prompt copied",
-                    )
-                with download_col:
-                    st.download_button(
-                        "Download image prompt",
-                        data=image_prompt.encode("utf-8"),
-                        file_name=f"creative-refresh-{rank}-{_normalise_header(strategy).replace(' ', '-')}-prompt.txt",
-                        mime="text/plain",
-                        icon=":material/download:",
-                        key=f"{STATE_PREFIX}challenger_prompt_download_{result['context_key']}_{rank}",
-                        use_container_width=True,
-                    )
-
-
 def _render_build_challengers_stage(review_result):
     st.divider()
     with st.container(border=True, key=f"{STATE_PREFIX}build_challengers_v2_card"):
         st.subheader("2. Build Challengers")
-        st.caption("In ChatGPT, attach the actual winning image, run the Review Prompt, then import the returned CSV.")
-        csv_upload = st.file_uploader(
-            "Import ChatGPT Refresh CSV",
-            type=["csv"],
-            key=CHALLENGER_CSV_UPLOAD_KEY,
-            max_upload_size=2,
-        )
-        result = None
+        st.caption("In ChatGPT, attach the winning image and empty CSV, run the prompt, then import the completed CSV.")
+        with st.container(key=CHALLENGER_CSV_CONTAINER_KEY):
+            csv_upload = st.file_uploader(
+                "Import Completed CSV",
+                type=["csv"],
+                key=CHALLENGER_CSV_UPLOAD_KEY,
+                max_upload_size=2,
+            )
+        result = st.session_state.get(CHALLENGER_RESULT_STATE_KEY)
+        if not isinstance(result, dict) or result.get("source_review_context_key") != review_result.get("context_key"):
+            result = None
         if csv_upload is not None:
             try:
                 challengers = _cached_parse_creative_refresh_challenger_csv(
@@ -3094,30 +3184,35 @@ def _render_build_challengers_stage(review_result):
                     review_result["product_context"],
                     challengers,
                     csv_upload.getvalue(),
+                    review_context_key=review_result.get("context_key"),
                 )
                 st.session_state[CHALLENGER_RESULT_STATE_KEY] = result
-                st.success("✓ ChatGPT Refresh CSV imported — 3 challengers")
+                _render_csv_file_state(CHALLENGER_CSV_CONTAINER_KEY, "applied")
+                st.success("✓ 3 ads imported")
             except CreativeRefreshValidationError as error:
+                result = None
+                st.session_state.pop(CHALLENGER_RESULT_STATE_KEY, None)
+                _render_csv_file_state(CHALLENGER_CSV_CONTAINER_KEY, "error")
                 st.error(str(error))
         if result is None:
             return
 
-    _render_challenger_cards(result)
     workflow = ads_page._ads_image_workflow(result)
+    standard_ads = tuple(result.get("standard_ads") or result.get("refresh_challengers") or ())
     workflow["ad_notes"] = {
         "headlines": "\n\n".join(
-            f"{row['refresh_variant']}: {row['headline']}"
-            for row in result.get("refresh_challengers") or ()
+            f"Ad {row['ad_number']} — {row['strategy']}: {row['headline']}"
+            for row in standard_ads
         ),
         "descriptions": "\n\n".join(
-            f"{row['refresh_variant']}: {row['description']}"
-            for row in result.get("refresh_challengers") or ()
+            f"Ad {row['ad_number']} — {row['strategy']}: {row['description']}"
+            for row in standard_ads
         ),
         "primary_text_variations": "\n\n".join(
-            f"{row['refresh_variant']}:\n{row['primary_text']}"
-            for row in result.get("refresh_challengers") or ()
+            f"Ad {row['ad_number']} — {row['strategy']}:\n{row['primary_text']}"
+            for row in standard_ads
         ),
-        "cards": creative_refresh_setup_notes(result.get("refresh_challengers") or ()),
+        "cards": creative_refresh_setup_notes(standard_ads),
     }
     st.session_state[ads_page.ADS_IMAGE_STATE_KEY] = workflow
     ads_page._render_ads_image_slots(result, workflow)
@@ -3134,9 +3229,9 @@ def render_page():
     with st.expander("How to use", expanded=False):
         st.markdown(
             "1. Select the product and paste the winning primary text and headline.\n"
-            "2. Optionally add a Meta performance CSV, then copy the Review Prompt.\n"
-            "3. In ChatGPT, attach the actual winning image and run the prompt.\n"
-            "4. Import ChatGPT's three-row CSV, generate the challenger images and save them through the normal Ads workflow."
+            "2. Optionally add a Meta performance CSV, then download the empty CSV and copy the Review Prompt.\n"
+            "3. In ChatGPT, attach the winning image and empty CSV, then run the prompt.\n"
+            "4. Import the completed three-row CSV, upload the three generated images and save through the normal Ads workflow."
         )
     review_result = _render_review_winner_stage()
     if (
