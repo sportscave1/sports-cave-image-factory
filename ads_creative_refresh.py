@@ -34,6 +34,7 @@ PRODUCT_URL_MANUAL_KEY = f"{STATE_PREFIX}product_url_manual"
 WINNING_CREATIVE_KEY = f"{STATE_PREFIX}winning_creative"
 ORIGINAL_PROMPT_UPLOAD_KEY = f"{STATE_PREFIX}original_prompt_upload"
 META_CSV_UPLOAD_KEY = f"{STATE_PREFIX}meta_csv_upload"
+META_CSV_CONTAINER_KEY = f"{STATE_PREFIX}meta_csv_state"
 CHALLENGER_CSV_UPLOAD_KEY = f"{STATE_PREFIX}challenger_csv_upload"
 REVIEW_RESULT_STATE_KEY = f"{STATE_PREFIX}review_result_v2"
 CHALLENGER_RESULT_STATE_KEY = f"{STATE_PREFIX}challenger_result_v2"
@@ -215,6 +216,25 @@ META_COLUMN_ALIASES = {
     "reach": ("reach",),
     "impressions": ("impressions",),
 }
+
+META_USEFUL_NUMERIC_FIELDS = (
+    "spend",
+    "results",
+    "purchase_results",
+    "purchase_value",
+    "cpa",
+    "roas",
+    "ctr",
+    "link_clicks",
+    "cpc",
+    "cpm",
+    "frequency",
+    "reach",
+    "impressions",
+    "adds_to_cart",
+    "checkouts",
+    "payment_info",
+)
 
 
 class CreativeRefreshValidationError(ValueError):
@@ -538,6 +558,15 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
         rows.append(derived)
     if not rows:
         raise MetaCSVValidationError("The Meta CSV contains no data rows.")
+    useful_metric_fields = tuple(
+        field
+        for field in META_USEFUL_NUMERIC_FIELDS
+        if any(row.get(field) is not None for row in rows)
+    )
+    if not useful_metric_fields:
+        raise MetaCSVValidationError(
+            "The Meta CSV contains recognised metric columns, but no usable performance values."
+        )
     if len(rows) < 2:
         warnings.append("At least two rows are needed to compare a winning period with a recent period.")
     report_level = (
@@ -570,6 +599,7 @@ def parse_meta_ads_csv(data, *, filename="meta-export.csv"):
             if not (row.get("ad_name") or row.get("ad_set_name") or row.get("campaign_name"))
         ),
         "currency": currency_match.group(1).upper() if currency_match else "",
+        "useful_metric_fields": useful_metric_fields,
     }
 
 
@@ -722,6 +752,7 @@ def build_meta_evidence_pack(parsed, product_context=None):
         return {
             "summary": "No Meta performance CSV was supplied. Treat all performance explanations as hypotheses to test.",
             "metrics": {},
+            "applied": False,
             "relevant_rows": (),
             "context_rows": (),
             "limitations": (
@@ -846,6 +877,7 @@ def build_meta_evidence_pack(parsed, product_context=None):
     return {
         "summary": "\n".join(lines),
         "metrics": metrics,
+        "applied": bool(parsed.get("useful_metric_fields")),
         "relevant_rows": tuple(relevant_rows[:3]),
         "context_rows": tuple(context_rows),
         "limitations": tuple(limitations),
@@ -2830,6 +2862,55 @@ def _mark_review_prompt_ready(context_key):
     st.session_state[PROMPT_READY_CONTEXT_KEY] = str(context_key or "")
 
 
+def _meta_csv_ui_state(*, uploaded, parsed=None, evidence=None, error=""):
+    if not uploaded:
+        return "neutral"
+    if parsed and (evidence or {}).get("applied"):
+        return "applied"
+    if error:
+        return "error"
+    return "error"
+
+
+def _render_meta_csv_file_state(state):
+    if state not in {"applied", "error"}:
+        return
+    if state == "applied":
+        background, border, foreground = "#EEF8F0", "#65A873", "#236332"
+    else:
+        background, border, foreground = "#FFF0F0", "#D66A6A", "#9E2424"
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{META_CSV_CONTAINER_KEY} [data-testid="stFileUploaderFile"] {{
+            background: {background} !important;
+            border-color: {border} !important;
+            color: {foreground} !important;
+        }}
+        .st-key-{META_CSV_CONTAINER_KEY} [data-testid="stFileUploaderFile"] svg {{
+            color: {foreground} !important;
+            fill: {foreground} !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_primary_review_prompt_copy(prompt, context_key):
+    copied_context = ads_page.render_prompt_copy_button(
+        prompt,
+        f"creative-refresh-v2-primary::{context_key or 'unavailable'}",
+        label="Copy Creative Refresh Review Prompt",
+        success_label="✓ Prompt copied",
+        primary=True,
+        disabled=not bool(prompt),
+        track_copy=True,
+    )
+    if prompt and copied_context:
+        _mark_review_prompt_ready(context_key)
+
+
 def _render_review_winner_stage():
     with st.container(border=True, key=f"{STATE_PREFIX}review_winner_v2_card"):
         st.subheader("1. Review Winner")
@@ -2852,12 +2933,13 @@ def _render_review_winner_stage():
                 placeholder="Paste the winning Meta headline",
                 key=f"{STATE_PREFIX}winning_meta_headline",
             )
-            meta_upload = st.file_uploader(
-                "Meta performance CSV (optional)",
-                type=["csv"],
-                key=META_CSV_UPLOAD_KEY,
-                max_upload_size=5,
-            )
+            with st.container(key=META_CSV_CONTAINER_KEY):
+                meta_upload = st.file_uploader(
+                    "Meta performance CSV (optional)",
+                    type=["csv"],
+                    key=META_CSV_UPLOAD_KEY,
+                    max_upload_size=5,
+                )
 
         parsed = None
         csv_error = ""
@@ -2868,8 +2950,18 @@ def _render_review_winner_stage():
                 csv_error = str(error)
                 st.error(csv_error)
         evidence = build_meta_evidence_pack(parsed, product_context)
-        if parsed:
-            st.success(f"✓ Meta CSV imported — {parsed.get('row_count', len(parsed.get('rows') or ())) } rows")
+        meta_csv_state = _meta_csv_ui_state(
+            uploaded=meta_upload is not None,
+            parsed=parsed,
+            evidence=evidence,
+            error=csv_error,
+        )
+        _render_meta_csv_file_state(meta_csv_state)
+        if meta_csv_state == "applied":
+            st.success(
+                "✓ Meta performance CSV applied"
+                f" — {parsed.get('row_count', len(parsed.get('rows') or ())) } rows"
+            )
             _render_imported_metrics_details(parsed, evidence)
 
         errors = validate_creative_refresh_v2_inputs(
@@ -2906,23 +2998,9 @@ def _render_review_winner_stage():
             }
             st.session_state[REVIEW_RESULT_STATE_KEY] = review_result
 
-        filename_product = product_context.get("handle") or product_context.get("product_name") or "product"
-        filename_product = ads_page.ads_image_workflow.sanitize_product_filename(
-            filename_product,
-            max_length=90,
-        ).casefold()
-        st.download_button(
-            "Download Creative Refresh Review Prompt",
-            data=prompt.encode("utf-8"),
-            file_name=f"creative-refresh-review-{filename_product}.txt",
-            mime="text/plain",
-            type="primary",
-            icon=":material/download:",
-            disabled=not bool(prompt),
-            key=f"{STATE_PREFIX}download_review_prompt",
-            on_click=_mark_review_prompt_ready,
-            args=((review_result or {}).get("context_key"),),
-            use_container_width=True,
+        _render_primary_review_prompt_copy(
+            prompt,
+            (review_result or {}).get("context_key"),
         )
         if errors:
             st.caption("Complete Product, Winning primary text and Winning headline to create the review prompt.")
@@ -3056,7 +3134,7 @@ def render_page():
     with st.expander("How to use", expanded=False):
         st.markdown(
             "1. Select the product and paste the winning primary text and headline.\n"
-            "2. Optionally add a Meta performance CSV, then download the Review Prompt.\n"
+            "2. Optionally add a Meta performance CSV, then copy the Review Prompt.\n"
             "3. In ChatGPT, attach the actual winning image and run the prompt.\n"
             "4. Import ChatGPT's three-row CSV, generate the challenger images and save them through the normal Ads workflow."
         )

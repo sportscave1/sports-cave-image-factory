@@ -29,6 +29,12 @@ from sports_cave_prompt_blocks import (
 from ui_option_ordering import alphabetize_options
 
 
+_PROMPT_COPY_COMPONENT = components.declare_component(
+    "sports_cave_prompt_copy",
+    path=Path(__file__).resolve().parent / "ui_components" / "prompt_copy",
+)
+
+
 class _LazyModuleProxy:
     def __init__(self, module_name):
         self._module_name = module_name
@@ -1557,12 +1563,42 @@ def prepare_ads_product_selector_state(rows, *, result=None):
         st.session_state[ADS_PRODUCT_SELECTOR_KEY] = saved_name
 
 
-def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_label="Prompt copied"):
+def render_prompt_copy_button(
+    prompt_text,
+    key,
+    label="Copy Prompt",
+    success_label="Prompt copied",
+    *,
+    primary=False,
+    disabled=False,
+    track_copy=False,
+):
+    if track_copy:
+        return _PROMPT_COPY_COMPONENT(
+            prompt_text=str(prompt_text or ""),
+            label=str(label or "Copy Prompt"),
+            success_label=str(success_label or "Prompt copied"),
+            primary=bool(primary),
+            disabled=bool(disabled),
+            default=None,
+            key=f"ads-prompt-copy::{key}",
+        )
     prompt_text_json = json.dumps(str(prompt_text or ""))
     safe_label = html.escape(label)
     safe_success_label = html.escape(success_label)
     button_id = f"ads-copy-prompt-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
     status_id = f"{button_id}-status"
+    if primary:
+        background = "#D4A54C" if not disabled else "#E6E2D9"
+        foreground = "#0B0B0D" if not disabled else "#817D75"
+        border = "#D4A54C" if not disabled else "#D4D0C7"
+    else:
+        background = "#FFFFFF" if not disabled else "#F2F1EE"
+        foreground = "#0B0B0D" if not disabled else "#817D75"
+        border = "rgba(11,11,13,0.55)" if not disabled else "#D4D0C7"
+    disabled_attribute = " disabled" if disabled else ""
+    aria_disabled = "true" if disabled else "false"
+    cursor = "not-allowed" if disabled else "pointer"
     components.html(
         f"""
         <div style="padding:2px 0;">
@@ -1571,7 +1607,9 @@ def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_lab
             type="button"
             aria-label="{safe_label}"
             aria-describedby="{status_id}"
-            style="width:100%;border:1px solid rgba(11,11,13,0.55);border-radius:14px;padding:12px 14px;background:#FFFFFF;color:#0B0B0D;font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
+            aria-disabled="{aria_disabled}"
+            style="width:100%;border:1px solid {border};border-radius:14px;padding:12px 14px;background:{background};color:{foreground};font-weight:700;font-size:0.95rem;cursor:{cursor};box-sizing:border-box;"
+            {disabled_attribute}
           >
             {safe_label}
           </button>
@@ -1618,6 +1656,7 @@ def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_lab
         """,
         height=64,
     )
+    return None
 
 
 def validate_ads_inputs(product_name, category, country, campaign_type, product_url=""):

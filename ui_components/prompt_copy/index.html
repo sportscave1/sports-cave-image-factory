@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: #0b0b0d;
+        font-family: Arial, sans-serif;
+      }
+
+      .copy-wrap {
+        padding: 2px 0;
+      }
+
+      button {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid rgba(11, 11, 13, 0.55);
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: #fff;
+        color: #0b0b0d;
+        font-size: 0.95rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: #d4a54c;
+        background: #d4a54c;
+      }
+
+      button:disabled {
+        border-color: #d4d0c7;
+        background: #e6e2d9;
+        color: #817d75;
+        cursor: not-allowed;
+      }
+
+      .status {
+        min-height: 18px;
+        margin-top: 6px;
+        color: #5c4309;
+        font-size: 0.82rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="copy-wrap">
+      <button id="copy-button" type="button" aria-describedby="copy-status"></button>
+      <div id="copy-status" class="status" role="status" aria-live="polite"></div>
+    </div>
+    <script>
+      (() => {
+        const button = document.getElementById("copy-button");
+        const status = document.getElementById("copy-status");
+        let args = {};
+
+        function sendMessage(type, extra = {}) {
+          window.parent.postMessage(
+            { isStreamlitMessage: true, type, ...extra },
+            "*",
+          );
+        }
+
+        function setFrameHeight() {
+          sendMessage("streamlit:setFrameHeight", { height: 68 });
+        }
+
+        function setComponentValue(value) {
+          sendMessage("streamlit:setComponentValue", {
+            value,
+            dataType: "json",
+          });
+        }
+
+        function render(nextArgs) {
+          args = nextArgs || {};
+          button.textContent = args.label || "Copy Prompt";
+          button.className = args.primary ? "primary" : "";
+          button.disabled = Boolean(args.disabled);
+          button.setAttribute("aria-label", button.textContent);
+          status.textContent = "";
+          setFrameHeight();
+        }
+
+        async function copyPrompt(event) {
+          event.preventDefault();
+          if (button.disabled) return;
+          const promptText = String(args.prompt_text || "");
+          const originalLabel = args.label || "Copy Prompt";
+          try {
+            if (navigator.clipboard && window.isSecureContext) {
+              await navigator.clipboard.writeText(promptText);
+            } else {
+              const textarea = document.createElement("textarea");
+              textarea.value = promptText;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              const copied = document.execCommand("copy");
+              document.body.removeChild(textarea);
+              if (!copied) throw new Error("Clipboard command failed");
+            }
+            const confirmation = args.success_label || "Prompt copied";
+            button.textContent = confirmation;
+            status.textContent = confirmation;
+            setComponentValue(Boolean(args.prompt_text));
+          } catch (_error) {
+            button.textContent = "Copy failed";
+            status.textContent = "Copy failed — use the prompt preview to copy manually.";
+          }
+          setFrameHeight();
+          window.setTimeout(() => {
+            button.textContent = originalLabel;
+            status.textContent = "";
+            setFrameHeight();
+          }, 1400);
+        }
+
+        window.addEventListener("message", (event) => {
+          if (event.data && event.data.type === "streamlit:render") {
+            render(event.data.args);
+          }
+        });
+        button.addEventListener("click", copyPrompt);
+        sendMessage("streamlit:componentReady", { apiVersion: 1 });
+        setFrameHeight();
+      })();
+    </script>
+  </body>
+</html>

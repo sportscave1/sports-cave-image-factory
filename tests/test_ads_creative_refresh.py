@@ -290,7 +290,8 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertNotIn(("Create Ads", "sidebar-child::Ads"), sidebar_buttons)
         self.assertEqual(app_test.session_state["sidebar-open-group"], "ads")
         page_source = (ROOT / "ads_creative_refresh.py").read_text(encoding="utf-8")
-        self.assertIn("Download Creative Refresh Review Prompt", page_source)
+        self.assertIn("Copy Creative Refresh Review Prompt", page_source)
+        self.assertNotIn("Download Creative Refresh Review Prompt", page_source)
         self.assertEqual(
             [uploader.label for uploader in app_test.file_uploader],
             ["Meta performance CSV (optional)"],
@@ -778,6 +779,131 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             prompt,
         )
         self.assertIn("immutable product identity", prompt)
+
+    def test_review_prompt_is_complete_without_meta_csv(self):
+        prompt = ads_creative_refresh.build_creative_refresh_review_prompt(
+            sample_product_context(),
+            "Limited to only 100 worldwide.\n\nSecure your edition.",
+            "Only 100 Shane Warne Editions",
+        )
+        self.assertIn("Shane Warne Tribute Wall Art", prompt)
+        self.assertIn("Limited to only 100 worldwide.", prompt)
+        self.assertIn("Only 100 Shane Warne Editions", prompt)
+        self.assertIn("No Meta performance CSV was supplied", prompt)
+        self.assertIn("exactly THREE", prompt)
+
+    @patch("ads_creative_refresh._mark_review_prompt_ready")
+    @patch("ads_creative_refresh.ads_page.render_prompt_copy_button")
+    def test_primary_copy_action_uses_the_complete_generated_prompt(
+        self,
+        render_copy_button,
+        mark_ready,
+    ):
+        prompt = ads_creative_refresh.build_creative_refresh_review_prompt(
+            sample_product_context(),
+            "Winning primary text from the VA",
+            "Winning headline from the VA",
+        )
+        render_copy_button.return_value = "context-123"
+        ads_creative_refresh._render_primary_review_prompt_copy(prompt, "context-123")
+        mark_ready.assert_called_once_with("context-123")
+        copied_prompt, copy_key = render_copy_button.call_args.args
+        self.assertEqual(copied_prompt, prompt)
+        self.assertEqual(copy_key, "creative-refresh-v2-primary::context-123")
+        self.assertEqual(
+            render_copy_button.call_args.kwargs["label"],
+            "Copy Creative Refresh Review Prompt",
+        )
+        self.assertEqual(render_copy_button.call_args.kwargs["success_label"], "✓ Prompt copied")
+        self.assertTrue(render_copy_button.call_args.kwargs["primary"])
+        self.assertFalse(render_copy_button.call_args.kwargs["disabled"])
+        self.assertTrue(render_copy_button.call_args.kwargs["track_copy"])
+
+    def test_primary_copy_component_uses_browser_clipboard_and_reports_the_click(self):
+        component_source = (
+            ROOT / "ui_components" / "prompt_copy" / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("navigator.clipboard.writeText(promptText)", component_source)
+        self.assertIn('document.execCommand("copy")', component_source)
+        self.assertIn('streamlit:setComponentValue', component_source)
+        self.assertIn("#d4a54c", component_source.casefold())
+        self.assertIn("✓ Prompt copied", (ROOT / "ads_creative_refresh.py").read_text(encoding="utf-8"))
+
+    def test_valid_meta_csv_is_applied_and_its_contents_enter_the_prompt(self):
+        parsed = ads_creative_refresh.parse_meta_ads_csv(
+            (ROOT / "tests" / "fixtures" / "meta_campaign_export.csv").read_bytes(),
+            filename="meta-performance.csv",
+        )
+        evidence = ads_creative_refresh.build_meta_evidence_pack(parsed, sample_product_context())
+        self.assertTrue(evidence["applied"])
+        self.assertEqual(
+            ads_creative_refresh._meta_csv_ui_state(
+                uploaded=True,
+                parsed=parsed,
+                evidence=evidence,
+            ),
+            "applied",
+        )
+        prompt = ads_creative_refresh.build_creative_refresh_review_prompt(
+            sample_product_context(),
+            "Winner copy",
+            "Winner headline",
+            meta_evidence=evidence,
+        )
+        self.assertIn("Import: 4 rows", prompt)
+        self.assertIn("Spend: AUD 270.00", prompt)
+        self.assertIn("Shane Warne Collector Winner", prompt)
+        self.assertIn("Purchase-semantic results only: 5", prompt)
+
+    def test_invalid_or_value_less_meta_csv_has_a_real_error_state(self):
+        with self.assertRaisesRegex(
+            ads_creative_refresh.MetaCSVValidationError,
+            "Could not map any performance metrics",
+        ):
+            ads_creative_refresh.parse_meta_ads_csv(
+                csv_bytes([{"Campaign name": "Winner"}], ["Campaign name"]),
+                filename="meta.csv",
+            )
+        with self.assertRaisesRegex(
+            ads_creative_refresh.MetaCSVValidationError,
+            "no usable performance values",
+        ):
+            ads_creative_refresh.parse_meta_ads_csv(
+                csv_bytes(
+                    [{"Campaign name": "Winner", "Amount spent": "NaN"}],
+                    ["Campaign name", "Amount spent"],
+                ),
+                filename="meta.csv",
+            )
+        self.assertEqual(
+            ads_creative_refresh._meta_csv_ui_state(
+                uploaded=True,
+                error="The Meta CSV has no usable performance values.",
+            ),
+            "error",
+        )
+
+    def test_missing_optional_meta_columns_still_apply_when_useful_values_exist(self):
+        parsed = ads_creative_refresh.parse_meta_ads_csv(
+            csv_bytes(
+                [{"Campaign name": "Shane Warne Minimal Export", "Spend": "19.50"}],
+                ["Campaign name", "Spend"],
+            ),
+            filename="minimal-meta.csv",
+        )
+        evidence = ads_creative_refresh.build_meta_evidence_pack(parsed, sample_product_context())
+        self.assertEqual(parsed["report_level"], "campaign")
+        self.assertEqual(parsed["useful_metric_fields"], ("spend",))
+        self.assertTrue(evidence["applied"])
+        self.assertIn("Spend: 19.50", evidence["summary"])
+        self.assertEqual(
+            ads_creative_refresh._meta_csv_ui_state(
+                uploaded=True,
+                parsed=parsed,
+                evidence=evidence,
+            ),
+            "applied",
+        )
 
     def test_stage_two_csv_imports_exactly_three_challengers_and_prompts(self):
         data = ads_creative_refresh.build_creative_refresh_challenger_csv(sample_challengers())
