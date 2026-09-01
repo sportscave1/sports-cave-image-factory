@@ -4373,6 +4373,66 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertIn("emoji 🏁", data.decode("utf-8-sig"))
 
+    def test_instant_experience_copy_csv_accepts_spreadsheet_index_columns(self):
+        result = instant_experience_csv_result()
+        expected = instant_experience_csv_notes()
+        canonical = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=expected,
+        )
+        canonical_rows = list(
+            csv.DictReader(
+                io.StringIO(canonical.decode("utf-8-sig"), newline="")
+            )
+        )
+
+        for index_header in ("index", "Unnamed: 0", ""):
+            with self.subTest(index_header=index_header):
+                indexed_rows = [
+                    {index_header: str(index), **row}
+                    for index, row in enumerate(canonical_rows)
+                ]
+                indexed_rows.reverse()
+                indexed = csv_bytes_from_rows(
+                    indexed_rows,
+                    headers=(
+                        index_header,
+                        *ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+                    ),
+                )
+
+                parsed = ads_page.parse_instant_experience_copy_csv(
+                    indexed,
+                    result,
+                )
+
+                self.assertEqual(parsed, expected)
+                self.assertIn(
+                    "Second line with \"quotes\"",
+                    parsed["premium_scarcity_right"][0]["primary_text"],
+                )
+                self.assertEqual(
+                    parsed["premium_scarcity_front"][1]["headline"],
+                    expected["premium_scarcity_front"][1]["headline"],
+                )
+                self.assertEqual(
+                    parsed["premium_scarcity_left"][2]["cta"],
+                    expected["premium_scarcity_left"][2]["cta"],
+                )
+
+    def test_instant_experience_copy_csv_rejects_posting_schema_with_useful_error(self):
+        with self.assertRaisesRegex(
+            ads_page.InstantExperienceCopyCSVError,
+            "Instant Experience CSV is missing required column:",
+        ):
+            ads_page.parse_instant_experience_copy_csv(
+                (
+                    "schema_version,product_name,primary_text,headline,cta\r\n"
+                    "2,Example product,Copy,Headline,Shop Now\r\n"
+                ).encode("utf-8-sig"),
+                instant_experience_csv_result(),
+            )
+
     def test_instant_experience_copy_csv_round_trips_every_supported_output_mode(self):
         for output_mode in (
             ads_page.IE_MODE_SMART,
@@ -4515,6 +4575,33 @@ PRIMARY TEXT VARIATIONS
             )
             self.assertEqual(session_state[first_key], "Manual change after import")
 
+    def test_failed_instant_experience_upload_does_not_poison_valid_replacement(self):
+        result = instant_experience_csv_result()
+        valid_data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=instant_experience_csv_notes(),
+        )
+        workflow = {"ad_notes": {}}
+        session_state = {}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            failed = ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                io.BytesIO(b"schema_version,product_name\r\n2,Example product\r\n"),
+            )
+            succeeded = ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                io.BytesIO(valid_data),
+            )
+
+        self.assertFalse(failed["ok"])
+        self.assertIn("missing required column", failed["message"])
+        self.assertTrue(succeeded["ok"])
+        self.assertEqual(succeeded["message"], "CSV imported — ad copy applied.")
+        self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
+
     def test_rendered_instant_experience_csv_import_populates_existing_fields(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
@@ -4525,9 +4612,23 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
         result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
         expected = instant_experience_csv_notes()
-        data = ads_page.build_instant_experience_copy_csv(
+        canonical = ads_page.build_instant_experience_copy_csv(
             result,
             concept_notes=expected,
+        )
+        canonical_rows = list(
+            csv.DictReader(
+                io.StringIO(canonical.decode("utf-8-sig"), newline="")
+            )
+        )
+        indexed_rows = [
+            {"index": str(index), **row}
+            for index, row in enumerate(canonical_rows)
+        ]
+        indexed_rows.reverse()
+        data = csv_bytes_from_rows(
+            indexed_rows,
+            headers=("index", *ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
         )
 
         uploader_by_label(app_test, "Import CSV").set_value(

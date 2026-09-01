@@ -548,7 +548,7 @@ INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = len(INSTANT_EXPERIENCE_DESCRIPTION_VAR
 INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
 INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "2"
 INSTANT_EXPERIENCE_COPY_CSV_IMPORT_RUNTIME_VERSION = (
-    "2026-09-01-ads-page-contract-v3"
+    "2026-09-02-ads-page-index-contract-v4"
 )
 INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE = "instant_experience"
 INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_descriptions"
@@ -564,6 +564,9 @@ INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
     "primary_text",
     "headline",
     "cta",
+)
+INSTANT_EXPERIENCE_COPY_CSV_IGNORED_INDEX_HEADERS = frozenset(
+    {"index", "unnamed_0"}
 )
 INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS = (
     "Claim Your Edition",
@@ -10540,7 +10543,14 @@ def parse_instant_experience_copy_csv(data, result):
         raw_headers = tuple(reader.fieldnames or ())
         if not raw_headers:
             raise InstantExperienceCopyCSVError("The copy CSV has no header row.")
-        headers = tuple(_normalise_ads_copy_csv_header(header) for header in raw_headers)
+        headers = tuple(
+            (
+                "index"
+                if position == 0 and not _normalise_ads_copy_csv_header(header)
+                else _normalise_ads_copy_csv_header(header)
+            )
+            for position, header in enumerate(raw_headers)
+        )
         if any(not header for header in headers):
             raise InstantExperienceCopyCSVError(
                 "The copy CSV contains an empty column header."
@@ -10558,7 +10568,8 @@ def parse_instant_experience_copy_csv(data, result):
             missing = [header for header in legacy_headers if header not in headers]
             if missing:
                 raise InstantExperienceCopyCSVError(
-                    f"Missing required column: {missing[0]}."
+                    "Instant Experience CSV is missing required column: "
+                    f"{missing[0]}."
                 )
             raise InstantExperienceCopyCSVError(
                 "The CSV does not match the Sports Cave Instant Experience copy format."
@@ -10576,13 +10587,16 @@ def parse_instant_experience_copy_csv(data, result):
                 for raw_header, value in raw_row.items()
             }
             populated_extra_headers = [
-                header for header in extra_headers if row.get(header, "").strip()
+                header
+                for header in extra_headers
+                if header not in INSTANT_EXPERIENCE_COPY_CSV_IGNORED_INDEX_HEADERS
+                and row.get(header, "").strip()
             ]
             if populated_extra_headers:
                 raise InstantExperienceCopyCSVError(
                     f"Unexpected populated column: {populated_extra_headers[0]}."
                 )
-            if any(value.strip() for value in row.values()):
+            if any(row.get(header, "").strip() for header in selected_header_set):
                 rows.append(
                     {
                         header: value
@@ -10603,7 +10617,8 @@ def parse_instant_experience_copy_csv(data, result):
     }
     if len(rows) != len(expected_rows):
         raise InstantExperienceCopyCSVError(
-            f"The copy CSV must contain exactly {len(expected_rows)} copy rows."
+            f"Expected {len(expected_rows)} Instant Experience rows but found "
+            f"{len(rows)}."
         )
 
     concepts_by_id = {
