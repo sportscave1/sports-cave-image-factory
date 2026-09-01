@@ -36,7 +36,15 @@ class RepairRequestValidationError(RepairRequestError):
 
 
 class RepairRequestStorageUnavailable(RepairRequestError):
-    """Durable storage is unavailable or its additive migration is missing."""
+    """Durable repair-request storage cannot currently serve the request."""
+
+
+class RepairRequestStorageMissing(RepairRequestStorageUnavailable):
+    """The additive repair-request table or one of its required columns is missing."""
+
+
+class RepairRequestStorageTemporary(RepairRequestStorageUnavailable):
+    """The database is configured but temporarily unavailable."""
 
 
 def _single_line(value, *, limit):
@@ -279,7 +287,7 @@ class PostgresRepairRequestStore:
         import supabase_backend
 
         if not supabase_backend.is_configured():
-            raise RepairRequestStorageUnavailable(
+            raise RepairRequestStorageTemporary(
                 "Repair request storage is not configured."
             )
         return supabase_backend
@@ -287,10 +295,19 @@ class PostgresRepairRequestStore:
     @staticmethod
     def _storage_error(error):
         if isinstance(error, RepairRequestStorageUnavailable):
-            return RepairRequestStorageUnavailable(str(error))
-        return RepairRequestStorageUnavailable(
-            "Repair request storage is not ready. Apply migration "
-            f"{MIGRATION_NAME}, then retry."
+            return error
+        sqlstate = str(
+            getattr(error, "sqlstate", "")
+            or getattr(error, "pgcode", "")
+            or ""
+        ).upper()
+        if sqlstate in {"42P01", "42703"}:
+            return RepairRequestStorageMissing(
+                "Repair request storage is not ready. Apply migration "
+                f"{MIGRATION_NAME}, then retry."
+            )
+        return RepairRequestStorageTemporary(
+            "Repair requests are temporarily unavailable. Please retry."
         )
 
     def create(self, values):
@@ -330,7 +347,9 @@ class PostgresRepairRequestStore:
                     row = dict(cur.fetchone() or {})
                 conn.commit()
             if not row:
-                raise RepairRequestStorageUnavailable("Repair request was not stored.")
+                raise RepairRequestStorageTemporary(
+                    "Repair request storage did not return the stored request."
+                )
             return row
         except Exception as error:
             raise self._storage_error(error) from error

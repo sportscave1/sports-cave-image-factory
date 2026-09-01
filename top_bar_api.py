@@ -1044,7 +1044,7 @@ async def top_bar_repair_requests(request: Request):
         return _json({"ok": False, "error": str(error)}, 400)
     except PermissionError:
         return _json({"ok": False, "error": "Administrator access required."}, 403)
-    except repair_requests.RepairRequestStorageUnavailable:
+    except repair_requests.RepairRequestStorageMissing:
         error_message = (
             "Repairs storage is not ready. Apply migration "
             f"{repair_requests.MIGRATION_NAME}."
@@ -1056,6 +1056,15 @@ async def top_bar_repair_requests(request: Request):
                 "ok": False,
                 "available": False,
                 "error": error_message,
+            },
+            503,
+        )
+    except repair_requests.RepairRequestStorageUnavailable:
+        return _json(
+            {
+                "ok": False,
+                "available": False,
+                "error": "Repairs are temporarily unavailable. Please try again shortly.",
             },
             503,
         )

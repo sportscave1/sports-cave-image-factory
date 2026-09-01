@@ -142,6 +142,23 @@ class RepairPromptTests(unittest.TestCase):
 
 
 class RepairPersistenceTests(unittest.TestCase):
+    def test_storage_errors_distinguish_missing_schema_from_temporary_database_failure(self):
+        class DatabaseError(Exception):
+            def __init__(self, sqlstate):
+                super().__init__("database error")
+                self.sqlstate = sqlstate
+
+        store = repair_requests.PostgresRepairRequestStore()
+
+        self.assertIsInstance(
+            store._storage_error(DatabaseError("42P01")),
+            repair_requests.RepairRequestStorageMissing,
+        )
+        self.assertIsInstance(
+            store._storage_error(DatabaseError("08006")),
+            repair_requests.RepairRequestStorageTemporary,
+        )
+
     def test_submission_is_stored_outside_session_state_and_survives_service_calls(self):
         durable_rows = []
         first_store = MemoryRepairStore(durable_rows)
@@ -205,6 +222,21 @@ class RepairPersistenceTests(unittest.TestCase):
 
 
 class RepairApiTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def request(method):
+        return Request(
+            {
+                "type": "http",
+                "method": method,
+                "path": top_bar_api.REPAIR_REQUESTS_PATH,
+                "headers": [],
+                "query_string": b"",
+                "server": ("testserver", 80),
+                "client": ("testclient", 1),
+                "scheme": "http",
+            }
+        )
+
     async def test_worker_submission_response_never_serializes_admin_prompt(self):
         request = Request(
             {
@@ -236,22 +268,11 @@ class RepairApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("problem_description", json.dumps(payload))
 
     async def test_missing_database_table_returns_safe_503_instead_of_crashing(self):
-        request = Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": top_bar_api.REPAIR_REQUESTS_PATH,
-                "headers": [],
-                "query_string": b"",
-                "server": ("testserver", 80),
-                "client": ("testclient", 1),
-                "scheme": "http",
-            }
-        )
+        request = self.request("GET")
         with mock.patch.object(top_bar_api, "_claims", return_value=WORKER), mock.patch.object(
             repair_requests,
             "recent_requests",
-            side_effect=repair_requests.RepairRequestStorageUnavailable("missing table"),
+            side_effect=repair_requests.RepairRequestStorageMissing("missing table"),
         ):
             response = await top_bar_api.top_bar_repair_requests(request)
 
@@ -259,6 +280,59 @@ class RepairApiTests(unittest.IsolatedAsyncioTestCase):
         safe_body = response.body.decode("utf-8")
         self.assertIn("temporarily unavailable", safe_body)
         self.assertNotIn(repair_requests.MIGRATION_NAME, safe_body)
+
+    async def test_admin_sees_migration_guidance_only_for_a_missing_table(self):
+        with mock.patch.object(top_bar_api, "_claims", return_value=ADMIN), mock.patch.object(
+            repair_requests,
+            "recent_requests",
+            side_effect=repair_requests.RepairRequestStorageMissing("missing table"),
+        ):
+            missing = await top_bar_api.top_bar_repair_requests(self.request("GET"))
+        with mock.patch.object(top_bar_api, "_claims", return_value=ADMIN), mock.patch.object(
+            repair_requests,
+            "recent_requests",
+            side_effect=repair_requests.RepairRequestStorageTemporary("connection unavailable"),
+        ):
+            temporary = await top_bar_api.top_bar_repair_requests(self.request("GET"))
+
+        self.assertEqual(503, missing.status_code)
+        self.assertIn(repair_requests.MIGRATION_NAME, missing.body.decode("utf-8"))
+        self.assertEqual(503, temporary.status_code)
+        self.assertIn("temporarily unavailable", temporary.body.decode("utf-8"))
+        self.assertNotIn(repair_requests.MIGRATION_NAME, temporary.body.decode("utf-8"))
+
+    async def test_existing_empty_table_returns_ready_empty_history(self):
+        with mock.patch.object(top_bar_api, "_claims", return_value=WORKER), mock.patch.object(
+            repair_requests,
+            "PostgresRepairRequestStore",
+            return_value=MemoryRepairStore(),
+        ):
+            response = await top_bar_api.top_bar_repair_requests(self.request("GET"))
+
+        payload = json.loads(response.body)
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(payload["ok"])
+        self.assertEqual([], payload["requests"])
+        self.assertIn(
+            "No repair requests submitted yet.",
+            COMPONENT_PATH.read_text(encoding="utf-8"),
+        )
+
+    async def test_worker_completion_api_is_server_side_forbidden(self):
+        store = MemoryRepairStore([stored_request()])
+        with mock.patch.object(top_bar_api, "_claims", return_value=WORKER), mock.patch.object(
+            top_bar_api,
+            "_request_json_object",
+            new=mock.AsyncMock(return_value={"id": "repair-1"}),
+        ), mock.patch.object(
+            repair_requests,
+            "PostgresRepairRequestStore",
+            return_value=store,
+        ):
+            response = await top_bar_api.top_bar_repair_requests(self.request("PATCH"))
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual(repair_requests.STATUS_SUBMITTED, store.rows[0]["status"])
 
     def test_route_supports_only_the_three_lightweight_operations(self):
         route = next(
