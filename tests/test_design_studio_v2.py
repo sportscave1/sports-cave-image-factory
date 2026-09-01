@@ -63,7 +63,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         self.assertEqual(
             design_studio_styles.STYLE_REGISTRY_VERSION,
-            "sports_cave_design_styles_v5_distinct_type_contracts",
+            "sports_cave_design_styles_v6_text_minimalism",
         )
 
     def test_every_style_builds_all_four_prompts(self):
@@ -86,6 +86,45 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 label = design_studio_styles.get_design_style(slug).label
                 self.assertIn(label, bundle["generation"])
                 self.assertIn(label, bundle["review"])
+
+    def test_every_registered_generation_enforces_artwork_text_minimalism(self):
+        for slug in design_studio_styles.style_slugs():
+            with self.subTest(style=slug):
+                prompt = design_studio_styles.build_generation_prompt(
+                    slug,
+                    "Create the requested collector artwork",
+                    STYLE_DETAILS[slug],
+                )
+                self.assertIn(
+                    design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER,
+                    prompt,
+                )
+                self.assertIn("Keep all visible typography intentionally minimal", prompt)
+                self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
+                self.assertIn("Never invent, add or paraphrase promotional", prompt)
+                self.assertIn("CLAIM YOUR EDITION", prompt)
+                self.assertIn("A design is allowed to breathe", prompt)
+                self.assertIn("Main title or defining moment", prompt)
+                self.assertIn("Athlete/player name or names", prompt)
+                self.assertIn("Verified authentic signature assets", prompt)
+                self.assertIn("exact supplied compact Sports Cave collector badge", prompt)
+                self.assertIn("LIMITED EDITION and 001 / 100", prompt)
+
+    def test_every_registered_review_penalises_promotional_or_excessive_text(self):
+        for slug in design_studio_styles.style_slugs():
+            with self.subTest(style=slug):
+                prompt = design_studio_styles.build_harsh_review_prompt(
+                    slug,
+                    "Review the requested collector artwork",
+                    STYLE_DETAILS[slug],
+                )
+                self.assertIn("ARTWORK TEXT MINIMALISM REVIEW - MANDATORY", prompt)
+                self.assertIn("Penalise unnecessary marketing copy", prompt)
+                self.assertIn("promotional scarcity sentences", prompt)
+                self.assertIn("CTA language", prompt)
+                self.assertIn("filler subtitles", prompt)
+                self.assertIn("Do not demand more text", prompt)
+                self.assertIn("exact compact plaque remains acceptable", prompt)
 
     def test_only_selected_sport_adapter_is_included(self):
         prompt = design_studio_styles.build_generation_prompt(

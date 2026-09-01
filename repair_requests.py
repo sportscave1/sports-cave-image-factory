@@ -11,7 +11,7 @@ import os_accounts
 
 TABLE_NAME = "os_repair_requests"
 MIGRATION_NAME = "20260901_os_repair_requests.sql"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 RECENT_LIMIT = 5
 DISPLAY_TIMEZONE = ZoneInfo("Australia/Sydney")
 
@@ -25,6 +25,48 @@ SCOPE_LABELS = {
     SCOPE_RELATED_SECTIONS: "No — related sections also need changes",
     SCOPE_NOT_SURE: "Not sure",
 }
+
+
+CHATGPT_CODEX_HANDOFF_PREFIX = """==================================================
+CHATGPT — CREATE THE FINAL CODEX PROMPT
+==================================================
+
+This is a Sports Cave OS repair / improvement handoff.
+
+Read the entire request below before responding.
+
+Your job is NOT to implement the code change yourself.
+
+Create one complete, production-quality prompt for Codex to carry out the requested repair or improvement in the Sports Cave OS repository. Use the submitted request as the source of truth.
+
+The Codex prompt you create must:
+
+- preserve the exact reported problem and expected result
+- preserve the stated scope / isolation boundary
+- tell Codex to inspect the current repository implementation before editing
+- tell Codex to identify and explain the root cause
+- tell Codex to fix the underlying issue rather than only the visible symptom
+- tell Codex to reuse existing Sports Cave OS architecture, helpers and UI patterns
+- protect all currently working unrelated behaviour
+- include likely files or code paths only when supported by the supplied request or context
+- require focused regression tests where appropriate
+- require syntax/compile checks and relevant tests for every changed file
+- prohibit destructive production actions
+- prohibit exposing secrets
+- prohibit pushing or deploying unless the request explicitly authorises it
+- require Codex to stop after local implementation and report the result
+
+Improve and expand the implementation instructions where necessary so Codex receives an unambiguous engineering task, but DO NOT change the user's intended behaviour or broaden the requested scope.
+
+If screenshots, files, error messages or additional context are supplied with this request, incorporate them into the Codex prompt where relevant.
+
+Return ONLY the final Codex prompt, ready for Nathan to copy directly into Codex.
+
+Do not give Nathan an explanation before or after it.
+
+==================================================
+ORIGINAL SPORTS CAVE OS REPAIR REQUEST
+==================================================""".strip()
 
 
 class RepairRequestError(RuntimeError):
@@ -139,7 +181,9 @@ def build_repair_prompt(request):
     )
     scope_notes = _multiline(request.get("scope_notes"), limit=4000) or "None provided."
     submitted_date = format_sydney_date(request.get("created_at")) or "Not recorded"
-    return f"""==================================================
+    return f"""{CHATGPT_CODEX_HANDOFF_PREFIX}
+
+==================================================
 SPORTS CAVE OS — REPAIR / IMPROVEMENT REQUEST
 ==================================================
 

@@ -1050,7 +1050,7 @@
     const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
     const plannerToastRegion = root.querySelector("#sc-os-planner-toast-region");
     const repairToastRegion = root.querySelector("#sc-os-repair-toast-region");
-    const TOAST_RUNTIME_VERSION = "dismissible-v2";
+    const TOAST_RUNTIME_VERSION = "dismissible-v3-stable-repair-identities";
     const TOAST_SEEN_STORAGE_KEY = "scSportsCaveTemporaryToastSeen:v2";
     const readSeenToastIdentities = () => {
       try {
@@ -1716,10 +1716,11 @@
     const dismissRepairToast = () => {
       temporaryToasts.dismiss("repairs");
     };
-    const showRepairToast = (message) => {
+    const showRepairToast = (message, notificationIdentity) => {
       const clean = String(message || "").trim();
-      if (!clean) return;
-      temporaryToasts.show("repairs", repairToastRegion, `repairs:${clean}:${Date.now()}`, () => {
+      const stableIdentity = String(notificationIdentity || "").trim();
+      if (!clean || !stableIdentity) return;
+      temporaryToasts.show("repairs", repairToastRegion, `repair:${stableIdentity}`, () => {
         const toast = doc.createElement("div");
         toast.className = "sc-os-order-toast";
         const copy = doc.createElement("div");
@@ -1731,7 +1732,7 @@
         toast.appendChild(copy);
         appendToastClose(toast, dismissRepairToast);
         repairToastRegion.replaceChildren(toast);
-      });
+      }, {remember: true});
     };
     const refreshOrderStatus = async () => {
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
@@ -2308,10 +2309,14 @@
         state.repairMessage = {};
         renderRepairPanel();
         try {
-          await requestJson(state.config.repairRequestsUrl, {method: "POST", body: payload});
+          const submitted = await requestJson(
+            state.config.repairRequestsUrl,
+            {method: "POST", body: payload},
+          );
           clearRepairDraft();
           state.repairMessage = {kind: "success", text: "Submitted successfully"};
-          showRepairToast("Repair request submitted");
+          const submittedRequestId = String(submitted.request?.id || "").trim();
+          showRepairToast("Repair request submitted", `submitted:${submittedRequestId}`);
           await loadRepairItems();
         } catch (error) {
           state.repairMessage = {kind: "error", text: error.message || "Repair request could not be submitted."};
@@ -2326,7 +2331,10 @@
           try {
             await writeClipboardText(item?.repair_prompt);
             state.repairMessage = {kind: "success", text: "Repair prompt copied"};
-            showRepairToast("Repair prompt copied");
+            showRepairToast(
+              "Repair prompt copied",
+              `prompt-copied:${item?.id || ""}:${item?.generated_prompt_version || "current"}`,
+            );
             if (state.activePanel === "repairs") renderRepairPanel();
           } catch (error) {
             state.repairMessage = {kind: "error", text: error.message || "Repair prompt could not be copied."};
@@ -2341,12 +2349,15 @@
           const adminNotes = card?.querySelector(".sc-os-repair-completion-note")?.value || "";
           button.disabled = true;
           try {
-            await requestJson(state.config.repairRequestsUrl, {
+            const completed = await requestJson(state.config.repairRequestsUrl, {
               method: "PATCH",
               body: {id, admin_notes: adminNotes},
             });
             state.repairMessage = {kind: "success", text: "Repair marked complete"};
-            showRepairToast("Repair marked complete");
+            showRepairToast(
+              "Repair marked complete",
+              `completed:${completed.request?.id || id}:${completed.request?.completed_date || "complete"}`,
+            );
             await loadRepairItems();
           } catch (error) {
             state.repairMessage = {kind: "error", text: error.message || "Repair could not be completed."};

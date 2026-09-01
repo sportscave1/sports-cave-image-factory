@@ -5,7 +5,7 @@ import re
 
 
 STYLE_REQUIRED_LABEL = "Style required"
-STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v5_distinct_type_contracts"
+STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v6_text_minimalism"
 
 DESIGN_DETAIL_FIELDS = (
     ("design_title", "Design title"),
@@ -180,6 +180,34 @@ VERIFIED SIGNATURE CONTRACT - NO GENERATION OR APPROXIMATION
 Every signature must come from one clear, verifiable reference mapped to the correct named principal. Composite the complete authentic handwritten mark while preserving its stroke path, proportions and orientation. Never invent, approximate, trace, redraw, rewrite, font-set or ask the image-generation model to create a signature. If no clear verified reference exists, state SIGNATURE UNAVAILABLE and leave it absent rather than fabricating it.
 
 When multiple signatures appear, preserve each authentic individual form while presenting them with the same colour, comparable displayed size, similar visual weight, matching apparent line thickness, brightness and opacity, balanced border spacing and clear readability at Shopify-thumbnail size. No signature may dominate another. Placement must follow the selected design type and the corresponding principal; consistency does not require an identical layout for every style.
+""".strip()
+
+
+ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER = "ARTWORK TEXT MINIMALISM - HARD RULE"
+ARTWORK_TEXT_MINIMALISM_CONTRACT = f"""
+{ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER}
+
+Sports Cave artwork is collectible wall art, not advertising creative. Keep all visible typography intentionally minimal. A design is allowed to breathe; never add explanatory or filler text merely to balance empty space. Every visible word must earn its place.
+
+Use only this restrained hierarchy when genuinely required by the selected design type and verified story:
+1. Main title or defining moment.
+2. Athlete/player name or names where appropriate.
+3. Verified authentic signature assets where appropriate.
+4. One very short subtitle, date or event only when it is genuinely necessary.
+5. The exact supplied compact Sports Cave collector badge or limited-edition plaque when the design system calls for it.
+
+Never invent, add or paraphrase promotional, ecommerce, scarcity or CTA copy inside the artwork. Forbidden artwork wording includes: LIMITED TO 100 WORLDWIDE; ONLY 100 MADE; ONLY 100 WILL EVER EXIST; JUST 100 AVAILABLE; NO REPRINTS; NEVER REPRINTED; ONCE IT'S GONE, IT'S GONE; ONCE IT SELLS OUT, IT'S GONE; SECURE YOUR EDITION; CLAIM YOUR EDITION; OWN YOUR EDITION; BUY NOW; SHOP NOW; and equivalent sales language.
+
+An established compact plaque may retain only its supplied collector treatment, such as LIMITED EDITION and 001 / 100, plus wording already present in the exact approved plaque asset. Composite that asset unchanged. Never expand it into a sentence, slogan, CTA or sales claim; never recreate or retype it. For an Update Existing Design task, do not introduce promotional copy, but preserve immutable non-target pixels unless removal of existing text is the named correction.
+""".strip()
+
+
+ARTWORK_TEXT_MINIMALISM_REVIEW_CONTRACT = """
+ARTWORK TEXT MINIMALISM REVIEW - MANDATORY
+
+Inspect every visible word. Penalise unnecessary marketing copy, promotional scarcity sentences, CTA language, filler subtitles, repeated information and too many competing text elements. Treat any invented sales wording such as LIMITED TO 100 WORLDWIDE, ONLY 100 MADE, NO REPRINTS, CLAIM YOUR EDITION, SHOP NOW or a paraphrased equivalent as a failure requiring the smallest safe removal correction.
+
+Do not demand more text when the title, necessary names, verified signatures and any exact compact supplied collector plaque already communicate the story. Favour clean negative space, premium restraint and a composition led by authentic photography. The exact compact plaque remains acceptable when unchanged and subordinate; expanding it into promotional wording fails review.
 """.strip()
 
 
@@ -1619,6 +1647,7 @@ def build_research_prompt(style_slug, task_text, details=None):
             _selected_design_type_block(style),
             base_rules,
             _design_type_contract_block(style),
+            ARTWORK_TEXT_MINIMALISM_CONTRACT,
             AUTHENTIC_SOURCE_ASSET_LOCK,
             source_contract,
             _style_task_variables(style, task_text, details, subjects),
@@ -1698,6 +1727,7 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
             _selected_design_type_block(style),
             _design_type_contract_block(style),
             COMMON_GENERATION_RULES,
+            ARTWORK_TEXT_MINIMALISM_CONTRACT,
             GENERATION_ASSET_VALIDATION_CONTRACT,
             AUTHENTIC_SOURCE_ASSET_LOCK,
             PHOTOGRAPHIC_REALISM_CONTRACT,
@@ -1743,6 +1773,7 @@ def build_signature_placement_prompt(style_slug, task_text, details=None, select
             _design_type_contract_block(style),
             style_signature_rules,
             COMMON_SIGNATURE_PLACEMENT_RULES,
+            ARTWORK_TEXT_MINIMALISM_CONTRACT,
             VERIFIED_SIGNATURE_CONTRACT,
             _style_task_variables(style, task_text, details, subjects),
             _required_names_block(subjects),
@@ -1792,6 +1823,8 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
             review_rules,
             STYLE_FIRST_REVIEW_GATE,
             _design_type_contract_block(style),
+            ARTWORK_TEXT_MINIMALISM_CONTRACT,
+            ARTWORK_TEXT_MINIMALISM_REVIEW_CONTRACT,
             AUTHENTIC_SOURCE_ASSET_LOCK,
             PHOTOGRAPHIC_REALISM_CONTRACT,
             VERIFIED_SIGNATURE_CONTRACT,
@@ -1834,6 +1867,7 @@ def build_targeted_correction_prompt(
             f"SPECIFIC CORRECTION: {issue}",
             _design_type_contract_block(style),
             _targeted_correction_contract_block(style),
+            ARTWORK_TEXT_MINIMALISM_CONTRACT,
             AUTHENTIC_SOURCE_ASSET_LOCK,
             PHOTOGRAPHIC_REALISM_CONTRACT,
             VERIFIED_SIGNATURE_CONTRACT,

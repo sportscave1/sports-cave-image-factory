@@ -103,6 +103,21 @@ def stored_request(**overrides):
 
 
 class RepairPromptTests(unittest.TestCase):
+    def test_builder_starts_with_chatgpt_to_codex_handoff(self):
+        prompt = repair_requests.build_repair_prompt(stored_request())
+
+        self.assertTrue(
+            prompt.startswith(
+                "==================================================\n"
+                "CHATGPT — CREATE THE FINAL CODEX PROMPT"
+            )
+        )
+        self.assertIn("Your job is NOT to implement the code change yourself.", prompt)
+        self.assertIn("Create one complete, production-quality prompt for Codex", prompt)
+        self.assertIn("ready for Nathan to copy directly into Codex", prompt)
+        self.assertIn("Return ONLY the final Codex prompt", prompt)
+        self.assertIn("ORIGINAL SPORTS CAVE OS REPAIR REQUEST", prompt)
+
     def test_builder_includes_all_submitted_context_and_protections(self):
         prompt = repair_requests.build_repair_prompt(stored_request())
 
@@ -114,6 +129,15 @@ class RepairPromptTests(unittest.TestCase):
         self.assertIn("Do not push or deploy until explicitly requested.", prompt)
         self.assertIn("DO NOT PUSH.", prompt)
         self.assertIn("DO NOT DEPLOY.", prompt)
+
+    def test_prompt_contract_version_is_bumped_and_legacy_records_use_current_builder(self):
+        self.assertEqual("2", repair_requests.PROMPT_VERSION)
+        legacy = stored_request(generated_prompt_version="1")
+        prompt = repair_requests.build_repair_prompt(legacy)
+
+        self.assertIn("CHATGPT — CREATE THE FINAL CODEX PROMPT", prompt)
+        self.assertIn(BASE_PAYLOAD["problem_description"], prompt)
+        self.assertEqual("1", legacy["generated_prompt_version"])
 
     def test_admin_receives_prompt_but_worker_mirror_never_does(self):
         row = stored_request()
@@ -358,6 +382,47 @@ class RepairApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RepairToolbarTests(unittest.TestCase):
+    def test_repair_toast_uses_stable_request_identity_and_durable_session_seen_state(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+        handler = source[
+            source.index("const dismissRepairToast") :
+            source.index("const refreshOrderStatus")
+        ]
+
+        self.assertIn('const showRepairToast = (message, notificationIdentity)', handler)
+        self.assertIn('`repair:${stableIdentity}`', handler)
+        self.assertIn("{remember: true}", handler)
+        self.assertNotIn("Date.now()", handler)
+        self.assertIn("temporaryToasts.dismiss(\"repairs\")", handler)
+        self.assertIn("appendToastClose(toast, dismissRepairToast)", handler)
+        self.assertIn('aria-label', source[source.index("const appendToastClose") : source.index("const enablePlannerAudio")])
+        self.assertIn("dismissible-v3-stable-repair-identities", source)
+
+    def test_each_repair_action_uses_its_durable_request_id_without_mutating_on_close(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+        self.assertIn("`submitted:${submittedRequestId}`", source)
+        self.assertIn('`prompt-copied:${item?.id || ""}', source)
+        self.assertIn('`completed:${completed.request?.id || id}', source)
+
+        dismiss_handler = source[
+            source.index("const dismissRepairToast") :
+            source.index("const showRepairToast")
+        ]
+        self.assertNotIn("requestJson", dismiss_handler)
+        self.assertNotIn('method: "PATCH"', dismiss_handler)
+        self.assertNotIn("loadRepairItems", dismiss_handler)
+
+    def test_other_toast_channels_and_automatic_timeout_remain_intact(self):
+        source = COMPONENT_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS)",
+            source,
+        )
+        self.assertIn('temporaryToasts.show("orders"', source)
+        self.assertIn('temporaryToasts.show("planner"', source)
+        self.assertIn('temporaryToasts.dismiss("orders")', source)
+        self.assertIn('temporaryToasts.dismiss("planner")', source)
+
     def test_sections_come_from_navigation_and_current_ads_page_is_preselected(self):
         admin = {**ADMIN, "is_active": True, "page_permissions": []}
         sections = top_bar.repair_sections_for_user(admin)

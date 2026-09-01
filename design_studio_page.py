@@ -2612,6 +2612,10 @@ A premium result that satisfies the full contract and needs only minimal changes
 Preserve the existing artwork and recommend the smallest exact crop, proportional scale or positioning edit that makes it premium, emotional, collector-worthy and ready to sell. If the source itself is unsuitable, require replacing only that source photograph through Find Images.
 
 {design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT}
+
+{design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT}
+
+{design_studio_styles.ARTWORK_TEXT_MINIMALISM_REVIEW_CONTRACT}
 """
 
 
@@ -3605,6 +3609,13 @@ def build_design_studio_image_generation_prompt(prompt_text: str, *, design_cont
         include_rivalry_rules=include_rivalry_rules,
         design_context=design_context,
     )
+    if (
+        design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER.casefold()
+        not in prompt.casefold()
+    ):
+        prompt = "\n\n".join(
+            (prompt, design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT)
+        )
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=False,
@@ -3703,7 +3714,11 @@ def build_design_research_prompt(task_text: str, *, design_context=None) -> str:
         _task_or_placeholder(task_text),
     )
     return "\n\n".join(
-        (prompt, design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT)
+        (
+            prompt,
+            design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT,
+        )
     )
 
 
@@ -3755,6 +3770,7 @@ def build_design_generation_prompt(task_text: str, *, design_context=None) -> st
             prompt,
             design_studio_styles.GENERATION_ASSET_VALIDATION_CONTRACT,
             design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
+            design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT,
             asset_context,
         )
         if str(section or "").strip()

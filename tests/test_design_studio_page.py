@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DesignStudioResearchPromptTests(unittest.TestCase):
+    def test_legacy_generation_adapters_share_the_text_minimalism_contract(self):
+        generated = design_studio_page.build_design_generation_prompt(
+            "Create a restrained Michael Jordan collector artwork"
+        )
+        adapted = design_studio_page.build_design_studio_image_generation_prompt(
+            "Create premium Sports Cave artwork from the supplied athlete photograph."
+        )
+        marker = design_studio_page.design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER
+
+        self.assertEqual(generated.count(marker), 1)
+        self.assertEqual(adapted.count(marker), 1)
+        for prompt in (generated, adapted):
+            self.assertIn("Sports Cave artwork is collectible wall art, not advertising", prompt)
+            self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
+            self.assertIn("exact approved plaque asset", prompt)
+        self.assertIn("ARTWORK TEXT MINIMALISM REVIEW - MANDATORY", design_studio_page.HARSH_REVIEW_PROMPT)
+
     def test_research_prompt_uses_pasted_task_without_finding_images(self):
         prompt = design_studio_page.build_design_research_prompt("Michael Jordan final shot collector piece")
 
