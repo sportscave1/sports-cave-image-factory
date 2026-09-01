@@ -21,14 +21,16 @@ from meta_posting_service import (
     MetaPostingService,
     PostingAmbiguousError,
     PostingBusyError,
+    PostingCreative,
     PostingError,
     PostingRequest,
     PostingValidationError,
     ads_manager_url,
     adset_name,
     campaign_name,
-    next_instant_experience_ad_name,
+    next_instant_experience_ad_names,
     load_posting_reference_snapshot,
+    posting_ad_results,
     posting_submission_id,
 )
 
@@ -42,10 +44,14 @@ SPORT_KEY = f"{STATE_PREFIX}sport"
 CATALOG_KEY = f"{STATE_PREFIX}catalog"
 PRODUCT_SET_KEY = f"{STATE_PREFIX}product_set"
 AUDIENCE_KEY = f"{STATE_PREFIX}audience"
-IMAGE_KEY = f"{STATE_PREFIX}image"
-PRIMARY_TEXT_KEY = f"{STATE_PREFIX}primary_text"
-HEADLINE_KEY = f"{STATE_PREFIX}headline"
-DESCRIPTION_KEY = f"{STATE_PREFIX}description"
+IMAGE_KEYS = tuple(f"{STATE_PREFIX}image_{index}" for index in range(1, 4))
+PRIMARY_TEXT_KEYS = tuple(f"{STATE_PREFIX}primary_text_{index}" for index in range(1, 4))
+HEADLINE_KEYS = tuple(f"{STATE_PREFIX}headline_{index}" for index in range(1, 4))
+DESCRIPTION_KEYS = tuple(f"{STATE_PREFIX}description_{index}" for index in range(1, 4))
+IMAGE_KEY = IMAGE_KEYS[0]
+PRIMARY_TEXT_KEY = PRIMARY_TEXT_KEYS[0]
+HEADLINE_KEY = HEADLINE_KEYS[0]
+DESCRIPTION_KEY = DESCRIPTION_KEYS[0]
 RESULT_KEY = f"{STATE_PREFIX}result"
 PROCESSING_KEY = f"{STATE_PREFIX}processing"
 META_OVERVIEW_STATE_KEY = "ads_posting_meta_overview"
@@ -125,13 +131,18 @@ def _product_rows_state():
 
 
 def _posting_form_ready(
-    *, product_title, product_url, image, image_error, country, sport,
-    catalog_id, product_set_id, primary_text, headline, dataset_id, identities_ready,
+    *, product_title, product_url, creatives, country, sport,
+    catalog_id, product_set_id, dataset_id, identities_ready,
 ):
     return bool(
-        product_title and product_url and image and not image_error and country and sport
-        and catalog_id and product_set_id and str(primary_text or "").strip()
-        and str(headline or "").strip() and dataset_id and identities_ready
+        product_title and product_url and country and sport and catalog_id and product_set_id
+        and dataset_id and identities_ready and len(tuple(creatives or ())) == 3
+        and all(
+            creative.get("image") and not creative.get("image_error")
+            and str(creative.get("primary_text") or "").strip()
+            and str(creative.get("headline") or "").strip()
+            for creative in creatives or ()
+        )
     )
 
 
@@ -210,17 +221,30 @@ def _render_object_result(result, *, title):
     for label, name_key, id_key in (
         ("Campaign", "campaign_name", "campaign_id"),
         ("Ad set", "adset_name", "adset_id"),
-        ("Page photo", "", "meta_page_photo_id"),
-        ("IE photo element", "", "meta_canvas_photo_element_id"),
-        ("IE product element", "", "meta_canvas_product_element_id"),
-        ("IE button element", "", "meta_canvas_button_element_id"),
-        ("IE footer element", "", "meta_canvas_footer_element_id"),
-        ("Instant Experience", "", "meta_instant_experience_id"),
-        ("Creative", "", "meta_creative_id"),
-        ("Ad", "ad_name", "meta_ad_id"),
     ):
         object_id = str(result.get(id_key) or "")
         rows.append({"Object": label, "Name": str(result.get(name_key) or ""), "ID": object_id, "State": "Created" if object_id else "Not created"})
+    for ad_result in posting_ad_results(result.get("ad_results")):
+        index = int(ad_result.get("index") or 0)
+        canvas_id = str(ad_result.get("meta_instant_experience_id") or "")
+        ad_id = str(ad_result.get("meta_ad_id") or "")
+        state = str(ad_result.get("status") or "PENDING").replace("_", " ").title()
+        rows.extend(
+            (
+                {
+                    "Object": f"Instant Experience {index}",
+                    "Name": str(ad_result.get("instant_experience_name") or ""),
+                    "ID": canvas_id,
+                    "State": "Created" if canvas_id else state,
+                },
+                {
+                    "Object": f"Ad {index}",
+                    "Name": str(ad_result.get("ad_name") or ""),
+                    "ID": ad_id,
+                    "State": "Created" if ad_id else state,
+                },
+            )
+        )
     st.dataframe(rows, hide_index=True, use_container_width=True)
     if result.get("safe_error"):
         st.caption(str(result.get("safe_error")))
@@ -240,10 +264,11 @@ def _render_success(result):
         "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
         "Generate backgrounds: **Off**"
     )
+    first_ad = posting_ad_results(result.get("ad_results"))[0]
     link = ads_manager_url(
         account_id=MetaPostingClient().ad_account_id,
         campaign_id=result.get("campaign_id"), adset_id=result.get("adset_id"),
-        ad_id=result.get("meta_ad_id"),
+        ad_id=first_ad.get("meta_ad_id") or result.get("meta_ad_id"),
     )
     actions = st.columns([1, 1, 4])
     actions[0].link_button("Open in Ads Manager", link, use_container_width=True)
@@ -267,7 +292,11 @@ def _render_recent_posts():
                 {
                     "Date": str(row.get("completed_at") or row.get("created_at") or ""),
                     "Product": str(row.get("product_title") or ""),
-                    "Ad": str(row.get("ad_name") or ""),
+                    "Ads": ", ".join(
+                        str(item.get("ad_name") or "")
+                        for item in posting_ad_results(row.get("ad_results"))
+                        if str(item.get("ad_name") or "")
+                    ) or str(row.get("ad_name") or ""),
                     "Status": str(row.get("status") or "").replace("_", " ").title(),
                     "Campaign ID": str(row.get("campaign_id") or ""),
                     "Ad set ID": str(row.get("adset_id") or ""),
@@ -281,7 +310,7 @@ def _render_recent_posts():
 
 def render_page():
     st.title("Post Ad")
-    st.caption("Build a complete new Meta Sales campaign, ad set, Instant Experience, and collection ad — all paused.")
+    st.caption("Build one Meta Sales campaign, one ad set and three Instant Experience ads — all paused.")
     st.session_state.setdefault(SUBMISSION_ID_KEY, posting_submission_id())
     st.session_state.setdefault(PROCESSING_KEY, False)
 
@@ -324,7 +353,7 @@ def render_page():
         _connection_status(status_col, str(overview.get("summary") or "Meta unavailable"), tone="warning")
         _render_connection_details(overview)
     elif references_ready:
-        _connection_status(status_col, "Meta connected · references ready", tone="success")
+        _connection_status(status_col, "Meta connected · ready", tone="success")
     else:
         _connection_status(status_col, "Meta connected · setup needs attention", tone="warning")
     warnings = tuple(str(value) for value in references.get("warnings") or () if str(value).strip())
@@ -404,30 +433,6 @@ def render_page():
     audience = audience_by_key[audience_key]
     st.text_input("Ad type", value=AD_TYPE, disabled=True)
 
-    st.subheader("Creative")
-    uploaded = st.file_uploader(
-        "Finished artwork", type=("jpg", "jpeg", "png", "webp"),
-        accept_multiple_files=False, key=IMAGE_KEY,
-    )
-    image = None
-    image_error = ""
-    if uploaded is not None:
-        try:
-            image = prepare_meta_posting_image(uploaded.getvalue(), original_name=uploaded.name)
-            st.caption(f":green[✓ **Artwork ready** — {image['source_width']} × {image['source_height']}] · Generate backgrounds will be off")
-        except AdsImageValidationError as error:
-            image_error = str(error)
-            st.error(image_error)
-    primary_text = st.text_area("Primary text", key=PRIMARY_TEXT_KEY, height=120)
-    copy_cols = st.columns(2)
-    headline = copy_cols[0].text_input("Headline", key=HEADLINE_KEY)
-    description = copy_cols[1].text_input("Description (optional)", key=DESCRIPTION_KEY)
-
-    existing_names = tuple(references.get("existing_ad_names") or ())
-    generated_campaign_name = campaign_name(product_title, country, sport) if product_title else ""
-    generated_adset_name = adset_name(country, sport, audience["name"])
-    generated_ad_name = next_instant_experience_ad_name(product_title, existing_names) if product_title else ""
-
     dataset_id = str(dataset_resolution.get("id") or "") if dataset_resolution.get("resolved") else ""
     dataset_label = str(dataset_resolution.get("name") or EXPECTED_PIXEL_NAME) if dataset_id else "Unresolved"
     st.text_input("Dataset", value=dataset_label, disabled=True)
@@ -437,26 +442,69 @@ def render_page():
             st.error(dataset_error)
         else:
             st.info(dataset_error)
+
+    st.subheader("Creatives")
+    creative_inputs = []
+    for index in range(1, 4):
+        with st.container(border=True):
+            st.markdown(f"**Ad {index}**")
+            uploaded = st.file_uploader(
+                f"Image {index}", type=("jpg", "jpeg", "png", "webp"),
+                accept_multiple_files=False, key=IMAGE_KEYS[index - 1],
+            )
+            image = None
+            image_error = ""
+            if uploaded is not None:
+                try:
+                    image = prepare_meta_posting_image(
+                        uploaded.getvalue(), original_name=uploaded.name
+                    )
+                    st.caption(
+                        f":green[✓ **Image {index} ready** — "
+                        f"{image['source_width']} × {image['source_height']}] · "
+                        "Instant Experience cover · Generate backgrounds off"
+                    )
+                except AdsImageValidationError as error:
+                    image_error = str(error)
+                    st.error(image_error)
+            primary_text = st.text_area(
+                f"Primary Text {index}", key=PRIMARY_TEXT_KEYS[index - 1], height=100
+            )
+            copy_cols = st.columns(2)
+            headline = copy_cols[0].text_input(
+                f"Headline {index}", key=HEADLINE_KEYS[index - 1]
+            )
+            description = copy_cols[1].text_input(
+                f"Description {index} (optional)", key=DESCRIPTION_KEYS[index - 1]
+            )
+            creative_inputs.append(
+                {
+                    "upload": uploaded,
+                    "image": image,
+                    "image_error": image_error,
+                    "primary_text": primary_text,
+                    "headline": headline,
+                    "description": description,
+                }
+            )
+
+    existing_names = tuple(references.get("existing_ad_names") or ())
+    generated_campaign_name = campaign_name(product_title, country, sport) if product_title else ""
+    generated_adset_name = adset_name(country, sport, audience["name"])
+    generated_ad_names = (
+        next_instant_experience_ad_names(product_title, existing_names, count=3)
+        if product_title else ("", "", "")
+    )
     product_set_label = str((product_set_by_id.get(product_set_id) or {}).get("name") or "Unresolved")
     account_currency = str((references.get("account") or {}).get("currency") or "account currency")
 
     st.subheader("Review")
     with st.container(border=True):
-        preview, summary = st.columns([1, 2])
-        with preview:
-            if image:
-                st.image(image["data"], caption="Exact uploaded artwork", use_container_width=True)
-            else:
-                st.caption("Upload the finished artwork to preview it.")
-        with summary:
-            st.markdown(str(primary_text or "Primary text"))
-            st.markdown(f"**{headline or 'Headline'}**")
-            st.caption(product_url or "Product URL unavailable")
-            st.caption(
-                f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
-                f"Ad set: **{html.escape(generated_adset_name)}**  \n"
-                f"Ad: **{html.escape(generated_ad_name or 'Waiting for product')}**"
-            )
+        st.markdown(
+            f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
+            f"Ad set: **{html.escape(generated_adset_name)}**  \n"
+            "Structure: **1 Campaign → 1 Ad Set → 3 Ads**"
+        )
         st.markdown(
             f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
             f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
@@ -471,40 +519,70 @@ def render_page():
             f"Instant Experience: Storefront · Catalog headline token · {PRODUCT_DESCRIPTION} · "
             f"{INSTANT_EXPERIENCE_BUTTON_TEXT} → {product_url or 'product URL unresolved'} · final status PAUSED"
         )
+    for index, (creative, ad_name) in enumerate(
+        zip(creative_inputs, generated_ad_names), start=1
+    ):
+        with st.container(border=True):
+            preview, summary = st.columns([1, 2])
+            with preview:
+                if creative["image"]:
+                    st.image(
+                        creative["image"]["data"],
+                        caption=f"Image {index} / Storefront cover {index}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption(f"Upload Image {index} to preview it.")
+            with summary:
+                st.markdown(f"**Ad {index} — {html.escape(ad_name or 'Waiting for product')}**")
+                st.markdown(str(creative["primary_text"] or f"Primary Text {index}"))
+                st.markdown(f"**{creative['headline'] or f'Headline {index}'}**")
+                if str(creative["description"] or "").strip():
+                    st.caption(f"Description: {creative['description']}")
+                st.caption(f"Instant Experience: {ad_name or f'Ad {index}'} | Storefront")
 
     identities_ready = bool(references.get("page") and references.get("instagram"))
     ready = _posting_form_ready(
         product_title=product_title,
         product_url=product_url,
-        image=image,
-        image_error=image_error,
+        creatives=creative_inputs,
         country=country,
         sport=sport,
         catalog_id=catalog_id,
         product_set_id=product_set_id,
-        primary_text=primary_text,
-        headline=headline,
         dataset_id=dataset_id,
         identities_ready=identities_ready,
     )
 
-    st.caption("Creates the campaign, ad set and ad paused in Meta for review.")
+    st.caption(
+        "Creates one paused campaign, one paused ad set and three paused "
+        "Instant Experience ads in Meta for review."
+    )
 
     if st.button(
-        "Create Paused Meta Campaign", type="primary", use_container_width=True,
+        "Create 3 Paused Meta Ads", type="primary", use_container_width=True,
         disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
     ):
         st.session_state[PROCESSING_KEY] = True
         request = PostingRequest(
             submission_id=st.session_state[SUBMISSION_ID_KEY], product_id=product_id,
             product_title=product_title, product_handle=product_handle,
-            destination_url=product_url, image_bytes=uploaded.getvalue(), image_name=uploaded.name,
+            destination_url=product_url,
             country=country, sport=sport, catalog_id=catalog_id, product_set_id=product_set_id,
             audience_type=audience["type"], audience_id=audience["id"],
-            primary_text=primary_text, headline=headline, description=description,
+            creatives=tuple(
+                PostingCreative(
+                    image_bytes=creative["upload"].getvalue(),
+                    image_name=creative["upload"].name,
+                    primary_text=creative["primary_text"],
+                    headline=creative["headline"],
+                    description=creative["description"],
+                )
+                for creative in creative_inputs
+            ),
         )
         try:
-            with st.spinner("Creating the paused Meta hierarchy…"):
+            with st.spinner("Creating one paused campaign, one ad set and three ads…"):
                 posted = MetaPostingService().create_paused_campaign(request)
         except (PostingValidationError, PostingBusyError, PostingAmbiguousError, PostingError) as error:
             st.error(str(error))

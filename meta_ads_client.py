@@ -822,6 +822,8 @@ class MetaPostingClient:
         account = dict(self.account() or {}) if account is None else dict(account or {})
         business_id = str((account.get("business") or {}).get("id") or "")
         rows = []
+        errors = []
+        successful_edges = 0
 
         def load_edge(parent_id, edge):
             try:
@@ -841,13 +843,19 @@ class MetaPostingClient:
             for edge in ("owned_product_catalogs", "client_product_catalogs"):
                 try:
                     rows.extend(load_edge(business_id, edge))
-                except MetaAdsApiError:
+                    successful_edges += 1
+                except MetaAdsApiError as error:
+                    errors.append(error)
                     LOGGER.info("Optional Meta catalog edge unavailable: %s", edge)
         if self.page_id:
             try:
                 rows.extend(load_edge(self.page_id, "product_catalogs"))
-            except MetaAdsApiError:
+                successful_edges += 1
+            except MetaAdsApiError as error:
+                errors.append(error)
                 LOGGER.info("Optional Page catalog edge unavailable")
+        if not rows and errors and not successful_edges:
+            raise errors[0]
         return tuple({str(row.get("id")): dict(row) for row in rows if row.get("id")}.values())
 
     def product_sets(self, catalog_id):
@@ -898,7 +906,10 @@ class MetaPostingClient:
             _paged_get(
                 f"{self.ad_account_id}/campaigns",
                 params={
-                    "fields": "id,name,status,effective_status,objective,promoted_object",
+                    "fields": (
+                        "id,name,status,effective_status,objective,promoted_object,"
+                        "created_time,updated_time"
+                    ),
                     "limit": 100,
                 },
                 config=self.config,
@@ -931,9 +942,22 @@ class MetaPostingClient:
             warnings.append("Meta account details are temporarily unavailable.")
         try:
             catalogs = self.catalogs(account=account)
-        except MetaAdsApiError:
+            catalog_error = {}
+        except MetaAdsApiError as error:
             catalogs = ()
-            warnings.append("Catalog discovery is unavailable to this token.")
+            catalog_error = {
+                "endpoint": str(error.request_path or "catalog discovery"),
+                "http_status": error.status_code,
+                "error_code": error.error_code,
+                "error_type": str(error.error_type or ""),
+                "message": sanitize_meta_error(error),
+            }
+            warnings.append(
+                "Catalog discovery failed at "
+                f"{catalog_error['endpoint']}"
+                + (f" (Meta code {catalog_error['error_code']})" if catalog_error["error_code"] else "")
+                + "."
+            )
         try:
             pixels = self.pixels()
         except MetaAdsApiError:
@@ -964,6 +988,7 @@ class MetaPostingClient:
             "page": page,
             "instagram": instagram,
             "catalogs": tuple(dict(row) for row in catalogs),
+            "catalog_error": catalog_error,
             "pixels": tuple(dict(row) for row in pixels),
             "saved_audiences": tuple(dict(row) for row in saved),
             "custom_audiences": tuple(dict(row) for row in custom),

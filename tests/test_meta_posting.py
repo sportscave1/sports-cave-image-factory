@@ -15,6 +15,7 @@ from meta_posting_service import (
     SUCCESS_MESSAGE,
     MetaPostingService,
     PostingError,
+    PostingCreative,
     PostingRequest,
     PostingValidationError,
     build_adset_payload,
@@ -29,6 +30,8 @@ from meta_posting_service import (
     dataset_ids_from_purchase_adsets,
     load_posting_reference_snapshot,
     next_instant_experience_ad_name,
+    next_instant_experience_ad_names,
+    posting_ad_results,
     product_short_name,
     resolve_catalog_reference,
     resolve_dataset_reference,
@@ -38,9 +41,9 @@ from meta_posting_service import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def image_bytes():
+def image_bytes(colour=(20, 30, 40)):
     output = io.BytesIO()
-    Image.new("RGB", (1080, 1350), (20, 30, 40)).save(output, format="JPEG")
+    Image.new("RGB", (1080, 1350), colour).save(output, format="JPEG")
     return output.getvalue()
 
 
@@ -51,17 +54,22 @@ def request_for(**overrides):
         "product_title": "Max Verstappen Victory Sports Wall Art",
         "product_handle": "max-verstappen-victory",
         "destination_url": "https://sportscaveshop.com/products/max-verstappen-victory",
-        "image_bytes": image_bytes(),
-        "image_name": "artwork.jpg",
         "country": "AUS",
         "sport": "Motorsport",
         "catalog_id": "catalog-1",
         "product_set_id": "set-1",
         "audience_type": "broad",
         "audience_id": "",
-        "primary_text": "Own the moment.",
-        "headline": "Claim the limited edition",
-        "description": "Limited Edition",
+        "creatives": tuple(
+            PostingCreative(
+                image_bytes=image_bytes((20 * index, 30, 40)),
+                image_name=f"artwork-{index}.jpg",
+                primary_text=f"Primary {index}",
+                headline=f"Headline {index}",
+                description=f"Description {index}",
+            )
+            for index in range(1, 4)
+        ),
     }
     values.update(overrides)
     return PostingRequest(**values)
@@ -106,7 +114,12 @@ class FakePostingClient:
         self.campaign_payload = None
         self.adset_payload = None
         self.creative_payload = None
+        self.creative_payloads = []
         self.last_ad_name = ""
+        self.ad_creations = []
+        self.canvas_names = []
+        self.canvas_element_payloads = []
+        self.uploaded_images = []
 
     def permissions(self):
         return ("ads_management",)
@@ -149,26 +162,24 @@ class FakePostingClient:
 
     def upload_image(self, data, *, filename, content_type):
         self.calls.append("ad_image")
-        return "image-hash-1"
+        self.uploaded_images.append((data, filename, content_type))
+        return f"image-hash-{len(self.uploaded_images)}"
 
     def upload_page_photo(self, data, *, filename, content_type):
         self.calls.append("page_photo")
-        return "photo-1"
+        return f"photo-{self.calls.count('page_photo')}"
 
     def create_canvas_element(self, element_type, specification):
         self.calls.append(element_type)
         if self.fail_at == element_type:
             raise meta_ads_client.MetaAdsApiError("element failed")
-        return {
-            "canvas_photo": "photo-element-1",
-            "canvas_product_set": "product-element-1",
-            "canvas_button": "button-element-1",
-            "canvas_footer": "footer-element-1",
-        }[element_type]
+        self.canvas_element_payloads.append((element_type, dict(specification)))
+        return f"{element_type}-element-{self.calls.count(element_type)}"
 
     def create_canvas(self, *, name, body_element_ids):
         self.calls.append("canvas")
-        return "canvas-1"
+        self.canvas_names.append(name)
+        return f"canvas-{len(self.canvas_names)}"
 
     def find_canvases_by_name(self, name):
         return ()
@@ -176,15 +187,19 @@ class FakePostingClient:
     def create_collection_creative(self, payload):
         self.calls.append("creative")
         self.creative_payload = payload
-        return "creative-1"
+        self.creative_payloads.append(payload)
+        return f"creative-{len(self.creative_payloads)}"
 
     def find_creative_by_name(self, name):
         return None
 
     def create_paused_ad(self, *, ad_name, adset_id, creative_id):
         self.calls.append("ad")
+        if self.fail_at == f"ad_{len(self.ad_creations) + 1}":
+            raise meta_ads_client.MetaAdsApiError("ad failed")
         self.last_ad_name = ad_name
-        return "ad-1"
+        self.ad_creations.append((ad_name, adset_id, creative_id))
+        return f"ad-{len(self.ad_creations)}"
 
     def find_ad_by_creative(self, adset_id, creative_id):
         return None
@@ -212,6 +227,14 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn('importlib.import_module("ads_posting_page")', source)
         self.assertIn('importlib.import_module("ads_meta_review_page")', source)
         self.assertIn("get_ads_meta_review_page().render_page()", source)
+
+    def test_posting_v3_ui_keeps_shared_setup_and_three_compact_creatives(self):
+        source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
+        self.assertIn('"Meta connected · ready"', source)
+        self.assertIn('"Create 3 Paused Meta Ads"', source)
+        self.assertIn('st.subheader("Creatives")', source)
+        self.assertIn("for index in range(1, 4)", source)
+        self.assertIn("one paused campaign, one paused ad set and three paused", source)
 
 
 class PostingPayloadTests(unittest.TestCase):
@@ -443,7 +466,14 @@ class PostingReferenceRepairTests(unittest.TestCase):
             (ads_posting_page.PRODUCT_KEY, "product-2"),
             (ads_posting_page.COUNTRY_KEY, "USA"),
             (ads_posting_page.SPORT_KEY, "NFL"),
-            (ads_posting_page.PRIMARY_TEXT_KEY, "Updated copy"),
+            (ads_posting_page.IMAGE_KEYS[0], "image-1"),
+            (ads_posting_page.IMAGE_KEYS[1], "image-2"),
+            (ads_posting_page.IMAGE_KEYS[2], "image-3"),
+            (ads_posting_page.PRIMARY_TEXT_KEYS[0], "Updated copy 1"),
+            (ads_posting_page.PRIMARY_TEXT_KEYS[1], "Updated copy 2"),
+            (ads_posting_page.PRIMARY_TEXT_KEYS[2], "Updated copy 3"),
+            (ads_posting_page.HEADLINE_KEYS[0], "Headline 1"),
+            (ads_posting_page.DESCRIPTION_KEYS[2], "Description 3"),
         ):
             state[key] = value
             ads_posting_page._session_cached_load(state, "references", "error", loader)
@@ -470,6 +500,17 @@ class PostingReferenceRepairTests(unittest.TestCase):
             self.references(catalogs=()), environ={"META_CATALOG_ID": "catalog-configured"}
         )
         self.assertEqual((configured["id"], configured["source"]), ("catalog-configured", "configured_id"))
+        configured_over_selected = resolve_catalog_reference(
+            self.references(
+                catalogs=(
+                    {"id": "catalog-configured", "name": "Shopify Product Catalog"},
+                    {"id": "catalog-selected", "name": "Shopify Product Catalog"},
+                )
+            ),
+            expected_id="catalog-selected",
+            environ={"META_CATALOG_ID": "catalog-configured"},
+        )
+        self.assertEqual(configured_over_selected["id"], "catalog-configured")
         sole = resolve_catalog_reference(
             self.references(catalogs=({"id": "catalog-sole", "name": "Sports Cave Store"},)),
             environ={},
@@ -492,6 +533,89 @@ class PostingReferenceRepairTests(unittest.TestCase):
             environ={},
         )
         self.assertFalse(conflict["resolved"])
+
+    def test_direct_unique_catalog_wins_over_historical_campaign_ids(self):
+        resolved = resolve_catalog_reference(
+            self.references(
+                catalogs=({"id": "catalog-current", "name": "Shopify Product Catalog"},),
+                catalog_fallback_ids=("catalog-old-1", "catalog-old-2"),
+                catalog_campaign_evidence=(
+                    {
+                        "objective": "OUTCOME_SALES",
+                        "promoted_object": {"product_catalog_id": "catalog-old-1"},
+                    },
+                ),
+            ),
+            environ={},
+        )
+        self.assertEqual((resolved["id"], resolved["source"]), ("catalog-current", "exact_name"))
+
+    def test_duplicate_named_catalogs_use_unique_current_campaign_evidence(self):
+        references = self.references(
+            catalogs=(
+                {"id": "catalog-old", "name": "Shopify Product Catalog"},
+                {"id": "catalog-current", "name": "Shopify Product Catalog"},
+            ),
+            catalog_campaign_evidence=(
+                {
+                    "objective": "OUTCOME_SALES", "status": "PAUSED",
+                    "created_time": "2025-02-07T00:00:00+0000",
+                    "promoted_object": {"product_catalog_id": "catalog-old"},
+                },
+                {
+                    "objective": "OUTCOME_SALES", "status": "ACTIVE",
+                    "created_time": "2026-09-01T00:00:00+0000",
+                    "promoted_object": {"product_catalog_id": "catalog-current"},
+                },
+            ),
+        )
+        resolved = resolve_catalog_reference(references, environ={})
+        self.assertEqual(resolved["id"], "catalog-current")
+        self.assertEqual(resolved["source"], "exact_name_current_sales_campaign")
+
+    def test_multiple_genuinely_current_catalogs_block_instead_of_guessing(self):
+        references = self.references(
+            catalogs=(
+                {"id": "catalog-a", "name": "Shopify Product Catalog"},
+                {"id": "catalog-b", "name": "Shopify Product Catalog"},
+            ),
+            catalog_campaign_evidence=tuple(
+                {
+                    "objective": "OUTCOME_SALES", "status": "ACTIVE",
+                    "promoted_object": {"product_catalog_id": catalog_id},
+                }
+                for catalog_id in ("catalog-a", "catalog-b")
+            ),
+        )
+        resolved = resolve_catalog_reference(references, environ={})
+        self.assertFalse(resolved["resolved"])
+        self.assertIn("currently used", resolved["error"])
+
+    def test_catalog_permission_error_is_reported_separately_from_ambiguity(self):
+        client = meta_ads_client.MetaPostingClient(
+            {
+                "configured": True, "ad_account_id": "act_123", "access_token": "secret",
+                "api_version": "v26.0", "page_id": "page-1", "instagram_user_id": "ig-1",
+            }
+        )
+        client.account = mock.Mock(return_value={"business": {"id": "business-1"}})
+        client.pixels = mock.Mock(return_value=())
+        client.saved_audiences = mock.Mock(return_value=())
+        client.custom_audiences = mock.Mock(return_value=())
+        client.page = mock.Mock(return_value={"id": "page-1"})
+        client.instagram_account = mock.Mock(return_value={"id": "ig-1"})
+        error = meta_ads_client.MetaAdsApiError(
+            "Permission denied", error_code=200, error_type="OAuthException",
+            request_path="business-1/owned_product_catalogs",
+        )
+        with mock.patch("meta_ads_client._paged_get", side_effect=error):
+            references = client.reference_data()
+        self.assertEqual(references["catalog_error"]["error_code"], 200)
+        self.assertEqual(
+            references["catalog_error"]["endpoint"],
+            "business-1/owned_product_catalogs",
+        )
+        self.assertNotIn("multiple", references["catalog_error"]["message"].casefold())
 
     def test_dataset_resolution_uses_exact_intentional_name_or_configured_id(self):
         self.assertEqual(EXPECTED_PIXEL_NAME, "Shprts Cave Pixel 2025")
@@ -557,6 +681,46 @@ class PostingReferenceRepairTests(unittest.TestCase):
             ["reference_data", "product_sets:catalog-1", "existing_ad_names"],
         )
         self.assertEqual(first["product_sets"][0]["id"], "set-1")
+
+    def test_snapshot_loads_product_sets_from_current_duplicate_named_catalog(self):
+        class DuplicateCatalogClient:
+            def __init__(inner_self):
+                inner_self.product_set_catalog_ids = []
+
+            def reference_data(inner_self):
+                return PostingReferenceRepairTests.references(
+                    catalogs=(
+                        {"id": "catalog-old", "name": "Shopify Product Catalog"},
+                        {"id": "catalog-current", "name": "Shopify Product Catalog"},
+                    )
+                )
+
+            def reference_campaigns(inner_self):
+                return (
+                    {
+                        "objective": "OUTCOME_SALES", "status": "PAUSED",
+                        "created_time": "2025-02-07T00:00:00+0000",
+                        "promoted_object": {"product_catalog_id": "catalog-old"},
+                    },
+                    {
+                        "objective": "OUTCOME_SALES", "status": "ACTIVE",
+                        "created_time": "2026-09-01T00:00:00+0000",
+                        "promoted_object": {"product_catalog_id": "catalog-current"},
+                    },
+                )
+
+            def product_sets(inner_self, catalog_id):
+                inner_self.product_set_catalog_ids.append(catalog_id)
+                return ({"id": "set-current", "product_catalog": {"id": catalog_id}},)
+
+            def existing_ad_names(inner_self):
+                return ()
+
+        client = DuplicateCatalogClient()
+        snapshot = load_posting_reference_snapshot(client, environ={})
+        self.assertEqual(snapshot["catalog_resolution"]["id"], "catalog-current")
+        self.assertEqual(client.product_set_catalog_ids, ["catalog-current"])
+        self.assertEqual(snapshot["product_sets"][0]["id"], "set-current")
 
     def test_snapshot_uses_mocked_sales_asset_fallbacks_when_direct_lists_are_empty(self):
         class FallbackClient:
@@ -640,14 +804,17 @@ class PostingReferenceRepairTests(unittest.TestCase):
         complete = {
             "product_title": "Product",
             "product_url": "https://www.sportscaveshop.com/products/product",
-            "image": {"data": b"image"},
-            "image_error": "",
+            "creatives": tuple(
+                {
+                    "image": {"data": b"image"}, "image_error": "",
+                    "primary_text": f"Primary {index}", "headline": f"Headline {index}",
+                }
+                for index in range(1, 4)
+            ),
             "country": "AUS",
             "sport": "NFL",
             "catalog_id": "catalog-1",
             "product_set_id": "set-1",
-            "primary_text": "Primary",
-            "headline": "Headline",
             "dataset_id": "dataset-1",
             "identities_ready": True,
         }
@@ -667,20 +834,81 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(result["meta_status"], "PAUSED")
         self.assertEqual(result["campaign_id"], "campaign-1")
         self.assertEqual(result["adset_id"], "adset-1")
-        self.assertEqual(result["meta_instant_experience_id"], "canvas-1")
-        self.assertEqual(result["meta_ad_id"], "ad-1")
+        self.assertEqual(
+            [row["meta_instant_experience_id"] for row in result["ad_results"]],
+            ["canvas-1", "canvas-2", "canvas-3"],
+        )
+        self.assertEqual(
+            [row["meta_ad_id"] for row in result["ad_results"]],
+            ["ad-1", "ad-2", "ad-3"],
+        )
         self.assertEqual(
             [call for call in client.calls if not call.startswith("read_")],
-            [
+            ["campaign", "adset"] + [
                 "campaign", "adset", "ad_image", "page_photo", "canvas_photo",
                 "canvas_product_set", "canvas_button", "canvas_footer", "canvas",
                 "creative", "ad",
-            ],
+            ][2:] * 3,
         )
         self.assertEqual(client.campaign_payload["status"], "PAUSED")
         self.assertEqual(client.adset_payload["status"], "PAUSED")
         self.assertEqual(client.adset_payload["promoted_object"]["pixel_id"], "pixel-1")
-        self.assertEqual(result["ad_name"], "Max Verstappen Victory IA 2")
+        self.assertEqual(client.calls.count("campaign"), 1)
+        self.assertEqual(client.calls.count("adset"), 1)
+        self.assertEqual(client.calls.count("ad"), 3)
+        self.assertEqual(client.calls.count("canvas"), 3)
+        self.assertEqual(len(client.uploaded_images), 3)
+        self.assertEqual(
+            [payload["object_story_spec"]["link_data"]["message"] for payload in client.creative_payloads],
+            ["Primary 1", "Primary 2", "Primary 3"],
+        )
+        self.assertEqual(
+            [payload["object_story_spec"]["link_data"]["name"] for payload in client.creative_payloads],
+            ["Headline 1", "Headline 2", "Headline 3"],
+        )
+        self.assertEqual(
+            [payload["object_story_spec"]["link_data"]["description"] for payload in client.creative_payloads],
+            ["Description 1", "Description 2", "Description 3"],
+        )
+        self.assertEqual(
+            [payload["object_story_spec"]["link_data"]["image_hash"] for payload in client.creative_payloads],
+            ["image-hash-1", "image-hash-2", "image-hash-3"],
+        )
+        photo_specs = [
+            specification
+            for element_type, specification in client.canvas_element_payloads
+            if element_type == "canvas_photo"
+        ]
+        self.assertEqual(
+            [specification["photo_id"] for specification in photo_specs],
+            ["photo-1", "photo-2", "photo-3"],
+        )
+        product_specs = [
+            specification
+            for element_type, specification in client.canvas_element_payloads
+            if element_type == "canvas_product_set"
+        ]
+        self.assertTrue(
+            all(specification["item_description"] == "Limited Edition" for specification in product_specs)
+        )
+        for payload in client.creative_payloads:
+            link_data = payload["object_story_spec"]["link_data"]
+            self.assertEqual(link_data["call_to_action"]["type"], "SHOP_NOW")
+            self.assertEqual(
+                payload["degrees_of_freedom_spec"]["creative_features_spec"]
+                ["image_background_gen"]["enroll_status"],
+                "OPT_OUT",
+            )
+            self.assertIn("utm_source=facebook", payload["url_tags"])
+        self.assertTrue(all(adset_id == "adset-1" for _name, adset_id, _creative in client.ad_creations))
+        self.assertEqual(
+            [row["ad_name"] for row in result["ad_results"]],
+            [
+                "Max Verstappen Victory IA 2",
+                "Max Verstappen Victory IA 3",
+                "Max Verstappen Victory IA 4",
+            ],
+        )
 
     def test_partial_failure_preserves_created_ids(self):
         client = FakePostingClient(fail_at="canvas_product_set")
@@ -694,6 +922,40 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(result["meta_page_photo_id"], "photo-1")
         self.assertNotIn("ad", client.calls)
 
+    def test_ad_three_failure_retries_without_recreating_ads_one_and_two(self):
+        client = FakePostingClient(fail_at="ad_3")
+        store = FakePostingStore()
+        service = MetaPostingService(client=client, store=store)
+        with self.assertRaises(PostingError) as caught:
+            service.create_paused_campaign(request_for())
+        partial = posting_ad_results(caught.exception.result["ad_results"])
+        self.assertEqual([row["meta_ad_id"] for row in partial[:2]], ["ad-1", "ad-2"])
+        self.assertEqual(partial[2]["status"], "FAILED")
+        self.assertEqual(client.calls.count("campaign"), 1)
+        self.assertEqual(client.calls.count("adset"), 1)
+
+        calls_before_retry = list(client.calls)
+        client.fail_at = ""
+        completed = service.create_paused_campaign(request_for())
+        self.assertEqual(completed["status"], "COMPLETE")
+        self.assertEqual(client.calls.count("campaign"), 1)
+        self.assertEqual(client.calls.count("adset"), 1)
+        self.assertEqual(client.calls[len(calls_before_retry):].count("ad"), 1)
+        self.assertEqual(client.calls[len(calls_before_retry):].count("canvas"), 0)
+        self.assertEqual(
+            [row["meta_ad_id"] for row in completed["ad_results"]],
+            ["ad-1", "ad-2", "ad-3"],
+        )
+
+    def test_three_name_sequence_advances_as_one_batch(self):
+        self.assertEqual(
+            next_instant_experience_ad_names(
+                "Legends Sports Wall Art",
+                ("Legends IA 1", "Legends IA 2", "Legends IA 3"),
+            ),
+            ("Legends IA 4", "Legends IA 5", "Legends IA 6"),
+        )
+
     def test_complete_fingerprint_result_is_returned_without_writes(self):
         existing = {"status": "COMPLETE", "meta_ad_id": "existing-ad"}
         client = FakePostingClient()
@@ -706,19 +968,28 @@ class PostingServiceTests(unittest.TestCase):
         existing = {
             "status": "FAILED", "campaign_id": "campaign-1", "campaign_name": "Original campaign",
             "adset_id": "adset-1", "adset_name": "Original ad set",
-            "ad_name": "Max Verstappen Victory IA 1", "meta_image_hash": "hash",
-            "meta_page_photo_id": "photo-1", "meta_canvas_photo_element_id": "photo-element-1",
-            "meta_canvas_product_element_id": "product-element-1",
-            "meta_canvas_button_element_id": "button-element-1",
-            "meta_canvas_footer_element_id": "footer-element-1",
-            "meta_instant_experience_id": "canvas-1", "meta_creative_id": "creative-1",
+            "ad_name": "Max Verstappen Victory IA 1",
+            "ad_results": posting_ad_results(
+                (),
+                ad_names=(
+                    "Max Verstappen Victory IA 1",
+                    "Max Verstappen Victory IA 2",
+                    "Max Verstappen Victory IA 3",
+                ),
+            ),
         }
         client = FakePostingClient()
         result = MetaPostingService(client=client, store=FakePostingStore(existing=existing)).create_paused_campaign(
             request_for()
         )
-        self.assertEqual(client.last_ad_name, "Max Verstappen Victory IA 1")
-        self.assertEqual(result["ad_name"], "Max Verstappen Victory IA 1")
+        self.assertEqual(
+            [row["ad_name"] for row in result["ad_results"]],
+            [
+                "Max Verstappen Victory IA 1",
+                "Max Verstappen Victory IA 2",
+                "Max Verstappen Victory IA 3",
+            ],
+        )
 
     def test_missing_canonical_url_blocks_before_meta(self):
         client = FakePostingClient()
@@ -729,7 +1000,7 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
     def test_success_copy_is_exact(self):
-        self.assertEqual(SUCCESS_MESSAGE, "Meta ad created successfully — PAUSED")
+        self.assertEqual(SUCCESS_MESSAGE, "3 Meta ads created successfully — PAUSED")
 
     def test_duplicate_pixel_name_blocks_before_writes(self):
         client = FakePostingClient()
@@ -795,6 +1066,17 @@ class ReviewAndPersistenceTests(unittest.TestCase):
             "meta_instant_experience_id", "CAMPAIGN_CREATED", "ADSET_CREATED",
         ):
             self.assertIn(field, source)
+
+    def test_v3_migration_adds_only_the_per_ad_json_ledger(self):
+        source = (ROOT / "migrations" / "20260901_meta_posting_v3.sql").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ADD COLUMN IF NOT EXISTS ad_results JSONB", source)
+        self.assertNotIn("DROP TABLE", source.upper())
+        self.assertIn(
+            'BASE_DIR / "migrations" / "20260901_meta_posting_v3.sql"',
+            (ROOT / "supabase_backend.py").read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":
