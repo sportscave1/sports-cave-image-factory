@@ -24,7 +24,7 @@ class TemporaryNotificationLifecycleTests(unittest.TestCase):
         self.assertIn("expiresAt: Date.now() + TEMPORARY_TOAST_MS", source)
         self.assertIn("this.entries.delete(channel)", source)
         self.assertIn("region.replaceChildren()", source)
-        self.assertIn("entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS)", source)
+        self.assertIn("() => this.dismiss(channel, cleanIdentity, {remember: Boolean(remember)})", source)
         self.assertNotIn("state.orderToastTimer", source)
         self.assertNotIn("state.plannerToastTimer", source)
 
@@ -37,9 +37,15 @@ class TemporaryNotificationLifecycleTests(unittest.TestCase):
         self.assertIn('close.textContent = "×"', source)
         self.assertIn('close.setAttribute("aria-label", label)', source)
         self.assertIn('close.title = label', source)
+        self.assertIn("close.dataset.toastDismissChannel", source)
+        self.assertIn("close.dataset.toastIdentity", source)
+        self.assertIn('root.addEventListener("click", (event) => {', source)
+        self.assertIn('{capture: true, signal: listenerController.signal}', source)
         self.assertIn('event.stopPropagation()', source)
-        self.assertIn('appendToastClose(toast, dismissOrderToast)', source)
-        self.assertIn('appendToastClose(toast, dismissPlannerToast)', source)
+        self.assertIn('appendToastClose(toast, "orders", identity)', source)
+        self.assertIn('appendToastClose(toast, "planner", identity)', source)
+        self.assertIn("pointer-events: auto", source)
+        self.assertIn("touch-action: manipulation", source)
 
     def test_expired_and_dismissed_parent_toasts_do_not_return_on_rerun(self):
         source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
@@ -49,12 +55,38 @@ class TemporaryNotificationLifecycleTests(unittest.TestCase):
         expired_cleanup = source.index("if (current && current.expiresAt <= now)")
         remembered_check = source.index("if (remember && this.seen.has(seenIdentity))")
         self.assertLess(expired_cleanup, remembered_check)
-        self.assertIn("this.dismiss(channel);\n          current = null;", source)
+        self.assertIn(
+            "this.dismiss(channel, current.identity, {remember: current.remember});\n"
+            "          current = null;",
+            source,
+        )
         self.assertIn("this.hide(region);\n          return \"seen\";", source)
         self.assertIn("parentWindow.sessionStorage.getItem(TOAST_SEEN_STORAGE_KEY)", source)
         self.assertIn("parentWindow.sessionStorage.setItem(", source)
         self.assertIn("writeSeenToastIdentities(this.seen)", source)
         self.assertIn('return "new";', source)
+
+    def test_manual_dismissal_is_identity_guarded_and_channel_local(self):
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('dismiss(channel, identity = "", {remember = false} = {})', source)
+        self.assertIn(
+            'if (expectedIdentity && entry?.identity !== expectedIdentity) return "stale";',
+            source,
+        )
+        self.assertIn("this.entries.delete(channel)", source)
+        self.assertNotIn("this.entries.clear()", source)
+        delegated = source[
+            source.index('root.addEventListener("click", (event) => {') :
+            source.index("const enablePlannerAudio")
+        ]
+        self.assertIn("close.dataset.toastDismissChannel", delegated)
+        self.assertIn("close.dataset.toastIdentity", delegated)
+        self.assertIn("{remember: true}", delegated)
+        self.assertNotIn("requestJson", delegated)
+        self.assertNotIn("updateOrdersBadge", delegated)
 
     def test_streamlit_temporary_toast_is_rerun_safe_and_clears_temporary_state(self):
         source = ui_feedback.temporary_toast_html("Saved", event_key="save:1")

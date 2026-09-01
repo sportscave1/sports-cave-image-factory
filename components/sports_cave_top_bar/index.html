@@ -13,7 +13,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "repair-inbox-v1";
+  const CONTROLLER_VERSION = "notification-dismissal-v2";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -405,10 +405,13 @@
       height: 28px;
       justify-content: center;
       padding: 0;
+      pointer-events: auto;
       position: absolute;
       right: 5px;
+      touch-action: manipulation;
       top: 5px;
       width: 28px;
+      z-index: 3;
     }
     .sc-os-toast-close:hover {
       background: rgba(255, 255, 255, .10);
@@ -1050,7 +1053,7 @@
     const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
     const plannerToastRegion = root.querySelector("#sc-os-planner-toast-region");
     const repairToastRegion = root.querySelector("#sc-os-repair-toast-region");
-    const TOAST_RUNTIME_VERSION = "dismissible-v3-stable-repair-identities";
+    const TOAST_RUNTIME_VERSION = "dismissible-v4-identity-guarded";
     const TOAST_SEEN_STORAGE_KEY = "scSportsCaveTemporaryToastSeen:v2";
     const readSeenToastIdentities = () => {
       try {
@@ -1089,11 +1092,23 @@
         region.replaceChildren();
         region.removeAttribute("data-toast-identity");
       },
-      dismiss(channel) {
+      remember(channel, identity) {
+        const cleanChannel = String(channel || "").trim();
+        const cleanIdentity = String(identity || "").trim();
+        if (!cleanChannel || !cleanIdentity) return;
+        this.seen.add(`${cleanChannel}:${cleanIdentity}`);
+        while (this.seen.size > 256) this.seen.delete(this.seen.values().next().value);
+        writeSeenToastIdentities(this.seen);
+      },
+      dismiss(channel, identity = "", {remember = false} = {}) {
         const entry = this.entries.get(channel);
+        const expectedIdentity = String(identity || "").trim();
+        if (expectedIdentity && entry?.identity !== expectedIdentity) return "stale";
+        if (remember && entry?.identity) this.remember(channel, entry.identity);
         if (entry?.timer) parentWindow.clearTimeout(entry.timer);
         this.hide(entry?.region);
         this.entries.delete(channel);
+        return entry ? "dismissed" : "missing";
       },
       show(channel, region, identity, render, {remember = false} = {}) {
         const cleanIdentity = String(identity || "").trim();
@@ -1101,7 +1116,7 @@
         const now = Date.now();
         let current = this.entries.get(channel);
         if (current && current.expiresAt <= now) {
-          this.dismiss(channel);
+          this.dismiss(channel, current.identity, {remember: current.remember});
           current = null;
         }
         if (current && current.identity === cleanIdentity && current.expiresAt > now) {
@@ -1125,16 +1140,16 @@
         const entry = {
           identity: cleanIdentity,
           region,
+          remember: Boolean(remember),
           expiresAt: Date.now() + TEMPORARY_TOAST_MS,
           timer: null,
         };
-        entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS);
+        entry.timer = parentWindow.setTimeout(
+          () => this.dismiss(channel, cleanIdentity, {remember: Boolean(remember)}),
+          TEMPORARY_TOAST_MS,
+        );
         this.entries.set(channel, entry);
-        if (remember) {
-          this.seen.add(seenIdentity);
-          while (this.seen.size > 256) this.seen.delete(this.seen.values().next().value);
-          writeSeenToastIdentities(this.seen);
-        }
+        if (remember) this.remember(channel, cleanIdentity);
         return "new";
       },
     };
@@ -1553,27 +1568,41 @@
       button.dataset.actionRequiredCount = String(numericCount);
       button.setAttribute("aria-label", `Orders, ${numericCount} require action`);
     };
-    const dismissOrderToast = () => {
-      temporaryToasts.dismiss("orders");
+    const dismissOrderToast = (identity = "") => {
+      temporaryToasts.dismiss("orders", identity, {remember: true});
     };
-    const dismissPlannerToast = () => {
-      temporaryToasts.dismiss("planner");
+    const dismissPlannerToast = (identity = "") => {
+      temporaryToasts.dismiss("planner", identity, {remember: true});
     };
-    const appendToastClose = (toast, dismiss, label = "Dismiss notification") => {
+    const appendToastClose = (
+      toast,
+      channel,
+      identity,
+      label = "Dismiss notification",
+    ) => {
       const close = doc.createElement("button");
       close.type = "button";
       close.className = "sc-os-toast-close";
       close.textContent = "×";
       close.setAttribute("aria-label", label);
       close.title = label;
-      close.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dismiss();
-      });
+      close.dataset.toastDismissChannel = String(channel || "");
+      close.dataset.toastIdentity = String(identity || "");
       toast.appendChild(close);
       return close;
     };
+    root.addEventListener("click", (event) => {
+      const close = event.target?.closest?.(".sc-os-toast-close[data-toast-dismiss-channel]");
+      if (close && root.contains(close)) {
+        event.preventDefault();
+        event.stopPropagation();
+        temporaryToasts.dismiss(
+          close.dataset.toastDismissChannel,
+          close.dataset.toastIdentity,
+          {remember: true},
+        );
+      }
+    }, {capture: true, signal: listenerController.signal});
     const enablePlannerAudio = async () => {
       const AudioContext = parentWindow.AudioContext || parentWindow.webkitAudioContext;
       if (!AudioContext) return false;
@@ -1637,7 +1666,8 @@
       }, 820);
     };
     const showPlannerPopupBlocked = (url) => {
-      temporaryToasts.show("planner", plannerToastRegion, `popup-blocked:${url}`, () => {
+      const identity = `popup-blocked:${url}`;
+      temporaryToasts.show("planner", plannerToastRegion, identity, () => {
         const notice = doc.createElement("div");
         notice.className = "sc-os-planner-toast sc-os-planner-popup-blocked";
         const message = doc.createElement("span");
@@ -1647,7 +1677,7 @@
         link.target = "sports_cave_daily_planner";
         link.textContent = "Open planner";
         notice.append(message, link);
-        appendToastClose(notice, dismissPlannerToast);
+        appendToastClose(notice, "planner", identity);
         plannerToastRegion.replaceChildren(notice);
       });
     };
@@ -1656,10 +1686,11 @@
       if (!clean) return;
       if (eventKey && state.shownPlannerEvents.has(eventKey)) return;
       if (eventKey) state.shownPlannerEvents.add(eventKey);
+      const identity = eventKey || `planner:${clean}`;
       const result = temporaryToasts.show(
         "planner",
         plannerToastRegion,
-        eventKey || `planner:${clean}`,
+        identity,
         () => {
           const toast = doc.createElement("div");
           toast.className = "sc-os-planner-toast";
@@ -1672,11 +1703,11 @@
           copy.textContent = clean;
           open.appendChild(copy);
           open.addEventListener("click", () => {
-            dismissPlannerToast();
+            dismissPlannerToast(identity);
             openDailyPlanner();
           });
           toast.appendChild(open);
-          appendToastClose(toast, dismissPlannerToast);
+          appendToastClose(toast, "planner", identity);
           plannerToastRegion.replaceChildren(toast);
         },
         {remember: Boolean(eventKey)},
@@ -1705,22 +1736,23 @@
         copy.textContent = message;
         open.appendChild(copy);
         open.addEventListener("click", () => {
-          dismissOrderToast();
+          dismissOrderToast(identity);
           navigateDocument(routeUrl("orders", "", false));
         });
         toast.appendChild(open);
-        appendToastClose(toast, dismissOrderToast);
+        appendToastClose(toast, "orders", identity);
         orderToastRegion.replaceChildren(toast);
       }, {remember: true});
     };
-    const dismissRepairToast = () => {
-      temporaryToasts.dismiss("repairs");
+    const dismissRepairToast = (identity = "") => {
+      temporaryToasts.dismiss("repairs", identity, {remember: true});
     };
     const showRepairToast = (message, notificationIdentity) => {
       const clean = String(message || "").trim();
       const stableIdentity = String(notificationIdentity || "").trim();
       if (!clean || !stableIdentity) return;
-      temporaryToasts.show("repairs", repairToastRegion, `repair:${stableIdentity}`, () => {
+      const identity = `repair:${stableIdentity}`;
+      temporaryToasts.show("repairs", repairToastRegion, identity, () => {
         const toast = doc.createElement("div");
         toast.className = "sc-os-order-toast";
         const copy = doc.createElement("div");
@@ -1730,7 +1762,7 @@
         text.textContent = clean;
         copy.appendChild(text);
         toast.appendChild(copy);
-        appendToastClose(toast, dismissRepairToast);
+        appendToastClose(toast, "repairs", identity);
         repairToastRegion.replaceChildren(toast);
       }, {remember: true});
     };

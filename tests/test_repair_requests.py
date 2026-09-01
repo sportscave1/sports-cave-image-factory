@@ -393,10 +393,13 @@ class RepairToolbarTests(unittest.TestCase):
         self.assertIn('`repair:${stableIdentity}`', handler)
         self.assertIn("{remember: true}", handler)
         self.assertNotIn("Date.now()", handler)
-        self.assertIn("temporaryToasts.dismiss(\"repairs\")", handler)
-        self.assertIn("appendToastClose(toast, dismissRepairToast)", handler)
+        self.assertIn(
+            'temporaryToasts.dismiss("repairs", identity, {remember: true})',
+            handler,
+        )
+        self.assertIn('appendToastClose(toast, "repairs", identity)', handler)
         self.assertIn('aria-label', source[source.index("const appendToastClose") : source.index("const enablePlannerAudio")])
-        self.assertIn("dismissible-v3-stable-repair-identities", source)
+        self.assertIn("dismissible-v4-identity-guarded", source)
 
     def test_each_repair_action_uses_its_durable_request_id_without_mutating_on_close(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
@@ -415,13 +418,19 @@ class RepairToolbarTests(unittest.TestCase):
     def test_other_toast_channels_and_automatic_timeout_remain_intact(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
         self.assertIn(
-            "entry.timer = parentWindow.setTimeout(() => this.dismiss(channel), TEMPORARY_TOAST_MS)",
+            "() => this.dismiss(channel, cleanIdentity, {remember: Boolean(remember)})",
             source,
         )
         self.assertIn('temporaryToasts.show("orders"', source)
         self.assertIn('temporaryToasts.show("planner"', source)
-        self.assertIn('temporaryToasts.dismiss("orders")', source)
-        self.assertIn('temporaryToasts.dismiss("planner")', source)
+        self.assertIn(
+            'temporaryToasts.dismiss("orders", identity, {remember: true})',
+            source,
+        )
+        self.assertIn(
+            'temporaryToasts.dismiss("planner", identity, {remember: true})',
+            source,
+        )
 
     def test_sections_come_from_navigation_and_current_ads_page_is_preselected(self):
         admin = {**ADMIN, "is_active": True, "page_permissions": []}

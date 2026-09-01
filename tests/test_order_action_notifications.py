@@ -606,6 +606,9 @@ class OrderStatusUiContractTests(unittest.TestCase):
         self.assertIn('button.setAttribute("aria-label", "Orders")', source)
         self.assertNotIn("state.orderToastTimer = later", source)
         self.assertIn('temporaryToasts.show("orders"', source)
+        self.assertIn('appendToastClose(toast, "orders", identity)', source)
+        self.assertIn("shopify_order_ids.map(String).filter(Boolean)", source)
+        self.assertIn("[...new Set(orderIds)].sort().join(\",\")", source)
         self.assertEqual(1, source.count('id="sc-os-order-toast-region"'))
         self.assertNotIn("st.rerun", source)
 
