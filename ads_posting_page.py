@@ -8,8 +8,8 @@ import streamlit as st
 import ads_page
 from ads_image_workflow import (
     AdsImageValidationError,
-    build_instant_experience_preview_thumbnail,
-    inspect_meta_posting_image_upload,
+    build_meta_posting_image_record,
+    source_image_signature,
 )
 from ads_product_catalog import load_live_edition_product_rows
 from meta_ads_client import MetaAdsApiError, MetaPostingClient, diagnose_meta_posting_connection
@@ -39,6 +39,7 @@ from meta_posting_service import (
     posting_submission_id,
 )
 from posting_import_csv import (
+    ADS_CSV_IMPORT_RUNTIME_VERSION,
     POSTING_IMPORT_FILENAME,
     PostingImportCSVError,
     parse_posting_import_csv,
@@ -56,6 +57,7 @@ PRODUCT_SET_KEY = f"{STATE_PREFIX}product_set"
 AUDIENCE_KEY = f"{STATE_PREFIX}audience"
 IMAGE_KEYS = tuple(f"{STATE_PREFIX}image_{index}" for index in range(1, 4))
 IMAGE_STATE_KEYS = tuple(f"{STATE_PREFIX}image_state_{index}" for index in range(1, 4))
+POSTING_IMAGE_RUNTIME_VERSION = "2026-09-01-durable-source-v2"
 PRIMARY_TEXT_KEYS = tuple(f"{STATE_PREFIX}primary_text_{index}" for index in range(1, 4))
 HEADLINE_KEYS = tuple(f"{STATE_PREFIX}headline_{index}" for index in range(1, 4))
 DESCRIPTION_KEYS = tuple(f"{STATE_PREFIX}description_{index}" for index in range(1, 4))
@@ -162,55 +164,57 @@ def capture_posting_image_upload(uploaded_file, previous=None):
     """Read and inspect a selected image once, then reuse its stable local state."""
 
     if uploaded_file is None:
-        return {}
+        return dict(previous or {})
     previous = dict(previous or {})
     upload_identity = _uploaded_file_identity(uploaded_file)
+    source_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
     if (
-        upload_identity
+        previous.get("runtime_version") == POSTING_IMAGE_RUNTIME_VERSION
+        and source_file_id
         and upload_identity == str(previous.get("upload_identity") or "")
-        and (previous.get("valid") or previous.get("error"))
+        and (
+            (previous.get("valid") and previous.get("data"))
+            or previous.get("error")
+        )
     ):
         return previous
 
     image_name = str(getattr(uploaded_file, "name", "") or "image")
     image_type = str(getattr(uploaded_file, "type", "") or "")
     source_bytes = bytes(uploaded_file.getvalue() or b"")
+    source_hash = source_image_signature(source_bytes) if not source_file_id else ""
+    if (
+        previous.get("runtime_version") == POSTING_IMAGE_RUNTIME_VERSION
+        and not source_file_id
+        and source_hash == str(previous.get("source_hash") or "")
+        and (
+            (previous.get("valid") and previous.get("data"))
+            or previous.get("error")
+        )
+    ):
+        return previous
     try:
-        details = inspect_meta_posting_image_upload(
+        captured = build_meta_posting_image_record(
             source_bytes,
             original_name=image_name,
-        )
-        preview = build_instant_experience_preview_thumbnail(
-            source_bytes,
-            source_hash=details["source_hash"],
-            max_edge=320,
-            quality=72,
+            declared_content_type=image_type,
+            upload_identity=upload_identity or source_hash,
+            preview_max_edge=320,
+            preview_quality=72,
         )
     except AdsImageValidationError as error:
         return {
             "upload_identity": upload_identity,
+            "source_hash": source_hash,
             "name": image_name,
             "type": image_type,
+            "runtime_version": POSTING_IMAGE_RUNTIME_VERSION,
             "valid": False,
             "error": str(error),
         }
-    except (OSError, SyntaxError, ValueError) as error:
-        return {
-            "upload_identity": upload_identity,
-            "name": image_name,
-            "type": image_type,
-            "valid": False,
-            "error": "This image could not be previewed. Upload a valid JPG, PNG or WebP image.",
-        }
     return {
-        **details,
-        **preview,
-        "upload_identity": upload_identity,
-        "name": image_name,
-        "type": image_type,
-        "data": source_bytes,
-        "valid": True,
-        "error": "",
+        **captured,
+        "runtime_version": POSTING_IMAGE_RUNTIME_VERSION,
     }
 
 
@@ -220,8 +224,6 @@ def _sync_posting_image_upload(index, uploaded_file, *, state=None):
     captured = capture_posting_image_upload(uploaded_file, state.get(state_key))
     if captured:
         state[state_key] = captured
-    else:
-        state.pop(state_key, None)
     return dict(captured)
 
 
@@ -336,12 +338,21 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
         return dict(state.get(CSV_IMPORT_STATE_KEY) or {})
     previous = dict(state.get(CSV_IMPORT_STATE_KEY) or {})
     source_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
-    if source_file_id and source_file_id == str(previous.get("source_file_id") or ""):
+    same_runtime = previous.get("runtime_version") == ADS_CSV_IMPORT_RUNTIME_VERSION
+    if (
+        same_runtime
+        and source_file_id
+        and source_file_id == str(previous.get("source_file_id") or "")
+    ):
         return previous
 
     source_bytes = bytes(uploaded_file.getvalue() or b"")
     upload_identity = hashlib.sha256(source_bytes).hexdigest()
-    if upload_identity == str(previous.get("upload_identity") or ""):
+    if (
+        same_runtime
+        and not source_file_id
+        and upload_identity == str(previous.get("upload_identity") or "")
+    ):
         return previous
     try:
         batch = parse_posting_import_csv(
@@ -356,7 +367,8 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
             "ok": True,
             "upload_identity": upload_identity,
             "source_file_id": source_file_id,
-            "message": "CSV imported — ad copy applied",
+            "runtime_version": ADS_CSV_IMPORT_RUNTIME_VERSION,
+            "message": "CSV imported — ad copy applied.",
             "summary": summary,
         }
     except PostingImportCSVError as error:
@@ -364,6 +376,7 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
             "ok": False,
             "upload_identity": upload_identity,
             "source_file_id": source_file_id,
+            "runtime_version": ADS_CSV_IMPORT_RUNTIME_VERSION,
             "message": str(error),
             "summary": {},
         }
@@ -384,6 +397,47 @@ def _posting_form_ready(
             and str(creative.get("headline") or "").strip()
             for creative in creatives or ()
         )
+    )
+
+
+def _build_posting_request(
+    *,
+    submission_id,
+    product_id,
+    product_title,
+    product_handle,
+    product_url,
+    country,
+    sport,
+    catalog_id,
+    product_set_id,
+    audience,
+    creatives,
+):
+    """Map reviewed local creative state into the existing Meta request contract."""
+
+    return PostingRequest(
+        submission_id=submission_id,
+        product_id=product_id,
+        product_title=product_title,
+        product_handle=product_handle,
+        destination_url=product_url,
+        country=country,
+        sport=sport,
+        catalog_id=catalog_id,
+        product_set_id=product_set_id,
+        audience_type=str((audience or {}).get("type") or "broad"),
+        audience_id=str((audience or {}).get("id") or ""),
+        creatives=tuple(
+            PostingCreative(
+                image_bytes=bytes((creative.get("image") or {}).get("data") or b""),
+                image_name=str((creative.get("image") or {}).get("name") or "image"),
+                primary_text=str(creative.get("primary_text") or ""),
+                headline=str(creative.get("headline") or ""),
+                description=str(creative.get("description") or ""),
+            )
+            for creative in creatives or ()
+        ),
     )
 
 
@@ -621,7 +675,7 @@ def render_page():
     )
     if import_status.get("ok"):
         summary = dict(import_status.get("summary") or {})
-        st.success(str(import_status.get("message") or "CSV imported — ad copy applied"))
+        st.success(str(import_status.get("message") or "CSV imported — ad copy applied."))
         st.caption(
             f"Product: {summary.get('product') or ''} · "
             f"Country: {summary.get('country') or ''} · "
@@ -826,22 +880,18 @@ def render_page():
         disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
     ):
         st.session_state[PROCESSING_KEY] = True
-        request = PostingRequest(
-            submission_id=st.session_state[SUBMISSION_ID_KEY], product_id=product_id,
-            product_title=product_title, product_handle=product_handle,
-            destination_url=product_url,
-            country=country, sport=sport, catalog_id=catalog_id, product_set_id=product_set_id,
-            audience_type=audience["type"], audience_id=audience["id"],
-            creatives=tuple(
-                PostingCreative(
-                    image_bytes=creative["image"]["data"],
-                    image_name=creative["image"]["name"],
-                    primary_text=creative["primary_text"],
-                    headline=creative["headline"],
-                    description=creative["description"],
-                )
-                for creative in creative_inputs
-            ),
+        request = _build_posting_request(
+            submission_id=st.session_state[SUBMISSION_ID_KEY],
+            product_id=product_id,
+            product_title=product_title,
+            product_handle=product_handle,
+            product_url=product_url,
+            country=country,
+            sport=sport,
+            catalog_id=catalog_id,
+            product_set_id=product_set_id,
+            audience=audience,
+            creatives=creative_inputs,
         )
         try:
             with st.spinner("Creating one paused campaign, one ad set and three ads…"):

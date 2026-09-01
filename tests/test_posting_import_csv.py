@@ -6,9 +6,11 @@ from unittest import mock
 from PIL import Image
 
 import ads_page
+import ads_image_workflow
 import ads_posting_page
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from posting_import_csv import (
+    ADS_COPY_HEADERS,
     POSTING_IMPORT_FILENAME,
     POSTING_IMPORT_HEADERS,
     POSTING_IMPORT_LEGACY_HEADERS,
@@ -16,6 +18,7 @@ from posting_import_csv import (
     POSTING_IMPORT_SCHEMA_VERSION,
     PostingImportCSVError,
     build_posting_import_rows,
+    parse_ads_import_csv,
     parse_posting_import_csv,
     serialize_posting_import_csv,
 )
@@ -219,8 +222,18 @@ class PostingImportContractTests(unittest.TestCase):
             "Alternative 2B",
         )
         self.assertEqual(
-            new_data,
-            ads_page.build_instant_experience_copy_csv(ads_result(), workflow),
+            tuple(
+                next(
+                    csv.reader(
+                        io.StringIO(
+                            ads_page.build_instant_experience_copy_csv(
+                                ads_result(), workflow
+                            ).decode("utf-8-sig")
+                        )
+                    )
+                )
+            ),
+            ADS_COPY_HEADERS,
         )
 
     def test_named_standard_ads_fields_map_without_display_text_reconstruction(self):
@@ -327,6 +340,173 @@ class PostingImportContractTests(unittest.TestCase):
             posting_ads()[0]["primary_text"],
         )
 
+    def test_previous_working_ads_copy_template_normalises_and_hydrates(self):
+        result = ads_result()
+        canonical = ads_page.build_instant_experience_copy_csv(
+            result, ads_workflow()
+        ).decode("utf-8-sig")
+        source_rows = list(csv.DictReader(io.StringIO(canonical, newline="")))
+        decorated_headers = [
+            f"  {header.replace('_', ' ').title()}  " for header in ADS_COPY_HEADERS
+        ] + ["Editor Notes"]
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=decorated_headers, lineterminator="\n")
+        writer.writeheader()
+        for source_row in source_rows:
+            writer.writerow(
+                {
+                    **{
+                        f"  {header.replace('_', ' ').title()}  ": source_row[header]
+                        for header in ADS_COPY_HEADERS
+                    },
+                    "Editor Notes": "",
+                }
+            )
+        edited = output.getvalue().encode("utf-8-sig")
+
+        batch = parse_ads_import_csv(edited)
+        self.assertEqual(batch["source_schema_kind"], "ads_copy")
+        self.assertEqual(len(batch["rows"]), 9)
+
+        workflow = {"ad_notes": {}, "slots": {}}
+        state = {}
+        with mock.patch.object(ads_page.st, "session_state", state):
+            status = ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                FakeUpload(edited, name="ChatGPT result", file_id="ads-editor-file"),
+            )
+        self.assertTrue(status["ok"])
+        self.assertEqual(status["message"], "CSV imported — ad copy applied.")
+        self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
+        first_key = ads_page._instant_experience_copy_widget_key(
+            result["context_key"],
+            INSTANT_EXPERIENCE_CONCEPTS[0]["id"],
+            "primary_text",
+            1,
+        )
+        self.assertEqual(state[first_key], posting_ads()[0]["primary_text"])
+
+    def test_blank_ads_template_can_be_filled_then_immediately_imported(self):
+        result = ads_result()
+        blank = ads_page.build_instant_experience_copy_csv(
+            result, {}, blank=True
+        ).decode("utf-8-sig")
+        rows = list(csv.DictReader(io.StringIO(blank, newline="")))
+        expected = ads_workflow()["ad_notes"]["instant_experience_concepts"]
+        for row in rows:
+            variation = expected[row["route_key"]][int(row["variation"]) - 1]
+            row["primary_text"] = variation["primary_text"]
+            row["headline"] = variation["headline"]
+            row["cta"] = variation["cta"]
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(
+            output, fieldnames=ADS_COPY_HEADERS, lineterminator="\r\n"
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+        imported = ads_page.parse_instant_experience_copy_csv(
+            output.getvalue().encode("utf-8-sig"), result
+        )
+
+        for concept in INSTANT_EXPERIENCE_CONCEPTS:
+            for index in range(3):
+                self.assertEqual(
+                    imported[concept["id"]][index]["primary_text"],
+                    expected[concept["id"]][index]["primary_text"],
+                )
+                self.assertEqual(
+                    imported[concept["id"]][index]["headline"],
+                    expected[concept["id"]][index]["headline"],
+                )
+                self.assertEqual(
+                    imported[concept["id"]][index]["cta"],
+                    expected[concept["id"]][index]["cta"],
+                )
+
+    def test_ads_import_applies_once_per_file_but_new_upload_can_reapply(self):
+        result = ads_result()
+        data = ads_page.build_instant_experience_copy_csv(result, ads_workflow())
+        workflow = {"ad_notes": {}, "slots": {}}
+        state = {}
+        first_key = ads_page._instant_experience_copy_widget_key(
+            result["context_key"],
+            INSTANT_EXPERIENCE_CONCEPTS[0]["id"],
+            "primary_text",
+            1,
+        )
+        first_upload = FakeUpload(
+            data, name="completed.csv", file_id="same-browser-upload"
+        )
+        with mock.patch.object(ads_page.st, "session_state", state):
+            ads_page._process_instant_experience_copy_csv_upload(
+                result, workflow, first_upload
+            )
+            state[first_key] = "Manual edit after import"
+            ads_page._process_instant_experience_copy_csv_upload(
+                result, workflow, first_upload
+            )
+            self.assertEqual(state[first_key], "Manual edit after import")
+            ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                FakeUpload(data, name="completed-again.csv", file_id="new-upload"),
+            )
+        self.assertEqual(state[first_key], posting_ads()[0]["primary_text"])
+        self.assertEqual(first_upload.getvalue_calls, 1)
+
+    def test_old_red_status_is_reparsed_and_replaced_by_green_success(self):
+        result = ads_result()
+        copy_data = ads_page.build_instant_experience_copy_csv(
+            result, ads_workflow()
+        )
+        workflow = {
+            "ad_notes": {},
+            "slots": {},
+            "copy_csv_import_file_id": "persisted-file",
+            "copy_csv_import_runtime_version": "older-parser",
+            "copy_csv_import_status": {"ok": False, "message": "Old red error"},
+        }
+        state = {}
+        with mock.patch.object(ads_page.st, "session_state", state):
+            ads_status = ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                FakeUpload(
+                    copy_data,
+                    name="completed.csv",
+                    file_id="persisted-file",
+                ),
+            )
+        self.assertTrue(ads_status["ok"])
+        self.assertEqual(ads_status["message"], "CSV imported — ad copy applied.")
+
+        posting_data = ads_page.build_ads_posting_import_csv(
+            result, ads_workflow()
+        )
+        posting_state = {
+            ads_posting_page.CSV_IMPORT_STATE_KEY: {
+                "ok": False,
+                "message": "Old red error",
+                "source_file_id": "persisted-posting-file",
+                "runtime_version": "older-parser",
+            }
+        }
+        posting_status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                posting_data,
+                name="posting-import.csv",
+                file_id="persisted-posting-file",
+            ),
+            product_records(),
+            state=posting_state,
+        )
+        self.assertTrue(posting_status["ok"])
+        self.assertEqual(
+            posting_status["message"], "CSV imported — ad copy applied."
+        )
+
     def test_immediately_previous_three_row_posting_csv_remains_supported(self):
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=POSTING_IMPORT_LEGACY_HEADERS)
@@ -372,7 +552,7 @@ class PostingImportContractTests(unittest.TestCase):
                         ),
                     )
                 self.assertTrue(status["ok"])
-                self.assertEqual(status["message"], "CSV imported — ad copy applied")
+                self.assertEqual(status["message"], "CSV imported — ad copy applied.")
                 self.assertTrue(ads_page.instant_experience_copy_complete(imported_workflow))
                 for concept in INSTANT_EXPERIENCE_CONCEPTS:
                     imported_workflow["slots"][concept["slot_id"]] = {
@@ -393,9 +573,12 @@ class PostingImportContractTests(unittest.TestCase):
                 }
                 self.assertIn(POSTING_IMPORT_FILENAME, stored_items)
                 stored_csv = stored_items[POSTING_IMPORT_FILENAME]["data"]
-                self.assertEqual(stored_csv, completed_csv)
                 stored_batch = parse_posting_import_csv(stored_csv)
                 self.assertEqual(len(stored_batch["rows"]), 9)
+                posting_expected = tuple(
+                    {**ad, "description": ""} for ad in posting_ads()
+                )
+                self.assertEqual(primary_ads(stored_batch), posting_expected)
 
                 posting_state = {ads_posting_page.AUDIENCE_KEY: "broad"}
                 posting_status = ads_posting_page.process_posting_csv_upload(
@@ -408,7 +591,7 @@ class PostingImportContractTests(unittest.TestCase):
                     state=posting_state,
                 )
                 self.assertTrue(posting_status["ok"])
-                for index, expected in enumerate(posting_ads()):
+                for index, expected in enumerate(posting_expected):
                     self.assertEqual(
                         posting_state[ads_posting_page.PRIMARY_TEXT_KEYS[index]],
                         expected["primary_text"],
@@ -487,6 +670,23 @@ class PostingCSVImportTests(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(upload.getvalue_calls, 1)
 
+        first_key = ads_posting_page.PRIMARY_TEXT_KEYS[0]
+        state[first_key] = "Manual Posting edit"
+        ads_posting_page.process_posting_csv_upload(
+            upload, product_records(), state=state
+        )
+        self.assertEqual(state[first_key], "Manual Posting edit")
+        ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                upload._data,
+                name="same-content-new-upload.csv",
+                file_id="csv-new-selection",
+            ),
+            product_records(),
+            state=state,
+        )
+        self.assertEqual(state[first_key], posting_ads()[0]["primary_text"])
+
     def test_failed_import_does_not_destroy_existing_form_state(self):
         upload = FakeUpload(
             b"wrong,headers\n1,2\n",
@@ -516,6 +716,13 @@ class PostingCSVImportTests(unittest.TestCase):
 
 class PostingImageCaptureTests(unittest.TestCase):
     @staticmethod
+    def image_data(image_format, *, colour=(25, 35, 45), size=(720, 900)):
+        output = io.BytesIO()
+        mode = "RGB"
+        Image.new(mode, size, colour).save(output, format=image_format)
+        return output.getvalue()
+
+    @staticmethod
     def large_png():
         output = io.BytesIO()
         Image.new("RGB", (1080, 1350), (25, 35, 45)).save(output, format="PNG")
@@ -530,13 +737,13 @@ class PostingImageCaptureTests(unittest.TestCase):
             content_type="image/png",
         )
         with mock.patch.object(
-            ads_posting_page,
+            ads_image_workflow,
             "inspect_meta_posting_image_upload",
-            wraps=ads_posting_page.inspect_meta_posting_image_upload,
+            wraps=ads_image_workflow.inspect_meta_posting_image_upload,
         ) as inspect, mock.patch.object(
-            ads_posting_page,
+            ads_image_workflow,
             "build_instant_experience_preview_thumbnail",
-            wraps=ads_posting_page.build_instant_experience_preview_thumbnail,
+            wraps=ads_image_workflow.build_instant_experience_preview_thumbnail,
         ) as preview:
             first = ads_posting_page.capture_posting_image_upload(upload)
             second = ads_posting_page.capture_posting_image_upload(upload, first)
@@ -578,6 +785,204 @@ class PostingImageCaptureTests(unittest.TestCase):
             all(key in state for key in ads_posting_page.IMAGE_STATE_KEYS)
         )
         self.assertEqual([upload.getvalue_calls for upload in uploads], [1, 1, 1])
+
+    def test_jpeg_png_and_webp_slots_persist_when_widgets_reconstruct_empty(self):
+        state = {}
+        formats = (
+            ("JPEG", "creative-1.jpg", "image/jpeg"),
+            ("PNG", "creative-2.png", "image/png"),
+            ("WEBP", "creative-3.webp", "image/webp"),
+        )
+        source_bytes = []
+        for index, (image_format, name, content_type) in enumerate(formats, start=1):
+            data = self.image_data(image_format, colour=(20 * index, 35, 45))
+            source_bytes.append(data)
+            captured = ads_posting_page._sync_posting_image_upload(
+                index,
+                FakeUpload(
+                    data,
+                    name=name,
+                    file_id=f"format-{index}",
+                    content_type=content_type,
+                ),
+                state=state,
+            )
+            self.assertTrue(captured["valid"])
+            self.assertEqual(captured["source_format"], image_format)
+            self.assertEqual(captured["source_bytes"], data)
+            self.assertEqual(captured["data"], data)
+
+        retained = [
+            ads_posting_page._sync_posting_image_upload(index, None, state=state)
+            for index in range(1, 4)
+        ]
+        self.assertEqual([row["data"] for row in retained], source_bytes)
+        self.assertTrue(all(row["valid"] for row in retained))
+
+    def test_replacing_second_slot_does_not_change_first_or_third(self):
+        state = {}
+        originals = []
+        for index in range(1, 4):
+            data = self.image_data("PNG", colour=(index * 30, 20, 10))
+            originals.append(data)
+            ads_posting_page._sync_posting_image_upload(
+                index,
+                FakeUpload(
+                    data,
+                    name=f"original-{index}.png",
+                    file_id=f"original-{index}",
+                    content_type="image/png",
+                ),
+                state=state,
+            )
+        replacement = self.image_data("PNG", colour=(200, 100, 50))
+        ads_posting_page._sync_posting_image_upload(
+            2,
+            FakeUpload(
+                replacement,
+                name="replacement-2.png",
+                file_id="replacement-2",
+                content_type="image/png",
+            ),
+            state=state,
+        )
+        self.assertEqual(state[ads_posting_page.IMAGE_STATE_KEYS[0]]["data"], originals[0])
+        self.assertEqual(state[ads_posting_page.IMAGE_STATE_KEYS[1]]["data"], replacement)
+        self.assertEqual(state[ads_posting_page.IMAGE_STATE_KEYS[2]]["data"], originals[2])
+
+    def test_csv_import_and_text_changes_do_not_clear_images(self):
+        state = {ads_posting_page.AUDIENCE_KEY: "broad"}
+        images = []
+        for index in range(1, 4):
+            data = self.image_data("PNG", colour=(10, index * 40, 20))
+            images.append(data)
+            ads_posting_page._sync_posting_image_upload(
+                index,
+                FakeUpload(
+                    data,
+                    name=f"creative-{index}.png",
+                    file_id=f"creative-{index}",
+                    content_type="image/png",
+                ),
+                state=state,
+            )
+        status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                serialize_posting_import_csv(posting_rows()),
+                name="posting-import.csv",
+                file_id="copy-with-images",
+            ),
+            product_records(),
+            state=state,
+        )
+        self.assertTrue(status["ok"])
+        state[ads_posting_page.HEADLINE_KEYS[0]] = "Manual headline edit"
+        self.assertEqual(
+            [state[key]["data"] for key in ads_posting_page.IMAGE_STATE_KEYS],
+            images,
+        )
+
+    def test_preview_failure_keeps_full_resolution_source_ready(self):
+        source = self.image_data("PNG", size=(1400, 1800))
+        upload = FakeUpload(
+            source,
+            name="full-resolution.png",
+            file_id="preview-failure",
+            content_type="image/png",
+        )
+        with mock.patch.object(
+            ads_image_workflow,
+            "build_instant_experience_preview_thumbnail",
+            side_effect=OSError("preview unavailable"),
+        ):
+            captured = ads_posting_page.capture_posting_image_upload(upload)
+        self.assertTrue(captured["valid"])
+        self.assertEqual(captured["data"], source)
+        self.assertEqual(captured["source_bytes"], source)
+        self.assertEqual((captured["source_width"], captured["source_height"]), (1400, 1800))
+        self.assertTrue(captured["preview_error"])
+
+    def test_invalid_image_has_specific_error_and_is_not_ready(self):
+        captured = ads_posting_page.capture_posting_image_upload(
+            FakeUpload(
+                b"not-an-image",
+                name="broken.png",
+                file_id="broken-image",
+                content_type="image/png",
+            )
+        )
+        self.assertFalse(captured["valid"])
+        self.assertIn("corrupt", captured["error"].casefold())
+
+    def test_same_metadata_without_file_id_uses_content_hash_for_replacement(self):
+        first_data = self.image_data("PNG", colour=(10, 20, 30), size=(10, 10))
+        second_data = self.image_data("PNG", colour=(30, 20, 10), size=(10, 10))
+        self.assertEqual(len(first_data), len(second_data))
+        first = FakeUpload(
+            first_data,
+            name="same.png",
+            file_id="",
+            content_type="image/png",
+        )
+        second = FakeUpload(
+            second_data,
+            name="same.png",
+            file_id="",
+            content_type="image/png",
+        )
+        original = ads_posting_page.capture_posting_image_upload(first)
+        replacement = ads_posting_page.capture_posting_image_upload(second, original)
+        self.assertNotEqual(original["source_hash"], replacement["source_hash"])
+        self.assertEqual(replacement["data"], second_data)
+
+    def test_review_request_receives_each_original_image_and_matching_copy(self):
+        image_records = []
+        for index, image_format in enumerate(("JPEG", "PNG", "WEBP"), start=1):
+            data = self.image_data(image_format, colour=(index * 40, 25, 35))
+            image_records.append(
+                ads_posting_page.capture_posting_image_upload(
+                    FakeUpload(
+                        data,
+                        name=f"creative-{index}.{image_format.casefold()}",
+                        file_id=f"review-{index}",
+                        content_type=f"image/{image_format.casefold()}",
+                    )
+                )
+            )
+        creatives = tuple(
+            {
+                "image": image_records[index - 1],
+                "primary_text": f"Primary {index}",
+                "headline": f"Headline {index}",
+                "description": f"Description {index}",
+            }
+            for index in range(1, 4)
+        )
+        request = ads_posting_page._build_posting_request(
+            submission_id="11111111-1111-4111-8111-111111111111",
+            product_id="shopify-1",
+            product_title="Product",
+            product_handle="product",
+            product_url="https://www.sportscaveshop.com/products/product",
+            country="AUS",
+            sport="Motorsport",
+            catalog_id="catalog-1",
+            product_set_id="set-1",
+            audience={"type": "broad", "id": ""},
+            creatives=creatives,
+        )
+        self.assertEqual(
+            [creative.image_bytes for creative in request.creatives],
+            [record["source_bytes"] for record in image_records],
+        )
+        self.assertEqual(
+            [creative.primary_text for creative in request.creatives],
+            ["Primary 1", "Primary 2", "Primary 3"],
+        )
+        self.assertEqual(
+            [creative.headline for creative in request.creatives],
+            ["Headline 1", "Headline 2", "Headline 3"],
+        )
 
 
 if __name__ == "__main__":

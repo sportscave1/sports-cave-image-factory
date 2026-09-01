@@ -202,6 +202,64 @@ def inspect_meta_posting_image_upload(data, *, original_name=""):
                 pass
 
 
+def build_meta_posting_image_record(
+    data,
+    *,
+    original_name="",
+    declared_content_type="",
+    upload_identity="",
+    preview_max_edge=320,
+    preview_quality=72,
+):
+    """Build durable local Posting state while retaining original source bytes.
+
+    The preview is deliberately best-effort and separate from the source image.
+    A valid full-resolution image must remain usable by the Meta create path even
+    if a lightweight browser preview cannot be generated.
+    """
+
+    source_bytes = bytes(data or b"")
+    details = inspect_meta_posting_image_upload(
+        source_bytes,
+        original_name=original_name,
+    )
+    preview = {}
+    preview_error = ""
+    try:
+        preview = build_instant_experience_preview_thumbnail(
+            source_bytes,
+            source_hash=details["source_hash"],
+            max_edge=preview_max_edge,
+            quality=preview_quality,
+        )
+    except Exception:
+        preview_error = (
+            "Preview could not be generated. The original full-resolution image "
+            "is still ready for Meta."
+        )
+
+    detected_content_types = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "WEBP": "image/webp",
+    }
+    clean_name = str(original_name or "image")
+    return {
+        **details,
+        **preview,
+        "data": source_bytes,
+        "source_bytes": source_bytes,
+        "name": clean_name,
+        "type": str(declared_content_type or ""),
+        "declared_content_type": str(declared_content_type or ""),
+        "content_type": detected_content_types.get(details["source_format"], ""),
+        "upload_identity": str(upload_identity or details["source_hash"]),
+        "preview_error": preview_error,
+        "valid": True,
+        "error": "",
+    }
+
+
 def inspect_instant_experience_original(data, *, original_name=""):
     details = _source_image_details(data, original_name=original_name)
     if details["source_width"] != details["source_height"]:

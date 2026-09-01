@@ -70,6 +70,35 @@ POSTING_IMPORT_HEADER_ALIASES = {
     "call_to_action": "cta",
 }
 POSTING_IMPORT_MAX_BYTES = 2 * 1024 * 1024
+ADS_CSV_IMPORT_RUNTIME_VERSION = "2026-09-01-working-template-v2"
+ADS_COPY_SCHEMA_VERSION = "2"
+ADS_COPY_CAMPAIGN_TYPE = "instant_experience"
+ADS_COPY_HEADERS = (
+    "schema_version",
+    "campaign_type",
+    "output_mode",
+    "route_key",
+    "route_label",
+    "variation",
+    "description_key",
+    "description_label",
+    "primary_text",
+    "headline",
+    "cta",
+)
+ADS_COPY_REQUIRED_HEADERS = frozenset(
+    {
+        "schema_version",
+        "campaign_type",
+        "output_mode",
+        "route_key",
+        "route_label",
+        "variation",
+        "primary_text",
+        "headline",
+        "cta",
+    }
+)
 
 
 class PostingImportCSVError(ValueError):
@@ -156,6 +185,31 @@ def _normalise_ad_variations(raw_ad):
     return tuple(variations)
 
 
+def build_ads_copy_rows(*, output_mode, ads):
+    rows = []
+    for ad_number, raw_ad in enumerate(tuple(ads or ()), start=1):
+        raw_ad = dict(raw_ad or {})
+        route_key = str(raw_ad.get("route_key") or f"ad_{ad_number}").strip()
+        route_label = str(raw_ad.get("route_label") or f"Ad {ad_number}").strip()
+        for variation in _normalise_ad_variations(raw_ad):
+            rows.append(
+                {
+                    "schema_version": ADS_COPY_SCHEMA_VERSION,
+                    "campaign_type": ADS_COPY_CAMPAIGN_TYPE,
+                    "output_mode": str(output_mode or "").strip(),
+                    "route_key": route_key,
+                    "route_label": route_label,
+                    "variation": variation["variation"],
+                    "description_key": variation["description_key"],
+                    "description_label": variation["description_label"],
+                    "primary_text": variation["primary_text"],
+                    "headline": variation["headline"],
+                    "cta": variation["cta"],
+                }
+            )
+    return validate_ads_copy_rows(rows, require_copy=False)
+
+
 def build_posting_import_rows(
     *,
     product_name,
@@ -205,6 +259,127 @@ def _allowed(value, allowed_values, *, label):
     )
     if allowed and value not in allowed:
         raise PostingImportCSVError(f"{label} must be one of: {', '.join(allowed)}.")
+
+
+def validate_ads_copy_rows(rows, *, require_copy=True):
+    rows = [dict(row or {}) for row in rows or ()]
+    expected_rows = 3 * POSTING_IMPORT_VARIATION_COUNT
+    if len(rows) != expected_rows:
+        raise PostingImportCSVError(
+            f"Ads CSV must contain exactly {expected_rows} copy rows "
+            f"(three routes with three description options each); found {len(rows)}."
+        )
+
+    parsed = []
+    seen = set()
+    route_order = []
+    baseline = None
+    for row_index, raw_row in enumerate(rows, start=1):
+        row = {
+            header: preserve_posting_text(raw_row.get(header))
+            for header in ADS_COPY_HEADERS
+        }
+        schema_version = row["schema_version"].strip()
+        if schema_version not in {ADS_COPY_SCHEMA_VERSION, "1"}:
+            raise PostingImportCSVError(
+                f"Row {row_index} has an unsupported schema_version."
+            )
+        row["campaign_type"] = row["campaign_type"].strip()
+        if _normalise_token(row["campaign_type"]) != _normalise_token(
+            ADS_COPY_CAMPAIGN_TYPE
+        ):
+            raise PostingImportCSVError(
+                f"Row {row_index} campaign_type must be {ADS_COPY_CAMPAIGN_TYPE}."
+            )
+        row["output_mode"] = row["output_mode"].strip()
+        if not row["output_mode"]:
+            raise PostingImportCSVError(f"Row {row_index} is missing required output_mode.")
+        route_key = row["route_key"].strip()
+        route_label = row["route_label"].strip()
+        if not route_key:
+            raise PostingImportCSVError(f"Row {row_index} is missing required route_key.")
+        if not route_label:
+            raise PostingImportCSVError(f"Row {row_index} is missing required route_label.")
+        try:
+            variation = int(row["variation"].strip())
+        except ValueError as error:
+            raise PostingImportCSVError(
+                f"Row {row_index} has an invalid variation."
+            ) from error
+        if variation not in range(1, POSTING_IMPORT_VARIATION_COUNT + 1):
+            raise PostingImportCSVError("variation values must be exactly 1, 2 and 3.")
+        identity = (route_key, variation)
+        if identity in seen:
+            raise PostingImportCSVError(
+                f"Route {route_key} variation {variation} is duplicated."
+            )
+        seen.add(identity)
+        if route_key not in route_order:
+            route_order.append(route_key)
+
+        defaults = _default_variation_identity(variation)
+        row["description_key"] = (
+            row["description_key"].strip() or defaults["description_key"]
+        )
+        row["description_label"] = (
+            row["description_label"].strip() or defaults["description_label"]
+        )
+        if require_copy:
+            for field, label in (
+                ("primary_text", "Description"),
+                ("headline", "Headline"),
+                ("cta", "CTA"),
+            ):
+                if not row[field].strip():
+                    raise PostingImportCSVError(
+                        f"{route_label} variation {variation} {label} is required."
+                    )
+        shared = (_normalise_token(row["campaign_type"]), row["output_mode"])
+        if baseline is None:
+            baseline = shared
+        elif shared != baseline:
+            raise PostingImportCSVError(
+                "All copy rows must use the same campaign_type and output_mode."
+            )
+        row["schema_version"] = ADS_COPY_SCHEMA_VERSION
+        row["campaign_type"] = ADS_COPY_CAMPAIGN_TYPE
+        row["route_key"] = route_key
+        row["route_label"] = route_label
+        row["variation"] = variation
+        parsed.append(row)
+
+    if len(route_order) != 3:
+        raise PostingImportCSVError("Ads CSV must contain exactly three stable route_key values.")
+    expected = {
+        (route_key, variation)
+        for route_key in route_order
+        for variation in range(1, POSTING_IMPORT_VARIATION_COUNT + 1)
+    }
+    if seen != expected:
+        raise PostingImportCSVError(
+            "Each Ads CSV route must contain description options 1, 2 and 3."
+        )
+    route_index = {route_key: index for index, route_key in enumerate(route_order)}
+    return tuple(
+        sorted(
+            parsed,
+            key=lambda row: (route_index[row["route_key"]], row["variation"]),
+        )
+    )
+
+
+def serialize_ads_copy_csv(rows, *, allow_incomplete=False):
+    clean_rows = validate_ads_copy_rows(rows, require_copy=not allow_incomplete)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=ADS_COPY_HEADERS,
+        lineterminator="\r\n",
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    writer.writerows(clean_rows)
+    return output.getvalue().encode("utf-8-sig")
 
 
 def _validate_shared_fields(row, row_index, *, allowed_countries, allowed_sports, allowed_campaign_types):
@@ -496,10 +671,12 @@ def _read_normalised_rows(data):
 def posting_import_csv_header_kind(data):
     headers, _rows = _read_normalised_rows(data)
     header_set = set(headers)
-    if header_set == set(POSTING_IMPORT_HEADERS):
+    if (set(POSTING_IMPORT_HEADERS) - {"description"}).issubset(header_set):
         return "canonical"
-    if header_set == set(POSTING_IMPORT_LEGACY_HEADERS):
+    if (set(POSTING_IMPORT_LEGACY_HEADERS) - {"description"}).issubset(header_set):
         return "legacy_posting"
+    if ADS_COPY_REQUIRED_HEADERS.issubset(header_set):
+        return "ads_copy"
     return "unknown"
 
 
@@ -580,6 +757,107 @@ def _batch_from_legacy_rows(clean_rows):
     }
 
 
+def _batch_from_ads_copy_rows(clean_rows, source_headers):
+    route_order = []
+    for row in clean_rows:
+        if row["route_key"] not in route_order:
+            route_order.append(row["route_key"])
+    ads = []
+    for ad_number, route_key in enumerate(route_order, start=1):
+        route_rows = tuple(
+            row for row in clean_rows if row["route_key"] == route_key
+        )
+        primary = next(row for row in route_rows if row["variation"] == 1)
+        ads.append(
+            {
+                "ad_number": ad_number,
+                "route_key": route_key,
+                "route_label": primary["route_label"],
+                "primary_text": primary["primary_text"],
+                "headline": primary["headline"],
+                "description": "",
+                "cta": primary["cta"],
+                "variations": tuple(
+                    {
+                        "variation": row["variation"],
+                        "description_key": row["description_key"],
+                        "description_label": row["description_label"],
+                        "primary_text": row["primary_text"],
+                        "headline": row["headline"],
+                        "description": "",
+                        "cta": row["cta"],
+                    }
+                    for row in route_rows
+                ),
+            }
+        )
+    first = clean_rows[0]
+    return {
+        "schema_version": POSTING_IMPORT_SCHEMA_VERSION,
+        "source_schema_version": ADS_COPY_SCHEMA_VERSION,
+        "source_schema_kind": "ads_copy",
+        "source_headers": tuple(source_headers),
+        "product_name": "",
+        "product_handle": "",
+        "product_url": "",
+        "country": "",
+        "sport_category": "",
+        "campaign_type": first["campaign_type"],
+        "output_mode": first["output_mode"],
+        "ads": tuple(ads),
+        "rows": clean_rows,
+    }
+
+
+def parse_ads_import_csv(
+    data,
+    *,
+    allowed_countries=(),
+    allowed_sports=(),
+    allowed_campaign_types=(),
+    require_copy=True,
+):
+    headers, rows = _read_normalised_rows(data)
+    header_set = set(headers)
+    canonical_required = set(POSTING_IMPORT_HEADERS) - {"description"}
+    if canonical_required.issubset(header_set):
+        clean_rows = validate_posting_import_rows(
+            rows,
+            allowed_countries=allowed_countries,
+            allowed_sports=allowed_sports,
+            allowed_campaign_types=allowed_campaign_types,
+            require_primary_ads=require_copy,
+        )
+        batch = _batch_from_canonical_rows(clean_rows)
+        batch["source_schema_kind"] = "posting"
+        batch["source_headers"] = tuple(headers)
+        return batch
+    if ADS_COPY_REQUIRED_HEADERS.issubset(header_set):
+        clean_rows = validate_ads_copy_rows(rows, require_copy=require_copy)
+        return _batch_from_ads_copy_rows(clean_rows, headers)
+    legacy_required = set(POSTING_IMPORT_LEGACY_HEADERS) - {"description"}
+    if legacy_required.issubset(header_set):
+        clean_rows = _validate_legacy_posting_rows(
+            rows,
+            allowed_countries=allowed_countries,
+            allowed_sports=allowed_sports,
+            allowed_campaign_types=allowed_campaign_types,
+        )
+        batch = _batch_from_legacy_rows(clean_rows)
+        batch["source_schema_kind"] = "posting_legacy"
+        batch["source_headers"] = tuple(headers)
+        return batch
+    recognised = set(ADS_COPY_HEADERS) | set(POSTING_IMPORT_HEADERS)
+    if not header_set.intersection(recognised):
+        raise PostingImportCSVError("No recognised Sports Cave Ads CSV columns were found.")
+    missing = [
+        header for header in ADS_COPY_HEADERS if header not in header_set
+    ]
+    if missing:
+        raise PostingImportCSVError(f"Missing required column: {missing[0]}.")
+    raise PostingImportCSVError("The CSV does not match a supported Sports Cave Ads format.")
+
+
 def parse_posting_import_csv(
     data,
     *,
@@ -590,26 +868,16 @@ def parse_posting_import_csv(
     require_primary_ads=True,
 ):
     del filename  # A valid canonical CSV is identified by content, never its filename.
-    headers, rows = _read_normalised_rows(data)
-    header_set = set(headers)
-    if header_set == set(POSTING_IMPORT_HEADERS):
-        clean_rows = validate_posting_import_rows(
-            rows,
-            allowed_countries=allowed_countries,
-            allowed_sports=allowed_sports,
-            allowed_campaign_types=allowed_campaign_types,
-            require_primary_ads=require_primary_ads,
+    batch = parse_ads_import_csv(
+        data,
+        allowed_countries=allowed_countries,
+        allowed_sports=allowed_sports,
+        allowed_campaign_types=allowed_campaign_types,
+        require_copy=require_primary_ads,
+    )
+    if batch.get("source_schema_kind") == "ads_copy":
+        raise PostingImportCSVError(
+            "This copy template has no product details. Download Posting CSV from "
+            "New Ads or Creative Refresh, then import that file here."
         )
-        return _batch_from_canonical_rows(clean_rows)
-    if header_set == set(POSTING_IMPORT_LEGACY_HEADERS):
-        clean_rows = _validate_legacy_posting_rows(
-            rows,
-            allowed_countries=allowed_countries,
-            allowed_sports=allowed_sports,
-            allowed_campaign_types=allowed_campaign_types,
-        )
-        return _batch_from_legacy_rows(clean_rows)
-    missing = [header for header in POSTING_IMPORT_HEADERS if header not in header_set]
-    if missing:
-        raise PostingImportCSVError(f"Missing required column: {missing[0]}.")
-    raise PostingImportCSVError("No recognised canonical Posting CSV columns were found.")
+    return batch

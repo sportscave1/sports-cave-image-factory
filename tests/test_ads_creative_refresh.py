@@ -913,7 +913,10 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         workflow = ads_page._new_ads_image_workflow(result)
         csv_data = ads_page.build_instant_experience_copy_csv(result, workflow, blank=True)
         headers = next(csv.reader(io.StringIO(csv_data.decode("utf-8-sig"))))
-        self.assertEqual(tuple(headers), ads_page.POSTING_IMPORT_HEADERS)
+        self.assertEqual(
+            tuple(headers),
+            ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+        )
 
     def test_legacy_creative_refresh_state_is_ignored_without_crashing(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))

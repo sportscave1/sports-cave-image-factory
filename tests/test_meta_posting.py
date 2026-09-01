@@ -47,6 +47,12 @@ def image_bytes(colour=(20, 30, 40)):
     return output.getvalue()
 
 
+def formatted_image_bytes(image_format, colour):
+    output = io.BytesIO()
+    Image.new("RGB", (720, 900), colour).save(output, format=image_format)
+    return output.getvalue()
+
+
 def request_for(**overrides):
     values = {
         "submission_id": "11111111-1111-4111-8111-111111111111",
@@ -859,6 +865,10 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("canvas"), 3)
         self.assertEqual(len(client.uploaded_images), 3)
         self.assertEqual(
+            [data for data, _filename, _content_type in client.uploaded_images],
+            [creative.image_bytes for creative in request_for().creatives],
+        )
+        self.assertEqual(
             [payload["object_story_spec"]["link_data"]["message"] for payload in client.creative_payloads],
             ["Primary 1", "Primary 2", "Primary 3"],
         )
@@ -909,6 +919,46 @@ class PostingServiceTests(unittest.TestCase):
                 "Max Verstappen Victory IA 4",
             ],
         )
+
+    def test_mixed_source_formats_stay_mapped_to_their_own_meta_upload(self):
+        source_rows = (
+            (formatted_image_bytes("JPEG", (190, 20, 30)), "ad-1.jpg"),
+            (formatted_image_bytes("PNG", (20, 190, 30)), "ad-2.png"),
+            (formatted_image_bytes("WEBP", (20, 30, 190)), "ad-3.webp"),
+        )
+        request = request_for(
+            creatives=tuple(
+                PostingCreative(
+                    image_bytes=data,
+                    image_name=name,
+                    primary_text=f"Primary {index}",
+                    headline=f"Headline {index}",
+                    description=f"Description {index}",
+                )
+                for index, (data, name) in enumerate(source_rows, start=1)
+            )
+        )
+        client = FakePostingClient()
+        MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(request)
+
+        self.assertEqual(client.uploaded_images[0][0], source_rows[0][0])
+        self.assertEqual(client.uploaded_images[1][0], source_rows[1][0])
+        self.assertEqual(
+            [(name, content_type) for _data, name, content_type in client.uploaded_images],
+            [
+                ("ad-1.jpg", "image/jpeg"),
+                ("ad-2.png", "image/png"),
+                ("ad-3.png", "image/png"),
+            ],
+        )
+        with Image.open(io.BytesIO(client.uploaded_images[2][0])) as converted_webp:
+            converted_webp.load()
+            self.assertEqual(converted_webp.format, "PNG")
+            self.assertEqual(converted_webp.size, (720, 900))
+            red, green, blue = converted_webp.getpixel((100, 100))
+            self.assertLess(red, 50)
+            self.assertLess(green, 60)
+            self.assertGreater(blue, 150)
 
     def test_partial_failure_preserves_created_ids(self):
         client = FakePostingClient(fail_at="canvas_product_set")
