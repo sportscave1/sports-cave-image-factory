@@ -4231,7 +4231,7 @@ PRIMARY TEXT VARIATIONS
             carousel_notes=expected,
         )
 
-        uploader_by_label(app_test, "Import Carousel CSV").set_value(
+        uploader_by_label(app_test, "Import CSV").set_value(
             [("carousel-copy.csv", data, "text/csv")]
         )
         app_test.run(timeout=30)
@@ -4277,6 +4277,13 @@ PRIMARY TEXT VARIATIONS
             result,
             {},
             blank=True,
+        )
+        self.assertEqual(
+            data,
+            ads_page.build_instant_experience_copy_csv(
+                result,
+                {"ad_notes": {}},
+            ),
         )
         rows = list(
             csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
@@ -4332,6 +4339,34 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             ads_page.parse_instant_experience_copy_csv(
                 data.replace(b"\r\n", b"\n"),
+                result,
+            ),
+            expected,
+        )
+        decorated_headers = [
+            f"  {header.replace('_', ' ').title()}  "
+            for header in ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS
+        ]
+        decorated_output = io.StringIO(newline="")
+        decorated_writer = csv.DictWriter(
+            decorated_output,
+            fieldnames=decorated_headers,
+            lineterminator="\n",
+        )
+        decorated_writer.writeheader()
+        for row in rows:
+            decorated_writer.writerow(
+                {
+                    decorated_header: row[canonical_header]
+                    for decorated_header, canonical_header in zip(
+                        decorated_headers,
+                        ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+                    )
+                }
+            )
+        self.assertEqual(
+            ads_page.parse_instant_experience_copy_csv(
+                decorated_output.getvalue().encode("utf-8-sig"),
                 result,
             ),
             expected,
@@ -4495,7 +4530,7 @@ PRIMARY TEXT VARIATIONS
             concept_notes=expected,
         )
 
-        uploader_by_label(app_test, "Import completed CSV").set_value(
+        uploader_by_label(app_test, "Import CSV").set_value(
             [("instant-experience-copy.csv", data, "text/csv")]
         )
         app_test.run(timeout=30)
@@ -4554,10 +4589,15 @@ PRIMARY TEXT VARIATIONS
             variation_token="copy-csv-control",
         )
 
-        self.assertIn('st.popover("Copy CSV"', csv_control_source)
-        self.assertIn("Download blank CSV", csv_control_source)
-        self.assertIn("Download current CSV", csv_control_source)
-        self.assertIn("Import completed CSV", csv_control_source)
+        self.assertIn('st.popover("CSV"', csv_control_source)
+        self.assertIn('"Import CSV"', csv_control_source)
+        self.assertIn('"Export CSV"', csv_control_source)
+        self.assertNotIn("Download blank CSV", csv_control_source)
+        self.assertNotIn("Download current CSV", csv_control_source)
+        self.assertNotIn("Download Posting CSV", csv_control_source)
+        self.assertNotIn("posting_import_csv", csv_control_source)
+        self.assertNotIn("build_ads_posting_import_csv", source)
+        self.assertNotIn("from posting_import_csv import", source)
         self.assertNotIn("st.expander", csv_control_source)
         self.assertNotIn("st.dataframe", csv_control_source)
         self.assertEqual(
@@ -4687,7 +4727,7 @@ PRIMARY TEXT VARIATIONS
             result,
             concept_notes=instant_experience_csv_notes(),
         )
-        uploader_by_label(app_test, "Import completed CSV").set_value(
+        uploader_by_label(app_test, "Import CSV").set_value(
             [("instant-experience-copy.csv", copy_csv, "text/csv")]
         )
         app_test.run(timeout=30)
@@ -5560,7 +5600,7 @@ PRIMARY TEXT VARIATIONS
             concept_notes=expected,
         )
 
-        uploader_by_label(app_test, "Import completed CSV").set_value(
+        uploader_by_label(app_test, "Import CSV").set_value(
             [("instant-experience-copy.csv", data, "text/csv")]
         )
         app_test.run(timeout=30)

@@ -201,57 +201,27 @@ class PostingImportContractTests(unittest.TestCase):
         headers = next(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(tuple(headers), POSTING_IMPORT_HEADERS)
 
-    def test_new_ads_and_creative_refresh_export_identical_schema_and_values(self):
+    def test_new_ads_and_creative_refresh_use_the_ads_copy_contract_not_posting(self):
         workflow = ads_workflow()
-        new_data = ads_page.build_ads_posting_import_csv(ads_result(), workflow)
-        refresh_data = ads_page.build_ads_posting_import_csv(
-            ads_result(workflow_mode=ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH),
+        new_result = ads_result()
+        refresh_result = ads_result(
+            workflow_mode=ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+        )
+        new_data = ads_page.build_instant_experience_copy_csv(new_result, workflow)
+        refresh_data = ads_page.build_instant_experience_copy_csv(
+            refresh_result,
             workflow,
         )
-        new_batch = parse_posting_import_csv(new_data)
-        refresh_batch = parse_posting_import_csv(refresh_data)
-        self.assertEqual(new_batch["rows"], refresh_batch["rows"])
-        self.assertEqual(new_batch["country"], "AUS")
-        self.assertEqual(new_batch["sport_category"], "Motorsport")
-        self.assertEqual(new_batch["campaign_type"], "Instant Experience")
-        self.assertEqual(new_batch["ads"][0]["primary_text"], posting_ads()[0]["primary_text"])
-        self.assertEqual(new_batch["ads"][2]["headline"], posting_ads()[2]["headline"])
-        self.assertEqual(len(new_batch["ads"][0]["variations"]), 3)
-        self.assertEqual(
-            new_batch["ads"][1]["variations"][2]["primary_text"],
-            "Alternative 2B",
+        self.assertEqual(new_data, refresh_data)
+        headers = tuple(
+            next(csv.reader(io.StringIO(new_data.decode("utf-8-sig"))))
         )
-        self.assertEqual(
-            tuple(
-                next(
-                    csv.reader(
-                        io.StringIO(
-                            ads_page.build_instant_experience_copy_csv(
-                                ads_result(), workflow
-                            ).decode("utf-8-sig")
-                        )
-                    )
-                )
-            ),
-            ADS_COPY_HEADERS,
-        )
+        self.assertEqual(headers, ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
+        self.assertNotEqual(headers, POSTING_IMPORT_HEADERS)
+        with self.assertRaisesRegex(PostingImportCSVError, "no product details"):
+            parse_posting_import_csv(new_data)
 
-    def test_named_standard_ads_fields_map_without_display_text_reconstruction(self):
-        result = ads_result()
-        result["standard_ads"] = tuple(
-            {
-                **ad,
-                "strategy": f"Strategy {ad['ad_number']}",
-                "image_prompt": f"Standalone prompt {ad['ad_number']}",
-            }
-            for ad in posting_ads()
-        )
-        parsed = parse_posting_import_csv(
-            ads_page.build_ads_posting_import_csv(result, ads_workflow())
-        )
-        self.assertEqual(primary_ads(parsed), posting_ads())
-
-    def test_package_adds_posting_csv_without_changing_text_exports(self):
+    def test_package_adds_current_ads_csv_without_changing_text_exports(self):
         result = ads_result()
         workflow = ads_workflow()
         for concept in INSTANT_EXPERIENCE_CONCEPTS:
@@ -265,13 +235,15 @@ class PostingImportContractTests(unittest.TestCase):
             }
         items = ads_page._instant_experience_package_items(result, workflow)
         item_by_path = {item["relative_path"]: item for item in items}
-        self.assertIn(POSTING_IMPORT_FILENAME, item_by_path)
-        stored_batch = parse_posting_import_csv(
-            item_by_path[POSTING_IMPORT_FILENAME]["data"]
+        csv_filename = ads_page._instant_experience_current_copy_csv_filename(result)
+        self.assertIn(csv_filename, item_by_path)
+        self.assertNotIn(POSTING_IMPORT_FILENAME, item_by_path)
+        stored_copy = ads_page.parse_instant_experience_copy_csv(
+            item_by_path[csv_filename]["data"],
+            result,
         )
-        self.assertEqual(len(stored_batch["rows"]), 9)
         self.assertEqual(
-            stored_batch["ads"][2]["variations"][1]["headline"],
+            stored_copy[INSTANT_EXPERIENCE_CONCEPTS[2]["id"]][1]["headline"],
             "Alternative headline 3A",
         )
         self.assertEqual(
@@ -482,9 +454,7 @@ class PostingImportContractTests(unittest.TestCase):
         self.assertTrue(ads_status["ok"])
         self.assertEqual(ads_status["message"], "CSV imported — ad copy applied.")
 
-        posting_data = ads_page.build_ads_posting_import_csv(
-            result, ads_workflow()
-        )
+        posting_data = serialize_posting_import_csv(posting_rows())
         posting_state = {
             ads_posting_page.CSV_IMPORT_STATE_KEY: {
                 "ok": False,
@@ -528,7 +498,7 @@ class PostingImportContractTests(unittest.TestCase):
         self.assertEqual(primary_ads(parsed), posting_ads())
         self.assertEqual(parsed["source_schema_version"], POSTING_IMPORT_LEGACY_SCHEMA_VERSION)
 
-    def test_new_ads_and_refresh_round_trip_import_save_and_posting_hydration(self):
+    def test_new_ads_and_refresh_round_trip_import_export_and_save_independently(self):
         for workflow_mode in (
             ads_page.ADS_WORKFLOW_MODE_NEW,
             ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH,
@@ -540,7 +510,9 @@ class PostingImportContractTests(unittest.TestCase):
                     ads_workflow(),
                 )
                 imported_workflow = {"ad_notes": {}, "slots": {}}
-                ads_state = {}
+                ads_state = {
+                    ads_page.ADS_ACTIVE_WORKFLOW_MODE_KEY: workflow_mode,
+                }
                 with mock.patch.object(ads_page.st, "session_state", ads_state):
                     status = ads_page._process_instant_experience_copy_csv_upload(
                         result,
@@ -551,9 +523,26 @@ class PostingImportContractTests(unittest.TestCase):
                             file_id=f"ads-{workflow_mode}",
                         ),
                     )
+                    exported_again = ads_page.build_instant_experience_copy_csv(
+                        result,
+                        imported_workflow,
+                    )
                 self.assertTrue(status["ok"])
                 self.assertEqual(status["message"], "CSV imported — ad copy applied.")
                 self.assertTrue(ads_page.instant_experience_copy_complete(imported_workflow))
+                self.assertEqual(exported_again, completed_csv)
+                expected_state_key = (
+                    ads_page.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY
+                    if workflow_mode == ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+                    else ads_page.ADS_IMAGE_STATE_KEY
+                )
+                other_state_key = (
+                    ads_page.ADS_IMAGE_STATE_KEY
+                    if workflow_mode == ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+                    else ads_page.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY
+                )
+                self.assertIs(ads_state[expected_state_key], imported_workflow)
+                self.assertNotIn(other_state_key, ads_state)
                 for concept in INSTANT_EXPERIENCE_CONCEPTS:
                     imported_workflow["slots"][concept["slot_id"]] = {
                         "valid": True,
@@ -571,39 +560,28 @@ class PostingImportContractTests(unittest.TestCase):
                         imported_workflow,
                     )
                 }
-                self.assertIn(POSTING_IMPORT_FILENAME, stored_items)
-                stored_csv = stored_items[POSTING_IMPORT_FILENAME]["data"]
-                stored_batch = parse_posting_import_csv(stored_csv)
-                self.assertEqual(len(stored_batch["rows"]), 9)
-                posting_expected = tuple(
-                    {**ad, "description": ""} for ad in posting_ads()
+                csv_filename = ads_page._instant_experience_current_copy_csv_filename(
+                    result
                 )
-                self.assertEqual(primary_ads(stored_batch), posting_expected)
-
-                posting_state = {ads_posting_page.AUDIENCE_KEY: "broad"}
-                posting_status = ads_posting_page.process_posting_csv_upload(
-                    FakeUpload(
-                        stored_csv,
-                        name="saved-ad-copy-any-name.csv",
-                        file_id=f"posting-{workflow_mode}",
-                    ),
-                    product_records(),
-                    state=posting_state,
+                self.assertIn(csv_filename, stored_items)
+                self.assertNotIn(POSTING_IMPORT_FILENAME, stored_items)
+                stored_csv = stored_items[csv_filename]["data"]
+                stored_copy = ads_page.parse_instant_experience_copy_csv(
+                    stored_csv,
+                    result,
                 )
-                self.assertTrue(posting_status["ok"])
-                for index, expected in enumerate(posting_expected):
-                    self.assertEqual(
-                        posting_state[ads_posting_page.PRIMARY_TEXT_KEYS[index]],
-                        expected["primary_text"],
-                    )
-                    self.assertEqual(
-                        posting_state[ads_posting_page.HEADLINE_KEYS[index]],
-                        expected["headline"],
-                    )
-                    self.assertEqual(
-                        posting_state[ads_posting_page.DESCRIPTION_KEYS[index]],
-                        expected["description"],
-                    )
+                self.assertEqual(
+                    stored_copy,
+                    ads_page.parse_instant_experience_copy_csv(completed_csv, result),
+                )
+                expected_slot = (
+                    "_creative_refresh_copy_csv"
+                    if workflow_mode == ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+                    else "_new_ads_copy_csv"
+                )
+                self.assertEqual(stored_items[csv_filename]["slot_id"], expected_slot)
+                with self.assertRaisesRegex(PostingImportCSVError, "no product details"):
+                    parse_posting_import_csv(stored_csv)
 
 
 class PostingCSVImportTests(unittest.TestCase):

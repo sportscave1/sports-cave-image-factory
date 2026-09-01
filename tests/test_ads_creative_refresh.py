@@ -815,17 +815,11 @@ class CreativeRefreshV2Tests(unittest.TestCase):
 
         self.assertEqual(refresh_prompt, f"{winner_block}\n\n{new_ads_prompt}")
         self.assertEqual(
-            ads_page.POSTING_IMPORT_HEADERS,
+            ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
             (
                 "schema_version",
-                "product_name",
-                "product_handle",
-                "product_url",
-                "country",
-                "sport_category",
                 "campaign_type",
                 "output_mode",
-                "ad_number",
                 "route_key",
                 "route_label",
                 "variation",
@@ -833,7 +827,6 @@ class CreativeRefreshV2Tests(unittest.TestCase):
                 "description_label",
                 "primary_text",
                 "headline",
-                "description",
                 "cta",
             ),
         )
@@ -1372,7 +1365,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         labels = [uploader.label for uploader in app_test.file_uploader]
         self.assertNotIn("Meta performance CSV (optional)", labels)
         self.assertNotIn("Winning creative", labels)
-        self.assertIn("Import completed CSV", labels)
+        self.assertIn("Import CSV", labels)
         expected_cover_labels = {
             f"{concept['display_name']} Cover"
             for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS

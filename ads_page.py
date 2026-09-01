@@ -23,20 +23,6 @@ from ads_meta_contract import META_AD_URL_PARAMETERS
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import os_accounts
-from posting_import_csv import (
-    ADS_CSV_IMPORT_RUNTIME_VERSION,
-    ADS_COPY_HEADERS,
-    POSTING_IMPORT_FILENAME,
-    POSTING_IMPORT_HEADERS,
-    PostingImportCSVError,
-    build_ads_copy_rows,
-    build_posting_import_rows,
-    canonical_posting_country,
-    parse_ads_import_csv,
-    posting_product_handle_from_url,
-    serialize_ads_copy_csv,
-    serialize_posting_import_csv,
-)
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
     build_sports_cave_image_realism_rules,
@@ -561,6 +547,9 @@ INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS = (
 INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = len(INSTANT_EXPERIENCE_DESCRIPTION_VARIANTS)
 INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
 INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "2"
+INSTANT_EXPERIENCE_COPY_CSV_IMPORT_RUNTIME_VERSION = (
+    "2026-09-01-ads-page-contract-v3"
+)
 INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE = "instant_experience"
 INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_descriptions"
 INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
@@ -606,6 +595,7 @@ INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
 CAROUSEL_COPY_VARIATION_COUNT = 5
 CAROUSEL_COPY_CSV_SCHEMA_VERSION = "1"
 CAROUSEL_COPY_CSV_CAMPAIGN_TYPE = "carousel"
+CAROUSEL_COPY_CSV_IMPORT_RUNTIME_VERSION = "2026-09-01-ads-page-contract-v2"
 CAROUSEL_COPY_CSV_HEADERS = (
     "schema_version",
     "campaign_type",
@@ -10050,16 +10040,44 @@ def parse_carousel_copy_csv(data, result=None):
         raise CarouselCopyCSVError("The Carousel CSV contains invalid text data.")
     try:
         reader = csv.DictReader(io.StringIO(decoded, newline=""))
-        headers = list(reader.fieldnames or ())
+        raw_headers = tuple(reader.fieldnames or ())
+        headers = tuple(
+            re.sub(
+                r"[^a-z0-9]+",
+                "_",
+                str(header or "").lstrip("\ufeff").strip().casefold(),
+            ).strip("_")
+            for header in raw_headers
+        )
+        if any(not header for header in headers):
+            raise CarouselCopyCSVError(
+                "The Carousel CSV contains an empty column header."
+            )
         if len(headers) != len(set(headers)):
             raise CarouselCopyCSVError("The Carousel CSV contains duplicate column headers.")
         if frozenset(headers) != frozenset(CAROUSEL_COPY_CSV_HEADERS):
-            required = ", ".join(CAROUSEL_COPY_CSV_HEADERS)
+            missing = [header for header in CAROUSEL_COPY_CSV_HEADERS if header not in headers]
+            if missing:
+                raise CarouselCopyCSVError(f"Missing required column: {missing[0]}.")
             raise CarouselCopyCSVError(
-                f"Use the Carousel CSV headers exactly: {required}."
+                "The CSV does not match the Sports Cave Carousel copy format."
             )
-        rows = list(reader)
-    except csv.Error as error:
+        header_map = dict(zip(raw_headers, headers))
+        rows = []
+        for row_number, raw_row in enumerate(reader, start=2):
+            if None in raw_row or any(value is None for value in raw_row.values()):
+                raise CarouselCopyCSVError(
+                    f"CSV row {row_number} has a quoting or column-count problem."
+                )
+            row = {
+                header_map[raw_header]: _preserve_multiline_text(value)
+                for raw_header, value in raw_row.items()
+            }
+            if any(value.strip() for value in row.values()):
+                rows.append(row)
+    except CarouselCopyCSVError:
+        raise
+    except (csv.Error, AttributeError) as error:
         raise CarouselCopyCSVError(
             "The Carousel CSV could not be read. Check its quoting and line breaks."
         ) from error
@@ -10084,10 +10102,6 @@ def parse_carousel_copy_csv(data, result=None):
         "primary_text": ("primary_texts", "primary_text"),
     }
     for row_number, row in enumerate(rows, start=2):
-        if None in row or any(value is None for value in row.values()):
-            raise CarouselCopyCSVError(
-                f"CSV row {row_number} has an unexpected or missing value."
-            )
         if str(row.get("schema_version") or "").strip() != CAROUSEL_COPY_CSV_SCHEMA_VERSION:
             raise CarouselCopyCSVError(
                 f"CSV row {row_number} has an incompatible schema_version. Download a fresh template."
@@ -10200,22 +10214,37 @@ def apply_carousel_copy_csv(result, workflow, data):
 def _process_carousel_copy_csv_upload(result, workflow, uploaded_file):
     if uploaded_file is None:
         return None
+    source_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
+    previous_file_id = str(workflow.get("carousel_csv_import_file_id") or "").strip()
+    same_runtime = (
+        workflow.get("carousel_csv_import_runtime_version")
+        == CAROUSEL_COPY_CSV_IMPORT_RUNTIME_VERSION
+    )
+    if same_runtime and source_file_id and source_file_id == previous_file_id:
+        return workflow.get("carousel_csv_import_status")
     source_bytes = bytes(uploaded_file.getvalue() or b"")
     digest = hashlib.sha256(source_bytes).hexdigest()
-    if workflow.get("carousel_csv_import_digest") == digest:
+    if (
+        same_runtime
+        and not source_file_id
+        and workflow.get("carousel_csv_import_digest") == digest
+    ):
         return workflow.get("carousel_csv_import_status")
     try:
         imported = apply_carousel_copy_csv(result, workflow, source_bytes)
         status = {
             "ok": True,
-            "message": (
-                f"Imported {imported['row_count']} Carousel rows into "
-                f"{imported['field_count']} editable fields."
-            ),
+            "message": "CSV imported — ad copy applied.",
+            "row_count": imported["row_count"],
+            "field_count": imported["field_count"],
         }
     except CarouselCopyCSVError as error:
         status = {"ok": False, "message": str(error)}
     workflow["carousel_csv_import_digest"] = digest
+    workflow["carousel_csv_import_file_id"] = source_file_id
+    workflow["carousel_csv_import_runtime_version"] = (
+        CAROUSEL_COPY_CSV_IMPORT_RUNTIME_VERSION
+    )
     workflow["carousel_csv_import_status"] = status
     st.session_state[_ads_image_state_key()] = workflow
     return status
@@ -10412,49 +10441,48 @@ def build_instant_experience_copy_csv(
             if blank
             else _instant_experience_copy_notes_with_widget_state(result, workflow or {})
         )
-    ads = []
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    output_mode = _instant_experience_copy_csv_output_mode(result)
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         variations = _normalise_instant_experience_variations(
             concept_notes.get(concept["id"])
         )
-        ads.append(
-            {
-                "route_key": concept["id"],
-                "route_label": _instant_experience_copy_csv_route_label(concept),
-                "variations": tuple(
-                    {
-                        "variation": variation_number,
-                        "description_key": _instant_experience_description_variant(
-                            variation_number
-                        )["key"],
-                        "description_label": _instant_experience_description_variant(
-                            variation_number
-                        )["label"],
-                        "primary_text": (
-                            ""
-                            if blank
-                            else _preserve_multiline_text(variation.get("primary_text"))
-                        ),
-                        "headline": (
-                            ""
-                            if blank
-                            else _preserve_multiline_text(variation.get("headline"))
-                        ),
-                        "cta": (
-                            ""
-                            if blank
-                            else _preserve_multiline_text(variation.get("cta"))
-                        ),
-                    }
-                    for variation_number, variation in enumerate(variations, start=1)
-                ),
-            }
-        )
-    rows = build_ads_copy_rows(
-        output_mode=_instant_experience_copy_csv_output_mode(result),
-        ads=ads,
-    )
-    return serialize_ads_copy_csv(rows, allow_incomplete=True)
+        for variation_number, variation in enumerate(variations, start=1):
+            variant = _instant_experience_description_variant(variation_number)
+            writer.writerow(
+                {
+                    "schema_version": INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION,
+                    "campaign_type": INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE,
+                    "output_mode": output_mode,
+                    "route_key": concept["id"],
+                    "route_label": _instant_experience_copy_csv_route_label(concept),
+                    "variation": str(variation_number),
+                    "description_key": variant["key"],
+                    "description_label": variant["label"],
+                    "primary_text": (
+                        ""
+                        if blank
+                        else _preserve_multiline_text(variation.get("primary_text"))
+                    ),
+                    "headline": (
+                        ""
+                        if blank
+                        else _preserve_multiline_text(variation.get("headline"))
+                    ),
+                    "cta": (
+                        ""
+                        if blank
+                        else _preserve_multiline_text(variation.get("cta"))
+                    ),
+                }
+            )
+    return output.getvalue().encode("utf-8-sig")
 
 
 def _instant_experience_copy_csv_expected_rows(result):
@@ -10475,109 +10503,189 @@ def _instant_experience_copy_csv_expected_rows(result):
     ]
 
 
+def _normalise_ads_copy_csv_header(value):
+    return re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        str(value or "").lstrip("\ufeff").strip().casefold(),
+    ).strip("_")
+
+
 def parse_instant_experience_copy_csv(data, result):
-    try:
-        batch = parse_ads_import_csv(
-            data,
-            allowed_countries=("AUS", "USA", "UK", "CAN", "NZ"),
-            allowed_campaign_types=("Instant Experience",),
-            require_copy=True,
-        )
-    except PostingImportCSVError as error:
-        raise InstantExperienceCopyCSVError(str(error)) from error
-
-    if batch.get("source_schema_kind") != "ads_copy":
-        expected_product = _clean_product_name((result or {}).get("product_name"))
-        if expected_product and str(batch.get("product_name") or "").casefold() != expected_product.casefold():
-            raise InstantExperienceCopyCSVError(
-                f"CSV product_name must match the selected product: {expected_product}."
-            )
-        expected_url = str((result or {}).get("product_url") or "").strip().rstrip("/")
-        actual_url = str(batch.get("product_url") or "").strip().rstrip("/")
-        if expected_url and actual_url.casefold() != expected_url.casefold():
-            raise InstantExperienceCopyCSVError(
-                "CSV product_url must match the selected canonical product URL."
-            )
-        expected_handle = posting_product_handle_from_url(expected_url)
-        if expected_handle and str(batch.get("product_handle") or "").casefold() != expected_handle:
-            raise InstantExperienceCopyCSVError(
-                "CSV product_handle must match the selected product."
-            )
-        expected_country = str((result or {}).get("country") or "").strip()
-        if expected_country:
-            try:
-                expected_country = canonical_posting_country(expected_country)
-            except PostingImportCSVError as error:
-                raise InstantExperienceCopyCSVError(str(error)) from error
-            if batch.get("country") != expected_country:
-                raise InstantExperienceCopyCSVError(
-                    "CSV country must match the selected Ads country."
-                )
-        expected_sport = str((result or {}).get("category") or "").strip()
-        if expected_sport and batch.get("sport_category") != expected_sport:
-            raise InstantExperienceCopyCSVError(
-                "CSV sport_category must match the selected Ads category."
-            )
-
-    expected_output_mode = _instant_experience_copy_csv_output_mode(result)
-    if batch.get("output_mode") != expected_output_mode:
+    source_bytes = bytes(data or b"")
+    if not source_bytes:
         raise InstantExperienceCopyCSVError(
-            "CSV output_mode must match the selected Instant Experience workflow."
+            "Choose a completed Instant Experience CSV file."
+        )
+    if len(source_bytes) > 2 * 1024 * 1024:
+        raise InstantExperienceCopyCSVError("The copy CSV must be smaller than 2 MB.")
+    try:
+        decoded = source_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise InstantExperienceCopyCSVError(
+            "Save the copy CSV as UTF-8 and try again."
+        ) from error
+    if "\x00" in decoded:
+        raise InstantExperienceCopyCSVError("The copy CSV contains invalid text data.")
+
+    legacy_headers = tuple(
+        header
+        for header in INSTANT_EXPERIENCE_COPY_CSV_HEADERS
+        if header not in {"description_key", "description_label"}
+    )
+    canonical_header_set = frozenset(INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
+    legacy_header_set = frozenset(legacy_headers)
+    try:
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        raw_headers = tuple(reader.fieldnames or ())
+        if not raw_headers:
+            raise InstantExperienceCopyCSVError("The copy CSV has no header row.")
+        headers = tuple(_normalise_ads_copy_csv_header(header) for header in raw_headers)
+        if any(not header for header in headers):
+            raise InstantExperienceCopyCSVError(
+                "The copy CSV contains an empty column header."
+            )
+        if len(headers) != len(set(headers)):
+            raise InstantExperienceCopyCSVError(
+                "The copy CSV contains duplicate column headers."
+            )
+        header_set = frozenset(headers)
+        if canonical_header_set.issubset(header_set):
+            selected_header_set = canonical_header_set
+        elif legacy_header_set.issubset(header_set):
+            selected_header_set = legacy_header_set
+        else:
+            missing = [header for header in legacy_headers if header not in headers]
+            if missing:
+                raise InstantExperienceCopyCSVError(
+                    f"Missing required column: {missing[0]}."
+                )
+            raise InstantExperienceCopyCSVError(
+                "The CSV does not match the Sports Cave Instant Experience copy format."
+            )
+        extra_headers = header_set - selected_header_set
+        header_map = dict(zip(raw_headers, headers))
+        rows = []
+        for row_number, raw_row in enumerate(reader, start=2):
+            if None in raw_row or any(value is None for value in raw_row.values()):
+                raise InstantExperienceCopyCSVError(
+                    f"CSV row {row_number} has a quoting or column-count problem."
+                )
+            row = {
+                header_map[raw_header]: _preserve_multiline_text(value)
+                for raw_header, value in raw_row.items()
+            }
+            populated_extra_headers = [
+                header for header in extra_headers if row.get(header, "").strip()
+            ]
+            if populated_extra_headers:
+                raise InstantExperienceCopyCSVError(
+                    f"Unexpected populated column: {populated_extra_headers[0]}."
+                )
+            if any(value.strip() for value in row.values()):
+                rows.append(
+                    {
+                        header: value
+                        for header, value in row.items()
+                        if header in selected_header_set
+                    }
+                )
+    except InstantExperienceCopyCSVError:
+        raise
+    except (csv.Error, AttributeError) as error:
+        raise InstantExperienceCopyCSVError(
+            "The copy CSV could not be read. Check its quoting and line breaks."
+        ) from error
+
+    expected_rows = {
+        (row["route_key"], int(row["variation"])): row
+        for row in _instant_experience_copy_csv_expected_rows(result)
+    }
+    if len(rows) != len(expected_rows):
+        raise InstantExperienceCopyCSVError(
+            f"The copy CSV must contain exactly {len(expected_rows)} copy rows."
         )
 
-    source_headers = set(batch.get("source_headers") or ())
-    ads_by_route = {
-        str(ad.get("route_key") or ""): dict(ad or {})
-        for ad in batch.get("ads") or ()
+    concepts_by_id = {
+        concept["id"]: concept for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
-    parsed = {}
-    for concept in INSTANT_EXPERIENCE_CONCEPTS:
-        ad = ads_by_route.get(concept["id"])
-        if not ad:
+    parsed = {
+        concept["id"]: _blank_instant_experience_variations()
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+    }
+    seen = set()
+    legacy_file = selected_header_set == legacy_header_set
+    for row_number, row in enumerate(rows, start=2):
+        route_key = str(row.get("route_key") or "").strip()
+        try:
+            variation_number = int(str(row.get("variation") or "").strip())
+        except ValueError as error:
             raise InstantExperienceCopyCSVError(
-                f"Missing required route: {concept['id']}."
-            )
-        expected_label = _instant_experience_copy_csv_route_label(concept)
-        if "route_label" in source_headers and str(ad.get("route_label") or "") != expected_label:
+                f"CSV row {row_number} has an invalid variation."
+            ) from error
+        row_key = (route_key, variation_number)
+        expected = expected_rows.get(row_key)
+        if expected is None:
             raise InstantExperienceCopyCSVError(
-                f"Route {concept['id']} must retain label {expected_label}."
+                f"CSV row {row_number} has an unknown route or variation identity."
             )
-        variations_by_number = {
-            int(variation.get("variation") or 0): dict(variation or {})
-            for variation in ad.get("variations") or ()
-        }
-        variations = []
-        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
-            raw_variation = variations_by_number.get(variation_number) or {}
-            expected_variant = _instant_experience_description_variant(variation_number)
-            if "description_key" in source_headers and str(raw_variation.get("description_key") or "") != expected_variant["key"]:
+        if row_key in seen:
+            raise InstantExperienceCopyCSVError(
+                f"CSV row {row_number} duplicates {route_key} variation {variation_number}."
+            )
+        seen.add(row_key)
+
+        schema_version = str(row.get("schema_version") or "").strip()
+        if schema_version != expected["schema_version"] and not (
+            legacy_file and schema_version == "1"
+        ):
+            raise InstantExperienceCopyCSVError(
+                f"CSV row {row_number} has an incompatible schema_version."
+            )
+        campaign_type = _normalise_ads_copy_csv_header(row.get("campaign_type"))
+        if campaign_type != expected["campaign_type"]:
+            raise InstantExperienceCopyCSVError(
+                f"CSV row {row_number} is not an Instant Experience copy row."
+            )
+        for field in ("output_mode", "route_key", "route_label"):
+            if str(row.get(field) or "").strip() != expected[field]:
                 raise InstantExperienceCopyCSVError(
-                    f"{concept['display_name']} variation {variation_number} has an incompatible description_key."
+                    f"CSV row {row_number} has an incompatible {field}."
                 )
-            if "description_label" in source_headers and str(raw_variation.get("description_label") or "") != expected_variant["label"]:
+        for field in ("description_key", "description_label"):
+            if field in selected_header_set and str(row.get(field) or "").strip() != expected[field]:
                 raise InstantExperienceCopyCSVError(
-                    f"{concept['display_name']} variation {variation_number} has an incompatible description_label."
+                    f"CSV row {row_number} has an incompatible {field}."
                 )
-            variation = _with_instant_experience_description_metadata(
-                raw_variation,
-                variation_number,
+
+        variation = _with_instant_experience_description_metadata(
+            {
+                field_key: _preserve_multiline_text(row.get(field_key))
+                for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
+            },
+            variation_number,
+        )
+        # Preserve the newer in-memory shape without adding Posting's description
+        # column to the historical Ads CSV contract.
+        variation["description"] = ""
+        validation_error = _instant_experience_copy_variation_error(
+            variation,
+            concept_id=route_key,
+            variation_number=variation_number,
+        )
+        if validation_error:
+            raise InstantExperienceCopyCSVError(
+                f"{concepts_by_id[route_key]['display_name']} variation "
+                f"{variation_number}: {validation_error}"
             )
-            variation.pop("variation", None)
-            variation["description"] = _preserve_multiline_text(
-                raw_variation.get("description")
-            )
-            validation_error = _instant_experience_copy_variation_error(
-                variation,
-                concept_id=concept["id"],
-                variation_number=variation_number,
-            )
-            if validation_error:
-                raise InstantExperienceCopyCSVError(
-                    f"{concept['display_name']} variation {variation_number}: "
-                    f"{validation_error}"
-                )
-            variations.append(variation)
-        parsed[concept["id"]] = variations
+        parsed[route_key][variation_number - 1] = variation
+
+    missing = sorted(set(expected_rows) - seen)
+    if missing:
+        route_key, variation_number = missing[0]
+        raise InstantExperienceCopyCSVError(
+            f"Missing required route {route_key} variation {variation_number}."
+        )
     return parsed
 
 
@@ -10620,7 +10728,7 @@ def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file)
     previous_file_id = str(workflow.get("copy_csv_import_file_id") or "").strip()
     same_runtime = (
         workflow.get("copy_csv_import_runtime_version")
-        == ADS_CSV_IMPORT_RUNTIME_VERSION
+        == INSTANT_EXPERIENCE_COPY_CSV_IMPORT_RUNTIME_VERSION
     )
     if same_runtime and source_file_id and source_file_id == previous_file_id:
         return workflow.get("copy_csv_import_status")
@@ -10644,7 +10752,9 @@ def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file)
         status = {"ok": False, "message": str(error)}
     workflow["copy_csv_import_digest"] = digest
     workflow["copy_csv_import_file_id"] = source_file_id
-    workflow["copy_csv_import_runtime_version"] = ADS_CSV_IMPORT_RUNTIME_VERSION
+    workflow["copy_csv_import_runtime_version"] = (
+        INSTANT_EXPERIENCE_COPY_CSV_IMPORT_RUNTIME_VERSION
+    )
     workflow["copy_csv_import_status"] = status
     st.session_state[_ads_image_state_key()] = workflow
     return status
@@ -11082,96 +11192,6 @@ def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
     ).hexdigest()
 
 
-def _posting_import_ads_from_workflow(result, workflow):
-    standard_ads = tuple(
-        dict(row or {})
-        for row in ((result or {}).get("standard_ads") or ())
-    )
-    if len(standard_ads) == len(INSTANT_EXPERIENCE_CONCEPTS):
-        return tuple(
-            {
-                "ad_number": row.get("ad_number") or index,
-                "route_key": INSTANT_EXPERIENCE_CONCEPTS[index - 1]["id"],
-                "route_label": _instant_experience_copy_csv_route_label(
-                    INSTANT_EXPERIENCE_CONCEPTS[index - 1]
-                ),
-                "variations": (
-                    {
-                        "variation": 1,
-                        "description_key": _instant_experience_description_variant(1)["key"],
-                        "description_label": _instant_experience_description_variant(1)["label"],
-                        "primary_text": _preserve_multiline_text(row.get("primary_text")),
-                        "headline": _preserve_multiline_text(row.get("headline")),
-                        "description": _preserve_multiline_text(row.get("description")),
-                        "cta": _preserve_multiline_text(row.get("cta")),
-                    },
-                ),
-            }
-            for index, row in enumerate(standard_ads, start=1)
-        )
-
-    concept_notes = _instant_experience_copy_notes_with_widget_state(
-        result or {}, workflow or {}
-    )
-    ads = []
-    for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
-        variations = _normalise_instant_experience_variations(
-            concept_notes.get(concept["id"])
-        )
-        for variation_number, variation in enumerate(variations, start=1):
-            validation_error = _instant_experience_copy_variation_error(
-                variation,
-                concept_id=concept["id"],
-                variation_number=variation_number,
-            )
-            if validation_error:
-                raise ValueError(
-                    f"{concept['display_name']} variation {variation_number} is incomplete: "
-                    f"{validation_error}"
-                )
-        ads.append(
-            {
-                "ad_number": index,
-                "route_key": concept["id"],
-                "route_label": _instant_experience_copy_csv_route_label(concept),
-                "variations": tuple(
-                    {
-                        "variation": variation_number,
-                        "description_key": variation.get("description_key"),
-                        "description_label": variation.get("description_label"),
-                        "primary_text": _preserve_multiline_text(
-                            variation.get("primary_text")
-                        ),
-                        "headline": _preserve_multiline_text(variation.get("headline")),
-                        "description": _preserve_multiline_text(
-                            variation.get("description")
-                        ),
-                        "cta": _preserve_multiline_text(variation.get("cta")),
-                    }
-                    for variation_number, variation in enumerate(variations, start=1)
-                ),
-            }
-        )
-    return tuple(ads)
-
-
-def build_ads_posting_import_csv(result, workflow):
-    if str((result or {}).get("campaign_type") or "") != "Instant Experience":
-        raise ValueError("Posting CSV is available for Instant Experience campaigns.")
-    product_url = str((result or {}).get("product_url") or "").strip()
-    rows = build_posting_import_rows(
-        product_name=(result or {}).get("product_name"),
-        product_handle=posting_product_handle_from_url(product_url),
-        product_url=product_url,
-        country=(result or {}).get("country"),
-        sport_category=(result or {}).get("category"),
-        campaign_type=(result or {}).get("campaign_type"),
-        ads=_posting_import_ads_from_workflow(result, workflow),
-        output_mode=_instant_experience_copy_csv_output_mode(result),
-    )
-    return serialize_posting_import_csv(rows)
-
-
 def _instant_experience_slot_for_concept(concept):
     return {
         slot["concept_id"]: slot
@@ -11293,20 +11313,30 @@ def _instant_experience_package_items(result, workflow):
                     concept=concept["display_name"],
                 )
             )
-    posting_csv = build_ads_posting_import_csv(result, workflow)
+    current_csv = build_instant_experience_copy_csv(result, workflow)
+    current_csv_filename = _instant_experience_current_copy_csv_filename(result)
+    workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
+    csv_slot_id = (
+        "_creative_refresh_copy_csv"
+        if workflow_mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+        else "_new_ads_copy_csv"
+    )
     items.append(
         {
             "kind": "copy",
-            "asset_type": "meta_ads_posting_import",
-            "slot_id": "_posting_import_csv",
+            "asset_type": "meta_ads_copy_csv",
+            "slot_id": csv_slot_id,
             "concept_id": "",
             "concept": "",
-            "label": "Posting import CSV",
-            "relative_path": POSTING_IMPORT_FILENAME,
-            "filename": POSTING_IMPORT_FILENAME,
-            "data": posting_csv,
-            "size": len(posting_csv),
-            "copy_variation_count": len(INSTANT_EXPERIENCE_CONCEPTS),
+            "label": "Current Ads copy CSV",
+            "relative_path": current_csv_filename,
+            "filename": current_csv_filename,
+            "data": current_csv,
+            "size": len(current_csv),
+            "copy_variation_count": (
+                len(INSTANT_EXPERIENCE_CONCEPTS)
+                * INSTANT_EXPERIENCE_COPY_VARIATION_COUNT
+            ),
         }
     )
     return items
@@ -11430,18 +11460,9 @@ def _render_carousel_copy_csv_control(result, workflow):
     )
     heading_column.subheader("Generated Ad Images")
     with control_column:
-        with st.popover("Carousel CSV", icon=":material/table_view:"):
-            st.download_button(
-                "Download Carousel CSV Template",
-                data=build_carousel_copy_csv(result, workflow, template=True),
-                file_name="sports-cave-carousel-copy-template.csv",
-                mime="text/csv",
-                key=f"ads-carousel-copy-csv-template::{context_key}",
-                use_container_width=True,
-            )
-            current_download_slot = st.empty()
+        with st.popover("CSV", icon=":material/table_view:"):
             uploaded_file = st.file_uploader(
-                "Import Carousel CSV",
+                "Import CSV",
                 type=["csv"],
                 key=import_key,
                 label_visibility="visible",
@@ -11452,12 +11473,12 @@ def _render_carousel_copy_csv_control(result, workflow):
                     workflow,
                     uploaded_file,
                 )
-            current_download_slot.download_button(
-                "Export Carousel CSV",
+            st.download_button(
+                "Export CSV",
                 data=build_carousel_copy_csv(result, workflow),
                 file_name=_carousel_current_copy_csv_filename(result),
                 mime="text/csv",
-                key=f"ads-carousel-copy-csv-current::{context_key}",
+                key=f"ads-carousel-copy-csv-export::{context_key}",
                 use_container_width=True,
             )
             status = workflow.get("carousel_csv_import_status")
@@ -11706,22 +11727,9 @@ def _render_instant_experience_copy_csv_control(result, workflow):
     )
     heading_column.subheader("Generated Ad Images")
     with control_column:
-        with st.popover("Copy CSV", icon=":material/table_view:"):
-            st.download_button(
-                "Download blank CSV",
-                data=build_instant_experience_copy_csv(
-                    result,
-                    workflow,
-                    blank=True,
-                ),
-                file_name="sports-cave-instant-experience-copy-template.csv",
-                mime="text/csv",
-                key=f"ads-ie-copy-csv-blank::{context_key}",
-                use_container_width=True,
-            )
-            current_download_slot = st.empty()
+        with st.popover("CSV", icon=":material/table_view:"):
             uploaded_file = st.file_uploader(
-                "Import completed CSV",
+                "Import CSV",
                 type=["csv"],
                 key=import_key,
                 label_visibility="visible",
@@ -11732,29 +11740,14 @@ def _render_instant_experience_copy_csv_control(result, workflow):
                     workflow,
                     uploaded_file,
                 )
-            current_download_slot.download_button(
-                "Download current CSV",
+            st.download_button(
+                "Export CSV",
                 data=build_instant_experience_copy_csv(result, workflow),
                 file_name=_instant_experience_current_copy_csv_filename(result),
                 mime="text/csv",
-                key=f"ads-ie-copy-csv-current::{context_key}",
+                key=f"ads-ie-copy-csv-export::{context_key}",
                 use_container_width=True,
             )
-            try:
-                posting_csv = build_ads_posting_import_csv(result, workflow)
-            except ValueError:
-                posting_csv = b""
-            st.download_button(
-                "Download Posting CSV",
-                data=posting_csv,
-                file_name=POSTING_IMPORT_FILENAME,
-                mime="text/csv",
-                disabled=not bool(posting_csv),
-                key=f"ads-ie-posting-csv::{context_key}",
-                use_container_width=True,
-            )
-            if not posting_csv:
-                st.caption("Complete all required copy before downloading the Posting CSV.")
             status = workflow.get("copy_csv_import_status")
             if isinstance(status, dict) and status.get("message"):
                 if status.get("ok"):

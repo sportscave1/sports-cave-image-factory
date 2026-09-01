@@ -704,7 +704,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 "03-premium-scarcity-left/02-framed-greatness/headline.txt",
                 "03-premium-scarcity-left/03-choose-a-side/primary-text.txt",
                 "03-premium-scarcity-left/03-choose-a-side/headline.txt",
-                "posting-import.csv",
+                ads_page._instant_experience_current_copy_csv_filename(result),
             ],
         )
         self.assertEqual(outcomes["_instant_experience_package"]["status"], "saved")
