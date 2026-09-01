@@ -156,6 +156,8 @@ INSTANT_EXPERIENCE_APPROVED_ON_IMAGE_CTAS = (
     "SECURE THIS EDITION",
 )
 ADS_COPY_FILENAME = "Ad Copy.txt"
+ADS_PRIMARY_TEXT_FILENAME = "primary-text.txt"
+ADS_HEADLINE_FILENAME = "headline.txt"
 CAROUSEL_COPY_FILENAME = "Carousel Copy.csv"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -10763,6 +10765,55 @@ def _instant_experience_concept_ad_copy_text(result, workflow, concept):
     return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
 
 
+def build_ad_variation_text_items(
+    variation,
+    *,
+    relative_folder,
+    slot_id,
+    label,
+    concept_id="",
+    concept="",
+):
+    """Build self-contained Primary Text and Headline export items."""
+
+    folder = str(relative_folder or "").replace("\\", "/").strip("/")
+    folder_parts = PurePosixPath(folder).parts
+    if (
+        not folder
+        or PurePosixPath(folder).is_absolute()
+        or any(part in {"", ".", ".."} for part in folder_parts)
+        or any(ads_image_workflow.sanitize_product_filename(part) != part for part in folder_parts)
+    ):
+        raise ValueError("The ad variation export folder is not Windows-safe.")
+
+    values = (
+        ("primary_text", "Primary Text", ADS_PRIMARY_TEXT_FILENAME),
+        ("headline", "Headline", ADS_HEADLINE_FILENAME),
+    )
+    items = []
+    for field_key, field_label, filename in values:
+        value = str((variation or {}).get(field_key) or "")
+        if not value.strip():
+            raise ValueError(f"{label} {field_label} is required before packaging.")
+        data = value.encode("utf-8")
+        items.append(
+            {
+                "kind": "copy",
+                "asset_type": "meta_ads_copy",
+                "slot_id": f"{slot_id}:{field_key}",
+                "concept_id": concept_id,
+                "concept": concept,
+                "label": f"{label} {field_label}",
+                "relative_path": f"{folder}/{filename}",
+                "filename": filename,
+                "data": data,
+                "size": len(data),
+                "copy_field": field_key,
+            }
+        )
+    return items
+
+
 def _instant_experience_copy_export_lines(workflow):
     notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     lines = ["INSTANT EXPERIENCE AD COPY", ""]
@@ -11071,6 +11122,25 @@ def _instant_experience_package_items(result, workflow):
                 "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
             }
         )
+        variations = _instant_experience_concept_copy_notes_from_workflow(workflow).get(
+            concept["id"]
+        ) or _blank_instant_experience_variations()
+        for variation_number, variation in enumerate(variations, start=1):
+            variant = _instant_experience_description_variant(variation_number)
+            variation_folder = (
+                f"{concept['folder']}/{variation_number:02d}-"
+                f"{variant['key'].replace('_', '-')}"
+            )
+            items.extend(
+                build_ad_variation_text_items(
+                    variation,
+                    relative_folder=variation_folder,
+                    slot_id=f"{concept['id']}:{variant['key']}",
+                    label=f"{concept['display_name']} {variant['label']}",
+                    concept_id=concept["id"],
+                    concept=concept["display_name"],
+                )
+            )
     return items
 
 

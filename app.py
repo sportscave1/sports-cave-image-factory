@@ -76,6 +76,7 @@ social_media_page_module = None
 ads_page_module = None
 ads_creative_refresh_module = None
 ads_posting_page_module = None
+ads_meta_review_page_module = None
 reporting_page_module = None
 seo_page_module = None
 analytics_page_module = None
@@ -228,6 +229,15 @@ def get_ads_posting_page():
         ads_posting_page_module = importlib.import_module("ads_posting_page")
         log_startup_stage("ADS POSTING PAGE IMPORT DONE")
     return ads_posting_page_module
+
+
+def get_ads_meta_review_page():
+    global ads_meta_review_page_module
+    if ads_meta_review_page_module is None:
+        log_startup_stage("ADS META REVIEW PAGE IMPORT START")
+        ads_meta_review_page_module = importlib.import_module("ads_meta_review_page")
+        log_startup_stage("ADS META REVIEW PAGE IMPORT DONE")
+    return ads_meta_review_page_module
 
 
 def get_marketing_factory_page():
@@ -8901,6 +8911,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Ads": ":material/ads_click:",
     ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
     ads_nav.POSTING_ROUTE: ":material/publish:",
+    ads_nav.META_REVIEW_ROUTE: ":material/rate_review:",
     analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
@@ -15941,6 +15952,8 @@ def render_selected_page(current_page):
         get_ads_creative_refresh_page().render_page()
     elif current_page == ads_nav.POSTING_ROUTE:
         get_ads_posting_page().render_page()
+    elif current_page == ads_nav.META_REVIEW_ROUTE:
+        get_ads_meta_review_page().render_page()
     elif current_page in {"Settings", "Developer"}:
         render_settings_page()
     else:

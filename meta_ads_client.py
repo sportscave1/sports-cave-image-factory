@@ -250,7 +250,7 @@ def fetch_meta_account(config=None):
     config = config or get_meta_config()
     return _request(
         config["ad_account_id"],
-        params={"fields": "account_id,name,currency,timezone_name"},
+        params={"fields": "account_id,name,currency,timezone_name,business{id,name}"},
         config=config,
     )
 
@@ -739,7 +739,7 @@ def fetch_meta_campaign_adsets(campaign_id, config=None):
     return _paged_get(
         f"{str(campaign_id or '').strip()}/adsets",
         params={
-            "fields": "id,name,status,effective_status,campaign_id,account_id",
+            "fields": "id,name,status,effective_status,campaign_id,account_id,created_time",
             "limit": 100,
         },
         config=config,
@@ -747,7 +747,11 @@ def fetch_meta_campaign_adsets(campaign_id, config=None):
 
 
 class MetaPostingClient:
-    """Paused-only Marketing API client used by Ads > Posting."""
+    """Paused-only Marketing API client used by Ads > Posting.
+
+    Read methods are deliberately separate from write methods so page rendering can
+    load selectors and diagnostics without creating or mutating Meta objects.
+    """
 
     def __init__(self, config=None):
         self.config = config or get_meta_config()
@@ -775,8 +779,32 @@ class MetaPostingClient:
     def permissions(self):
         return fetch_meta_permissions(config=self.config)
 
+    def account(self):
+        return fetch_meta_account(config=self.config)
+
+    def page(self):
+        return _request(
+            self.page_id,
+            params={"fields": "id,name"},
+            config=self.config,
+        )
+
+    def instagram_account(self):
+        return _request(
+            self.instagram_user_id,
+            params={"fields": "id,username,name"},
+            config=self.config,
+        )
+
     def campaigns(self):
         return tuple(fetch_meta_campaigns(config=self.config).get("rows") or ())
+
+    def existing_ad_names(self):
+        return tuple(
+            str(row.get("name") or "")
+            for row in fetch_meta_ads(config=self.config).get("rows") or ()
+            if str(row.get("name") or "").strip()
+        )
 
     def campaign_adsets(self, campaign_id):
         return tuple(
@@ -787,6 +815,236 @@ class MetaPostingClient:
         return _request(
             str(campaign_id or ""),
             params={"fields": "id,name,status,effective_status,account_id"},
+            config=self.config,
+        )
+
+    def catalogs(self):
+        account = dict(self.account() or {})
+        business_id = str((account.get("business") or {}).get("id") or "")
+        rows = []
+
+        def load_edge(parent_id, edge):
+            try:
+                return _paged_get(
+                    f"{parent_id}/{edge}",
+                    params={"fields": "id,name,vertical,product_count", "limit": 100},
+                    config=self.config,
+                ).get("rows") or ()
+            except MetaAdsApiError:
+                return _paged_get(
+                    f"{parent_id}/{edge}",
+                    params={"fields": "id,name,vertical", "limit": 100},
+                    config=self.config,
+                ).get("rows") or ()
+
+        if business_id:
+            for edge in ("owned_product_catalogs", "client_product_catalogs"):
+                try:
+                    rows.extend(load_edge(business_id, edge))
+                except MetaAdsApiError:
+                    LOGGER.info("Optional Meta catalog edge unavailable: %s", edge)
+        if self.page_id:
+            try:
+                rows.extend(load_edge(self.page_id, "product_catalogs"))
+            except MetaAdsApiError:
+                LOGGER.info("Optional Page catalog edge unavailable")
+        return tuple({str(row.get("id")): dict(row) for row in rows if row.get("id")}.values())
+
+    def product_sets(self, catalog_id):
+        return tuple(
+            _paged_get(
+                f"{str(catalog_id or '').strip()}/product_sets",
+                params={"fields": "id,name,product_catalog{id,name},filter", "limit": 100},
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def pixels(self):
+        return tuple(
+            _paged_get(
+                f"{self.ad_account_id}/adspixels",
+                params={"fields": "id,name,last_fired_time", "limit": 100},
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def saved_audiences(self):
+        return tuple(
+            _paged_get(
+                f"{self.ad_account_id}/saved_audiences",
+                params={"fields": "id,name,targeting", "limit": 100},
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def custom_audiences(self):
+        return tuple(
+            _paged_get(
+                f"{self.ad_account_id}/customaudiences",
+                params={
+                    "fields": "id,name,subtype,lookalike_spec,operation_status,delivery_status",
+                    "limit": 100,
+                },
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def reference_data(self):
+        warnings = []
+        catalogs = self.catalogs()
+        pixels = self.pixels()
+        try:
+            saved = self.saved_audiences()
+        except MetaAdsApiError:
+            saved = ()
+            warnings.append("Saved audiences are unavailable to this token.")
+        try:
+            custom = self.custom_audiences()
+        except MetaAdsApiError:
+            custom = ()
+            warnings.append("Custom audiences are unavailable to this token.")
+        return {
+            "account": dict(self.account() or {}),
+            "page": dict(self.page() or {}),
+            "instagram": dict(self.instagram_account() or {}),
+            "catalogs": tuple(dict(row) for row in catalogs),
+            "pixels": tuple(dict(row) for row in pixels),
+            "saved_audiences": tuple(dict(row) for row in saved),
+            "custom_audiences": tuple(dict(row) for row in custom),
+            "warnings": tuple(warnings),
+        }
+
+    @staticmethod
+    def _graph_data(payload, *, json_fields=()):
+        data = {}
+        for key, value in dict(payload or {}).items():
+            if value is None:
+                continue
+            data[key] = json.dumps(value) if key in set(json_fields) else value
+        return data
+
+    def create_campaign(self, payload):
+        result = _post(
+            f"{self.ad_account_id}/campaigns",
+            data=self._graph_data(
+                payload,
+                json_fields=("special_ad_categories", "promoted_object"),
+            ),
+            config=self.config,
+        )
+        campaign_id = str(result.get("id") or "")
+        if not campaign_id:
+            raise MetaAdsApiError("Meta did not return a campaign ID.")
+        return campaign_id
+
+    def create_adset(self, payload):
+        result = _post(
+            f"{self.ad_account_id}/adsets",
+            data=self._graph_data(payload, json_fields=("promoted_object", "targeting")),
+            config=self.config,
+        )
+        adset_id = str(result.get("id") or "")
+        if not adset_id:
+            raise MetaAdsApiError("Meta did not return an ad set ID.")
+        return adset_id
+
+    def find_campaigns_by_name(self, name):
+        expected = str(name or "")
+        return tuple(row for row in self.campaigns() if str(row.get("name") or "") == expected)
+
+    def find_adsets_by_name(self, campaign_id, name):
+        expected = str(name or "")
+        return tuple(
+            row
+            for row in self.campaign_adsets(campaign_id)
+            if str(row.get("name") or "") == expected
+        )
+
+    def upload_page_photo(self, image_bytes, *, filename, content_type):
+        payload = _post(
+            f"{self.page_id}/photos",
+            data={"published": "false", "no_story": "true"},
+            files={"source": (str(filename or "ad-image"), bytes(image_bytes), str(content_type))},
+            config=self.config,
+        )
+        photo_id = str(payload.get("id") or payload.get("post_id") or "")
+        if not photo_id:
+            raise MetaAdsApiError("Meta did not return a Page photo ID.")
+        return photo_id
+
+    def create_canvas_element(self, element_type, specification):
+        element_field = str(element_type or "").strip()
+        allowed = {"canvas_photo", "canvas_product_set", "canvas_button", "canvas_footer"}
+        if element_field not in allowed:
+            raise ValueError("Unsupported Instant Experience element type.")
+        payload = _post(
+            f"{self.page_id}/canvas_elements",
+            data={element_field: json.dumps(dict(specification or {}))},
+            config=self.config,
+        )
+        element_id = str(payload.get("id") or "")
+        if not element_id:
+            raise MetaAdsApiError("Meta did not return an Instant Experience element ID.")
+        return element_id
+
+    def canvases(self):
+        return tuple(
+            _paged_get(
+                f"{self.page_id}/canvases",
+                params={"fields": "id,name,is_published,update_time", "limit": 100},
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def find_canvases_by_name(self, name):
+        expected = str(name or "")
+        return tuple(row for row in self.canvases() if str(row.get("name") or "") == expected)
+
+    def create_canvas(self, *, name, body_element_ids):
+        payload = _post(
+            f"{self.page_id}/canvases",
+            data={
+                "name": str(name),
+                "body_element_ids": json.dumps([str(value) for value in body_element_ids]),
+                "is_published": "true",
+            },
+            config=self.config,
+        )
+        canvas_id = str(payload.get("id") or "")
+        if not canvas_id:
+            raise MetaAdsApiError("Meta did not return an Instant Experience ID.")
+        return canvas_id
+
+    def create_collection_creative(self, payload):
+        result = _post(
+            f"{self.ad_account_id}/adcreatives",
+            data=self._graph_data(
+                payload,
+                json_fields=("object_story_spec", "contextual_multi_ads", "degrees_of_freedom_spec"),
+            ),
+            config=self.config,
+        )
+        creative_id = str(result.get("id") or "")
+        if not creative_id:
+            raise MetaAdsApiError("Meta did not return a creative ID.")
+        return creative_id
+
+    def configured_campaign(self, campaign_id):
+        return _request(
+            str(campaign_id or ""),
+            params={"fields": "id,name,status,configured_status,effective_status,account_id"},
+            config=self.config,
+        )
+
+    def configured_adset(self, adset_id):
+        return _request(
+            str(adset_id or ""),
+            params={"fields": "id,name,status,configured_status,effective_status,campaign_id,account_id"},
             config=self.config,
         )
 
@@ -964,6 +1222,14 @@ def _insight_params(date_preset=None, since=None, until=None, days=None, breakdo
 def fetch_meta_ad_insights(date_preset=None, since=None, until=None, days=None, config=None):
     config = config or get_meta_config()
     params = _insight_params(date_preset=date_preset, since=since, until=until, days=days)
+    return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
+
+
+def fetch_meta_ad_insights_summary(date_preset=None, since=None, until=None, days=None, config=None):
+    """Return one range-total row per ad for the read-only Meta Review page."""
+    config = config or get_meta_config()
+    params = _insight_params(date_preset=date_preset, since=since, until=until, days=days)
+    params.pop("time_increment", None)
     return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
 
 

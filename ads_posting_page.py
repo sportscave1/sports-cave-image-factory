@@ -1,43 +1,53 @@
 from __future__ import annotations
 
-from datetime import datetime
 import html
+import os
 
 import streamlit as st
 
+import ads_page
 from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
-from meta_ads_client import (
-    MetaAdsApiError,
-    MetaPostingClient,
-    diagnose_meta_posting_connection,
-)
+from ads_product_catalog import load_live_edition_product_rows
+from meta_ads_client import MetaAdsApiError, MetaPostingClient, diagnose_meta_posting_connection
 from meta_posting_service import (
+    AD_TYPE,
+    CAMPAIGN_DAILY_BUDGET_MINOR,
+    COUNTRY_META_CODES,
+    EXPECTED_CATALOG_NAME,
+    EXPECTED_PIXEL_NAME,
+    INSTANT_EXPERIENCE_BUTTON_TEXT,
+    PRODUCT_DESCRIPTION,
+    SPORT_OPTIONS,
+    SUCCESS_MESSAGE,
     MetaPostingService,
     PostingAmbiguousError,
     PostingBusyError,
     PostingError,
     PostingRequest,
     PostingValidationError,
-    SUCCESS_MESSAGE,
     ads_manager_url,
-    default_ad_name,
+    adset_name,
+    campaign_name,
+    next_instant_experience_ad_name,
     posting_submission_id,
 )
 
 
-STATE_PREFIX = "ads_posting_"
+STATE_PREFIX = "ads_posting_v2_"
 SUBMISSION_ID_KEY = f"{STATE_PREFIX}submission_id"
-CAMPAIGN_KEY = f"{STATE_PREFIX}campaign_id"
-CAMPAIGN_TRACK_KEY = f"{STATE_PREFIX}campaign_track"
-ADSET_KEY = f"{STATE_PREFIX}adset_id"
-URL_KEY = f"{STATE_PREFIX}product_url"
+PRODUCT_KEY = f"{STATE_PREFIX}product"
+PRODUCT_TRACK_KEY = f"{STATE_PREFIX}product_track"
+COUNTRY_KEY = f"{STATE_PREFIX}country"
+SPORT_KEY = f"{STATE_PREFIX}sport"
+CATALOG_KEY = f"{STATE_PREFIX}catalog"
+PRODUCT_SET_KEY = f"{STATE_PREFIX}product_set"
+AUDIENCE_KEY = f"{STATE_PREFIX}audience"
 IMAGE_KEY = f"{STATE_PREFIX}image"
 PRIMARY_TEXT_KEY = f"{STATE_PREFIX}primary_text"
 HEADLINE_KEY = f"{STATE_PREFIX}headline"
-AD_NAME_KEY = f"{STATE_PREFIX}ad_name"
-AUTO_AD_NAME_KEY = f"{STATE_PREFIX}auto_ad_name"
 DESCRIPTION_KEY = f"{STATE_PREFIX}description"
 RESULT_KEY = f"{STATE_PREFIX}result"
+PROCESSING_KEY = f"{STATE_PREFIX}processing"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -46,9 +56,16 @@ def _load_meta_overview():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_campaign_adsets(campaign_id):
+def _load_meta_references():
     client = MetaPostingClient()
-    return tuple(dict(row) for row in client.campaign_adsets(campaign_id))
+    payload = dict(client.reference_data() or {})
+    payload["existing_ad_names"] = tuple(client.existing_ad_names())
+    return payload
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_product_sets(catalog_id):
+    return tuple(dict(row) for row in MetaPostingClient().product_sets(catalog_id))
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -58,76 +75,15 @@ def _load_recent_posts():
 
 def _clear_meta_cache():
     _load_meta_overview.clear()
-    _load_campaign_adsets.clear()
-
-
-def _render_recent_posts():
-    with st.expander("Recent Posts", expanded=False):
-        try:
-            records = _load_recent_posts()
-        except Exception:
-            st.caption("Recent posting history is unavailable.")
-            return
-        if not records:
-            st.caption("No paused ads have been posted yet.")
-            return
-        account_id = MetaPostingClient().ad_account_id
-        rows = []
-        for record in records:
-            rows.append(
-                {
-                    "Date": str(record.get("completed_at") or record.get("created_at") or ""),
-                    "Ad name": str(record.get("ad_name") or ""),
-                    "Campaign": str(record.get("campaign_name") or ""),
-                    "Ad set": str(record.get("adset_name") or ""),
-                    "Status": str(record.get("meta_status") or record.get("status") or "").title(),
-                    "Meta Ad ID": str(record.get("meta_ad_id") or ""),
-                    "Open": (
-                        ads_manager_url(
-                            account_id=account_id,
-                            campaign_id=record.get("campaign_id"),
-                            adset_id=record.get("adset_id"),
-                            ad_id=record.get("meta_ad_id"),
-                        )
-                        if record.get("meta_ad_id")
-                        else ""
-                    ),
-                }
-            )
-        st.dataframe(
-            rows,
-            use_container_width=True,
-            hide_index=True,
-            column_config={"Open": st.column_config.LinkColumn("Open", display_text="Open")},
-        )
+    _load_meta_references.clear()
+    _load_product_sets.clear()
 
 
 def _reset_posting_state():
-    for key in (
-        SUBMISSION_ID_KEY,
-        CAMPAIGN_KEY,
-        CAMPAIGN_TRACK_KEY,
-        ADSET_KEY,
-        URL_KEY,
-        IMAGE_KEY,
-        PRIMARY_TEXT_KEY,
-        HEADLINE_KEY,
-        AD_NAME_KEY,
-        AUTO_AD_NAME_KEY,
-        DESCRIPTION_KEY,
-        RESULT_KEY,
-    ):
-        st.session_state.pop(key, None)
+    for key in tuple(st.session_state):
+        if str(key).startswith(STATE_PREFIX):
+            st.session_state.pop(key, None)
     st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
-
-
-def _status_label(row):
-    return str(row.get("effective_status") or row.get("status") or "Unknown").replace("_", " ").title()
-
-
-def _option_label(row):
-    name = str(row.get("name") or row.get("id") or "Unnamed")
-    return f"{name} — {_status_label(row)}"
 
 
 def _connection_status(container, label, *, tone):
@@ -137,111 +93,146 @@ def _connection_status(container, label, *, tone):
 
 def _render_connection_details(overview):
     with st.expander("Connection details", expanded=False):
-        for key in (
-            "configuration",
-            "token_presence",
-            "app_configuration",
-            "account_configuration",
-            "page_identity",
-            "instagram_identity",
-            "token_metadata",
-            "token_identity",
-            "ad_account",
-            "campaigns",
-            "permissions",
-        ):
+        for key in ("configuration", "page_identity", "instagram_identity", "ad_account", "permissions"):
             check = dict((overview.get("checks") or {}).get(key) or {})
-            if not check:
-                continue
-            status = str(check.get("status") or "unknown")
-            if status == "ok":
-                detail = str(check.get("message") or "OK")
-            elif status == "unverified":
-                diagnostic = str(check.get("diagnostic") or "")
-                detail = str(check.get("message") or "unverified")
-                if diagnostic:
-                    detail = f"{detail} — {diagnostic}"
-            else:
-                detail = str(check.get("message") or "Failed")
-            endpoint = str(check.get("endpoint") or "")
-            endpoint_note = f" — GET `{endpoint}`" if endpoint and status != "ok" else ""
-            st.caption(f"**{check.get('label') or key}:** {detail}{endpoint_note}")
-            metadata = []
-            for label, field in (
-                ("HTTP", "http_status"),
-                ("type", "error_type"),
-                ("code", "error_code"),
-                ("subcode", "error_subcode"),
-                ("fbtrace_id", "fbtrace_id"),
-            ):
-                value = check.get(field)
-                if value not in (None, ""):
-                    metadata.append(f"{label}: `{value}`")
-            if metadata:
-                st.caption(" · ".join(metadata))
-            if key == "token_metadata" and check.get("token_app_id"):
-                scope_note = (
-                    "ads_management present"
-                    if "ads_management" in set(check.get("scopes") or ())
-                    else "ads_management not reported"
-                )
+            if check:
                 st.caption(
-                    f"Token type: `{check.get('token_type') or 'unknown'}` · "
-                    f"App ID: `{check.get('token_app_id')}` · {scope_note}"
+                    f"**{check.get('label') or key}:** {check.get('message') or check.get('status') or 'Unknown'}"
                 )
-        source = str(overview.get("api_version_source") or "default")
-        source_label = "Render override" if source == "META_API_VERSION" else "application default"
-        default_version = str(overview.get("default_api_version") or "unknown")
         st.caption(
-            f"**Effective API version:** {overview.get('api_version') or 'unknown'} "
-            f"({source_label}; application default {default_version})"
+            f"Graph API: `{overview.get('api_version') or 'unknown'}` · "
+            f"permission: `{overview.get('permission_state') or 'unknown'}`"
         )
-        version_warning = str(overview.get("version_warning") or "")
-        if version_warning:
-            st.caption(f"**API version action:** {version_warning}")
-        diagnosis = str(overview.get("diagnosis_category") or "")
-        if diagnosis and diagnosis != "connected":
-            st.caption(f"**Diagnosis category:** `{diagnosis}`")
-        for item in overview.get("guidance") or ():
-            st.caption(f"• {item}")
+
+
+def _infer_sport(selection):
+    row = dict(selection.get("row") or {})
+    candidates = [
+        str(row.get("product_type") or ""),
+        *[str(value or "") for value in row.get("collections") or ()],
+        str(selection.get("selected_label") or ""),
+    ]
+    joined = " | ".join(candidates).casefold()
+    aliases = {
+        "nba": "NBA", "basketball": "NBA", "motorsport": "Motorsport", "formula 1": "Motorsport",
+        "football": "Football", "soccer": "Football", "cricket": "Cricket", "golf": "Golf",
+        "horse racing": "Horse Racing", "baseball": "Baseball", "boxing": "Combat", "ufc": "Combat",
+        "combat": "Combat", "ice hockey": "Ice Hockey", "nhl": "Ice Hockey", "nfl": "NFL",
+        "rugby union": "Rugby Union", "tennis": "Tennis",
+    }
+    for needle, sport in aliases.items():
+        if needle in joined:
+            return sport
+    return "Other"
+
+
+def _audience_options(references):
+    rows = [{"key": "broad", "type": "broad", "label_type": "Broad", "id": "", "name": "Broad"}]
+    rows.extend(
+        {
+            "key": f"saved:{row.get('id')}", "type": "saved", "id": str(row.get("id") or ""),
+            "label_type": "Saved",
+            "name": str(row.get("name") or row.get("id") or "Saved audience"),
+        }
+        for row in references.get("saved_audiences") or () if row.get("id")
+    )
+    rows.extend(
+        {
+            "key": f"custom:{row.get('id')}", "type": "custom",
+            "label_type": "Lookalike" if row.get("lookalike_spec") or str(row.get("subtype") or "").upper() == "LOOKALIKE" else "Custom",
+            "id": str(row.get("id") or ""),
+            "name": str(row.get("name") or row.get("id") or "Custom audience"),
+        }
+        for row in references.get("custom_audiences") or () if row.get("id")
+    )
+    return tuple(rows)
+
+
+def _render_object_result(result, *, title):
+    st.subheader(title)
+    rows = []
+    for label, name_key, id_key in (
+        ("Campaign", "campaign_name", "campaign_id"),
+        ("Ad set", "adset_name", "adset_id"),
+        ("Page photo", "", "meta_page_photo_id"),
+        ("IE photo element", "", "meta_canvas_photo_element_id"),
+        ("IE product element", "", "meta_canvas_product_element_id"),
+        ("IE button element", "", "meta_canvas_button_element_id"),
+        ("IE footer element", "", "meta_canvas_footer_element_id"),
+        ("Instant Experience", "", "meta_instant_experience_id"),
+        ("Creative", "", "meta_creative_id"),
+        ("Ad", "ad_name", "meta_ad_id"),
+    ):
+        object_id = str(result.get(id_key) or "")
+        rows.append({"Object": label, "Name": str(result.get(name_key) or ""), "ID": object_id, "State": "Created" if object_id else "Not created"})
+    st.dataframe(rows, hide_index=True, use_container_width=True)
+    if result.get("safe_error"):
+        st.caption(str(result.get("safe_error")))
 
 
 def _render_success(result):
     st.success(SUCCESS_MESSAGE)
-    left, right = st.columns(2)
-    with left:
-        st.markdown(
-            f"**{html.escape(str(result.get('ad_name') or 'Ad'))}**  \n"
-            f"Campaign: {html.escape(str(result.get('campaign_name') or ''))}  \n"
-            f"Ad set: {html.escape(str(result.get('adset_name') or ''))}"
-        )
-    with right:
-        st.markdown(
-            f"Meta Ad ID: `{html.escape(str(result.get('meta_ad_id') or ''))}`  \n"
-            f"Meta Creative ID: `{html.escape(str(result.get('meta_creative_id') or ''))}`  \n"
-            "Status: **Paused**"
-        )
+    _render_object_result(result, title=str(result.get("ad_name") or "Created Meta hierarchy"))
+    currency = str(result.get("account_currency") or "account currency")
+    st.caption(
+        f"Product: **{result.get('product_title') or ''}** · Country: **{result.get('country') or ''}** · "
+        f"Product set: **{result.get('product_set_name') or result.get('product_set_id') or ''}** · "
+        f"Destination: {result.get('destination_url') or ''}"
+    )
+    st.caption(
+        f"Campaign budget: **$25.00 {currency}/day** · Objective: **Sales** · Optimization: **Purchase** · "
+        "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
+        "Generate backgrounds: **Off**"
+    )
     link = ads_manager_url(
         account_id=MetaPostingClient().ad_account_id,
-        campaign_id=result.get("campaign_id"),
-        adset_id=result.get("adset_id"),
+        campaign_id=result.get("campaign_id"), adset_id=result.get("adset_id"),
         ad_id=result.get("meta_ad_id"),
     )
     actions = st.columns([1, 1, 4])
     actions[0].link_button("Open in Ads Manager", link, use_container_width=True)
-    if actions[1].button("Reset", key=f"{STATE_PREFIX}reset_success", use_container_width=True):
+    if actions[1].button("New campaign", use_container_width=True):
         _reset_posting_state()
         st.rerun()
 
 
+def _render_recent_posts():
+    with st.expander("Recent Posting jobs", expanded=False):
+        try:
+            records = _load_recent_posts()
+        except Exception:
+            st.caption("Posting history is unavailable.")
+            return
+        if not records:
+            st.caption("No Posting jobs are recorded yet.")
+            return
+        st.dataframe(
+            [
+                {
+                    "Date": str(row.get("completed_at") or row.get("created_at") or ""),
+                    "Product": str(row.get("product_title") or ""),
+                    "Ad": str(row.get("ad_name") or ""),
+                    "Status": str(row.get("status") or "").replace("_", " ").title(),
+                    "Campaign ID": str(row.get("campaign_id") or ""),
+                    "Ad set ID": str(row.get("adset_id") or ""),
+                    "Ad ID": str(row.get("meta_ad_id") or ""),
+                }
+                for row in records
+            ],
+            hide_index=True, use_container_width=True,
+        )
+
+
 def render_page():
     st.title("Post Ad")
-    st.caption("Upload the finished ad and create it paused in Meta for review.")
-
+    st.caption("Build a complete new Meta Sales campaign, ad set, Instant Experience, and collection ad — all paused.")
     st.session_state.setdefault(SUBMISSION_ID_KEY, posting_submission_id())
+    st.session_state.setdefault(PROCESSING_KEY, False)
+
     result = dict(st.session_state.get(RESULT_KEY) or {})
-    if result and str(result.get("status") or "") == "COMPLETE":
+    if str(result.get("status") or "") == "COMPLETE":
         _render_success(result)
+        _render_recent_posts()
         return
 
     status_col, refresh_col = st.columns([5, 1])
@@ -249,178 +240,200 @@ def render_page():
         overview = _load_meta_overview()
     except MetaAdsApiError as error:
         _connection_status(status_col, f"Meta unavailable — {error}", tone="error")
-        if refresh_col.button("Refresh Meta", use_container_width=True):
-            _clear_meta_cache()
-            st.rerun()
         return
-
-    configuration_ready = (
-        ((overview.get("checks") or {}).get("configuration") or {}).get("status") == "ok"
-    )
-    if not overview.get("connected"):
-        summary = str(overview.get("summary") or "Meta unavailable")
-        tone = "warning" if summary == "Meta identity configuration required." else "error"
-        _connection_status(status_col, summary, tone=tone)
-        if refresh_col.button(
-            "Refresh Meta",
-            disabled=not configuration_ready,
-            use_container_width=True,
-        ):
-            _clear_meta_cache()
-            st.rerun()
-        _render_connection_details(overview)
-        return
-    if overview.get("permission_state") == "missing":
-        _connection_status(status_col, "Meta posting permission required", tone="warning")
-        if refresh_col.button("Refresh Meta", use_container_width=True):
-            _clear_meta_cache()
-            st.rerun()
+    if refresh_col.button("Refresh Meta", use_container_width=True, disabled=st.session_state[PROCESSING_KEY]):
+        _clear_meta_cache()
+        st.rerun()
+    if not overview.get("connected") or overview.get("permission_state") == "missing":
+        _connection_status(status_col, str(overview.get("summary") or "Meta unavailable"), tone="warning")
         _render_connection_details(overview)
         return
     _connection_status(status_col, "Meta connected", tone="success")
-    if refresh_col.button("Refresh Meta", use_container_width=True):
-        _clear_meta_cache()
-        st.rerun()
-    if overview.get("permission_state") == "unverified":
-        _render_connection_details(overview)
 
-    campaigns = tuple(overview.get("campaigns") or ())
-    campaign_by_id = {str(row.get("id") or ""): row for row in campaigns if row.get("id")}
-    if str(st.session_state.get(CAMPAIGN_KEY) or "") not in {"", *campaign_by_id}:
-        st.session_state.pop(CAMPAIGN_KEY, None)
-        st.session_state.pop(ADSET_KEY, None)
+    try:
+        references = _load_meta_references()
+    except MetaAdsApiError as error:
+        st.error(f"Meta selectors are unavailable — {error}")
+        return
+    for warning in references.get("warnings") or ():
+        st.caption(f"⚠ {warning}")
 
-    st.subheader("Meta destination")
-    destination_cols = st.columns(2)
-    with destination_cols[0]:
-        campaign_id = st.selectbox(
-            "Campaign",
-            options=("", *campaign_by_id),
-            key=CAMPAIGN_KEY,
-            format_func=lambda value: "Select campaign" if not value else _option_label(campaign_by_id[value]),
+    product_rows = load_live_edition_product_rows()
+    product_records = ads_page.build_ads_product_selector_records(product_rows)
+    record_by_identity = {str(row["identity"]): row for row in product_records}
+    if not record_by_identity:
+        st.error("No Edition Ops products with Shopify data are available. Posting is blocked.")
+        return
+    selector_value = st.selectbox(
+        "Product",
+        options=tuple(record_by_identity), index=None, placeholder="Search Edition Ops products",
+        filter_mode="fuzzy",
+        format_func=lambda value: record_by_identity[value]["label"], key=PRODUCT_KEY,
+    )
+    selection = ads_page.resolve_ads_product_selector_value(
+        selector_value, rows=product_rows, records=product_records
+    )
+    selected_row = dict(selection.get("row") or {})
+    selected_identity = str(selection.get("selector_identity") or "")
+    if selected_identity and selected_identity != str(st.session_state.get(PRODUCT_TRACK_KEY) or ""):
+        st.session_state[PRODUCT_TRACK_KEY] = selected_identity
+        st.session_state[SPORT_KEY] = _infer_sport(selection)
+        st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
+        st.session_state.pop(RESULT_KEY, None)
+    product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
+    product_url = str(selection.get("product_url") or "")
+    product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
+    product_handle = str(selected_row.get("product_handle") or selected_row.get("shopify_handle") or "")
+    st.text_input("Product URL", value=product_url, disabled=True)
+    if product_title and not product_url:
+        st.error("This product has no canonical live Shopify URL. Fix Edition Ops/Shopify sync before posting.")
+
+    targeting_cols = st.columns(2)
+    country = targeting_cols[0].selectbox("Country", tuple(COUNTRY_META_CODES), key=COUNTRY_KEY)
+    sport = targeting_cols[1].selectbox("Sport / category", SPORT_OPTIONS, key=SPORT_KEY)
+
+    matching_catalogs = tuple(
+        dict(row) for row in references.get("catalogs") or ()
+        if str(row.get("name") or "").strip().casefold() == EXPECTED_CATALOG_NAME.casefold()
+    )
+    catalog_by_id = {str(row.get("id")): row for row in matching_catalogs if row.get("id")}
+    if len(catalog_by_id) == 1:
+        catalog_id = next(iter(catalog_by_id))
+        st.text_input("Catalog", value=EXPECTED_CATALOG_NAME, disabled=True)
+    elif catalog_by_id:
+        catalog_id = st.selectbox(
+            "Catalog", tuple(catalog_by_id), format_func=lambda value: f"{EXPECTED_CATALOG_NAME} · {value}",
+            key=CATALOG_KEY,
         )
-    previous_campaign = str(st.session_state.get(CAMPAIGN_TRACK_KEY) or "")
-    if campaign_id != previous_campaign:
-        st.session_state[CAMPAIGN_TRACK_KEY] = campaign_id
-        st.session_state.pop(ADSET_KEY, None)
+    else:
+        catalog_id = ""
+        st.error(f"The existing {EXPECTED_CATALOG_NAME} was not found. Posting is blocked.")
+    product_sets = _load_product_sets(catalog_id) if catalog_id else ()
+    product_set_by_id = {str(row.get("id")): row for row in product_sets if row.get("id")}
+    product_set_id = st.selectbox(
+        "Product set", tuple(product_set_by_id), index=None, placeholder="Select a Meta product set",
+        format_func=lambda value: str(product_set_by_id[value].get("name") or value),
+        key=PRODUCT_SET_KEY, disabled=not product_set_by_id,
+    ) if product_set_by_id else ""
+    if catalog_id and not product_set_by_id:
+        st.error("No product sets are available in the Shopify catalog. Posting is blocked.")
 
-    adsets = ()
-    adset_error = ""
-    if campaign_id:
-        try:
-            adsets = _load_campaign_adsets(campaign_id)
-        except MetaAdsApiError:
-            adset_error = "The selected campaign's ad sets could not be loaded."
-    adset_by_id = {
-        str(row.get("id") or ""): row
-        for row in adsets
-        if row.get("id") and str(row.get("campaign_id") or campaign_id) == campaign_id
-    }
-    if str(st.session_state.get(ADSET_KEY) or "") not in {"", *adset_by_id}:
-        st.session_state.pop(ADSET_KEY, None)
-    with destination_cols[1]:
-        adset_id = st.selectbox(
-            "Ad Set",
-            options=("", *adset_by_id),
-            key=ADSET_KEY,
-            disabled=not campaign_id or bool(adset_error),
-            format_func=lambda value: "Select ad set" if not value else _option_label(adset_by_id[value]),
-        )
-    if adset_error:
-        st.error(adset_error)
+    audiences = _audience_options(references)
+    audience_by_key = {row["key"]: row for row in audiences}
+    audience_key = st.selectbox(
+        "Audience", tuple(audience_by_key),
+        format_func=lambda value: (
+            "Broad — Sports Cave Default" if value == "broad"
+            else f"{audience_by_key[value]['label_type']} — {audience_by_key[value]['name']}"
+        ),
+        key=AUDIENCE_KEY,
+    )
+    audience = audience_by_key[audience_key]
+    st.text_input("Ad type", value=AD_TYPE, disabled=True)
 
-    st.subheader("Finished ad")
-    product_url = st.text_input("Product URL", placeholder="https://www.sportscaveshop.com/products/...", key=URL_KEY)
+    st.subheader("Creative")
     uploaded = st.file_uploader(
-        "Ad Image",
-        type=("jpg", "jpeg", "png", "webp"),
-        accept_multiple_files=False,
-        key=IMAGE_KEY,
+        "Finished artwork", type=("jpg", "jpeg", "png", "webp"),
+        accept_multiple_files=False, key=IMAGE_KEY,
     )
     image = None
     image_error = ""
     if uploaded is not None:
         try:
             image = prepare_meta_posting_image(uploaded.getvalue(), original_name=uploaded.name)
-            converted_note = " (WebP safely converted to PNG)" if image.get("converted") else ""
-            st.caption(
-                f":green[✓ **Ad image ready** — {image['source_width']} × "
-                f"{image['source_height']}{converted_note}]"
-            )
+            st.caption(f":green[✓ **Artwork ready** — {image['source_width']} × {image['source_height']}] · Generate backgrounds will be off")
         except AdsImageValidationError as error:
             image_error = str(error)
             st.error(image_error)
-
-    primary_text = st.text_area("Primary Text", key=PRIMARY_TEXT_KEY, height=130)
+    primary_text = st.text_area("Primary text", key=PRIMARY_TEXT_KEY, height=120)
     copy_cols = st.columns(2)
-    with copy_cols[0]:
-        headline = st.text_input("Headline", key=HEADLINE_KEY)
-    expected_auto_name = default_ad_name(product_url)
-    previous_auto_name = str(st.session_state.get(AUTO_AD_NAME_KEY) or "")
-    current_ad_name = str(st.session_state.get(AD_NAME_KEY) or "")
-    if not current_ad_name or current_ad_name == previous_auto_name:
-        st.session_state[AD_NAME_KEY] = expected_auto_name
-    st.session_state[AUTO_AD_NAME_KEY] = expected_auto_name
-    with copy_cols[1]:
-        ad_name = st.text_input("Ad Name", key=AD_NAME_KEY)
-    with st.expander("Optional", expanded=False):
-        description = st.text_input("Description", key=DESCRIPTION_KEY)
+    headline = copy_cols[0].text_input("Headline", key=HEADLINE_KEY)
+    description = copy_cols[1].text_input("Description (optional)", key=DESCRIPTION_KEY)
 
-    st.subheader("Preview")
+    existing_names = tuple(references.get("existing_ad_names") or ())
+    generated_campaign_name = campaign_name(product_title, country, sport) if product_title else ""
+    generated_adset_name = adset_name(country, sport, audience["name"])
+    generated_ad_name = next_instant_experience_ad_name(product_title, existing_names) if product_title else ""
+
+    pixels = tuple(dict(row) for row in references.get("pixels") or ())
+    configured_pixel = str(os.getenv("META_PIXEL_ID") or os.getenv("META_DATASET_ID") or "").strip()
+    matching_pixels = [
+        row for row in pixels
+        if (configured_pixel and str(row.get("id") or "") == configured_pixel)
+        or (not configured_pixel and str(row.get("name") or "").strip().casefold() == EXPECTED_PIXEL_NAME.casefold())
+    ]
+    pixel_label = str((matching_pixels[0] if len(matching_pixels) == 1 else {}).get("name") or "Unresolved")
+    product_set_label = str((product_set_by_id.get(product_set_id) or {}).get("name") or "Unresolved")
+    account_currency = str((references.get("account") or {}).get("currency") or "account currency")
+
+    st.subheader("Review")
     with st.container(border=True):
-        preview_cols = st.columns([1, 2])
-        with preview_cols[0]:
+        preview, summary = st.columns([1, 2])
+        with preview:
             if image:
-                st.image(image["data"], width=230)
+                st.image(image["data"], caption="Exact uploaded artwork", use_container_width=True)
             else:
-                st.caption("Ad image")
-        with preview_cols[1]:
+                st.caption("Upload the finished artwork to preview it.")
+        with summary:
             st.markdown(str(primary_text or "Primary text"))
             st.markdown(f"**{headline or 'Headline'}**")
-            st.caption(product_url.strip() or "Product URL")
+            st.caption(product_url or "Product URL unavailable")
             st.caption(
-                f"Campaign: {_option_label(campaign_by_id[campaign_id]) if campaign_id else 'Not selected'}  \n"
-                f"Ad set: {_option_label(adset_by_id[adset_id]) if adset_id else 'Not selected'}  \n"
-                f"Ad name: {ad_name or 'Not set'}  \nStatus: Paused"
+                f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
+                f"Ad set: **{html.escape(generated_adset_name)}**  \n"
+                f"Ad: **{html.escape(generated_ad_name or 'Waiting for product')}**"
             )
+        st.markdown(
+            f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
+            f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
+            "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
+        )
+        st.caption(
+            f"Catalog: {EXPECTED_CATALOG_NAME} · Product set: {product_set_label} · Pixel: {pixel_label} · "
+            "Format: Collection · CTA: Shop Now"
+        )
+        st.caption(
+            f"Instant Experience: Storefront · Catalog headline token · {PRODUCT_DESCRIPTION} · "
+            f"{INSTANT_EXPERIENCE_BUTTON_TEXT} → {product_url or 'product URL unresolved'} · final status PAUSED"
+        )
 
-    obvious_ready = bool(
-        campaign_id
-        and adset_id
-        and product_url.strip()
-        and image
-        and not image_error
-        and primary_text.strip()
-        and headline.strip()
-        and ad_name.strip()
+    identities_ready = bool(references.get("page") and references.get("instagram"))
+    ready = bool(
+        product_title and product_url and image and not image_error and country and sport
+        and catalog_id and product_set_id and primary_text.strip() and headline.strip()
+        and len(matching_pixels) == 1 and identities_ready
     )
+    if len(matching_pixels) != 1:
+        st.error(f"Meta must expose exactly one usable {EXPECTED_PIXEL_NAME}/configured dataset. Posting is blocked.")
+
+    st.caption("Creates the campaign, ad set and ad paused in Meta for review.")
+
     if st.button(
-        "Create Paused Ad",
-        key=f"{STATE_PREFIX}create",
-        type="primary",
-        use_container_width=True,
-        disabled=not obvious_ready,
+        "Create Paused Meta Campaign", type="primary", use_container_width=True,
+        disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
     ):
+        st.session_state[PROCESSING_KEY] = True
         request = PostingRequest(
-            submission_id=st.session_state[SUBMISSION_ID_KEY],
-            campaign_id=campaign_id,
-            adset_id=adset_id,
-            destination_url=product_url,
-            image_bytes=uploaded.getvalue() if uploaded is not None else b"",
-            image_name=uploaded.name if uploaded is not None else "",
-            primary_text=primary_text,
-            headline=headline,
-            ad_name=ad_name,
-            description=description,
+            submission_id=st.session_state[SUBMISSION_ID_KEY], product_id=product_id,
+            product_title=product_title, product_handle=product_handle,
+            destination_url=product_url, image_bytes=uploaded.getvalue(), image_name=uploaded.name,
+            country=country, sport=sport, catalog_id=catalog_id, product_set_id=product_set_id,
+            audience_type=audience["type"], audience_id=audience["id"],
+            primary_text=primary_text, headline=headline, description=description,
         )
         try:
-            with st.spinner("Creating paused ad in Meta…"):
-                posted = MetaPostingService().create_paused_ad(request)
+            with st.spinner("Creating the paused Meta hierarchy…"):
+                posted = MetaPostingService().create_paused_campaign(request)
         except (PostingValidationError, PostingBusyError, PostingAmbiguousError, PostingError) as error:
             st.error(str(error))
+            partial = dict(getattr(error, "result", {}) or {})
+            if partial:
+                _render_object_result(partial, title="Partial result — all created ad objects remain paused")
         else:
             st.session_state[RESULT_KEY] = dict(posted)
             _load_recent_posts.clear()
             st.rerun()
+        finally:
+            st.session_state[PROCESSING_KEY] = False
 
     _render_recent_posts()

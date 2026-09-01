@@ -98,6 +98,14 @@ PAGE_REGISTRY = (
         "navigation_child": True,
     },
     {
+        "key": ads_navigation.META_REVIEW_PAGE_KEY,
+        "route": ads_navigation.META_REVIEW_ROUTE,
+        "label": ads_navigation.META_REVIEW_ROUTE,
+        "worker_assignable": False,
+        "parent_key": ads_navigation.ADS_PAGE_KEY,
+        "navigation_child": True,
+    },
+    {
         "key": analytics_navigation.ANALYTICS_PAGE_KEY,
         "route": analytics_navigation.ANALYTICS_OVERVIEW_ROUTE,
         "label": "Analytics",
