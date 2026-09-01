@@ -23,6 +23,12 @@ from ads_meta_contract import META_AD_URL_PARAMETERS
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import os_accounts
+from posting_import_csv import (
+    POSTING_IMPORT_FILENAME,
+    build_posting_import_rows,
+    posting_product_handle_from_url,
+    serialize_posting_import_csv,
+)
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
     build_sports_cave_image_realism_rules,
@@ -11044,6 +11050,86 @@ def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
     ).hexdigest()
 
 
+def _posting_import_ads_from_workflow(result, workflow):
+    standard_ads = tuple(
+        dict(row or {})
+        for row in ((result or {}).get("standard_ads") or ())
+    )
+    if len(standard_ads) == len(INSTANT_EXPERIENCE_CONCEPTS):
+        return tuple(
+            {
+                "ad_number": row.get("ad_number") or index,
+                "primary_text": _preserve_multiline_text(row.get("primary_text")),
+                "headline": _preserve_multiline_text(row.get("headline")),
+                "description": _preserve_multiline_text(row.get("description")),
+            }
+            for index, row in enumerate(standard_ads, start=1)
+        )
+
+    concept_notes = _instant_experience_copy_notes_with_widget_state(
+        result or {}, workflow or {}
+    )
+    ads = []
+    for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
+        variations = _normalise_instant_experience_variations(
+            concept_notes.get(concept["id"])
+        )
+        primary_variation = next(
+            (
+                variation
+                for variation in variations
+                if str(variation.get("description_key") or "") == "legacy_standard"
+            ),
+            None,
+        )
+        if primary_variation is None:
+            raise ValueError(
+                f"{concept['display_name']} is missing the named Legacy Standard "
+                "Posting variation."
+            )
+        validation_error = _instant_experience_copy_variation_error(
+            primary_variation,
+            concept_id=concept["id"],
+            variation_number=1,
+        )
+        if validation_error:
+            raise ValueError(
+                f"{concept['display_name']} primary Posting variation is incomplete: "
+                f"{validation_error}"
+            )
+        ads.append(
+            {
+                "ad_number": index,
+                "primary_text": _preserve_multiline_text(
+                    primary_variation.get("primary_text")
+                ),
+                "headline": _preserve_multiline_text(
+                    primary_variation.get("headline")
+                ),
+                "description": _preserve_multiline_text(
+                    primary_variation.get("description")
+                ),
+            }
+        )
+    return tuple(ads)
+
+
+def build_ads_posting_import_csv(result, workflow):
+    if str((result or {}).get("campaign_type") or "") != "Instant Experience":
+        raise ValueError("Posting CSV is available for Instant Experience campaigns.")
+    product_url = str((result or {}).get("product_url") or "").strip()
+    rows = build_posting_import_rows(
+        product_name=(result or {}).get("product_name"),
+        product_handle=posting_product_handle_from_url(product_url),
+        product_url=product_url,
+        country=(result or {}).get("country"),
+        sport_category=(result or {}).get("category"),
+        campaign_type=(result or {}).get("campaign_type"),
+        ads=_posting_import_ads_from_workflow(result, workflow),
+    )
+    return serialize_posting_import_csv(rows)
+
+
 def _instant_experience_slot_for_concept(concept):
     return {
         slot["concept_id"]: slot
@@ -11165,6 +11251,22 @@ def _instant_experience_package_items(result, workflow):
                     concept=concept["display_name"],
                 )
             )
+    posting_csv = build_ads_posting_import_csv(result, workflow)
+    items.append(
+        {
+            "kind": "copy",
+            "asset_type": "meta_ads_posting_import",
+            "slot_id": "_posting_import_csv",
+            "concept_id": "",
+            "concept": "",
+            "label": "Posting import CSV",
+            "relative_path": POSTING_IMPORT_FILENAME,
+            "filename": POSTING_IMPORT_FILENAME,
+            "data": posting_csv,
+            "size": len(posting_csv),
+            "copy_variation_count": len(INSTANT_EXPERIENCE_CONCEPTS),
+        }
+    )
     return items
 
 
@@ -11596,6 +11698,21 @@ def _render_instant_experience_copy_csv_control(result, workflow):
                 key=f"ads-ie-copy-csv-current::{context_key}",
                 use_container_width=True,
             )
+            try:
+                posting_csv = build_ads_posting_import_csv(result, workflow)
+            except ValueError:
+                posting_csv = b""
+            st.download_button(
+                "Download Posting CSV",
+                data=posting_csv,
+                file_name=POSTING_IMPORT_FILENAME,
+                mime="text/csv",
+                disabled=not bool(posting_csv),
+                key=f"ads-ie-posting-csv::{context_key}",
+                use_container_width=True,
+            )
+            if not posting_csv:
+                st.caption("Complete all required copy before downloading the Posting CSV.")
             status = workflow.get("copy_csv_import_status")
             if isinstance(status, dict) and status.get("message"):
                 if status.get("ok"):

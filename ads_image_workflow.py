@@ -148,6 +148,60 @@ def _source_image_details(data, *, original_name=""):
                     pass
 
 
+def inspect_meta_posting_image_upload(data, *, original_name=""):
+    """Perform the minimum local checks needed while a Posting form is being edited.
+
+    Full decode/verification and any required WebP conversion remain in
+    ``prepare_meta_posting_image`` and run only after the final create action.
+    """
+
+    source_bytes = bytes(data or b"")
+    if not source_bytes:
+        raise AdsImageValidationError("This image is empty. Upload a valid JPEG, PNG or WebP image.")
+    if len(source_bytes) > META_IMAGE_MAX_UPLOAD_BYTES:
+        raise AdsImageValidationError("This image is too large. Upload a JPEG, PNG or WebP under 20 MB.")
+    source = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            source = Image.open(io.BytesIO(source_bytes))
+            source_format = str(source.format or "").upper()
+            if source_format not in META_IMAGE_ACCEPTED_FORMATS:
+                raise AdsImageValidationError(
+                    "Unsupported image type. Upload a JPEG, PNG or WebP image."
+                )
+            width, height = source.size
+            if width <= 0 or height <= 0 or width * height > META_IMAGE_MAX_SOURCE_PIXELS:
+                raise AdsImageValidationError("This image is too large to process safely.")
+        return {
+            "source_hash": source_image_signature(source_bytes),
+            "original_name": str(original_name or "image"),
+            "source_format": source_format,
+            "source_width": width,
+            "source_height": height,
+            "source_size": len(source_bytes),
+        }
+    except AdsImageValidationError:
+        raise
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        OSError,
+        SyntaxError,
+        ValueError,
+    ) as error:
+        raise AdsImageValidationError(
+            "This file is corrupt or is not a supported JPEG, PNG or WebP image."
+        ) from error
+    finally:
+        if source is not None:
+            try:
+                source.close()
+            except Exception:
+                pass
+
+
 def inspect_instant_experience_original(data, *, original_name=""):
     details = _source_image_details(data, original_name=original_name)
     if details["source_width"] != details["source_height"]:

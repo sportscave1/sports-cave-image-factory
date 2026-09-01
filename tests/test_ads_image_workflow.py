@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
 import hashlib
 import io
+from pathlib import Path
+import stat
+import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from PIL import Image
 
@@ -316,6 +320,10 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             "USA",
             campaign_type,
             product_id="product-1",
+            product_url=(
+                "https://www.sportscaveshop.com/products/"
+                "shohei-ohtani-50-50-wall-art"
+            ),
             variation_token="save-test",
         )
         workflow = {
@@ -674,13 +682,111 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             [
                 "01-premium-scarcity-right/premium_scarcity_right_cover_original.png",
                 "01-premium-scarcity-right/ad-copy.txt",
+                "01-premium-scarcity-right/01-legacy-standard/primary-text.txt",
+                "01-premium-scarcity-right/01-legacy-standard/headline.txt",
+                "01-premium-scarcity-right/02-framed-greatness/primary-text.txt",
+                "01-premium-scarcity-right/02-framed-greatness/headline.txt",
+                "01-premium-scarcity-right/03-choose-a-side/primary-text.txt",
+                "01-premium-scarcity-right/03-choose-a-side/headline.txt",
                 "02-premium-scarcity-front/premium_scarcity_front_cover_original.png",
                 "02-premium-scarcity-front/ad-copy.txt",
+                "02-premium-scarcity-front/01-legacy-standard/primary-text.txt",
+                "02-premium-scarcity-front/01-legacy-standard/headline.txt",
+                "02-premium-scarcity-front/02-framed-greatness/primary-text.txt",
+                "02-premium-scarcity-front/02-framed-greatness/headline.txt",
+                "02-premium-scarcity-front/03-choose-a-side/primary-text.txt",
+                "02-premium-scarcity-front/03-choose-a-side/headline.txt",
                 "03-premium-scarcity-left/premium_scarcity_left_cover_original.png",
                 "03-premium-scarcity-left/ad-copy.txt",
+                "03-premium-scarcity-left/01-legacy-standard/primary-text.txt",
+                "03-premium-scarcity-left/01-legacy-standard/headline.txt",
+                "03-premium-scarcity-left/02-framed-greatness/primary-text.txt",
+                "03-premium-scarcity-left/02-framed-greatness/headline.txt",
+                "03-premium-scarcity-left/03-choose-a-side/primary-text.txt",
+                "03-premium-scarcity-left/03-choose-a-side/headline.txt",
+                "posting-import.csv",
             ],
         )
         self.assertEqual(outcomes["_instant_experience_package"]["status"], "saved")
+
+    def test_ad_variation_text_files_are_exact_persistent_zip_bytes(self):
+        result, workflow = self.build_result_and_workflow("Instant Experience")
+        primary_text = "OWN A PIECE OF THE LEGACY."
+        headline = "LIMITED EDITION NFL WALL ART"
+        variation = workflow["ad_notes"]["instant_experience_concepts"][
+            "premium_scarcity_right"
+        ][0]
+        variation["primary_text"] = primary_text
+        variation["headline"] = headline
+
+        items = ads_page._instant_experience_package_items(result, workflow)
+        primary_path = (
+            "01-premium-scarcity-right/01-legacy-standard/primary-text.txt"
+        )
+        headline_path = "01-premium-scarcity-right/01-legacy-standard/headline.txt"
+        item_by_path = {item["relative_path"]: item for item in items}
+
+        self.assertEqual(item_by_path[primary_path]["data"], primary_text.encode("utf-8"))
+        self.assertEqual(item_by_path[headline_path]["data"], headline.encode("utf-8"))
+        self.assertNotEqual(item_by_path[primary_path]["data"], b"")
+        self.assertNotEqual(item_by_path[headline_path]["data"], b"")
+        self.assertNotIn(primary_text, item_by_path[headline_path]["data"].decode("utf-8"))
+
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            for item in items:
+                archive.writestr(item["relative_path"], item["data"])
+
+        archive_bytes.seek(0)
+        with zipfile.ZipFile(archive_bytes, "r") as archive:
+            info_by_path = {info.filename: info for info in archive.infolist()}
+            self.assertEqual(archive.read(primary_path), primary_text.encode("utf-8"))
+            self.assertEqual(archive.read(headline_path), headline.encode("utf-8"))
+            for path in (primary_path, headline_path):
+                info = info_by_path[path]
+                self.assertFalse(stat.S_ISLNK(info.external_attr >> 16))
+                self.assertNotIn(Path(path).suffix.casefold(), {".lnk", ".url"})
+
+            with tempfile.TemporaryDirectory() as extraction_directory:
+                archive.extractall(extraction_directory)
+                extracted_primary = Path(extraction_directory, *primary_path.split("/"))
+                extracted_headline = Path(extraction_directory, *headline_path.split("/"))
+                self.assertEqual(extracted_primary.read_text(encoding="utf-8"), primary_text)
+                self.assertEqual(extracted_headline.read_text(encoding="utf-8"), headline)
+                for exported_text in (extracted_primary, extracted_headline):
+                    content = exported_text.read_text(encoding="utf-8")
+                    self.assertNotIn("/tmp/", content)
+                    self.assertNotRegex(content, r"[A-Za-z]:\\")
+
+    def test_ad_variation_text_export_rejects_missing_required_named_field(self):
+        with self.assertRaisesRegex(ValueError, "Primary Text is required"):
+            ads_page.build_ad_variation_text_items(
+                {"primary_text": "", "headline": "Headline is present"},
+                relative_folder="01-ad",
+                slot_id="ad-01",
+                label="Ad 1",
+            )
+
+    def test_creative_refresh_uses_same_ad_variation_text_export(self):
+        result, workflow = self.build_result_and_workflow("Instant Experience")
+        result["workflow_mode"] = ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+        items = ads_page._instant_experience_package_items(result, workflow)
+        text_items = {
+            item["relative_path"]: item["data"]
+            for item in items
+            if item.get("filename")
+            in {ads_page.ADS_PRIMARY_TEXT_FILENAME, ads_page.ADS_HEADLINE_FILENAME}
+        }
+
+        self.assertEqual(len(text_items), 18)
+        self.assertIn(
+            "01-premium-scarcity-right/01-legacy-standard/primary-text.txt",
+            text_items,
+        )
+        self.assertIn(
+            "01-premium-scarcity-right/01-legacy-standard/headline.txt",
+            text_items,
+        )
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
@@ -811,8 +917,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
             [
-                (1, 6, "Premium Scarcity — Right Angle Cover"),
-                (1, 6, "Premium Scarcity — Right Angle Cover"),
+                (1, 25, "Premium Scarcity — Right Angle Cover"),
+                (1, 25, "Premium Scarcity — Right Angle Cover"),
             ],
         )
 

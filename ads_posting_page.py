@@ -5,7 +5,11 @@ import html
 import streamlit as st
 
 import ads_page
-from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
+from ads_image_workflow import (
+    AdsImageValidationError,
+    build_instant_experience_preview_thumbnail,
+    inspect_meta_posting_image_upload,
+)
 from ads_product_catalog import load_live_edition_product_rows
 from meta_ads_client import MetaAdsApiError, MetaPostingClient, diagnose_meta_posting_connection
 from meta_posting_service import (
@@ -33,6 +37,11 @@ from meta_posting_service import (
     posting_ad_results,
     posting_submission_id,
 )
+from posting_import_csv import (
+    POSTING_IMPORT_FILENAME,
+    PostingImportCSVError,
+    parse_posting_import_csv,
+)
 
 
 STATE_PREFIX = "ads_posting_v2_"
@@ -45,6 +54,7 @@ CATALOG_KEY = f"{STATE_PREFIX}catalog"
 PRODUCT_SET_KEY = f"{STATE_PREFIX}product_set"
 AUDIENCE_KEY = f"{STATE_PREFIX}audience"
 IMAGE_KEYS = tuple(f"{STATE_PREFIX}image_{index}" for index in range(1, 4))
+IMAGE_STATE_KEYS = tuple(f"{STATE_PREFIX}image_state_{index}" for index in range(1, 4))
 PRIMARY_TEXT_KEYS = tuple(f"{STATE_PREFIX}primary_text_{index}" for index in range(1, 4))
 HEADLINE_KEYS = tuple(f"{STATE_PREFIX}headline_{index}" for index in range(1, 4))
 DESCRIPTION_KEYS = tuple(f"{STATE_PREFIX}description_{index}" for index in range(1, 4))
@@ -59,6 +69,8 @@ META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
 META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
 META_REFERENCES_ERROR_KEY = "ads_posting_meta_references_error"
 PRODUCT_ROWS_STATE_KEY = "ads_posting_product_rows"
+CSV_IMPORT_KEY = f"{STATE_PREFIX}csv_import"
+CSV_IMPORT_STATE_KEY = f"{STATE_PREFIX}csv_import_state"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -128,6 +140,229 @@ def _product_rows_state():
     if PRODUCT_ROWS_STATE_KEY not in st.session_state:
         st.session_state[PRODUCT_ROWS_STATE_KEY] = tuple(load_live_edition_product_rows())
     return tuple(st.session_state.get(PRODUCT_ROWS_STATE_KEY) or ())
+
+
+def _uploaded_file_identity(uploaded_file):
+    if uploaded_file is None:
+        return ""
+    file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
+    if file_id:
+        return file_id
+    return "|".join(
+        (
+            str(getattr(uploaded_file, "name", "") or ""),
+            str(getattr(uploaded_file, "size", "") or ""),
+            str(getattr(uploaded_file, "type", "") or ""),
+        )
+    )
+
+
+def capture_posting_image_upload(uploaded_file, previous=None):
+    """Read and inspect a selected image once, then reuse its stable local state."""
+
+    if uploaded_file is None:
+        return {}
+    previous = dict(previous or {})
+    upload_identity = _uploaded_file_identity(uploaded_file)
+    if (
+        upload_identity
+        and upload_identity == str(previous.get("upload_identity") or "")
+        and (previous.get("valid") or previous.get("error"))
+    ):
+        return previous
+
+    image_name = str(getattr(uploaded_file, "name", "") or "image")
+    image_type = str(getattr(uploaded_file, "type", "") or "")
+    source_bytes = bytes(uploaded_file.getvalue() or b"")
+    try:
+        details = inspect_meta_posting_image_upload(
+            source_bytes,
+            original_name=image_name,
+        )
+        preview = build_instant_experience_preview_thumbnail(
+            source_bytes,
+            source_hash=details["source_hash"],
+            max_edge=320,
+            quality=72,
+        )
+    except AdsImageValidationError as error:
+        return {
+            "upload_identity": upload_identity,
+            "name": image_name,
+            "type": image_type,
+            "valid": False,
+            "error": str(error),
+        }
+    except (OSError, SyntaxError, ValueError) as error:
+        return {
+            "upload_identity": upload_identity,
+            "name": image_name,
+            "type": image_type,
+            "valid": False,
+            "error": "This image could not be previewed. Upload a valid JPG, PNG or WebP image.",
+        }
+    return {
+        **details,
+        **preview,
+        "upload_identity": upload_identity,
+        "name": image_name,
+        "type": image_type,
+        "data": source_bytes,
+        "valid": True,
+        "error": "",
+    }
+
+
+def _sync_posting_image_upload(index, uploaded_file, *, state=None):
+    state = st.session_state if state is None else state
+    state_key = IMAGE_STATE_KEYS[int(index) - 1]
+    captured = capture_posting_image_upload(uploaded_file, state.get(state_key))
+    if captured:
+        state[state_key] = captured
+    else:
+        state.pop(state_key, None)
+    return dict(captured)
+
+
+def _posting_image_size_label(size):
+    size = int(size or 0)
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
+
+
+def _posting_record_handle(record):
+    row = dict((record or {}).get("row") or {})
+    return str(
+        row.get("product_handle")
+        or row.get("shopify_handle")
+        or row.get("handle")
+        or ""
+    ).strip().casefold()
+
+
+def _posting_record_title(record):
+    row = dict((record or {}).get("row") or {})
+    return str(
+        row.get("product_title")
+        or row.get("edition_name")
+        or row.get("product_name")
+        or row.get("title")
+        or (record or {}).get("label")
+        or ""
+    ).strip()
+
+
+def match_posting_import_product(batch, product_records):
+    records = tuple(dict(record or {}) for record in product_records or ())
+    handle = str((batch or {}).get("product_handle") or "").strip().casefold()
+    csv_url = str((batch or {}).get("product_url") or "").strip().rstrip("/")
+    title = str((batch or {}).get("product_name") or "").strip().casefold()
+
+    handle_matches = [record for record in records if handle and _posting_record_handle(record) == handle]
+    if len(handle_matches) == 1:
+        return handle_matches[0]
+    if len(handle_matches) > 1:
+        raise PostingImportCSVError("More than one Posting product matches this product_handle.")
+
+    url_matches = []
+    if csv_url:
+        for record in records:
+            canonical_url = str(
+                ads_page.canonical_shopify_product_url_from_row(record.get("row") or {}) or ""
+            ).strip().rstrip("/")
+            if canonical_url and canonical_url.casefold() == csv_url.casefold():
+                url_matches.append(record)
+    if len(url_matches) == 1:
+        return url_matches[0]
+    if len(url_matches) > 1:
+        raise PostingImportCSVError("More than one Posting product matches this product URL.")
+
+    title_matches = [
+        record for record in records
+        if title and _posting_record_title(record).casefold() == title
+    ]
+    if len(title_matches) == 1:
+        return title_matches[0]
+    if len(title_matches) > 1:
+        raise PostingImportCSVError(
+            "The product title is duplicated. Update the CSV with the exact product_handle."
+        )
+    raise PostingImportCSVError(
+        "The Posting CSV product could not be matched to the current Edition Ops product list."
+    )
+
+
+def apply_posting_import_to_state(batch, product_records, *, state=None):
+    state = st.session_state if state is None else state
+    matched = match_posting_import_product(batch, product_records)
+    ads = tuple(dict(row or {}) for row in (batch or {}).get("ads") or ())
+    if len(ads) != 3:
+        raise PostingImportCSVError("Posting CSV must contain exactly three ads.")
+
+    updates = {
+        PRODUCT_KEY: str(matched.get("identity") or ""),
+        PRODUCT_TRACK_KEY: str(matched.get("identity") or ""),
+        COUNTRY_KEY: str(batch.get("country") or ""),
+        SPORT_KEY: str(batch.get("sport_category") or ""),
+        SUBMISSION_ID_KEY: posting_submission_id(),
+    }
+    for index, ad in enumerate(ads):
+        updates[PRIMARY_TEXT_KEYS[index]] = str(ad.get("primary_text") or "")
+        updates[HEADLINE_KEYS[index]] = str(ad.get("headline") or "")
+        updates[DESCRIPTION_KEYS[index]] = str(ad.get("description") or "")
+    state.update(updates)
+    state.pop(RESULT_KEY, None)
+    canonical_url = str(
+        ads_page.canonical_shopify_product_url_from_row(matched.get("row") or {}) or ""
+    )
+    return {
+        "product": _posting_record_title(matched) or str(matched.get("label") or ""),
+        "product_identity": str(matched.get("identity") or ""),
+        "product_url": canonical_url,
+        "country": str(batch.get("country") or ""),
+        "sport": str(batch.get("sport_category") or ""),
+        "campaign_type": str(batch.get("campaign_type") or ""),
+        "ads_loaded": 3,
+    }
+
+
+def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
+    state = st.session_state if state is None else state
+    if uploaded_file is None:
+        return dict(state.get(CSV_IMPORT_STATE_KEY) or {})
+    upload_identity = _uploaded_file_identity(uploaded_file)
+    previous = dict(state.get(CSV_IMPORT_STATE_KEY) or {})
+    if upload_identity and upload_identity == str(previous.get("upload_identity") or ""):
+        return previous
+
+    source_bytes = bytes(uploaded_file.getvalue() or b"")
+    try:
+        batch = parse_posting_import_csv(
+            source_bytes,
+            filename=str(getattr(uploaded_file, "name", "") or POSTING_IMPORT_FILENAME),
+            allowed_countries=tuple(COUNTRY_META_CODES),
+            allowed_sports=SPORT_OPTIONS,
+            allowed_campaign_types=(AD_TYPE,),
+        )
+        summary = apply_posting_import_to_state(batch, product_records, state=state)
+        status = {
+            "ok": True,
+            "upload_identity": upload_identity,
+            "message": "✓ Posting CSV imported",
+            "summary": summary,
+        }
+    except PostingImportCSVError as error:
+        status = {
+            "ok": False,
+            "upload_identity": upload_identity,
+            "message": str(error),
+            "summary": {},
+        }
+    state[CSV_IMPORT_STATE_KEY] = status
+    return status
 
 
 def _posting_form_ready(
@@ -366,6 +601,29 @@ def render_page():
     if not record_by_identity:
         st.error("No Edition Ops products with Shopify data are available. Posting is blocked.")
         return
+    posting_csv = st.file_uploader(
+        "Import Ads CSV",
+        type=("csv",),
+        accept_multiple_files=False,
+        key=CSV_IMPORT_KEY,
+        max_upload_size=2,
+        help=f"Upload {POSTING_IMPORT_FILENAME} from New Ads or Creative Refresh.",
+    )
+    import_status = process_posting_csv_upload(
+        posting_csv,
+        product_records,
+    )
+    if import_status.get("ok"):
+        summary = dict(import_status.get("summary") or {})
+        st.success(str(import_status.get("message") or "✓ Posting CSV imported"))
+        st.caption(
+            f"Product: {summary.get('product') or ''} · "
+            f"Country: {summary.get('country') or ''} · "
+            f"Sport: {summary.get('sport') or ''} · "
+            f"Ads loaded: {summary.get('ads_loaded') or 0}"
+        )
+    elif import_status.get("message"):
+        st.error(str(import_status.get("message")))
     selector_value = st.selectbox(
         "Product",
         options=tuple(record_by_identity), index=None, placeholder="Search Edition Ops products",
@@ -452,21 +710,18 @@ def render_page():
                 f"Image {index}", type=("jpg", "jpeg", "png", "webp"),
                 accept_multiple_files=False, key=IMAGE_KEYS[index - 1],
             )
-            image = None
-            image_error = ""
-            if uploaded is not None:
-                try:
-                    image = prepare_meta_posting_image(
-                        uploaded.getvalue(), original_name=uploaded.name
-                    )
-                    st.caption(
-                        f":green[✓ **Image {index} ready** — "
-                        f"{image['source_width']} × {image['source_height']}] · "
-                        "Instant Experience cover · Generate backgrounds off"
-                    )
-                except AdsImageValidationError as error:
-                    image_error = str(error)
-                    st.error(image_error)
+            image = _sync_posting_image_upload(index, uploaded)
+            image_error = str(image.get("error") or "")
+            if image.get("valid"):
+                st.caption(
+                    f":green[✓ **Image {index} ready**] · "
+                    f"{_posting_image_size_label(image.get('source_size'))} "
+                    f"{image.get('source_format') or ''} · "
+                    f"{image.get('source_width')} × {image.get('source_height')} · "
+                    "Instant Experience cover · Generate backgrounds off"
+                )
+            elif image_error:
+                st.error(image_error)
             primary_text = st.text_area(
                 f"Primary Text {index}", key=PRIMARY_TEXT_KEYS[index - 1], height=100
             )
@@ -479,7 +734,6 @@ def render_page():
             )
             creative_inputs.append(
                 {
-                    "upload": uploaded,
                     "image": image,
                     "image_error": image_error,
                     "primary_text": primary_text,
@@ -525,12 +779,14 @@ def render_page():
         with st.container(border=True):
             preview, summary = st.columns([1, 2])
             with preview:
-                if creative["image"]:
+                if creative["image"].get("preview_data"):
                     st.image(
-                        creative["image"]["data"],
+                        creative["image"]["preview_data"],
                         caption=f"Image {index} / Storefront cover {index}",
                         use_container_width=True,
                     )
+                elif creative["image"].get("valid"):
+                    st.caption(f"Image {index} is ready. Preview unavailable.")
                 else:
                     st.caption(f"Upload Image {index} to preview it.")
             with summary:
@@ -572,8 +828,8 @@ def render_page():
             audience_type=audience["type"], audience_id=audience["id"],
             creatives=tuple(
                 PostingCreative(
-                    image_bytes=creative["upload"].getvalue(),
-                    image_name=creative["upload"].name,
+                    image_bytes=creative["image"]["data"],
+                    image_name=creative["image"]["name"],
                     primary_text=creative["primary_text"],
                     headline=creative["headline"],
                     description=creative["description"],
