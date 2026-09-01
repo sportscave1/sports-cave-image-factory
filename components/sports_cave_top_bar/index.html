@@ -13,7 +13,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-reliability-v16";
+  const CONTROLLER_VERSION = "repair-inbox-v1";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -28,6 +28,7 @@
       refresh: '<path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path>',
       planner: '<rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M8 2v4"></path><path d="M16 2v4"></path><path d="M3 10h18"></path><path d="M12 14v3l2 1"></path>',
       bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
+      hammer: '<path d="m14 5 5 5"></path><path d="m13 6 4-4 5 5-4 4"></path><path d="M5 21 16 10"></path><path d="m2 18 4 4"></path>',
       user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
       settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>',
       print: '<path d="M6 9V3h12v6"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="7"></rect>',
@@ -318,6 +319,14 @@
       z-index: 1000001;
     }
     #sc-os-planner-toast-region[hidden] { display: none !important; }
+    #sc-os-repair-toast-region {
+      position: fixed;
+      right: 16px;
+      top: calc(var(--sc-topbar-height) + 12px);
+      width: min(340px, calc(100vw - 32px));
+      z-index: 1000002;
+    }
+    #sc-os-repair-toast-region[hidden] { display: none !important; }
     .sc-os-order-toast {
       align-items: center;
       background: #171715;
@@ -421,7 +430,10 @@
     .sc-os-topbar-icon-button:focus-visible,
     .sc-os-topbar-result:focus-visible,
     .sc-os-topbar-action:focus-visible,
-    .sc-os-theme-option:focus-visible {
+    .sc-os-theme-option:focus-visible,
+    .sc-os-repair-close:focus-visible,
+    .sc-os-repair-primary:focus-visible,
+    .sc-os-repair-secondary:focus-visible {
       outline: 2px solid #d4a54c;
       outline-offset: 2px;
     }
@@ -444,10 +456,141 @@
       right: 24px;
     }
     #sc-os-notifications-panel,
-    #sc-os-settings-panel {
+    #sc-os-settings-panel,
+    #sc-os-repairs-panel {
       right: 16px;
       width: min(360px, calc(100vw - 24px));
     }
+    #sc-os-repairs-panel {
+      max-height: min(760px, calc(100dvh - var(--sc-topbar-height) - 22px));
+      overflow-y: auto;
+      width: min(430px, calc(100vw - 24px));
+    }
+    .sc-os-repair-header {
+      align-items: flex-start;
+      border-bottom: 1px solid #e8e4dc;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      padding: 12px 12px 10px 14px;
+    }
+    .sc-os-repair-heading { color: #181817; font-size: 13px; font-weight: 760; }
+    .sc-os-repair-subtitle { color: #706d66; font-size: 11px; line-height: 1.35; margin-top: 2px; }
+    .sc-os-repair-close {
+      align-items: center;
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      color: #6f6b63;
+      cursor: pointer;
+      display: inline-flex;
+      flex: 0 0 auto;
+      font: 600 18px/1 system-ui, sans-serif;
+      height: 28px;
+      justify-content: center;
+      padding: 0;
+      width: 28px;
+    }
+    .sc-os-repair-close:hover { background: #f1eee8; color: #181817; }
+    .sc-os-repair-form { display: grid; gap: 9px; padding: 11px 14px 13px; }
+    .sc-os-repair-form-title,
+    .sc-os-repair-history-title {
+      color: #6d675d;
+      font-size: 10px;
+      font-weight: 780;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .sc-os-repair-field { display: grid; gap: 4px; }
+    .sc-os-repair-field > label,
+    .sc-os-repair-scope-label { color: #292824; font-size: 11px; font-weight: 700; }
+    .sc-os-repair-help { color: #77736b; font-size: 10px; line-height: 1.35; }
+    .sc-os-repair-field select,
+    .sc-os-repair-field input,
+    .sc-os-repair-field textarea {
+      background: #fff;
+      border: 1px solid #cec9bf;
+      border-radius: 5px;
+      color: #1d1c19;
+      font: 12px/1.4 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      padding: 7px 8px;
+      width: 100%;
+    }
+    .sc-os-repair-field textarea { min-height: 66px; resize: vertical; }
+    .sc-os-repair-field textarea.sc-os-repair-scope-notes { min-height: 48px; }
+    .sc-os-repair-field select:focus,
+    .sc-os-repair-field input:focus,
+    .sc-os-repair-field textarea:focus {
+      border-color: #b28b3d;
+      box-shadow: 0 0 0 2px rgba(178, 139, 61, .16);
+      outline: 0;
+    }
+    .sc-os-repair-scope-options { display: grid; gap: 4px; }
+    .sc-os-repair-scope-option {
+      align-items: flex-start;
+      color: #403e39;
+      display: flex;
+      font-size: 11px;
+      gap: 6px;
+      line-height: 1.3;
+    }
+    .sc-os-repair-scope-option input {
+      flex: 0 0 auto;
+      height: auto;
+      margin: 1px 0 0;
+      padding: 0;
+      width: auto;
+    }
+    .sc-os-repair-primary,
+    .sc-os-repair-secondary {
+      appearance: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font: 700 11px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      min-height: 34px;
+      padding: 0 11px;
+    }
+    .sc-os-repair-primary { background: #b79243; border: 1px solid #9d792f; color: #111; }
+    .sc-os-repair-primary:hover:not(:disabled) { background: #c8a452; }
+    .sc-os-repair-primary:disabled { cursor: not-allowed; opacity: .45; }
+    .sc-os-repair-secondary { background: #fff; border: 1px solid #c9c4ba; color: #2b2925; }
+    .sc-os-repair-secondary:hover:not(:disabled) { background: #f3f1ec; }
+    .sc-os-repair-success {
+      background: #edf7ee;
+      border: 1px solid #9cc8a1;
+      border-radius: 5px;
+      color: #23552a;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 9px;
+    }
+    .sc-os-repair-error {
+      background: #fff2ef;
+      border: 1px solid #dfaaa0;
+      border-radius: 5px;
+      color: #7a2f25;
+      font-size: 11px;
+      line-height: 1.35;
+      padding: 8px 9px;
+    }
+    .sc-os-repair-history { border-top: 1px solid #e8e4dc; padding: 11px 14px 13px; }
+    .sc-os-repair-history-list { display: grid; gap: 7px; margin-top: 8px; }
+    .sc-os-repair-card { background: #faf9f6; border: 1px solid #dfdbd2; border-radius: 6px; padding: 8px 9px; }
+    .sc-os-repair-card summary { cursor: pointer; list-style: none; }
+    .sc-os-repair-card summary::-webkit-details-marker { display: none; }
+    .sc-os-repair-card-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+    .sc-os-repair-card-section { color: #24231f; font-size: 11px; font-weight: 760; }
+    .sc-os-repair-card-status { color: #7a6332; flex: 0 0 auto; font-size: 10px; font-weight: 740; }
+    .sc-os-repair-card-status.is-complete { color: #35703d; }
+    .sc-os-repair-card-summary { color: #5d5a54; font-size: 11px; line-height: 1.35; margin-top: 3px; }
+    .sc-os-repair-card-date { color: #817d75; font-size: 10px; margin-top: 4px; }
+    .sc-os-repair-details { border-top: 1px solid #e4e0d8; display: grid; gap: 7px; margin-top: 8px; padding-top: 8px; }
+    .sc-os-repair-answer strong { color: #706b62; display: block; font-size: 9px; letter-spacing: .05em; margin-bottom: 2px; text-transform: uppercase; }
+    .sc-os-repair-answer span { color: #35332f; display: block; font-size: 11px; line-height: 1.4; white-space: pre-wrap; }
+    .sc-os-repair-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sc-os-repair-completion-note { min-height: 32px !important; }
+    .sc-os-repair-empty { color: #77736b; font-size: 11px; padding: 5px 0 2px; }
     .sc-os-topbar-panel-title {
       color: #181817;
       font-size: 13px;
@@ -645,7 +788,8 @@
       }
       .sc-os-planner-timer-pill:not([hidden]) + #sc-os-daily-planner { display: none; }
       #sc-os-notifications-panel,
-      #sc-os-settings-panel {
+      #sc-os-settings-panel,
+      #sc-os-repairs-panel {
         left: max(8px, env(safe-area-inset-left));
         max-height: calc(100dvh - var(--sc-topbar-height) - 16px);
         overflow-y: auto;
@@ -655,7 +799,8 @@
         width: auto;
       }
       #sc-os-order-toast-region,
-      #sc-os-planner-toast-region {
+      #sc-os-planner-toast-region,
+      #sc-os-repair-toast-region {
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
         width: auto;
@@ -708,13 +853,16 @@
       <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
       <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}</button>
       <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
+      <button id="sc-os-repairs" class="sc-os-topbar-icon-button" type="button" aria-label="Repairs &amp; Improvements" aria-controls="sc-os-repairs-panel" aria-expanded="false" title="Repairs &amp; Improvements">${icon("hammer")}</button>
       <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Accounts and Access" title="Accounts and Access">${icon("user")}</button>
       <button id="sc-os-settings" class="sc-os-topbar-icon-button" type="button" aria-label="Open settings" aria-controls="sc-os-settings-panel" aria-expanded="false" title="Settings">${icon("settings")}</button>
       <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
+      <div id="sc-os-repairs-panel" class="sc-os-topbar-panel" aria-label="Repairs &amp; Improvements" hidden></div>
       <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
     </div>
     <div id="sc-os-order-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div id="sc-os-planner-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <div id="sc-os-repair-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   `;
 
   const createController = () => {
@@ -776,6 +924,10 @@
       searchIndex: null,
       searchPromise: null,
       notifications: null,
+      repairItems: [],
+      repairIsAdmin: false,
+      repairBusy: false,
+      repairMessage: {},
       highlighted: -1,
       visibleResults: [],
       activePanel: "",
@@ -888,11 +1040,16 @@
     const plannerTimerTime = plannerTimerPill?.querySelector(".sc-os-planner-pill-time");
     const notificationsButton = root.querySelector("#sc-os-notifications");
     const notificationsPanel = root.querySelector("#sc-os-notifications-panel");
+    const repairsButton = root.querySelector("#sc-os-repairs");
+    const repairsPanel = root.querySelector("#sc-os-repairs-panel");
+    repairsPanel.hidden = true;
+    repairsButton.setAttribute("aria-expanded", "false");
     const profileButton = root.querySelector("#sc-os-profile");
     const settingsButton = root.querySelector("#sc-os-settings");
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
     const orderToastRegion = root.querySelector("#sc-os-order-toast-region");
     const plannerToastRegion = root.querySelector("#sc-os-planner-toast-region");
+    const repairToastRegion = root.querySelector("#sc-os-repair-toast-region");
     const TOAST_RUNTIME_VERSION = "dismissible-v2";
     const TOAST_SEEN_STORAGE_KEY = "scSportsCaveTemporaryToastSeen:v2";
     const readSeenToastIdentities = () => {
@@ -918,6 +1075,7 @@
     if (replacingTemporaryToastRuntime) {
       try { previousTemporaryToasts.dismiss("orders"); } catch (_error) {}
       try { previousTemporaryToasts.dismiss("planner"); } catch (_error) {}
+      try { previousTemporaryToasts.dismiss("repairs"); } catch (_error) {}
     }
     const temporaryToasts = previousTemporaryToasts?.version === TOAST_RUNTIME_VERSION
       ? previousTemporaryToasts
@@ -984,6 +1142,7 @@
     if (replacingTemporaryToastRuntime) {
       temporaryToasts.hide(orderToastRegion);
       temporaryToasts.hide(plannerToastRegion);
+      temporaryToasts.hide(repairToastRegion);
     }
     const mobileViewport = () => parentWindow.matchMedia("(max-width: 820px), (max-width: 940px) and (max-height: 520px)").matches;
     const closeMobileNavigation = ({returnFocus = false} = {}) => {
@@ -1275,19 +1434,23 @@
     const closePanels = (returnFocus = false) => {
       searchPanel.hidden = true;
       notificationsPanel.hidden = true;
+      repairsPanel.hidden = true;
       settingsPanel.hidden = true;
       doc.body.classList.remove("sc-mobile-search-open");
       setExpanded(searchInput, false);
       setExpanded(mobileSearchButton, false);
       setExpanded(notificationsButton, false);
+      setExpanded(repairsButton, false);
       setExpanded(settingsButton, false);
       const trigger = state.activePanel === "notifications"
         ? notificationsButton
+        : state.activePanel === "repairs"
+          ? repairsButton
         : state.activePanel === "settings"
-          ? settingsButton
-          : mobileViewport()
-            ? mobileSearchButton
-            : searchInput;
+            ? settingsButton
+            : mobileViewport()
+              ? mobileSearchButton
+              : searchInput;
       state.activePanel = "";
       if (returnFocus && trigger) trigger.focus({preventScroll: true});
     };
@@ -1304,19 +1467,28 @@
       } else if (name === "notifications") {
         notificationsPanel.hidden = false;
         setExpanded(notificationsButton, true);
+      } else if (name === "repairs") {
+        repairsPanel.hidden = false;
+        setExpanded(repairsButton, true);
       } else if (name === "settings") {
         settingsPanel.hidden = false;
         setExpanded(settingsButton, true);
       }
       return true;
     };
-    const requestJson = async (url) => {
+    const requestJson = async (url, options = {}) => {
+      const method = String(options.method || "GET").toUpperCase();
+      const headers = {Authorization: `Bearer ${state.config.authToken || ""}`};
+      if (options.body !== undefined) headers["Content-Type"] = "application/json";
       const response = await parentWindow.fetch(url, {
         credentials: "same-origin",
-        headers: {Authorization: `Bearer ${state.config.authToken || ""}`},
+        method,
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
       });
-      if (!response.ok) throw new Error("Request failed");
-      return response.json();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Request failed");
+      return payload;
     };
     const topBarGreetingForDate = (date = new Date()) => {
       const hour = Number(date.getHours());
@@ -1540,6 +1712,26 @@
         appendToastClose(toast, dismissOrderToast);
         orderToastRegion.replaceChildren(toast);
       }, {remember: true});
+    };
+    const dismissRepairToast = () => {
+      temporaryToasts.dismiss("repairs");
+    };
+    const showRepairToast = (message) => {
+      const clean = String(message || "").trim();
+      if (!clean) return;
+      temporaryToasts.show("repairs", repairToastRegion, `repairs:${clean}:${Date.now()}`, () => {
+        const toast = doc.createElement("div");
+        toast.className = "sc-os-order-toast";
+        const copy = doc.createElement("div");
+        copy.className = "sc-os-toast-open";
+        const text = doc.createElement("span");
+        text.className = "sc-os-toast-copy";
+        text.textContent = clean;
+        copy.appendChild(text);
+        toast.appendChild(copy);
+        appendToastClose(toast, dismissRepairToast);
+        repairToastRegion.replaceChildren(toast);
+      });
     };
     const refreshOrderStatus = async () => {
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
@@ -1884,6 +2076,296 @@
     const escapeHtml = (value) => String(value || "").replace(/[&<>'"]/g, (character) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
     })[character]);
+    const repairDraftStorageKey = () => `scSportsCaveRepairDraft:${state.config.dailyPlannerTimerScope || "account"}`;
+    const blankRepairDraft = () => {
+      const sections = Array.isArray(state.config.repairSections) ? state.config.repairSections : [];
+      const current = String(state.config.repairCurrentSection || "");
+      return {
+        section_selection: sections.includes(current) ? current : (sections[0] || "Other"),
+        other_section: "",
+        problem_description: "",
+        desired_result: "",
+        scope_choice: "",
+        scope_notes: "",
+      };
+    };
+    const readRepairDraft = () => {
+      const fallback = blankRepairDraft();
+      try {
+        const stored = JSON.parse(parentWindow.sessionStorage.getItem(repairDraftStorageKey()) || "null");
+        if (!stored || typeof stored !== "object") return fallback;
+        const sections = Array.isArray(state.config.repairSections) ? state.config.repairSections : [];
+        return {
+          ...fallback,
+          ...stored,
+          section_selection: sections.includes(stored.section_selection)
+            ? stored.section_selection
+            : fallback.section_selection,
+        };
+      } catch (_error) {
+        return fallback;
+      }
+    };
+    const writeRepairDraft = (draft) => {
+      try {
+        parentWindow.sessionStorage.setItem(repairDraftStorageKey(), JSON.stringify(draft));
+      } catch (_error) {}
+    };
+    const clearRepairDraft = () => {
+      try { parentWindow.sessionStorage.removeItem(repairDraftStorageKey()); } catch (_error) {}
+    };
+    const repairHeaderHtml = () => `
+      <div class="sc-os-repair-header">
+        <div>
+          <div class="sc-os-repair-heading">Repairs &amp; Improvements</div>
+          <div class="sc-os-repair-subtitle">Report something that needs fixing or improving.</div>
+        </div>
+        <button type="button" class="sc-os-repair-close" aria-label="Close Repairs &amp; Improvements" title="Close">×</button>
+      </div>
+    `;
+    const repairHistoryHtml = () => {
+      const items = Array.isArray(state.repairItems) ? state.repairItems.slice(0, 5) : [];
+      if (!items.length) return '<div class="sc-os-repair-empty">No repair requests submitted yet.</div>';
+      return items.map((item) => {
+        const complete = item.status === "complete";
+        const statusText = complete ? `Completed ${escapeHtml(item.completed_date || "")}` : "Submitted";
+        const common = `
+          <div class="sc-os-repair-card-head">
+            <span class="sc-os-repair-card-section">${escapeHtml(item.section)}</span>
+            <span class="sc-os-repair-card-status${complete ? " is-complete" : ""}">${statusText}</span>
+          </div>
+          <div class="sc-os-repair-card-summary">“${escapeHtml(item.summary)}”</div>
+          <div class="sc-os-repair-card-date">Submitted ${escapeHtml(item.submitted_date || "")}</div>
+        `;
+        if (!state.repairIsAdmin) return `<article class="sc-os-repair-card">${common}</article>`;
+        const completionControls = complete ? "" : `
+          <div class="sc-os-repair-field">
+            <label for="sc-os-repair-note-${escapeHtml(item.id)}">Completion note <span class="sc-os-repair-help">(optional)</span></label>
+            <input id="sc-os-repair-note-${escapeHtml(item.id)}" class="sc-os-repair-completion-note" type="text" maxlength="4000" placeholder="Brief note about what changed">
+          </div>
+        `;
+        const actions = `
+          <div class="sc-os-repair-actions">
+            <button type="button" class="sc-os-repair-primary" data-repair-copy="${escapeHtml(item.id)}">Copy Repair Prompt</button>
+            ${complete ? "" : `<button type="button" class="sc-os-repair-secondary" data-repair-complete="${escapeHtml(item.id)}">Mark Complete</button>`}
+          </div>
+        `;
+        return `
+          <details class="sc-os-repair-card" data-repair-id="${escapeHtml(item.id)}">
+            <summary>${common}</summary>
+            <div class="sc-os-repair-details">
+              <div class="sc-os-repair-answer"><strong>Submitted by</strong><span>${escapeHtml(item.submitted_by_name || "Sports Cave OS user")} (${escapeHtml(item.submitted_by_role || "user")})</span></div>
+              <div class="sc-os-repair-answer"><strong>What is happening?</strong><span>${escapeHtml(item.problem_description)}</span></div>
+              <div class="sc-os-repair-answer"><strong>What should happen instead?</strong><span>${escapeHtml(item.desired_result)}</span></div>
+              <div class="sc-os-repair-answer"><strong>Scope / isolation</strong><span>${escapeHtml(item.scope_label || "Not sure")}</span></div>
+              <div class="sc-os-repair-answer"><strong>Scope notes</strong><span>${escapeHtml(item.scope_notes || "None provided.")}</span></div>
+              ${item.admin_notes ? `<div class="sc-os-repair-answer"><strong>Completion note</strong><span>${escapeHtml(item.admin_notes)}</span></div>` : ""}
+              ${completionControls}
+              ${actions}
+            </div>
+          </details>
+        `;
+      }).join("");
+    };
+    const renderRepairPanel = () => {
+      const sections = Array.isArray(state.config.repairSections) && state.config.repairSections.length
+        ? state.config.repairSections
+        : ["Other"];
+      const draft = readRepairDraft();
+      const message = state.repairMessage?.text
+        ? `<div class="${state.repairMessage.kind === "success" ? "sc-os-repair-success" : "sc-os-repair-error"}" role="status">${escapeHtml(state.repairMessage.text)}</div>`
+        : "";
+      repairsPanel.innerHTML = `
+        ${repairHeaderHtml()}
+        <form class="sc-os-repair-form" novalidate>
+          <div class="sc-os-repair-form-title">New request form</div>
+          ${message}
+          <div class="sc-os-repair-field">
+            <label for="sc-os-repair-section">Which section of Sports Cave OS needs an upgrade or repair?</label>
+            <select id="sc-os-repair-section" required>
+              ${sections.map((section) => `<option value="${escapeHtml(section)}"${section === draft.section_selection ? " selected" : ""}>${escapeHtml(section)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="sc-os-repair-field" data-repair-other${draft.section_selection === "Other" ? "" : " hidden"}>
+            <label for="sc-os-repair-other">Other section</label>
+            <input id="sc-os-repair-other" type="text" maxlength="160" value="${escapeHtml(draft.other_section)}" placeholder="Name the section">
+          </div>
+          <div class="sc-os-repair-field">
+            <label for="sc-os-repair-problem">What is happening?</label>
+            <textarea id="sc-os-repair-problem" maxlength="6000" required>${escapeHtml(draft.problem_description)}</textarea>
+            <div class="sc-os-repair-help">Describe the problem or improvement suggestion. Include what you clicked, what happened, and anything unexpected.</div>
+          </div>
+          <div class="sc-os-repair-field">
+            <label for="sc-os-repair-desired">What should happen instead?</label>
+            <textarea id="sc-os-repair-desired" maxlength="6000" required>${escapeHtml(draft.desired_result)}</textarea>
+            <div class="sc-os-repair-help">Describe the result you want after the repair or upgrade.</div>
+          </div>
+          <div class="sc-os-repair-field">
+            <div class="sc-os-repair-scope-label">Should this update only affect this section and leave everything else unchanged?</div>
+            <div class="sc-os-repair-scope-options">
+              <label class="sc-os-repair-scope-option"><input type="radio" name="sc-os-repair-scope" value="section_only"${draft.scope_choice === "section_only" ? " checked" : ""}> <span>Yes — this section only</span></label>
+              <label class="sc-os-repair-scope-option"><input type="radio" name="sc-os-repair-scope" value="related_sections"${draft.scope_choice === "related_sections" ? " checked" : ""}> <span>No — related sections also need changes</span></label>
+              <label class="sc-os-repair-scope-option"><input type="radio" name="sc-os-repair-scope" value="not_sure"${draft.scope_choice === "not_sure" ? " checked" : ""}> <span>Not sure</span></label>
+            </div>
+          </div>
+          <div class="sc-os-repair-field">
+            <label for="sc-os-repair-scope-notes">Scope notes <span class="sc-os-repair-help">(optional)</span></label>
+            <textarea id="sc-os-repair-scope-notes" class="sc-os-repair-scope-notes" maxlength="4000" placeholder="Explain anything that must not change or any related section that also needs updating.">${escapeHtml(draft.scope_notes)}</textarea>
+          </div>
+          <button type="submit" class="sc-os-repair-primary" data-repair-submit disabled>${state.repairBusy ? "Submitting…" : "Submit Request"}</button>
+        </form>
+        <section class="sc-os-repair-history">
+          <div class="sc-os-repair-history-title">Recent repairs</div>
+          <div class="sc-os-repair-history-list">${repairHistoryHtml()}</div>
+        </section>
+      `;
+      bindRepairPanel();
+    };
+    const repairFormDraft = () => {
+      const sectionSelection = repairsPanel.querySelector("#sc-os-repair-section")?.value || "";
+      return {
+        section_selection: sectionSelection,
+        other_section: repairsPanel.querySelector("#sc-os-repair-other")?.value || "",
+        problem_description: repairsPanel.querySelector("#sc-os-repair-problem")?.value || "",
+        desired_result: repairsPanel.querySelector("#sc-os-repair-desired")?.value || "",
+        scope_choice: repairsPanel.querySelector('input[name="sc-os-repair-scope"]:checked')?.value || "",
+        scope_notes: repairsPanel.querySelector("#sc-os-repair-scope-notes")?.value || "",
+      };
+    };
+    const repairSubmissionPayload = (draft) => ({
+      section: draft.section_selection === "Other" ? draft.other_section.trim() : draft.section_selection,
+      problem_description: draft.problem_description.trim(),
+      desired_result: draft.desired_result.trim(),
+      scope_choice: draft.scope_choice,
+      scope_notes: draft.scope_notes.trim(),
+    });
+    const updateRepairSubmitState = () => {
+      const draft = repairFormDraft();
+      const payload = repairSubmissionPayload(draft);
+      const button = repairsPanel.querySelector("[data-repair-submit]");
+      if (button) {
+        button.disabled = Boolean(
+          state.repairBusy
+          || !payload.section
+          || !payload.problem_description
+          || !payload.desired_result
+          || !payload.scope_choice
+        );
+      }
+      return draft;
+    };
+    const writeClipboardText = async (value) => {
+      const text = String(value || "");
+      if (!text) throw new Error("Repair prompt is unavailable.");
+      if (parentWindow.navigator.clipboard && parentWindow.isSecureContext) {
+        await parentWindow.navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = doc.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      doc.body.appendChild(textarea);
+      textarea.select();
+      const copied = doc.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Copy failed.");
+    };
+    const loadRepairItems = async () => {
+      try {
+        const payload = await requestJson(state.config.repairRequestsUrl);
+        state.repairItems = Array.isArray(payload.requests) ? payload.requests.slice(0, 5) : [];
+        state.repairIsAdmin = Boolean(payload.is_admin);
+        return true;
+      } catch (error) {
+        state.repairItems = [];
+        state.repairMessage = {kind: "error", text: error.message || "Repairs are temporarily unavailable."};
+        return false;
+      }
+    };
+    const bindRepairPanel = () => {
+      repairsPanel.querySelector(".sc-os-repair-close")?.addEventListener("click", () => closePanels(true));
+      const form = repairsPanel.querySelector(".sc-os-repair-form");
+      const section = repairsPanel.querySelector("#sc-os-repair-section");
+      const otherField = repairsPanel.querySelector("[data-repair-other]");
+      const persist = () => {
+        if (otherField) otherField.hidden = section?.value !== "Other";
+        const draft = updateRepairSubmitState();
+        writeRepairDraft(draft);
+      };
+      form?.querySelectorAll("input, textarea, select").forEach((field) => {
+        field.addEventListener("input", persist);
+        field.addEventListener("change", persist);
+      });
+      persist();
+      form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const draft = updateRepairSubmitState();
+        const payload = repairSubmissionPayload(draft);
+        if (!payload.section || !payload.problem_description || !payload.desired_result || !payload.scope_choice) return;
+        state.repairBusy = true;
+        state.repairMessage = {};
+        renderRepairPanel();
+        try {
+          await requestJson(state.config.repairRequestsUrl, {method: "POST", body: payload});
+          clearRepairDraft();
+          state.repairMessage = {kind: "success", text: "Submitted successfully"};
+          showRepairToast("Repair request submitted");
+          await loadRepairItems();
+        } catch (error) {
+          state.repairMessage = {kind: "error", text: error.message || "Repair request could not be submitted."};
+        } finally {
+          state.repairBusy = false;
+          if (state.activePanel === "repairs") renderRepairPanel();
+        }
+      });
+      repairsPanel.querySelectorAll("[data-repair-copy]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const item = state.repairItems.find((entry) => String(entry.id) === String(button.dataset.repairCopy));
+          try {
+            await writeClipboardText(item?.repair_prompt);
+            state.repairMessage = {kind: "success", text: "Repair prompt copied"};
+            showRepairToast("Repair prompt copied");
+            if (state.activePanel === "repairs") renderRepairPanel();
+          } catch (error) {
+            state.repairMessage = {kind: "error", text: error.message || "Repair prompt could not be copied."};
+            if (state.activePanel === "repairs") renderRepairPanel();
+          }
+        });
+      });
+      repairsPanel.querySelectorAll("[data-repair-complete]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = String(button.dataset.repairComplete || "");
+          const card = button.closest("[data-repair-id]");
+          const adminNotes = card?.querySelector(".sc-os-repair-completion-note")?.value || "";
+          button.disabled = true;
+          try {
+            await requestJson(state.config.repairRequestsUrl, {
+              method: "PATCH",
+              body: {id, admin_notes: adminNotes},
+            });
+            state.repairMessage = {kind: "success", text: "Repair marked complete"};
+            showRepairToast("Repair marked complete");
+            await loadRepairItems();
+          } catch (error) {
+            state.repairMessage = {kind: "error", text: error.message || "Repair could not be completed."};
+          }
+          if (state.activePanel === "repairs") renderRepairPanel();
+        });
+      });
+    };
+    const openRepairPanel = async () => {
+      if (!openPanel("repairs")) return;
+      repairsPanel.innerHTML = `${repairHeaderHtml()}<div class="sc-loading-only" role="status" aria-label="Loading repair requests"><span class="sc-loading-spinner" aria-hidden="true"></span></div>`;
+      repairsPanel.querySelector(".sc-os-repair-close")?.addEventListener("click", () => closePanels(true));
+      state.repairMessage = {};
+      await loadRepairItems();
+      if (state.activePanel === "repairs") {
+        renderRepairPanel();
+        repairsPanel.querySelector("#sc-os-repair-section")?.focus({preventScroll: true});
+      }
+    };
     const openSearch = async () => {
       openPanel("search");
       searchPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
@@ -2066,6 +2548,7 @@
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
     }, listenerOptions);
+    repairsButton.addEventListener("click", openRepairPanel, listenerOptions);
     profileButton.addEventListener("click", () => {
       navigateDocument(routeUrl(state.config.accountsRouteKey, "", false));
     }, listenerOptions);

@@ -17,6 +17,8 @@ COMPONENT_PATH = (
 )
 PLANNER_DATA_REFRESH_BRIDGE_KEY = "planner-data-refresh-bridge"
 PLANNER_DATA_REFRESH_ROUTES = frozenset({"dashboard", "reporting", "weekly review"})
+REPAIR_TOOLBAR_SECTION = "Toolbar / Navigation"
+REPAIR_OTHER_SECTION = "Other"
 
 
 def allowed_routes_for_user(user):
@@ -31,6 +33,42 @@ def daily_planner_timer_scope(user):
     return hashlib.sha256(
         f"sports-cave-planner|{str((user or {}).get('id') or '').strip()}".encode("utf-8")
     ).hexdigest()[:24]
+
+
+def _repair_section_label(page):
+    page = dict(page or {})
+    key = str(page.get("key") or "")
+    parent_key = str(page.get("parent_key") or "")
+    if key == "ads":
+        return "Ads — New Ads"
+    if parent_key == "ads":
+        return f"Ads — {str(page.get('label') or page.get('route') or '').strip()}"
+    if page.get("navigation_child") and parent_key:
+        parent = os_accounts.PAGE_BY_KEY.get(parent_key) or {}
+        return str(parent.get("label") or parent.get("route") or "").strip()
+    return str(page.get("label") or page.get("route") or "").strip()
+
+
+def repair_sections_for_user(user):
+    """Derive the compact report taxonomy from the user's current navigation."""
+
+    allowed_routes = set(allowed_routes_for_user(user))
+    sections = []
+    for page in os_accounts.PAGE_REGISTRY:
+        if page.get("route") not in allowed_routes:
+            continue
+        label = _repair_section_label(page)
+        if label and label not in sections:
+            sections.append(label)
+    for label in (REPAIR_TOOLBAR_SECTION, REPAIR_OTHER_SECTION):
+        if label not in sections:
+            sections.append(label)
+    return tuple(sections)
+
+
+def repair_section_for_route(route):
+    page = os_accounts.PAGE_BY_ROUTE.get(os_accounts.normalise_route(route)) or {}
+    return _repair_section_label(page) or REPAIR_OTHER_SECTION
 
 
 def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
@@ -80,6 +118,9 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "accountsRouteKey": "accounts_access",
         "searchUrl": "/api/os/top-bar/search-index",
         "notificationsUrl": "/api/os/top-bar/notifications",
+        "repairRequestsUrl": "/api/os/top-bar/repair-requests",
+        "repairSections": repair_sections_for_user(user),
+        "repairCurrentSection": repair_section_for_route(current_route),
         "orderStatusUrl": "/api/os/top-bar/order-status",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,

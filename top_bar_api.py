@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 
 import os_accounts
 import order_action_state
+import repair_requests
 import seo_navigation
 import top_bar_security
 
@@ -25,6 +26,7 @@ SEARCH_INDEX_PATH = "/api/os/top-bar/search-index"
 NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
 ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
 DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
+REPAIR_REQUESTS_PATH = "/api/os/top-bar/repair-requests"
 _TASK_SEARCH_FIELDS = ("title", "text", "section", "category", "status")
 _TASK_METADATA_FIELDS = (
     "sport",
@@ -131,6 +133,26 @@ def _claims(request: Request):
     if not valid:
         return {}
     return claims
+
+
+async def _request_json_object(request: Request, *, maximum_bytes=24000):
+    try:
+        content_length = int(request.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        content_length = 0
+    if content_length > maximum_bytes:
+        raise repair_requests.RepairRequestValidationError("Request is too large.")
+    try:
+        payload = await request.json()
+    except Exception as error:
+        raise repair_requests.RepairRequestValidationError(
+            "Request details could not be read."
+        ) from error
+    if not isinstance(payload, dict):
+        raise repair_requests.RepairRequestValidationError(
+            "Request details must be a JSON object."
+        )
+    return payload
 
 
 def _text(value, *, limit=240):
@@ -985,9 +1007,64 @@ async def top_bar_daily_planner_status(request: Request):
     return _json({"ok": True, **status})
 
 
+async def top_bar_repair_requests(request: Request):
+    """Lazy repair inbox API; every response is projected for the signed role."""
+
+    claims = _claims(request)
+    if not claims:
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    try:
+        if request.method == "GET":
+            items = await run_in_threadpool(repair_requests.recent_requests, claims)
+            return _json(
+                {
+                    "ok": True,
+                    "is_admin": os_accounts.is_admin(claims),
+                    "requests": items,
+                }
+            )
+        payload = await _request_json_object(request)
+        if request.method == "POST":
+            item = await run_in_threadpool(
+                repair_requests.submit_request,
+                payload,
+                claims,
+            )
+            return _json({"ok": True, "request": item}, 201)
+        if request.method == "PATCH":
+            item = await run_in_threadpool(
+                repair_requests.mark_request_complete,
+                payload.get("id"),
+                claims,
+                admin_notes=payload.get("admin_notes") or "",
+            )
+            return _json({"ok": True, "request": item})
+        return _json({"ok": False, "error": "Method not allowed."}, 405)
+    except repair_requests.RepairRequestValidationError as error:
+        return _json({"ok": False, "error": str(error)}, 400)
+    except PermissionError:
+        return _json({"ok": False, "error": "Administrator access required."}, 403)
+    except repair_requests.RepairRequestStorageUnavailable:
+        error_message = (
+            "Repairs storage is not ready. Apply migration "
+            f"{repair_requests.MIGRATION_NAME}."
+            if os_accounts.is_admin(claims)
+            else "Repairs are temporarily unavailable. Please tell Nathan."
+        )
+        return _json(
+            {
+                "ok": False,
+                "available": False,
+                "error": error_message,
+            },
+            503,
+        )
+
+
 TOP_BAR_ROUTE_HANDLERS = (
     (SEARCH_INDEX_PATH, top_bar_search_index, ("GET",)),
     (NOTIFICATIONS_PATH, top_bar_notifications, ("GET",)),
     (ORDER_STATUS_PATH, top_bar_order_status, ("GET",)),
     (DAILY_PLANNER_STATUS_PATH, top_bar_daily_planner_status, ("GET",)),
+    (REPAIR_REQUESTS_PATH, top_bar_repair_requests, ("GET", "POST", "PATCH")),
 )
