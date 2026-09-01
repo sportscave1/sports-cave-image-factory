@@ -195,14 +195,15 @@ def sample_legacy_challengers():
 
 
 class CreativeRefreshNavigationTests(unittest.TestCase):
-    def test_ads_registry_has_one_top_level_parent_and_two_explicit_children(self):
+    def test_ads_registry_has_one_top_level_parent_and_three_explicit_children(self):
         self.assertEqual(
             ads_navigation.ADS_ROUTES,
-            ("Ads", "Creative Refresh", "Posting"),
+            ("Ads", "Creative Refresh", "Posting", "Meta Review"),
         )
         parent = os_accounts.PAGE_BY_KEY[ads_navigation.ADS_PAGE_KEY]
         child = os_accounts.PAGE_BY_KEY[ads_navigation.CREATIVE_REFRESH_PAGE_KEY]
         posting = os_accounts.PAGE_BY_KEY[ads_navigation.POSTING_PAGE_KEY]
+        meta_review = os_accounts.PAGE_BY_KEY[ads_navigation.META_REVIEW_PAGE_KEY]
         top_level_routes = tuple(page["route"] for page in os_accounts.navigation_pages())
 
         self.assertEqual(parent["route"], ads_navigation.ADS_CREATE_ROUTE)
@@ -212,6 +213,9 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertEqual(posting["parent_key"], parent["key"])
         self.assertTrue(posting["navigation_child"])
         self.assertFalse(posting["worker_assignable"])
+        self.assertEqual(meta_review["parent_key"], parent["key"])
+        self.assertTrue(meta_review["navigation_child"])
+        self.assertFalse(meta_review["worker_assignable"])
         self.assertEqual(top_level_routes.count(ads_navigation.ADS_CREATE_ROUTE), 1)
         self.assertNotIn(ads_navigation.CREATIVE_REFRESH_ROUTE, top_level_routes)
 
@@ -221,7 +225,11 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
                 ads_navigation.ADS_ROUTES,
                 ads_navigation.ADS_CREATE_ROUTE,
             ),
-            (ads_navigation.CREATIVE_REFRESH_ROUTE, ads_navigation.POSTING_ROUTE),
+            (
+                ads_navigation.CREATIVE_REFRESH_ROUTE,
+                ads_navigation.POSTING_ROUTE,
+                ads_navigation.META_REVIEW_ROUTE,
+            ),
         )
         self.assertEqual(
             navigation_runtime.disclosure_child_routes(
@@ -335,13 +343,17 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertNotIn(("Create Ads", "sidebar-child::Ads"), sidebar_buttons)
         self.assertEqual(app_test.session_state["sidebar-open-group"], "ads")
         page_source = (ROOT / "ads_creative_refresh.py").read_text(encoding="utf-8")
-        self.assertIn("Copy Creative Refresh Review Prompt", page_source)
-        self.assertNotIn("Download Creative Refresh Review Prompt", page_source)
-        self.assertEqual(
+        render_source = page_source[page_source.index("def render_page():") :]
+        self.assertIn("ads_page.render_page(", render_source)
+        self.assertIn("ADS_WORKFLOW_MODE_CREATIVE_REFRESH", render_source)
+        self.assertFalse(app_test.file_uploader)
+        self.assertNotIn(
+            "Meta performance CSV (optional)",
             [uploader.label for uploader in app_test.file_uploader],
-            ["Meta performance CSV (optional)"],
         )
         self.assertNotIn("Winning creative", [uploader.label for uploader in app_test.file_uploader])
+        self.assertIn("Winning primary text", [field.label for field in app_test.text_area])
+        self.assertIn("Winning headline", [field.label for field in app_test.text_input])
 
         next(
             button
@@ -774,6 +786,150 @@ class CreativeRefreshPromptTests(unittest.TestCase):
 
 
 class CreativeRefreshV2Tests(unittest.TestCase):
+    def test_new_ads_and_creative_refresh_share_the_exact_prompt_suffix_and_output_contract(self):
+        kwargs = {
+            "product_url": "https://sportscave.com.au/products/purple-reign",
+            "variation_token": "fixed-parity-test",
+            "product_metadata": {"product_sport": "NBA", "edition_limit": 100},
+        }
+        new_ads_prompt = ads_page.build_ads_prompt(
+            "Purple Reign",
+            "NBA",
+            "USA",
+            "Instant Experience",
+            **kwargs,
+        )
+        winner_context = {
+            "winning_primary_text": "Remember the night the whole city believed.",
+            "winning_headline": "Purple Reign",
+        }
+        refresh_prompt = ads_page.build_ads_prompt(
+            "Purple Reign",
+            "NBA",
+            "USA",
+            "Instant Experience",
+            creative_refresh_context=winner_context,
+            **kwargs,
+        )
+        winner_block = ads_page.build_creative_refresh_winner_context(winner_context)
+
+        self.assertEqual(refresh_prompt, f"{winner_block}\n\n{new_ads_prompt}")
+        self.assertEqual(
+            ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+            (
+                "schema_version",
+                "campaign_type",
+                "output_mode",
+                "route_key",
+                "route_label",
+                "variation",
+                "description_key",
+                "description_label",
+                "primary_text",
+                "headline",
+                "cta",
+            ),
+        )
+        self.assertNotIn(ads_page.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION, new_ads_prompt)
+        self.assertIn("Return exactly three complete grouped Instant Experience routes", new_ads_prompt)
+        self.assertEqual(
+            new_ads_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
+            3,
+        )
+        self.assertEqual(
+            refresh_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
+            3,
+        )
+
+    def test_shared_ie_prompt_requires_three_different_homes_not_camera_only(self):
+        prompt = ads_page.build_ads_prompt(
+            "Purple Reign",
+            "NBA",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/purple-reign",
+            variation_token="fixed-diversity-test",
+        )
+        self.assertEqual(
+            prompt.count(ads_page.THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION),
+            3,
+        )
+        for wording in (
+            "three camera angles inside the same house",
+            "genuinely different customer's home",
+            "Changing only the camera angle does not count as a different environment",
+            "Changing only the wall colour does not count as enough variation",
+            "must not believe the photographs were taken inside the same property",
+            "The HOUSE changes.",
+            "The ROOM changes.",
+            "The ENVIRONMENT changes.",
+        ):
+            self.assertIn(wording, prompt)
+
+    def test_creative_refresh_winner_block_is_internal_context_not_a_review_response(self):
+        context = {
+            "winning_primary_text": "Built for supporters who remember every lap.",
+            "winning_headline": "Frame the Winning Moment",
+        }
+        prompt = ads_page.build_creative_refresh_winner_context(context)
+        self.assertTrue(prompt.startswith("IMPORTANT:\n"))
+        self.assertIn(context["winning_primary_text"], prompt)
+        self.assertIn(context["winning_headline"], prompt)
+        self.assertIn(
+            "Attach the actual winning advertisement image to this ChatGPT message before running this prompt.",
+            prompt,
+        )
+        self.assertIn("Perform the winner analysis internally", prompt)
+        self.assertIn("do not output a separate winner diagnosis", prompt)
+        self.assertIn("Use the canonical Sports Cave product and artwork", prompt)
+        self.assertIn("genuinely different homes", prompt)
+
+    def test_creative_refresh_result_keeps_normal_campaign_csv_and_image_pipeline(self):
+        result = ads_page.build_ads_result_record(
+            "Purple Reign",
+            "NBA",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/purple-reign",
+            variation_token="fixed-result-test",
+            creative_refresh_context={
+                "winning_primary_text": "Winning primary text",
+                "winning_headline": "Winning headline",
+            },
+        )
+        self.assertEqual(result["campaign_type"], "Instant Experience")
+        self.assertNotEqual(result["campaign_type"], "Creative Refresh")
+        self.assertEqual(
+            len(ads_page.ads_image_workflow.campaign_image_slots(result["campaign_type"])),
+            3,
+        )
+        workflow = ads_page._new_ads_image_workflow(result)
+        csv_data = ads_page.build_instant_experience_copy_csv(result, workflow, blank=True)
+        headers = next(csv.reader(io.StringIO(csv_data.decode("utf-8-sig"))))
+        self.assertEqual(tuple(headers), ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
+
+    def test_legacy_creative_refresh_state_is_ignored_without_crashing(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["startup_shell_loaded"] = True
+        app_test.session_state[ads_creative_refresh.REVIEW_RESULT_STATE_KEY] = {
+            "context_key": "legacy-review",
+            "obsolete_field": {"nested": True},
+        }
+        app_test.session_state[ads_creative_refresh.CHALLENGER_RESULT_STATE_KEY] = {
+            "campaign_type": "Creative Refresh",
+            "refresh_challengers": [{"legacy": True}],
+        }
+        app_test.query_params["page"] = ads_navigation.CREATIVE_REFRESH_PAGE_KEY
+        app_test.run(timeout=30)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual([title.value for title in app_test.title], ["Creative Refresh"])
+        self.assertNotIn(
+            "Meta performance CSV (optional)",
+            [uploader.label for uploader in app_test.file_uploader],
+        )
+
     def test_product_context_uses_canonical_selection_without_manual_reconstruction(self):
         selection = {
             "selected_label": "Duplicate display label",
@@ -1161,10 +1317,12 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             "Generate Creative Refresh Package",
         ):
             self.assertNotIn(legacy_call, render_source)
-        self.assertIn("_render_review_winner_stage()", render_source)
-        self.assertIn("_render_build_challengers_stage(review_result)", render_source)
+        self.assertNotIn("_render_review_winner_stage()", render_source)
+        self.assertNotIn("_render_build_challengers_stage(review_result)", render_source)
+        self.assertIn("ads_page.render_page(", render_source)
+        self.assertIn("ADS_WORKFLOW_MODE_CREATIVE_REFRESH", render_source)
 
-    def test_two_stage_ui_preserves_stage_one_and_reveals_three_image_uploads(self):
+    def test_creative_refresh_uses_canonical_new_ads_ui_and_three_ie_uploads(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["startup_shell_loaded"] = True
@@ -1183,8 +1341,14 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         app_test.run(timeout=30)
         self.assertFalse(app_test.exception)
 
-        next(widget for widget in app_test.selectbox if widget.label == "Product").select(
+        next(widget for widget in app_test.selectbox if widget.label == "Product name").select(
             "id::product-3096"
+        )
+        app_test.run(timeout=30)
+        next(widget for widget in app_test.selectbox if widget.label == "Category").select("Cricket")
+        next(widget for widget in app_test.selectbox if widget.label == "Country").select("Australia")
+        next(widget for widget in app_test.selectbox if widget.label == "Campaign type").select(
+            "Instant Experience"
         )
         next(widget for widget in app_test.text_area if widget.label == "Winning primary text").set_value(
             "Limited to only 100 worldwide.\n\nSecure your edition."
@@ -1192,99 +1356,37 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         next(widget for widget in app_test.text_input if widget.label == "Winning headline").set_value(
             "Only 100 Shane Warne Editions"
         )
-        app_test.run(timeout=30)
-        self.assertFalse(app_test.exception)
-        self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
-            ["Meta performance CSV (optional)"],
-        )
-        review = app_test.session_state[ads_creative_refresh.REVIEW_RESULT_STATE_KEY]
-        app_test.session_state[ads_creative_refresh.PROMPT_READY_CONTEXT_KEY] = review["context_key"]
-        app_test.run(timeout=30)
-        self.assertIn(
-            "Import Completed CSV",
-            [uploader.label for uploader in app_test.file_uploader],
-        )
-
-        refresh_csv = ads_creative_refresh.build_creative_refresh_challenger_csv(
-            sample_challengers()
-        )
-        next(
-            uploader
-            for uploader in app_test.file_uploader
-            if uploader.label == "Import Completed CSV"
-        ).set_value([("refresh.csv", refresh_csv, "text/csv")])
+        next(button for button in app_test.button if button.label == "Submit").click()
         app_test.run(timeout=30)
         self.assertFalse(app_test.exception)
         labels = [uploader.label for uploader in app_test.file_uploader]
-        for ad_number in range(1, 4):
-            self.assertIn(f"Ad {ad_number} Image", labels)
-        self.assertEqual(
-            [field.value for field in app_test.text_area if field.label == "Primary Text"],
-            [row["primary_text"] for row in sample_challengers()],
-        )
-        self.assertEqual(
-            [field.value for field in app_test.text_input if field.label == "Headline"],
-            [row["headline"] for row in sample_challengers()],
-        )
-        self.assertEqual(
-            [field.value for field in app_test.text_area if field.label == "Description"],
-            [row["description"] for row in sample_challengers()],
-        )
-        self.assertEqual(
-            [field.value for field in app_test.text_input if field.label == "CTA"],
-            [row["cta"] for row in sample_challengers()],
-        )
-        self.assertEqual(
-            [
-                field.value
-                for field in app_test.text_area
-                if field.label.endswith("Image Generation Prompt")
-            ],
-            [row["image_prompt"] for row in sample_challengers()],
-        )
-        for ad_number in range(1, 4):
-            next(
-                uploader
-                for uploader in app_test.file_uploader
-                if uploader.label == f"Ad {ad_number} Image"
-            ).set_value(
-                [(f"ad-{ad_number}.png", square_png_bytes(), "image/png")]
-            )
-        app_test.run(timeout=30)
-        self.assertFalse(app_test.exception)
-        workflow_before = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        slot_names_before = {
-            slot_id: slot_data.get("original_name")
-            for slot_id, slot_data in workflow_before["slots"].items()
+        self.assertNotIn("Meta performance CSV (optional)", labels)
+        self.assertNotIn("Winning creative", labels)
+        self.assertIn("Import completed CSV", labels)
+        expected_cover_labels = {
+            f"{concept['display_name']} Cover"
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
         }
+        self.assertEqual(expected_cover_labels, expected_cover_labels.intersection(labels))
+
+        result = app_test.session_state[ads_page.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]
+        self.assertEqual(result["campaign_type"], "Instant Experience")
+        self.assertEqual(result["workflow_mode"], ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH)
         self.assertEqual(
-            slot_names_before,
-            {
-                "creative-refresh-winner-evolution": "ad-1.png",
-                "creative-refresh-emotional-collector-expansion": "ad-2.png",
-                "creative-refresh-pattern-interrupt": "ad-3.png",
-            },
-        )
-        app_test.run(timeout=30)
-        workflow_after = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertEqual(
-            {
-                slot_id: slot_data.get("original_name")
-                for slot_id, slot_data in workflow_after["slots"].items()
-            },
-            slot_names_before,
-        )
-        self.assertEqual(
-            app_test.session_state[f"{ads_creative_refresh.STATE_PREFIX}winning_meta_headline"],
+            result["creative_refresh_context"]["winning_headline"],
             "Only 100 Shane Warne Editions",
         )
-        app_test.run(timeout=30)
-        self.assertFalse(app_test.exception)
+        self.assertTrue(result["master_prompt"].startswith("IMPORTANT:\n"))
+        self.assertIn(
+            "Attach the actual winning advertisement image to this ChatGPT message before running this prompt.",
+            result["master_prompt"],
+        )
         self.assertEqual(
-            len(ads_page.ads_image_workflow.campaign_image_slots("Creative Refresh")),
+            len(ads_page.ads_image_workflow.campaign_image_slots(result["campaign_type"])),
             3,
         )
+        self.assertIn(ads_page.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY, app_test.session_state)
+        self.assertNotIn(ads_page.ADS_IMAGE_STATE_KEY, app_test.session_state)
 
     def test_creative_refresh_uses_exactly_three_shared_ads_image_slots(self):
         slots = ads_page.ads_image_workflow.campaign_image_slots("Creative Refresh")

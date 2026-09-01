@@ -130,9 +130,19 @@ ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
+ADS_WORKFLOW_MODE_NEW = "new"
+ADS_WORKFLOW_MODE_CREATIVE_REFRESH = "creative_refresh"
+ADS_ACTIVE_WORKFLOW_MODE_KEY = "ads_active_workflow_mode"
+ADS_CREATIVE_REFRESH_RESULT_STATE_KEY = "ads_creative_refresh_shared_result_v3"
+ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY = "ads_creative_refresh_shared_image_workflow_v3"
+ADS_CREATIVE_REFRESH_REVIEW_STATE_KEY = "ads_creative_refresh_shared_review_workflow_v3"
+ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY = "ads_creative_refresh_winning_primary_text"
+ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY = "ads_creative_refresh_winning_meta_headline"
+CREATIVE_REFRESH_WINNER_CONTEXT_VERSION = "SPORTS CAVE CREATIVE REFRESH WINNER CONTEXT V3"
+THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION = "SPORTS CAVE THREE-ENVIRONMENT DIVERSITY V1"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4 DIFFERENT HOMES"
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = 6
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = 28
 INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_WORDS = 12
@@ -163,6 +173,39 @@ ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY = "ads_product_url_last_auto_value"
 ADS_PRODUCT_URL_MANUALLY_EDITED_KEY = "ads_product_url_manually_edited"
 ADS_PRODUCT_URL_INITIALIZED_KEY = "ads_product_url_initialized"
 ADS_IE_RECENT_FINGERPRINTS_KEY = "ads_instant_experience_recent_fingerprints"
+
+
+def normalize_ads_workflow_mode(workflow_mode):
+    if workflow_mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    return ADS_WORKFLOW_MODE_NEW
+
+
+def _active_ads_workflow_mode():
+    return normalize_ads_workflow_mode(
+        st.session_state.get(ADS_ACTIVE_WORKFLOW_MODE_KEY)
+    )
+
+
+def _ads_result_state_key(workflow_mode=None):
+    mode = normalize_ads_workflow_mode(workflow_mode or _active_ads_workflow_mode())
+    if mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return ADS_CREATIVE_REFRESH_RESULT_STATE_KEY
+    return ADS_RESULT_STATE_KEY
+
+
+def _ads_image_state_key(workflow_mode=None):
+    mode = normalize_ads_workflow_mode(workflow_mode or _active_ads_workflow_mode())
+    if mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY
+    return ADS_IMAGE_STATE_KEY
+
+
+def _ads_review_state_key(workflow_mode=None):
+    mode = normalize_ads_workflow_mode(workflow_mode or _active_ads_workflow_mode())
+    if mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return ADS_CREATIVE_REFRESH_REVIEW_STATE_KEY
+    return ADS_REVIEW_STATE_KEY
 
 FINAL_REVIEW_HOW_TO_STEPS = (
     "1. Finish setting up the complete campaign in Meta Ads Manager.",
@@ -4942,6 +4985,31 @@ These are the only permitted advertising words for this cover. Never place Prima
 If edition limit used is "not verified", the supporting FOMO line for this route must not be used. Use the resolved safe fallback line above. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
 
+def build_three_environment_diversity_rules():
+    return f"""{THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION}
+THREE-ENVIRONMENT DIVERSITY — MANDATORY
+
+Generate three premium advertisement scenes, but they must not look like three camera angles inside the same house. Each image must feel as though it was photographed in a genuinely different customer's home.
+
+Across Image 1, Image 2 and Image 3, deliberately vary the room type, architectural character, wall colour, wall material and finish, furniture, furniture placement, flooring, lighting direction, lighting temperature, visible window placement, styling and decor, room proportions, surrounding objects, camera position and camera angle.
+
+The three rooms must be visually distinct at first glance. Do not reuse the same sofa, console, shelving, wall colour, wall texture, lamp, table, rug, window arrangement, furniture layout or architectural layout across all three images.
+
+Changing only the camera angle does not count as a different environment. Camera-angle variation is in addition to environment variation, not a replacement for it. Changing only the wall colour does not count as enough variation. Each scene must plausibly belong to a completely separate home.
+
+Quality test: if the Sports Cave artwork were removed from all three images, a viewer must not believe the photographs were taken inside the same property or staged studio set.
+
+Maintain consistent premium Sports Cave quality, photorealism, tasteful masculine interior styling where appropriate, believable artwork scale, product prominence, strong advertising composition, realistic shadows, reflections and perspective, and high-end commercial photography quality.
+
+The PRODUCT remains consistent.
+The HOUSE changes.
+The ROOM changes.
+The ENVIRONMENT changes.
+The advertising quality remains equally premium across all three.
+
+Make every environment more visually compelling than a generic stock room."""
+
+
 def build_instant_experience_set_differentiation_rules(visual):
     sibling_lines = []
     for sibling in visual.get("sibling_summaries", ()):
@@ -4975,8 +5043,10 @@ Within one three-image package:
 - Never use the same furniture arrangement twice.
 - Never reuse an identical room composition.
 - Never simply mirror the right route to create the left route.
-- A broad room category may repeat only when wall colour, cue, furniture crop and lighting clearly change.
+- Do not repeat a broad room category across the three images. If an automatically resolved sibling profile is too similar, reinterpret it as a genuinely different residential room and property while preserving the route's commercial purpose.
 - Use exactly one primary cue and no more than one secondary cue.
+
+{build_three_environment_diversity_rules()}
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -7031,6 +7101,66 @@ def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type, instant_experie
     return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade(campaign_type, instant_experience_settings)}"
 
 
+def normalize_creative_refresh_context(context=None):
+    context = dict(context or {})
+    return {
+        "winning_primary_text": str(context.get("winning_primary_text") or "").strip(),
+        "winning_headline": str(context.get("winning_headline") or "").strip(),
+        "winner_image_attached_in_chatgpt": True,
+    }
+
+
+def validate_creative_refresh_context(context=None):
+    normalized = normalize_creative_refresh_context(context)
+    missing = []
+    if not normalized["winning_primary_text"]:
+        missing.append("Winning primary text")
+    if not normalized["winning_headline"]:
+        missing.append("Winning headline")
+    if missing:
+        return "Enter " + " and ".join(missing) + " before submitting."
+    return ""
+
+
+def build_creative_refresh_winner_context(context=None):
+    normalized = normalize_creative_refresh_context(context)
+    return f"""IMPORTANT:
+Attach the actual winning advertisement image to this ChatGPT message before running this prompt.
+
+{CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}
+WINNING AD REFERENCE
+
+The attached image is the current winning Sports Cave advertisement.
+
+Winning primary text:
+{normalized['winning_primary_text']}
+
+Winning headline:
+{normalized['winning_headline']}
+
+Study the attached winning advertisement before creating the refreshed ads. Identify the visual and commercial DNA that is likely helping it work, including the overall room and environment style, product prominence, framing and scale, composition, viewing angle, lighting, tonal balance, premium presentation, emotional feel, amount of visual clutter, relationship between artwork and room, copy angle and headline angle.
+
+The objective is not to copy the exact advertisement. Preserve the winning DNA while creating THREE fresh controlled challengers. Perform the winner analysis internally; do not output a separate winner diagnosis, review essay, KEEP/IMPROVE/REMOVE report or alternate Creative Refresh response format.
+
+The selected Sports Cave product and artwork remain immutable. Never redraw, replace, reinterpret, modify, extract or reconstruct the Sports Cave artwork from the winning advertisement. Use the canonical Sports Cave product and artwork supplied by the normal Ads workflow.
+
+COPY REFRESH RULE
+
+Treat the winning primary text and headline as reference material. Preserve what appears commercially strong while creating fresh options. Do not repeat the winning copy across every option, and do not abandon a proven angle purely for novelty. Use controlled evolution and every normal Sports Cave copy rule in the New Ads prompt below.
+
+CREATIVE REFRESH VISUAL RULE
+
+Preserve the strongest visual characteristics of the winning ad without recreating its exact property. Principles such as a dark premium tone, large artwork scale, warm directional lighting or artwork above furniture may remain when they appear commercially useful, but translate that formula into genuinely different homes with different rooms, architecture, materials, furnishings, lighting and layouts. The winning image supplies style and composition intelligence only; it is never a product-artwork source.
+
+Continue through the complete normal New Ads prompt below. Its production fields, response order, image count, CSV contract, parser expectations and downstream workflow remain authoritative and unchanged."""
+
+
+def apply_creative_refresh_winner_context(prompt, context=None):
+    if not prompt or not context:
+        return prompt
+    return f"{build_creative_refresh_winner_context(context)}\n\n{prompt.lstrip()}"
+
+
 def compose_final_ads_prompt(
     prompt,
     *,
@@ -8555,6 +8685,7 @@ def build_ads_prompt(
     product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
+    creative_refresh_context=None,
 ):
     template_key = get_template_key(category, campaign_type)
     settings = None
@@ -8584,21 +8715,26 @@ def build_ads_prompt(
         prompt = build_generic_single_image_video_prompt(product_name, category, country, campaign_type)
     else:
         prompt = ""
-    return compose_final_ads_prompt(
-        prompt,
-        category=category,
-        country=country,
-        campaign_type=campaign_type,
-        include_primary_text_variations=campaign_type == "Carousel",
-        product_name=product_name,
-        product_url=product_url,
-        template_key=template_key,
-        variation_token=variation_token,
-        campaign_moment=campaign_moment,
-        product_metadata=product_metadata,
-        instant_experience_settings=settings,
-        recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
-    )
+    prompt_kwargs = {
+        "category": category,
+        "country": country,
+        "campaign_type": campaign_type,
+        "include_primary_text_variations": campaign_type == "Carousel",
+        "product_name": product_name,
+        "product_url": product_url,
+        "template_key": template_key,
+        "variation_token": variation_token,
+        "campaign_moment": campaign_moment,
+        "product_metadata": product_metadata,
+        "instant_experience_settings": settings,
+        "recent_instant_experience_fingerprints": recent_instant_experience_fingerprints,
+    }
+    if creative_refresh_context:
+        return apply_creative_refresh_winner_context(
+            compose_final_ads_prompt(prompt, **prompt_kwargs),
+            creative_refresh_context,
+        )
+    return compose_final_ads_prompt(prompt, **prompt_kwargs)
 
 
 def render_insufficient_winner_data():
@@ -8784,6 +8920,7 @@ def ads_result_context_key(
     campaign_moment=None,
     instant_experience_settings=None,
     product_metadata=None,
+    creative_refresh_context=None,
 ):
     payload_data = {
         "product_id": str(product_id or ""),
@@ -8805,6 +8942,14 @@ def ads_result_context_key(
             "collections": product_metadata.get("collections"),
             "product_type": product_metadata.get("product_type"),
         }
+    if creative_refresh_context:
+        winner_context = normalize_creative_refresh_context(creative_refresh_context)
+        payload_data["creative_refresh"] = {
+            "version": CREATIVE_REFRESH_WINNER_CONTEXT_VERSION,
+            "winning_primary_text": winner_context["winning_primary_text"],
+            "winning_headline": winner_context["winning_headline"],
+            "winner_image_attached_in_chatgpt": True,
+        }
     payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
@@ -8822,6 +8967,7 @@ def build_ads_result_record(
     product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
+    creative_refresh_context=None,
 ):
     clean_product_name = _clean_product_name(product_name)
     clean_product_id = str(product_id or "").strip()
@@ -8836,6 +8982,11 @@ def build_ads_result_record(
         else {"product_sport": _normalise_option_label(category)}
     )
     clean_instant_experience_settings = None
+    clean_creative_refresh_context = (
+        normalize_creative_refresh_context(creative_refresh_context)
+        if creative_refresh_context
+        else None
+    )
     instant_experience_fingerprints = (
         build_standard_instant_experience_fingerprints(
             product_name=clean_product_name,
@@ -8858,8 +9009,9 @@ def build_ads_result_record(
         product_metadata=clean_product_metadata,
         instant_experience_settings=clean_instant_experience_settings,
         recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
+        creative_refresh_context=clean_creative_refresh_context,
     )
-    return {
+    result = {
         "context_key": ads_result_context_key(
             clean_product_id,
             clean_product_name,
@@ -8868,6 +9020,7 @@ def build_ads_result_record(
             campaign_type,
             clean_campaign_moment,
             product_metadata=clean_product_metadata,
+            creative_refresh_context=clean_creative_refresh_context,
         ),
         "product_id": clean_product_id,
         "product_name": clean_product_name,
@@ -8884,26 +9037,52 @@ def build_ads_result_record(
             if campaign_type == "Instant Experience"
             else []
         ),
-        "prompt_contract_version": ads_prompt_contract_version_for_campaign(campaign_type),
+        "prompt_contract_version": ads_prompt_contract_version_for_campaign(
+            campaign_type,
+            workflow_mode=(
+                ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+                if clean_creative_refresh_context
+                else ADS_WORKFLOW_MODE_NEW
+            ),
+        ),
         "master_prompt": master_prompt,
         "generated_ad_output": master_prompt,
     }
+    if clean_creative_refresh_context:
+        result.update(
+            {
+                "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH,
+                "source": "Creative Refresh",
+                "creative_refresh_context": clean_creative_refresh_context,
+            }
+        )
+    return result
 
 
-def ads_prompt_contract_version_for_campaign(campaign_type):
+def ads_prompt_contract_version_for_campaign(
+    campaign_type,
+    workflow_mode=ADS_WORKFLOW_MODE_NEW,
+):
+    version = ADS_PROMPT_CONTRACT_VERSION
     if campaign_type == "Instant Experience":
-        return (
+        version = (
             f"{ADS_PROMPT_CONTRACT_VERSION}; "
             f"{ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION}; "
             f"{ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION}"
         )
-    return ADS_PROMPT_CONTRACT_VERSION
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
+    return version
 
 
 def ensure_current_ads_result_prompt(result):
     if not isinstance(result, dict) or not result.get("master_prompt"):
         return result
-    expected_version = ads_prompt_contract_version_for_campaign(result.get("campaign_type"))
+    workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
+    expected_version = ads_prompt_contract_version_for_campaign(
+        result.get("campaign_type"),
+        workflow_mode=workflow_mode,
+    )
     if result.get("prompt_contract_version") == expected_version:
         return result
     old_master_prompt = str(result.get("master_prompt") or "")
@@ -8920,6 +9099,7 @@ def ensure_current_ads_result_prompt(result):
         product_metadata=result.get("product_metadata"),
         instant_experience_settings=result.get("instant_experience_settings"),
         recent_instant_experience_fingerprints=result.get("recent_instant_experience_fingerprints", []),
+        creative_refresh_context=result.get("creative_refresh_context"),
     )
     merged = {**result, **refreshed}
     if old_generated_output and old_generated_output != old_master_prompt:
@@ -8951,15 +9131,15 @@ def _reset_ads_image_workflow(result):
         if str(key).startswith("ads-image-upload::") and current_context not in str(key):
             st.session_state.pop(key, None)
     workflow = _new_ads_image_workflow(result)
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
     return workflow
 
 
 def _ads_image_workflow(result):
-    workflow = st.session_state.get(ADS_IMAGE_STATE_KEY)
+    workflow = st.session_state.get(_ads_image_state_key())
     if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
         workflow = _new_ads_image_workflow(result)
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
     return workflow
 
 
@@ -9138,7 +9318,7 @@ def _remove_ads_image_slot(result, slot_id):
         workflow["destination_path"] = ""
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
 
 
 def _process_ads_image_upload(result, workflow, slot, uploaded_file):
@@ -9219,7 +9399,7 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
         workflow["destination_path"] = ""
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
 
 
 def ads_images_ready(result, workflow=None):
@@ -9997,7 +10177,7 @@ def _process_carousel_copy_csv_upload(result, workflow, uploaded_file):
         status = {"ok": False, "message": str(error)}
     workflow["carousel_csv_import_digest"] = digest
     workflow["carousel_csv_import_status"] = status
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
     return status
 
 
@@ -10402,7 +10582,7 @@ def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file)
         status = {"ok": False, "message": str(error)}
     workflow["copy_csv_import_digest"] = digest
     workflow["copy_csv_import_status"] = status
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
     return status
 
 
@@ -11214,7 +11394,7 @@ def _render_carousel_setup_notes(result, workflow):
                 placeholder="Overall Carousel or final Meta ad setup notes.",
             )
     _store_carousel_copy_notes(workflow, carousel)
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
 
 
 def _render_ads_setup_notes(result, workflow):
@@ -11268,7 +11448,7 @@ def _render_ads_setup_notes(result, workflow):
                     key=f"ads-notes-primary-text::{result['context_key']}",
                 )
     workflow["ad_notes"] = notes
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
 
 
 def _render_instant_experience_copy_csv_control(result, workflow):
@@ -11481,7 +11661,7 @@ def _render_instant_experience_concepts(result, workflow):
     notes = dict(workflow.get("ad_notes") or {})
     notes["instant_experience_concepts"] = concept_notes
     workflow["ad_notes"] = notes
-    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    st.session_state[_ads_image_state_key()] = workflow
 
 
 def _render_ads_image_slots(result, workflow):
@@ -11688,10 +11868,11 @@ def _render_ads_folder_picker(
     result,
     workflow,
     *,
-    state_key=ADS_IMAGE_STATE_KEY,
+    state_key=None,
     key_prefix="ads-picker",
     container_key="ads-dropbox-picker",
 ):
+    state_key = state_key or _ads_image_state_key()
     default_path = dropbox_integration.normalize_dropbox_path(
         f"{root_path}/{ADS_PRODUCT_IMAGES_FOLDER}"
     )
@@ -12117,7 +12298,7 @@ def _render_instant_experience_package_save(result, workflow):
         use_container_width=True,
     ):
         workflow["save_open"] = True
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
     if not workflow.get("save_open"):
         return
@@ -12150,7 +12331,7 @@ def _render_instant_experience_package_save(result, workflow):
         use_container_width=True,
     ):
         workflow["saving"] = True
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         progress = st.progress(0, text="Saving Instant Experience package...")
 
         def update_progress(index, total, label, uploaded, file_total):
@@ -12231,7 +12412,7 @@ def _render_instant_experience_package_save(result, workflow):
         finally:
             progress.empty()
             workflow["saving"] = False
-            st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+            st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
     if action_columns[1].button(
         "Cancel",
@@ -12239,7 +12420,7 @@ def _render_instant_experience_package_save(result, workflow):
         use_container_width=True,
     ):
         workflow["save_open"] = False
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
 
     outcomes = workflow.get("outcomes") or {}
@@ -12326,7 +12507,7 @@ def _render_ads_image_save(result, workflow):
             st.warning("Upload at least one valid generated image or add setup notes before saving.")
             return
         workflow["save_open"] = True
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
     if not workflow.get("save_open"):
         return
@@ -12370,7 +12551,7 @@ def _render_ads_image_save(result, workflow):
         use_container_width=True,
     ):
         workflow["saving"] = True
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         progress = st.progress(0, text="Saving Meta-ready images...")
 
         def update_progress(index, total, label, uploaded, file_total):
@@ -12438,7 +12619,7 @@ def _render_ads_image_save(result, workflow):
         finally:
             progress.empty()
             workflow["saving"] = False
-            st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+            st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
     if action_columns[1].button(
         "Cancel",
@@ -12446,7 +12627,7 @@ def _render_ads_image_save(result, workflow):
         use_container_width=True,
     ):
         workflow["save_open"] = False
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.session_state[_ads_image_state_key()] = workflow
         st.rerun()
 
     outcomes = workflow.get("outcomes") or {}
@@ -12605,12 +12786,12 @@ def _clear_ads_review_widget_state(context_key):
 
 
 def _ads_review_workflow(result):
-    workflow = st.session_state.get(ADS_REVIEW_STATE_KEY)
+    workflow = st.session_state.get(_ads_review_state_key())
     if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
         if isinstance(workflow, dict):
             _clear_ads_review_widget_state(str(workflow.get("context_key") or ""))
         workflow = _new_ads_review_workflow(result)
-        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+        st.session_state[_ads_review_state_key()] = workflow
     return workflow
 
 
@@ -12659,7 +12840,7 @@ def _process_review_uploads(result, workflow, kind, uploaded_files):
     if changed or errors != previous_errors:
         workflow["review"] = None
         workflow["error"] = ""
-        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+        st.session_state[_ads_review_state_key()] = workflow
 
 
 def _remove_review_image(result, kind, index):
@@ -12672,7 +12853,7 @@ def _remove_review_image(result, kind, index):
     nonces[kind] = int(nonces.get(kind) or 0) + 1
     workflow["review"] = None
     workflow["error"] = ""
-    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+    st.session_state[_ads_review_state_key()] = workflow
 
 
 def _move_review_image(result, kind, index, offset):
@@ -12684,7 +12865,7 @@ def _move_review_image(result, kind, index, offset):
         workflow[kind] = items
         workflow["review"] = None
         workflow["error"] = ""
-        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+        st.session_state[_ads_review_state_key()] = workflow
 
 
 def _render_review_image_list(result, workflow, kind):
@@ -12907,7 +13088,7 @@ def _submit_ads_review(result, workflow):
     workflow["running"] = True
     workflow["request_id"] = request_id
     workflow["error"] = ""
-    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+    st.session_state[_ads_review_state_key()] = workflow
     try:
         with st.spinner("Reviewing the complete ad..."):
             review = ads_final_review.request_final_ad_review(
@@ -12916,7 +13097,7 @@ def _submit_ads_review(result, workflow):
                 workflow.get("creatives") or (),
                 workflow.get("final_copy") or "",
             )
-        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        current = st.session_state.get(_ads_review_state_key())
         if (
             isinstance(current, dict)
             and current.get("context_key") == result.get("context_key")
@@ -12925,24 +13106,24 @@ def _submit_ads_review(result, workflow):
             current["review"] = review
             current["error"] = ""
             current["running"] = False
-            st.session_state[ADS_REVIEW_STATE_KEY] = current
+            st.session_state[_ads_review_state_key()] = current
     except (
         ads_final_review.AdsReviewError,
         ads_final_review.AdsReviewValidationError,
     ) as error:
-        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        current = st.session_state.get(_ads_review_state_key())
         if isinstance(current, dict) and current.get("request_id") == request_id:
             current["error"] = str(error)
             current["running"] = False
-            st.session_state[ADS_REVIEW_STATE_KEY] = current
+            st.session_state[_ads_review_state_key()] = current
     except Exception:
-        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        current = st.session_state.get(_ads_review_state_key())
         if isinstance(current, dict) and current.get("request_id") == request_id:
             current["error"] = (
                 "The review could not be completed. Your uploads are still available to retry."
             )
             current["running"] = False
-            st.session_state[ADS_REVIEW_STATE_KEY] = current
+            st.session_state[_ads_review_state_key()] = current
 
 
 def _render_final_ad_review(result):
@@ -12968,6 +13149,8 @@ def render_supported_result(result):
     render_generic_winner_pattern_note(category, campaign_type)
     master_prompt = result["master_prompt"]
     workflow = _ads_image_workflow(result)
+    if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        st.info("Attach the winning ad image to ChatGPT with this prompt.")
 
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
@@ -13027,7 +13210,11 @@ def render_supported_result(result):
     render_meta_url_parameters_section(3)
 
 
-def render_page():
+def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
+    workflow_mode = normalize_ads_workflow_mode(workflow_mode)
+    st.session_state[ADS_ACTIVE_WORKFLOW_MODE_KEY] = workflow_mode
+    result_state_key = _ads_result_state_key(workflow_mode)
+    is_creative_refresh = workflow_mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
     st.markdown(
         """
         <style>
@@ -13150,23 +13337,37 @@ def render_page():
         """,
         unsafe_allow_html=True,
     )
-    st.title("Ads")
-    st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
+    if is_creative_refresh:
+        st.title("Creative Refresh")
+        st.caption("Turn a proven winner into three fresh controlled challengers.")
+    else:
+        st.title("Ads")
+        st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
 
     with st.expander("How to use", expanded=False):
-        st.markdown(
-            "1. Enter the product and select the sport, country and campaign type.\n"
-            "2. Select Submit.\n"
-            "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
-            "4. Copy and paste the generated master prompt.\n"
-            "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
-            "6. Generate and upload the images in the displayed order."
-        )
+        if is_creative_refresh:
+            st.markdown(
+                "1. Enter the same product, sport, country, campaign type and optional Campaign Moment used by New Ads.\n"
+                "2. Paste the winning primary text and headline, then select Submit.\n"
+                "3. Upload the black-framed Sports Cave product WebP and attach the winning ad image to ChatGPT.\n"
+                "4. Copy and paste the generated master prompt.\n"
+                "5. ChatGPT will return the normal New Ads production package.\n"
+                "6. Import the completed CSV where offered, then upload and save the images through the normal Ads workflow."
+            )
+        else:
+            st.markdown(
+                "1. Enter the product and select the sport, country and campaign type.\n"
+                "2. Select Submit.\n"
+                "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
+                "4. Copy and paste the generated master prompt.\n"
+                "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
+                "6. Generate and upload the images in the displayed order."
+            )
         st.warning(
             "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
         )
 
-    result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    result = st.session_state.get(result_state_key)
     if (
         ADS_PRODUCT_NAME_KEY not in st.session_state
         and isinstance(result, dict)
@@ -13207,6 +13408,28 @@ def render_page():
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
     campaign_moment = render_campaign_moment_section()
+    creative_refresh_context = None
+    if is_creative_refresh:
+        with st.container(border=True, key="ads-creative-refresh-winning-ad"):
+            st.subheader("Winning ad")
+            winning_primary_text = st.text_area(
+                "Winning primary text",
+                placeholder="Paste the winning Meta primary text",
+                height=112,
+                key=ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY,
+            )
+            winning_headline = st.text_input(
+                "Winning headline",
+                placeholder="Paste the winning Meta headline",
+                key=ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY,
+            )
+            st.caption("Attach the winning ad image to ChatGPT with this prompt.")
+        creative_refresh_context = normalize_creative_refresh_context(
+            {
+                "winning_primary_text": winning_primary_text,
+                "winning_headline": winning_headline,
+            }
+        )
     submitted = st.button(
         "Submit",
         type="primary",
@@ -13224,6 +13447,11 @@ def render_page():
         campaign_moment_message = validate_campaign_moment(
             campaign_moment,
             selected_country=country,
+        )
+        creative_refresh_message = (
+            validate_creative_refresh_context(creative_refresh_context)
+            if is_creative_refresh
+            else ""
         )
         if campaign_moment_message:
             st.warning(campaign_moment_message)
@@ -13247,6 +13475,8 @@ def render_page():
                 )
             else:
                 st.warning(validation_message)
+        elif creative_refresh_message:
+            st.warning(creative_refresh_message)
         elif not get_winner_pattern_key(category, campaign_type):
             render_insufficient_winner_data()
         else:
@@ -13263,6 +13493,7 @@ def render_page():
                 campaign_type,
                 campaign_moment,
                 product_metadata=product_metadata,
+                creative_refresh_context=creative_refresh_context,
             )
             existing_result = result if isinstance(result, dict) else {}
             if existing_result.get("context_key") == context_key:
@@ -13291,6 +13522,7 @@ def render_page():
                             ADS_IE_RECENT_FINGERPRINTS_KEY,
                             [],
                         ),
+                        creative_refresh_context=creative_refresh_context,
                     )
                 else:
                     result = existing_result
@@ -13309,9 +13541,10 @@ def render_page():
                         ADS_IE_RECENT_FINGERPRINTS_KEY,
                         [],
                     ),
+                    creative_refresh_context=creative_refresh_context,
                 )
                 _reset_ads_image_workflow(result)
-            st.session_state[ADS_RESULT_STATE_KEY] = result
+            st.session_state[result_state_key] = result
             if campaign_type == "Instant Experience":
                 update_recent_instant_experience_fingerprints(
                     result.get("instant_experience_fingerprints")
@@ -13328,11 +13561,11 @@ def render_page():
                 ),
             )
 
-    result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    result = st.session_state.get(result_state_key)
     refreshed_result = ensure_current_ads_result_prompt(result)
     if refreshed_result is not result:
         result = refreshed_result
-        st.session_state[ADS_RESULT_STATE_KEY] = result
+        st.session_state[result_state_key] = result
     if isinstance(result, dict) and result.get("master_prompt"):
         render_supported_result(result)
         _render_final_ad_review(result)

@@ -3256,26 +3256,9 @@ def _render_build_challengers_stage(review_result):
 
 
 def render_page():
-    _render_styles()
-    st.title("Creative Refresh")
-    st.markdown(
-        '<div class="sc-creative-refresh-subtitle">Turn a proven winner into three stronger controlled challengers.</div>',
-        unsafe_allow_html=True,
+    ads_page.render_page(
+        workflow_mode=ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH,
     )
-    with st.expander("How to use", expanded=False):
-        st.markdown(
-            "1. Select the product and paste the winning primary text and headline.\n"
-            "2. Optionally add a Meta performance CSV, then download the empty CSV and copy the Review Prompt.\n"
-            "3. In ChatGPT, attach the winning image and empty CSV, then run the prompt.\n"
-            "4. Import the completed three-row CSV, upload the three generated images and save through the normal Ads workflow."
-        )
-    review_result = _render_review_winner_stage()
-    if (
-        review_result
-        and review_result.get("prompt")
-        and st.session_state.get(PROMPT_READY_CONTEXT_KEY) == review_result.get("context_key")
-    ):
-        _render_build_challengers_stage(review_result)
 
 
 render_creative_refresh_page = render_page
