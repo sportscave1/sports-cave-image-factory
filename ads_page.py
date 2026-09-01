@@ -1137,6 +1137,21 @@ def _edition_ops_product_id_from_row(row):
 
 
 def _edition_ops_product_page_url_from_row(row):
+    return canonical_shopify_product_url_from_row(
+        row,
+        allow_handle_fallback=False,
+        require_sports_cave_store=False,
+    )
+
+
+def canonical_shopify_product_url_from_row(
+    row,
+    *,
+    allow_handle_fallback=True,
+    require_sports_cave_store=True,
+):
+    """Resolve the canonical product URL without a live Shopify API call."""
+
     if not isinstance(row, dict):
         return ""
     for field in (
@@ -1150,7 +1165,16 @@ def _edition_ops_product_page_url_from_row(row):
     ):
         clean_url = _clean_product_url(row.get(field))
         if clean_url and is_valid_product_page_url(clean_url):
-            return clean_url
+            hostname = str(urlparse(clean_url).hostname or "").strip().casefold()
+            if not require_sports_cave_store or hostname in {
+                "sportscaveshop.com",
+                "www.sportscaveshop.com",
+            }:
+                return clean_url
+    if allow_handle_fallback:
+        handle = _edition_ops_product_handle_from_row(row).strip().casefold()
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", handle):
+            return f"https://www.sportscaveshop.com/products/{handle}"
     return ""
 
 

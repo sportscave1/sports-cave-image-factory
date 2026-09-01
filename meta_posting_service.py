@@ -24,7 +24,9 @@ from meta_ads_client import (
 SUCCESS_MESSAGE = "Meta ad created successfully — PAUSED"
 POSTING_PERMISSION = "ads_management"
 EXPECTED_CATALOG_NAME = "Shopify Product Catalog"
-EXPECTED_PIXEL_NAME = "Sports Cave Pixel 2025"
+EXPECTED_PIXEL_NAME = "Shprts Cave Pixel 2025"
+CATALOG_ID_ENV_KEYS = ("META_CATALOG_ID",)
+DATASET_ID_ENV_KEYS = ("META_PIXEL_ID", "META_DATASET_ID")
 CAMPAIGN_OBJECTIVE = "OUTCOME_SALES"
 CAMPAIGN_DAILY_BUDGET_MINOR = 2500
 PRODUCT_DESCRIPTION = "Limited Edition"
@@ -40,6 +42,250 @@ POSTING_STATUSES = (
     "PAGE_PHOTO_CREATED", "INSTANT_EXPERIENCE_CREATED", "CREATIVE_CREATED",
     "AD_CREATED", "COMPLETE", "FAILED", "AMBIGUOUS",
 )
+
+
+def _configured_id(keys, *, environ=None):
+    environ = os.environ if environ is None else environ
+    for key in keys:
+        value = str(environ.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def configured_catalog_id(*, environ=None):
+    return _configured_id(CATALOG_ID_ENV_KEYS, environ=environ)
+
+
+def configured_dataset_id(*, environ=None):
+    return _configured_id(DATASET_ID_ENV_KEYS, environ=environ)
+
+
+def _rows_by_id(rows):
+    return {
+        str(row.get("id") or "").strip(): dict(row)
+        for row in rows or ()
+        if str(row.get("id") or "").strip()
+    }
+
+
+def _resolution(*, entity, row=None, source="", error=""):
+    row = dict(row or {})
+    return {
+        "resolved": bool(row.get("id")),
+        "entity": entity,
+        "id": str(row.get("id") or ""),
+        "name": str(row.get("name") or ""),
+        "source": str(source or ""),
+        "error": str(error or ""),
+    }
+
+
+def resolve_catalog_reference(references, *, expected_id="", environ=None):
+    references = dict(references or {})
+    rows = _rows_by_id(references.get("catalogs") or ())
+    configured_id = configured_catalog_id(environ=environ)
+    required_id = str(expected_id or configured_id or "").strip()
+    if required_id:
+        if required_id in rows:
+            return _resolution(entity="catalog", row=rows[required_id], source="configured_or_selected_id")
+        fallback_ids = {
+            str(value or "").strip()
+            for value in references.get("catalog_fallback_ids") or ()
+            if str(value or "").strip()
+        }
+        if required_id == configured_id or required_id in fallback_ids:
+            return _resolution(
+                entity="catalog",
+                row={"id": required_id, "name": EXPECTED_CATALOG_NAME},
+                source="configured_id" if required_id == configured_id else "existing_sales_campaign",
+            )
+        return _resolution(
+            entity="catalog",
+            error="The selected catalog could not be verified against configured or existing Sports Cave assets.",
+        )
+
+    exact = [
+        row for row in rows.values()
+        if str(row.get("name") or "").strip().casefold() == EXPECTED_CATALOG_NAME.casefold()
+    ]
+    if len(exact) == 1:
+        return _resolution(entity="catalog", row=exact[0], source="exact_name")
+    if len(exact) > 1:
+        return _resolution(
+            entity="catalog",
+            error=f"Multiple Meta catalogs are named {EXPECTED_CATALOG_NAME}; configure META_CATALOG_ID.",
+        )
+    if len(rows) == 1:
+        return _resolution(entity="catalog", row=next(iter(rows.values())), source="only_accessible_catalog")
+    fallback_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in references.get("catalog_fallback_ids") or ()
+            if str(value or "").strip()
+        }
+    )
+    if len(fallback_ids) == 1:
+        fallback_id = fallback_ids[0]
+        return _resolution(
+            entity="catalog",
+            row=rows.get(fallback_id) or {"id": fallback_id, "name": EXPECTED_CATALOG_NAME},
+            source="existing_sales_campaign",
+        )
+    if len(fallback_ids) > 1:
+        return _resolution(
+            entity="catalog",
+            error="Existing Sports Cave Sales campaigns reference multiple catalog IDs; configure META_CATALOG_ID.",
+        )
+    return _resolution(
+        entity="catalog",
+        error="The Shopify Product Catalog could not be resolved from configured, accessible, or existing Sales assets.",
+    )
+
+
+def resolve_dataset_reference(references, *, environ=None):
+    references = dict(references or {})
+    rows = _rows_by_id(references.get("pixels") or ())
+    configured_id = configured_dataset_id(environ=environ)
+    if configured_id:
+        return _resolution(
+            entity="dataset",
+            row=rows.get(configured_id) or {"id": configured_id, "name": EXPECTED_PIXEL_NAME},
+            source="configured_id",
+        )
+    exact = [
+        row for row in rows.values()
+        if str(row.get("name") or "").strip().casefold() == EXPECTED_PIXEL_NAME.casefold()
+    ]
+    if len(exact) == 1:
+        return _resolution(entity="dataset", row=exact[0], source="exact_name")
+    if len(exact) > 1:
+        return _resolution(
+            entity="dataset",
+            error=f"Multiple Meta datasets are named {EXPECTED_PIXEL_NAME}; configure META_PIXEL_ID or META_DATASET_ID.",
+        )
+    fallback_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in references.get("dataset_fallback_ids") or ()
+            if str(value or "").strip()
+        }
+    )
+    if len(fallback_ids) == 1:
+        fallback_id = fallback_ids[0]
+        return _resolution(
+            entity="dataset",
+            row=rows.get(fallback_id) or {"id": fallback_id, "name": EXPECTED_PIXEL_NAME},
+            source="existing_purchase_adsets",
+        )
+    if len(fallback_ids) > 1:
+        return _resolution(
+            entity="dataset",
+            error="Existing Sports Cave Purchase ad sets reference multiple Dataset/Pixel IDs; configure the intended ID.",
+        )
+    return _resolution(
+        entity="dataset",
+        error=f"The existing Dataset {EXPECTED_PIXEL_NAME} could not be resolved.",
+    )
+
+
+def catalog_ids_from_sales_campaigns(rows):
+    ids = set()
+    for row in rows or ():
+        objective = str(row.get("objective") or "").strip().upper()
+        promoted = dict(row.get("promoted_object") or {})
+        catalog_id = str(promoted.get("product_catalog_id") or "").strip()
+        if catalog_id and objective in {"OUTCOME_SALES", "PRODUCT_CATALOG_SALES", "CONVERSIONS"}:
+            ids.add(catalog_id)
+    return tuple(sorted(ids))
+
+
+def dataset_ids_from_purchase_adsets(rows):
+    ids = set()
+    for row in rows or ():
+        promoted = dict(row.get("promoted_object") or {})
+        event_type = str(promoted.get("custom_event_type") or "").strip().upper()
+        campaign = dict(row.get("campaign") or {})
+        objective = str(
+            campaign.get("objective")
+            or row.get("campaign_objective")
+            or row.get("objective")
+            or ""
+        ).strip().upper()
+        dataset_id = str(promoted.get("pixel_id") or promoted.get("dataset_id") or "").strip()
+        if (
+            dataset_id
+            and event_type == "PURCHASE"
+            and objective in {"OUTCOME_SALES", "PRODUCT_CATALOG_SALES", "CONVERSIONS"}
+        ):
+            ids.add(dataset_id)
+    return tuple(sorted(ids))
+
+
+def load_posting_reference_snapshot(
+    client,
+    *,
+    include_existing_ad_names=True,
+    expected_catalog_id="",
+    environ=None,
+):
+    """Load reusable read-only Meta references once for a page/session refresh."""
+
+    references = dict(client.reference_data() or {})
+    warnings = list(references.get("warnings") or ())
+    catalog_resolution = resolve_catalog_reference(
+        references,
+        expected_id=expected_catalog_id,
+        environ=environ,
+    )
+    if not catalog_resolution.get("resolved"):
+        loader = getattr(client, "reference_campaigns", None)
+        try:
+            campaigns = tuple(loader() or ()) if callable(loader) else ()
+        except MetaAdsApiError:
+            campaigns = ()
+            warnings.append("Existing Sales campaigns were unavailable for catalog fallback discovery.")
+        references["catalog_fallback_ids"] = catalog_ids_from_sales_campaigns(campaigns)
+        catalog_resolution = resolve_catalog_reference(
+            references,
+            expected_id=expected_catalog_id,
+            environ=environ,
+        )
+
+    dataset_resolution = resolve_dataset_reference(references, environ=environ)
+    if not dataset_resolution.get("resolved"):
+        loader = getattr(client, "reference_adsets", None)
+        try:
+            adsets = tuple(loader() or ()) if callable(loader) else ()
+        except MetaAdsApiError:
+            adsets = ()
+            warnings.append("Existing Purchase ad sets were unavailable for Dataset fallback discovery.")
+        references["dataset_fallback_ids"] = dataset_ids_from_purchase_adsets(adsets)
+        dataset_resolution = resolve_dataset_reference(references, environ=environ)
+
+    product_sets = ()
+    catalog_id = str(catalog_resolution.get("id") or "")
+    if catalog_id:
+        try:
+            product_sets = tuple(dict(row) for row in client.product_sets(catalog_id))
+        except MetaAdsApiError:
+            warnings.append("Product Sets are temporarily unavailable for the resolved catalog.")
+    existing_ad_names = ()
+    if include_existing_ad_names:
+        try:
+            existing_ad_names = tuple(client.existing_ad_names())
+        except MetaAdsApiError:
+            warnings.append("Existing ad names are unavailable; the definitive IA sequence will be checked at creation.")
+    references.update(
+        {
+            "catalog_resolution": catalog_resolution,
+            "dataset_resolution": dataset_resolution,
+            "product_sets": product_sets,
+            "existing_ad_names": existing_ad_names,
+            "warnings": tuple(dict.fromkeys(str(value) for value in warnings if str(value).strip())),
+        }
+    )
+    return references
 
 
 class PostingError(RuntimeError):
@@ -504,21 +750,31 @@ class MetaPostingService:
             raise PostingValidationError("Sports Cave Facebook Page identity is not configured.")
         if not str(self.client.instagram_actor_id or "").strip():
             raise PostingValidationError("Sports Cave Instagram identity is not configured.")
-        references = dict(self.client.reference_data() or {})
+        references = load_posting_reference_snapshot(
+            self.client,
+            include_existing_ad_names=False,
+            expected_catalog_id=clean["catalog_id"],
+        )
         page = dict(references.get("page") or {})
         instagram = dict(references.get("instagram") or {})
         if str(page.get("id") or "") != str(self.client.page_id):
             raise PostingValidationError("The configured Sports Cave Facebook Page could not be validated.")
         if str(instagram.get("id") or "") != str(self.client.instagram_actor_id):
             raise PostingValidationError("The configured Sports Cave Instagram identity could not be validated.")
-        catalog = self._one(
-            references.get("catalogs") or (), entity=EXPECTED_CATALOG_NAME,
-            expected_id=clean["catalog_id"],
-        )
-        if str(catalog.get("name") or "").strip().casefold() != EXPECTED_CATALOG_NAME.casefold():
-            raise PostingValidationError(f"Select the existing {EXPECTED_CATALOG_NAME}.")
+        catalog_resolution = dict(references.get("catalog_resolution") or {})
+        if (
+            not catalog_resolution.get("resolved")
+            or str(catalog_resolution.get("id") or "") != clean["catalog_id"]
+        ):
+            raise PostingValidationError(
+                str(catalog_resolution.get("error") or "The selected Shopify catalog could not be validated.")
+            )
+        catalog = {
+            "id": clean["catalog_id"],
+            "name": str(catalog_resolution.get("name") or EXPECTED_CATALOG_NAME),
+        }
         product_set = self._one(
-            self.client.product_sets(clean["catalog_id"]), entity="product set",
+            references.get("product_sets") or (), entity="product set",
             expected_id=clean["product_set_id"],
         )
         product_catalog = dict(product_set.get("product_catalog") or {})
@@ -526,19 +782,15 @@ class MetaPostingService:
             raise PostingValidationError(
                 "The selected product set no longer belongs to the Shopify catalog."
             )
-        configured_pixel_id = str(
-            os.getenv("META_PIXEL_ID") or os.getenv("META_DATASET_ID") or ""
-        ).strip()
-        if configured_pixel_id:
-            pixel = self._one(
-                references.get("pixels") or (), entity="configured dataset/pixel",
-                expected_id=configured_pixel_id,
+        dataset_resolution = dict(references.get("dataset_resolution") or {})
+        if not dataset_resolution.get("resolved"):
+            raise PostingValidationError(
+                str(dataset_resolution.get("error") or f"The Dataset {EXPECTED_PIXEL_NAME} could not be validated.")
             )
-        else:
-            pixel = self._one(
-                references.get("pixels") or (), entity=EXPECTED_PIXEL_NAME,
-                expected_name=EXPECTED_PIXEL_NAME,
-            )
+        pixel = {
+            "id": str(dataset_resolution.get("id") or ""),
+            "name": str(dataset_resolution.get("name") or EXPECTED_PIXEL_NAME),
+        }
         audience = {"id": "", "name": "Broad", "targeting": {}}
         if clean["audience_type"] == "saved":
             audience = self._one(

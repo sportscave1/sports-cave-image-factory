@@ -818,8 +818,8 @@ class MetaPostingClient:
             config=self.config,
         )
 
-    def catalogs(self):
-        account = dict(self.account() or {})
+    def catalogs(self, account=None):
+        account = dict(self.account() or {}) if account is None else dict(account or {})
         business_id = str((account.get("business") or {}).get("id") or "")
         rows = []
 
@@ -893,10 +893,52 @@ class MetaPostingClient:
             or ()
         )
 
+    def reference_campaigns(self):
+        return tuple(
+            _paged_get(
+                f"{self.ad_account_id}/campaigns",
+                params={
+                    "fields": "id,name,status,effective_status,objective,promoted_object",
+                    "limit": 100,
+                },
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def reference_adsets(self):
+        return tuple(
+            _paged_get(
+                f"{self.ad_account_id}/adsets",
+                params={
+                    "fields": (
+                        "id,name,status,effective_status,campaign_id,optimization_goal,"
+                        "promoted_object,campaign{objective}"
+                    ),
+                    "limit": 100,
+                },
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
     def reference_data(self):
         warnings = []
-        catalogs = self.catalogs()
-        pixels = self.pixels()
+        try:
+            account = dict(self.account() or {})
+        except MetaAdsApiError:
+            account = {}
+            warnings.append("Meta account details are temporarily unavailable.")
+        try:
+            catalogs = self.catalogs(account=account)
+        except MetaAdsApiError:
+            catalogs = ()
+            warnings.append("Catalog discovery is unavailable to this token.")
+        try:
+            pixels = self.pixels()
+        except MetaAdsApiError:
+            pixels = ()
+            warnings.append("Dataset discovery is unavailable to this token.")
         try:
             saved = self.saved_audiences()
         except MetaAdsApiError:
@@ -907,10 +949,20 @@ class MetaPostingClient:
         except MetaAdsApiError:
             custom = ()
             warnings.append("Custom audiences are unavailable to this token.")
+        try:
+            page = dict(self.page() or {})
+        except MetaAdsApiError:
+            page = {}
+            warnings.append("Facebook Page identity could not be refreshed.")
+        try:
+            instagram = dict(self.instagram_account() or {})
+        except MetaAdsApiError:
+            instagram = {}
+            warnings.append("Instagram identity could not be refreshed.")
         return {
-            "account": dict(self.account() or {}),
-            "page": dict(self.page() or {}),
-            "instagram": dict(self.instagram_account() or {}),
+            "account": account,
+            "page": page,
+            "instagram": instagram,
             "catalogs": tuple(dict(row) for row in catalogs),
             "pixels": tuple(dict(row) for row in pixels),
             "saved_audiences": tuple(dict(row) for row in saved),

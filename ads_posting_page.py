@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import os
 
 import streamlit as st
 
@@ -29,6 +28,7 @@ from meta_posting_service import (
     adset_name,
     campaign_name,
     next_instant_experience_ad_name,
+    load_posting_reference_snapshot,
     posting_submission_id,
 )
 
@@ -48,6 +48,11 @@ HEADLINE_KEY = f"{STATE_PREFIX}headline"
 DESCRIPTION_KEY = f"{STATE_PREFIX}description"
 RESULT_KEY = f"{STATE_PREFIX}result"
 PROCESSING_KEY = f"{STATE_PREFIX}processing"
+META_OVERVIEW_STATE_KEY = "ads_posting_meta_overview"
+META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
+META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
+META_REFERENCES_ERROR_KEY = "ads_posting_meta_references_error"
+PRODUCT_ROWS_STATE_KEY = "ads_posting_product_rows"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -57,15 +62,7 @@ def _load_meta_overview():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_meta_references():
-    client = MetaPostingClient()
-    payload = dict(client.reference_data() or {})
-    payload["existing_ad_names"] = tuple(client.existing_ad_names())
-    return payload
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_product_sets(catalog_id):
-    return tuple(dict(row) for row in MetaPostingClient().product_sets(catalog_id))
+    return load_posting_reference_snapshot(MetaPostingClient())
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -76,7 +73,66 @@ def _load_recent_posts():
 def _clear_meta_cache():
     _load_meta_overview.clear()
     _load_meta_references.clear()
-    _load_product_sets.clear()
+    for key in (
+        META_OVERVIEW_STATE_KEY,
+        META_OVERVIEW_ERROR_KEY,
+        META_REFERENCES_STATE_KEY,
+        META_REFERENCES_ERROR_KEY,
+    ):
+        st.session_state.pop(key, None)
+
+
+def _session_cached_load(state, value_key, error_key, loader, *, force=False):
+    """Keep read-only Meta results stable across ordinary Streamlit reruns."""
+
+    if not force and (value_key in state or error_key in state):
+        return dict(state.get(value_key) or {}), str(state.get(error_key) or "")
+    state.pop(value_key, None)
+    state.pop(error_key, None)
+    try:
+        value = dict(loader() or {})
+    except MetaAdsApiError as error:
+        state[error_key] = str(error)
+        return {}, str(error)
+    state[value_key] = value
+    return value, ""
+
+
+def _meta_state(*, force=False):
+    overview, overview_error = _session_cached_load(
+        st.session_state,
+        META_OVERVIEW_STATE_KEY,
+        META_OVERVIEW_ERROR_KEY,
+        _load_meta_overview,
+        force=force,
+    )
+    if overview_error or not overview.get("connected"):
+        return overview, {}, overview_error, ""
+    references, references_error = _session_cached_load(
+        st.session_state,
+        META_REFERENCES_STATE_KEY,
+        META_REFERENCES_ERROR_KEY,
+        _load_meta_references,
+        force=force,
+    )
+    return overview, references, overview_error, references_error
+
+
+def _product_rows_state():
+    if PRODUCT_ROWS_STATE_KEY not in st.session_state:
+        st.session_state[PRODUCT_ROWS_STATE_KEY] = tuple(load_live_edition_product_rows())
+    return tuple(st.session_state.get(PRODUCT_ROWS_STATE_KEY) or ())
+
+
+def _posting_form_ready(
+    *, product_title, product_url, image, image_error, country, sport,
+    catalog_id, product_set_id, primary_text, headline, dataset_id, identities_ready,
+):
+    return bool(
+        product_title and product_url and image and not image_error and country and sport
+        and catalog_id and product_set_id and str(primary_text or "").strip()
+        and str(headline or "").strip() and dataset_id and identities_ready
+    )
 
 
 def _reset_posting_state():
@@ -236,29 +292,46 @@ def render_page():
         return
 
     status_col, refresh_col = st.columns([5, 1])
-    try:
-        overview = _load_meta_overview()
-    except MetaAdsApiError as error:
-        _connection_status(status_col, f"Meta unavailable — {error}", tone="error")
-        return
-    if refresh_col.button("Refresh Meta", use_container_width=True, disabled=st.session_state[PROCESSING_KEY]):
+    refresh_meta = refresh_col.button(
+        "Refresh Meta",
+        use_container_width=True,
+        disabled=st.session_state[PROCESSING_KEY],
+    )
+    if refresh_meta:
         _clear_meta_cache()
-        st.rerun()
-    if not overview.get("connected") or overview.get("permission_state") == "missing":
+        with st.spinner("Refreshing Meta references…"):
+            overview, references, overview_error, references_error = _meta_state(force=True)
+        st.toast(
+            "Meta setup needs attention"
+            if overview_error or references_error
+            else "Meta references refreshed"
+        )
+    else:
+        overview, references, overview_error, references_error = _meta_state()
+
+    catalog_resolution = dict(references.get("catalog_resolution") or {})
+    dataset_resolution = dict(references.get("dataset_resolution") or {})
+    references_ready = bool(
+        catalog_resolution.get("resolved")
+        and dataset_resolution.get("resolved")
+        and references.get("product_sets")
+        and references.get("page")
+        and references.get("instagram")
+    )
+    if overview_error:
+        _connection_status(status_col, f"Meta unavailable — {overview_error}", tone="warning")
+    elif not overview.get("connected") or overview.get("permission_state") == "missing":
         _connection_status(status_col, str(overview.get("summary") or "Meta unavailable"), tone="warning")
         _render_connection_details(overview)
-        return
-    _connection_status(status_col, "Meta connected", tone="success")
+    elif references_ready:
+        _connection_status(status_col, "Meta connected · references ready", tone="success")
+    else:
+        _connection_status(status_col, "Meta connected · setup needs attention", tone="warning")
+    warnings = tuple(str(value) for value in references.get("warnings") or () if str(value).strip())
+    if warnings:
+        st.caption("⚠ " + " · ".join(warnings[:3]))
 
-    try:
-        references = _load_meta_references()
-    except MetaAdsApiError as error:
-        st.error(f"Meta selectors are unavailable — {error}")
-        return
-    for warning in references.get("warnings") or ():
-        st.caption(f"⚠ {warning}")
-
-    product_rows = load_live_edition_product_rows()
+    product_rows = _product_rows_state()
     product_records = ads_page.build_ads_product_selector_records(product_rows)
     record_by_identity = {str(row["identity"]): row for row in product_records}
     if not record_by_identity:
@@ -281,42 +354,42 @@ def render_page():
         st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
         st.session_state.pop(RESULT_KEY, None)
     product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
-    product_url = str(selection.get("product_url") or "")
+    product_url = str(ads_page.canonical_shopify_product_url_from_row(selected_row) or "")
     product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
-    product_handle = str(selected_row.get("product_handle") or selected_row.get("shopify_handle") or "")
+    product_handle = str(
+        selected_row.get("product_handle")
+        or selected_row.get("shopify_handle")
+        or selected_row.get("handle")
+        or ""
+    )
     st.text_input("Product URL", value=product_url, disabled=True)
     if product_title and not product_url:
-        st.error("This product has no canonical live Shopify URL. Fix Edition Ops/Shopify sync before posting.")
+        st.error("This product has no usable Shopify product URL or valid handle. Posting is blocked.")
 
     targeting_cols = st.columns(2)
     country = targeting_cols[0].selectbox("Country", tuple(COUNTRY_META_CODES), key=COUNTRY_KEY)
     sport = targeting_cols[1].selectbox("Sport / category", SPORT_OPTIONS, key=SPORT_KEY)
 
-    matching_catalogs = tuple(
-        dict(row) for row in references.get("catalogs") or ()
-        if str(row.get("name") or "").strip().casefold() == EXPECTED_CATALOG_NAME.casefold()
-    )
-    catalog_by_id = {str(row.get("id")): row for row in matching_catalogs if row.get("id")}
-    if len(catalog_by_id) == 1:
-        catalog_id = next(iter(catalog_by_id))
-        st.text_input("Catalog", value=EXPECTED_CATALOG_NAME, disabled=True)
-    elif catalog_by_id:
-        catalog_id = st.selectbox(
-            "Catalog", tuple(catalog_by_id), format_func=lambda value: f"{EXPECTED_CATALOG_NAME} · {value}",
-            key=CATALOG_KEY,
-        )
-    else:
-        catalog_id = ""
-        st.error(f"The existing {EXPECTED_CATALOG_NAME} was not found. Posting is blocked.")
-    product_sets = _load_product_sets(catalog_id) if catalog_id else ()
+    catalog_id = str(catalog_resolution.get("id") or "") if catalog_resolution.get("resolved") else ""
+    catalog_label = str(catalog_resolution.get("name") or EXPECTED_CATALOG_NAME)
+    st.text_input("Catalog", value=catalog_label if catalog_id else "Not resolved", disabled=True)
+    if not catalog_id:
+        message = str(catalog_resolution.get("error") or "Meta references have not been refreshed yet.")
+        if references or references_error:
+            st.error(message)
+        else:
+            st.info(message)
+    product_sets = tuple(dict(row) for row in references.get("product_sets") or ()) if catalog_id else ()
     product_set_by_id = {str(row.get("id")): row for row in product_sets if row.get("id")}
+    if str(st.session_state.get(PRODUCT_SET_KEY) or "") not in product_set_by_id:
+        st.session_state.pop(PRODUCT_SET_KEY, None)
     product_set_id = st.selectbox(
         "Product set", tuple(product_set_by_id), index=None, placeholder="Select a Meta product set",
         format_func=lambda value: str(product_set_by_id[value].get("name") or value),
         key=PRODUCT_SET_KEY, disabled=not product_set_by_id,
     ) if product_set_by_id else ""
     if catalog_id and not product_set_by_id:
-        st.error("No product sets are available in the Shopify catalog. Posting is blocked.")
+        st.error("Product Sets could not be loaded for the resolved Shopify catalog.")
 
     audiences = _audience_options(references)
     audience_by_key = {row["key"]: row for row in audiences}
@@ -355,14 +428,15 @@ def render_page():
     generated_adset_name = adset_name(country, sport, audience["name"])
     generated_ad_name = next_instant_experience_ad_name(product_title, existing_names) if product_title else ""
 
-    pixels = tuple(dict(row) for row in references.get("pixels") or ())
-    configured_pixel = str(os.getenv("META_PIXEL_ID") or os.getenv("META_DATASET_ID") or "").strip()
-    matching_pixels = [
-        row for row in pixels
-        if (configured_pixel and str(row.get("id") or "") == configured_pixel)
-        or (not configured_pixel and str(row.get("name") or "").strip().casefold() == EXPECTED_PIXEL_NAME.casefold())
-    ]
-    pixel_label = str((matching_pixels[0] if len(matching_pixels) == 1 else {}).get("name") or "Unresolved")
+    dataset_id = str(dataset_resolution.get("id") or "") if dataset_resolution.get("resolved") else ""
+    dataset_label = str(dataset_resolution.get("name") or EXPECTED_PIXEL_NAME) if dataset_id else "Unresolved"
+    st.text_input("Dataset", value=dataset_label, disabled=True)
+    if not dataset_id:
+        dataset_error = str(dataset_resolution.get("error") or "Meta references have not been refreshed yet.")
+        if references or references_error:
+            st.error(dataset_error)
+        else:
+            st.info(dataset_error)
     product_set_label = str((product_set_by_id.get(product_set_id) or {}).get("name") or "Unresolved")
     account_currency = str((references.get("account") or {}).get("currency") or "account currency")
 
@@ -389,7 +463,8 @@ def render_page():
             "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
         )
         st.caption(
-            f"Catalog: {EXPECTED_CATALOG_NAME} · Product set: {product_set_label} · Pixel: {pixel_label} · "
+            f"Catalog: {catalog_label if catalog_id else 'Unresolved'} · Product set: {product_set_label} · "
+            f"Dataset: {dataset_label} · "
             "Format: Collection · CTA: Shop Now"
         )
         st.caption(
@@ -398,13 +473,20 @@ def render_page():
         )
 
     identities_ready = bool(references.get("page") and references.get("instagram"))
-    ready = bool(
-        product_title and product_url and image and not image_error and country and sport
-        and catalog_id and product_set_id and primary_text.strip() and headline.strip()
-        and len(matching_pixels) == 1 and identities_ready
+    ready = _posting_form_ready(
+        product_title=product_title,
+        product_url=product_url,
+        image=image,
+        image_error=image_error,
+        country=country,
+        sport=sport,
+        catalog_id=catalog_id,
+        product_set_id=product_set_id,
+        primary_text=primary_text,
+        headline=headline,
+        dataset_id=dataset_id,
+        identities_ready=identities_ready,
     )
-    if len(matching_pixels) != 1:
-        st.error(f"Meta must expose exactly one usable {EXPECTED_PIXEL_NAME}/configured dataset. Posting is blocked.")
 
     st.caption("Creates the campaign, ad set and ad paused in Meta for review.")
 

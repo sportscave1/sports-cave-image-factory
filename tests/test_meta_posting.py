@@ -11,6 +11,7 @@ import ads_page
 import ads_posting_page
 import meta_ads_client
 from meta_posting_service import (
+    EXPECTED_PIXEL_NAME,
     SUCCESS_MESSAGE,
     MetaPostingService,
     PostingError,
@@ -24,8 +25,13 @@ from meta_posting_service import (
     adset_name,
     campaign_name,
     COUNTRY_META_CODES,
+    catalog_ids_from_sales_campaigns,
+    dataset_ids_from_purchase_adsets,
+    load_posting_reference_snapshot,
     next_instant_experience_ad_name,
     product_short_name,
+    resolve_catalog_reference,
+    resolve_dataset_reference,
 )
 
 
@@ -111,7 +117,7 @@ class FakePostingClient:
             "page": {"id": self.page_id, "name": "Sports Cave"},
             "instagram": {"id": self.instagram_user_id, "username": "sportscave"},
             "catalogs": ({"id": "catalog-1", "name": "Shopify Product Catalog"},),
-            "pixels": ({"id": "pixel-1", "name": "Sports Cave Pixel 2025"},),
+            "pixels": ({"id": "pixel-1", "name": "Shprts Cave Pixel 2025"},),
             "saved_audiences": (
                 {"id": "saved-1", "name": "Collectors", "targeting": {"age_min": 30}},
             ),
@@ -255,6 +261,24 @@ class PostingPayloadTests(unittest.TestCase):
             selection["product_url"], "https://www.sportscaveshop.com/products/shane-warne"
         )
 
+    def test_valid_handle_supplies_current_canonical_url_without_live_shopify(self):
+        row = {
+            "shopify_product_id": "1",
+            "product_title": "Mean Joe Greene & Jack Lambert NFL Wall Art",
+            "product_handle": "mean-joe-greene-jack-lambert-wall-art",
+            "online_store_url": "https://sportscave.com.au/products/obsolete",
+        }
+        self.assertEqual(
+            ads_page.canonical_shopify_product_url_from_row(row),
+            "https://www.sportscaveshop.com/products/mean-joe-greene-jack-lambert-wall-art",
+        )
+        self.assertIn(
+            "canonical_shopify_product_url_from_row",
+            (ROOT / "ads_page.py").read_text(encoding="utf-8").split(
+                "def _edition_ops_product_page_url_from_row", 1
+            )[1].split("def _positive_int_or_none", 1)[0],
+        )
+
     def test_campaign_is_paused_sales_cbo(self):
         payload = build_campaign_payload(name="Campaign", catalog_id="catalog-1")
         self.assertEqual(payload["objective"], "OUTCOME_SALES")
@@ -377,6 +401,262 @@ class MetaPostingClientTests(unittest.TestCase):
         )
         self.assertEqual(post.call_args.kwargs["data"]["status"], "PAUSED")
 
+    @mock.patch("meta_ads_client._paged_get")
+    def test_dataset_and_reference_fallbacks_use_current_read_edges(self, paged_get):
+        paged_get.return_value = {"rows": ()}
+        client = meta_ads_client.MetaPostingClient(self.config())
+        client.pixels()
+        client.reference_campaigns()
+        client.reference_adsets()
+        self.assertEqual(
+            [call.args[0] for call in paged_get.call_args_list],
+            ["act_123/adspixels", "act_123/campaigns", "act_123/adsets"],
+        )
+        self.assertIn("campaign{objective}", paged_get.call_args_list[2].kwargs["params"]["fields"])
+
+
+class PostingReferenceRepairTests(unittest.TestCase):
+    @staticmethod
+    def references(**overrides):
+        payload = {
+            "account": {"id": "act_123", "currency": "AUD"},
+            "page": {"id": "page-1", "name": "Sports Cave"},
+            "instagram": {"id": "ig-1", "username": "sportscave"},
+            "catalogs": ({"id": "catalog-1", "name": "Shopify Product Catalog"},),
+            "pixels": ({"id": "dataset-1", "name": EXPECTED_PIXEL_NAME},),
+            "saved_audiences": (),
+            "custom_audiences": (),
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_ordinary_form_reruns_reuse_reference_snapshot(self):
+        state = {}
+        calls = []
+
+        def loader():
+            calls.append("discover")
+            return {"catalog_resolution": {"resolved": True, "id": "catalog-1"}}
+
+        ads_posting_page._session_cached_load(state, "references", "error", loader)
+        for key, value in (
+            (ads_posting_page.PRODUCT_KEY, "product-2"),
+            (ads_posting_page.COUNTRY_KEY, "USA"),
+            (ads_posting_page.SPORT_KEY, "NFL"),
+            (ads_posting_page.PRIMARY_TEXT_KEY, "Updated copy"),
+        ):
+            state[key] = value
+            ads_posting_page._session_cached_load(state, "references", "error", loader)
+        self.assertEqual(calls, ["discover"])
+
+    def test_explicit_refresh_forces_reference_refetch(self):
+        state = {}
+        calls = []
+
+        def loader():
+            calls.append("discover")
+            return {"sequence": len(calls)}
+
+        first, _ = ads_posting_page._session_cached_load(state, "references", "error", loader)
+        cached, _ = ads_posting_page._session_cached_load(state, "references", "error", loader)
+        refreshed, _ = ads_posting_page._session_cached_load(
+            state, "references", "error", loader, force=True
+        )
+        self.assertEqual((first["sequence"], cached["sequence"], refreshed["sequence"]), (1, 1, 2))
+        self.assertEqual(calls, ["discover", "discover"])
+
+    def test_catalog_resolution_is_deterministic_and_not_name_only(self):
+        configured = resolve_catalog_reference(
+            self.references(catalogs=()), environ={"META_CATALOG_ID": "catalog-configured"}
+        )
+        self.assertEqual((configured["id"], configured["source"]), ("catalog-configured", "configured_id"))
+        sole = resolve_catalog_reference(
+            self.references(catalogs=({"id": "catalog-sole", "name": "Sports Cave Store"},)),
+            environ={},
+        )
+        self.assertEqual((sole["id"], sole["source"]), ("catalog-sole", "only_accessible_catalog"))
+
+    def test_catalog_fallback_uses_only_consistent_sales_campaign_evidence(self):
+        ids = catalog_ids_from_sales_campaigns(
+            (
+                {"objective": "OUTCOME_SALES", "promoted_object": {"product_catalog_id": "catalog-1"}},
+                {"objective": "AWARENESS", "promoted_object": {"product_catalog_id": "ignore"}},
+            )
+        )
+        resolved = resolve_catalog_reference(
+            self.references(catalogs=(), catalog_fallback_ids=ids), environ={}
+        )
+        self.assertEqual((resolved["id"], resolved["source"]), ("catalog-1", "existing_sales_campaign"))
+        conflict = resolve_catalog_reference(
+            self.references(catalogs=(), catalog_fallback_ids=("catalog-1", "catalog-2")),
+            environ={},
+        )
+        self.assertFalse(conflict["resolved"])
+
+    def test_dataset_resolution_uses_exact_intentional_name_or_configured_id(self):
+        self.assertEqual(EXPECTED_PIXEL_NAME, "Shprts Cave Pixel 2025")
+        configured = resolve_dataset_reference(
+            self.references(pixels=()), environ={"META_DATASET_ID": "dataset-configured"}
+        )
+        self.assertEqual((configured["id"], configured["name"]), ("dataset-configured", EXPECTED_PIXEL_NAME))
+        exact = resolve_dataset_reference(self.references(), environ={})
+        self.assertEqual((exact["id"], exact["source"]), ("dataset-1", "exact_name"))
+        wrong_name = resolve_dataset_reference(
+            self.references(pixels=({"id": "wrong", "name": "Sports Cave Pixel 2025"},)),
+            environ={},
+        )
+        self.assertFalse(wrong_name["resolved"])
+
+    def test_dataset_fallback_requires_one_sales_purchase_dataset(self):
+        base = {
+            "campaign": {"objective": "OUTCOME_SALES"},
+            "optimization_goal": "OFFSITE_CONVERSIONS",
+            "promoted_object": {"custom_event_type": "PURCHASE", "pixel_id": "dataset-1"},
+        }
+        self.assertEqual(dataset_ids_from_purchase_adsets((base,)), ("dataset-1",))
+        resolved = resolve_dataset_reference(
+            self.references(pixels=(), dataset_fallback_ids=("dataset-1",)), environ={}
+        )
+        self.assertEqual((resolved["id"], resolved["source"]), ("dataset-1", "existing_purchase_adsets"))
+        conflicting = dict(base)
+        conflicting["promoted_object"] = {
+            "custom_event_type": "PURCHASE", "dataset_id": "dataset-2"
+        }
+        conflict_ids = dataset_ids_from_purchase_adsets((base, conflicting))
+        conflict = resolve_dataset_reference(
+            self.references(pixels=(), dataset_fallback_ids=conflict_ids), environ={}
+        )
+        self.assertFalse(conflict["resolved"])
+        self.assertIn("multiple", conflict["error"].casefold())
+
+    def test_snapshot_loads_product_sets_and_ad_names_once_then_session_reuses_it(self):
+        class ReadClient:
+            def __init__(self):
+                self.calls = []
+
+            def reference_data(inner_self):
+                inner_self.calls.append("reference_data")
+                return PostingReferenceRepairTests.references()
+
+            def product_sets(inner_self, catalog_id):
+                inner_self.calls.append(f"product_sets:{catalog_id}")
+                return ({"id": "set-1", "name": "NFL", "product_catalog": {"id": catalog_id}},)
+
+            def existing_ad_names(inner_self):
+                inner_self.calls.append("existing_ad_names")
+                return ("Product IA 1",)
+
+        client = ReadClient()
+        state = {}
+        loader = lambda: load_posting_reference_snapshot(client, environ={})
+        first, _ = ads_posting_page._session_cached_load(state, "references", "error", loader)
+        second, _ = ads_posting_page._session_cached_load(state, "references", "error", loader)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            client.calls,
+            ["reference_data", "product_sets:catalog-1", "existing_ad_names"],
+        )
+        self.assertEqual(first["product_sets"][0]["id"], "set-1")
+
+    def test_snapshot_uses_mocked_sales_asset_fallbacks_when_direct_lists_are_empty(self):
+        class FallbackClient:
+            def reference_data(inner_self):
+                return PostingReferenceRepairTests.references(catalogs=(), pixels=())
+
+            def reference_campaigns(inner_self):
+                return (
+                    {
+                        "objective": "OUTCOME_SALES",
+                        "promoted_object": {"product_catalog_id": "catalog-fallback"},
+                    },
+                )
+
+            def reference_adsets(inner_self):
+                return (
+                    {
+                        "campaign": {"objective": "OUTCOME_SALES"},
+                        "promoted_object": {
+                            "custom_event_type": "PURCHASE",
+                            "pixel_id": "dataset-fallback",
+                        },
+                    },
+                )
+
+            def product_sets(inner_self, catalog_id):
+                return ({"id": "set-1", "product_catalog": {"id": catalog_id}},)
+
+            def existing_ad_names(inner_self):
+                return ()
+
+        snapshot = load_posting_reference_snapshot(FallbackClient(), environ={})
+        self.assertEqual(snapshot["catalog_resolution"]["id"], "catalog-fallback")
+        self.assertEqual(snapshot["dataset_resolution"]["id"], "dataset-fallback")
+        self.assertEqual(snapshot["product_sets"][0]["product_catalog"]["id"], "catalog-fallback")
+
+    @mock.patch("meta_ads_client._post")
+    def test_reference_refresh_is_read_only_and_never_calls_meta_write_edge(self, post):
+        client = meta_ads_client.MetaPostingClient(
+            {
+                "configured": True,
+                "ad_account_id": "act_123",
+                "access_token": "secret",
+                "api_version": "v26.0",
+                "page_id": "page-1",
+                "instagram_user_id": "ig-1",
+            }
+        )
+        client.reference_data = mock.Mock(return_value=self.references())
+        client.product_sets = mock.Mock(return_value=({"id": "set-1", "name": "NFL"},))
+        client.existing_ad_names = mock.Mock(return_value=())
+        snapshot = load_posting_reference_snapshot(client, environ={})
+        self.assertTrue(snapshot["catalog_resolution"]["resolved"])
+        post.assert_not_called()
+
+    def test_audience_failure_keeps_broad_default_available(self):
+        self.assertEqual(
+            ads_posting_page._audience_options({}),
+            ({"key": "broad", "type": "broad", "label_type": "Broad", "id": "", "name": "Broad"},),
+        )
+
+    def test_product_switch_updates_nfl_and_url_in_same_resolution(self):
+        row = {
+            "shopify_product_id": "nfl-1",
+            "product_title": "Legends Never Die: Mean Joe Greene & Jack Lambert NFL Wall Art",
+            "product_handle": "mean-joe-greene-jack-lambert",
+            "collections": ("NFL",),
+        }
+        selection = {
+            "selected_label": row["product_title"],
+            "selector_identity": "id::nfl-1",
+            "row": row,
+        }
+        self.assertEqual(ads_posting_page._infer_sport(selection), "NFL")
+        self.assertEqual(
+            ads_page.canonical_shopify_product_url_from_row(row),
+            "https://www.sportscaveshop.com/products/mean-joe-greene-jack-lambert",
+        )
+
+    def test_create_readiness_only_blocks_real_required_dependencies(self):
+        complete = {
+            "product_title": "Product",
+            "product_url": "https://www.sportscaveshop.com/products/product",
+            "image": {"data": b"image"},
+            "image_error": "",
+            "country": "AUS",
+            "sport": "NFL",
+            "catalog_id": "catalog-1",
+            "product_set_id": "set-1",
+            "primary_text": "Primary",
+            "headline": "Headline",
+            "dataset_id": "dataset-1",
+            "identities_ready": True,
+        }
+        self.assertTrue(ads_posting_page._posting_form_ready(**complete))
+        for required in ("product_url", "catalog_id", "product_set_id", "dataset_id"):
+            missing = dict(complete)
+            missing[required] = ""
+            self.assertFalse(ads_posting_page._posting_form_ready(**missing), required)
+
 
 class PostingServiceTests(unittest.TestCase):
     def test_complete_sequence_creates_every_object_paused(self):
@@ -458,13 +738,13 @@ class PostingServiceTests(unittest.TestCase):
         def references():
             payload = original()
             payload["pixels"] = (
-                {"id": "pixel-1", "name": "Sports Cave Pixel 2025"},
-                {"id": "pixel-2", "name": "Sports Cave Pixel 2025"},
+                {"id": "pixel-1", "name": "Shprts Cave Pixel 2025"},
+                {"id": "pixel-2", "name": "Shprts Cave Pixel 2025"},
             )
             return payload
 
         client.reference_data = references
-        with self.assertRaisesRegex(PostingValidationError, "found 2"):
+        with self.assertRaisesRegex(PostingValidationError, "Multiple Meta datasets"):
             MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(request_for())
         self.assertNotIn("campaign", client.calls)
 
