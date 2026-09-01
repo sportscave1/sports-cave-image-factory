@@ -108,6 +108,9 @@ def instant_experience_csv_result(output_mode=None):
     result = {
         "context_key": "instant-experience-csv-test",
         "product_name": "Senna’s Legacy — Collector Edition",
+        "product_url": "https://www.sportscaveshop.com/products/sennas-legacy-collector-edition",
+        "country": "Australia",
+        "category": "Motorsport",
         "campaign_type": "Instant Experience",
     }
     if output_mode:
@@ -137,6 +140,7 @@ def instant_experience_csv_notes():
                         f"{ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]}"
                     ),
                     "headline": f"{concept['display_name']} Headline {variation}",
+                    "description": "",
                     "cta": cta,
                 }
             )
@@ -214,7 +218,7 @@ def csv_bytes_from_rows(rows, headers=None):
     output = io.StringIO(newline="")
     writer = csv.DictWriter(
         output,
-        fieldnames=list(headers or ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+        fieldnames=list(headers or ads_page.POSTING_IMPORT_HEADERS),
         lineterminator="\r\n",
     )
     writer.writeheader()
@@ -4281,7 +4285,7 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(data.startswith(b"\xef\xbb\xbf"))
         self.assertEqual(
             tuple(rows[0]),
-            ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+            ads_page.POSTING_IMPORT_HEADERS,
         )
         self.assertEqual(len(rows), 9)
         self.assertEqual(
@@ -4294,7 +4298,11 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertTrue(
             all(
-                row["primary_text"] == row["headline"] == row["cta"] == ""
+                row["primary_text"]
+                == row["headline"]
+                == row["description"]
+                == row["cta"]
+                == ""
                 for row in rows
             )
         )
@@ -4316,7 +4324,7 @@ PRIMARY TEXT VARIATIONS
         )
         reordered = csv_bytes_from_rows(
             rows,
-            headers=reversed(ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+            headers=reversed(ads_page.POSTING_IMPORT_HEADERS),
         )
         self.assertEqual(
             ads_page.parse_instant_experience_copy_csv(reordered, result),
@@ -4403,7 +4411,7 @@ PRIMARY TEXT VARIATIONS
             missing_header_rows,
             headers=[
                 header
-                for header in ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS
+                for header in ads_page.POSTING_IMPORT_HEADERS
                 if header != "cta"
             ],
         )
@@ -4454,7 +4462,7 @@ PRIMARY TEXT VARIATIONS
                 io.BytesIO(valid_data),
             )
             self.assertTrue(status["ok"])
-            self.assertEqual(status["message"], "Imported 9 description options into 27 fields.")
+            self.assertEqual(status["message"], "CSV imported — ad copy applied")
             self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
             for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
                 self.assertEqual(

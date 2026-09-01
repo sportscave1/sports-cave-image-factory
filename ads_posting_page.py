@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 
 import streamlit as st
@@ -333,12 +334,15 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
     state = st.session_state if state is None else state
     if uploaded_file is None:
         return dict(state.get(CSV_IMPORT_STATE_KEY) or {})
-    upload_identity = _uploaded_file_identity(uploaded_file)
     previous = dict(state.get(CSV_IMPORT_STATE_KEY) or {})
-    if upload_identity and upload_identity == str(previous.get("upload_identity") or ""):
+    source_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
+    if source_file_id and source_file_id == str(previous.get("source_file_id") or ""):
         return previous
 
     source_bytes = bytes(uploaded_file.getvalue() or b"")
+    upload_identity = hashlib.sha256(source_bytes).hexdigest()
+    if upload_identity == str(previous.get("upload_identity") or ""):
+        return previous
     try:
         batch = parse_posting_import_csv(
             source_bytes,
@@ -351,13 +355,15 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
         status = {
             "ok": True,
             "upload_identity": upload_identity,
-            "message": "✓ Posting CSV imported",
+            "source_file_id": source_file_id,
+            "message": "CSV imported — ad copy applied",
             "summary": summary,
         }
     except PostingImportCSVError as error:
         status = {
             "ok": False,
             "upload_identity": upload_identity,
+            "source_file_id": source_file_id,
             "message": str(error),
             "summary": {},
         }
@@ -615,7 +621,7 @@ def render_page():
     )
     if import_status.get("ok"):
         summary = dict(import_status.get("summary") or {})
-        st.success(str(import_status.get("message") or "✓ Posting CSV imported"))
+        st.success(str(import_status.get("message") or "CSV imported — ad copy applied"))
         st.caption(
             f"Product: {summary.get('product') or ''} · "
             f"Country: {summary.get('country') or ''} · "

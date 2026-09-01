@@ -11,6 +11,8 @@ from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from posting_import_csv import (
     POSTING_IMPORT_FILENAME,
     POSTING_IMPORT_HEADERS,
+    POSTING_IMPORT_LEGACY_HEADERS,
+    POSTING_IMPORT_LEGACY_SCHEMA_VERSION,
     POSTING_IMPORT_SCHEMA_VERSION,
     PostingImportCSVError,
     build_posting_import_rows,
@@ -67,10 +69,45 @@ def posting_rows(**overrides):
         "country": "AUS",
         "sport_category": "Motorsport",
         "campaign_type": "Instant Experience",
-        "ads": posting_ads(),
+        "ads": posting_ads_with_variations(),
     }
     values.update(overrides)
     return build_posting_import_rows(**values)
+
+
+def posting_ads_with_variations():
+    workflow = ads_workflow()
+    rows = []
+    for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
+        variations = [
+            {**variation, "variation": variation_number}
+            for variation_number, variation in enumerate(
+                workflow["ad_notes"]["instant_experience_concepts"][concept["id"]],
+                start=1,
+            )
+        ]
+        variations[0]["description"] = posting_ads()[index - 1]["description"]
+        rows.append(
+            {
+                "ad_number": index,
+                "route_key": concept["id"],
+                "route_label": ads_page._instant_experience_copy_csv_route_label(concept),
+                "variations": variations,
+            }
+        )
+    return tuple(rows)
+
+
+def primary_ads(batch):
+    return tuple(
+        {
+            "ad_number": ad["ad_number"],
+            "primary_text": ad["primary_text"],
+            "headline": ad["headline"],
+            "description": ad["description"],
+        }
+        for ad in batch["ads"]
+    )
 
 
 def ads_result(*, workflow_mode=ads_page.ADS_WORKFLOW_MODE_NEW):
@@ -97,6 +134,7 @@ def ads_workflow():
                 "description_label": "Description 1 — Legacy Standard",
                 "primary_text": posting_ads()[index - 1]["primary_text"],
                 "headline": posting_ads()[index - 1]["headline"],
+                "description": posting_ads()[index - 1]["description"],
                 "cta": "Claim Your Edition",
             },
             {
@@ -134,14 +172,18 @@ def product_records():
 
 
 class PostingImportContractTests(unittest.TestCase):
-    def test_schema_is_versioned_three_row_contract(self):
+    def test_schema_is_versioned_three_route_nine_copy_row_contract(self):
         rows = posting_rows()
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 9)
         self.assertTrue(
             all(row["schema_version"] == POSTING_IMPORT_SCHEMA_VERSION for row in rows)
         )
-        self.assertEqual([row["ad_number"] for row in rows], [1, 2, 3])
+        self.assertEqual(
+            [(row["ad_number"], row["variation"]) for row in rows],
+            [(ad_number, variation) for ad_number in (1, 2, 3) for variation in (1, 2, 3)],
+        )
         self.assertTrue(all(row["product_handle"] for row in rows))
+        self.assertEqual(len({row["route_key"] for row in rows}), 3)
 
     def test_multiline_quotes_commas_and_unicode_round_trip_exactly(self):
         data = serialize_posting_import_csv(posting_rows())
@@ -151,7 +193,7 @@ class PostingImportContractTests(unittest.TestCase):
             allowed_sports=("Motorsport", "NFL"),
             allowed_campaign_types=("Instant Experience",),
         )
-        self.assertEqual(parsed["ads"], posting_ads())
+        self.assertEqual(primary_ads(parsed), posting_ads())
         self.assertIn(b'""Six Laps""', data)
         headers = next(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(tuple(headers), POSTING_IMPORT_HEADERS)
@@ -171,6 +213,15 @@ class PostingImportContractTests(unittest.TestCase):
         self.assertEqual(new_batch["campaign_type"], "Instant Experience")
         self.assertEqual(new_batch["ads"][0]["primary_text"], posting_ads()[0]["primary_text"])
         self.assertEqual(new_batch["ads"][2]["headline"], posting_ads()[2]["headline"])
+        self.assertEqual(len(new_batch["ads"][0]["variations"]), 3)
+        self.assertEqual(
+            new_batch["ads"][1]["variations"][2]["primary_text"],
+            "Alternative 2B",
+        )
+        self.assertEqual(
+            new_data,
+            ads_page.build_instant_experience_copy_csv(ads_result(), workflow),
+        )
 
     def test_named_standard_ads_fields_map_without_display_text_reconstruction(self):
         result = ads_result()
@@ -185,7 +236,7 @@ class PostingImportContractTests(unittest.TestCase):
         parsed = parse_posting_import_csv(
             ads_page.build_ads_posting_import_csv(result, ads_workflow())
         )
-        self.assertEqual(parsed["ads"], posting_ads())
+        self.assertEqual(primary_ads(parsed), posting_ads())
 
     def test_package_adds_posting_csv_without_changing_text_exports(self):
         result = ads_result()
@@ -202,6 +253,14 @@ class PostingImportContractTests(unittest.TestCase):
         items = ads_page._instant_experience_package_items(result, workflow)
         item_by_path = {item["relative_path"]: item for item in items}
         self.assertIn(POSTING_IMPORT_FILENAME, item_by_path)
+        stored_batch = parse_posting_import_csv(
+            item_by_path[POSTING_IMPORT_FILENAME]["data"]
+        )
+        self.assertEqual(len(stored_batch["rows"]), 9)
+        self.assertEqual(
+            stored_batch["ads"][2]["variations"][1]["headline"],
+            "Alternative headline 3A",
+        )
         self.assertEqual(
             item_by_path[
                 "01-premium-scarcity-right/01-legacy-standard/primary-text.txt"
@@ -225,20 +284,143 @@ class PostingImportContractTests(unittest.TestCase):
         invalid_schema = [dict(row) for row in rows]
         invalid_schema[0]["schema_version"] = "OLD"
         cases.append((invalid_schema, "schema_version"))
-        cases.append((rows[:2], "exactly three"))
+        cases.append((rows[:-1], "exactly 9"))
         duplicate = [dict(row) for row in rows]
-        duplicate[2]["ad_number"] = 2
+        duplicate[1] = dict(duplicate[0])
         cases.append((duplicate, "duplicated"))
         conflicting_handle = [dict(row) for row in rows]
-        conflicting_handle[2]["product_handle"] = "another-product"
+        conflicting_handle[-1]["product_handle"] = "another-product"
         cases.append((conflicting_handle, "does not match product_url"))
         conflicting_country = [dict(row) for row in rows]
-        conflicting_country[2]["country"] = "USA"
+        conflicting_country[-1]["country"] = "USA"
         cases.append((conflicting_country, "Conflicting"))
         for candidate, message in cases:
             with self.subTest(message=message):
                 with self.assertRaisesRegex(PostingImportCSVError, message):
                     serialize_posting_import_csv(candidate)
+
+    def test_excel_and_sheets_safe_headers_bom_newlines_and_filename(self):
+        canonical = serialize_posting_import_csv(posting_rows()).decode("utf-8-sig")
+        rows = list(csv.DictReader(io.StringIO(canonical, newline="")))
+        reordered_headers = tuple(reversed(POSTING_IMPORT_HEADERS))
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(
+            output,
+            fieldnames=[f"  {header.replace('_', ' ').title()}  " for header in reordered_headers],
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    f"  {header.replace('_', ' ').title()}  ": row[header]
+                    for header in reordered_headers
+                }
+            )
+        edited = output.getvalue().encode("utf-8-sig")
+
+        parsed = parse_posting_import_csv(edited, filename="ChatGPT completed output")
+
+        self.assertEqual(primary_ads(parsed), posting_ads())
+        self.assertEqual(
+            parsed["ads"][0]["variations"][0]["primary_text"],
+            posting_ads()[0]["primary_text"],
+        )
+
+    def test_immediately_previous_three_row_posting_csv_remains_supported(self):
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=POSTING_IMPORT_LEGACY_HEADERS)
+        writer.writeheader()
+        for ad in posting_ads():
+            writer.writerow(
+                {
+                    "schema_version": POSTING_IMPORT_LEGACY_SCHEMA_VERSION,
+                    "product_name": "Six Laps Ahead Peter Brock Wall Art",
+                    "product_handle": "peter-brock-bathurst-wall-art",
+                    "product_url": "https://www.sportscaveshop.com/products/peter-brock-bathurst-wall-art",
+                    "country": "AUS",
+                    "sport_category": "Motorsport",
+                    "campaign_type": "Instant Experience",
+                    **ad,
+                }
+            )
+        parsed = parse_posting_import_csv(output.getvalue().encode("utf-8-sig"))
+        self.assertEqual(primary_ads(parsed), posting_ads())
+        self.assertEqual(parsed["source_schema_version"], POSTING_IMPORT_LEGACY_SCHEMA_VERSION)
+
+    def test_new_ads_and_refresh_round_trip_import_save_and_posting_hydration(self):
+        for workflow_mode in (
+            ads_page.ADS_WORKFLOW_MODE_NEW,
+            ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH,
+        ):
+            with self.subTest(workflow_mode=workflow_mode):
+                result = ads_result(workflow_mode=workflow_mode)
+                completed_csv = ads_page.build_instant_experience_copy_csv(
+                    result,
+                    ads_workflow(),
+                )
+                imported_workflow = {"ad_notes": {}, "slots": {}}
+                ads_state = {}
+                with mock.patch.object(ads_page.st, "session_state", ads_state):
+                    status = ads_page._process_instant_experience_copy_csv_upload(
+                        result,
+                        imported_workflow,
+                        FakeUpload(
+                            completed_csv,
+                            name="ChatGPT completed.csv",
+                            file_id=f"ads-{workflow_mode}",
+                        ),
+                    )
+                self.assertTrue(status["ok"])
+                self.assertEqual(status["message"], "CSV imported — ad copy applied")
+                self.assertTrue(ads_page.instant_experience_copy_complete(imported_workflow))
+                for concept in INSTANT_EXPERIENCE_CONCEPTS:
+                    imported_workflow["slots"][concept["slot_id"]] = {
+                        "valid": True,
+                        "data": f"image-{concept['id']}".encode("utf-8"),
+                        "original_name": f"{concept['id']}.png",
+                        "source_format": "PNG",
+                        "source_width": 1024,
+                        "source_height": 1024,
+                    }
+
+                stored_items = {
+                    item["relative_path"]: item
+                    for item in ads_page._instant_experience_package_items(
+                        result,
+                        imported_workflow,
+                    )
+                }
+                self.assertIn(POSTING_IMPORT_FILENAME, stored_items)
+                stored_csv = stored_items[POSTING_IMPORT_FILENAME]["data"]
+                self.assertEqual(stored_csv, completed_csv)
+                stored_batch = parse_posting_import_csv(stored_csv)
+                self.assertEqual(len(stored_batch["rows"]), 9)
+
+                posting_state = {ads_posting_page.AUDIENCE_KEY: "broad"}
+                posting_status = ads_posting_page.process_posting_csv_upload(
+                    FakeUpload(
+                        stored_csv,
+                        name="saved-ad-copy-any-name.csv",
+                        file_id=f"posting-{workflow_mode}",
+                    ),
+                    product_records(),
+                    state=posting_state,
+                )
+                self.assertTrue(posting_status["ok"])
+                for index, expected in enumerate(posting_ads()):
+                    self.assertEqual(
+                        posting_state[ads_posting_page.PRIMARY_TEXT_KEYS[index]],
+                        expected["primary_text"],
+                    )
+                    self.assertEqual(
+                        posting_state[ads_posting_page.HEADLINE_KEYS[index]],
+                        expected["headline"],
+                    )
+                    self.assertEqual(
+                        posting_state[ads_posting_page.DESCRIPTION_KEYS[index]],
+                        expected["description"],
+                    )
 
 
 class PostingCSVImportTests(unittest.TestCase):
