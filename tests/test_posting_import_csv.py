@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 import ads_page
 import ads_image_workflow
 import ads_posting_page
+import posting_import_csv as posting_csv_module
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from posting_import_csv import (
     ADS_COPY_HEADERS,
@@ -693,6 +694,16 @@ class PostingCSVImportTests(unittest.TestCase):
                 "_product_rows_state",
                 return_value=product_rows,
             ),
+            mock.patch.object(
+                ads_posting_page,
+                "parse_posting_import_csv",
+                wraps=ads_posting_page.parse_posting_import_csv,
+            ) as parser,
+            mock.patch.object(
+                ads_posting_page,
+                "apply_posting_import_to_state",
+                wraps=ads_posting_page.apply_posting_import_to_state,
+            ) as hydration,
         ):
             app = AppTest.from_string(
                 "import ads_posting_page\nads_posting_page.render_page()"
@@ -732,6 +743,11 @@ class PostingCSVImportTests(unittest.TestCase):
                     expected[concept["id"]][0]["headline"],
                 )
 
+            next(
+                item
+                for item in app.text_area
+                if item.label == "Primary Text 1"
+            ).set_value("Manual edit after import")
             app.run(timeout=20)
             self.assertEqual(
                 next(
@@ -739,8 +755,46 @@ class PostingCSVImportTests(unittest.TestCase):
                     for item in app.text_area
                     if item.label == "Primary Text 1"
                 ).value,
-                posting_ads()[0]["primary_text"],
+                "Manual edit after import",
             )
+            self.assertEqual(parser.call_count, 1)
+            self.assertEqual(hydration.call_count, 1)
+
+    def test_product_selector_snapshot_is_built_once_per_session(self):
+        rows = tuple(record["row"] for record in product_records())
+        state = {}
+        with mock.patch.object(
+            ads_posting_page.ads_page,
+            "build_ads_product_selector_records",
+            wraps=ads_posting_page.ads_page.build_ads_product_selector_records,
+        ) as builder:
+            first = ads_posting_page._product_selector_state(rows, state=state)
+            second = ads_posting_page._product_selector_state(rows, state=state)
+            third = ads_posting_page._product_selector_state(rows, state=state)
+
+        self.assertEqual(builder.call_count, 1)
+        self.assertEqual(second, first)
+        self.assertEqual(third, first)
+
+    def test_ads_csv_dispatch_does_not_parse_rows_before_canonical_parser(self):
+        source = ads_page.build_instant_experience_copy_csv(
+            ads_result(),
+            ads_workflow(),
+        )
+        with mock.patch.object(
+            posting_csv_module,
+            "_read_normalised_rows",
+            wraps=posting_csv_module._read_normalised_rows,
+        ) as posting_row_reader, mock.patch.object(
+            ads_page,
+            "parse_instant_experience_copy_csv",
+            wraps=ads_page.parse_instant_experience_copy_csv,
+        ) as canonical_parser:
+            parsed = parse_posting_import_csv(source)
+
+        self.assertEqual(parsed["source_schema_kind"], "ads_copy")
+        self.assertEqual(posting_row_reader.call_count, 0)
+        self.assertEqual(canonical_parser.call_count, 1)
 
     def test_new_ads_csv_hydrates_copy_and_preserves_existing_posting_setup(self):
         records = product_records()
@@ -979,15 +1033,33 @@ class PostingCSVImportTests(unittest.TestCase):
             ads_posting_page.MetaPostingClient,
             "upload_image",
             side_effect=AssertionError("Meta writes must not run"),
-        ):
+        ), mock.patch.object(
+            ads_posting_page,
+            "capture_posting_image_upload",
+            side_effect=AssertionError("Image processing must not run"),
+        ), mock.patch.object(
+            ads_posting_page,
+            "parse_posting_import_csv",
+            wraps=ads_posting_page.parse_posting_import_csv,
+        ) as parser, mock.patch.object(
+            ads_posting_page,
+            "apply_posting_import_to_state",
+            wraps=ads_posting_page.apply_posting_import_to_state,
+        ) as hydration:
             first = ads_posting_page.process_posting_csv_upload(
                 upload, product_records(), state=state
             )
             second = ads_posting_page.process_posting_csv_upload(
                 upload, product_records(), state=state
             )
+            third = ads_posting_page.process_posting_csv_upload(
+                upload, product_records(), state=state
+            )
+            self.assertEqual(parser.call_count, 1)
+            self.assertEqual(hydration.call_count, 1)
         self.assertTrue(first["ok"])
         self.assertEqual(second, first)
+        self.assertEqual(third, first)
         self.assertEqual(upload.getvalue_calls, 1)
 
         first_key = ads_posting_page.PRIMARY_TEXT_KEYS[0]
@@ -996,15 +1068,26 @@ class PostingCSVImportTests(unittest.TestCase):
             upload, product_records(), state=state
         )
         self.assertEqual(state[first_key], "Manual Posting edit")
-        ads_posting_page.process_posting_csv_upload(
-            FakeUpload(
-                upload._data,
-                name="same-content-new-upload.csv",
-                file_id="csv-new-selection",
-            ),
-            product_records(),
-            state=state,
-        )
+        with mock.patch.object(
+            ads_posting_page,
+            "parse_posting_import_csv",
+            wraps=ads_posting_page.parse_posting_import_csv,
+        ) as replacement_parser, mock.patch.object(
+            ads_posting_page,
+            "apply_posting_import_to_state",
+            wraps=ads_posting_page.apply_posting_import_to_state,
+        ) as replacement_hydration:
+            ads_posting_page.process_posting_csv_upload(
+                FakeUpload(
+                    upload._data,
+                    name="same-content-new-upload.csv",
+                    file_id="csv-new-selection",
+                ),
+                product_records(),
+                state=state,
+            )
+        self.assertEqual(replacement_parser.call_count, 1)
+        self.assertEqual(replacement_hydration.call_count, 1)
         self.assertEqual(state[first_key], posting_ads()[0]["primary_text"])
 
     def test_failed_import_does_not_destroy_existing_form_state(self):

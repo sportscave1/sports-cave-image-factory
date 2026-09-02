@@ -90,6 +90,8 @@ META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
 META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
 META_REFERENCES_ERROR_KEY = "ads_posting_meta_references_error"
 PRODUCT_ROWS_STATE_KEY = "ads_posting_product_rows"
+PRODUCT_SELECTOR_STATE_KEY = "ads_posting_product_selector"
+PRODUCT_SELECTOR_RUNTIME_VERSION = "2026-09-03-session-selector-v1"
 CSV_IMPORT_KEY = f"{STATE_PREFIX}csv_import"
 CSV_IMPORT_STATE_KEY = f"{STATE_PREFIX}csv_import_state"
 ADS_COPY_ROUTES_STATE_KEY = f"{STATE_PREFIX}ads_copy_routes"
@@ -162,6 +164,31 @@ def _product_rows_state():
     if PRODUCT_ROWS_STATE_KEY not in st.session_state:
         st.session_state[PRODUCT_ROWS_STATE_KEY] = tuple(load_live_edition_product_rows())
     return tuple(st.session_state.get(PRODUCT_ROWS_STATE_KEY) or ())
+
+
+def _product_selector_state(product_rows, *, state=None):
+    """Build the large Posting selector once per session, not once per rerun."""
+
+    state = st.session_state if state is None else state
+    cached = state.get(PRODUCT_SELECTOR_STATE_KEY)
+    if (
+        isinstance(cached, dict)
+        and cached.get("runtime_version") == PRODUCT_SELECTOR_RUNTIME_VERSION
+    ):
+        return tuple(cached.get("records") or ()), dict(
+            cached.get("record_by_identity") or {}
+        )
+
+    records = tuple(ads_page.build_ads_product_selector_records(product_rows))
+    record_by_identity = {
+        str(record["identity"]): record for record in records
+    }
+    state[PRODUCT_SELECTOR_STATE_KEY] = {
+        "runtime_version": PRODUCT_SELECTOR_RUNTIME_VERSION,
+        "records": records,
+        "record_by_identity": record_by_identity,
+    }
+    return records, record_by_identity
 
 
 def _uploaded_file_identity(uploaded_file):
@@ -1062,8 +1089,7 @@ def render_page():
         st.caption("⚠ " + " · ".join(warnings[:3]))
 
     product_rows = _product_rows_state()
-    product_records = ads_page.build_ads_product_selector_records(product_rows)
-    record_by_identity = {str(row["identity"]): row for row in product_records}
+    product_records, record_by_identity = _product_selector_state(product_rows)
     if not record_by_identity:
         st.error("No Edition Ops products with Shopify data are available. Posting is blocked.")
         return

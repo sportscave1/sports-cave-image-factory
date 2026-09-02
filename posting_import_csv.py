@@ -634,6 +634,14 @@ def _decoded_csv(data):
     return decoded
 
 
+def _normalised_headers(raw_headers):
+    headers = []
+    for position, raw_header in enumerate(raw_headers):
+        header = _normalise_header(raw_header)
+        headers.append("index" if position == 0 and not header else header)
+    return tuple(headers)
+
+
 def _read_normalised_rows(data):
     decoded = _decoded_csv(data)
     try:
@@ -641,14 +649,7 @@ def _read_normalised_rows(data):
         raw_headers = tuple(reader.fieldnames or ())
         if not raw_headers:
             raise PostingImportCSVError("Posting CSV has no header row.")
-        headers = tuple(
-            (
-                "index"
-                if position == 0 and not _normalise_header(header)
-                else _normalise_header(header)
-            )
-            for position, header in enumerate(raw_headers)
-        )
+        headers = _normalised_headers(raw_headers)
         if any(not header for header in headers):
             raise PostingImportCSVError("Posting CSV contains an empty column header.")
         if len(headers) != len(set(headers)):
@@ -675,8 +676,31 @@ def _read_normalised_rows(data):
     return headers, rows
 
 
+def _read_normalised_headers(data):
+    """Read only the dispatch header; the selected parser validates all rows."""
+
+    decoded = _decoded_csv(data)
+    try:
+        reader = csv.reader(io.StringIO(decoded, newline=""))
+        raw_headers = tuple(next(reader, ()))
+        if not raw_headers:
+            raise PostingImportCSVError("Posting CSV has no header row.")
+        headers = _normalised_headers(raw_headers)
+        if any(not header for header in headers):
+            raise PostingImportCSVError("Posting CSV contains an empty column header.")
+        if len(headers) != len(set(headers)):
+            raise PostingImportCSVError("Posting CSV contains duplicate column headers.")
+        return headers
+    except PostingImportCSVError:
+        raise
+    except (csv.Error, AttributeError) as error:
+        raise PostingImportCSVError(
+            "Posting CSV could not be parsed. Check its quoting and line breaks."
+        ) from error
+
+
 def posting_import_csv_header_kind(data):
-    headers, _rows = _read_normalised_rows(data)
+    headers = _read_normalised_headers(data)
     header_set = set(headers)
     if (set(POSTING_IMPORT_HEADERS) - {"description"}).issubset(header_set):
         return "canonical"
