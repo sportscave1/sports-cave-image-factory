@@ -70,7 +70,7 @@ POSTING_IMPORT_HEADER_ALIASES = {
     "call_to_action": "cta",
 }
 POSTING_IMPORT_MAX_BYTES = 2 * 1024 * 1024
-ADS_CSV_IMPORT_RUNTIME_VERSION = "2026-09-01-working-template-v2"
+ADS_CSV_IMPORT_RUNTIME_VERSION = "2026-09-02-canonical-ads-copy-v3"
 ADS_COPY_SCHEMA_VERSION = "2"
 ADS_COPY_CAMPAIGN_TYPE = "instant_experience"
 ADS_COPY_HEADERS = (
@@ -641,7 +641,14 @@ def _read_normalised_rows(data):
         raw_headers = tuple(reader.fieldnames or ())
         if not raw_headers:
             raise PostingImportCSVError("Posting CSV has no header row.")
-        headers = tuple(_normalise_header(header) for header in raw_headers)
+        headers = tuple(
+            (
+                "index"
+                if position == 0 and not _normalise_header(header)
+                else _normalise_header(header)
+            )
+            for position, header in enumerate(raw_headers)
+        )
         if any(not header for header in headers):
             raise PostingImportCSVError("Posting CSV contains an empty column header.")
         if len(headers) != len(set(headers)):
@@ -809,6 +816,76 @@ def _batch_from_ads_copy_rows(clean_rows, source_headers):
     }
 
 
+def _batch_from_canonical_ads_copy(parsed, concepts):
+    ads = []
+    rows = []
+    for ad_number, concept in enumerate(tuple(concepts or ()), start=1):
+        route_key = str(concept.get("id") or "")
+        route_label = (
+            f"{str(concept.get('display_name') or route_key).upper()} — "
+            f"{str(concept.get('supporting_label') or '')}"
+        )
+        variations = []
+        for variation_number, raw_variation in enumerate(
+            tuple((parsed or {}).get(route_key) or ()),
+            start=1,
+        ):
+            variation = {
+                "variation": variation_number,
+                "description_key": str(
+                    raw_variation.get("description_key") or ""
+                ),
+                "description_label": str(
+                    raw_variation.get("description_label") or ""
+                ),
+                "primary_text": preserve_posting_text(
+                    raw_variation.get("primary_text")
+                ),
+                "headline": preserve_posting_text(raw_variation.get("headline")),
+                "description": "",
+                "cta": preserve_posting_text(raw_variation.get("cta")),
+            }
+            variations.append(variation)
+            rows.append(
+                {
+                    "schema_version": ADS_COPY_SCHEMA_VERSION,
+                    "campaign_type": ADS_COPY_CAMPAIGN_TYPE,
+                    "output_mode": "standard_three_descriptions",
+                    "route_key": route_key,
+                    "route_label": route_label,
+                    **variation,
+                }
+            )
+        primary = variations[POSTING_IMPORT_PRIMARY_VARIATION - 1]
+        ads.append(
+            {
+                "ad_number": ad_number,
+                "route_key": route_key,
+                "route_label": route_label,
+                "primary_text": primary["primary_text"],
+                "headline": primary["headline"],
+                "description": "",
+                "cta": primary["cta"],
+                "variations": tuple(variations),
+            }
+        )
+    return {
+        "schema_version": POSTING_IMPORT_SCHEMA_VERSION,
+        "source_schema_version": ADS_COPY_SCHEMA_VERSION,
+        "source_schema_kind": "ads_copy",
+        "source_headers": ADS_COPY_HEADERS,
+        "product_name": "",
+        "product_handle": "",
+        "product_url": "",
+        "country": "",
+        "sport_category": "",
+        "campaign_type": "Instant Experience",
+        "output_mode": "standard_three_descriptions",
+        "ads": tuple(ads),
+        "rows": tuple(rows),
+    }
+
+
 def parse_ads_import_csv(
     data,
     *,
@@ -868,6 +945,27 @@ def parse_posting_import_csv(
     require_primary_ads=True,
 ):
     del filename  # A valid canonical CSV is identified by content, never its filename.
+    if posting_import_csv_header_kind(data) == "ads_copy":
+        # New Ads owns the Instant Experience CSV contract. Posting consumes the
+        # canonical parsed structure and only adapts it into its existing three-ad
+        # form model; it does not independently decide whether the Ads CSV is valid.
+        import ads_page
+
+        try:
+            parsed = ads_page.parse_instant_experience_copy_csv(
+                data,
+                {
+                    "campaign_type": "Instant Experience",
+                    "output_mode": "standard_three_descriptions",
+                },
+            )
+        except ads_page.InstantExperienceCopyCSVError as error:
+            raise PostingImportCSVError(str(error)) from error
+        _allowed("Instant Experience", allowed_campaign_types, label="Campaign type")
+        return _batch_from_canonical_ads_copy(
+            parsed,
+            ads_page.INSTANT_EXPERIENCE_CONCEPTS,
+        )
     batch = parse_ads_import_csv(
         data,
         allowed_countries=allowed_countries,
@@ -875,9 +973,4 @@ def parse_posting_import_csv(
         allowed_campaign_types=allowed_campaign_types,
         require_copy=require_primary_ads,
     )
-    if batch.get("source_schema_kind") == "ads_copy":
-        raise PostingImportCSVError(
-            "This copy template has no product details. Download Posting CSV from "
-            "New Ads or Creative Refresh, then import that file here."
-        )
     return batch

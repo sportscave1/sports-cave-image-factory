@@ -74,6 +74,7 @@ META_REFERENCES_ERROR_KEY = "ads_posting_meta_references_error"
 PRODUCT_ROWS_STATE_KEY = "ads_posting_product_rows"
 CSV_IMPORT_KEY = f"{STATE_PREFIX}csv_import"
 CSV_IMPORT_STATE_KEY = f"{STATE_PREFIX}csv_import_state"
+ADS_COPY_ROUTES_STATE_KEY = f"{STATE_PREFIX}ads_copy_routes"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -300,10 +301,54 @@ def match_posting_import_product(batch, product_records):
 
 def apply_posting_import_to_state(batch, product_records, *, state=None):
     state = st.session_state if state is None else state
-    matched = match_posting_import_product(batch, product_records)
     ads = tuple(dict(row or {}) for row in (batch or {}).get("ads") or ())
     if len(ads) != 3:
         raise PostingImportCSVError("Posting CSV must contain exactly three ads.")
+
+    if str((batch or {}).get("source_schema_kind") or "") == "ads_copy":
+        updates = {
+            SUBMISSION_ID_KEY: posting_submission_id(),
+            ADS_COPY_ROUTES_STATE_KEY: ads,
+        }
+        for index, ad in enumerate(ads):
+            updates[PRIMARY_TEXT_KEYS[index]] = str(ad.get("primary_text") or "")
+            updates[HEADLINE_KEYS[index]] = str(ad.get("headline") or "")
+        state.update(updates)
+        state.pop(RESULT_KEY, None)
+
+        selected_identity = str(state.get(PRODUCT_KEY) or "")
+        selected_product = next(
+            (
+                dict(record or {})
+                for record in product_records or ()
+                if str((record or {}).get("identity") or "") == selected_identity
+            ),
+            {},
+        )
+        selected_url = str(
+            ads_page.canonical_shopify_product_url_from_row(
+                selected_product.get("row") or {}
+            )
+            or ""
+        )
+        return {
+            "product": (
+                _posting_record_title(selected_product)
+                or str(selected_product.get("label") or "")
+                or "Not selected yet"
+            ),
+            "product_identity": selected_identity,
+            "product_url": selected_url,
+            "country": str(state.get(COUNTRY_KEY) or ""),
+            "sport": str(state.get(SPORT_KEY) or ""),
+            "campaign_type": "Instant Experience",
+            "ads_loaded": 3,
+            "variations_loaded": sum(
+                len(tuple(ad.get("variations") or ())) for ad in ads
+            ),
+        }
+
+    matched = match_posting_import_product(batch, product_records)
 
     updates = {
         PRODUCT_KEY: str(matched.get("identity") or ""),
@@ -368,7 +413,11 @@ def process_posting_csv_upload(uploaded_file, product_records, *, state=None):
             "upload_identity": upload_identity,
             "source_file_id": source_file_id,
             "runtime_version": ADS_CSV_IMPORT_RUNTIME_VERSION,
-            "message": "CSV imported — ad copy applied.",
+            "message": (
+                "Ads CSV imported — copy applied."
+                if batch.get("source_schema_kind") == "ads_copy"
+                else "CSV imported — ad copy applied."
+            ),
             "summary": summary,
         }
     except PostingImportCSVError as error:
@@ -667,7 +716,7 @@ def render_page():
         accept_multiple_files=False,
         key=CSV_IMPORT_KEY,
         max_upload_size=2,
-        help=f"Upload {POSTING_IMPORT_FILENAME} from New Ads or Creative Refresh.",
+        help="Upload the Instant Experience CSV saved or exported by New Ads.",
     )
     import_status = process_posting_csv_upload(
         posting_csv,

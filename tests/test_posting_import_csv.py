@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 from PIL import Image
+from streamlit.testing.v1 import AppTest
 
 import ads_page
 import ads_image_workflow
@@ -174,6 +175,27 @@ def product_records():
     )
 
 
+def indexed_ads_copy_csv(*, index_header="index", reverse_rows=False):
+    canonical = ads_page.build_instant_experience_copy_csv(
+        ads_result(),
+        ads_workflow(),
+    ).decode("utf-8-sig")
+    rows = list(csv.DictReader(io.StringIO(canonical, newline="")))
+    if reverse_rows:
+        rows.reverse()
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow((index_header, *ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS))
+    for index, row in enumerate(rows):
+        writer.writerow(
+            (
+                index,
+                *(row[header] for header in ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+            )
+        )
+    return output.getvalue().encode("utf-8-sig")
+
+
 class PostingImportContractTests(unittest.TestCase):
     def test_schema_is_versioned_three_route_nine_copy_row_contract(self):
         rows = posting_rows()
@@ -218,8 +240,16 @@ class PostingImportContractTests(unittest.TestCase):
         )
         self.assertEqual(headers, ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
         self.assertNotEqual(headers, POSTING_IMPORT_HEADERS)
-        with self.assertRaisesRegex(PostingImportCSVError, "no product details"):
-            parse_posting_import_csv(new_data)
+        with mock.patch.object(
+            ads_page,
+            "parse_instant_experience_copy_csv",
+            wraps=ads_page.parse_instant_experience_copy_csv,
+        ) as canonical_parser:
+            posting_batch = parse_posting_import_csv(new_data)
+        canonical_parser.assert_called_once()
+        self.assertEqual(posting_batch["source_schema_kind"], "ads_copy")
+        self.assertEqual(len(posting_batch["ads"]), 3)
+        self.assertEqual(len(posting_batch["rows"]), 9)
 
     def test_package_adds_current_ads_csv_without_changing_text_exports(self):
         result = ads_result()
@@ -233,19 +263,57 @@ class PostingImportContractTests(unittest.TestCase):
                 "source_width": 1024,
                 "source_height": 1024,
             }
-        items = ads_page._instant_experience_package_items(result, workflow)
+        final_editor_headline = "Final editor headline after CSV import"
+        final_widget_key = ads_page._instant_experience_copy_widget_key(
+            result["context_key"],
+            INSTANT_EXPERIENCE_CONCEPTS[2]["id"],
+            "headline",
+            2,
+        )
+        with mock.patch.object(
+            ads_page.st,
+            "session_state",
+            {final_widget_key: final_editor_headline},
+        ):
+            items = ads_page._instant_experience_package_items(result, workflow)
         item_by_path = {item["relative_path"]: item for item in items}
         csv_filename = ads_page._instant_experience_current_copy_csv_filename(result)
         self.assertIn(csv_filename, item_by_path)
         self.assertNotIn(POSTING_IMPORT_FILENAME, item_by_path)
+        self.assertEqual(sum(item["kind"] == "image" for item in items), 3)
+        self.assertEqual(
+            sum(item["filename"] == "ad-copy.txt" for item in items),
+            3,
+        )
+        self.assertEqual(
+            sum(item["filename"] == "primary-text.txt" for item in items),
+            9,
+        )
+        self.assertEqual(
+            sum(item["filename"] == "headline.txt" for item in items),
+            9,
+        )
+        self.assertEqual(
+            sum(item["asset_type"] == "meta_ads_copy_csv" for item in items),
+            1,
+        )
         stored_copy = ads_page.parse_instant_experience_copy_csv(
             item_by_path[csv_filename]["data"],
             result,
         )
         self.assertEqual(
             stored_copy[INSTANT_EXPERIENCE_CONCEPTS[2]["id"]][1]["headline"],
-            "Alternative headline 3A",
+            final_editor_headline,
         )
+        stored_rows = list(
+            csv.DictReader(
+                io.StringIO(
+                    item_by_path[csv_filename]["data"].decode("utf-8-sig"),
+                    newline="",
+                )
+            )
+        )
+        self.assertEqual(len(stored_rows), 9)
         self.assertEqual(
             item_by_path[
                 "01-premium-scarcity-right/01-legacy-standard/primary-text.txt"
@@ -580,11 +648,285 @@ class PostingImportContractTests(unittest.TestCase):
                     else "_new_ads_copy_csv"
                 )
                 self.assertEqual(stored_items[csv_filename]["slot_id"], expected_slot)
-                with self.assertRaisesRegex(PostingImportCSVError, "no product details"):
-                    parse_posting_import_csv(stored_csv)
+                posting_batch = parse_posting_import_csv(stored_csv)
+                self.assertEqual(posting_batch["source_schema_kind"], "ads_copy")
+                self.assertEqual(len(posting_batch["rows"]), 9)
 
 
 class PostingCSVImportTests(unittest.TestCase):
+    def test_visible_posting_widgets_hydrate_from_new_ads_csv_before_render(self):
+        overview = {
+            "connected": True,
+            "permission_state": "ok",
+            "summary": "Meta connected",
+        }
+        references = {
+            "catalog_resolution": {
+                "resolved": True,
+                "id": "catalog-1",
+                "name": "Shopify Product Catalog",
+            },
+            "dataset_resolution": {
+                "resolved": True,
+                "id": "dataset-1",
+                "name": "Sports Cave Pixel",
+            },
+            "product_sets": ({"id": "product-set-1", "name": "All products"},),
+            "page": {"id": "page-1"},
+            "instagram": {"id": "instagram-1"},
+            "account": {"currency": "AUD"},
+            "existing_ad_names": (),
+        }
+        product_rows = tuple(record["row"] for record in product_records())
+        source = ads_page.build_instant_experience_copy_csv(
+            ads_result(),
+            ads_workflow(),
+        )
+        with (
+            mock.patch.object(
+                ads_posting_page,
+                "_meta_state",
+                return_value=(overview, references, "", ""),
+            ),
+            mock.patch.object(
+                ads_posting_page,
+                "_product_rows_state",
+                return_value=product_rows,
+            ),
+        ):
+            app = AppTest.from_string(
+                "import ads_posting_page\nads_posting_page.render_page()"
+            ).run(timeout=20)
+            uploader = next(
+                item for item in app.file_uploader if item.label == "Import Ads CSV"
+            )
+            uploader.set_value(
+                [("completed-ads-copy.csv", source, "text/csv")]
+            )
+            app.run(timeout=20)
+
+            self.assertTrue(
+                any(
+                    success.value == "Ads CSV imported — copy applied."
+                    for success in app.success
+                )
+            )
+            for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
+                expected = ads_workflow()["ad_notes"]["instant_experience_concepts"]
+                primary_widget = next(
+                    item
+                    for item in app.text_area
+                    if item.label == f"Primary Text {index}"
+                )
+                headline_widget = next(
+                    item
+                    for item in app.text_input
+                    if item.label == f"Headline {index}"
+                )
+                self.assertEqual(
+                    primary_widget.value,
+                    expected[concept["id"]][0]["primary_text"],
+                )
+                self.assertEqual(
+                    headline_widget.value,
+                    expected[concept["id"]][0]["headline"],
+                )
+
+            app.run(timeout=20)
+            self.assertEqual(
+                next(
+                    item
+                    for item in app.text_area
+                    if item.label == "Primary Text 1"
+                ).value,
+                posting_ads()[0]["primary_text"],
+            )
+
+    def test_new_ads_csv_hydrates_copy_and_preserves_existing_posting_setup(self):
+        records = product_records()
+        product_identity = records[0]["identity"]
+        state = {
+            ads_posting_page.PRODUCT_KEY: product_identity,
+            ads_posting_page.PRODUCT_TRACK_KEY: product_identity,
+            ads_posting_page.COUNTRY_KEY: "AUS",
+            ads_posting_page.SPORT_KEY: "Motorsport",
+            ads_posting_page.CATALOG_KEY: "catalog-1",
+            ads_posting_page.PRODUCT_SET_KEY: "product-set-1",
+            ads_posting_page.AUDIENCE_KEY: "broad",
+            ads_posting_page.DESCRIPTION_KEYS[0]: "Keep optional description",
+        }
+        preserved = {
+            key: state[key]
+            for key in (
+                ads_posting_page.PRODUCT_KEY,
+                ads_posting_page.PRODUCT_TRACK_KEY,
+                ads_posting_page.COUNTRY_KEY,
+                ads_posting_page.SPORT_KEY,
+                ads_posting_page.CATALOG_KEY,
+                ads_posting_page.PRODUCT_SET_KEY,
+                ads_posting_page.AUDIENCE_KEY,
+                ads_posting_page.DESCRIPTION_KEYS[0],
+            )
+        }
+        status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                ads_page.build_instant_experience_copy_csv(
+                    ads_result(),
+                    ads_workflow(),
+                ),
+                name="Sports Cave - completed Instant Experience Copy.csv",
+                file_id="new-ads-copy",
+            ),
+            records,
+            state=state,
+        )
+
+        self.assertTrue(status["ok"])
+        self.assertEqual(status["message"], "Ads CSV imported — copy applied.")
+        self.assertEqual(status["summary"]["variations_loaded"], 9)
+        for key, value in preserved.items():
+            self.assertEqual(state[key], value)
+
+        expected = ads_workflow()["ad_notes"]["instant_experience_concepts"]
+        canonical_routes = state[ads_posting_page.ADS_COPY_ROUTES_STATE_KEY]
+        self.assertEqual(
+            tuple(route["route_key"] for route in canonical_routes),
+            tuple(concept["id"] for concept in INSTANT_EXPERIENCE_CONCEPTS),
+        )
+        for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS):
+            self.assertEqual(
+                state[ads_posting_page.PRIMARY_TEXT_KEYS[index]],
+                expected[concept["id"]][0]["primary_text"],
+            )
+            self.assertEqual(
+                state[ads_posting_page.HEADLINE_KEYS[index]],
+                expected[concept["id"]][0]["headline"],
+            )
+            self.assertEqual(len(canonical_routes[index]["variations"]), 3)
+            for variation_index, variation in enumerate(
+                canonical_routes[index]["variations"]
+            ):
+                self.assertEqual(
+                    variation["primary_text"],
+                    expected[concept["id"]][variation_index]["primary_text"],
+                )
+                self.assertEqual(
+                    variation["headline"],
+                    expected[concept["id"]][variation_index]["headline"],
+                )
+                self.assertEqual(
+                    variation["cta"],
+                    expected[concept["id"]][variation_index]["cta"],
+                )
+        self.assertTrue(
+            ads_posting_page._posting_form_ready(
+                product_title="Six Laps Ahead Peter Brock Wall Art",
+                product_url=(
+                    "https://www.sportscaveshop.com/products/"
+                    "peter-brock-bathurst-wall-art"
+                ),
+                creatives=tuple(
+                    {
+                        "image": {"valid": True},
+                        "image_error": "",
+                        "primary_text": state[key],
+                        "headline": state[ads_posting_page.HEADLINE_KEYS[index]],
+                    }
+                    for index, key in enumerate(ads_posting_page.PRIMARY_TEXT_KEYS)
+                ),
+                country=state[ads_posting_page.COUNTRY_KEY],
+                sport=state[ads_posting_page.SPORT_KEY],
+                catalog_id="catalog-1",
+                product_set_id=state[ads_posting_page.PRODUCT_SET_KEY],
+                dataset_id="dataset-1",
+                identities_ready=True,
+            )
+        )
+
+    def test_new_ads_csv_import_does_not_require_a_selected_product(self):
+        state = {}
+        status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                ads_page.build_instant_experience_copy_csv(
+                    ads_result(),
+                    ads_workflow(),
+                ),
+                name="copy-only.csv",
+                file_id="copy-without-product",
+            ),
+            (),
+            state=state,
+        )
+        self.assertTrue(status["ok"])
+        self.assertNotIn(ads_posting_page.PRODUCT_KEY, state)
+        self.assertEqual(
+            state[ads_posting_page.PRIMARY_TEXT_KEYS[0]],
+            posting_ads()[0]["primary_text"],
+        )
+
+    def test_new_ads_csv_tolerance_and_route_mapping_are_inherited_by_posting(self):
+        expected_route_order = tuple(
+            concept["id"] for concept in INSTANT_EXPERIENCE_CONCEPTS
+        )
+        for index_header in ("index", "Unnamed: 0", ""):
+            with self.subTest(index_header=index_header):
+                batch = parse_posting_import_csv(
+                    indexed_ads_copy_csv(
+                        index_header=index_header,
+                        reverse_rows=True,
+                    )
+                )
+                self.assertEqual(
+                    tuple(ad["route_key"] for ad in batch["ads"]),
+                    expected_route_order,
+                )
+                self.assertEqual(len(batch["rows"]), 9)
+                self.assertIn("\n", batch["ads"][0]["primary_text"])
+
+    def test_new_ads_csv_duplicate_header_fails_and_valid_replacement_succeeds(self):
+        canonical = ads_page.build_instant_experience_copy_csv(
+            ads_result(),
+            ads_workflow(),
+        ).decode("utf-8-sig")
+        rows = list(csv.reader(io.StringIO(canonical, newline="")))
+        duplicate_output = io.StringIO(newline="")
+        writer = csv.writer(duplicate_output, lineterminator="\r\n")
+        writer.writerow(("index", "index", *rows[0]))
+        for index, row in enumerate(rows[1:]):
+            writer.writerow((index, index, *row))
+
+        state = {
+            ads_posting_page.PRODUCT_KEY: "keep-product",
+            ads_posting_page.COUNTRY_KEY: "AUS",
+        }
+        failed = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                duplicate_output.getvalue().encode("utf-8-sig"),
+                name="duplicate.csv",
+                file_id="duplicate-ads-copy",
+            ),
+            (),
+            state=state,
+        )
+        self.assertFalse(failed["ok"])
+        self.assertIn("duplicate column headers", failed["message"].casefold())
+        self.assertEqual(state[ads_posting_page.PRODUCT_KEY], "keep-product")
+
+        succeeded = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                ads_page.build_instant_experience_copy_csv(
+                    ads_result(),
+                    ads_workflow(),
+                ),
+                name="valid.csv",
+                file_id="valid-after-duplicate",
+            ),
+            (),
+            state=state,
+        )
+        self.assertTrue(succeeded["ok"])
+        self.assertEqual(succeeded["message"], "Ads CSV imported — copy applied.")
+
     def test_product_matches_by_handle_and_canonical_url_wins(self):
         data = serialize_posting_import_csv(
             posting_rows(
