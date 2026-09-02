@@ -6,6 +6,7 @@ import re
 from datetime import date
 from pathlib import Path
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -101,6 +102,12 @@ def carousel_prompt_card_sections(contract):
 def square_png_bytes(color=(46, 76, 112)):
     buffer = io.BytesIO()
     Image.new("RGB", (96, 96), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def square_image_bytes(image_format, color=(46, 76, 112)):
+    buffer = io.BytesIO()
+    Image.new("RGB", (96, 96), color).save(buffer, format=image_format)
     return buffer.getvalue()
 
 
@@ -276,6 +283,16 @@ def carousel_image_uploaders(app_test):
 
 
 class AdsPageTests(unittest.TestCase):
+    def test_streamlit_config_is_valid_for_local_file_uploads(self):
+        with (ROOT / ".streamlit" / "config.toml").open("rb") as config_file:
+            config = tomllib.load(config_file)
+
+        self.assertEqual(config["server"]["address"], "0.0.0.0")
+        self.assertTrue(config["server"]["headless"])
+        self.assertFalse(config["server"]["enableCORS"])
+        self.assertFalse(config["server"]["enableXsrfProtection"])
+        self.assertFalse(config["browser"]["gatherUsageStats"])
+
     def test_visible_title_and_navigation_are_ads_only(self):
         app_test = run_ads_page()
 
@@ -4420,6 +4437,40 @@ PRIMARY TEXT VARIATIONS
                     expected["premium_scarcity_left"][2]["cta"],
                 )
 
+    def test_instant_experience_copy_csv_rejects_duplicate_index_header(self):
+        result = instant_experience_csv_result()
+        canonical = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=instant_experience_csv_notes(),
+        )
+        rows = list(
+            csv.DictReader(
+                io.StringIO(canonical.decode("utf-8-sig"), newline="")
+            )
+        )
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\r\n")
+        writer.writerow(
+            ("index", "index", *ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
+        )
+        for index, row in enumerate(rows):
+            writer.writerow(
+                (
+                    index,
+                    index,
+                    *(row[header] for header in ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+                )
+            )
+
+        with self.assertRaisesRegex(
+            ads_page.InstantExperienceCopyCSVError,
+            "duplicate column headers",
+        ):
+            ads_page.parse_instant_experience_copy_csv(
+                output.getvalue().encode("utf-8-sig"),
+                result,
+            )
+
     def test_instant_experience_copy_csv_rejects_posting_schema_with_useful_error(self):
         with self.assertRaisesRegex(
             ads_page.InstantExperienceCopyCSVError,
@@ -4863,6 +4914,116 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
+    def test_instant_experience_package_keeps_historical_text_and_image_assets_without_posting_schema(self):
+        result = instant_experience_csv_result()
+        notes = instant_experience_csv_notes()
+        slots = {}
+        image_cases = (
+            ("right.jpg", "JPEG"),
+            ("front.png", "PNG"),
+            ("left.webp", "WEBP"),
+        )
+        for slot, (filename, image_format) in zip(
+            ads_page.ads_image_workflow.campaign_image_slots(
+                "Instant Experience"
+            ),
+            image_cases,
+        ):
+            source = square_image_bytes(image_format)
+            details = ads_page.ads_image_workflow.inspect_instant_experience_original(
+                source,
+                original_name=filename,
+            )
+            slots[slot["id"]] = {
+                **details,
+                "data": source,
+                "output_format": details["source_format"],
+                "output_width": details["source_width"],
+                "output_height": details["source_height"],
+                "output_size": details["source_size"],
+                "slot_id": slot["id"],
+                "label": slot["label"],
+                "concept_id": slot.get("concept_id"),
+                "position": slot["position"],
+                "valid": True,
+                "error": "",
+            }
+        workflow = {
+            "context_key": result["context_key"],
+            "campaign_type": "Instant Experience",
+            "slots": slots,
+            "outcomes": {},
+            "ad_notes": {"instant_experience_concepts": notes},
+        }
+
+        items = ads_page._instant_experience_package_items(result, workflow)
+        paths = {item["relative_path"] for item in items}
+
+        self.assertEqual(sum(item["kind"] == "image" for item in items), 3)
+        for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
+            self.assertIn(f"{concept['folder']}/ad-copy.txt", paths)
+            for variation_number in range(
+                1,
+                ads_page.INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1,
+            ):
+                variant = ads_page._instant_experience_description_variant(
+                    variation_number
+                )
+                variation_folder = (
+                    f"{concept['folder']}/{variation_number:02d}-"
+                    f"{variant['key'].replace('_', '-')}"
+                )
+                self.assertIn(
+                    f"{variation_folder}/{ads_page.ADS_PRIMARY_TEXT_FILENAME}",
+                    paths,
+                )
+                self.assertIn(
+                    f"{variation_folder}/{ads_page.ADS_HEADLINE_FILENAME}",
+                    paths,
+                )
+
+        copy_csv_items = [
+            item for item in items if item["asset_type"] == "meta_ads_copy_csv"
+        ]
+        self.assertEqual(len(copy_csv_items), 1)
+        self.assertEqual(
+            ads_page.parse_instant_experience_copy_csv(
+                copy_csv_items[0]["data"],
+                result,
+            ),
+            notes,
+        )
+        self.assertFalse(any("posting" in path.casefold() for path in paths))
+        self.assertFalse(
+            any(item["asset_type"] == "meta_ads_posting_import" for item in items)
+        )
+
+        current_slot_id = ads_page.ads_image_workflow.campaign_image_slots(
+            "Instant Experience"
+        )[0]["id"]
+        workflow["outcomes"].update(
+            {
+                current_slot_id: {"status": "saved", "label": "Right Angle"},
+                "instant-experience": {"status": "failed"},
+                "_new_ads_copy_csv": {"status": "saved"},
+                "_instant_experience_package": {
+                    "status": "saved",
+                    "signature": "package-signature",
+                },
+            }
+        )
+        ads_page._compact_instant_experience_slots(workflow)
+        self.assertEqual(workflow["outcomes"][current_slot_id]["status"], "saved")
+        self.assertNotIn("instant-experience", workflow["outcomes"])
+        self.assertEqual(
+            workflow["outcomes"]["_new_ads_copy_csv"]["status"],
+            "saved",
+        )
+        self.assertEqual(
+            workflow["outcomes"]["_instant_experience_package"]["signature"],
+            "package-signature",
+        )
+
     def test_invalid_generated_image_shows_inline_error_and_keeps_save_disabled(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Final Whistle Glory")
@@ -5221,6 +5382,135 @@ PRIMARY TEXT VARIATIONS
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(workflow["slots"][slot_id]["original_name"], "replacement.webp")
+
+    def test_local_instant_experience_upload_accepts_jpg_jpeg_png_and_webp(self):
+        result = instant_experience_csv_result()
+        slot = ads_page.ads_image_workflow.campaign_image_slots(
+            "Instant Experience"
+        )[0]
+        cases = (
+            ("jpg", "JPEG", "image/jpeg"),
+            ("jpeg", "JPEG", "image/jpeg"),
+            ("png", "PNG", "image/png"),
+            ("webp", "WEBP", "image/webp"),
+        )
+
+        for case_index, (extension, image_format, _mime_type) in enumerate(cases):
+            with self.subTest(extension=extension):
+                workflow = {
+                    "context_key": result["context_key"],
+                    "campaign_type": "Instant Experience",
+                    "slots": {},
+                    "widget_nonces": {},
+                    "outcomes": {},
+                    "ad_notes": {},
+                }
+                session_state = {}
+                source = square_image_bytes(
+                    image_format,
+                    color=(46 + case_index, 76, 112),
+                )
+                upload = io.BytesIO(source)
+                upload.name = f"cover.{extension}"
+
+                with (
+                    patch.object(ads_page.st, "session_state", session_state),
+                    patch("ads_page._ads_dropbox_connection") as dropbox_connection,
+                    patch("ads_page.save_ads_images_to_dropbox") as save_to_dropbox,
+                    patch("ads_image_workflow.prepare_meta_posting_image") as posting_prepare,
+                ):
+                    ads_page._process_ads_image_upload(
+                        result,
+                        workflow,
+                        slot,
+                        upload,
+                    )
+
+                saved = workflow["slots"][slot["id"]]
+                self.assertTrue(saved["valid"])
+                self.assertEqual(saved["data"], source)
+                self.assertEqual(saved["original_name"], f"cover.{extension}")
+                self.assertEqual(saved["source_format"], image_format)
+                self.assertEqual((saved["source_width"], saved["source_height"]), (96, 96))
+                self.assertTrue(saved["preview_data"])
+                self.assertIs(session_state[ads_page.ADS_IMAGE_STATE_KEY], workflow)
+                dropbox_connection.assert_not_called()
+                save_to_dropbox.assert_not_called()
+                posting_prepare.assert_not_called()
+
+    def test_rendered_instant_experience_supported_images_replace_without_red_error(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        slot_id = "instant-experience-premium-scarcity-right"
+        cases = (
+            ("cover.jpg", "JPEG", "image/jpeg"),
+            ("cover.jpeg", "JPEG", "image/jpeg"),
+            ("cover.png", "PNG", "image/png"),
+            ("cover.webp", "WEBP", "image/webp"),
+        )
+        for case_index, (filename, image_format, mime_type) in enumerate(cases):
+            with self.subTest(filename=filename):
+                instant_experience_cover_uploaders(app_test)[0].set_value(
+                    [
+                        (
+                            filename,
+                            square_image_bytes(
+                                image_format,
+                                color=(20 + case_index * 50, 60 + case_index * 20, 110),
+                            ),
+                            mime_type,
+                        )
+                    ]
+                )
+                app_test.run(timeout=30)
+                saved = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"][slot_id]
+                self.assertTrue(saved["valid"])
+                self.assertEqual(saved["original_name"], filename)
+                self.assertEqual(saved["source_format"], image_format)
+                self.assertFalse(app_test.error)
+                self.assertTrue(
+                    any(
+                        caption.value == f"Filename: {filename}"
+                        for caption in app_test.caption
+                    )
+                )
+
+        app_test.run(timeout=20)
+        persisted = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"][slot_id]
+        self.assertEqual(persisted["original_name"], "cover.webp")
+        self.assertTrue(persisted["valid"])
+
+    def test_failed_instant_experience_image_does_not_poison_valid_replacement(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        instant_experience_cover_uploaders(app_test)[0].set_value(
+            [("broken.jpg", b"not an image", "image/jpeg")]
+        )
+        app_test.run(timeout=20)
+        self.assertTrue(any("corrupt" in error.value for error in app_test.error))
+
+        instant_experience_cover_uploaders(app_test)[0].set_value(
+            [("recovered.jpg", square_image_bytes("JPEG"), "image/jpeg")]
+        )
+        app_test.run(timeout=30)
+        slot = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"][
+            "instant-experience-premium-scarcity-right"
+        ]
+        self.assertTrue(slot["valid"])
+        self.assertEqual(slot["original_name"], "recovered.jpg")
+        self.assertFalse(app_test.error)
 
     def test_instant_experience_remove_middle_cover_preserves_route_slots(self):
         app_test = run_ads_page()

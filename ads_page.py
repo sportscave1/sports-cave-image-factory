@@ -9231,7 +9231,12 @@ def _compact_instant_experience_slots(workflow):
     slot_by_id = {slot["id"]: slot for slot in slot_specs}
     outcomes = workflow.setdefault("outcomes", {})
     new_slots = {}
-    new_outcomes = {}
+    managed_outcome_ids = set(slot_by_id).union(INSTANT_EXPERIENCE_LEGACY_SLOT_IDS)
+    new_outcomes = {
+        outcome_id: dict(outcome) if isinstance(outcome, dict) else outcome
+        for outcome_id, outcome in outcomes.items()
+        if outcome_id not in managed_outcome_ids
+    }
     for slot in slot_specs:
         slot_id = slot["id"]
         if slot_id in slots:
