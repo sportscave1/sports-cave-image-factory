@@ -504,7 +504,10 @@ def _connection_status(container, label, *, tone):
 
 def _render_connection_details(overview):
     with st.expander("Connection details", expanded=False):
-        for key in ("configuration", "page_identity", "instagram_identity", "ad_account", "permissions"):
+        for key in (
+            "configuration", "page_identity", "page_token", "page_auth",
+            "instagram_identity", "ad_account", "permissions",
+        ):
             check = dict((overview.get("checks") or {}).get(key) or {})
             if check:
                 st.caption(
@@ -693,7 +696,7 @@ def render_page():
     )
     if overview_error:
         _connection_status(status_col, f"Meta unavailable — {overview_error}", tone="warning")
-    elif not overview.get("connected") or overview.get("permission_state") == "missing":
+    elif not overview.get("posting_ready"):
         _connection_status(status_col, str(overview.get("summary") or "Meta unavailable"), tone="warning")
         _render_connection_details(overview)
     elif references_ready:
@@ -906,7 +909,11 @@ def render_page():
                     st.caption(f"Description: {creative['description']}")
                 st.caption(f"Instant Experience: {ad_name or f'Ad {index}'} | Storefront")
 
-    identities_ready = bool(references.get("page") and references.get("instagram"))
+    identities_ready = bool(
+        references.get("page")
+        and references.get("instagram")
+        and overview.get("posting_ready")
+    )
     ready = _posting_form_ready(
         product_title=product_title,
         product_url=product_url,

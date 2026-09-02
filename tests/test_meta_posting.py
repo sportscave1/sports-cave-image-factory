@@ -14,6 +14,7 @@ from meta_posting_service import (
     EXPECTED_PIXEL_NAME,
     SUCCESS_MESSAGE,
     MetaPostingService,
+    SupabasePostingStore,
     PostingError,
     PostingCreative,
     PostingRequest,
@@ -111,6 +112,7 @@ class FakePostingStore:
 class FakePostingClient:
     ad_account_id = "act_123"
     page_id = "page-1"
+    page_access_token = "page-token"
     instagram_actor_id = "ig-1"
     instagram_user_id = "ig-1"
 
@@ -129,6 +131,13 @@ class FakePostingClient:
 
     def permissions(self):
         return ("ads_management",)
+
+    def validate_page_auth(self):
+        return {
+            "ready": True,
+            "page_id": self.page_id,
+            "permission": "pages_manage_posts",
+        }
 
     def reference_data(self):
         return {
@@ -385,8 +394,68 @@ class MetaPostingClientTests(unittest.TestCase):
     def config(self):
         return {
             "configured": True, "ad_account_id": "act_123", "access_token": "secret",
-            "api_version": "v26.0", "page_id": "page-1", "instagram_user_id": "ig-1",
+            "page_access_token": "page-secret", "api_version": "v26.0",
+            "page_id": "page-1", "instagram_user_id": "ig-1",
         }
+
+    @mock.patch("meta_ads_client.requests.post")
+    def test_common_post_defaults_to_ad_token_and_accepts_explicit_page_override(self, post):
+        response = mock.Mock(ok=True, status_code=200)
+        response.json.return_value = {"id": "created"}
+        post.return_value = response
+        config = self.config()
+
+        meta_ads_client._post("act_123/campaigns", data={"name": "Campaign"}, config=config)
+        self.assertEqual(post.call_args.kwargs["data"]["access_token"], "secret")
+
+        meta_ads_client._post(
+            "page-1/photos",
+            data={"published": "false"},
+            config=config,
+            access_token="page-secret",
+        )
+        self.assertEqual(post.call_args.kwargs["data"]["access_token"], "page-secret")
+
+    @mock.patch("meta_ads_client.requests.post")
+    def test_page_token_is_redacted_from_meta_errors(self, post):
+        page_token = "EAA-page-secret-that-must-never-leak"
+        response = mock.Mock(ok=False, status_code=403)
+        response.json.return_value = {
+            "error": {"message": f"Rejected access_token={page_token}", "code": 200}
+        }
+        post.return_value = response
+        with self.assertRaises(meta_ads_client.MetaAdsApiError) as caught:
+            meta_ads_client._post(
+                "page-1/photos",
+                config=self.config(),
+                access_token=page_token,
+            )
+        self.assertNotIn(page_token, str(caught.exception))
+        self.assertIn("[redacted]", str(caught.exception))
+
+    @mock.patch("meta_ads_client.fetch_meta_permissions", return_value=("ads_management",))
+    @mock.patch("meta_ads_client.fetch_meta_campaigns", return_value={"rows": ()})
+    @mock.patch("meta_ads_client.fetch_meta_account", return_value={"id": "act_123"})
+    @mock.patch("meta_ads_client.fetch_meta_token_identity", return_value={"id": "system-user"})
+    def test_missing_page_token_is_a_distinct_non_destructive_readiness_failure(
+        self, _identity, _account, _campaigns, _permissions
+    ):
+        overview = meta_ads_client.diagnose_meta_posting_connection(
+            {
+                "configured": True,
+                "ad_account_id": "act_123",
+                "access_token": "ad-secret",
+                "api_version": "v26.0",
+                "api_version_source": "provided config",
+                "page_id": "page-1",
+                "page_access_token": "",
+                "instagram_user_id": "ig-1",
+            }
+        )
+        self.assertTrue(overview["connected"])
+        self.assertFalse(overview["posting_ready"])
+        self.assertEqual(overview["diagnosis_category"], "missing_page_token")
+        self.assertEqual(overview["checks"]["page_auth"]["status"], "failed")
 
     @mock.patch("meta_ads_client._post")
     def test_new_object_writes_use_expected_edges_and_json(self, post):
@@ -420,6 +489,92 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertEqual(post.call_args_list[0].kwargs["data"]["status"], "PAUSED")
         self.assertIn('"advantage_audience": 1', post.call_args_list[1].kwargs["data"]["targeting"])
         self.assertEqual(post.call_args_list[2].kwargs["data"]["published"], "false")
+        self.assertNotIn("access_token", post.call_args_list[0].kwargs)
+        self.assertNotIn("access_token", post.call_args_list[1].kwargs)
+        for call in post.call_args_list[2:5]:
+            self.assertEqual(call.kwargs["access_token"], "page-secret")
+        self.assertNotIn("access_token", post.call_args_list[5].kwargs)
+
+    @mock.patch("meta_ads_client.fetch_meta_page_token_debug")
+    @mock.patch("meta_ads_client.fetch_meta_page_token_identity")
+    def test_page_auth_rejects_wrong_page_and_missing_publishing_task(self, identity, debug):
+        config = {
+            **self.config(),
+            "app_id": "app-1",
+            "app_secret": "app-secret",
+        }
+        identity.return_value = {"id": "other-page", "name": "Other"}
+        with self.assertRaisesRegex(meta_ads_client.MetaPageAuthError, "different Facebook Page"):
+            meta_ads_client.MetaPostingClient(config).validate_page_auth()
+        debug.assert_not_called()
+
+        identity.return_value = {"id": "page-1", "name": "Sports Cave"}
+        debug.return_value = {
+            "is_valid": True,
+            "app_id": "app-1",
+            "type": "PAGE",
+            "scopes": ("pages_read_engagement",),
+        }
+        with self.assertRaisesRegex(meta_ads_client.MetaPageAuthError, "pages_manage_posts"):
+            meta_ads_client.MetaPostingClient(config).validate_page_auth()
+
+    @mock.patch("meta_ads_client.fetch_meta_page_token_debug")
+    @mock.patch("meta_ads_client.fetch_meta_page_token_identity")
+    def test_page_auth_rejects_page_without_expected_task_assignment(self, identity, debug):
+        config = {
+            **self.config(),
+            "app_id": "app-1",
+            "app_secret": "app-secret",
+        }
+        identity.return_value = {"id": "page-1", "name": "Sports Cave"}
+        debug.return_value = {
+            "is_valid": True,
+            "app_id": "app-1",
+            "type": "PAGE",
+            "scopes": ("pages_manage_posts",),
+            "granular_scopes": (
+                {"scope": "pages_manage_posts", "target_ids": ("other-page",)},
+            ),
+        }
+        with self.assertRaisesRegex(meta_ads_client.MetaPageAuthError, "required content task"):
+            meta_ads_client.MetaPostingClient(config).validate_page_auth()
+
+    @mock.patch("meta_ads_client.fetch_meta_page_token_identity")
+    def test_page_auth_classifies_invalid_token_without_leaking_it(self, identity):
+        page_token = "EAA-invalid-page-token-never-display"
+        identity.side_effect = meta_ads_client.MetaAdsApiError(
+            f"Invalid OAuth access token {page_token}",
+            error_code=190,
+        )
+        with self.assertRaises(meta_ads_client.MetaPageAuthError) as caught:
+            meta_ads_client.MetaPostingClient(
+                {**self.config(), "page_access_token": page_token}
+            ).validate_page_auth()
+        self.assertEqual(caught.exception.category, "invalid_page_token")
+        self.assertNotIn(page_token, str(caught.exception))
+
+    @mock.patch("meta_ads_client.fetch_meta_page_token_debug")
+    @mock.patch("meta_ads_client.fetch_meta_page_token_identity")
+    def test_page_auth_confirms_expected_page_permission_and_assignment(self, identity, debug):
+        config = {
+            **self.config(),
+            "app_id": "app-1",
+            "app_secret": "app-secret",
+        }
+        identity.return_value = {"id": "page-1", "name": "Sports Cave"}
+        debug.return_value = {
+            "is_valid": True,
+            "app_id": "app-1",
+            "type": "PAGE",
+            "scopes": ("pages_manage_posts",),
+            "granular_scopes": (
+                {"scope": "pages_manage_posts", "target_ids": ("page-1",)},
+            ),
+        }
+        readiness = meta_ads_client.MetaPostingClient(config).validate_page_auth()
+        self.assertTrue(readiness["ready"])
+        self.assertEqual(readiness["page_id"], "page-1")
+        self.assertNotIn("page-secret", str(readiness))
 
     @mock.patch("meta_ads_client._post", return_value={"id": "ad-1"})
     def test_ad_is_created_paused(self, post):
@@ -832,6 +987,31 @@ class PostingReferenceRepairTests(unittest.TestCase):
 
 
 class PostingServiceTests(unittest.TestCase):
+    def test_missing_page_token_blocks_before_campaign_creation(self):
+        client = FakePostingClient()
+        client.page_access_token = ""
+        with self.assertRaisesRegex(PostingValidationError, "META_PAGE_ACCESS_TOKEN"):
+            MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(
+                request_for()
+            )
+        self.assertNotIn("campaign", client.calls)
+        self.assertNotIn("adset", client.calls)
+
+    def test_invalid_page_auth_blocks_before_campaign_creation(self):
+        client = FakePostingClient()
+        client.validate_page_auth = mock.Mock(
+            side_effect=meta_ads_client.MetaPageAuthError(
+                "The Facebook Page token lacks pages_manage_posts for Page-owned content.",
+                category="page_permission_missing",
+            )
+        )
+        with self.assertRaisesRegex(PostingValidationError, "pages_manage_posts"):
+            MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(
+                request_for()
+            )
+        self.assertNotIn("campaign", client.calls)
+        self.assertNotIn("adset", client.calls)
+
     def test_complete_sequence_creates_every_object_paused(self):
         client = FakePostingClient()
         store = FakePostingStore()
@@ -996,6 +1176,73 @@ class PostingServiceTests(unittest.TestCase):
             [row["meta_ad_id"] for row in completed["ad_results"]],
             ["ad-1", "ad-2", "ad-3"],
         )
+
+    def test_new_submission_id_resumes_unique_partial_campaign_and_adset(self):
+        original_submission_id = "22222222-2222-4222-8222-222222222222"
+        existing = {
+            "submission_id": original_submission_id,
+            "status": "FAILED",
+            "campaign_id": "120249720387120554",
+            "campaign_name": "Original campaign",
+            "adset_id": "120249720389890554",
+            "adset_name": "Original ad set",
+            "ad_name": "Max Verstappen Victory IA 1",
+            "ad_results": posting_ad_results(
+                (),
+                ad_names=(
+                    "Max Verstappen Victory IA 1",
+                    "Max Verstappen Victory IA 2",
+                    "Max Verstappen Victory IA 3",
+                ),
+            ),
+        }
+        client = FakePostingClient()
+        store = FakePostingStore(existing=existing)
+        result = MetaPostingService(client=client, store=store).create_paused_campaign(
+            request_for(submission_id="33333333-3333-4333-8333-333333333333")
+        )
+        self.assertEqual(result["submission_id"], original_submission_id)
+        self.assertEqual(result["campaign_id"], "120249720387120554")
+        self.assertEqual(result["adset_id"], "120249720389890554")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("ad"), 3)
+
+    def test_store_claim_reuses_unique_failed_fingerprint_without_inserting_new_job(self):
+        original_submission_id = "22222222-2222-4222-8222-222222222222"
+        partial = {
+            "submission_id": original_submission_id,
+            "request_fingerprint": "same-fingerprint",
+            "status": "FAILED",
+            "campaign_id": "120249720387120554",
+            "adset_id": "120249720389890554",
+        }
+        cursor = mock.MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.side_effect = [None, partial, partial]
+        cursor.fetchall.return_value = [partial]
+        connection = mock.MagicMock()
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        backend = mock.Mock()
+        backend.connect.return_value = connection
+        store = SupabasePostingStore()
+
+        with mock.patch.object(store, "_backend", return_value=backend):
+            claim = store.claim(
+                {
+                    "submission_id": "33333333-3333-4333-8333-333333333333",
+                    "request_fingerprint": "same-fingerprint",
+                    "ad_results": (),
+                },
+                lease_token="44444444-4444-4444-8444-444444444444",
+            )
+
+        self.assertTrue(claim["claimed"])
+        self.assertEqual(claim["record"]["submission_id"], original_submission_id)
+        statements = [str(call.args[0]) for call in cursor.execute.call_args_list]
+        self.assertTrue(any("status='FAILED'" in statement for statement in statements))
+        self.assertFalse(any("INSERT INTO meta_posting_submissions" in statement for statement in statements))
 
     def test_three_name_sequence_advances_as_one_batch(self):
         self.assertEqual(

@@ -37,6 +37,14 @@ class MetaAdsAmbiguousResultError(MetaAdsApiError):
     """The request may have reached Meta, so callers must reconcile before retrying."""
 
 
+class MetaPageAuthError(MetaAdsApiError):
+    """Safe, classified failure while validating Page-owned Meta operations."""
+
+    def __init__(self, message, *, category, **kwargs):
+        super().__init__(message, **kwargs)
+        self.category = str(category or "page_auth_unavailable")
+
+
 FACEBOOK_PAGE_ID_ENV_KEYS = (
     "META_FACEBOOK_PAGE_ID",
     "META_PAGE_ID",
@@ -48,6 +56,8 @@ INSTAGRAM_ACTOR_ID_ENV_KEYS = (
     "INSTAGRAM_ACTOR_ID",
     "INSTAGRAM_ACCOUNT_ID",
 )
+PAGE_ACCESS_TOKEN_ENV_KEY = "META_PAGE_ACCESS_TOKEN"
+PAGE_POST_PERMISSION = "pages_manage_posts"
 
 
 def _first_env_value(keys):
@@ -60,7 +70,10 @@ def _first_env_value(keys):
 
 def sanitize_meta_error(message, extra_secrets=()):
     cleaned = str(message or "")
-    protected_values = [str(os.getenv(key, "")).strip() for key in ("META_ACCESS_TOKEN", "META_APP_SECRET")]
+    protected_values = [
+        str(os.getenv(key, "")).strip()
+        for key in ("META_ACCESS_TOKEN", PAGE_ACCESS_TOKEN_ENV_KEY, "META_APP_SECRET")
+    ]
     protected_values.extend(str(value or "").strip() for value in extra_secrets)
     for value in protected_values:
         if value and len(value) >= 6:
@@ -79,6 +92,7 @@ def get_meta_config():
     if account_id and not account_id.startswith("act_"):
         account_id = f"act_{account_id}"
     access_token = str(os.getenv("META_ACCESS_TOKEN", "")).strip()
+    page_access_token = str(os.getenv(PAGE_ACCESS_TOKEN_ENV_KEY, "")).strip()
     app_id = str(os.getenv("META_APP_ID", "")).strip()
     app_secret = str(os.getenv("META_APP_SECRET", "")).strip()
     configured_api_version = str(os.getenv("META_API_VERSION", "")).strip()
@@ -96,6 +110,8 @@ def get_meta_config():
         "api_version": api_version,
         "api_version_source": "META_API_VERSION" if configured_api_version else "default",
         "access_token": access_token,
+        "page_access_token": page_access_token,
+        "page_access_token_present": bool(page_access_token),
         "page_id": page_id,
         "page_id_env": page_id_env,
         "instagram_actor_id": instagram_actor_id,
@@ -110,6 +126,7 @@ def safe_meta_config_status():
         "configured": config["configured"],
         "ad_account_id_present": bool(config["ad_account_id"]),
         "token_present": config["access_token_present"],
+        "page_token_present": config["page_access_token_present"],
         "app_id_present": config["app_id_present"],
         "app_secret_present": config["app_secret_present"],
         "app_id": config["app_id"],
@@ -179,14 +196,16 @@ def _request(path, params=None, config=None, access_token=None):
     return response.json()
 
 
-def _post(path, data=None, files=None, config=None):
+def _post(path, data=None, files=None, config=None, access_token=None):
     config = config or get_meta_config()
-    if not config.get("configured"):
+    if not config.get("configured") and access_token is None:
         raise MetaAdsApiError("Meta Ads API is not configured.")
     clean_path = str(path or "").lstrip("/")
     url = f"{META_BASE_URL}/{config['api_version']}/{clean_path}"
     request_data = dict(data or {})
-    request_data["access_token"] = config["access_token"]
+    request_data["access_token"] = (
+        config.get("access_token") if access_token is None else str(access_token)
+    )
     try:
         response = requests.post(url, data=request_data, files=files, timeout=45)
     except (requests.Timeout, requests.ConnectionError) as error:
@@ -221,10 +240,10 @@ def _get_next_page(url):
     return response.json()
 
 
-def _paged_get(path, params=None, config=None, max_pages=25):
+def _paged_get(path, params=None, config=None, max_pages=25, access_token=None):
     page_count = 0
     rows = []
-    payload = _request(path, params=params, config=config)
+    payload = _request(path, params=params, config=config, access_token=access_token)
     while True:
         page_count += 1
         rows.extend(payload.get("data") or [])
@@ -306,14 +325,61 @@ def fetch_meta_adsets(config=None):
     )
 
 
-def fetch_meta_permissions(config=None):
+def fetch_meta_permissions(config=None, access_token=None):
     config = config or get_meta_config()
-    payload = _request("me/permissions", params={"fields": "permission,status"}, config=config)
+    payload = _request(
+        "me/permissions",
+        params={"fields": "permission,status"},
+        config=config,
+        access_token=access_token,
+    )
     return tuple(
         str(row.get("permission") or "")
         for row in payload.get("data") or []
         if str(row.get("status") or "").casefold() == "granted"
     )
+
+
+def fetch_meta_page_token_identity(config=None):
+    """Resolve the identity represented by the configured Page token."""
+    config = config or get_meta_config()
+    page_token = str(config.get("page_access_token") or "").strip()
+    if not page_token:
+        raise MetaPageAuthError(
+            "META_PAGE_ACCESS_TOKEN is not configured.",
+            category="missing_page_token",
+        )
+    return _request(
+        "me",
+        params={"fields": "id,name"},
+        config=config,
+        access_token=page_token,
+    )
+
+
+def fetch_meta_page_token_debug(config=None):
+    """Read safe Page-token metadata without returning or logging the token."""
+    config = config or get_meta_config()
+    app_id = str(config.get("app_id") or "").strip()
+    app_secret = str(config.get("app_secret") or "").strip()
+    page_token = str(config.get("page_access_token") or "").strip()
+    if not app_id or not app_secret:
+        raise MetaPageAuthError(
+            "Meta app credentials are not configured for Page-token inspection.",
+            category="page_auth_unavailable",
+        )
+    if not page_token:
+        raise MetaPageAuthError(
+            "META_PAGE_ACCESS_TOKEN is not configured.",
+            category="missing_page_token",
+        )
+    payload = _request(
+        "debug_token",
+        params={"input_token": page_token},
+        config=config,
+        access_token=f"{app_id}|{app_secret}",
+    )
+    return dict(payload.get("data") or {})
 
 
 def _classify_meta_error(stage, error):
@@ -559,6 +625,13 @@ def diagnose_meta_posting_connection(config=None):
         "status": "ok" if bool(config.get("page_id")) else "failed",
         "message": "configured" if config.get("page_id") else "missing",
     }
+    page_token_present = bool(config.get("page_access_token"))
+    checks["page_token"] = {
+        "label": "Facebook Page access token",
+        "status": "ok" if page_token_present else "failed",
+        "message": "configured" if page_token_present else "META_PAGE_ACCESS_TOKEN is missing",
+        "category": "page_token_present" if page_token_present else "missing_page_token",
+    }
     checks["instagram_identity"] = {
         "label": "Instagram identity",
         "status": "ok" if bool(
@@ -586,9 +659,39 @@ def diagnose_meta_posting_connection(config=None):
             "default_api_version": DEFAULT_META_API_VERSION,
             "version_warning": version_warning,
             "checks": checks,
+            "page_auth_state": "unverified" if page_token_present else "missing",
             "permission_state": "unverified",
             "permissions": (),
             "campaigns": campaigns,
+        }
+
+    page_auth_state = "missing"
+    if page_token_present:
+        try:
+            page_auth = MetaPostingClient(config).validate_page_auth()
+            page_auth_state = "confirmed"
+            checks["page_auth"] = {
+                "label": "Facebook Page authentication",
+                "status": "ok",
+                "message": "Page identity and pages_manage_posts confirmed",
+                "category": "page_auth_confirmed",
+                "page_id": str(page_auth.get("page_id") or ""),
+                "permission": str(page_auth.get("permission") or ""),
+            }
+        except MetaPageAuthError as error:
+            page_auth_state = "failed"
+            checks["page_auth"] = {
+                "label": "Facebook Page authentication",
+                "status": "failed",
+                "message": sanitize_meta_error(error),
+                "category": str(error.category or "page_auth_unavailable"),
+            }
+    else:
+        checks["page_auth"] = {
+            "label": "Facebook Page authentication",
+            "status": "failed",
+            "message": "META_PAGE_ACCESS_TOKEN is not configured.",
+            "category": "missing_page_token",
         }
 
     checks["token_metadata"] = _token_debug_check(config, api_version)
@@ -717,9 +820,18 @@ def diagnose_meta_posting_connection(config=None):
         summary = "Meta posting permission required"
         diagnosis_category = "ads_management_missing"
         guidance = ("Generate the System User token with ads_management for this app.",)
+    elif connected and page_auth_state != "confirmed":
+        page_check = checks.get("page_auth") or checks.get("page_token") or {}
+        summary = "Meta Page authentication required"
+        diagnosis_category = str(page_check.get("category") or "page_auth_unavailable")
+        guidance = (
+            str(page_check.get("message") or "Configure a valid Facebook Page access token."),
+        )
     return {
         "connected": connected,
-        "posting_ready": connected and permission_state != "missing",
+        "posting_ready": (
+            connected and permission_state != "missing" and page_auth_state == "confirmed"
+        ),
         "summary": summary,
         "diagnosis_category": diagnosis_category,
         "guidance": tuple(value for value in guidance if value),
@@ -728,6 +840,7 @@ def diagnose_meta_posting_connection(config=None):
         "default_api_version": DEFAULT_META_API_VERSION,
         "version_warning": version_warning,
         "checks": checks,
+        "page_auth_state": page_auth_state,
         "permission_state": permission_state,
         "permissions": permissions,
         "campaigns": campaigns,
@@ -765,6 +878,10 @@ class MetaPostingClient:
         return str(self.config.get("page_id") or "")
 
     @property
+    def page_access_token(self):
+        return str(self.config.get("page_access_token") or "")
+
+    @property
     def instagram_actor_id(self):
         return self.instagram_user_id
 
@@ -778,6 +895,128 @@ class MetaPostingClient:
 
     def permissions(self):
         return fetch_meta_permissions(config=self.config)
+
+    def validate_page_auth(self):
+        """Validate Page identity and publishing permission before any Meta write."""
+        if not self.page_id:
+            raise MetaPageAuthError(
+                "Sports Cave Facebook Page identity is not configured.",
+                category="missing_page_id",
+            )
+        if not self.page_access_token:
+            raise MetaPageAuthError(
+                "META_PAGE_ACCESS_TOKEN is not configured.",
+                category="missing_page_token",
+            )
+        try:
+            identity = dict(fetch_meta_page_token_identity(config=self.config) or {})
+        except MetaPageAuthError:
+            raise
+        except MetaAdsApiError as error:
+            category = (
+                "invalid_page_token"
+                if str(getattr(error, "error_code", "")) == "190"
+                else "page_auth_unavailable"
+            )
+            message = (
+                "META_PAGE_ACCESS_TOKEN is invalid or expired."
+                if category == "invalid_page_token"
+                else "The configured Facebook Page token could not be validated."
+            )
+            raise MetaPageAuthError(message, category=category) from error
+        represented_page_id = str(identity.get("id") or "")
+        if represented_page_id != self.page_id:
+            raise MetaPageAuthError(
+                "META_PAGE_ACCESS_TOKEN represents a different Facebook Page.",
+                category="page_identity_mismatch",
+            )
+
+        metadata = {}
+        scopes = set()
+        if self.config.get("app_id") and self.config.get("app_secret"):
+            try:
+                metadata = fetch_meta_page_token_debug(config=self.config)
+            except MetaPageAuthError:
+                raise
+            except MetaAdsApiError as error:
+                category = (
+                    "invalid_page_token"
+                    if str(getattr(error, "error_code", "")) == "190"
+                    else "page_auth_unavailable"
+                )
+                message = (
+                    "META_PAGE_ACCESS_TOKEN is invalid or expired."
+                    if category == "invalid_page_token"
+                    else "The Facebook Page token permissions could not be validated."
+                )
+                raise MetaPageAuthError(message, category=category) from error
+            if metadata.get("is_valid") is not True:
+                raise MetaPageAuthError(
+                    "META_PAGE_ACCESS_TOKEN is invalid or expired.",
+                    category="invalid_page_token",
+                )
+            token_app_id = str(metadata.get("app_id") or "")
+            if token_app_id and token_app_id != str(self.config.get("app_id") or ""):
+                raise MetaPageAuthError(
+                    "META_PAGE_ACCESS_TOKEN belongs to a different Meta app.",
+                    category="page_token_app_mismatch",
+                )
+            token_type = str(metadata.get("type") or "").strip().upper()
+            if token_type and token_type != "PAGE":
+                raise MetaPageAuthError(
+                    "META_PAGE_ACCESS_TOKEN must be a Facebook Page access token.",
+                    category="wrong_page_token_type",
+                )
+            scopes = {
+                str(value or "").strip()
+                for value in metadata.get("scopes") or ()
+                if str(value or "").strip()
+            }
+            scopes.update(
+                str(scope.get("scope") or scope.get("permission") or "").strip()
+                for scope in metadata.get("granular_scopes") or ()
+                if str(scope.get("scope") or scope.get("permission") or "").strip()
+            )
+        else:
+            try:
+                scopes = set(
+                    fetch_meta_permissions(
+                        config=self.config,
+                        access_token=self.page_access_token,
+                    )
+                )
+            except MetaAdsApiError as error:
+                raise MetaPageAuthError(
+                    "The Facebook Page token permissions could not be validated.",
+                    category="page_auth_unavailable",
+                ) from error
+
+        if PAGE_POST_PERMISSION not in scopes:
+            raise MetaPageAuthError(
+                "The Facebook Page token lacks pages_manage_posts for Page-owned content.",
+                category="page_permission_missing",
+            )
+        target_ids = set()
+        for scope in metadata.get("granular_scopes") or ():
+            if str(scope.get("scope") or scope.get("permission") or "") != PAGE_POST_PERMISSION:
+                continue
+            target_ids.update(
+                str(value or "").strip()
+                for value in scope.get("target_ids") or ()
+                if str(value or "").strip()
+            )
+        if target_ids and self.page_id not in target_ids:
+            raise MetaPageAuthError(
+                "The Facebook Page token is not assigned the required content task for the configured Page.",
+                category="page_task_missing",
+            )
+        return {
+            "ready": True,
+            "page_id": represented_page_id,
+            "page_name": str(identity.get("name") or ""),
+            "permission": PAGE_POST_PERMISSION,
+            "token_type": str(metadata.get("type") or "Page"),
+        }
 
     def account(self):
         return fetch_meta_account(config=self.config)
@@ -1047,6 +1286,7 @@ class MetaPostingClient:
             data={"published": "false", "no_story": "true"},
             files={"source": (str(filename or "ad-image"), bytes(image_bytes), str(content_type))},
             config=self.config,
+            access_token=self.page_access_token,
         )
         photo_id = str(payload.get("id") or payload.get("post_id") or "")
         if not photo_id:
@@ -1062,6 +1302,7 @@ class MetaPostingClient:
             f"{self.page_id}/canvas_elements",
             data={element_field: json.dumps(dict(specification or {}))},
             config=self.config,
+            access_token=self.page_access_token,
         )
         element_id = str(payload.get("id") or "")
         if not element_id:
@@ -1074,6 +1315,7 @@ class MetaPostingClient:
                 f"{self.page_id}/canvases",
                 params={"fields": "id,name,is_published,update_time", "limit": 100},
                 config=self.config,
+                access_token=self.page_access_token,
             ).get("rows")
             or ()
         )
@@ -1091,6 +1333,7 @@ class MetaPostingClient:
                 "is_published": "true",
             },
             config=self.config,
+            access_token=self.page_access_token,
         )
         canvas_id = str(payload.get("id") or "")
         if not canvas_id:

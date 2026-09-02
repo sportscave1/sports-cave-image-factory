@@ -746,6 +746,27 @@ class SupabasePostingStore:
                 if completed:
                     conn.commit()
                     return {"claimed": False, "record": completed}
+                cur.execute(
+                    """
+                    SELECT * FROM meta_posting_submissions
+                    WHERE request_fingerprint=%s AND status='FAILED'
+                      AND (campaign_id IS NOT NULL OR adset_id IS NOT NULL)
+                      AND created_at >= now() - interval '7 days'
+                    ORDER BY updated_at DESC LIMIT 2
+                    """,
+                    (request_data["request_fingerprint"],),
+                )
+                resumable = [dict(row) for row in cur.fetchall()]
+                if len(resumable) > 1:
+                    raise PostingValidationError(
+                        "Multiple partial Meta Posting jobs match this request. Review Posting history "
+                        "before retrying so no duplicate campaign is created."
+                    )
+                target_submission_id = (
+                    str(resumable[0].get("submission_id") or "")
+                    if resumable
+                    else str(request_data["submission_id"])
+                )
                 columns = (
                     "submission_id", "request_fingerprint", "status", "product_id",
                     "product_title", "product_handle", "country", "sport", "catalog_id",
@@ -764,14 +785,15 @@ class SupabasePostingStore:
                     for column in columns
                 )
                 placeholders[-1] = "%s::jsonb"
-                cur.execute(
-                    f"INSERT INTO meta_posting_submissions({', '.join(columns)}) "
-                    f"VALUES ({', '.join(placeholders)}) ON CONFLICT (submission_id) DO NOTHING",
-                    values,
-                )
+                if target_submission_id == str(request_data["submission_id"]):
+                    cur.execute(
+                        f"INSERT INTO meta_posting_submissions({', '.join(columns)}) "
+                        f"VALUES ({', '.join(placeholders)}) ON CONFLICT (submission_id) DO NOTHING",
+                        values,
+                    )
                 cur.execute(
                     "SELECT * FROM meta_posting_submissions WHERE submission_id=%s::uuid",
-                    (request_data["submission_id"],),
+                    (target_submission_id,),
                 )
                 existing = dict(cur.fetchone() or {})
                 if str(existing.get("request_fingerprint") or "") != request_data["request_fingerprint"]:
@@ -790,13 +812,13 @@ class SupabasePostingStore:
                       AND (lease_expires_at IS NULL OR lease_expires_at < now())
                     RETURNING *
                     """,
-                    (lease_token, request_data["submission_id"]),
+                    (lease_token, target_submission_id),
                 )
                 claimed = dict(cur.fetchone() or {})
                 if not claimed:
                     cur.execute(
                         "SELECT * FROM meta_posting_submissions WHERE submission_id=%s::uuid",
-                        (request_data["submission_id"],),
+                        (target_submission_id,),
                     )
                     existing = dict(cur.fetchone() or {})
                 conn.commit()
@@ -892,8 +914,21 @@ class MetaPostingService:
             raise PostingValidationError("Meta posting permission is unavailable.")
         if not str(self.client.page_id or "").strip():
             raise PostingValidationError("Sports Cave Facebook Page identity is not configured.")
+        if not str(getattr(self.client, "page_access_token", "") or "").strip():
+            raise PostingValidationError("META_PAGE_ACCESS_TOKEN is not configured.")
         if not str(self.client.instagram_actor_id or "").strip():
             raise PostingValidationError("Sports Cave Instagram identity is not configured.")
+        try:
+            page_auth = dict(self.client.validate_page_auth() or {})
+        except MetaAdsApiError as error:
+            raise PostingValidationError(sanitize_meta_error(error)) from error
+        if (
+            not page_auth.get("ready")
+            or str(page_auth.get("page_id") or "") != str(self.client.page_id)
+        ):
+            raise PostingValidationError(
+                "The configured Facebook Page token could not be validated for this Page."
+            )
         references = load_posting_reference_snapshot(
             self.client,
             include_existing_ad_names=False,
@@ -1015,6 +1050,7 @@ class MetaPostingService:
             lease_token=str(uuid.uuid4()),
         )
         record = dict(claim.get("record") or {})
+        submission_id = str(record.get("submission_id") or submission_id)
         if not claim.get("claimed"):
             status = str(record.get("status") or "")
             if status == "COMPLETE":
