@@ -22,6 +22,8 @@ class MetaAdsApiError(RuntimeError):
         error_subcode=None,
         error_type="",
         fbtrace_id="",
+        error_user_title="",
+        error_user_msg="",
         request_path="",
     ):
         super().__init__(sanitize_meta_error(message))
@@ -30,6 +32,8 @@ class MetaAdsApiError(RuntimeError):
         self.error_subcode = error_subcode
         self.error_type = str(error_type or "")
         self.fbtrace_id = str(fbtrace_id or "")[:160]
+        self.error_user_title = sanitize_meta_error(error_user_title)[:500]
+        self.error_user_msg = sanitize_meta_error(error_user_msg)[:1000]
         self.request_path = str(request_path or "")
 
 
@@ -148,6 +152,8 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
     error_subcode = None
     error_type = ""
     fbtrace_id = ""
+    error_user_title = ""
+    error_user_msg = ""
     try:
         payload = response.json()
         error = payload.get("error") or {}
@@ -157,10 +163,24 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
         error_subcode = error.get("error_subcode")
         error_type = str(error.get("type") or "")
         fbtrace_id = str(error.get("fbtrace_id") or "")[:160]
+        error_user_title = sanitize_meta_error(
+            error.get("error_user_title") or "",
+            extra_secrets=secrets,
+        )[:500]
+        error_user_msg = sanitize_meta_error(
+            error.get("error_user_msg") or "",
+            extra_secrets=secrets,
+        )[:1000]
+        if error_user_title:
+            message = f"{message} — {error_user_title}"
+        if error_user_msg:
+            message = f"{message}: {error_user_msg}"
         if error_code is not None:
             message = f"{message} (code {error_code})"
         if error_subcode is not None:
             message = f"{message} (subcode {error_subcode})"
+        if fbtrace_id:
+            message = f"{message} (fbtrace_id {fbtrace_id})"
     except Exception:
         pass
     raise MetaAdsApiError(
@@ -170,6 +190,8 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
         error_subcode=error_subcode,
         error_type=error_type,
         fbtrace_id=fbtrace_id,
+        error_user_title=error_user_title,
+        error_user_msg=error_user_msg,
         request_path=request_path,
     )
 
@@ -488,6 +510,8 @@ def _failed_connection_check(stage, label, endpoint, error):
         "error_subcode": getattr(error, "error_subcode", None),
         "error_type": str(getattr(error, "error_type", "") or ""),
         "fbtrace_id": str(getattr(error, "fbtrace_id", "") or "")[:160],
+        "error_user_title": str(getattr(error, "error_user_title", "") or "")[:500],
+        "error_user_msg": str(getattr(error, "error_user_msg", "") or "")[:1000],
         **classification,
     }
 

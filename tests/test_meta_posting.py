@@ -363,8 +363,19 @@ class PostingPayloadTests(unittest.TestCase):
             headline="Headline",
         )
         link = payload["object_story_spec"]["link_data"]
-        self.assertEqual(link["canvas_id"], "canvas-1")
+        self.assertNotIn("canvas_id", link)
+        self.assertEqual(link["link"], "https://fb.com/canvas_doc/canvas-1")
+        self.assertEqual(
+            link["call_to_action"]["value"]["link"],
+            "https://fb.com/canvas_doc/canvas-1",
+        )
+        self.assertEqual(link["image_hash"], "hash")
+        self.assertEqual(link["message"], "Text")
+        self.assertEqual(link["name"], "Headline")
         self.assertEqual(link["call_to_action"]["type"], "SHOP_NOW")
+        self.assertEqual(payload["product_set_id"], "set-1")
+        self.assertEqual(payload["object_story_spec"]["page_id"], "page-1")
+        self.assertEqual(payload["object_story_spec"]["instagram_user_id"], "ig-1")
         self.assertEqual(payload["contextual_multi_ads"], {"enroll_status": "OPT_IN"})
         features = payload["degrees_of_freedom_spec"]["creative_features_spec"]
         self.assertEqual(features["hide_price"]["enroll_status"], "OPT_IN")
@@ -421,7 +432,14 @@ class MetaPostingClientTests(unittest.TestCase):
         page_token = "EAA-page-secret-that-must-never-leak"
         response = mock.Mock(ok=False, status_code=403)
         response.json.return_value = {
-            "error": {"message": f"Rejected access_token={page_token}", "code": 200}
+            "error": {
+                "message": f"Rejected access_token={page_token}",
+                "code": 100,
+                "error_subcode": 1443050,
+                "error_user_title": "Using unsupported field in object_story_spec",
+                "error_user_msg": f"canvas_id is invalid; access_token={page_token}",
+                "fbtrace_id": "safe-trace-id",
+            }
         }
         post.return_value = response
         with self.assertRaises(meta_ads_client.MetaAdsApiError) as caught:
@@ -432,6 +450,15 @@ class MetaPostingClientTests(unittest.TestCase):
             )
         self.assertNotIn(page_token, str(caught.exception))
         self.assertIn("[redacted]", str(caught.exception))
+        self.assertEqual(caught.exception.error_code, 100)
+        self.assertEqual(caught.exception.error_subcode, 1443050)
+        self.assertEqual(
+            caught.exception.error_user_title,
+            "Using unsupported field in object_story_spec",
+        )
+        self.assertNotIn(page_token, caught.exception.error_user_msg)
+        self.assertIn("[redacted]", caught.exception.error_user_msg)
+        self.assertEqual(caught.exception.fbtrace_id, "safe-trace-id")
 
     @mock.patch("meta_ads_client.fetch_meta_permissions", return_value=("ads_management",))
     @mock.patch("meta_ads_client.fetch_meta_campaigns", return_value={"rows": ()})
@@ -1207,6 +1234,74 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("campaign"), 0)
         self.assertEqual(client.calls.count("adset"), 0)
         self.assertEqual(client.calls.count("ad"), 3)
+
+    def test_retry_reuses_peter_brock_campaign_adset_and_first_instant_experience(self):
+        original_submission_id = "22222222-2222-4222-8222-222222222222"
+        ad_results = posting_ad_results(
+            (),
+            ad_names=(
+                "Six Laps Ahead Peter Brock IA 1",
+                "Six Laps Ahead Peter Brock IA 2",
+                "Six Laps Ahead Peter Brock IA 3",
+            ),
+        )
+        ad_results[0].update(
+            {
+                "meta_image_hash": "existing-image-hash",
+                "meta_page_photo_id": "existing-page-photo",
+                "meta_canvas_photo_element_id": "existing-photo-element",
+                "meta_canvas_product_element_id": "existing-product-element",
+                "meta_canvas_button_element_id": "existing-button-element",
+                "meta_canvas_footer_element_id": "existing-footer-element",
+                "meta_instant_experience_id": "1390026833255926",
+                "status": "FAILED",
+            }
+        )
+        existing = {
+            "submission_id": original_submission_id,
+            "status": "FAILED",
+            "campaign_id": "120249720387120554",
+            "campaign_name": "020926 AUS Motorsport Six Laps Ahead Peter Brock",
+            "adset_id": "120249720389890554",
+            "adset_name": "AUS Motorsport Broad",
+            "ad_name": "Six Laps Ahead Peter Brock IA 1",
+            "ad_results": ad_results,
+        }
+        client = FakePostingClient()
+        result = MetaPostingService(
+            client=client,
+            store=FakePostingStore(existing=existing),
+        ).create_paused_campaign(
+            request_for(
+                submission_id="33333333-3333-4333-8333-333333333333",
+                product_title="Six Laps Ahead Peter Brock Wall Art",
+                product_handle="six-laps-ahead-peter-brock-wall-art",
+                destination_url=(
+                    "https://sportscaveshop.com/products/"
+                    "six-laps-ahead-peter-brock-wall-art"
+                ),
+            )
+        )
+
+        self.assertEqual(result["submission_id"], original_submission_id)
+        self.assertEqual(result["campaign_id"], "120249720387120554")
+        self.assertEqual(result["adset_id"], "120249720389890554")
+        self.assertEqual(
+            result["ad_results"][0]["meta_instant_experience_id"],
+            "1390026833255926",
+        )
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("canvas"), 2)
+        self.assertEqual(client.calls.count("ad"), 3)
+        self.assertEqual(
+            client.creative_payloads[0]["object_story_spec"]["link_data"]["link"],
+            "https://fb.com/canvas_doc/1390026833255926",
+        )
+        self.assertEqual(
+            [row["meta_instant_experience_id"] for row in result["ad_results"]],
+            ["1390026833255926", "canvas-1", "canvas-2"],
+        )
 
     def test_store_claim_reuses_unique_failed_fingerprint_without_inserting_new_job(self):
         original_submission_id = "22222222-2222-4222-8222-222222222222"

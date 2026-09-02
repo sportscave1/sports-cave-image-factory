@@ -8,7 +8,7 @@ import json
 import os
 import re
 import uuid
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from zoneinfo import ZoneInfo
 
 from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
@@ -701,10 +701,17 @@ def build_collection_creative_payload(
     *, name, page_id, instagram_user_id, image_hash, canvas_id, product_set_id,
     destination_url, primary_text, headline, description="", url_tags=META_AD_URL_PARAMETERS,
 ):
+    instant_experience_url = (
+        "https://fb.com/canvas_doc/"
+        f"{quote(str(canvas_id), safe='')}"
+    )
     link_data = {
-        "image_hash": str(image_hash), "link": str(destination_url), "canvas_id": str(canvas_id),
+        "image_hash": str(image_hash), "link": instant_experience_url,
         "message": str(primary_text), "name": str(headline),
-        "call_to_action": {"type": META_DEFAULT_CTA, "value": {"link": str(destination_url)}},
+        "call_to_action": {
+            "type": META_DEFAULT_CTA,
+            "value": {"link": instant_experience_url},
+        },
     }
     if str(description or "").strip():
         link_data["description"] = str(description)
