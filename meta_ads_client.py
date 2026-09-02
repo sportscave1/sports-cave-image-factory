@@ -64,7 +64,8 @@ PAGE_ACCESS_TOKEN_ENV_KEY = "META_PAGE_ACCESS_TOKEN"
 PAGE_POST_PERMISSION = "pages_manage_posts"
 PRODUCT_SET_TEMPLATE_GUIDANCE = (
     "The selected Product Set requires a catalogue Collection creative. "
-    "Use object_story_spec.template_data with Meta's supported Collection format before retrying."
+    "Use Meta's image-Collection object_story_spec.link_data contract with picture and "
+    "retailer_item_ids before retrying."
 )
 
 
@@ -1417,6 +1418,34 @@ class MetaPostingClient:
         if not image_hash:
             raise MetaAdsApiError("Meta did not return an image reference.")
         return image_hash
+
+    def ad_image_url(self, image_hash):
+        """Return the full-size Meta-hosted URL for an existing ad image hash."""
+        expected_hash = str(image_hash or "").strip()
+        if not expected_hash:
+            raise MetaAdsApiError("Meta ad image reference is missing.")
+        rows = tuple(
+            _paged_get(
+                f"{self.ad_account_id}/adimages",
+                params={
+                    "fields": "hash,url,permalink_url,width,height",
+                    "hashes": json.dumps([expected_hash]),
+                },
+                config=self.config,
+                max_pages=1,
+            ).get("rows")
+            or ()
+        )
+        image = next(
+            (row for row in rows if str(row.get("hash") or "") == expected_hash),
+            None,
+        )
+        image_url = str((image or {}).get("url") or (image or {}).get("permalink_url") or "").strip()
+        if not image_url.lower().startswith("https://"):
+            raise MetaAdsApiError(
+                "Meta did not return a secure full-size image URL for the Collection cover."
+            )
+        return image_url
 
     def creatives(self):
         return tuple(

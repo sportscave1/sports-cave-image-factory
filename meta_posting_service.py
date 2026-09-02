@@ -31,7 +31,7 @@ CAMPAIGN_OBJECTIVE = "OUTCOME_SALES"
 CAMPAIGN_DAILY_BUDGET_MINOR = 2500
 PRODUCT_DESCRIPTION = "Limited Edition"
 INSTANT_EXPERIENCE_BUTTON_TEXT = "Claim Your Edition"
-COLLECTION_FORMAT_OPTION = "collection_video"
+DYNAMIC_COLLECTION_RETAILER_ITEM_IDS = (0, 0, 0, 0)
 AD_TYPE = "Instant Experience"
 COUNTRY_META_CODES = {"AUS": "AU", "USA": "US", "UK": "GB", "CAN": "CA", "NZ": "NZ"}
 SPORT_OPTIONS = (
@@ -699,29 +699,30 @@ def build_storefront_element_specs(*, page_photo_id, product_set_id, destination
 
 
 def build_collection_creative_payload(
-    *, name, page_id, instagram_user_id, image_hash, canvas_id, product_set_id,
+    *, name, page_id, instagram_user_id, image_url, canvas_id, product_set_id,
     destination_url, primary_text, headline, description="", url_tags=META_AD_URL_PARAMETERS,
 ):
     instant_experience_url = (
         "https://fb.com/canvas_doc/"
         f"{quote(str(canvas_id), safe='')}"
     )
-    template_data = {
-        # Meta's v26 SDK retains this legacy enum name for Collection creatives.
-        # Supplying image_hash (and no video_id) makes the uploaded image the cover.
-        "format_option": COLLECTION_FORMAT_OPTION,
-        "image_hash": str(image_hash),
+    link_data = {
+        # Meta's v26 generated image-cover Collection example uses a public
+        # picture URL and four zero retailer slots. The slots request dynamic
+        # product selection from the top-level product_set_id.
+        "picture": str(image_url),
         "link": instant_experience_url,
         "message": str(primary_text), "name": str(headline),
         "call_to_action": {"type": META_DEFAULT_CTA},
+        "retailer_item_ids": list(DYNAMIC_COLLECTION_RETAILER_ITEM_IDS),
     }
     if str(description or "").strip():
-        template_data["description"] = str(description)
+        link_data["description"] = str(description)
     return {
         "name": str(name),
         "object_story_spec": {
             "page_id": str(page_id), "instagram_user_id": str(instagram_user_id),
-            "template_data": template_data,
+            "link_data": link_data,
         },
         "product_set_id": str(product_set_id),
         "contextual_multi_ads": {"enroll_status": "OPT_IN"},
@@ -1229,12 +1230,15 @@ class MetaPostingService:
                 creative_label = f"{ad_label} | Collection"
                 creative_id = str(ad_result.get("meta_creative_id") or "")
                 if not creative_id:
+                    # Resolve the current full-size CDN URL immediately before
+                    # creative creation; Meta-hosted image URLs can be transient.
+                    image_url = self.client.ad_image_url(image_hash)
                     creative_id = self._create_or_reconcile(
                         lambda: self.client.create_collection_creative(
                             build_collection_creative_payload(
                                 name=creative_label, page_id=self.client.page_id,
                                 instagram_user_id=self.client.instagram_user_id,
-                                image_hash=image_hash, canvas_id=canvas_id,
+                                image_url=image_url, canvas_id=canvas_id,
                                 product_set_id=clean["product_set_id"],
                                 destination_url=clean["destination_url"],
                                 primary_text=creative["primary_text"],
