@@ -13,6 +13,12 @@ from zoneinfo import ZoneInfo
 
 from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
 from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
+from meta_collection_template_copy import (
+    MetaCollectionTemplateCopySafetyError,
+    MetaCollectionTemplateCopyService,
+    MetaCollectionTemplateCopyVerificationError,
+    configured_collection_template_ad_id,
+)
 from meta_ads_client import (
     MetaAdsAmbiguousResultError,
     MetaAdsApiError,
@@ -549,6 +555,11 @@ def posting_ad_results(value, *, ad_names=()):
             "meta_creative_id", "meta_ad_id",
         ):
             row.setdefault(field, "")
+        row.setdefault("meta_instant_experience_reused", False)
+        row.setdefault("meta_ad_reused", False)
+        row.setdefault("meta_ad_configured_status", "")
+        row.setdefault("instant_experience_verification", {})
+        row.setdefault("product_set_health", {})
         results.append(row)
     return results
 
@@ -695,6 +706,143 @@ def build_storefront_element_specs(*, page_photo_id, product_set_id, destination
             "open_url_action": {"url": str(destination_url)},
         },
         "canvas_footer": {"child_elements": [str(button_element_id)] if button_element_id else []},
+    }
+
+
+def _walk_graph_values(value):
+    """Yield every mapping in a nested Graph response."""
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_graph_values(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _walk_graph_values(child)
+
+
+def verify_instant_experience_destination(canvas, *, expected_url):
+    """Verify the fixed IA button label and exact Shopify HTTPS destination."""
+    expected_url = validate_destination_url(expected_url)
+    parsed = urlparse(expected_url)
+    hostname = str(parsed.hostname or "").casefold()
+    if (
+        hostname == "fb.com"
+        or hostname.endswith(".fb.com")
+        or hostname == "facebook.com"
+        or hostname.endswith(".facebook.com")
+    ):
+        raise PostingValidationError(
+            "The Instant Experience button destination cannot be a Facebook URL."
+        )
+    matches = []
+    for value in _walk_graph_values(dict(canvas or {})):
+        action = dict(value.get("open_url_action") or {})
+        rich_text = dict(value.get("rich_text") or {})
+        if action or rich_text:
+            matches.append(
+                {
+                    "label": str(rich_text.get("plain_text") or value.get("label") or ""),
+                    "url": str(action.get("url") or ""),
+                }
+            )
+    verified = any(
+        row["label"] == INSTANT_EXPERIENCE_BUTTON_TEXT
+        and row["url"] == expected_url
+        for row in matches
+    )
+    return {
+        "verified": verified,
+        "label": INSTANT_EXPERIENCE_BUTTON_TEXT if verified else "",
+        "url": expected_url if verified else "",
+        "reason": (
+            "Fixed button label and destination verified from Meta Graph."
+            if verified
+            else "Meta Graph did not return the expected fixed button label and Shopify destination."
+        ),
+    }
+
+
+def assess_product_set_health(payload):
+    """Summarise read-only catalogue eligibility without modifying products."""
+    payload = dict(payload or {})
+    product_set = dict(payload.get("product_set") or {})
+    products = tuple(dict(row) for row in payload.get("products") or ())
+    eligible = []
+    reasons = {}
+    reason_details = []
+    available_values = {"in stock", "available for order", "preorder"}
+    for product in products:
+        availability = str(product.get("availability") or "").strip().casefold()
+        status = str(product.get("status") or "").strip().upper()
+        visibility = str(product.get("visibility") or "").strip().casefold()
+        review_status = str(product.get("review_status") or "").strip().casefold()
+        errors = product.get("errors") or product.get("invalidation_errors") or ()
+        failures = []
+        if not availability:
+            failures.append("availability=unknown")
+        elif availability not in available_values:
+            failures.append(f"availability={availability}")
+        if status and status != "PUBLISHED":
+            failures.append(f"status={status}")
+        if visibility and visibility != "published":
+            failures.append(f"visibility={visibility}")
+        if review_status and review_status != "approved":
+            failures.append(f"review_status={review_status}")
+        if errors:
+            failures.append("catalogue_errors")
+            error_rows = errors if isinstance(errors, (list, tuple)) else (errors,)
+            for error in error_rows:
+                if isinstance(error, dict):
+                    detail = " — ".join(
+                        str(error.get(field) or "").strip()
+                        for field in ("code", "title", "message")
+                        if str(error.get(field) or "").strip()
+                    )
+                else:
+                    detail = str(error or "").strip()
+                if detail:
+                    reason_details.append(sanitize_meta_error(detail)[:300])
+        if failures:
+            for reason in failures:
+                reasons[reason] = reasons.get(reason, 0) + 1
+            product_label = str(
+                product.get("retailer_id")
+                or product.get("name")
+                or product.get("id")
+                or "Product"
+            ).strip()
+            reason_details.append(
+                sanitize_meta_error(f"{product_label}: {', '.join(failures)}")[:300]
+            )
+        else:
+            eligible.append(product)
+    readable_count = len(products)
+    reported_count = product_set.get("product_count")
+    try:
+        reported_count = int(reported_count)
+    except (TypeError, ValueError):
+        reported_count = readable_count
+    ready = bool(eligible)
+    message = (
+        f"Meta reports {len(eligible)} eligible product(s) in this Product Set."
+        if ready
+        else (
+            "Collection ad created successfully, but Meta reports no eligible catalogue "
+            "products in the selected Product Set. Review Commerce Manager/catalogue feed "
+            "before activation."
+        )
+    )
+    return {
+        "status": "READY" if ready else "WARNING",
+        "product_set_id": str(product_set.get("id") or ""),
+        "product_set_name": str(product_set.get("name") or ""),
+        "reported_product_count": reported_count,
+        "readable_product_count": readable_count,
+        "eligible_product_count": len(eligible),
+        "reason_counts": reasons,
+        "reason_details": tuple(dict.fromkeys(reason_details))[:20],
+        "message": message,
+        "read_only": True,
     }
 
 
@@ -942,10 +1090,20 @@ class SupabasePostingStore:
 
 
 class MetaPostingService:
-    def __init__(self, *, client=None, store=None, url_tags=META_AD_URL_PARAMETERS):
+    def __init__(
+        self,
+        *,
+        client=None,
+        store=None,
+        url_tags=META_AD_URL_PARAMETERS,
+        template_copy_service=None,
+    ):
         self.client = client or MetaPostingClient()
         self.store = store or SupabasePostingStore()
         self.url_tags = str(url_tags or "")
+        self.template_copy_service = (
+            template_copy_service or MetaCollectionTemplateCopyService(self.client)
+        )
 
     @staticmethod
     def _one(rows, *, entity, expected_id="", expected_name=""):
@@ -1171,8 +1329,6 @@ class MetaPostingService:
                 zip(clean["creatives"], ad_results), start=1
             ):
                 active_ad_index = index - 1
-                if str(ad_result.get("meta_ad_id") or ""):
-                    continue
                 ad_label = str(ad_result.get("ad_name") or proposed_ad_names[index - 1])
 
                 def persist(stage, **legacy_fields):
@@ -1255,6 +1411,7 @@ class MetaPostingService:
                 canvas_label = f"{ad_label} | Storefront"
                 ad_result["instant_experience_name"] = canvas_label
                 canvas_id = str(ad_result.get("meta_instant_experience_id") or "")
+                canvas_was_reused = bool(canvas_id)
                 if not canvas_id:
                     canvas_id = self._create_or_reconcile(
                         lambda: self.client.create_canvas(
@@ -1274,56 +1431,65 @@ class MetaPostingService:
                         "INSTANT_EXPERIENCE_CREATED",
                         **({"meta_instant_experience_id": canvas_id} if index == 1 else {}),
                     )
+                ad_result["meta_instant_experience_reused"] = canvas_was_reused
+                instant_experience = self.client.instant_experience(canvas_id)
+                destination_verification = verify_instant_experience_destination(
+                    instant_experience,
+                    expected_url=clean["destination_url"],
+                )
+                ad_result["instant_experience_verification"] = destination_verification
+                if not destination_verification["verified"]:
+                    raise MetaAdsApiError(
+                        f"Instant Experience {index} fixed button could not be verified. "
+                        f"{destination_verification['reason']} No copied Ad was created."
+                    )
+                persist("INSTANT_EXPERIENCE_CREATED")
 
                 creative_label = f"{ad_label} | Collection"
-                creative_id = str(ad_result.get("meta_creative_id") or "")
-                if not creative_id:
-                    creative_id = self._create_or_reconcile(
-                        lambda: self.client.create_collection_creative(
-                            build_collection_creative_payload(
-                                name=creative_label, page_id=self.client.page_id,
-                                instagram_user_id=self.client.instagram_user_id,
-                                image_hash=image_hash, canvas_id=canvas_id,
-                                product_set_id=clean["product_set_id"],
-                                destination_url=clean["destination_url"],
-                                primary_text=creative["primary_text"],
-                                headline=creative["headline"],
-                                description=creative["description"], url_tags=self.url_tags,
-                            )
-                        ),
-                        lambda: self._one_match(
-                            self.client.find_creative_by_name(creative_label)
-                        ),
-                        submission_id=submission_id, entity=f"collection creative {index}",
-                    )
-                    ad_result["meta_creative_id"] = creative_id
-                    ad_result["status"] = "CREATIVE_CREATED"
-                    persist(
-                        "CREATIVE_CREATED",
-                        **({"meta_creative_id": creative_id} if index == 1 else {}),
-                    )
-
-                ad_id = str(ad_result.get("meta_ad_id") or "")
-                if not ad_id:
-                    ad_id = self._create_or_reconcile(
-                        lambda: self.client.create_paused_ad(
-                            ad_name=ad_label, adset_id=adset_id, creative_id=creative_id
-                        ),
-                        lambda: self._one_match(
-                            self.client.find_ad_by_creative(adset_id, creative_id)
-                        ),
-                        submission_id=submission_id, entity=f"ad {index}",
-                    )
-                    ad_result["meta_ad_id"] = ad_id
-                    ad_result["status"] = "CREATED"
-                    ad_result["safe_error"] = ""
-                    persist(
-                        "AD_CREATED",
-                        **(
-                            {"ad_name": ad_label, "meta_ad_id": ad_id}
-                            if index == 1 else {}
-                        ),
-                    )
+                creative_payload = build_collection_creative_payload(
+                    name=creative_label,
+                    page_id=self.client.page_id,
+                    instagram_user_id=self.client.instagram_user_id,
+                    image_hash=image_hash,
+                    canvas_id=canvas_id,
+                    product_set_id=clean["product_set_id"],
+                    destination_url=clean["destination_url"],
+                    primary_text=creative["primary_text"],
+                    headline=creative["headline"],
+                    description=creative["description"],
+                    url_tags=self.url_tags,
+                )
+                copy_result = self.template_copy_service.create_or_reconcile_paused_route_copy(
+                    source_ad_id=configured_collection_template_ad_id(),
+                    target_adset_id=adset_id,
+                    expected_ad_name=ad_label,
+                    creative_parameters=creative_payload,
+                    persisted_ad_id=str(ad_result.get("meta_ad_id") or ""),
+                )
+                ad_result["meta_creative_id"] = str(
+                    copy_result.get("copied_creative_id") or ""
+                )
+                ad_result["meta_ad_id"] = str(copy_result.get("copied_ad_id") or "")
+                ad_result["meta_ad_reused"] = bool(
+                    copy_result.get("reconciled_existing_copy")
+                )
+                ad_result["meta_ad_configured_status"] = str(
+                    copy_result.get("copied_configured_status") or ""
+                )
+                ad_result["status"] = "CREATED"
+                ad_result["safe_error"] = ""
+                persist(
+                    "AD_CREATED",
+                    **(
+                        {
+                            "ad_name": ad_label,
+                            "meta_creative_id": ad_result["meta_creative_id"],
+                            "meta_ad_id": ad_result["meta_ad_id"],
+                        }
+                        if index == 1
+                        else {}
+                    ),
+                )
 
             statuses = {
                 "campaign": self._configured_status(self.client.configured_campaign(campaign_id)),
@@ -1344,6 +1510,28 @@ class MetaPostingService:
                     f"Meta did not confirm PAUSED status for: {', '.join(not_paused)}. Review in Ads Manager.",
                     record=record,
                 )
+            try:
+                product_set_health = assess_product_set_health(
+                    self.client.product_set_health(clean["product_set_id"])
+                )
+            except MetaAdsApiError as error:
+                product_set_health = {
+                    "status": "WARNING",
+                    "product_set_id": clean["product_set_id"],
+                    "product_set_name": str(product_set.get("name") or ""),
+                    "reported_product_count": None,
+                    "readable_product_count": None,
+                    "eligible_product_count": None,
+                    "reason_counts": {},
+                    "reason_details": (),
+                    "message": (
+                        "Collection ads were created successfully, but Product Set health "
+                        "could not be read from Meta. Review Commerce Manager before activation. "
+                        + sanitize_meta_error(error)
+                    ),
+                    "read_only": True,
+                }
+            ad_results[0]["product_set_health"] = product_set_health
             first = ad_results[0]
             return self.store.update_stage(
                 submission_id, "COMPLETE", campaign_id=campaign_id, adset_id=adset_id,
@@ -1356,6 +1544,18 @@ class MetaPostingService:
             )
         except (PostingAmbiguousError, PostingBusyError, PostingValidationError):
             raise
+        except (
+            MetaCollectionTemplateCopySafetyError,
+            MetaCollectionTemplateCopyVerificationError,
+        ) as error:
+            safe_error = sanitize_meta_error(error)
+            if active_ad_index is not None:
+                ad_results[active_ad_index]["status"] = "FAILED"
+                ad_results[active_ad_index]["safe_error"] = safe_error
+            result = self.store.update_stage(
+                submission_id, "FAILED", safe_error=safe_error, ad_results=ad_results
+            )
+            raise PostingError(safe_error, result=result) from error
         except MetaAdsAmbiguousResultError as error:
             self._ambiguous(submission_id, error, record=record)
         except MetaAdsApiError as error:

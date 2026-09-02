@@ -14,6 +14,7 @@ from meta_collection_template_copy import (
     MetaCollectionTemplateCopyService,
     MetaCollectionTemplateCopyVerificationError,
     build_paused_template_copy_request,
+    collection_features_match,
     configured_collection_template_ad_id,
     sanitized_template_copy_error,
 )
@@ -58,6 +59,7 @@ class FakeTemplateCopyClient:
     def __init__(self, *, invalid_target=False):
         self.invalid_target = invalid_target
         self.copy_calls = []
+        self.rename_calls = []
         self.ad_reads = []
         self.creative_reads = []
         self.copy_exists = False
@@ -113,6 +115,12 @@ class FakeTemplateCopyClient:
         )
         self.copy_exists = True
         return "copied-ad-1"
+
+    def rename_paused_ad(self, ad_id, *, name, protected_source_ad_id=""):
+        self.rename_calls.append((ad_id, name, protected_source_ad_id))
+        if str(ad_id) == str(protected_source_ad_id):
+            raise AssertionError("source ad must never be renamed")
+        self.copied_ad["name"] = str(name)
 
 
 class MetaCollectionTemplateCopyTransportTests(unittest.TestCase):
@@ -205,6 +213,17 @@ class MetaCollectionTemplateCopyTransportTests(unittest.TestCase):
 
 
 class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
+    def test_collection_features_are_semantic_subset_not_exact_object(self):
+        actual = {
+            "image_uncrop": {"enroll_status": "OPT_OUT"},
+            "media_type_automation": {"enroll_status": "OPT_IN"},
+            "product_browsing": {"enroll_status": "OPT_OUT"},
+            "meta_generated_feature": {"enroll_status": "OPT_OUT"},
+        }
+        self.assertTrue(collection_features_match(actual))
+        actual["product_browsing"]["enroll_status"] = "OPT_IN"
+        self.assertFalse(collection_features_match(actual))
+
     def test_one_copy_is_created_paused_and_all_peter_values_read_back(self):
         client = FakeTemplateCopyClient()
         result = MetaCollectionTemplateCopyService(client).create_one_paused_copy(

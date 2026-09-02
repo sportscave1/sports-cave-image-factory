@@ -1,19 +1,29 @@
-"""One-shot, paused-only Meta Collection template-copy diagnostic.
+"""Paused-only Meta Collection template copying and read-back verification.
 
-This module is deliberately separate from the normal three-ad Posting service.  It
-may copy one known-good ad into an existing ad set, then performs read-back checks.
-It never creates campaigns, ad sets, images, canvases, or updates the Posting ledger.
+The normal three-route Posting service and the one-copy advanced diagnostic share
+this narrow boundary.  It can only copy from the configured source ad, can only
+target a PAUSED ad, and verifies the source and copied creative after every call.
+Campaign, ad-set, image and Instant Experience creation remain outside this module.
 """
 
 from __future__ import annotations
 
 import os
 
-from meta_ads_client import MetaAdsApiError, sanitize_meta_error
+from meta_ads_client import (
+    MetaAdsAmbiguousResultError,
+    MetaAdsApiError,
+    sanitize_meta_error,
+)
 
 
 COLLECTION_TEMPLATE_AD_ENV_KEY = "META_COLLECTION_TEMPLATE_AD_ID"
 INITIAL_COLLECTION_TEMPLATE_AD_ID = "120249557468150554"
+REQUIRED_COLLECTION_FEATURES = {
+    "image_uncrop": "OPT_OUT",
+    "media_type_automation": "OPT_IN",
+    "product_browsing": "OPT_OUT",
+}
 
 
 class MetaCollectionTemplateCopySafetyError(RuntimeError):
@@ -82,6 +92,7 @@ def _ad_snapshot(ad):
         "name": str(ad.get("name") or ""),
         "status": str(ad.get("status") or ""),
         "configured_status": str(ad.get("configured_status") or ""),
+        "effective_status": str(ad.get("effective_status") or ""),
         "adset_id": str(ad.get("adset_id") or ""),
         "creative_id": _creative_id(ad),
     }
@@ -102,6 +113,16 @@ def _collection_feature_spec(creative):
             )
             or {}
         )
+    )
+
+
+def collection_features_match(actual_features):
+    """Accept Meta-normalised supersets while enforcing required semantics."""
+    actual_features = dict(actual_features or {})
+    return all(
+        str((actual_features.get(name) or {}).get("enroll_status") or "").upper()
+        == expected
+        for name, expected in REQUIRED_COLLECTION_FEATURES.items()
     )
 
 
@@ -140,6 +161,7 @@ def verify_template_copy_readback(
     source_ad_id,
     target_adset_id,
     expected_creative,
+    expected_ad_name="",
 ):
     """Verify the copied object is paused, targeted, overridden, and source-safe."""
     source_ad_id = str(source_ad_id or "").strip()
@@ -152,7 +174,6 @@ def verify_template_copy_readback(
     actual_link = _link_data(copied_creative)
     expected_link = _link_data(expected_creative)
     actual_features = _collection_feature_spec(copied_creative)
-    expected_features = _collection_feature_spec(expected_creative)
 
     copied_id = str(copied_ad.get("id") or "").strip()
     checks = {
@@ -161,6 +182,11 @@ def verify_template_copy_readback(
         "status_paused": str(copied_ad.get("status") or "").upper() == "PAUSED",
         "configured_status_paused": (
             str(copied_ad.get("configured_status") or "").upper() == "PAUSED"
+        ),
+        "route_ad_name": (
+            not str(expected_ad_name or "").strip()
+            or str(copied_ad.get("name") or "").strip()
+            == str(expected_ad_name or "").strip()
         ),
         "new_creative": bool(
             _creative_id(copied_ad)
@@ -186,7 +212,7 @@ def verify_template_copy_readback(
         "url_tags": copied_creative.get("url_tags") == expected_creative.get("url_tags"),
         "contextual_multi_ads": copied_creative.get("contextual_multi_ads")
         == expected_creative.get("contextual_multi_ads"),
-        "collection_features": actual_features == expected_features,
+        "collection_features": collection_features_match(actual_features),
         "source_route_values_absent": _source_route_values_absent(
             source_creative=source_creative,
             copied_creative=copied_creative,
@@ -219,14 +245,75 @@ def verify_template_copy_readback(
 
 
 class MetaCollectionTemplateCopyService:
-    """Copy and verify at most one source ad for the selected target Ad Set."""
+    """Copy or reconcile one uniquely identified route in a target Ad Set."""
 
     def __init__(self, client):
         self.client = client
 
-    def create_one_paused_copy(
-        self, *, source_ad_id, target_adset_id, creative_parameters
+    @staticmethod
+    def _route_signature_matches(ad, creative, expected_creative):
+        """Match a route without relying on Meta's inherited source-copy name."""
+        ad = dict(ad or {})
+        creative = dict(creative or {})
+        expected_creative = dict(expected_creative or {})
+        actual_link = _link_data(creative)
+        expected_link = _link_data(expected_creative)
+        return bool(
+            str(ad.get("id") or "").strip()
+            and actual_link.get("link") == expected_link.get("link")
+            and actual_link.get("image_hash") == expected_link.get("image_hash")
+            and creative.get("image_hash") == expected_creative.get("image_hash")
+            and creative.get("product_set_id")
+            == expected_creative.get("product_set_id")
+            and actual_link.get("message") == expected_link.get("message")
+            and actual_link.get("name") == expected_link.get("name")
+        )
+
+    def _matching_route_copies(
+        self,
+        *,
+        source_ad_id,
+        target_adset_id,
+        expected_creative,
+        persisted_ad_id="",
     ):
+        target_rows = [
+            dict(row)
+            for row in self.client.ad_copies(source_ad_id)
+            if str(dict(row).get("adset_id") or "") == str(target_adset_id)
+        ]
+        persisted_ad_id = str(persisted_ad_id or "").strip()
+        if persisted_ad_id:
+            target_rows = [
+                row for row in target_rows
+                if str(row.get("id") or "").strip() == persisted_ad_id
+            ]
+            if not target_rows:
+                raise MetaCollectionTemplateCopySafetyError(
+                    "The persisted route Ad is not a copy of the configured template in "
+                    "the target Ad Set. No additional copy was made."
+                )
+        matches = []
+        for row in target_rows:
+            ad = dict(self.client.ad(row.get("id")) or {})
+            creative_id = _creative_id(ad)
+            if not creative_id:
+                continue
+            creative = dict(self.client.creative(creative_id) or {})
+            if self._route_signature_matches(ad, creative, expected_creative):
+                matches.append((ad, creative))
+        return matches
+
+    def create_or_reconcile_paused_route_copy(
+        self,
+        *,
+        source_ad_id,
+        target_adset_id,
+        expected_ad_name,
+        creative_parameters,
+        persisted_ad_id="",
+    ):
+        """Create or reuse exactly one route-specific paused template copy."""
         source_ad_id = str(source_ad_id or "").strip()
         if not source_ad_id:
             raise MetaCollectionTemplateCopySafetyError(
@@ -244,28 +331,51 @@ class MetaCollectionTemplateCopyService:
             )
         source_creative = dict(self.client.creative(source_creative_id) or {})
 
-        existing = [
-            dict(row)
-            for row in self.client.ad_copies(source_ad_id)
-            if str(dict(row).get("adset_id") or "") == request["adset_id"]
-        ]
-        if len(existing) > 1:
+        matches = self._matching_route_copies(
+            source_ad_id=source_ad_id,
+            target_adset_id=request["adset_id"],
+            expected_creative=request["creative_parameters"],
+            persisted_ad_id=persisted_ad_id,
+        )
+        if len(matches) > 1:
             raise MetaCollectionTemplateCopySafetyError(
-                "More than one template copy already exists in the target Ad Set. "
+                f"More than one template copy matches route Ad {expected_ad_name!r}. "
                 "No additional copy was made. Review Ads Manager before continuing."
             )
-        if existing:
-            copied_ad_id = str(existing[0].get("id") or "").strip()
+        if matches:
+            copied_ad_id = str(matches[0][0].get("id") or "").strip()
             created_now = False
         else:
-            copied_ad_id = self.client.copy_paused_ad_from_template(
-                source_ad_id=source_ad_id,
-                target_adset_id=request["adset_id"],
-                creative_parameters=request["creative_parameters"],
-            )
-            created_now = True
+            try:
+                copied_ad_id = self.client.copy_paused_ad_from_template(
+                    source_ad_id=source_ad_id,
+                    target_adset_id=request["adset_id"],
+                    creative_parameters=request["creative_parameters"],
+                )
+                created_now = True
+            except MetaAdsAmbiguousResultError:
+                # Meta can persist a copy while losing the response. Reconcile only a
+                # uniquely matching route signature; otherwise preserve ambiguity.
+                matches = self._matching_route_copies(
+                    source_ad_id=source_ad_id,
+                    target_adset_id=request["adset_id"],
+                    expected_creative=request["creative_parameters"],
+                )
+                if len(matches) != 1:
+                    raise
+                copied_ad_id = str(matches[0][0].get("id") or "").strip()
+                created_now = False
 
         copied_ad = dict(self.client.ad(copied_ad_id) or {})
+        renamed = False
+        if str(copied_ad.get("name") or "").strip() != str(expected_ad_name or "").strip():
+            self.client.rename_paused_ad(
+                copied_ad_id,
+                name=expected_ad_name,
+                protected_source_ad_id=source_ad_id,
+            )
+            renamed = True
+            copied_ad = dict(self.client.ad(copied_ad_id) or {})
         # Always re-read the source after Meta returns the copied ad, even if the
         # copied creative itself is unreadable. Source immutability is mandatory.
         source_after = dict(self.client.ad(source_ad_id) or {})
@@ -295,7 +405,25 @@ class MetaCollectionTemplateCopyService:
             source_ad_id=source_ad_id,
             target_adset_id=request["adset_id"],
             expected_creative=request["creative_parameters"],
+            expected_ad_name=expected_ad_name,
         )
         result["created_now"] = created_now
         result["reconciled_existing_copy"] = not created_now
+        result["renamed"] = renamed
         return result
+
+    def create_one_paused_copy(
+        self,
+        *,
+        source_ad_id,
+        target_adset_id,
+        creative_parameters,
+        expected_ad_name="Template Copy Test",
+    ):
+        """Backward-compatible one-route diagnostic entry point."""
+        return self.create_or_reconcile_paused_route_copy(
+            source_ad_id=source_ad_id,
+            target_adset_id=target_adset_id,
+            expected_ad_name=expected_ad_name,
+            creative_parameters=creative_parameters,
+        )

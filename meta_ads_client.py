@@ -1356,6 +1356,15 @@ class MetaPostingClient:
         expected = str(name or "")
         return tuple(row for row in self.canvases() if str(row.get("name") or "") == expected)
 
+    def instant_experience(self, canvas_id):
+        """Read the published IA body for fixed-button destination verification."""
+        return _request(
+            str(canvas_id or "").strip(),
+            params={"fields": "id,name,is_published,body_elements"},
+            config=self.config,
+            access_token=self.page_access_token,
+        )
+
     def create_canvas(self, *, name, body_element_ids):
         payload = _post(
             f"{self.page_id}/canvases",
@@ -1526,6 +1535,32 @@ class MetaPostingClient:
             or ()
         )
 
+    def product_set_health(self, product_set_id):
+        """Read Product Set metadata and products without mutating the catalogue."""
+        clean_id = str(product_set_id or "").strip()
+        product_set = _request(
+            clean_id,
+            params={
+                "fields": (
+                    "id,name,product_count,filter,product_catalog{id,name},"
+                    "live_metadata,latest_metadata"
+                )
+            },
+            config=self.config,
+        )
+        products = _paged_get(
+            f"{clean_id}/products",
+            params={
+                "fields": (
+                    "id,name,retailer_id,availability,inventory,status,visibility,"
+                    "review_status,errors,invalidation_errors,url"
+                ),
+                "limit": 100,
+            },
+            config=self.config,
+        ).get("rows") or ()
+        return {"product_set": dict(product_set or {}), "products": tuple(products)}
+
     def copy_paused_ad_from_template(
         self, *, source_ad_id, target_adset_id, creative_parameters
     ):
@@ -1553,10 +1588,32 @@ class MetaPostingClient:
             )
         return ad_id
 
+    def rename_paused_ad(self, ad_id, *, name, protected_source_ad_id=""):
+        """Rename only a copied PAUSED ad; never update the source template."""
+        clean_ad_id = str(ad_id or "").strip()
+        clean_name = str(name or "").strip()
+        if not clean_ad_id or clean_ad_id == str(protected_source_ad_id or "").strip():
+            raise MetaAdsApiError("The source Collection template ad cannot be renamed.")
+        if not clean_name:
+            raise MetaAdsApiError("The copied Collection ad name cannot be blank.")
+        current = dict(self.ad(clean_ad_id) or {})
+        if str(current.get("configured_status") or current.get("status") or "").upper() != "PAUSED":
+            raise MetaAdsApiError("The copied Collection ad is not PAUSED, so it was not renamed.")
+        _post(
+            clean_ad_id,
+            data={"name": clean_name},
+            config=self.config,
+        )
+
     def ad(self, ad_id):
         return _request(
             str(ad_id or ""),
-            params={"fields": "id,name,status,configured_status,effective_status,creative{id},adset_id"},
+            params={
+                "fields": (
+                    "id,name,status,configured_status,effective_status,"
+                    "creative{id},adset_id,source_ad_id"
+                )
+            },
             config=self.config,
         )
 

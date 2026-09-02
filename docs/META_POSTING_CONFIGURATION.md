@@ -9,7 +9,7 @@ The production environment variables are:
 - `META_AD_ACCOUNT_ID`: the Sports Cave ad account (with or without the `act_` prefix).
 - `META_FACEBOOK_PAGE_ID`: the fixed Facebook Page identity used by Posting creatives.
 - `META_INSTAGRAM_ACTOR_ID`: the Instagram professional-account user ID sent as `instagram_user_id` in the current creative payload. The legacy environment-variable name is retained for deployment compatibility.
-- `META_COLLECTION_TEMPLATE_AD_ID`: source ad used only by the one-ad paused Collection template-copy diagnostic. Point production at a dedicated paused Sports Cave template ad after the initial known-good source test.
+- `META_COLLECTION_TEMPLATE_AD_ID`: immutable source Collection ad used by normal Posting to copy Meta's proven hidden Collection template state. The current fallback is the verified Sports Cave source ad; production should ultimately point this at a dedicated paused Sports Cave template ad.
 - `META_API_VERSION=v26.0`: the central version used by every Meta read and write in this repository.
 
 ## Required Business Portfolio setup
@@ -38,6 +38,10 @@ When `META_APP_ID` and `META_APP_SECRET` are present, the app also calls read-on
 
 Connection/selection uses GET requests for `/me`, `/debug_token`, `/me/permissions`, the configured `act_<account>`, its `/campaigns`, and selected campaign `/adsets`. Page-token checks are read-only and cached by the Posting readiness view; the create service repeats the check immediately before claiming or creating a Posting job.
 
-Only an explicit **Create 3 Paused Meta Ads** submission or the separately labelled **Create 1 Paused Template Copy** diagnostic may write. The diagnostic calls only `/{source_ad_id}/copies`, targets the positively matched failed-job Ad Set, forces `status_option=PAUSED`, and reads the source and copied ad/creative back before reporting success. It does not update the source ad or Posting ledger and does not create a campaign, ad set, image, Page photo, or Instant Experience.
+Only an explicit **Create 3 Paused Meta Ads** submission or the separately labelled advanced **Create 1 Paused Template Copy** diagnostic may write. Normal Posting creates or reconciles the campaign, ad set, route image and Instant Experience, then creates each route ad through `/{source_ad_id}/copies` with `status_option=PAUSED`. It never creates the Collection ad through a standalone `/adcreatives` request. Every copied ad is renamed to its deterministic route name and read back together with its creative; retries reuse a unique route match and block on ambiguity. The source template is only read and its `/copies` edge is called—it is never renamed, paused or edited.
+
+Before a copied route ad is accepted, Posting reads the Instant Experience body with the Page token and verifies that the fixed button is exactly **Claim Your Edition** and points to the currently selected HTTPS Shopify product URL. After all three ads are verified PAUSED, Posting performs a read-only Product Set health check. A zero-eligible or unreadable Product Set is reported as `WARNING` for Commerce Manager review; no catalogue data is changed.
+
+The advanced one-copy diagnostic targets the positively matched failed-job Ad Set, forces `status_option=PAUSED`, and reads the source and copied ad/creative back before reporting success. It does not update the source ad or Posting ledger and does not create a campaign, ad set, image, Page photo, or Instant Experience.
 
 `META_ACCESS_TOKEN` remains the default for campaign, ad-set, ad-image, creative, ad-copy and ad endpoints. `META_PAGE_ACCESS_TOKEN` is explicitly limited to `/{page_id}/photos`, `/{page_id}/canvas_elements` and `/{page_id}/canvases`. Campaign, ad-set and ad payloads are hard-coded to `PAUSED` and are verified as paused before completion.

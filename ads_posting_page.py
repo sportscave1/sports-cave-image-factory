@@ -693,6 +693,7 @@ def run_collection_template_copy_from_posting_state(
         source_ad_id=configured_collection_template_ad_id(),
         target_adset_id=context["adset_id"],
         creative_parameters=creative_parameters,
+        expected_ad_name=context["ad_name"],
     )
 
 
@@ -771,12 +772,23 @@ def _audience_options(references):
 def _render_object_result(result, *, title):
     st.subheader(title)
     rows = []
+    completed_paused = (
+        str(result.get("status") or "").upper() == "COMPLETE"
+        and str(result.get("meta_status") or "").upper() == "PAUSED"
+    )
     for label, name_key, id_key in (
         ("Campaign", "campaign_name", "campaign_id"),
         ("Ad set", "adset_name", "adset_id"),
     ):
         object_id = str(result.get(id_key) or "")
-        rows.append({"Object": label, "Name": str(result.get(name_key) or ""), "ID": object_id, "State": "Created" if object_id else "Not created"})
+        rows.append(
+            {
+                "Object": label,
+                "Name": str(result.get(name_key) or ""),
+                "ID": object_id,
+                "State": "PAUSED" if object_id and completed_paused else "Created" if object_id else "Not created",
+            }
+        )
     for ad_result in posting_ad_results(result.get("ad_results")):
         index = int(ad_result.get("index") or 0)
         canvas_id = str(ad_result.get("meta_instant_experience_id") or "")
@@ -788,19 +800,47 @@ def _render_object_result(result, *, title):
                     "Object": f"Instant Experience {index}",
                     "Name": str(ad_result.get("instant_experience_name") or ""),
                     "ID": canvas_id,
-                    "State": "Created" if canvas_id else state,
+                    "State": (
+                        "Reused"
+                        if canvas_id and ad_result.get("meta_instant_experience_reused")
+                        else "Created" if canvas_id else state
+                    ),
                 },
                 {
                     "Object": f"Ad {index}",
                     "Name": str(ad_result.get("ad_name") or ""),
                     "ID": ad_id,
-                    "State": "Created" if ad_id else state,
+                    "State": (
+                        "PAUSED"
+                        if ad_id
+                        and str(ad_result.get("meta_ad_configured_status") or "").upper()
+                        == "PAUSED"
+                        else state
+                    ),
                 },
             )
         )
     st.dataframe(rows, hide_index=True, use_container_width=True)
     if result.get("safe_error"):
         st.caption(str(result.get("safe_error")))
+    first_ad = posting_ad_results(result.get("ad_results"))[0]
+    product_health = dict(first_ad.get("product_set_health") or {})
+    if product_health:
+        label = str(product_health.get("status") or "WARNING").upper()
+        message = str(product_health.get("message") or "Product Set health unavailable.")
+        if label == "READY":
+            st.success(f"Product Set health: READY — {message}")
+        else:
+            st.warning(f"Product Set health: WARNING — {message}")
+        counts = (
+            f"Reported: {product_health.get('reported_product_count')} · "
+            f"Readable: {product_health.get('readable_product_count')} · "
+            f"Eligible: {product_health.get('eligible_product_count')}"
+        )
+        st.caption(counts)
+        reason_details = tuple(product_health.get("reason_details") or ())
+        if reason_details:
+            st.caption("Reasons: " + " · ".join(str(value) for value in reason_details))
 
 
 def _render_success(result):
@@ -1280,8 +1320,9 @@ def render_page():
         finally:
             st.session_state[PROCESSING_KEY] = False
 
-    st.markdown("#### Collection diagnostic")
-    st.caption("Uses Meta validate_only. Creates no campaign, ad set, creative or ad.")
+    diagnostics_panel = st.expander("Advanced Meta Diagnostics", expanded=False)
+    diagnostics_panel.markdown("#### Collection diagnostic")
+    diagnostics_panel.caption("Uses Meta validate_only. Creates no campaign, ad set, creative or ad.")
     diagnostic_signature = _collection_validation_signature(
         submission_id=st.session_state[SUBMISSION_ID_KEY],
         product_title=product_title,
@@ -1298,7 +1339,7 @@ def render_page():
         and str(creative_inputs[0]["headline"] or "").strip()
         and overview.get("posting_ready")
     )
-    if st.button(
+    if diagnostics_panel.button(
         "Run Collection Validation — No Ads Created",
         type="secondary",
         use_container_width=True,
@@ -1344,10 +1385,11 @@ def render_page():
         st.session_state.get(COLLECTION_DIAGNOSTIC_RESULT_KEY) or {}
     )
     if saved_diagnostic.get("signature") == diagnostic_signature:
-        _render_collection_validation(saved_diagnostic.get("result"))
+        with diagnostics_panel:
+            _render_collection_validation(saved_diagnostic.get("result"))
 
-    st.markdown("#### Real-write Collection diagnostic")
-    st.warning(
+    diagnostics_panel.markdown("#### Real-write Collection diagnostic")
+    diagnostics_panel.warning(
         "Creates exactly one real PAUSED ad by copying the configured Collection "
         "template into the existing failed-job Ad Set. It does not create a campaign, "
         "ad set, Instant Experience, Page photo, or additional route ads."
@@ -1355,7 +1397,7 @@ def render_page():
     template_copy_attempted = bool(
         st.session_state.get(COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY)
     )
-    if st.button(
+    if diagnostics_panel.button(
         "Create 1 Paused Template Copy",
         type="secondary",
         use_container_width=True,
@@ -1421,9 +1463,10 @@ def render_page():
         st.session_state.get(COLLECTION_TEMPLATE_COPY_RESULT_KEY) or {}
     )
     if saved_template_copy.get("signature") == diagnostic_signature:
-        _render_collection_template_copy(saved_template_copy.get("result"))
+        with diagnostics_panel:
+            _render_collection_template_copy(saved_template_copy.get("result"))
     elif template_copy_attempted:
-        st.caption(
+        diagnostics_panel.caption(
             "A template-copy attempt has already been made in this Posting session. "
             "Further copies are blocked."
         )
