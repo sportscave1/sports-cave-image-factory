@@ -362,17 +362,18 @@ class PostingPayloadTests(unittest.TestCase):
             destination_url="https://sportscaveshop.com/products/a", primary_text="Text",
             headline="Headline",
         )
-        link = payload["object_story_spec"]["link_data"]
-        self.assertNotIn("canvas_id", link)
-        self.assertEqual(link["link"], "https://fb.com/canvas_doc/canvas-1")
-        self.assertEqual(
-            link["call_to_action"]["value"]["link"],
-            "https://fb.com/canvas_doc/canvas-1",
-        )
-        self.assertEqual(link["image_hash"], "hash")
-        self.assertEqual(link["message"], "Text")
-        self.assertEqual(link["name"], "Headline")
-        self.assertEqual(link["call_to_action"]["type"], "SHOP_NOW")
+        story = payload["object_story_spec"]
+        self.assertNotIn("link_data", story)
+        template = story["template_data"]
+        self.assertNotIn("canvas_id", template)
+        self.assertEqual(template["format_option"], "collection_video")
+        self.assertEqual(template["link"], "https://fb.com/canvas_doc/canvas-1")
+        self.assertEqual(template["image_hash"], "hash")
+        self.assertNotIn("video_id", template)
+        self.assertEqual(template["message"], "Text")
+        self.assertEqual(template["name"], "Headline")
+        self.assertEqual(template["call_to_action"], {"type": "SHOP_NOW"})
+        self.assertNotIn("retailer_item_ids", template)
         self.assertEqual(payload["product_set_id"], "set-1")
         self.assertEqual(payload["object_story_spec"]["page_id"], "page-1")
         self.assertEqual(payload["object_story_spec"]["instagram_user_id"], "ig-1")
@@ -459,6 +460,35 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertNotIn(page_token, caught.exception.error_user_msg)
         self.assertIn("[redacted]", caught.exception.error_user_msg)
         self.assertEqual(caught.exception.fbtrace_id, "safe-trace-id")
+
+    @mock.patch("meta_ads_client.requests.post")
+    def test_product_set_without_collection_template_has_safe_actionable_guidance(self, post):
+        response = mock.Mock(ok=False, status_code=400)
+        response.json.return_value = {
+            "error": {
+                "message": "Invalid parameter",
+                "code": 100,
+                "error_subcode": 1990065,
+                "error_user_title": "Cannot use product set ID without template spec",
+                "error_user_msg": "Use a carousel or collection ad.",
+                "fbtrace_id": "safe-product-set-trace",
+            }
+        }
+        post.return_value = response
+
+        with self.assertRaises(meta_ads_client.MetaAdsApiError) as caught:
+            meta_ads_client._post(
+                "act_123/adcreatives",
+                data={"name": "Collection creative"},
+                config=self.config(),
+            )
+
+        message = str(caught.exception)
+        self.assertIn("code 100", message)
+        self.assertIn("subcode 1990065", message)
+        self.assertIn("object_story_spec.template_data", message)
+        self.assertIn("catalogue Collection creative", message)
+        self.assertEqual(caught.exception.fbtrace_id, "safe-product-set-trace")
 
     @mock.patch("meta_ads_client.fetch_meta_permissions", return_value=("ads_management",))
     @mock.patch("meta_ads_client.fetch_meta_campaigns", return_value={"rows": ()})
@@ -1076,19 +1106,19 @@ class PostingServiceTests(unittest.TestCase):
             [creative.image_bytes for creative in request_for().creatives],
         )
         self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["message"] for payload in client.creative_payloads],
+            [payload["object_story_spec"]["template_data"]["message"] for payload in client.creative_payloads],
             ["Primary 1", "Primary 2", "Primary 3"],
         )
         self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["name"] for payload in client.creative_payloads],
+            [payload["object_story_spec"]["template_data"]["name"] for payload in client.creative_payloads],
             ["Headline 1", "Headline 2", "Headline 3"],
         )
         self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["description"] for payload in client.creative_payloads],
+            [payload["object_story_spec"]["template_data"]["description"] for payload in client.creative_payloads],
             ["Description 1", "Description 2", "Description 3"],
         )
         self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["image_hash"] for payload in client.creative_payloads],
+            [payload["object_story_spec"]["template_data"]["image_hash"] for payload in client.creative_payloads],
             ["image-hash-1", "image-hash-2", "image-hash-3"],
         )
         photo_specs = [
@@ -1109,8 +1139,11 @@ class PostingServiceTests(unittest.TestCase):
             all(specification["item_description"] == "Limited Edition" for specification in product_specs)
         )
         for payload in client.creative_payloads:
-            link_data = payload["object_story_spec"]["link_data"]
-            self.assertEqual(link_data["call_to_action"]["type"], "SHOP_NOW")
+            story = payload["object_story_spec"]
+            self.assertNotIn("link_data", story)
+            template_data = story["template_data"]
+            self.assertEqual(template_data["format_option"], "collection_video")
+            self.assertEqual(template_data["call_to_action"]["type"], "SHOP_NOW")
             self.assertEqual(
                 payload["degrees_of_freedom_spec"]["creative_features_spec"]
                 ["image_background_gen"]["enroll_status"],
@@ -1295,7 +1328,7 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("canvas"), 2)
         self.assertEqual(client.calls.count("ad"), 3)
         self.assertEqual(
-            client.creative_payloads[0]["object_story_spec"]["link_data"]["link"],
+            client.creative_payloads[0]["object_story_spec"]["template_data"]["link"],
             "https://fb.com/canvas_doc/1390026833255926",
         )
         self.assertEqual(

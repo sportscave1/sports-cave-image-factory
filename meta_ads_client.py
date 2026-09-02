@@ -62,6 +62,10 @@ INSTAGRAM_ACTOR_ID_ENV_KEYS = (
 )
 PAGE_ACCESS_TOKEN_ENV_KEY = "META_PAGE_ACCESS_TOKEN"
 PAGE_POST_PERMISSION = "pages_manage_posts"
+PRODUCT_SET_TEMPLATE_GUIDANCE = (
+    "The selected Product Set requires a catalogue Collection creative. "
+    "Use object_story_spec.template_data with Meta's supported Collection format before retrying."
+)
 
 
 def _first_env_value(keys):
@@ -179,6 +183,8 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
             message = f"{message} (code {error_code})"
         if error_subcode is not None:
             message = f"{message} (subcode {error_subcode})"
+        if error_code == 100 and error_subcode == 1990065:
+            message = f"{message} — {PRODUCT_SET_TEMPLATE_GUIDANCE}"
         if fbtrace_id:
             message = f"{message} (fbtrace_id {fbtrace_id})"
     except Exception:

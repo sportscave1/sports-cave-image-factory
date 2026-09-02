@@ -31,6 +31,7 @@ CAMPAIGN_OBJECTIVE = "OUTCOME_SALES"
 CAMPAIGN_DAILY_BUDGET_MINOR = 2500
 PRODUCT_DESCRIPTION = "Limited Edition"
 INSTANT_EXPERIENCE_BUTTON_TEXT = "Claim Your Edition"
+COLLECTION_FORMAT_OPTION = "collection_video"
 AD_TYPE = "Instant Experience"
 COUNTRY_META_CODES = {"AUS": "AU", "USA": "US", "UK": "GB", "CAN": "CA", "NZ": "NZ"}
 SPORT_OPTIONS = (
@@ -705,21 +706,22 @@ def build_collection_creative_payload(
         "https://fb.com/canvas_doc/"
         f"{quote(str(canvas_id), safe='')}"
     )
-    link_data = {
-        "image_hash": str(image_hash), "link": instant_experience_url,
+    template_data = {
+        # Meta's v26 SDK retains this legacy enum name for Collection creatives.
+        # Supplying image_hash (and no video_id) makes the uploaded image the cover.
+        "format_option": COLLECTION_FORMAT_OPTION,
+        "image_hash": str(image_hash),
+        "link": instant_experience_url,
         "message": str(primary_text), "name": str(headline),
-        "call_to_action": {
-            "type": META_DEFAULT_CTA,
-            "value": {"link": instant_experience_url},
-        },
+        "call_to_action": {"type": META_DEFAULT_CTA},
     }
     if str(description or "").strip():
-        link_data["description"] = str(description)
+        template_data["description"] = str(description)
     return {
         "name": str(name),
         "object_story_spec": {
             "page_id": str(page_id), "instagram_user_id": str(instagram_user_id),
-            "link_data": link_data,
+            "template_data": template_data,
         },
         "product_set_id": str(product_set_id),
         "contextual_multi_ads": {"enroll_status": "OPT_IN"},
