@@ -888,6 +888,58 @@ class SupabasePostingStore:
                 )
                 return [dict(row) for row in cur.fetchall()]
 
+    def failed_collection_diagnostic_job(
+        self, *, submission_id="", product_title="", product_set_id=""
+    ):
+        """Resolve one failed Posting job without changing the durable ledger."""
+        clean_product_title = str(product_title or "").strip()
+        clean_product_set_id = str(product_set_id or "").strip()
+        if not clean_product_title or not clean_product_set_id:
+            raise PostingValidationError(
+                "Select the Posting product and Product Set before running validation."
+            )
+        backend = self._backend()
+        if not backend.is_configured():
+            raise PostingValidationError(
+                "The failed Posting job ledger is unavailable in this environment."
+            )
+        # Deliberately do not call ensure_ads_schema() here.  This diagnostic
+        # lookup is SELECT-only and must never migrate or mutate the ledger.
+        with backend.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT submission_id, created_at, updated_at, status,
+                           product_title, product_set_id, destination_url,
+                           campaign_id, campaign_name, adset_id, adset_name,
+                           ad_name, meta_image_hash, meta_instant_experience_id,
+                           ad_results
+                    FROM meta_posting_submissions
+                    WHERE status='FAILED'
+                      AND product_title=%s
+                      AND product_set_id=%s
+                      AND created_at >= now() - interval '7 days'
+                    ORDER BY updated_at DESC
+                    LIMIT 3
+                    """,
+                    (clean_product_title, clean_product_set_id),
+                )
+                candidates = [dict(row) for row in cur.fetchall()]
+        clean_submission_id = str(submission_id or "").strip()
+        exact = [
+            row for row in candidates
+            if clean_submission_id
+            and str(row.get("submission_id") or "") == clean_submission_id
+        ]
+        if len(exact) == 1:
+            return exact[0]
+        if len(candidates) != 1:
+            raise PostingValidationError(
+                "Meta Collection validation requires exactly one failed Posting job "
+                "for the selected product and Product Set. Review Posting history first."
+            )
+        return candidates[0]
+
 
 class MetaPostingService:
     def __init__(self, *, client=None, store=None, url_tags=META_AD_URL_PARAMETERS):
@@ -1333,3 +1385,13 @@ class MetaPostingService:
 
     def recent_posts(self, limit=20):
         return self.store.recent(limit=limit)
+
+    def failed_collection_diagnostic_job(
+        self, *, submission_id="", product_title="", product_set_id=""
+    ):
+        """Read the positively matched partial job used by validate-only probes."""
+        return self.store.failed_collection_diagnostic_job(
+            submission_id=submission_id,
+            product_title=product_title,
+            product_set_id=product_set_id,
+        )

@@ -13,6 +13,11 @@ from ads_image_workflow import (
 )
 from ads_product_catalog import load_live_edition_product_rows
 from meta_ads_client import MetaAdsApiError, MetaPostingClient, diagnose_meta_posting_connection
+from meta_collection_diagnostics import (
+    MetaCollectionDiagnosticSafetyError,
+    MetaCollectionValidateOnlyProbe,
+    sanitized_collection_request_shape,
+)
 from meta_posting_service import (
     AD_TYPE,
     CAMPAIGN_DAILY_BUDGET_MINOR,
@@ -32,6 +37,7 @@ from meta_posting_service import (
     PostingValidationError,
     ads_manager_url,
     adset_name,
+    build_collection_creative_payload,
     campaign_name,
     next_instant_experience_ad_names,
     load_posting_reference_snapshot,
@@ -67,6 +73,8 @@ HEADLINE_KEY = HEADLINE_KEYS[0]
 DESCRIPTION_KEY = DESCRIPTION_KEYS[0]
 RESULT_KEY = f"{STATE_PREFIX}result"
 PROCESSING_KEY = f"{STATE_PREFIX}processing"
+COLLECTION_DIAGNOSTIC_RESULT_KEY = f"{STATE_PREFIX}collection_diagnostic_result"
+COLLECTION_DIAGNOSTIC_PROCESSING_KEY = f"{STATE_PREFIX}collection_diagnostic_processing"
 META_OVERVIEW_STATE_KEY = "ads_posting_meta_overview"
 META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
 META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
@@ -490,6 +498,148 @@ def _build_posting_request(
     )
 
 
+def _collection_validation_signature(
+    *, submission_id, product_title, product_set_id, product_url, primary_text, headline
+):
+    values = (
+        submission_id,
+        product_title,
+        product_set_id,
+        product_url,
+        primary_text,
+        headline,
+    )
+    return hashlib.sha256(
+        "\x1f".join(str(value or "").strip() for value in values).encode("utf-8")
+    ).hexdigest()
+
+
+def _resolve_collection_validation_context(
+    record, *, product_title, product_set_id
+):
+    """Fail closed unless one ledger row contains the complete route-1 retry state."""
+    record = dict(record or {})
+    if str(record.get("status") or "").upper() != "FAILED":
+        raise PostingValidationError(
+            "Meta Collection validation requires a failed partial Posting job."
+        )
+    if str(record.get("product_title") or "").strip() != str(product_title or "").strip():
+        raise PostingValidationError(
+            "The failed Posting job does not match the currently selected product."
+        )
+    if str(record.get("product_set_id") or "").strip() != str(product_set_id or "").strip():
+        raise PostingValidationError(
+            "The failed Posting job does not match the currently selected Product Set."
+        )
+    route_one = dict(posting_ad_results(record.get("ad_results"))[0])
+    context = {
+        "campaign_id": str(record.get("campaign_id") or "").strip(),
+        "adset_id": str(record.get("adset_id") or "").strip(),
+        "instant_experience_id": str(
+            route_one.get("meta_instant_experience_id")
+            or record.get("meta_instant_experience_id")
+            or ""
+        ).strip(),
+        "image_hash": str(
+            route_one.get("meta_image_hash") or record.get("meta_image_hash") or ""
+        ).strip(),
+        "ad_name": str(
+            route_one.get("ad_name") or record.get("ad_name") or ""
+        ).strip(),
+    }
+    missing = [
+        label
+        for key, label in (
+            ("campaign_id", "Campaign"),
+            ("adset_id", "Ad Set"),
+            ("instant_experience_id", "Instant Experience 1"),
+            ("image_hash", "route 1 Meta image hash"),
+            ("ad_name", "route 1 ad name"),
+        )
+        if not context[key]
+    ]
+    if missing:
+        raise PostingValidationError(
+            "The failed Posting job is missing: " + ", ".join(missing) + "."
+        )
+    return context
+
+
+def collection_validation_decision(test_a, test_b):
+    test_a = dict(test_a or {})
+    test_b = dict(test_b or {})
+    if test_a.get("validated"):
+        return (
+            "Standalone creative creation validates; investigate difference between "
+            "diagnostic and production request."
+        )
+    if test_b.get("validated"):
+        return (
+            "Inline Collection creation validated. Production Posting should switch "
+            "from standalone AdCreative creation to inline /ads creative creation."
+        )
+    return (
+        "Neither direct path validates. Do not retry production. Proceed to "
+        "Collection template/copy investigation."
+    )
+
+
+def run_collection_validation_from_posting_state(
+    *,
+    submission_id,
+    product_title,
+    product_set_id,
+    product_url,
+    primary_text,
+    headline,
+    service=None,
+    client=None,
+    probe=None,
+):
+    """Run Meta's two validate-only paths from current UI and persisted retry state."""
+    client = client or MetaPostingClient()
+    service = service or MetaPostingService(client=client)
+    record = service.failed_collection_diagnostic_job(
+        submission_id=submission_id,
+        product_title=product_title,
+        product_set_id=product_set_id,
+    )
+    context = _resolve_collection_validation_context(
+        record,
+        product_title=product_title,
+        product_set_id=product_set_id,
+    )
+    creative_payload = build_collection_creative_payload(
+        name=f"{context['ad_name']} | Collection",
+        page_id=client.page_id,
+        instagram_user_id=client.instagram_user_id,
+        image_hash=context["image_hash"],
+        canvas_id=context["instant_experience_id"],
+        product_set_id=product_set_id,
+        destination_url=product_url,
+        primary_text=primary_text,
+        headline=headline,
+    )
+    probe = probe or MetaCollectionValidateOnlyProbe(client.config)
+    test_a, test_b = probe.run_ab(
+        ad_name=context["ad_name"],
+        adset_id=context["adset_id"],
+        creative_payload=creative_payload,
+    )
+    return {
+        "persistent_meta_writes": "NONE",
+        "test_a": dict(test_a or {}),
+        "test_b": dict(test_b or {}),
+        "decision": collection_validation_decision(test_a, test_b),
+        "request_shapes": {
+            "test_a": sanitized_collection_request_shape(mode="standalone"),
+            "test_b": sanitized_collection_request_shape(
+                mode="inline_ad", adset_id=context["adset_id"]
+            ),
+        },
+    }
+
+
 def _reset_posting_state():
     for key in tuple(st.session_state):
         if str(key).startswith(STATE_PREFIX):
@@ -624,6 +774,60 @@ def _render_success(result):
         st.rerun()
 
 
+def _collection_validation_message(result):
+    result = dict(result or {})
+    return str(
+        result.get("error_user_msg")
+        or result.get("error_user_title")
+        or result.get("safe_error")
+        or ("Meta accepted this validate-only request." if result.get("validated") else "Validation failed.")
+    )
+
+
+def _render_collection_validation_test(*, title, endpoint, result):
+    result = dict(result or {})
+    st.markdown(f"**{title}**")
+    if result.get("validated"):
+        st.success("Result: PASS")
+    else:
+        st.error("Result: FAIL")
+    st.caption(f"Endpoint: `{endpoint}`")
+    st.caption(
+        f"HTTP status: `{result.get('http_status') if result.get('http_status') is not None else '—'}` · "
+        f"Code: `{result.get('error_code') if result.get('error_code') is not None else '—'}` · "
+        f"Subcode: `{result.get('error_subcode') if result.get('error_subcode') is not None else '—'}`"
+    )
+    if result.get("error_user_title"):
+        st.caption(f"Title: {result['error_user_title']}")
+    st.write(f"Message: {_collection_validation_message(result)}")
+    if result.get("fbtrace_id"):
+        st.caption(f"fbtrace_id: `{result['fbtrace_id']}`")
+
+
+def _render_collection_validation(result):
+    result = dict(result or {})
+    with st.container(border=True):
+        st.markdown("### META COLLECTION VALIDATION")
+        st.markdown("**Persistent Meta writes:** NONE")
+        if result.get("error"):
+            st.error(str(result["error"]))
+            return
+        _render_collection_validation_test(
+            title="Test A — Standalone AdCreative",
+            endpoint="/adcreatives",
+            result=result.get("test_a"),
+        )
+        _render_collection_validation_test(
+            title="Test B — Inline Creative on Ad",
+            endpoint="/ads",
+            result=result.get("test_b"),
+        )
+        st.markdown("**DECISION:**")
+        st.write(str(result.get("decision") or "No decision is available."))
+        with st.expander("Sanitized request shapes", expanded=False):
+            st.json(dict(result.get("request_shapes") or {}))
+
+
 def _render_recent_posts():
     with st.expander("Recent Posting jobs", expanded=False):
         try:
@@ -660,6 +864,7 @@ def render_page():
     st.caption("Build one Meta Sales campaign, one ad set and three Instant Experience ads — all paused.")
     st.session_state.setdefault(SUBMISSION_ID_KEY, posting_submission_id())
     st.session_state.setdefault(PROCESSING_KEY, False)
+    st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
     if str(result.get("status") or "") == "COMPLETE":
@@ -752,6 +957,7 @@ def render_page():
         st.session_state[SPORT_KEY] = _infer_sport(selection)
         st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
         st.session_state.pop(RESULT_KEY, None)
+        st.session_state.pop(COLLECTION_DIAGNOSTIC_RESULT_KEY, None)
     product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
     product_url = str(ads_page.canonical_shopify_product_url_from_row(selected_row) or "")
     product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
@@ -963,5 +1169,71 @@ def render_page():
             st.rerun()
         finally:
             st.session_state[PROCESSING_KEY] = False
+
+    st.markdown("#### Collection diagnostic")
+    st.caption("Uses Meta validate_only. Creates no campaign, ad set, creative or ad.")
+    diagnostic_signature = _collection_validation_signature(
+        submission_id=st.session_state[SUBMISSION_ID_KEY],
+        product_title=product_title,
+        product_set_id=product_set_id,
+        product_url=product_url,
+        primary_text=creative_inputs[0]["primary_text"],
+        headline=creative_inputs[0]["headline"],
+    )
+    diagnostic_ready = bool(
+        product_title
+        and product_url
+        and product_set_id
+        and str(creative_inputs[0]["primary_text"] or "").strip()
+        and str(creative_inputs[0]["headline"] or "").strip()
+        and overview.get("posting_ready")
+    )
+    if st.button(
+        "Run Collection Validation — No Ads Created",
+        type="secondary",
+        use_container_width=True,
+        disabled=(
+            not diagnostic_ready
+            or st.session_state[PROCESSING_KEY]
+            or st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY]
+        ),
+        key=f"{STATE_PREFIX}collection_diagnostic",
+    ):
+        st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = True
+        try:
+            with st.spinner("Running Meta validate-only Collection tests…"):
+                diagnostic = run_collection_validation_from_posting_state(
+                    submission_id=st.session_state[SUBMISSION_ID_KEY],
+                    product_title=product_title,
+                    product_set_id=product_set_id,
+                    product_url=product_url,
+                    primary_text=creative_inputs[0]["primary_text"],
+                    headline=creative_inputs[0]["headline"],
+                )
+        except (PostingValidationError, MetaCollectionDiagnosticSafetyError) as error:
+            diagnostic = {
+                "persistent_meta_writes": "NONE",
+                "error": str(error),
+            }
+        except Exception:
+            diagnostic = {
+                "persistent_meta_writes": "NONE",
+                "error": (
+                    "Meta Collection validation could not run safely. No Meta objects "
+                    "were created and the Posting ledger was not changed."
+                ),
+            }
+        finally:
+            st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = False
+        st.session_state[COLLECTION_DIAGNOSTIC_RESULT_KEY] = {
+            "signature": diagnostic_signature,
+            "result": diagnostic,
+        }
+
+    saved_diagnostic = dict(
+        st.session_state.get(COLLECTION_DIAGNOSTIC_RESULT_KEY) or {}
+    )
+    if saved_diagnostic.get("signature") == diagnostic_signature:
+        _render_collection_validation(saved_diagnostic.get("result"))
 
     _render_recent_posts()
