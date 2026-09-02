@@ -180,10 +180,6 @@ class FakePostingClient:
         self.uploaded_images.append((data, filename, content_type))
         return f"image-hash-{len(self.uploaded_images)}"
 
-    def ad_image_url(self, image_hash):
-        self.calls.append("ad_image_url")
-        return f"https://scontent.xx.fbcdn.net/{image_hash}.jpg"
-
     def upload_page_photo(self, data, *, filename, content_type):
         self.calls.append("page_photo")
         return f"photo-{self.calls.count('page_photo')}"
@@ -362,32 +358,40 @@ class PostingPayloadTests(unittest.TestCase):
     def test_collection_creative_contract(self):
         payload = build_collection_creative_payload(
             name="Creative", page_id="page-1", instagram_user_id="ig-1",
-            image_url="https://scontent.xx.fbcdn.net/cover.jpg",
+            image_hash="route-image-hash",
             canvas_id="canvas-1", product_set_id="set-1",
             destination_url="https://sportscaveshop.com/products/a", primary_text="Text",
-            headline="Headline",
+            headline="Headline", description="Description retained in Posting state",
         )
         story = payload["object_story_spec"]
         self.assertNotIn("template_data", story)
         link_data = story["link_data"]
         self.assertNotIn("canvas_id", link_data)
         self.assertNotIn("format_option", link_data)
-        self.assertNotIn("image_hash", link_data)
-        self.assertEqual(link_data["picture"], "https://scontent.xx.fbcdn.net/cover.jpg")
+        self.assertNotIn("picture", link_data)
+        self.assertEqual(link_data["image_hash"], "route-image-hash")
         self.assertEqual(link_data["link"], "https://fb.com/canvas_doc/canvas-1")
         self.assertEqual(link_data["message"], "Text")
         self.assertEqual(link_data["name"], "Headline")
         self.assertEqual(link_data["call_to_action"], {"type": "SHOP_NOW"})
-        self.assertEqual(link_data["retailer_item_ids"], [0, 0, 0, 0])
+        self.assertEqual(link_data["retailer_item_ids"], ["0", "0", "0", "0"])
+        self.assertTrue(all(isinstance(value, str) for value in link_data["retailer_item_ids"]))
         self.assertNotIn("customization_rules_spec", link_data)
+        self.assertNotIn("description", link_data)
         self.assertEqual(payload["product_set_id"], "set-1")
+        self.assertEqual(payload["image_hash"], link_data["image_hash"])
         self.assertEqual(payload["object_story_spec"]["page_id"], "page-1")
         self.assertEqual(payload["object_story_spec"]["instagram_user_id"], "ig-1")
         self.assertEqual(payload["contextual_multi_ads"], {"enroll_status": "OPT_IN"})
         features = payload["degrees_of_freedom_spec"]["creative_features_spec"]
-        self.assertEqual(features["hide_price"]["enroll_status"], "OPT_IN")
-        self.assertEqual(features["inline_comment"]["enroll_status"], "OPT_IN")
-        self.assertEqual(features["image_background_gen"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(
+            features,
+            {
+                "image_uncrop": {"enroll_status": "OPT_OUT"},
+                "media_type_automation": {"enroll_status": "OPT_IN"},
+                "product_browsing": {"enroll_status": "OPT_OUT"},
+            },
+        )
         self.assertIn("utm_source=facebook", payload["url_tags"])
 
     def test_storefront_component_contract(self):
@@ -433,33 +437,6 @@ class MetaPostingClientTests(unittest.TestCase):
             access_token="page-secret",
         )
         self.assertEqual(post.call_args.kwargs["data"]["access_token"], "page-secret")
-
-    @mock.patch("meta_ads_client._paged_get")
-    def test_ad_image_url_uses_full_size_meta_hosted_image(self, paged_get):
-        paged_get.return_value = {
-            "rows": (
-                {
-                    "hash": "route-image-hash",
-                    "url": "https://scontent.xx.fbcdn.net/full-size-route-image.jpg",
-                    "url_128": "https://scontent.xx.fbcdn.net/thumbnail.jpg",
-                },
-            )
-        }
-        client = meta_ads_client.MetaPostingClient(self.config())
-
-        image_url = client.ad_image_url("route-image-hash")
-
-        self.assertEqual(
-            image_url,
-            "https://scontent.xx.fbcdn.net/full-size-route-image.jpg",
-        )
-        self.assertEqual(paged_get.call_args.args[0], "act_123/adimages")
-        self.assertEqual(
-            paged_get.call_args.kwargs["params"]["hashes"],
-            '["route-image-hash"]',
-        )
-        self.assertIn("url", paged_get.call_args.kwargs["params"]["fields"])
-        self.assertNotIn("url_128", paged_get.call_args.kwargs["params"]["fields"])
 
     @mock.patch("meta_ads_client.requests.post")
     def test_page_token_is_redacted_from_meta_errors(self, post):
@@ -520,6 +497,7 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertIn("code 100", message)
         self.assertIn("subcode 1990065", message)
         self.assertIn("object_story_spec.link_data", message)
+        self.assertIn("image_hash", message)
         self.assertIn("retailer_item_ids", message)
         self.assertIn("catalogue Collection creative", message)
         self.assertEqual(caught.exception.fbtrace_id, "safe-product-set-trace")
@@ -568,7 +546,7 @@ class MetaPostingClientTests(unittest.TestCase):
         client.create_collection_creative(
             build_collection_creative_payload(
                 name="Creative", page_id="page-1", instagram_user_id="ig-1",
-                image_url="https://scontent.xx.fbcdn.net/cover.jpg",
+                image_hash="hash",
                 canvas_id="canvas-1", product_set_id="set-1",
                 destination_url="https://example.com/product", primary_text="Text", headline="H",
             )
@@ -1125,7 +1103,7 @@ class PostingServiceTests(unittest.TestCase):
             ["campaign", "adset"] + [
                 "campaign", "adset", "ad_image", "page_photo", "canvas_photo",
                 "canvas_product_set", "canvas_button", "canvas_footer", "canvas",
-                "ad_image_url", "creative", "ad",
+                "creative", "ad",
             ][2:] * 3,
         )
         self.assertEqual(client.campaign_payload["status"], "PAUSED")
@@ -1148,17 +1126,16 @@ class PostingServiceTests(unittest.TestCase):
             [payload["object_story_spec"]["link_data"]["name"] for payload in client.creative_payloads],
             ["Headline 1", "Headline 2", "Headline 3"],
         )
-        self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["description"] for payload in client.creative_payloads],
-            ["Description 1", "Description 2", "Description 3"],
+        self.assertTrue(
+            all("description" not in payload["object_story_spec"]["link_data"] for payload in client.creative_payloads)
         )
         self.assertEqual(
-            [payload["object_story_spec"]["link_data"]["picture"] for payload in client.creative_payloads],
-            [
-                "https://scontent.xx.fbcdn.net/image-hash-1.jpg",
-                "https://scontent.xx.fbcdn.net/image-hash-2.jpg",
-                "https://scontent.xx.fbcdn.net/image-hash-3.jpg",
-            ],
+            [payload["object_story_spec"]["link_data"]["image_hash"] for payload in client.creative_payloads],
+            ["image-hash-1", "image-hash-2", "image-hash-3"],
+        )
+        self.assertEqual(
+            [payload["image_hash"] for payload in client.creative_payloads],
+            ["image-hash-1", "image-hash-2", "image-hash-3"],
         )
         photo_specs = [
             specification
@@ -1181,12 +1158,16 @@ class PostingServiceTests(unittest.TestCase):
             story = payload["object_story_spec"]
             self.assertNotIn("template_data", story)
             link_data = story["link_data"]
-            self.assertEqual(link_data["retailer_item_ids"], [0, 0, 0, 0])
+            self.assertNotIn("picture", link_data)
+            self.assertEqual(link_data["retailer_item_ids"], ["0", "0", "0", "0"])
             self.assertEqual(link_data["call_to_action"]["type"], "SHOP_NOW")
             self.assertEqual(
-                payload["degrees_of_freedom_spec"]["creative_features_spec"]
-                ["image_background_gen"]["enroll_status"],
-                "OPT_OUT",
+                payload["degrees_of_freedom_spec"]["creative_features_spec"],
+                {
+                    "image_uncrop": {"enroll_status": "OPT_OUT"},
+                    "media_type_automation": {"enroll_status": "OPT_IN"},
+                    "product_browsing": {"enroll_status": "OPT_OUT"},
+                },
             )
             self.assertIn("utm_source=facebook", payload["url_tags"])
         self.assertTrue(all(adset_id == "adset-1" for _name, adset_id, _creative in client.ad_creations))
@@ -1271,7 +1252,6 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("adset"), 1)
         self.assertEqual(client.calls[len(calls_before_retry):].count("ad"), 1)
         self.assertEqual(client.calls[len(calls_before_retry):].count("canvas"), 0)
-        self.assertEqual(client.calls[len(calls_before_retry):].count("ad_image_url"), 0)
         self.assertEqual(
             [row["meta_ad_id"] for row in completed["ad_results"]],
             ["ad-1", "ad-2", "ad-3"],
@@ -1367,10 +1347,16 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("adset"), 0)
         self.assertEqual(client.calls.count("canvas"), 2)
         self.assertEqual(client.calls.count("ad"), 3)
-        self.assertEqual(client.calls.count("ad_image_url"), 3)
+        self.assertEqual(client.calls.count("ad_image"), 2)
         self.assertEqual(client.calls.count("page_photo"), 2)
+        first_creative = client.creative_payloads[0]
+        self.assertEqual(first_creative["image_hash"], "existing-image-hash")
         self.assertEqual(
-            client.creative_payloads[0]["object_story_spec"]["link_data"]["link"],
+            first_creative["object_story_spec"]["link_data"]["image_hash"],
+            "existing-image-hash",
+        )
+        self.assertEqual(
+            first_creative["object_story_spec"]["link_data"]["link"],
             "https://fb.com/canvas_doc/1390026833255926",
         )
         self.assertEqual(

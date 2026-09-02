@@ -31,7 +31,7 @@ CAMPAIGN_OBJECTIVE = "OUTCOME_SALES"
 CAMPAIGN_DAILY_BUDGET_MINOR = 2500
 PRODUCT_DESCRIPTION = "Limited Edition"
 INSTANT_EXPERIENCE_BUTTON_TEXT = "Claim Your Edition"
-DYNAMIC_COLLECTION_RETAILER_ITEM_IDS = (0, 0, 0, 0)
+DYNAMIC_COLLECTION_RETAILER_ITEM_IDS = ("0", "0", "0", "0")
 AD_TYPE = "Instant Experience"
 COUNTRY_META_CODES = {"AUS": "AU", "USA": "US", "UK": "GB", "CAN": "CA", "NZ": "NZ"}
 SPORT_OPTIONS = (
@@ -670,15 +670,15 @@ def build_adset_payload(*, name, campaign_id, product_set_id, pixel_id, targetin
     }
 
 
-def build_creative_features_spec():
-    opted_in = (
-        "standard_enhancements_catalog", "adapt_to_placement", "description_automation",
-        "enhance_cta", "hide_price", "inline_comment", "product_extensions",
-        "text_optimizations",
-    )
-    features = {name: {"enroll_status": "OPT_IN"} for name in opted_in}
-    features["image_background_gen"] = {"enroll_status": "OPT_OUT"}
-    return {"creative_features_spec": features}
+def build_collection_creative_features_spec():
+    """Match the feature flags returned by Sports Cave's working Collection ad."""
+    return {
+        "creative_features_spec": {
+            "image_uncrop": {"enroll_status": "OPT_OUT"},
+            "media_type_automation": {"enroll_status": "OPT_IN"},
+            "product_browsing": {"enroll_status": "OPT_OUT"},
+        }
+    }
 
 
 def build_storefront_element_specs(*, page_photo_id, product_set_id, destination_url, button_element_id=""):
@@ -699,7 +699,7 @@ def build_storefront_element_specs(*, page_photo_id, product_set_id, destination
 
 
 def build_collection_creative_payload(
-    *, name, page_id, instagram_user_id, image_url, canvas_id, product_set_id,
+    *, name, page_id, instagram_user_id, image_hash, canvas_id, product_set_id,
     destination_url, primary_text, headline, description="", url_tags=META_AD_URL_PARAMETERS,
 ):
     instant_experience_url = (
@@ -707,17 +707,12 @@ def build_collection_creative_payload(
         f"{quote(str(canvas_id), safe='')}"
     )
     link_data = {
-        # Meta's v26 generated image-cover Collection example uses a public
-        # picture URL and four zero retailer slots. The slots request dynamic
-        # product selection from the top-level product_set_id.
-        "picture": str(image_url),
         "link": instant_experience_url,
         "message": str(primary_text), "name": str(headline),
+        "image_hash": str(image_hash),
         "call_to_action": {"type": META_DEFAULT_CTA},
         "retailer_item_ids": list(DYNAMIC_COLLECTION_RETAILER_ITEM_IDS),
     }
-    if str(description or "").strip():
-        link_data["description"] = str(description)
     return {
         "name": str(name),
         "object_story_spec": {
@@ -725,8 +720,9 @@ def build_collection_creative_payload(
             "link_data": link_data,
         },
         "product_set_id": str(product_set_id),
+        "image_hash": str(image_hash),
         "contextual_multi_ads": {"enroll_status": "OPT_IN"},
-        "degrees_of_freedom_spec": build_creative_features_spec(),
+        "degrees_of_freedom_spec": build_collection_creative_features_spec(),
         "url_tags": str(url_tags or ""),
     }
 
@@ -1230,15 +1226,12 @@ class MetaPostingService:
                 creative_label = f"{ad_label} | Collection"
                 creative_id = str(ad_result.get("meta_creative_id") or "")
                 if not creative_id:
-                    # Resolve the current full-size CDN URL immediately before
-                    # creative creation; Meta-hosted image URLs can be transient.
-                    image_url = self.client.ad_image_url(image_hash)
                     creative_id = self._create_or_reconcile(
                         lambda: self.client.create_collection_creative(
                             build_collection_creative_payload(
                                 name=creative_label, page_id=self.client.page_id,
                                 instagram_user_id=self.client.instagram_user_id,
-                                image_url=image_url, canvas_id=canvas_id,
+                                image_hash=image_hash, canvas_id=canvas_id,
                                 product_set_id=clean["product_set_id"],
                                 destination_url=clean["destination_url"],
                                 primary_text=creative["primary_text"],
