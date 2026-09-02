@@ -559,6 +559,7 @@ def posting_ad_results(value, *, ad_names=()):
         row.setdefault("meta_ad_reused", False)
         row.setdefault("meta_ad_configured_status", "")
         row.setdefault("instant_experience_verification", {})
+        row.setdefault("instant_experience_creation_provenance", {})
         row.setdefault("product_set_health", {})
         results.append(row)
     return results
@@ -720,8 +721,93 @@ def _walk_graph_values(value):
             yield from _walk_graph_values(child)
 
 
-def verify_instant_experience_destination(canvas, *, expected_url):
-    """Verify the fixed IA button label and exact Shopify HTTPS destination."""
+def _decoded_element_payload(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return ()
+    try:
+        decoded = json.loads(stripped)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    return decoded if isinstance(decoded, (dict, list, tuple)) else ()
+
+
+def _instant_experience_button_candidates(value, *, source):
+    candidates = []
+    for node in _walk_graph_values(value):
+        action = node.get("open_url_action")
+        rich_text = node.get("rich_text")
+        action = dict(action) if isinstance(action, dict) else {}
+        rich_text = dict(rich_text) if isinstance(rich_text, dict) else {}
+        label = str(rich_text.get("plain_text") or node.get("label") or "")
+        url = str(action.get("url") or "")
+        if label or (rich_text and action):
+            candidates.append({"label": label, "url": url, "source": source})
+    return tuple(candidates)
+
+
+def build_instant_experience_creation_provenance(
+    *,
+    submission_id,
+    request_fingerprint,
+    canvas_id,
+    button_element_id,
+    footer_element_id,
+    destination_url,
+):
+    """Record the immutable inputs used to create one route's fixed IA button."""
+
+    return {
+        "contract": "sports_cave_storefront_fixed_button_v1",
+        "submission_id": str(submission_id or ""),
+        "request_fingerprint": str(request_fingerprint or ""),
+        "instant_experience_id": str(canvas_id or ""),
+        "button_element_id": str(button_element_id or ""),
+        "footer_element_id": str(footer_element_id or ""),
+        "button_label": INSTANT_EXPERIENCE_BUTTON_TEXT,
+        "destination_url": str(destination_url or ""),
+    }
+
+
+def _creation_provenance_matches(
+    provenance,
+    *,
+    expected_url,
+    expected_canvas_id,
+    expected_request_fingerprint,
+    expected_submission_id,
+):
+    provenance = dict(provenance or {})
+    return bool(
+        str(provenance.get("contract") or "")
+        == "sports_cave_storefront_fixed_button_v1"
+        and str(provenance.get("submission_id") or "")
+        == str(expected_submission_id or "")
+        and str(provenance.get("request_fingerprint") or "")
+        == str(expected_request_fingerprint or "")
+        and str(provenance.get("instant_experience_id") or "")
+        == str(expected_canvas_id or "")
+        and str(provenance.get("button_element_id") or "")
+        and str(provenance.get("footer_element_id") or "")
+        and str(provenance.get("button_label") or "")
+        == INSTANT_EXPERIENCE_BUTTON_TEXT
+        and str(provenance.get("destination_url") or "") == expected_url
+    )
+
+
+def verify_instant_experience_destination(
+    canvas,
+    *,
+    expected_url,
+    child_elements=(),
+    provenance=None,
+    expected_canvas_id="",
+    expected_request_fingerprint="",
+    expected_submission_id="",
+):
+    """Classify Meta's IA destination evidence without treating omission as mismatch."""
     expected_url = validate_destination_url(expected_url)
     parsed = urlparse(expected_url)
     hostname = str(parsed.hostname or "").casefold()
@@ -734,30 +820,103 @@ def verify_instant_experience_destination(canvas, *, expected_url):
         raise PostingValidationError(
             "The Instant Experience button destination cannot be a Facebook URL."
         )
-    matches = []
-    for value in _walk_graph_values(dict(canvas or {})):
-        action = dict(value.get("open_url_action") or {})
-        rich_text = dict(value.get("rich_text") or {})
-        if action or rich_text:
-            matches.append(
-                {
-                    "label": str(rich_text.get("plain_text") or value.get("label") or ""),
-                    "url": str(action.get("url") or ""),
-                }
+    sports_cave_hosts = ("sportscaveshop.com", "sportscave.com.au")
+    if not any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in sports_cave_hosts
+    ) or not str(parsed.path or "").startswith("/products/"):
+        raise PostingValidationError(
+            "The Instant Experience button destination must be a Sports Cave product URL."
+        )
+
+    canvas = dict(canvas or {})
+    candidates = []
+    for value in (
+        canvas.get("body_elements") or (),
+        canvas.get("fb_body_elements") or (),
+        _decoded_element_payload(canvas.get("element_payload")),
+    ):
+        candidates.extend(
+            _instant_experience_button_candidates(
+                value, source="Meta element payload"
             )
-    verified = any(
-        row["label"] == INSTANT_EXPERIENCE_BUTTON_TEXT
-        and row["url"] == expected_url
-        for row in matches
+        )
+    candidates.extend(
+        _instant_experience_button_candidates(
+            tuple(child_elements or ()), source="Meta child element"
+        )
     )
+
+    exact = next(
+        (
+            row
+            for row in candidates
+            if row["label"] == INSTANT_EXPERIENCE_BUTTON_TEXT
+            and row["url"] == expected_url
+        ),
+        None,
+    )
+    if exact:
+        return {
+            "verified": True,
+            "verification_state": "VERIFIED",
+            "display_status": "VERIFIED",
+            "verification_source": exact["source"],
+            "label": INSTANT_EXPERIENCE_BUTTON_TEXT,
+            "url": expected_url,
+            "reason": "Fixed button label and destination verified from Meta Graph.",
+        }
+
+    conflicts = tuple(
+        row
+        for row in candidates
+        if (row["label"] and row["label"] != INSTANT_EXPERIENCE_BUTTON_TEXT)
+        or (row["url"] and row["url"] != expected_url)
+    )
+    if conflicts:
+        return {
+            "verified": False,
+            "verification_state": "MISMATCH",
+            "display_status": "MISMATCH",
+            "verification_source": conflicts[0]["source"],
+            "label": "",
+            "url": "",
+            "reason": (
+                "Meta returned a fixed button label or destination that does not "
+                "match the current Posting product."
+            ),
+        }
+
+    if _creation_provenance_matches(
+        provenance,
+        expected_url=expected_url,
+        expected_canvas_id=expected_canvas_id,
+        expected_request_fingerprint=expected_request_fingerprint,
+        expected_submission_id=expected_submission_id,
+    ):
+        return {
+            "verified": True,
+            "verification_state": "VERIFIED",
+            "display_status": "VERIFIED VIA CREATION RECORD",
+            "verification_source": "Persisted creation provenance",
+            "label": INSTANT_EXPERIENCE_BUTTON_TEXT,
+            "url": expected_url,
+            "reason": (
+                "Meta omitted expanded child data; the exact persisted route creation "
+                "record verifies the fixed button and destination."
+            ),
+        }
+
     return {
-        "verified": verified,
-        "label": INSTANT_EXPERIENCE_BUTTON_TEXT if verified else "",
-        "url": expected_url if verified else "",
+        "verified": False,
+        "verification_state": "UNAVAILABLE",
+        "display_status": "UNAVAILABLE",
+        "verification_source": "",
+        "label": "",
+        "url": "",
         "reason": (
-            "Fixed button label and destination verified from Meta Graph."
-            if verified
-            else "Meta Graph did not return the expected fixed button label and Shopify destination."
+            "Meta did not expose enough expanded Canvas element data to compare the "
+            "fixed button, and no exact persisted creation provenance was available."
         ),
     }
 
@@ -1330,6 +1489,14 @@ class MetaPostingService:
             ):
                 active_ad_index = index - 1
                 ad_label = str(ad_result.get("ad_name") or proposed_ad_names[index - 1])
+                persisted_route_ids = {
+                    key: str(ad_result.get(key) or "")
+                    for key in (
+                        "meta_canvas_button_element_id",
+                        "meta_canvas_footer_element_id",
+                        "meta_instant_experience_id",
+                    )
+                }
 
                 def persist(stage, **legacy_fields):
                     nonlocal record
@@ -1426,23 +1593,96 @@ class MetaPostingService:
                         submission_id=submission_id, entity=f"Instant Experience {index}",
                     )
                     ad_result["meta_instant_experience_id"] = canvas_id
+                    ad_result["instant_experience_creation_provenance"] = (
+                        build_instant_experience_creation_provenance(
+                            submission_id=submission_id,
+                            request_fingerprint=fingerprint,
+                            canvas_id=canvas_id,
+                            button_element_id=ad_result["meta_canvas_button_element_id"],
+                            footer_element_id=ad_result["meta_canvas_footer_element_id"],
+                            destination_url=clean["destination_url"],
+                        )
+                    )
                     ad_result["status"] = "INSTANT_EXPERIENCE_CREATED"
                     persist(
                         "INSTANT_EXPERIENCE_CREATED",
                         **({"meta_instant_experience_id": canvas_id} if index == 1 else {}),
                     )
                 ad_result["meta_instant_experience_reused"] = canvas_was_reused
+
+                provenance = dict(
+                    ad_result.get("instant_experience_creation_provenance") or {}
+                )
+                legacy_provenance_eligible = bool(
+                    canvas_was_reused
+                    and persisted_route_ids["meta_canvas_button_element_id"]
+                    and persisted_route_ids["meta_canvas_footer_element_id"]
+                    and persisted_route_ids["meta_instant_experience_id"] == canvas_id
+                    and str(record.get("request_fingerprint") or "") == fingerprint
+                    and str(record.get("destination_url") or "")
+                    == clean["destination_url"]
+                )
+                if not provenance and legacy_provenance_eligible:
+                    provenance = build_instant_experience_creation_provenance(
+                        submission_id=submission_id,
+                        request_fingerprint=str(record.get("request_fingerprint") or ""),
+                        canvas_id=canvas_id,
+                        button_element_id=persisted_route_ids[
+                            "meta_canvas_button_element_id"
+                        ],
+                        footer_element_id=persisted_route_ids[
+                            "meta_canvas_footer_element_id"
+                        ],
+                        destination_url=str(record.get("destination_url") or ""),
+                    )
+
                 instant_experience = self.client.instant_experience(canvas_id)
+                preliminary_verification = verify_instant_experience_destination(
+                    instant_experience,
+                    expected_url=clean["destination_url"],
+                    expected_canvas_id=canvas_id,
+                    expected_request_fingerprint=fingerprint,
+                    expected_submission_id=submission_id,
+                )
+                child_elements = ()
+                if preliminary_verification["verification_state"] == "UNAVAILABLE":
+                    verification_element_ids = (
+                        (
+                            persisted_route_ids["meta_canvas_button_element_id"],
+                            persisted_route_ids["meta_canvas_footer_element_id"],
+                        )
+                        if canvas_was_reused
+                        else (
+                            ad_result["meta_canvas_button_element_id"],
+                            ad_result["meta_canvas_footer_element_id"],
+                        )
+                    )
+                    try:
+                        child_elements = self.client.instant_experience_elements(
+                            verification_element_ids
+                        )
+                    except (AttributeError, MetaAdsApiError):
+                        child_elements = ()
                 destination_verification = verify_instant_experience_destination(
                     instant_experience,
                     expected_url=clean["destination_url"],
+                    child_elements=child_elements,
+                    provenance=provenance,
+                    expected_canvas_id=canvas_id,
+                    expected_request_fingerprint=fingerprint,
+                    expected_submission_id=submission_id,
                 )
                 ad_result["instant_experience_verification"] = destination_verification
                 if not destination_verification["verified"]:
                     raise MetaAdsApiError(
-                        f"Instant Experience {index} fixed button could not be verified. "
+                        f"Instant Experience {index} fixed button verification "
+                        f"{destination_verification['verification_state'].casefold()}. "
                         f"{destination_verification['reason']} No copied Ad was created."
                     )
+                if provenance and not ad_result.get(
+                    "instant_experience_creation_provenance"
+                ):
+                    ad_result["instant_experience_creation_provenance"] = provenance
                 persist("INSTANT_EXPERIENCE_CREATED")
 
                 creative_label = f"{ad_label} | Collection"

@@ -848,6 +848,22 @@ def _render_object_result(result, *, title):
             )
         )
     st.dataframe(rows, hide_index=True, use_container_width=True)
+    for ad_result in posting_ad_results(result.get("ad_results")):
+        verification = dict(
+            ad_result.get("instant_experience_verification") or {}
+        )
+        if not verification:
+            continue
+        label = str(
+            verification.get("display_status")
+            or verification.get("verification_state")
+            or "UNAVAILABLE"
+        )
+        source = str(verification.get("verification_source") or "Unavailable")
+        st.caption(
+            f"Instant Experience {ad_result.get('index')} destination: "
+            f"**{label}** · Verification source: {source}"
+        )
     if result.get("safe_error"):
         st.caption(str(result.get("safe_error")))
     first_ad = posting_ad_results(result.get("ad_results"))[0]

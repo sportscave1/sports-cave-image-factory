@@ -1360,9 +1360,36 @@ class MetaPostingClient:
         """Read the published IA body for fixed-button destination verification."""
         return _request(
             str(canvas_id or "").strip(),
-            params={"fields": "id,name,is_published,body_elements"},
+            params={
+                "fields": (
+                    "id,name,is_published,body_elements,fb_body_elements,"
+                    "element_payload,store_url,use_retailer_item_ids"
+                )
+            },
             config=self.config,
             access_token=self.page_access_token,
+        )
+
+    def instant_experience_elements(self, element_ids):
+        """Read matching Canvas elements from the Page-owned, read-only edge."""
+
+        expected_ids = {
+            str(element_id or "").strip()
+            for element_id in element_ids or ()
+            if str(element_id or "").strip()
+        }
+        if not expected_ids:
+            return ()
+        payload = _paged_get(
+            f"{self.page_id}/canvas_elements",
+            params={"fields": "id,element", "limit": 100},
+            config=self.config,
+            access_token=self.page_access_token,
+        )
+        return tuple(
+            dict(row)
+            for row in payload.get("rows") or ()
+            if str(row.get("id") or "") in expected_ids
         )
 
     def create_canvas(self, *, name, body_element_ids):

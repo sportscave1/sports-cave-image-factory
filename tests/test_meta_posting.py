@@ -1,4 +1,5 @@
 import io
+import json
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -11,6 +12,7 @@ import ads_page
 import ads_posting_page
 import meta_ads_client
 from meta_posting_service import (
+    _request_fingerprint,
     EXPECTED_PIXEL_NAME,
     SUCCESS_MESSAGE,
     MetaPostingService,
@@ -22,6 +24,7 @@ from meta_posting_service import (
     build_adset_payload,
     build_campaign_payload,
     build_collection_creative_payload,
+    build_instant_experience_creation_provenance,
     build_storefront_element_specs,
     build_targeting,
     assess_product_set_health,
@@ -38,6 +41,7 @@ from meta_posting_service import (
     resolve_catalog_reference,
     resolve_dataset_reference,
     verify_instant_experience_destination,
+    validate_posting_request,
 )
 
 
@@ -250,6 +254,17 @@ class FakePostingClient:
         self.calls.append("read_instant_experience")
         return dict(self.canvas_readbacks.get(str(canvas_id)) or {})
 
+    def instant_experience_elements(self, element_ids):
+        self.calls.append("read_instant_experience_elements")
+        return tuple(
+            {
+                "id": str(element_id),
+                "element": dict(self.canvas_element_specs[str(element_id)]),
+            }
+            for element_id in element_ids or ()
+            if str(element_id) in self.canvas_element_specs
+        )
+
     def create_collection_creative(self, payload):
         self.calls.append("creative")
         self.creative_payload = payload
@@ -376,6 +391,31 @@ class PostingNavigationTests(unittest.TestCase):
             source.index('"Create 3 Paused Meta Ads"'),
             source.index('st.expander("Advanced Meta Diagnostics", expanded=False)'),
         )
+
+    def test_posting_result_shows_safe_ia_verification_status_and_source(self):
+        result = {
+            "status": "FAILED",
+            "ad_results": (
+                {
+                    "index": 1,
+                    "instant_experience_verification": {
+                        "display_status": "VERIFIED VIA CREATION RECORD",
+                        "verification_source": "Persisted creation provenance",
+                    },
+                },
+            ),
+        }
+        with mock.patch.object(ads_posting_page.st, "subheader"), mock.patch.object(
+            ads_posting_page.st, "dataframe"
+        ), mock.patch.object(ads_posting_page.st, "caption") as caption:
+            ads_posting_page._render_object_result(result, title="Partial result")
+
+        rendered = " ".join(
+            str(call.args[0]) for call in caption.call_args_list if call.args
+        )
+        self.assertIn("Instant Experience 1 destination", rendered)
+        self.assertIn("VERIFIED VIA CREATION RECORD", rendered)
+        self.assertIn("Persisted creation provenance", rendered)
 
 
 class PostingPayloadTests(unittest.TestCase):
@@ -566,6 +606,150 @@ class PostingPayloadTests(unittest.TestCase):
             verify_instant_experience_destination(
                 canvas, expected_url="https://fb.com/canvas_doc/not-a-shopify-url"
             )
+        with self.assertRaisesRegex(PostingValidationError, "Sports Cave product URL"):
+            verify_instant_experience_destination(
+                canvas, expected_url="https://example.com/products/not-sports-cave"
+            )
+
+    def test_instant_experience_element_payload_json_verifies(self):
+        url = "https://sportscaveshop.com/products/shane-warne"
+        result = verify_instant_experience_destination(
+            {
+                "element_payload": json.dumps(
+                    {
+                        "canvas_button": {
+                            "rich_text": {"plain_text": "Claim Your Edition"},
+                            "open_url_action": {"url": url},
+                        }
+                    }
+                )
+            },
+            expected_url=url,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["verification_source"], "Meta element payload")
+
+    def test_instant_experience_fb_body_elements_verifies(self):
+        url = "https://sportscaveshop.com/products/shane-warne"
+        result = verify_instant_experience_destination(
+            {
+                "fb_body_elements": [
+                    {
+                        "element": {
+                            "rich_text": {"plain_text": "Claim Your Edition"},
+                            "open_url_action": {"url": url},
+                        }
+                    }
+                ]
+            },
+            expected_url=url,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["verification_source"], "Meta element payload")
+
+    def test_instant_experience_reference_only_body_is_unavailable_not_mismatch(self):
+        result = verify_instant_experience_destination(
+            {"body_elements": [{"id": "button-1"}, "footer-1"]},
+            expected_url="https://sportscaveshop.com/products/shane-warne",
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["verification_state"], "UNAVAILABLE")
+
+    def test_instant_experience_direct_child_element_verifies(self):
+        url = "https://sportscaveshop.com/products/shane-warne"
+        result = verify_instant_experience_destination(
+            {"body_elements": [{"id": "button-1"}]},
+            expected_url=url,
+            child_elements=(
+                {
+                    "id": "button-1",
+                    "element": {
+                        "rich_text": {"plain_text": "Claim Your Edition"},
+                        "open_url_action": {"url": url},
+                    },
+                },
+            ),
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["verification_source"], "Meta child element")
+
+    def test_instant_experience_explicit_wrong_label_or_url_is_mismatch(self):
+        expected_url = "https://sportscaveshop.com/products/shane-warne"
+        for label, url in (
+            ("Wrong label", expected_url),
+            (
+                "Claim Your Edition",
+                "https://sportscaveshop.com/products/wrong-product",
+            ),
+            ("Claim Your Edition", "https://facebook.com/products/wrong"),
+        ):
+            with self.subTest(label=label, url=url):
+                result = verify_instant_experience_destination(
+                    {
+                        "body_elements": [
+                            {
+                                "element": {
+                                    "rich_text": {"plain_text": label},
+                                    "open_url_action": {"url": url},
+                                }
+                            }
+                        ]
+                    },
+                    expected_url=expected_url,
+                )
+                self.assertFalse(result["verified"])
+                self.assertEqual(result["verification_state"], "MISMATCH")
+
+    def test_instant_experience_complete_creation_provenance_verifies_omission(self):
+        url = "https://sportscaveshop.com/products/shane-warne"
+        provenance = build_instant_experience_creation_provenance(
+            submission_id="11111111-1111-4111-8111-111111111111",
+            request_fingerprint="fingerprint-1",
+            canvas_id="canvas-1",
+            button_element_id="button-1",
+            footer_element_id="footer-1",
+            destination_url=url,
+        )
+        result = verify_instant_experience_destination(
+            {"id": "canvas-1", "body_elements": [{"id": "footer-1"}]},
+            expected_url=url,
+            provenance=provenance,
+            expected_canvas_id="canvas-1",
+            expected_request_fingerprint="fingerprint-1",
+            expected_submission_id="11111111-1111-4111-8111-111111111111",
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["display_status"], "VERIFIED VIA CREATION RECORD")
+        self.assertEqual(
+            result["verification_source"], "Persisted creation provenance"
+        )
+
+    def test_instant_experience_provenance_rejects_changed_request_or_destination(self):
+        url = "https://sportscaveshop.com/products/shane-warne"
+        provenance = build_instant_experience_creation_provenance(
+            submission_id="11111111-1111-4111-8111-111111111111",
+            request_fingerprint="fingerprint-1",
+            canvas_id="canvas-1",
+            button_element_id="button-1",
+            footer_element_id="footer-1",
+            destination_url=url,
+        )
+        cases = (
+            (url, "different-fingerprint"),
+            ("https://sportscaveshop.com/products/different", "fingerprint-1"),
+        )
+        for expected_url, fingerprint in cases:
+            with self.subTest(expected_url=expected_url, fingerprint=fingerprint):
+                result = verify_instant_experience_destination(
+                    {"id": "canvas-1", "body_elements": [{"id": "footer-1"}]},
+                    expected_url=expected_url,
+                    provenance=provenance,
+                    expected_canvas_id="canvas-1",
+                    expected_request_fingerprint=fingerprint,
+                    expected_submission_id="11111111-1111-4111-8111-111111111111",
+                )
+                self.assertFalse(result["verified"])
+                self.assertEqual(result["verification_state"], "UNAVAILABLE")
 
     def test_product_set_health_warns_when_meta_exposes_no_eligible_products(self):
         health = assess_product_set_health(
@@ -863,7 +1047,37 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertEqual(client.instant_experience("canvas-1"), {"id": "canvas-1"})
         self.assertEqual(request.call_args.args[0], "canvas-1")
         self.assertEqual(request.call_args.kwargs["access_token"], "page-secret")
-        self.assertIn("body_elements", request.call_args.kwargs["params"]["fields"])
+        fields = request.call_args.kwargs["params"]["fields"]
+        for field in (
+            "body_elements",
+            "fb_body_elements",
+            "element_payload",
+            "store_url",
+            "use_retailer_item_ids",
+        ):
+            self.assertIn(field, fields)
+
+    @mock.patch("meta_ads_client._paged_get")
+    def test_instant_experience_element_read_is_page_scoped_and_read_only(
+        self, paged_get
+    ):
+        paged_get.return_value = {
+            "rows": (
+                {"id": "button-1", "element": {"canvas_button": {}}},
+                {"id": "other", "element": {}},
+            )
+        }
+        client = meta_ads_client.MetaPostingClient(self.config())
+
+        self.assertEqual(
+            client.instant_experience_elements(("button-1", "footer-1")),
+            ({"id": "button-1", "element": {"canvas_button": {}}},),
+        )
+        self.assertEqual(paged_get.call_args.args[0], "page-1/canvas_elements")
+        self.assertEqual(paged_get.call_args.kwargs["access_token"], "page-secret")
+        self.assertEqual(
+            paged_get.call_args.kwargs["params"]["fields"], "id,element"
+        )
 
     @mock.patch("meta_ads_client._post")
     @mock.patch("meta_ads_client._paged_get", return_value={"rows": ({"id": "p1"},)})
@@ -1444,6 +1658,21 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(
             result["ad_results"][0]["product_set_health"]["status"], "READY"
         )
+        for index, row in enumerate(result["ad_results"], start=1):
+            provenance = row["instant_experience_creation_provenance"]
+            self.assertEqual(
+                provenance["button_label"], "Claim Your Edition"
+            )
+            self.assertEqual(
+                provenance["destination_url"],
+                "https://sportscaveshop.com/products/max-verstappen-victory",
+            )
+            self.assertEqual(
+                provenance["instant_experience_id"], f"canvas-{index}"
+            )
+            self.assertTrue(provenance["button_element_id"])
+            self.assertTrue(provenance["footer_element_id"])
+            self.assertTrue(provenance["request_fingerprint"])
 
     def test_future_new_adset_uses_selected_saved_custom_or_broad_audience(self):
         cases = (
@@ -1502,10 +1731,46 @@ class PostingServiceTests(unittest.TestCase):
             return canvas
 
         client.instant_experience = wrong_destination
-        with self.assertRaisesRegex(PostingError, "fixed button could not be verified"):
+        with self.assertRaisesRegex(PostingError, "fixed button verification mismatch"):
             MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(
                 request_for()
             )
+        self.assertEqual(client.calls.count("template_copy"), 0)
+
+    def test_unknown_reused_instant_experience_without_provenance_blocks(self):
+        request = request_for()
+        clean = validate_posting_request(request)
+        ad_results = posting_ad_results(
+            (),
+            ad_names=(
+                "Max Verstappen Victory IA 1",
+                "Max Verstappen Victory IA 2",
+                "Max Verstappen Victory IA 3",
+            ),
+        )
+        ad_results[0]["meta_instant_experience_id"] = "external-canvas"
+        existing = {
+            "submission_id": request.submission_id,
+            "request_fingerprint": _request_fingerprint(clean),
+            "destination_url": clean["destination_url"],
+            "status": "FAILED",
+            "campaign_id": "campaign-existing",
+            "campaign_name": "Existing campaign",
+            "adset_id": "adset-existing",
+            "adset_name": "Existing ad set",
+            "ad_results": ad_results,
+        }
+        client = FakePostingClient()
+        client.canvas_readbacks["external-canvas"] = {
+            "id": "external-canvas",
+            "body_elements": [{"id": "external-footer"}],
+        }
+
+        with self.assertRaisesRegex(PostingError, "verification unavailable"):
+            MetaPostingService(
+                client=client, store=FakePostingStore(existing=existing)
+            ).create_paused_campaign(request)
+
         self.assertEqual(client.calls.count("template_copy"), 0)
 
     def test_zero_eligible_products_complete_with_read_only_warning(self):
@@ -1682,17 +1947,24 @@ class PostingServiceTests(unittest.TestCase):
             "https://sportscaveshop.com/products/"
             "six-laps-ahead-peter-brock-wall-art"
         )
+        retry_request = request_for(
+            submission_id="33333333-3333-4333-8333-333333333333",
+            product_title="Six Laps Ahead Peter Brock Wall Art",
+            product_handle="six-laps-ahead-peter-brock-wall-art",
+            destination_url=product_url,
+        )
+        existing["destination_url"] = product_url
+        existing["request_fingerprint"] = _request_fingerprint(
+            validate_posting_request(retry_request)
+        )
         client.canvas_readbacks["1390026833255926"] = {
             "id": "1390026833255926",
             "name": "Six Laps Ahead Peter Brock IA 1 | Storefront",
             "is_published": True,
             "body_elements": [
-                {
-                    "element": {
-                        "rich_text": {"plain_text": "Claim Your Edition"},
-                        "open_url_action": {"url": product_url},
-                    }
-                }
+                {"id": "existing-photo-element"},
+                {"id": "existing-product-element"},
+                {"id": "existing-footer-element"},
             ],
         }
         existing_route_one_creative = build_collection_creative_payload(
@@ -1727,14 +1999,7 @@ class PostingServiceTests(unittest.TestCase):
         result = MetaPostingService(
             client=client,
             store=FakePostingStore(existing=existing),
-        ).create_paused_campaign(
-            request_for(
-                submission_id="33333333-3333-4333-8333-333333333333",
-                product_title="Six Laps Ahead Peter Brock Wall Art",
-                product_handle="six-laps-ahead-peter-brock-wall-art",
-                destination_url=product_url,
-            )
-        )
+        ).create_paused_campaign(retry_request)
 
         self.assertEqual(result["submission_id"], original_submission_id)
         self.assertEqual(result["campaign_id"], "120249720387120554")
@@ -1773,6 +2038,18 @@ class PostingServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["ad_results"][0]["meta_ad_reused"])
         self.assertTrue(result["ad_results"][0]["meta_instant_experience_reused"])
+        self.assertEqual(
+            result["ad_results"][0]["instant_experience_verification"][
+                "display_status"
+            ],
+            "VERIFIED VIA CREATION RECORD",
+        )
+        self.assertEqual(
+            result["ad_results"][0]["instant_experience_verification"][
+                "verification_source"
+            ],
+            "Persisted creation provenance",
+        )
         self.assertEqual(
             [row["meta_ad_configured_status"] for row in result["ad_results"]],
             ["PAUSED", "PAUSED", "PAUSED"],
