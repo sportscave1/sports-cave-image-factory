@@ -18,6 +18,13 @@ from meta_collection_diagnostics import (
     MetaCollectionValidateOnlyProbe,
     sanitized_collection_request_shape,
 )
+from meta_collection_template_copy import (
+    MetaCollectionTemplateCopySafetyError,
+    MetaCollectionTemplateCopyService,
+    MetaCollectionTemplateCopyVerificationError,
+    configured_collection_template_ad_id,
+    sanitized_template_copy_error,
+)
 from meta_posting_service import (
     AD_TYPE,
     CAMPAIGN_DAILY_BUDGET_MINOR,
@@ -75,6 +82,9 @@ RESULT_KEY = f"{STATE_PREFIX}result"
 PROCESSING_KEY = f"{STATE_PREFIX}processing"
 COLLECTION_DIAGNOSTIC_RESULT_KEY = f"{STATE_PREFIX}collection_diagnostic_result"
 COLLECTION_DIAGNOSTIC_PROCESSING_KEY = f"{STATE_PREFIX}collection_diagnostic_processing"
+COLLECTION_TEMPLATE_COPY_RESULT_KEY = f"{STATE_PREFIX}collection_template_copy_result"
+COLLECTION_TEMPLATE_COPY_PROCESSING_KEY = f"{STATE_PREFIX}collection_template_copy_processing"
+COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY = f"{STATE_PREFIX}collection_template_copy_attempted"
 META_OVERVIEW_STATE_KEY = "ads_posting_meta_overview"
 META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
 META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
@@ -640,6 +650,52 @@ def run_collection_validation_from_posting_state(
     }
 
 
+def run_collection_template_copy_from_posting_state(
+    *,
+    submission_id,
+    product_title,
+    product_set_id,
+    product_url,
+    primary_text,
+    headline,
+    service=None,
+    client=None,
+    template_copy_service=None,
+):
+    """Create and verify one paused template copy from current route-1 state."""
+    client = client or MetaPostingClient()
+    service = service or MetaPostingService(client=client)
+    record = service.failed_collection_diagnostic_job(
+        submission_id=submission_id,
+        product_title=product_title,
+        product_set_id=product_set_id,
+    )
+    context = _resolve_collection_validation_context(
+        record,
+        product_title=product_title,
+        product_set_id=product_set_id,
+    )
+    creative_parameters = build_collection_creative_payload(
+        name=f"{context['ad_name']} | Collection",
+        page_id=client.page_id,
+        instagram_user_id=client.instagram_user_id,
+        image_hash=context["image_hash"],
+        canvas_id=context["instant_experience_id"],
+        product_set_id=product_set_id,
+        destination_url=product_url,
+        primary_text=primary_text,
+        headline=headline,
+    )
+    template_copy_service = template_copy_service or MetaCollectionTemplateCopyService(
+        client
+    )
+    return template_copy_service.create_one_paused_copy(
+        source_ad_id=configured_collection_template_ad_id(),
+        target_adset_id=context["adset_id"],
+        creative_parameters=creative_parameters,
+    )
+
+
 def _reset_posting_state():
     for key in tuple(st.session_state):
         if str(key).startswith(STATE_PREFIX):
@@ -828,6 +884,58 @@ def _render_collection_validation(result):
             st.json(dict(result.get("request_shapes") or {}))
 
 
+def _render_collection_template_copy(result):
+    result = dict(result or {})
+    with st.container(border=True):
+        st.markdown("### META COLLECTION TEMPLATE COPY")
+        st.markdown(
+            f"**Persistent Meta writes:** {result.get('persistent_meta_writes') or 'NONE CONFIRMED'}"
+        )
+        if str(result.get("status") or "").upper() == "PASS":
+            if result.get("reconciled_existing_copy"):
+                st.success("PASS — the existing paused template copy was reconciled and verified.")
+            else:
+                st.success("PASS — one paused template copy was created and verified.")
+        else:
+            st.error(str(result.get("error") or result.get("safe_error") or "Template copy failed."))
+        if result.get("copied_ad_id"):
+            st.caption(
+                f"Copied Ad: `{result.get('copied_ad_id')}` · "
+                f"Creative: `{result.get('copied_creative_id') or 'unavailable'}` · "
+                f"Target Ad Set: `{result.get('target_adset_id') or 'unavailable'}`"
+            )
+            st.caption(
+                f"Status: `{result.get('copied_status') or '—'}` · "
+                f"Configured status: `{result.get('copied_configured_status') or '—'}` · "
+                f"Effective status: `{result.get('copied_effective_status') or '—'}`"
+            )
+        if result.get("error_code") is not None or result.get("http_status") is not None:
+            st.caption(
+                f"HTTP status: `{result.get('http_status') if result.get('http_status') is not None else '—'}` · "
+                f"Code: `{result.get('error_code') if result.get('error_code') is not None else '—'}` · "
+                f"Subcode: `{result.get('error_subcode') if result.get('error_subcode') is not None else '—'}`"
+            )
+        if result.get("error_user_title"):
+            st.caption(f"Title: {result['error_user_title']}")
+        if result.get("error_user_msg"):
+            st.write(f"Message: {result['error_user_msg']}")
+        if result.get("fbtrace_id"):
+            st.caption(f"fbtrace_id: `{result['fbtrace_id']}`")
+        checks = dict(result.get("checks") or {})
+        if checks:
+            st.dataframe(
+                [
+                    {
+                        "Read-back check": name.replace("_", " ").title(),
+                        "Result": "PASS" if passed else "FAIL",
+                    }
+                    for name, passed in checks.items()
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
 def _render_recent_posts():
     with st.expander("Recent Posting jobs", expanded=False):
         try:
@@ -865,6 +973,7 @@ def render_page():
     st.session_state.setdefault(SUBMISSION_ID_KEY, posting_submission_id())
     st.session_state.setdefault(PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
+    st.session_state.setdefault(COLLECTION_TEMPLATE_COPY_PROCESSING_KEY, False)
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
     if str(result.get("status") or "") == "COMPLETE":
@@ -958,6 +1067,7 @@ def render_page():
         st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
         st.session_state.pop(RESULT_KEY, None)
         st.session_state.pop(COLLECTION_DIAGNOSTIC_RESULT_KEY, None)
+        st.session_state.pop(COLLECTION_TEMPLATE_COPY_RESULT_KEY, None)
     product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
     product_url = str(ads_page.canonical_shopify_product_url_from_row(selected_row) or "")
     product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
@@ -1235,5 +1345,87 @@ def render_page():
     )
     if saved_diagnostic.get("signature") == diagnostic_signature:
         _render_collection_validation(saved_diagnostic.get("result"))
+
+    st.markdown("#### Real-write Collection diagnostic")
+    st.warning(
+        "Creates exactly one real PAUSED ad by copying the configured Collection "
+        "template into the existing failed-job Ad Set. It does not create a campaign, "
+        "ad set, Instant Experience, Page photo, or additional route ads."
+    )
+    template_copy_attempted = bool(
+        st.session_state.get(COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY)
+    )
+    if st.button(
+        "Create 1 Paused Template Copy",
+        type="secondary",
+        use_container_width=True,
+        disabled=(
+            not diagnostic_ready
+            or st.session_state[PROCESSING_KEY]
+            or st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY]
+            or st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY]
+            or template_copy_attempted
+        ),
+        key=f"{STATE_PREFIX}collection_template_copy",
+    ):
+        # Lock the control before the network call. A Meta failure or ambiguous
+        # response must never cause an automatic or accidental second copy.
+        st.session_state[COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY] = {
+            "signature": diagnostic_signature,
+            "source_ad_id": configured_collection_template_ad_id(),
+        }
+        st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = True
+        try:
+            with st.spinner("Creating and verifying one paused Meta template copy…"):
+                template_copy_result = run_collection_template_copy_from_posting_state(
+                    submission_id=st.session_state[SUBMISSION_ID_KEY],
+                    product_title=product_title,
+                    product_set_id=product_set_id,
+                    product_url=product_url,
+                    primary_text=creative_inputs[0]["primary_text"],
+                    headline=creative_inputs[0]["headline"],
+                )
+        except MetaCollectionTemplateCopyVerificationError as error:
+            template_copy_result = dict(error.result or {})
+            template_copy_result["status"] = "FAIL"
+            template_copy_result["error"] = str(error)
+        except MetaAdsApiError as error:
+            template_copy_result = {
+                "status": "FAIL",
+                "persistent_meta_writes": "NONE CONFIRMED — REVIEW REQUIRED",
+                **sanitized_template_copy_error(error),
+            }
+        except (PostingValidationError, MetaCollectionTemplateCopySafetyError) as error:
+            template_copy_result = {
+                "status": "FAIL",
+                "persistent_meta_writes": "NONE",
+                "error": str(error),
+            }
+        except Exception:
+            template_copy_result = {
+                "status": "FAIL",
+                "persistent_meta_writes": "NONE CONFIRMED — REVIEW REQUIRED",
+                "error": (
+                    "The template-copy diagnostic could not confirm a safe result. "
+                    "Do not retry until the source ad copies are reviewed in Meta."
+                ),
+            }
+        finally:
+            st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = False
+        st.session_state[COLLECTION_TEMPLATE_COPY_RESULT_KEY] = {
+            "signature": diagnostic_signature,
+            "result": template_copy_result,
+        }
+
+    saved_template_copy = dict(
+        st.session_state.get(COLLECTION_TEMPLATE_COPY_RESULT_KEY) or {}
+    )
+    if saved_template_copy.get("signature") == diagnostic_signature:
+        _render_collection_template_copy(saved_template_copy.get("result"))
+    elif template_copy_attempted:
+        st.caption(
+            "A template-copy attempt has already been made in this Posting session. "
+            "Further copies are blocked."
+        )
 
     _render_recent_posts()

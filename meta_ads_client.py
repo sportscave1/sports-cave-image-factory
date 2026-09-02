@@ -1509,10 +1509,67 @@ class MetaPostingClient:
             raise MetaAdsApiError("Meta did not return an ad ID.")
         return ad_id
 
+    def ad_copies(self, source_ad_id):
+        """Read existing copies of one source ad for duplicate-safe diagnostics."""
+        return tuple(
+            _paged_get(
+                f"{str(source_ad_id or '').strip()}/copies",
+                params={
+                    "fields": (
+                        "id,name,status,configured_status,effective_status,"
+                        "creative{id},adset_id,source_ad_id"
+                    ),
+                    "limit": 100,
+                },
+                config=self.config,
+            ).get("rows")
+            or ()
+        )
+
+    def copy_paused_ad_from_template(
+        self, *, source_ad_id, target_adset_id, creative_parameters
+    ):
+        """Use only Meta's ad-copy edge and force the new ad to PAUSED."""
+        payload = _post(
+            f"{str(source_ad_id or '').strip()}/copies",
+            data={
+                "adset_id": str(target_adset_id or "").strip(),
+                "status_option": "PAUSED",
+                "creative_parameters": json.dumps(dict(creative_parameters or {})),
+            },
+            config=self.config,
+        )
+        candidates = [payload.get("id"), payload.get("copied_ad_id")]
+        candidates.extend(payload.get("copied_ad_ids") or ())
+        rows = payload.get("data") or ()
+        if isinstance(rows, dict):
+            rows = (rows,)
+        candidates.extend(dict(row or {}).get("id") for row in rows)
+        ad_id = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
+        if not ad_id:
+            raise MetaAdsAmbiguousResultError(
+                "Meta did not confirm the copied ad ID. Do not retry until the source ad's "
+                "copies have been reconciled."
+            )
+        return ad_id
+
     def ad(self, ad_id):
         return _request(
             str(ad_id or ""),
             params={"fields": "id,name,status,configured_status,effective_status,creative{id},adset_id"},
+            config=self.config,
+        )
+
+    def creative(self, creative_id):
+        """Read the Collection fields required by template-copy verification."""
+        return _request(
+            str(creative_id or ""),
+            params={
+                "fields": (
+                    "id,name,object_story_spec,product_set_id,image_hash,url_tags,"
+                    "contextual_multi_ads,degrees_of_freedom_spec"
+                )
+            },
             config=self.config,
         )
 
