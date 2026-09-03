@@ -1,0 +1,170 @@
+[
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "card_2",
+    "sha256": "2903a498ebe861cd708a92a6bfd70840492bb98a5fa2d218da1b317de0cdb185"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "card_3",
+    "sha256": "7fd76c81e041f97a8c7b61abd219ba8716d748e034efe15e0eaa17481e2559ee"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "card_4",
+    "sha256": "41cd045586f5a1ab26a1a90e422300870ea0575eadc8e1eac5c3626de8598d39"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "refresh_Carousel",
+    "sha256": "28d53aa3764c0ff2b9186da647e29ac05cf5543129db3987a70b4e51c34f66df"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "Instant Experience",
+    "sha256": "8615671c6195e997cbde61ffc16faa7f35b4923ac943c1f3d8ec2a527ce1204f"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "refresh_Instant Experience",
+    "sha256": "fb254d72f9907d6dc2a4bb827bb748aafef2b8d1b0f85531d5da58c91a48bad6"
+  },
+  {
+    "category": "Motorsport",
+    "country": "Australia",
+    "kind": "Single Image / Video",
+    "sha256": "4634cb267c0505718c23e56b2df83576d4c261d906f60e745b5cc4b382f1cf88"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "card_2",
+    "sha256": "fa032d130008e283bc4153f3a053f033b3c5c4171e977c80125828c55c1f3069"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "card_3",
+    "sha256": "2a586f21f24d69e0fca4b1d69e23726e29a8da9a6d0f7671580562a077bea8c4"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "card_4",
+    "sha256": "d6d8b808ffdd37c70adbe7d6e34e58f282bb3ee258bd545ea56acdf8e36dc2bd"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "refresh_Carousel",
+    "sha256": "f9d80c92a6c29b8484067d8bf71d46c65bf701e5a2017e2732a34d45d2704fd7"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "Instant Experience",
+    "sha256": "b3ffc69c23dd29dcb3b9c14977780ac9178f6ab67551c137ec61c34e618113df"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "refresh_Instant Experience",
+    "sha256": "66e5d264b9be75afcab47079f6f5bc6dca995eb022eeccd70b3bf9c5495ff06b"
+  },
+  {
+    "category": "Football",
+    "country": "UK",
+    "kind": "Single Image / Video",
+    "sha256": "1b9dfac4f0fe4e78291bc708d80bfdba36d3bcdf65b53ea4754664a87643748a"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "card_2",
+    "sha256": "5facb67ca9c3313ec2467d89fb6d88389faaaa2ba690f5d83b2f73776f11678c"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "card_3",
+    "sha256": "c3c2fae2f465c813775c5135ebd22a952e1401798d1aa88522338d8d2bf5ca3d"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "card_4",
+    "sha256": "fa465e485af92b7b8d1b3800173fb3f21a18a6df5228a075a6714dc3062a833a"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "refresh_Carousel",
+    "sha256": "7ddba631c35cb3264be486052c3aa178f1539abd93aca6b809ee928beb9b3e0c"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "Instant Experience",
+    "sha256": "22e1dc69ad9034f41622e42f1001cca3ab93b208d7956ae47bd19c9bb544febf"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "refresh_Instant Experience",
+    "sha256": "b53a8628c13bdf917585f1148f4b11e84d3fcd0f3d7de6f33f8fb7d95dcd46d8"
+  },
+  {
+    "category": "Cricket",
+    "country": "New Zealand",
+    "kind": "Single Image / Video",
+    "sha256": "fc217002f5219a10e7656a743aacfe7ca1ce77310338be2f1c2def0fe2c0f292"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "card_2",
+    "sha256": "0176eea608fcb562f4a9ce6b40f345731160f30c5754405f553211c7b4e1a576"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "card_3",
+    "sha256": "8b40165fc508c7f53db9f56e37926ca981d27bf3743db6be2010e8612ceadc88"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "card_4",
+    "sha256": "5dbb034d30b174438fe9c4b8f952aa8b68b137b88a91174530f08a5e51de0068"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "refresh_Carousel",
+    "sha256": "d4b86afbd9828a43e983677505e0e594c880263d69e3357c483b1a07c8527b7c"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "Instant Experience",
+    "sha256": "fd3688b2b96bea25d88fc854fa45ea968f5b319e1dd4678d02e1292205f1f47a"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "refresh_Instant Experience",
+    "sha256": "be252669a4e8eb4051ffdd83d12d0bdab7b309f6956994e0fe4dec1c9b7ceb4d"
+  },
+  {
+    "category": "NBA",
+    "country": "USA",
+    "kind": "Single Image / Video",
+    "sha256": "fb67343fb8a1a49b22093dc9d2329a2d6a104da59411a187bebc8b02f0001571"
+  }
+]

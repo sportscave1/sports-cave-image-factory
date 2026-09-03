@@ -129,7 +129,6 @@ CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
 ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
-ADS_CAROUSEL_DETAIL_CONTRACT_VERSION = "CAROUSEL HERO AND EDITION DETAIL V1"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
@@ -2770,51 +2769,7 @@ def build_carousel_final_square_format_check():
     )
 
 
-CAROUSEL_NOSTALGIC_WALL_TONES = {
-    "cricket": ("muted heritage pavilion green", "historic pavilions and quiet clubhouse interiors"),
-    "australian rules": ("muted heritage oval green", "traditional oval grounds and aged clubrooms"),
-    "rugby union": ("muted deep clubroom green", "traditional rugby clubhouses"),
-    "rugby league": ("muted heritage navy", "established rugby league clubrooms"),
-    "football": ("muted stadium tunnel green", "older stadium tunnels and terrace-era grounds"),
-    "nba": ("muted vintage hardwood tan", "historic basketball courts and warm retro arenas"),
-    "nfl": ("muted aged leather tan", "heritage locker rooms and traditional football equipment"),
-    "baseball": ("muted classic ballpark green", "historic ballpark walls and grandstands"),
-    "motorsport": ("muted petrol blue", "heritage racing workshops and older pit-lane surfaces"),
-    "ice hockey": ("muted rink blue-grey", "historic ice arenas and cool rink-side architecture"),
-    "tennis": ("muted clay terracotta", "traditional clay courts and tournament heritage"),
-    "golf": ("muted clubhouse olive", "traditional clubhouses and mature golf-course landscapes"),
-    "combat": ("muted vintage gym burgundy", "historic boxing gyms and aged training halls"),
-    "horse racing": ("muted warm clubhouse cream", "historic racecourse pavilions and grandstands"),
-    "other": ("muted gallery taupe", "restrained collector galleries and warm painted walls"),
-}
-CAROUSEL_WALL_SPORT_ALIASES = {
-    "basketball": "nba", "nba basketball": "nba",
-    "soccer": "football", "association football": "football", "football soccer": "football",
-    "american football": "nfl", "american football nfl": "nfl",
-    "afl": "australian rules", "aussie rules": "australian rules", "australian rules football": "australian rules",
-    "australian rules afl": "australian rules",
-    "rugby": "rugby union", "nrl": "rugby league",
-    "nhl": "ice hockey", "ice hockey nhl": "ice hockey",
-    "boxing": "combat", "mma": "combat", "combat sports": "combat",
-    "combat sports boxing mma": "combat",
-    "motor racing": "motorsport", "motor sports": "motorsport", "motorsports": "motorsport",
-}
-
-
-def carousel_nostalgic_wall_treatment(category):
-    sport = _normalise_option_label(re.sub(r"[^\w]+", " ", str(category or "").casefold()))
-    sport = CAROUSEL_WALL_SPORT_ALIASES.get(sport, sport)
-    tone, heritage = CAROUSEL_NOSTALGIC_WALL_TONES.get(sport, CAROUSEL_NOSTALGIC_WALL_TONES["other"])
-    return (
-        f"Required nostalgic wall tone: {tone}. Its restrained sporting association is {heritage}. "
-        "Use a matte plaster or painted-wall finish with low saturation; the wall must never overpower the artwork. "
-        "This is sport nostalgia, not team branding: do not copy team colours, add team or sports logos, "
-        "slogans, wall graphics or themed-room decor. Retain this resolved tone across generations; "
-        "vary light and subtle surface texture instead of randomly selecting another colour."
-    )
-
-
-def build_carousel_card_one_mockups_close_up_foundation(*, category="", workflow_mode=ADS_WORKFLOW_MODE_NEW):
+def build_carousel_card_one_mockups_close_up_foundation():
     foundation = image_factory.get_close_up_wall_prompt_foundation()
     if not foundation:
         return ""
@@ -2833,43 +2788,24 @@ def build_carousel_card_one_mockups_close_up_foundation(*, category="", workflow
     }
     for old, new in replacements.items():
         foundation = foundation.replace(old, new)
-    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        foundation = foundation.replace(
-            "Almost perfectly straight-on camera position, with only a very subtle 2-4 degree natural angle when required for realistic frame depth.",
-            "Require a subtle 5–12 degree off-axis / slight three-quarter camera angle from one side. Never use a flat straight-on catalogue view.",
-        ).replace(
-            "matte plaster, soft concrete, warm beige, off-white, charcoal, muted taupe, or clean gallery-style painted wall.",
-            carousel_nostalgic_wall_treatment(category),
-        ).replace("premium black timber frame.", "preserve the source frame material and colour; premium black timber only when the uploaded frame uses black timber.")
-        foundation = foundation.replace("artwork and black frame,", "artwork and its unchanged frame,").replace(
-            "No logos.", "No added logos. Preserve every logo already present in the uploaded artwork."
-        )
     return foundation.strip()
 
 
-def build_carousel_card_one_product_hero_lock(*, category="", workflow_mode=ADS_WORKFLOW_MODE_NEW):
-    close_up_foundation = build_carousel_card_one_mockups_close_up_foundation(category=category, workflow_mode=workflow_mode)
+def build_carousel_card_one_product_hero_lock():
+    close_up_foundation = build_carousel_card_one_mockups_close_up_foundation()
     foundation_block = (
         f"\n\nMOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:\n{close_up_foundation}"
         if close_up_foundation
         else ""
     )
-    angle = "Use an almost perfectly straight-on camera position, level with the centre of the artwork. Allow no more than a very subtle 2-4 degree natural angle when required for realistic frame depth."
-    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        angle = (
-            "Require a subtle 5–12 degree off-axis / slight three-quarter camera angle, level with the centre of the artwork. "
-            "Never use a completely flat, straight-on catalogue image. Natural camera perspective may affect the complete framed product "
-            "as ONE rigid rectangular physical object only; never warp the artwork, bend the frame, distort typography or faces, "
-            "change the artwork crop, squash or stretch it, or cut off the outer frame."
-        )
-    prompt = f"""CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:
+    return f"""CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:
 Carousel Card 1 must use the existing Mockups/Reel Close-Up Premium Wall Shot as its close-up composition foundation, then obey the stricter Carousel Card 1 rules below. Carousel Card 1 must be a premium close-up product photograph, not a lifestyle room photograph.{foundation_block}
 
 The complete framed product must occupy approximately 65-80% of the useful square composition and should fill most of the available visual area while preserving its correct landscape proportions.
 
 Keep all four outer frame edges and all four corners completely visible. Leave natural breathing room around the frame. Never crop the frame, artwork, border, plaque or shadow.
 
-{angle}
+Use an almost perfectly straight-on camera position, level with the centre of the artwork. Allow no more than a very subtle 2-4 degree natural angle when required for realistic frame depth.
 
 Use the visual character of a premium 70-85 mm product-photography lens:
 - No wide-angle room view.
@@ -2917,43 +2853,6 @@ CARD 1 REALISM UPGRADE — MANDATORY:
 Card 1 must resemble genuine commercial product photography. Require physically convincing premium timber frame depth, sharp square corners and clean joins, natural glass thickness, subtle reflections that match the light source, controlled glare that never hides important artwork details, realistic contact shadow behind and slightly below the frame, accurate scale and perspective, fine wall texture, natural highlight falloff and realistic sharpness without oversharpening.
 
 Reject flat pasted-on artwork, fake or missing glass, plastic frame materials, artificial HDR, excessive glow, warped frame edges, curved walls, impossible reflections, melted textures, fake luxury styling, AI-generated-looking artwork, excessive depth of field, blurred product detail, compact entry gallery compositions, visible flooring, furniture-led composition or any room-setting instruction that would make the framed product smaller than 65% of the useful composition."""
-    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        prompt = prompt.replace(
-            "At most, allow a small restrained edge of a console, cabinet or surface at the bottom of the image, but only if it does not reduce the frame's required product dominance.",
-            "Do not add furniture or room decor; keep only the frame and narrow wall context.",
-        )
-        if "Required nostalgic wall tone:" not in prompt:
-            prompt += "\n\n" + carousel_nostalgic_wall_treatment(category)
-        prompt += """
-
-CARD 1 GLASS, LIGHT AND MOUNTING — REQUIRED:
-Require genuine transparent frame glass, subtle premium glare, soft controlled reflection, premium highlights and realistic falloff that interact naturally with the required camera angle and room/window light. Never use fake white streak overlays or synthetic CGI shine. Reflections must not obscure faces, artwork, typography, badges, signatures, edition details or important product information.
-Require a realistic wall contact shadow, subtle depth behind the physical frame, soft directional shadow, believable ambient occlusion and consistent lighting direction. The frame must feel physically mounted with real depth and weight, never digitally pasted onto the wall. Preserve exact frame material and colour, every source logo and signature; never mirror or recolour the uploaded product."""
-    return prompt
-
-
-def build_carousel_card_five_edition_detail_lock():
-    return """CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:
-Create a 1024 x 1024 ultra-realistic limited edition detail mockup: a premium photorealistic magnifying glass detail shot highlighting the genuine limited-edition / numbered-edition information on the exact uploaded Sports Cave framed artwork.
-
-Use the uploaded full-resolution artwork and frame as the exact immutable physical reference. Keep the complete artwork and outer frame recognisable and visible with correct aspect ratio and breathing room. Do not crop or blur the artwork. Preserve every athlete, face, body, team/subject, vehicle, stadium/background, piece of equipment, word, letter, number, logo, signature, title/subtitle, font, colour, border, crop, layout, limited-edition badge, plaque, collector badge, numbered detail and edition plate. Preserve the exact frame colour, material, thickness, geometry and proportions. Never redesign, recolour, repaint, enhance, regenerate, reinterpret, replace, mirror, repair or invent product details. Do not stretch, warp, bend, bow, squash, twist, melt, reshape or distort the frame or artwork. Natural camera perspective may affect the complete product only as ONE rigid rectangular physical object.
-
-ACTUAL EDITION DETAIL — VISUAL HERO:
-Place one realistic physical magnifying glass over or near the limited-edition badge, edition plate, edition number, collector badge, certificate-style detail or numbered-edition area ACTUALLY visible in the supplied artwork. If both a collector badge and a numbered edition plate exist, prioritise the NUMBERED EDITION PLATE. If that genuine detail is at bottom centre, place the lens naturally there; otherwise use its actual visible location, never an assumed position. If no genuine edition detail is visible/readable, ask for the full-resolution source showing it before generating Card 5; never invent scarcity or substitute unrelated text.
-
-The magnifying glass is the sole scarcity storytelling device: no fake urgency text. Use a clear glass lens, premium metal rim, realistic handle, natural reflections, soft shadows and believable object weight. Position it naturally in the foreground at a slight angle with physical depth and a plausible soft contact/cast shadow. Keep the rim and handle clear of the genuine edition information.
-Allow modest, believable optical magnification/refraction ONLY inside the physical lens. This is an optical view of the unchanged printed product, not permission to alter its pixels, lettering, numbers or geometry. Keep every genuine character and edition number exact and readable through the lens. Do not excessively enlarge text or create cartoon magnification. No distortion or artificial blur outside the magnifying glass. Do not deform the product beneath it.
-
-Do not create fake text. Do not create a fake edition number. Do not change the edition number. Do not invent scarcity information. Do not add new badges. Do not add new logos. Do not add extra text overlays. Do not add watermarks. Never invent, replace or modify an edition number.
-
-FRAME, TWO GLASS SURFACES AND LIGHT:
-Keep straight outer edges, sharp corners, realistic mitred joins, consistent thickness, believable bevels, real physical depth, subtle source-material texture and correct mounting. Use premium black timber only when the uploaded source frame uses black timber; otherwise retain its exact material and colour.
-Require genuine transparent artwork glazing AND a clear magnifying-glass lens, each with believable room-based reflections, restrained premium glare and natural highlight falloff. Reflections on either glass surface must NEVER conceal the edition information or obscure, rewrite or distort artwork, faces, typography, logos, badges or plaques.
-Use soft natural directional light, controlled premium highlights, realistic wall/contact shadows, ambient occlusion, consistent light direction and believable depth. Keep the product sharp. The scene must look like professional collector-product photography, not CGI, rendered, illustrated, painted, plastic, synthetic, over-smoothed or over-sharpened. No excessive HDR, bloom, glow, fisheye distortion, fake blur, melted geometry, malformed objects or impossible perspective.
-
-COMPOSITION AND BACKGROUND:
-Square 1024 x 1024 canvas, composed square from the start. The complete framed artwork must remain clearly recognisable while the genuine limited-edition detail becomes the visual hero through the lens. Keep the framed edition among the largest elements with correct proportions. Use a clean matte plaster / gallery-style painted wall in muted taupe, warm beige, soft concrete, charcoal or off-white. No room decor. No furniture. No people. No random props except the magnifying glass. No clutter. No neon signs. No extra wall art. No random sports logos. No added text.
-Keep Card 5 distinct from Card 1's desirable close-up hero: this is a controlled numbered collector-detail photograph, not another general hero or lifestyle room shot. Carry the selected product and sport through the genuine source artwork, never invented marks or sporting props."""
 
 
 def build_carousel_product_dominance_principle_lock():
@@ -2961,14 +2860,12 @@ def build_carousel_product_dominance_principle_lock():
 We are selling the framed Sports Cave edition, not the room. The room may enhance the product, provide scale and create aspiration, but it must never overpower the framed artwork or make it look small. In every carousel card, the framed edition must be dominant, instantly recognizable and readable as a small Facebook carousel card on a phone. Use varied rooms, wall colours, camera positions and viewing angles without creating distant product shots. Maintain a cohesive premium campaign while ensuring every card works independently as a Facebook advertisement."""
 
 
-def build_carousel_card_camera_distance_lock(index, *, category="", workflow_mode=ADS_WORKFLOW_MODE_NEW):
+def build_carousel_card_camera_distance_lock(index):
     if index == 1:
-        return build_carousel_card_one_product_hero_lock(category=category, workflow_mode=workflow_mode)
+        return build_carousel_card_one_product_hero_lock()
     if index in {2, 3, 4}:
         return """CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:
 Use a medium or medium-close lifestyle composition, not a distant wide-angle room shot. The complete framed artwork should generally occupy approximately 45-65% of the useful square composition. The product must remain instantly recognizable and readable when viewed as a small Facebook carousel card on a phone. Show enough of the room to create variety, context, ownership appeal and atmosphere, but do not place the frame far away, at the end of a large room or as a small background decoration. Never use an extreme wide shot, excessive empty space or oversized furniture that visually reduces the product. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
-    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        return build_carousel_card_five_edition_detail_lock()
     return """CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:
 Finish with a dramatic product-led scarcity image using a close or medium-close composition. Keep the framed edition prominent even when the card focuses on scarcity, edition details or a different environment. The framed edition must remain one of the largest elements in the composition and must not become secondary to scarcity messaging, furniture, architecture or atmosphere. Make the existing edition badge, plaque or numbered-edition detail visible when it exists in the supplied product, but never invent, replace or modify an edition number. Do not zoom out significantly farther than Cards 2-4. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
 
@@ -3011,7 +2908,6 @@ def build_carousel_image_prompt_schema(
     product_name="",
     category="",
     selected_country="",
-    workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
@@ -3025,7 +2921,7 @@ def build_carousel_image_prompt_schema(
     }
     square_lock = build_carousel_square_format_lock()
     product_dominance_lock = build_carousel_product_dominance_principle_lock()
-    camera_distance_lock = build_carousel_card_camera_distance_lock(index, category=category, workflow_mode=workflow_mode)
+    camera_distance_lock = build_carousel_card_camera_distance_lock(index)
     strict_product_lock = build_carousel_strict_product_lock()
     product_lock = build_product_lock_visual_rules()
     frame_and_glass_rules = build_frame_and_glass_visual_rules()
@@ -3037,39 +2933,6 @@ def build_carousel_image_prompt_schema(
         category,
         selected_country,
     )
-    creative_direction = f"Use the exact Card {index} headline, description and supplementary creative direction generated earlier in this campaign to shape one concrete scene. Do not render the Meta headline or description inside the image unless the approved card concept explicitly requires on-image text. The creative-direction line is additional context only and must never replace or shorten this complete prompt."
-    scene_description = "Describe the concrete room or wall, wall colour and material, camera position, lens character, lighting direction, furniture context and emotional atmosphere in full. Do not return a summary, shorthand variation, shared base prompt, list of changes or reference to instructions elsewhere."
-    if index in {1, 5} and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        square_lock = square_lock.replace("Compose the entire room, framed product", "Compose the wall, framed product")
-        product_dominance_lock = product_dominance_lock.replace(
-            "Use varied rooms, wall colours, camera positions and viewing angles without creating distant product shots.",
-            "Vary wall lighting and camera placement only within this card's required wall and angle limits, without creating distant product shots.",
-        )
-        frame_and_glass_rules = frame_and_glass_rules.replace(
-            "The black frame must appear", "The supplied frame must appear"
-        ).replace("realistic black timber or frame depth", "realistic source frame depth; black timber only when the source uses it")
-        photorealism_lock = photorealism_lock.replace(
-            "genuine high-end interior photograph", "genuine high-end product photograph"
-        ).replace(
-            "Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic.",
-            "Keep the wall restrained and believable. No people, furniture or decor. Only the framed product and the objects explicitly required by this card may appear.",
-        )
-        sport_country_adaptation = sport_country_adaptation.replace("furniture tone", "wall tone").replace(
-            " unless an existing approved creative direction explicitly requires an extremely subtle one", ""
-        )
-        room_realism_rules = """DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT
-Use a clean premium wall, physically believable wall texture, true photographic scale, consistent directional light, contact shadows and ambient occlusion. Show no lifestyle room scene, room decor, furniture, people or clutter. Preserve the uploaded frame as a rigid mounted object. The card-specific wall treatment and allowed objects are mandatory; room variety cannot introduce extra props or a different scene."""
-        variation_lock = """LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT
-Analyze the uploaded Sports Cave product image and previous images for the same product. Make this a distinct photograph using light direction, subtle wall texture, camera height and physical depth within this card's mandatory camera, wall, composition and object limits. Never sacrifice the product lock or change a resolved wall tone to create variation. Do not introduce furniture, room decor or sporting props. Repeat this complete lock in the returned standalone prompt."""
-        scene_description = "Describe the required wall tone and finish, product camera angle, lens character, physical glazing, lighting and contact shadows in full. The card-specific composition is authoritative; do not create a lifestyle room scene or add furniture. Do not return a summary or refer to another prompt."
-        if index == 1:
-            sequential_variation_lock = sequential_variation_lock.replace(
-                "Vary naturally between perspectives such as a subtle left three-quarter angle, right three-quarter angle, straight-on view, slightly higher or lower camera position, or a different off-centre placement. These are examples only; choose the most realistic premium composition for each card.",
-                "Retain the required subtle 5–12 degree off-axis angle; vary its side, lighting or camera height without using a flat straight-on catalogue view.",
-            )
-        else:
-            required_purposes[5] = "Truthful scarcity through a physical magnifying glass over the genuine numbered-edition detail."
-            creative_direction = "Use Card 5's copy only to understand its verified collector purpose. The physical magnifying glass over actual edition detail is the authoritative visual. Do not render any headline, description, campaign offer, urgency text or extra overlay inside this image."
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=selected_country,
@@ -3090,9 +2953,9 @@ Selected market: {selected_country}
 Approved card role: {role}
 Required card purpose: {required_purposes[index]}
 
-{creative_direction}
+Use the exact Card {index} headline, description and supplementary creative direction generated earlier in this campaign to shape one concrete scene. Do not render the Meta headline or description inside the image unless the approved card concept explicitly requires on-image text. The creative-direction line is additional context only and must never replace or shorten this complete prompt.
 
-{scene_description}
+Describe the concrete room or wall, wall colour and material, camera position, lens character, lighting direction, furniture context and emotional atmosphere in full. Do not return a summary, shorthand variation, shared base prompt, list of changes or reference to instructions elsewhere.
 
 {square_lock}
 
@@ -3128,7 +2991,6 @@ def build_carousel_visual_output_requirements(
     product_name="",
     category="",
     selected_country="",
-    workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     roles = get_carousel_visual_roles(template_key)
     schema = []
@@ -3141,16 +3003,9 @@ def build_carousel_visual_output_requirements(
                 product_name=product_name,
                 category=category,
                 selected_country=selected_country,
-                workflow_mode=workflow_mode,
             )
         )
     schema_text = "\n".join(schema).rstrip()
-    detail_rules = ""
-    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        detail_rules = """CARD 1 AND CARD 5 SCENE LIMITS:
-Card 1 must use its resolved sport-nostalgic wall tone and mandatory slight angle. Card 5 must use its magnifying-glass edition-detail concept on a clean wall with no decor or furniture. Generic room variety, sporting atmosphere, campaign context or supplementary creative direction must not override either card's specific scene limits. Keep Cards 2–4's existing lifestyle roles unchanged. Lens magnification on Card 5 is a physical optical view of the unchanged printed source, never an edit to the protected artwork or frame. Repeat the relevant shared master realism/product-lock protections and these card-specific limits in the final standalone prompts.
-
-"""
     return f"""CAROUSEL VISUAL STORY REQUIREMENTS
 
 After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
@@ -3212,7 +3067,7 @@ Do not add prices, discounts, fake buttons, fake UI, watermarks, promotional sti
 
 Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
 
-{detail_rules}IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
 
 {schema_text}
 
@@ -6511,7 +6366,6 @@ def build_campaign_visual_output_contract(
     product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
-    workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     product_name = _clean_product_name(product_name)
     variation_token = _normalise_option_label(variation_token) or "standard"
@@ -6522,7 +6376,6 @@ def build_campaign_visual_output_contract(
             product_name=product_name,
             category=category,
             selected_country=country,
-            workflow_mode=workflow_mode,
         )
     elif campaign_type == "Instant Experience":
         campaign_requirements = build_instant_experience_visual_output_requirements(
@@ -6544,9 +6397,7 @@ def build_campaign_visual_output_contract(
         )
     else:
         return ""
-    contract_version = ads_prompt_contract_version_for_campaign(
-        campaign_type, workflow_mode=workflow_mode,
-    ).removesuffix(f"; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}").replace("; ", "\n")
+    contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
             "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, "
@@ -6669,16 +6520,14 @@ def apply_campaign_visual_output_contract(
     product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
-    workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     if not prompt:
         return prompt
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
-    expected_version = ads_prompt_contract_version_for_campaign(campaign_type, workflow_mode=workflow_mode)
+    expected_version = ads_prompt_contract_version_for_campaign(campaign_type)
     if expected_version in prompt:
         return prompt
-    new_carousel = campaign_type == "Carousel" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW
-    if campaign_type != "Instant Experience" and not new_carousel and ADS_PROMPT_CONTRACT_VERSION in prompt:
+    if campaign_type != "Instant Experience" and ADS_PROMPT_CONTRACT_VERSION in prompt:
         return prompt
     if marker in prompt:
         prompt = prompt[:prompt.index(marker)].rstrip()
@@ -6694,7 +6543,6 @@ def apply_campaign_visual_output_contract(
         product_metadata=product_metadata,
         instant_experience_settings=instant_experience_settings,
         recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
-        workflow_mode=workflow_mode,
     )
     return f"{prompt.rstrip()}\n\n{contract}" if contract else prompt
 
@@ -7363,7 +7211,6 @@ def compose_final_ads_prompt(
     product_metadata=None,
     instant_experience_settings=None,
     recent_instant_experience_fingerprints=None,
-    workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     if not prompt:
         return prompt
@@ -7400,7 +7247,6 @@ def compose_final_ads_prompt(
             product_metadata=product_metadata,
             instant_experience_settings=instant_experience_settings,
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
-            workflow_mode=workflow_mode,
         )
     return prompt
 
@@ -8917,7 +8763,6 @@ def build_ads_prompt(
         "product_metadata": product_metadata,
         "instant_experience_settings": settings,
         "recent_instant_experience_fingerprints": recent_instant_experience_fingerprints,
-        "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH if creative_refresh_context else ADS_WORKFLOW_MODE_NEW,
     }
     if creative_refresh_context:
         return apply_creative_refresh_winner_context(
@@ -9254,8 +9099,6 @@ def ads_prompt_contract_version_for_campaign(
     workflow_mode=ADS_WORKFLOW_MODE_NEW,
 ):
     version = ADS_PROMPT_CONTRACT_VERSION
-    if campaign_type == "Carousel" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        version = f"{version}; {ADS_CAROUSEL_DETAIL_CONTRACT_VERSION}"
     if campaign_type == "Instant Experience":
         version = (
             f"{ADS_PROMPT_CONTRACT_VERSION}; "

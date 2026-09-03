@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import html
+from copy import deepcopy
 
 import streamlit as st
 
 import ads_page
+import ads_posting_handoff as posting_handoff
 from ads_image_workflow import (
     AdsImageValidationError,
     build_meta_posting_image_record,
@@ -143,6 +145,7 @@ PRODUCT_SELECTOR_RUNTIME_VERSION = "2026-09-03-session-selector-v1"
 CSV_IMPORT_KEY = f"{STATE_PREFIX}csv_import"
 CSV_IMPORT_STATE_KEY = f"{STATE_PREFIX}csv_import_state"
 ADS_COPY_ROUTES_STATE_KEY = f"{STATE_PREFIX}ads_copy_routes"
+SAVED_PRODUCT_URL_KEY = f"{STATE_PREFIX}saved_product_url"
 
 RUN_STATE_DRAFT = "DRAFT"
 RUN_STATE_ACTIVE = "ACTIVE"
@@ -478,6 +481,17 @@ def _posting_record_title(record):
 
 def match_posting_import_product(batch, product_records):
     records = tuple(dict(record or {}) for record in product_records or ())
+    product_id = str((batch or {}).get("product_id") or "").strip()
+    id_matches = [
+        record for record in records
+        if product_id and ads_page._edition_ops_product_id_from_row(record.get("row") or {}) == product_id
+    ]
+    if len(id_matches) == 1:
+        return id_matches[0]
+    if len(id_matches) > 1:
+        raise PostingImportCSVError("More than one Posting product matches this product ID.")
+    if product_id:
+        raise PostingImportCSVError("The saved product ID is not available in the current Posting product list.")
     handle = str((batch or {}).get("product_handle") or "").strip().casefold()
     csv_url = str((batch or {}).get("product_url") or "").strip().rstrip("/")
     title = str((batch or {}).get("product_name") or "").strip().casefold()
@@ -573,6 +587,14 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
         updates = {
             ADS_COPY_ROUTES_STATE_KEY: ads,
         }
+        if batch.get("product_name") or batch.get("product_handle") or batch.get("product_id"):
+            matched = match_posting_import_product(batch, product_records)
+            updates.update({
+                PRODUCT_KEY: str(matched.get("identity") or ""),
+                PRODUCT_TRACK_KEY: str(matched.get("identity") or ""),
+                COUNTRY_KEY: str(batch.get("country") or ""),
+                SPORT_KEY: str(batch.get("sport_category") or ""),
+            })
         for index, ad in enumerate(ads):
             updates[PRIMARY_TEXT_KEYS[index]] = str(ad.get("primary_text") or "")
             updates[HEADLINE_KEYS[index]] = str(ad.get("headline") or "")
@@ -639,6 +661,75 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
     }
 
 
+def consume_saved_posting_package(product_records, *, state=None):
+    """Validate and stage a whole ad before touching any existing Posting inputs."""
+    state = st.session_state if state is None else state
+    pending = state.get(posting_handoff.PENDING_KEY)
+    if not pending:
+        return False
+    if not isinstance(pending, dict):
+        raise posting_handoff.SavedPackageError("The saved-package handoff is damaged. Save it again.")
+    handoff_id = pending.get("handoff_id")
+    if not handoff_id:
+        raise posting_handoff.SavedPackageError("The saved-package handoff is missing its identity.")
+    if state.get(posting_handoff.CONSUMED_KEY) == handoff_id:
+        return False
+    package = posting_handoff.validate_saved_package(pending.get("package"))
+    batch = package["batch"]
+    if batch.get("country") not in COUNTRY_META_CODES:
+        raise posting_handoff.SavedPackageError("The saved package country is not supported by Posting.")
+    if batch.get("sport_category") not in SPORT_OPTIONS:
+        raise posting_handoff.SavedPackageError("The saved package sport is not supported by Posting.")
+
+    staging = dict(state)
+    _prepare_posting_run_for_import(staging)  # Keep the existing Meta-history safety guard.
+    clear_keys = (
+        *IMAGE_KEYS, *IMAGE_STATE_KEYS, *PRIMARY_TEXT_KEYS, *HEADLINE_KEYS, *DESCRIPTION_KEYS,
+        *CAROUSEL_IMAGE_KEYS, *CAROUSEL_IMAGE_STATE_KEYS, *CAROUSEL_HEADLINE_KEYS,
+        *CAROUSEL_DESCRIPTION_KEYS, *CAROUSEL_PRIMARY_TEXT_KEYS, *CAROUSEL_EXPECTED_IMAGE_NAME_KEYS,
+        PRODUCT_KEY, PRODUCT_TRACK_KEY, COUNTRY_KEY, SPORT_KEY, PRODUCT_SET_KEY,
+        CSV_IMPORT_KEY, CSV_IMPORT_STATE_KEY, ADS_COPY_ROUTES_STATE_KEY, SAVED_PRODUCT_URL_KEY,
+        RESULT_KEY, COLLECTION_DIAGNOSTIC_RESULT_KEY, COLLECTION_TEMPLATE_COPY_RESULT_KEY,
+        COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY,
+    )
+    for key in clear_keys:
+        staging.pop(key, None)
+    apply_posting_import_to_state(batch, product_records, state=staging)
+    if package["ad_type"] == "Instant Experience":
+        for key, ad in zip(DESCRIPTION_KEYS, batch["ads"]):
+            staging[key] = str(ad.get("description") or "")
+    staging[AD_TYPE_KEY] = CAROUSEL_AD_TYPE if package["ad_type"] == "Carousel" else AD_TYPE
+    staging[SAVED_PRODUCT_URL_KEY] = {
+        "product_identity": staging[PRODUCT_KEY], "url": batch["product_url"],
+    }
+    image_keys = CAROUSEL_IMAGE_STATE_KEYS if package["ad_type"] == "Carousel" else IMAGE_STATE_KEYS
+    for key, asset in zip(image_keys, package["assets"]):
+        try:
+            record = build_meta_posting_image_record(
+                asset["data"], original_name=asset["filename"],
+                declared_content_type=asset["content_type"],
+                upload_identity=f"{package['package_id']}:{asset['slot_id']}",
+            )
+        except AdsImageValidationError as error:
+            raise posting_handoff.SavedPackageError(f"{asset['slot_id']}: {error}") from error
+        staging[key] = {
+            **record, "runtime_version": POSTING_IMAGE_RUNTIME_VERSION,
+            "saved_asset": {field: value for field, value in asset.items() if field != "data"},
+        }
+    staging[posting_handoff.LOADED_KEY] = deepcopy(package)
+    staging[posting_handoff.CONSUMED_KEY] = handoff_id
+    # Commit only after copy, product mapping, every slot, and every full image validated.
+    for key in set(state) | set(staging):
+        if not (key.startswith(STATE_PREFIX) or key in {posting_handoff.LOADED_KEY, posting_handoff.CONSUMED_KEY}):
+            continue
+        if key in staging:
+            state[key] = staging[key]
+        else:
+            state.pop(key, None)
+    state.pop(posting_handoff.PENDING_KEY, None)
+    return True
+
+
 def process_posting_csv_upload(
     uploaded_file, product_records, *, state=None, ad_type=AD_TYPE
 ):
@@ -676,6 +767,8 @@ def process_posting_csv_upload(
             allowed_campaign_types=(requested_ad_type,),
         )
         summary = apply_posting_import_to_state(batch, product_records, state=state)
+        state.pop(posting_handoff.LOADED_KEY, None)
+        state.pop(SAVED_PRODUCT_URL_KEY, None)
         status = {
             "ok": True,
             "upload_identity": upload_identity,
@@ -1481,6 +1574,20 @@ def _render_recent_posts():
 
 def render_page():
     st.title("Post Ad")
+    if st.session_state.get(posting_handoff.PENDING_KEY):
+        try:
+            records, _ = _product_selector_state(_product_rows_state())
+            consume_saved_posting_package(records)
+        except (posting_handoff.SavedPackageError, PostingImportCSVError) as error:
+            st.error(f"Saved package could not be loaded: {error}")
+            st.caption("Your saved Dropbox package and current Posting work have been preserved.")
+            if st.button("Return to current Posting run"):
+                st.session_state.pop(posting_handoff.PENDING_KEY, None)
+                st.rerun()
+            return
+    loaded = st.session_state.get(posting_handoff.LOADED_KEY) or {}
+    if loaded:
+        st.caption(f"Loaded from {loaded['source']} — saved Dropbox package")
     _ensure_posting_run()
     st.session_state.setdefault(PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
@@ -1700,11 +1807,15 @@ def render_page():
     if selected_identity and selected_identity != str(st.session_state.get(PRODUCT_TRACK_KEY) or ""):
         st.session_state[PRODUCT_TRACK_KEY] = selected_identity
         st.session_state[SPORT_KEY] = _infer_sport(selection)
+        st.session_state.pop(SAVED_PRODUCT_URL_KEY, None)
         if _current_run_state(st.session_state) == RUN_STATE_DRAFT:
             st.session_state.pop(COLLECTION_DIAGNOSTIC_RESULT_KEY, None)
             st.session_state.pop(COLLECTION_TEMPLATE_COPY_RESULT_KEY, None)
     product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
     product_url = str(ads_page.canonical_shopify_product_url_from_row(selected_row) or "")
+    saved_url = st.session_state.get(SAVED_PRODUCT_URL_KEY) or {}
+    if saved_url.get("product_identity") == selected_identity:
+        product_url = str(saved_url.get("url") or product_url)
     product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
     product_handle = str(
         selected_row.get("product_handle")
