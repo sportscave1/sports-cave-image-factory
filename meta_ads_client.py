@@ -1348,6 +1348,51 @@ class MetaPostingClient:
             "warnings": tuple(warnings),
         }
 
+    def carousel_reference_data(self):
+        """Load only the identities, Dataset and audiences needed by Carousel."""
+
+        warnings = []
+        try:
+            account = dict(self.account() or {})
+        except MetaAdsApiError:
+            account = {}
+            warnings.append("Meta account details are temporarily unavailable.")
+        try:
+            pixels = self.pixels()
+        except MetaAdsApiError:
+            pixels = ()
+            warnings.append("Dataset discovery is unavailable to this token.")
+        try:
+            saved = self.saved_audiences()
+        except MetaAdsApiError:
+            saved = ()
+            warnings.append("Saved audiences are unavailable to this token.")
+        try:
+            custom = self.custom_audiences()
+        except MetaAdsApiError:
+            custom = ()
+            warnings.append("Custom audiences are unavailable to this token.")
+        try:
+            page = dict(self.page() or {})
+        except MetaAdsApiError:
+            page = {}
+            warnings.append("Facebook Page identity could not be refreshed.")
+        try:
+            instagram = dict(self.instagram_account() or {})
+        except MetaAdsApiError:
+            instagram = {}
+            warnings.append("Instagram identity could not be refreshed.")
+        return {
+            "account": account,
+            "page": page,
+            "instagram": instagram,
+            "catalogs": (),
+            "pixels": tuple(dict(row) for row in pixels),
+            "saved_audiences": tuple(dict(row) for row in saved),
+            "custom_audiences": tuple(dict(row) for row in custom),
+            "warnings": tuple(warnings),
+        }
+
     @staticmethod
     def _graph_data(payload, *, json_fields=()):
         data = {}
@@ -1524,6 +1569,25 @@ class MetaPostingClient:
             raise MetaAdsApiError("Meta did not return a creative ID.")
         return creative_id
 
+    def create_carousel_creative(self, payload):
+        result = _post(
+            f"{self.ad_account_id}/adcreatives",
+            data=self._graph_data(
+                payload,
+                json_fields=(
+                    "object_story_spec",
+                    "asset_feed_spec",
+                    "contextual_multi_ads",
+                    "degrees_of_freedom_spec",
+                ),
+            ),
+            config=self.config,
+        )
+        creative_id = str(result.get("id") or "")
+        if not creative_id:
+            raise MetaAdsApiError("Meta did not return a Carousel creative ID.")
+        return creative_id
+
     def configured_campaign(self, campaign_id):
         return _request(
             str(campaign_id or ""),
@@ -1545,6 +1609,22 @@ class MetaPostingClient:
                     "optimization_goal,billing_event,destination_type,promoted_object,"
                     "targeting,daily_budget,lifetime_budget,ad_set_goal,"
                     "existing_customer_budget_percentage"
+                )
+            },
+            config=self.config,
+        )
+
+    def configured_carousel_adset(self, adset_id):
+        """Read the standard Carousel Ad Set fields without widening IE reads."""
+
+        return _request(
+            str(adset_id or ""),
+            params={
+                "fields": (
+                    "id,name,status,configured_status,effective_status,campaign_id,account_id,"
+                    "optimization_goal,billing_event,destination_type,promoted_object,"
+                    "targeting,daily_budget,lifetime_budget,ad_set_goal,"
+                    "existing_customer_budget_percentage,is_dynamic_creative"
                 )
             },
             config=self.config,
@@ -1787,6 +1867,105 @@ class MetaPostingClient:
             },
             config=self.config,
         )
+
+    def carousel_creative(self, creative_id):
+        """Read the exact public fields required for Carousel verification."""
+
+        return _request(
+            str(creative_id or ""),
+            params={
+                "fields": (
+                    "id,name,object_story_spec,asset_feed_spec,url_tags,"
+                    "contextual_multi_ads,degrees_of_freedom_spec"
+                )
+            },
+            config=self.config,
+        )
+
+    def carousel_reference_contract(self):
+        """Read the known-good manual Sports Cave Carousel using Graph only."""
+
+        from meta_carousel_diagnostics import (
+            MANUAL_CAROUSEL_AD_ID,
+            MANUAL_CAROUSEL_ADSET_ID,
+            MANUAL_CAROUSEL_CAMPAIGN_ID,
+            MANUAL_CAROUSEL_CREATIVE_ID,
+        )
+
+        creative = dict(
+            _request(
+                MANUAL_CAROUSEL_CREATIVE_ID,
+                params={
+                    "fields": (
+                        "id,name,object_story_spec,asset_feed_spec,"
+                        "contextual_multi_ads,degrees_of_freedom_spec"
+                    )
+                },
+                config=self.config,
+            )
+            or {}
+        )
+        unavailable = {}
+        for field in ("format_transformation_spec", "portrait_customizations"):
+            try:
+                response = dict(
+                    _request(
+                        MANUAL_CAROUSEL_CREATIVE_ID,
+                        params={"fields": f"id,{field}"},
+                        config=self.config,
+                    )
+                    or {}
+                )
+            except MetaAdsApiError as error:
+                if not is_optional_meta_diagnostic_read_error(error):
+                    raise
+                unavailable[field] = {
+                    "error_code": error.error_code,
+                    "error_subcode": error.error_subcode,
+                    "reason": "not available to this Meta app/token",
+                }
+                continue
+            if field in response:
+                creative[field] = response[field]
+            else:
+                unavailable[field] = {"reason": "omitted by Meta"}
+        creative["_unavailable_reference_fields"] = unavailable
+
+        return {
+            "ad": _request(
+                MANUAL_CAROUSEL_AD_ID,
+                params={
+                    "fields": (
+                        "id,name,status,configured_status,effective_status,"
+                        "campaign_id,adset_id,creative{id}"
+                    )
+                },
+                config=self.config,
+            ),
+            "campaign": _request(
+                MANUAL_CAROUSEL_CAMPAIGN_ID,
+                params={
+                    "fields": (
+                        "id,name,status,configured_status,effective_status,account_id,"
+                        "objective,buying_type,daily_budget,bid_strategy,"
+                        "special_ad_categories"
+                    )
+                },
+                config=self.config,
+            ),
+            "adset": _request(
+                MANUAL_CAROUSEL_ADSET_ID,
+                params={
+                    "fields": (
+                        "id,name,status,configured_status,effective_status,campaign_id,"
+                        "account_id,optimization_goal,billing_event,destination_type,"
+                        "promoted_object,is_dynamic_creative,targeting"
+                    )
+                },
+                config=self.config,
+            ),
+            "creative": creative,
+        }
 
     def creative_crop_details(self, creative_id):
         """Read optional crop/placement state without changing Posting behaviour.

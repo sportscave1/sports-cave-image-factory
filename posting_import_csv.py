@@ -99,6 +99,23 @@ ADS_COPY_REQUIRED_HEADERS = frozenset(
         "cta",
     }
 )
+CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION = "SPORTS_CAVE_CAROUSEL_POSTING_V1"
+CAROUSEL_POSTING_IMPORT_FILENAME = "carousel-posting-import.csv"
+CAROUSEL_POSTING_IMPORT_HEADERS = (
+    "schema_version",
+    "product_name",
+    "product_handle",
+    "product_url",
+    "country",
+    "sport_category",
+    "campaign_type",
+    "card_number",
+    "image_filename",
+    "card_headline",
+    "card_description",
+    "primary_text",
+)
+CAROUSEL_POSTING_REQUIRED_HEADERS = frozenset(CAROUSEL_POSTING_IMPORT_HEADERS)
 
 
 class PostingImportCSVError(ValueError):
@@ -702,6 +719,8 @@ def _read_normalised_headers(data):
 def posting_import_csv_header_kind(data):
     headers = _read_normalised_headers(data)
     header_set = set(headers)
+    if CAROUSEL_POSTING_REQUIRED_HEADERS.issubset(header_set):
+        return "carousel"
     if (set(POSTING_IMPORT_HEADERS) - {"description"}).issubset(header_set):
         return "canonical"
     if (set(POSTING_IMPORT_LEGACY_HEADERS) - {"description"}).issubset(header_set):
@@ -709,6 +728,175 @@ def posting_import_csv_header_kind(data):
     if ADS_COPY_REQUIRED_HEADERS.issubset(header_set):
         return "ads_copy"
     return "unknown"
+
+
+def validate_carousel_posting_import_rows(
+    rows,
+    *,
+    allowed_countries=(),
+    allowed_sports=(),
+    allowed_campaign_types=(),
+):
+    rows = [dict(row or {}) for row in rows or ()]
+    if len(rows) != 5:
+        raise PostingImportCSVError(
+            f"Carousel Posting CSV must contain exactly five card rows; found {len(rows)}."
+        )
+    parsed = []
+    seen = set()
+    baseline = None
+    shared_fields = (
+        "product_name",
+        "product_handle",
+        "product_url",
+        "country",
+        "sport_category",
+        "campaign_type",
+    )
+    for row_index, raw_row in enumerate(rows, start=1):
+        row = {
+            header: preserve_posting_text(raw_row.get(header))
+            for header in CAROUSEL_POSTING_IMPORT_HEADERS
+        }
+        if row["schema_version"].strip() != CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION:
+            raise PostingImportCSVError(
+                f"Row {row_index} has an unsupported Carousel schema_version."
+            )
+        row["output_mode"] = "carousel_five_cards"
+        _validate_shared_fields(
+            row,
+            row_index,
+            allowed_countries=allowed_countries,
+            allowed_sports=allowed_sports,
+            allowed_campaign_types=allowed_campaign_types,
+        )
+        if row["campaign_type"] != "Carousel":
+            raise PostingImportCSVError(
+                "Carousel Posting CSV campaign_type must be Carousel."
+            )
+        try:
+            card_number = int(row["card_number"].strip())
+        except ValueError as error:
+            raise PostingImportCSVError(
+                f"Row {row_index} has an invalid card_number."
+            ) from error
+        if card_number not in range(1, 6):
+            raise PostingImportCSVError("card_number values must be exactly 1 to 5.")
+        if card_number in seen:
+            raise PostingImportCSVError(f"Carousel Card {card_number} is duplicated.")
+        seen.add(card_number)
+        for field in (
+            "image_filename",
+            "card_headline",
+            "card_description",
+            "primary_text",
+        ):
+            row[field] = row[field].strip() if field == "image_filename" else row[field]
+            if not row[field].strip():
+                raise PostingImportCSVError(
+                    f"Carousel Card {card_number} is missing required {field}."
+                )
+        shared = tuple(row[field] for field in shared_fields)
+        if baseline is None:
+            baseline = shared
+        elif shared != baseline:
+            conflicts = [
+                field
+                for field, expected, actual in zip(shared_fields, baseline, shared)
+                if expected != actual
+            ]
+            raise PostingImportCSVError(
+                "All Carousel rows must use the same shared values. Conflicting: "
+                + ", ".join(conflicts)
+                + "."
+            )
+        row["schema_version"] = CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION
+        row["card_number"] = card_number
+        parsed.append(row)
+    if seen != set(range(1, 6)):
+        raise PostingImportCSVError("card_number values must be exactly 1 to 5.")
+    primary_texts = tuple(row["primary_text"] for row in parsed)
+    if len(set(primary_texts)) != 5:
+        raise PostingImportCSVError(
+            "Carousel Primary Text variations must remain distinct."
+        )
+    return tuple(sorted(parsed, key=lambda row: row["card_number"]))
+
+
+def build_carousel_posting_import_rows(
+    *,
+    product_name,
+    product_handle="",
+    product_url,
+    country,
+    sport_category,
+    cards,
+):
+    clean_url = str(product_url or "").strip()
+    clean_handle = str(product_handle or "").strip().casefold()
+    if not clean_handle:
+        clean_handle = posting_product_handle_from_url(clean_url)
+    rows = []
+    for index, raw_card in enumerate(tuple(cards or ()), start=1):
+        card = dict(raw_card or {})
+        rows.append(
+            {
+                "schema_version": CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION,
+                "product_name": str(product_name or "").strip(),
+                "product_handle": clean_handle,
+                "product_url": clean_url,
+                "country": canonical_posting_country(country),
+                "sport_category": str(sport_category or "").strip(),
+                "campaign_type": "Carousel",
+                "card_number": card.get("card_number") or index,
+                "image_filename": str(card.get("image_filename") or "").strip(),
+                "card_headline": preserve_posting_text(card.get("headline")),
+                "card_description": preserve_posting_text(card.get("description")),
+                "primary_text": preserve_posting_text(card.get("primary_text")),
+            }
+        )
+    return validate_carousel_posting_import_rows(rows)
+
+
+def serialize_carousel_posting_import_csv(rows):
+    clean_rows = validate_carousel_posting_import_rows(rows)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=CAROUSEL_POSTING_IMPORT_HEADERS,
+        lineterminator="\r\n",
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    writer.writerows(clean_rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def _batch_from_carousel_rows(clean_rows):
+    first = clean_rows[0]
+    return {
+        "schema_version": CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION,
+        "source_schema_version": CAROUSEL_POSTING_IMPORT_SCHEMA_VERSION,
+        "source_schema_kind": "carousel",
+        "product_name": first["product_name"],
+        "product_handle": first["product_handle"],
+        "product_url": first["product_url"],
+        "country": first["country"],
+        "sport_category": first["sport_category"],
+        "campaign_type": "Carousel",
+        "output_mode": "carousel_five_cards",
+        "cards": tuple(
+            {
+                "card_number": row["card_number"],
+                "image_filename": row["image_filename"],
+                "headline": row["card_headline"],
+                "description": row["card_description"],
+            }
+            for row in clean_rows
+        ),
+        "primary_texts": tuple(row["primary_text"] for row in clean_rows),
+        "rows": clean_rows,
+    }
 
 
 def _batch_from_canonical_rows(clean_rows):
@@ -928,6 +1116,14 @@ def parse_ads_import_csv(
 ):
     headers, rows = _read_normalised_rows(data)
     header_set = set(headers)
+    if CAROUSEL_POSTING_REQUIRED_HEADERS.issubset(header_set):
+        clean_rows = validate_carousel_posting_import_rows(
+            rows,
+            allowed_countries=allowed_countries,
+            allowed_sports=allowed_sports,
+            allowed_campaign_types=allowed_campaign_types,
+        )
+        return _batch_from_carousel_rows(clean_rows)
     canonical_required = set(POSTING_IMPORT_HEADERS) - {"description"}
     if canonical_required.issubset(header_set):
         clean_rows = validate_posting_import_rows(
@@ -956,7 +1152,11 @@ def parse_ads_import_csv(
         batch["source_schema_kind"] = "posting_legacy"
         batch["source_headers"] = tuple(headers)
         return batch
-    recognised = set(ADS_COPY_HEADERS) | set(POSTING_IMPORT_HEADERS)
+    recognised = (
+        set(ADS_COPY_HEADERS)
+        | set(POSTING_IMPORT_HEADERS)
+        | set(CAROUSEL_POSTING_IMPORT_HEADERS)
+    )
     if not header_set.intersection(recognised):
         raise PostingImportCSVError("No recognised Sports Cave Ads CSV columns were found.")
     missing = [
@@ -977,6 +1177,14 @@ def parse_posting_import_csv(
     require_primary_ads=True,
 ):
     del filename  # A valid canonical CSV is identified by content, never its filename.
+    if posting_import_csv_header_kind(data) == "carousel":
+        return parse_ads_import_csv(
+            data,
+            allowed_countries=allowed_countries,
+            allowed_sports=allowed_sports,
+            allowed_campaign_types=allowed_campaign_types,
+            require_copy=require_primary_ads,
+        )
     if posting_import_csv_header_kind(data) == "ads_copy":
         # New Ads owns the Instant Experience CSV contract. Posting consumes the
         # canonical parsed structure and only adapts it into its existing three-ad

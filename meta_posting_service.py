@@ -21,6 +21,13 @@ from meta_collection_template_copy import (
     REQUIRED_COLLECTION_FEATURES,
     configured_collection_template_ad_id,
 )
+from meta_carousel_diagnostics import (
+    MANUAL_CAROUSEL_ADSET_ID,
+    MetaCarouselDiagnosticSafetyError,
+    MetaCarouselValidateOnlyProbe,
+    reference_carousel_image_hashes,
+    validate_manual_carousel_reference_contract,
+)
 from meta_ads_client import (
     MetaAdsAmbiguousResultError,
     MetaAdsApiError,
@@ -42,6 +49,10 @@ PRODUCT_DESCRIPTION = "Limited Edition"
 INSTANT_EXPERIENCE_BUTTON_TEXT = "Claim Your Edition"
 DYNAMIC_COLLECTION_RETAILER_ITEM_IDS = ("0", "0", "0", "0")
 AD_TYPE = "Instant Experience"
+CAROUSEL_AD_TYPE = "Carousel"
+AD_TYPES = (AD_TYPE, CAROUSEL_AD_TYPE)
+CAROUSEL_CARD_COUNT = 5
+CAROUSEL_PRIMARY_TEXT_COUNT = 5
 COUNTRY_META_CODES = {"AUS": "AU", "USA": "US", "UK": "GB", "CAN": "CA", "NZ": "NZ"}
 SPORT_OPTIONS = (
     "NBA", "Motorsport", "Football", "Cricket", "Golf", "Horse Racing", "Baseball",
@@ -403,6 +414,42 @@ def load_posting_reference_snapshot(
     return references
 
 
+def load_carousel_reference_snapshot(client, *, environ=None):
+    """Load Carousel dependencies without catalogue or Product Set reads."""
+
+    loader = getattr(client, "carousel_reference_data", None)
+    references = dict(
+        (loader() if callable(loader) else client.reference_data()) or {}
+    )
+    warnings = list(references.get("warnings") or ())
+    dataset_resolution = resolve_dataset_reference(references, environ=environ)
+    if not dataset_resolution.get("resolved"):
+        fallback_loader = getattr(client, "reference_adsets", None)
+        try:
+            adsets = (
+                tuple(fallback_loader() or ()) if callable(fallback_loader) else ()
+            )
+        except MetaAdsApiError:
+            adsets = ()
+            warnings.append(
+                "Existing Purchase ad sets were unavailable for Dataset fallback discovery."
+            )
+        references["dataset_fallback_ids"] = dataset_ids_from_purchase_adsets(adsets)
+        dataset_resolution = resolve_dataset_reference(references, environ=environ)
+    references.update(
+        {
+            "catalog_resolution": {"resolved": False, "id": "", "name": ""},
+            "dataset_resolution": dataset_resolution,
+            "product_sets": (),
+            "existing_ad_names": (),
+            "warnings": tuple(
+                dict.fromkeys(str(value) for value in warnings if str(value).strip())
+            ),
+        }
+    )
+    return references
+
+
 def load_existing_posting_targets(client):
     """Load selectable Campaigns and Ad Sets from the configured account only.
 
@@ -533,6 +580,132 @@ def validate_existing_posting_target(
     }
 
 
+def validate_existing_carousel_target(
+    *,
+    campaign,
+    adset,
+    expected_campaign_id,
+    expected_adset_id,
+    expected_account_id,
+    expected_pixel_id,
+):
+    """Validate hierarchy/Purchase compatibility without changing the target.
+
+    Product-Set Ad Sets are not guessed compatible here. Their final Carousel
+    compatibility is decided by Meta's inline-Ad ``validate_only`` response
+    before any persistent Meta write.
+    """
+
+    campaign = dict(campaign or {})
+    adset = dict(adset or {})
+    campaign_id = str(expected_campaign_id or "").strip()
+    adset_id = str(expected_adset_id or "").strip()
+    if str(campaign.get("id") or "").strip() != campaign_id:
+        raise PostingValidationError(EXISTING_TARGET_MISSING_MESSAGE)
+    if str(adset.get("id") or "").strip() != adset_id:
+        raise PostingValidationError(EXISTING_TARGET_MISSING_MESSAGE)
+    if str(adset.get("campaign_id") or "").strip() != campaign_id:
+        raise PostingValidationError(
+            "The selected Ad Set does not belong to the selected Campaign. "
+            "Choose a matching Ad Set."
+        )
+    account_id = normalize_account_id(expected_account_id)
+    for entity, row in (("Campaign", campaign), ("Ad Set", adset)):
+        if normalize_account_id(row.get("account_id")) != account_id:
+            raise PostingValidationError(
+                f"The selected Meta {entity} does not belong to the configured Sports Cave ad account."
+            )
+        status = str(
+            row.get("configured_status") or row.get("status") or ""
+        ).strip().upper()
+        if status not in SELECTABLE_EXISTING_STATUSES:
+            raise PostingValidationError(
+                f"The selected Meta {entity} must be ACTIVE or PAUSED."
+            )
+    if str(campaign.get("objective") or "").strip().upper() not in {
+        CAMPAIGN_OBJECTIVE,
+        "PRODUCT_CATALOG_SALES",
+    }:
+        raise PostingValidationError(
+            "The selected Campaign is not a compatible Sales campaign. Choose a "
+            "Sales Campaign or create a New Carousel Campaign."
+        )
+    if str(adset.get("optimization_goal") or "").strip().upper() != "OFFSITE_CONVERSIONS":
+        raise PostingValidationError(
+            "The selected Ad Set is not configured for website Purchase conversions."
+        )
+    if str(adset.get("billing_event") or "").strip().upper() != "IMPRESSIONS":
+        raise PostingValidationError(
+            "The selected Ad Set uses an incompatible billing configuration."
+        )
+    destination_type = str(adset.get("destination_type") or "").strip().upper()
+    if destination_type and destination_type != "WEBSITE":
+        raise PostingValidationError(
+            "The selected Ad Set does not use a compatible Website destination."
+        )
+    promoted = dict(adset.get("promoted_object") or {})
+    if str(promoted.get("custom_event_type") or "").strip().upper() != "PURCHASE":
+        raise PostingValidationError(
+            "The selected Ad Set is not configured for the Purchase conversion event."
+        )
+    pixel_id = str(promoted.get("pixel_id") or promoted.get("dataset_id") or "").strip()
+    if not pixel_id or pixel_id != str(expected_pixel_id or "").strip():
+        raise PostingValidationError(
+            "The selected Ad Set uses a different Pixel/Dataset. Choose a compatible "
+            "Ad Set or create a New Carousel Campaign."
+        )
+    return {
+        "campaign": campaign,
+        "adset": adset,
+        "campaign_status": str(
+            campaign.get("configured_status") or campaign.get("status") or ""
+        ).upper(),
+        "adset_status": str(
+            adset.get("configured_status") or adset.get("status") or ""
+        ).upper(),
+        "has_product_set": bool(str(promoted.get("product_set_id") or "").strip()),
+    }
+
+
+def verify_new_carousel_adset_readback(
+    adset,
+    *,
+    expected_adset_id,
+    expected_campaign_id,
+    expected_pixel_id,
+):
+    """Fail closed if Meta did not persist the verified non-catalogue Ad Set."""
+
+    adset = dict(adset or {})
+    promoted = dict(adset.get("promoted_object") or {})
+    configured_status = str(
+        adset.get("configured_status") or adset.get("status") or ""
+    ).strip().upper()
+    checks = {
+        "adset_id": str(adset.get("id") or "") == str(expected_adset_id),
+        "campaign_id": str(adset.get("campaign_id") or "")
+        == str(expected_campaign_id),
+        "configured_status_paused": configured_status == "PAUSED",
+        "optimization_goal": str(adset.get("optimization_goal") or "").upper()
+        == "OFFSITE_CONVERSIONS",
+        "billing_event": str(adset.get("billing_event") or "").upper()
+        == "IMPRESSIONS",
+        "destination_type": str(adset.get("destination_type") or "").upper()
+        == "WEBSITE",
+        "pixel_id": str(
+            promoted.get("pixel_id") or promoted.get("dataset_id") or ""
+        )
+        == str(expected_pixel_id),
+        "purchase_event": str(promoted.get("custom_event_type") or "").upper()
+        == "PURCHASE",
+        "no_product_set": not str(promoted.get("product_set_id") or "").strip(),
+        "smart_pse_disabled": promoted.get("smart_pse_enabled") is False,
+        "dynamic_creative_disabled": adset.get("is_dynamic_creative") is False,
+    }
+    failed = tuple(name for name, passed in checks.items() if not passed)
+    return {"verified": not failed, "checks": checks, "failed_checks": failed}
+
+
 class PostingError(RuntimeError):
     def __init__(self, message, *, result=None):
         super().__init__(message)
@@ -598,6 +771,14 @@ class PostingCreative:
 
 
 @dataclass(frozen=True)
+class CarouselCard:
+    image_bytes: bytes
+    image_name: str
+    headline: str
+    description: str
+
+
+@dataclass(frozen=True)
 class PostingRequest:
     submission_id: str
     product_id: str
@@ -615,6 +796,9 @@ class PostingRequest:
     posting_mode: str = POSTING_MODE_NEW
     target_campaign_id: str = ""
     target_adset_id: str = ""
+    ad_type: str = AD_TYPE
+    carousel_cards: tuple[CarouselCard, ...] = ()
+    carousel_primary_texts: tuple[str, ...] = ()
 
 
 def normalize_account_id(value):
@@ -694,6 +878,16 @@ def next_instant_experience_ad_names(product_title, existing_names=(), *, count=
     return tuple(f"{short} IA {number}" for number in range(first, first + int(count)))
 
 
+def next_carousel_ad_name(product_title, existing_names=()):
+    short = product_short_name(product_title)
+    pattern = re.compile(rf"^{re.escape(short)}\s+Carousel\s+(\d+)$", re.IGNORECASE)
+    sequence = [
+        int(match.group(1)) for name in existing_names
+        if (match := pattern.match(str(name or "").strip()))
+    ]
+    return f"{short} Carousel {(max(sequence) if sequence else 0) + 1}"
+
+
 def posting_submission_id():
     return str(uuid.uuid4())
 
@@ -721,6 +915,24 @@ def _request_fingerprint(clean):
     lifecycle = str(clean.get("customer_lifecycle_strategy") or "").upper()
     if lifecycle not in ("", CUSTOMER_LIFECYCLE_ALL_AUDIENCES):
         payload["customer_lifecycle_strategy"] = lifecycle
+    ad_type = str(clean.get("ad_type") or AD_TYPE)
+    # Preserve every existing Instant Experience fingerprint exactly. Ad type
+    # becomes explicit only for the new, independent Carousel content contract.
+    if ad_type == CAROUSEL_AD_TYPE:
+        payload["ad_type"] = CAROUSEL_AD_TYPE
+        payload["carousel_cards"] = [
+            {
+                "image_checksum": card["image_checksum"],
+                "headline": card["headline"],
+                "description": card["description"],
+            }
+            for card in clean["carousel_cards"]
+        ]
+        payload["carousel_primary_texts"] = list(clean["carousel_primary_texts"])
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     payload["creatives"] = [
         {
             "image_checksum": creative["image_checksum"],
@@ -778,7 +990,174 @@ def posting_ad_results(value, *, ad_names=()):
     return results
 
 
+def carousel_ad_result(value=None, *, ad_name=""):
+    """Normalize the single-Ad Carousel ledger without invoking IA defaults."""
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = ()
+    if isinstance(value, (list, tuple)):
+        row = dict(value[0] or {}) if value else {}
+    else:
+        row = dict(value or {})
+    row.setdefault("index", 1)
+    row.setdefault("ad_type", CAROUSEL_AD_TYPE)
+    row.setdefault("ad_name", str(ad_name or ""))
+    row.setdefault("status", "PENDING")
+    row.setdefault("safe_error", "")
+    row.setdefault("carousel_image_hashes", [])
+    row.setdefault("meta_creative_id", "")
+    row.setdefault("meta_ad_id", "")
+    row.setdefault("creative_ownership", META_OBJECT_CREATED_BY_RUN)
+    row.setdefault("ad_ownership", META_OBJECT_CREATED_BY_RUN)
+    row.setdefault("meta_ad_reused", False)
+    row.setdefault("meta_ad_configured_status", "")
+    row.setdefault("carousel_verification", {})
+    return row
+
+
+def _validate_posting_mode_fields(request):
+    posting_mode = str(
+        getattr(request, "posting_mode", POSTING_MODE_NEW) or POSTING_MODE_NEW
+    ).strip().upper()
+    if posting_mode not in POSTING_MODES:
+        raise PostingValidationError("Select a valid Posting mode.")
+    target_campaign_id = str(
+        getattr(request, "target_campaign_id", "") or ""
+    ).strip()
+    target_adset_id = str(getattr(request, "target_adset_id", "") or "").strip()
+    if posting_mode == POSTING_MODE_EXISTING:
+        if not target_campaign_id:
+            raise PostingValidationError("Select an existing Meta Campaign.")
+        if not target_adset_id:
+            raise PostingValidationError("Select an existing Meta Ad Set.")
+        return posting_mode, target_campaign_id, target_adset_id, "inherited", "", ""
+    if target_campaign_id or target_adset_id:
+        raise PostingValidationError(
+            "New Campaign mode cannot use Campaign or Ad Set IDs from another run."
+        )
+    audience_type = str(request.audience_type or "broad").strip().casefold()
+    audience_id = str(request.audience_id or "").strip()
+    lifecycle = str(
+        getattr(
+            request,
+            "customer_lifecycle_strategy",
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        or CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+    ).strip().upper()
+    if lifecycle not in CUSTOMER_LIFECYCLE_STRATEGIES:
+        raise PostingValidationError("Select a valid Customer Lifecycle Strategy.")
+    if lifecycle == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
+        raise PostingValidationError(
+            "Acquire new customers is not available yet because Meta's complete "
+            "existing-customer audience contract has not been verified. Choose "
+            "Get conversions from all audiences."
+        )
+    if audience_type not in {"broad", "saved", "custom"}:
+        raise PostingValidationError("Select a valid Meta audience.")
+    if audience_type != "broad" and not audience_id:
+        raise PostingValidationError("Select a saved or custom audience.")
+    return (
+        posting_mode,
+        target_campaign_id,
+        target_adset_id,
+        audience_type,
+        audience_id,
+        lifecycle,
+    )
+
+
+def validate_carousel_posting_request(request):
+    """Validate the isolated five-card, one-Ad website Carousel contract."""
+
+    try:
+        uuid.UUID(str(request.submission_id or ""))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise PostingValidationError("Start a new Posting submission and try again.") from error
+    product_title = str(request.product_title or "").strip()
+    if not product_title:
+        raise PostingValidationError("Select a product from Edition Ops.")
+    destination_url = validate_destination_url(request.destination_url)
+    raw_cards = tuple(getattr(request, "carousel_cards", ()) or ())
+    if len(raw_cards) != CAROUSEL_CARD_COUNT:
+        raise PostingValidationError("Provide exactly five complete Carousel cards.")
+    cards = []
+    for index, card in enumerate(raw_cards, start=1):
+        if not bytes(card.image_bytes or b""):
+            raise PostingValidationError(f"Upload Carousel Image {index}.")
+        try:
+            image = prepare_meta_posting_image(
+                card.image_bytes, original_name=card.image_name
+            )
+        except AdsImageValidationError as error:
+            raise PostingValidationError(f"Carousel Image {index}: {error}") from error
+        headline = str(card.headline or "")
+        description = str(card.description or "")
+        if not headline.strip():
+            raise PostingValidationError(f"Enter Card Headline {index}.")
+        if not description.strip():
+            raise PostingValidationError(f"Enter Card Description {index}.")
+        cards.append(
+            {
+                "image": image,
+                "image_checksum": str(image["source_hash"]),
+                "headline": headline,
+                "description": description,
+            }
+        )
+    primary_texts = tuple(
+        str(value or "")
+        for value in (getattr(request, "carousel_primary_texts", ()) or ())
+    )
+    if len(primary_texts) != CAROUSEL_PRIMARY_TEXT_COUNT:
+        raise PostingValidationError("Provide exactly five Primary Text variations.")
+    for index, value in enumerate(primary_texts, start=1):
+        if not value.strip():
+            raise PostingValidationError(f"Enter Primary Text {index}.")
+    if len(set(primary_texts)) != CAROUSEL_PRIMARY_TEXT_COUNT:
+        raise PostingValidationError("Carousel Primary Text variations must remain distinct.")
+    country = str(request.country or "").strip().upper()
+    if country not in COUNTRY_META_CODES:
+        raise PostingValidationError("Select a supported country.")
+    sport = str(request.sport or "").strip()
+    if sport not in SPORT_OPTIONS:
+        raise PostingValidationError("Select a sport/category.")
+    (
+        posting_mode,
+        target_campaign_id,
+        target_adset_id,
+        audience_type,
+        audience_id,
+        lifecycle,
+    ) = _validate_posting_mode_fields(request)
+    return {
+        "ad_type": CAROUSEL_AD_TYPE,
+        "product_id": str(request.product_id or "").strip(),
+        "product_title": product_title,
+        "product_handle": str(request.product_handle or "").strip(),
+        "destination_url": destination_url,
+        "creatives": (),
+        "carousel_cards": tuple(cards),
+        "carousel_primary_texts": primary_texts,
+        "country": country,
+        "sport": sport,
+        "catalog_id": "",
+        "product_set_id": "",
+        "audience_type": audience_type,
+        "audience_id": audience_id,
+        "customer_lifecycle_strategy": lifecycle,
+        "posting_mode": posting_mode,
+        "target_campaign_id": target_campaign_id,
+        "target_adset_id": target_adset_id,
+    }
+
+
 def validate_posting_request(request):
+    if str(getattr(request, "ad_type", AD_TYPE) or AD_TYPE) == CAROUSEL_AD_TYPE:
+        return validate_carousel_posting_request(request)
     try:
         uuid.UUID(str(request.submission_id or ""))
     except (ValueError, TypeError, AttributeError) as error:
@@ -873,6 +1252,7 @@ def validate_posting_request(request):
         if audience_type != "inherited":
             raise PostingValidationError("Select a saved or custom audience.")
     return {
+        "ad_type": AD_TYPE,
         "product_id": str(request.product_id or "").strip(),
         "product_title": product_title,
         "product_handle": str(request.product_handle or "").strip(),
@@ -898,6 +1278,20 @@ def build_campaign_payload(*, name, catalog_id):
         "daily_budget": str(CAMPAIGN_DAILY_BUDGET_MINOR),
         "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
         "promoted_object": {"product_catalog_id": str(catalog_id)},
+    }
+
+
+def build_carousel_campaign_payload(*, name):
+    """Build the manual-reference Sales campaign without a catalogue binding."""
+
+    return {
+        "name": str(name),
+        "objective": CAMPAIGN_OBJECTIVE,
+        "buying_type": "AUCTION",
+        "status": "PAUSED",
+        "special_ad_categories": [],
+        "daily_budget": str(CAMPAIGN_DAILY_BUDGET_MINOR),
+        "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
     }
 
 
@@ -956,6 +1350,44 @@ def build_adset_payload(
             "pixel_id": str(pixel_id), "custom_event_type": "PURCHASE",
             "product_set_id": str(product_set_id),
         },
+        "targeting": dict(targeting or {}),
+        "start_time": begins.astimezone(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+def build_carousel_adset_payload(
+    *,
+    name,
+    campaign_id,
+    pixel_id,
+    targeting,
+    customer_lifecycle_strategy=CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+    start_time=None,
+):
+    """Build the standard website/Purchase Ad Set from the manual reference."""
+
+    begins = start_time or datetime.now(timezone.utc)
+    lifecycle = str(
+        customer_lifecycle_strategy or CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+    ).strip().upper()
+    if lifecycle != CUSTOMER_LIFECYCLE_ALL_AUDIENCES:
+        raise PostingValidationError(
+            "Acquire new customers cannot be sent until Meta's complete "
+            "existing-customer audience contract is configured."
+        )
+    return {
+        "name": str(name),
+        "campaign_id": str(campaign_id),
+        "status": "PAUSED",
+        "billing_event": "IMPRESSIONS",
+        "optimization_goal": "OFFSITE_CONVERSIONS",
+        "destination_type": "WEBSITE",
+        "promoted_object": {
+            "pixel_id": str(pixel_id),
+            "custom_event_type": "PURCHASE",
+            "smart_pse_enabled": False,
+        },
+        "is_dynamic_creative": False,
         "targeting": dict(targeting or {}),
         "start_time": begins.astimezone(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -1368,6 +1800,140 @@ def build_collection_creative_payload(
     }
 
 
+def build_carousel_creative_payload(
+    *,
+    name,
+    page_id,
+    instagram_user_id,
+    cards,
+    primary_texts,
+    destination_url,
+    url_tags=META_AD_URL_PARAMETERS,
+):
+    """Build one non-catalogue, five-card Meta v26 Carousel creative."""
+
+    clean_cards = tuple(dict(card or {}) for card in cards or ())
+    clean_primary_texts = tuple(str(value or "") for value in primary_texts or ())
+    if len(clean_cards) != CAROUSEL_CARD_COUNT:
+        raise PostingValidationError("Carousel creative requires exactly five cards.")
+    if len(clean_primary_texts) != CAROUSEL_PRIMARY_TEXT_COUNT:
+        raise PostingValidationError(
+            "Carousel creative requires exactly five Primary Text variations."
+        )
+    child_attachments = []
+    for index, card in enumerate(clean_cards, start=1):
+        image_hash = str(card.get("image_hash") or "").strip()
+        headline = str(card.get("headline") or "")
+        description = str(card.get("description") or "")
+        if not image_hash or not headline.strip() or not description.strip():
+            raise PostingValidationError(f"Carousel Card {index} is incomplete.")
+        child_attachments.append(
+            {
+                "link": str(destination_url),
+                "image_hash": image_hash,
+                "name": headline,
+                "description": description,
+                "call_to_action": {"type": META_DEFAULT_CTA},
+            }
+        )
+    return {
+        "name": str(name),
+        "object_story_spec": {
+            "page_id": str(page_id),
+            "instagram_user_id": str(instagram_user_id),
+            "link_data": {
+                "link": str(destination_url),
+                "call_to_action": {"type": META_DEFAULT_CTA},
+                "child_attachments": child_attachments,
+                "multi_share_end_card": True,
+                "multi_share_optimized": True,
+            },
+        },
+        "asset_feed_spec": {
+            "bodies": [{"text": value} for value in clean_primary_texts],
+            "optimization_type": "DEGREES_OF_FREEDOM",
+        },
+        "contextual_multi_ads": {"enroll_status": "OPT_IN"},
+        "degrees_of_freedom_spec": {
+            "creative_features_spec": {
+                "advantage_plus_creative": {"enroll_status": "OPT_IN"},
+                "carousel_to_video": {"enroll_status": "OPT_IN"},
+                "description_automation": {"enroll_status": "OPT_IN"},
+                "enhance_cta": {"enroll_status": "OPT_IN"},
+                "image_touchups": {"enroll_status": "OPT_IN"},
+                "inline_comment": {"enroll_status": "OPT_IN"},
+                "media_order": {"enroll_status": "OPT_IN"},
+                "profile_card": {"enroll_status": "OPT_IN"},
+            }
+        },
+        "url_tags": str(url_tags or ""),
+    }
+
+
+def verify_carousel_creative_readback(
+    creative,
+    *,
+    page_id,
+    instagram_user_id,
+    cards,
+    primary_texts,
+    destination_url,
+):
+    """Verify exact ordered cards and exposed text variations after creation."""
+
+    creative = dict(creative or {})
+    story = dict(creative.get("object_story_spec") or {})
+    link_data = dict(story.get("link_data") or {})
+    actual_cards = tuple(
+        dict(row or {}) for row in link_data.get("child_attachments") or ()
+    )
+    expected_cards = tuple(dict(row or {}) for row in cards or ())
+    checks = {
+        "page_id": str(story.get("page_id") or "") == str(page_id),
+        "instagram_user_id": str(story.get("instagram_user_id") or "")
+        == str(instagram_user_id),
+        "five_cards": len(actual_cards) == len(expected_cards) == CAROUSEL_CARD_COUNT,
+        "multi_share_end_card": link_data.get("multi_share_end_card") is True,
+        "multi_share_optimized": link_data.get("multi_share_optimized") is True,
+    }
+    for index, (actual, expected) in enumerate(
+        zip(actual_cards, expected_cards), start=1
+    ):
+        checks[f"card_{index}_image_hash"] = str(actual.get("image_hash") or "") == str(
+            expected.get("image_hash") or ""
+        )
+        checks[f"card_{index}_link"] = str(actual.get("link") or "") == str(
+            destination_url
+        )
+        checks[f"card_{index}_headline"] = str(actual.get("name") or "") == str(
+            expected.get("headline") or ""
+        )
+        checks[f"card_{index}_description"] = str(
+            actual.get("description") or ""
+        ) == str(expected.get("description") or "")
+        checks[f"card_{index}_cta"] = str(
+            (actual.get("call_to_action") or {}).get("type") or ""
+        ).upper() == META_DEFAULT_CTA
+    feed_exposed = "asset_feed_spec" in creative
+    if feed_exposed:
+        feed = dict(creative.get("asset_feed_spec") or {})
+        actual_texts = tuple(
+            str(dict(row or {}).get("text") or "") for row in feed.get("bodies") or ()
+        )
+        checks["primary_text_variations"] = actual_texts == tuple(primary_texts or ())
+        checks["optimization_type"] = str(
+            feed.get("optimization_type") or ""
+        ).upper() == "DEGREES_OF_FREEDOM"
+    failed = tuple(name for name, passed in checks.items() if not passed)
+    return {
+        "verified": not failed,
+        "checks": checks,
+        "failed_checks": failed,
+        "card_count": len(actual_cards),
+        "primary_text_variations_exposed": feed_exposed,
+    }
+
+
 class SupabasePostingStore:
     """Persistent lease ledger keyed by one intentional Posting run UUID.
 
@@ -1386,7 +1952,7 @@ class SupabasePostingStore:
             with conn.cursor() as cur:
                 target_submission_id = str(request_data["submission_id"])
                 columns = (
-                    "submission_id", "request_fingerprint", "status", "product_id",
+                    "submission_id", "request_fingerprint", "status", "ad_type", "product_id",
                     "product_title", "product_handle", "country", "sport", "catalog_id",
                     "catalog_name", "product_set_id", "product_set_name", "audience_type",
                     "audience_id", "audience_name", "requested_lifecycle_strategy",
@@ -1511,6 +2077,7 @@ class SupabasePostingStore:
                            country, sport, campaign_id, campaign_name, adset_id, adset_name,
                            ad_name, meta_instant_experience_id, meta_ad_id, meta_creative_id,
                            meta_status, safe_error, ad_results, posting_mode,
+                           ad_type,
                            campaign_ownership, adset_ownership,
                            campaign_configured_status, adset_configured_status,
                            requested_lifecycle_strategy, verified_lifecycle_strategy,
@@ -1584,6 +2151,7 @@ class MetaPostingService:
         template_copy_service=None,
         progress_callback=None,
         clock=None,
+        carousel_validator=None,
     ):
         self.client = client or MetaPostingClient()
         self.store = store or SupabasePostingStore()
@@ -1593,6 +2161,7 @@ class MetaPostingService:
         self._performance_started = None
         self._performance_last = None
         self._performance_trace = []
+        self._carousel_validator = carousel_validator
         self.template_copy_service = (
             template_copy_service or MetaCollectionTemplateCopyService(self.client)
         )
@@ -1725,6 +2294,122 @@ class MetaPostingService:
             )
         return references, catalog, product_set, pixel, audience
 
+    def _validate_carousel_references(self, clean):
+        try:
+            permissions = set(self.client.permissions())
+        except MetaAdsApiError:
+            permissions = None
+        if permissions is not None and POSTING_PERMISSION not in permissions:
+            raise PostingValidationError("Meta posting permission is unavailable.")
+        if not str(self.client.page_id or "").strip():
+            raise PostingValidationError(
+                "Sports Cave Facebook Page identity is not configured."
+            )
+        if not str(self.client.instagram_actor_id or "").strip():
+            raise PostingValidationError(
+                "Sports Cave Instagram identity is not configured."
+            )
+        references = load_carousel_reference_snapshot(self.client)
+        page = dict(references.get("page") or {})
+        instagram = dict(references.get("instagram") or {})
+        if str(page.get("id") or "") != str(self.client.page_id):
+            raise PostingValidationError(
+                "The configured Sports Cave Facebook Page could not be validated."
+            )
+        if str(instagram.get("id") or "") != str(self.client.instagram_actor_id):
+            raise PostingValidationError(
+                "The configured Sports Cave Instagram identity could not be validated."
+            )
+        dataset_resolution = dict(references.get("dataset_resolution") or {})
+        if not dataset_resolution.get("resolved"):
+            raise PostingValidationError(
+                str(
+                    dataset_resolution.get("error")
+                    or f"The Dataset {EXPECTED_PIXEL_NAME} could not be validated."
+                )
+            )
+        pixel = {
+            "id": str(dataset_resolution.get("id") or ""),
+            "name": str(dataset_resolution.get("name") or EXPECTED_PIXEL_NAME),
+        }
+        audience = {"id": "", "name": "Broad", "targeting": {}}
+        if clean["audience_type"] == "saved":
+            audience = self._one(
+                references.get("saved_audiences") or (),
+                entity="saved audience",
+                expected_id=clean["audience_id"],
+            )
+        elif clean["audience_type"] == "custom":
+            audience = self._one(
+                references.get("custom_audiences") or (),
+                entity="custom audience",
+                expected_id=clean["audience_id"],
+            )
+        return references, pixel, audience
+
+    def _validate_carousel_contract(self, *, clean, ad_name, adset_id):
+        """Require current Graph reference evidence plus two validate-only passes."""
+
+        reference = dict(self.client.carousel_reference_contract() or {})
+        reference_evidence = validate_manual_carousel_reference_contract(
+            reference,
+            expected_page_id=self.client.page_id,
+            expected_instagram_user_id=self.client.instagram_user_id,
+        )
+        reference_hashes = reference_carousel_image_hashes(reference)
+        validation_cards = tuple(
+            {
+                "image_hash": image_hash,
+                "headline": card["headline"],
+                "description": card["description"],
+            }
+            for card, image_hash in zip(clean["carousel_cards"], reference_hashes)
+        )
+        creative_payload = build_carousel_creative_payload(
+            name=f"{ad_name} | Carousel validate-only",
+            page_id=self.client.page_id,
+            instagram_user_id=self.client.instagram_user_id,
+            cards=validation_cards,
+            primary_texts=clean["carousel_primary_texts"],
+            destination_url=clean["destination_url"],
+            url_tags=self.url_tags,
+        )
+        probe = self._carousel_validator
+        if probe is None:
+            probe = MetaCarouselValidateOnlyProbe(self.client.config)
+        result = dict(
+            probe.run(
+                ad_name=f"{ad_name} validate-only",
+                adset_id=str(adset_id),
+                creative_payload=creative_payload,
+            )
+            or {}
+        )
+        result["reference"] = reference_evidence
+        if not result.get("validated"):
+            inline = dict(result.get("inline_ad") or {})
+            standalone = dict(result.get("standalone_creative") or {})
+            failure = inline if not inline.get("validated") else standalone
+            code = failure.get("error_code")
+            subcode = failure.get("error_subcode")
+            meta_suffix = ""
+            if code not in (None, ""):
+                meta_suffix += f" Meta code {code}"
+            if subcode not in (None, ""):
+                meta_suffix += f", subcode {subcode}"
+            if clean["posting_mode"] == POSTING_MODE_EXISTING:
+                raise PostingValidationError(
+                    "This Ad Set is not compatible with a standard Carousel. "
+                    "Choose another Ad Set or create a New Carousel Campaign."
+                    + (meta_suffix + "." if meta_suffix else "")
+                )
+            raise PostingValidationError(
+                "Meta v26 did not validate the Sports Cave Carousel creative and "
+                "PAUSED Ad contract. No persistent Meta objects were created."
+                + (meta_suffix + "." if meta_suffix else "")
+            )
+        return result
+
     def _ambiguous(self, submission_id, message, *, record=None):
         safe_error = sanitize_meta_error(message)
         result = self.store.update_stage(submission_id, "AMBIGUOUS", safe_error=safe_error)
@@ -1804,7 +2489,573 @@ class MetaPostingService:
             )
             raise PostingValidationError(str(error), result=failed or record) from error
 
+    def create_paused_carousel_campaign(self, request):
+        """Create exactly one PAUSED, non-catalogue, five-card Carousel Ad."""
+
+        self._start_performance_trace()
+        self._progress("Preparing Meta carousel…")
+        clean = validate_carousel_posting_request(request)
+        self._checkpoint("request_validation")
+        try:
+            references, pixel, audience = self._validate_carousel_references(clean)
+            existing_ad_names = tuple(self.client.existing_ad_names())
+        except MetaAdsApiError as error:
+            raise PostingError(sanitize_meta_error(error)) from error
+        self._checkpoint("meta_reference_validation")
+        posting_mode = clean["posting_mode"]
+        is_existing_mode = posting_mode == POSTING_MODE_EXISTING
+        campaign_label = (
+            clean["target_campaign_id"]
+            if is_existing_mode
+            else campaign_name(clean["product_title"], clean["country"], clean["sport"])
+        )
+        audience_label = (
+            "Inherited from existing Ad Set"
+            if is_existing_mode
+            else str(audience.get("name") or "Broad")
+        )
+        adset_label = (
+            clean["target_adset_id"]
+            if is_existing_mode
+            else adset_name(clean["country"], clean["sport"], audience_label)
+        )
+        proposed_ad_name = next_carousel_ad_name(
+            clean["product_title"], existing_ad_names
+        )
+        initial_ad_result = carousel_ad_result(ad_name=proposed_ad_name)
+        fingerprint = _request_fingerprint(clean)
+        submission_id = str(request.submission_id)
+        claim = self.store.claim(
+            {
+                "submission_id": submission_id,
+                "request_fingerprint": fingerprint,
+                "ad_type": CAROUSEL_AD_TYPE,
+                "product_id": clean["product_id"],
+                "product_title": clean["product_title"],
+                "product_handle": clean["product_handle"],
+                "country": clean["country"],
+                "sport": clean["sport"],
+                "catalog_id": "",
+                "catalog_name": "",
+                "product_set_id": "",
+                "product_set_name": "",
+                "audience_type": clean["audience_type"],
+                "audience_id": str(audience.get("id") or ""),
+                "audience_name": audience_label,
+                "requested_lifecycle_strategy": (
+                    clean["customer_lifecycle_strategy"] if not is_existing_mode else None
+                ),
+                "verified_lifecycle_strategy": CUSTOMER_LIFECYCLE_UNKNOWN,
+                "lifecycle_verification_source": "",
+                "pixel_id": str(pixel.get("id") or ""),
+                "pixel_name": str(pixel.get("name") or ""),
+                "account_currency": str(
+                    (references.get("account") or {}).get("currency") or ""
+                ),
+                "campaign_name": campaign_label,
+                "adset_name": adset_label,
+                "ad_name": proposed_ad_name,
+                "ad_results": [initial_ad_result],
+                "destination_url": clean["destination_url"],
+                "posting_mode": posting_mode,
+                "campaign_ownership": (
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                "adset_ownership": (
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                "campaign_id": clean["target_campaign_id"] if is_existing_mode else None,
+                "adset_id": clean["target_adset_id"] if is_existing_mode else None,
+                "campaign_configured_status": "",
+                "adset_configured_status": "",
+                "image_checksum": ",".join(
+                    card["image_checksum"] for card in clean["carousel_cards"]
+                ),
+            },
+            lease_token=str(uuid.uuid4()),
+        )
+        self._checkpoint("ledger_claim")
+        record = dict(claim.get("record") or {})
+        submission_id = str(record.get("submission_id") or submission_id)
+        if str(record.get("ad_type") or AD_TYPE) != CAROUSEL_AD_TYPE:
+            raise PostingValidationError(
+                "This Posting run belongs to a different Ad Type. Start a new run."
+            )
+        if str(record.get("posting_mode") or POSTING_MODE_NEW).upper() != posting_mode:
+            raise PostingValidationError(
+                "This Posting run belongs to a different Posting mode. Start a new run."
+            )
+        if is_existing_mode and (
+            str(record.get("campaign_id") or "") != clean["target_campaign_id"]
+            or str(record.get("adset_id") or "") != clean["target_adset_id"]
+        ):
+            raise PostingValidationError(
+                "This Carousel run does not own the selected existing Meta target. "
+                "Start a new run and select it again."
+            )
+        if not claim.get("claimed"):
+            status = str(record.get("status") or "")
+            if status == "COMPLETE":
+                record["performance_trace"] = tuple(self._performance_trace)
+                return record
+            if status == "AMBIGUOUS":
+                raise PostingAmbiguousError(
+                    str(record.get("safe_error") or "Meta did not confirm the earlier result."),
+                    result=record,
+                )
+            if status == "ABANDONED_EXTERNALLY":
+                raise PostingAbandonedError(
+                    str(record.get("safe_error") or EXTERNALLY_ABANDONED_MESSAGE),
+                    result=record,
+                )
+            raise PostingBusyError(
+                "This Carousel is already being created. Wait for the current request to finish.",
+                result=record,
+            )
+
+        campaign_label = str(record.get("campaign_name") or campaign_label)
+        adset_label = str(record.get("adset_name") or adset_label)
+        ad_result = carousel_ad_result(
+            record.get("ad_results"),
+            ad_name=str(record.get("ad_name") or proposed_ad_name),
+        )
+        try:
+            campaign_id = str(record.get("campaign_id") or "")
+            adset_id = str(record.get("adset_id") or "")
+            configured_campaign = None
+            configured_adset = None
+            target = None
+            if is_existing_mode:
+                try:
+                    configured_campaign = dict(
+                        self.client.configured_campaign(clean["target_campaign_id"]) or {}
+                    )
+                    carousel_adset_reader = getattr(
+                        self.client,
+                        "configured_carousel_adset",
+                        self.client.configured_adset,
+                    )
+                    configured_adset = dict(
+                        carousel_adset_reader(clean["target_adset_id"]) or {}
+                    )
+                except MetaAdsApiError as error:
+                    if not is_meta_object_missing_or_inaccessible(error):
+                        raise
+                    abandoned = self.store.update_stage(
+                        submission_id,
+                        "ABANDONED_EXTERNALLY",
+                        safe_error=EXISTING_TARGET_MISSING_MESSAGE,
+                        ad_results=[ad_result],
+                    )
+                    raise PostingAbandonedError(
+                        EXISTING_TARGET_MISSING_MESSAGE,
+                        result=abandoned or record,
+                    ) from error
+                target = validate_existing_carousel_target(
+                    campaign=configured_campaign,
+                    adset=configured_adset,
+                    expected_campaign_id=clean["target_campaign_id"],
+                    expected_adset_id=clean["target_adset_id"],
+                    expected_account_id=self.client.ad_account_id,
+                    expected_pixel_id=pixel["id"],
+                )
+                campaign_id = clean["target_campaign_id"]
+                adset_id = clean["target_adset_id"]
+                campaign_label = str(configured_campaign.get("name") or campaign_id)
+                adset_label = str(configured_adset.get("name") or adset_id)
+
+            validation_target_adset_id = (
+                adset_id if is_existing_mode else MANUAL_CAROUSEL_ADSET_ID
+            )
+            self._progress("Validating Meta carousel contract…")
+            carousel_validation = self._validate_carousel_contract(
+                clean=clean,
+                ad_name=ad_result["ad_name"],
+                adset_id=validation_target_adset_id,
+            )
+            ad_result["validate_only"] = carousel_validation
+            record = self.store.update_stage(
+                submission_id,
+                "VALIDATING",
+                ad_results=[ad_result],
+            )
+            self._checkpoint("carousel_validate_only")
+
+            if not is_existing_mode:
+                self._progress("Creating campaign…")
+                if campaign_id:
+                    try:
+                        configured_campaign = dict(
+                            self.client.configured_campaign(campaign_id) or {}
+                        )
+                    except MetaAdsApiError as error:
+                        if not is_meta_object_missing_or_inaccessible(error):
+                            raise
+                        abandoned = self.store.update_stage(
+                            submission_id,
+                            "ABANDONED_EXTERNALLY",
+                            safe_error=EXTERNALLY_ABANDONED_MESSAGE,
+                            ad_results=[ad_result],
+                        )
+                        raise PostingAbandonedError(
+                            EXTERNALLY_ABANDONED_MESSAGE,
+                            result=abandoned or record,
+                        ) from error
+                else:
+                    campaign_id = self._create_or_reconcile(
+                        lambda: self.client.create_campaign(
+                            build_carousel_campaign_payload(name=campaign_label)
+                        ),
+                        submission_id=submission_id,
+                        entity="campaign",
+                    )
+                    record = self.store.update_stage(
+                        submission_id,
+                        "CAMPAIGN_CREATED",
+                        campaign_id=campaign_id,
+                        campaign_name=campaign_label,
+                    )
+            self._checkpoint("campaign_resolution")
+
+            if not is_existing_mode:
+                self._progress("Creating Ad Set…")
+                if not adset_id:
+                    targeting = build_targeting(
+                        country=clean["country"],
+                        audience_type=clean["audience_type"],
+                        audience=audience,
+                    )
+                    adset_id = self._create_or_reconcile(
+                        lambda: self.client.create_adset(
+                            build_carousel_adset_payload(
+                                name=adset_label,
+                                campaign_id=campaign_id,
+                                pixel_id=pixel["id"],
+                                targeting=targeting,
+                                customer_lifecycle_strategy=clean[
+                                    "customer_lifecycle_strategy"
+                                ],
+                            )
+                        ),
+                        lambda: self.client.find_adsets_by_name(
+                            campaign_id, adset_label
+                        ),
+                        submission_id=submission_id,
+                        entity="ad set",
+                    )
+                    record = self.store.update_stage(
+                        submission_id,
+                        "ADSET_CREATED",
+                        adset_id=adset_id,
+                        adset_name=adset_label,
+                    )
+                carousel_adset_reader = getattr(
+                    self.client,
+                    "configured_carousel_adset",
+                    self.client.configured_adset,
+                )
+                configured_adset = dict(carousel_adset_reader(adset_id) or {})
+                adset_verification = verify_new_carousel_adset_readback(
+                    configured_adset,
+                    expected_adset_id=adset_id,
+                    expected_campaign_id=campaign_id,
+                    expected_pixel_id=pixel["id"],
+                )
+                ad_result["carousel_adset_verification"] = adset_verification
+                if not adset_verification["verified"]:
+                    self._ambiguous(
+                        submission_id,
+                        "Meta did not confirm the new paused, non-catalogue Carousel "
+                        "Ad Set. Failed checks: "
+                        + ", ".join(adset_verification["failed_checks"])
+                        + ". No Carousel Ad was created.",
+                        record=record,
+                    )
+                lifecycle_verification = customer_lifecycle_verification(
+                    configured_adset,
+                    acquisition_fields_requested=True,
+                )
+                record = self.store.update_stage(
+                    submission_id,
+                    "ADSET_CREATED",
+                    requested_lifecycle_strategy=clean[
+                        "customer_lifecycle_strategy"
+                    ],
+                    verified_lifecycle_strategy=lifecycle_verification["strategy"],
+                    lifecycle_verification_source=lifecycle_verification[
+                        "verification_source"
+                    ],
+                    ad_results=[ad_result],
+                )
+                if (
+                    lifecycle_verification["strategy"]
+                    != clean["customer_lifecycle_strategy"]
+                ):
+                    self._ambiguous(
+                        submission_id,
+                        "Meta did not confirm 'Get conversions from all audiences' "
+                        "for the new paused Carousel Ad Set. No Carousel Ad was created.",
+                        record=record,
+                    )
+            else:
+                lifecycle_verification = customer_lifecycle_verification(
+                    configured_adset,
+                    acquisition_fields_requested=True,
+                )
+                record = self.store.update_stage(
+                    submission_id,
+                    "ADSET_CREATED",
+                    campaign_id=campaign_id,
+                    campaign_name=campaign_label,
+                    adset_id=adset_id,
+                    adset_name=adset_label,
+                    campaign_ownership=META_OBJECT_EXISTING_TARGET,
+                    adset_ownership=META_OBJECT_EXISTING_TARGET,
+                    campaign_configured_status=target["campaign_status"],
+                    adset_configured_status=target["adset_status"],
+                    verified_lifecycle_strategy=lifecycle_verification["strategy"],
+                    lifecycle_verification_source=lifecycle_verification[
+                        "verification_source"
+                    ],
+                    ad_results=[ad_result],
+                )
+            self._checkpoint("adset_resolution")
+
+            self._progress("Uploading 5 carousel images…")
+            image_hashes = list(ad_result.get("carousel_image_hashes") or ())
+            if len(image_hashes) > CAROUSEL_CARD_COUNT:
+                raise PostingValidationError(
+                    "The persisted Carousel image state is invalid. Start a new run."
+                )
+            for card in clean["carousel_cards"][len(image_hashes) :]:
+                image = card["image"]
+                image_hashes.append(
+                    self.client.upload_image(
+                        image["data"],
+                        filename=image["upload_name"],
+                        content_type=image["content_type"],
+                    )
+                )
+                ad_result["carousel_image_hashes"] = list(image_hashes)
+                ad_result["status"] = "IMAGE_UPLOADED"
+                record = self.store.update_stage(
+                    submission_id,
+                    "IMAGE_UPLOADED",
+                    meta_image_hash=image_hashes[0],
+                    ad_results=[ad_result],
+                )
+            actual_cards = tuple(
+                {
+                    "image_hash": image_hash,
+                    "headline": card["headline"],
+                    "description": card["description"],
+                }
+                for card, image_hash in zip(clean["carousel_cards"], image_hashes)
+            )
+            creative_name = (
+                f"{ad_result['ad_name']} | Carousel | {submission_id[:8]}"
+            )
+            creative_payload = build_carousel_creative_payload(
+                name=creative_name,
+                page_id=self.client.page_id,
+                instagram_user_id=self.client.instagram_user_id,
+                cards=actual_cards,
+                primary_texts=clean["carousel_primary_texts"],
+                destination_url=clean["destination_url"],
+                url_tags=self.url_tags,
+            )
+            creative_id = str(ad_result.get("meta_creative_id") or "")
+            if not creative_id:
+                creative_id = self._create_or_reconcile(
+                    lambda: self.client.create_carousel_creative(creative_payload),
+                    lambda: self._one_match(
+                        self.client.find_creative_by_name(creative_name)
+                    ),
+                    submission_id=submission_id,
+                    entity="Carousel creative",
+                )
+                ad_result["meta_creative_id"] = creative_id
+                ad_result["status"] = "CREATIVE_CREATED"
+                record = self.store.update_stage(
+                    submission_id,
+                    "CREATIVE_CREATED",
+                    meta_creative_id=creative_id,
+                    ad_results=[ad_result],
+                )
+
+            self._progress("Creating 1 paused carousel ad…")
+            ad_id = str(ad_result.get("meta_ad_id") or "")
+            if not ad_id:
+                existing_ad = self.client.find_ad_by_creative(adset_id, creative_id)
+                ad_id = str((existing_ad or {}).get("id") or "")
+            if not ad_id:
+                ad_id = self._create_or_reconcile(
+                    lambda: self.client.create_paused_ad(
+                        ad_name=ad_result["ad_name"],
+                        adset_id=adset_id,
+                        creative_id=creative_id,
+                    ),
+                    lambda: self._one_match(
+                        self.client.find_ad_by_creative(adset_id, creative_id)
+                    ),
+                    submission_id=submission_id,
+                    entity="Carousel Ad",
+                )
+            ad_result["meta_ad_id"] = ad_id
+            ad_result["meta_ad_reused"] = bool(record.get("meta_ad_id"))
+
+            self._progress("Verifying paused Meta carousel…")
+            creative_readback = dict(self.client.carousel_creative(creative_id) or {})
+            verification = verify_carousel_creative_readback(
+                creative_readback,
+                page_id=self.client.page_id,
+                instagram_user_id=self.client.instagram_user_id,
+                cards=actual_cards,
+                primary_texts=clean["carousel_primary_texts"],
+                destination_url=clean["destination_url"],
+            )
+            ad_readback = dict(self.client.ad(ad_id) or {})
+            ad_checks = {
+                "ad_id": str(ad_readback.get("id") or "") == ad_id,
+                "target_adset": str(ad_readback.get("adset_id") or "") == adset_id,
+                "creative_id": str(
+                    (ad_readback.get("creative") or {}).get("id") or ""
+                )
+                == creative_id,
+                "status_paused": str(ad_readback.get("status") or "").upper()
+                == "PAUSED",
+                "configured_status_paused": str(
+                    ad_readback.get("configured_status") or ""
+                ).upper()
+                == "PAUSED",
+            }
+            failed = list(verification["failed_checks"])
+            failed.extend(name for name, passed in ad_checks.items() if not passed)
+            ad_result["carousel_verification"] = {
+                **verification,
+                "ad_checks": ad_checks,
+                "failed_checks": tuple(failed),
+                "verified": not failed,
+            }
+            ad_result["meta_ad_configured_status"] = str(
+                ad_readback.get("configured_status") or ""
+            ).upper()
+            if failed:
+                raise MetaAdsApiError(
+                    "Meta Carousel read-back verification failed. Failed checks: "
+                    + ", ".join(failed)
+                    + "."
+                )
+            ad_result["status"] = "CREATED"
+            ad_result["safe_error"] = ""
+            record = self.store.update_stage(
+                submission_id,
+                "AD_CREATED",
+                ad_name=ad_result["ad_name"],
+                meta_creative_id=creative_id,
+                meta_ad_id=ad_id,
+                ad_results=[ad_result],
+            )
+            self._checkpoint("carousel_ad")
+
+            if not is_existing_mode:
+                configured_campaign = dict(
+                    configured_campaign
+                    or self.client.configured_campaign(campaign_id)
+                    or {}
+                )
+            campaign_status = self._configured_status(configured_campaign or {})
+            adset_status = self._configured_status(configured_adset or {})
+            if not is_existing_mode and (
+                campaign_status != "PAUSED" or adset_status != "PAUSED"
+            ):
+                self._ambiguous(
+                    submission_id,
+                    "Meta did not confirm PAUSED status for the new Carousel Campaign "
+                    "and Ad Set. Review in Ads Manager.",
+                    record=record,
+                )
+            result = self.store.update_stage(
+                submission_id,
+                "COMPLETE",
+                campaign_id=campaign_id,
+                campaign_name=campaign_label,
+                adset_id=adset_id,
+                adset_name=adset_label,
+                campaign_ownership=(
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                adset_ownership=(
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                campaign_configured_status=campaign_status,
+                adset_configured_status=adset_status,
+                ad_name=ad_result["ad_name"],
+                meta_image_hash=image_hashes[0],
+                meta_creative_id=creative_id,
+                meta_ad_id=ad_id,
+                meta_status="PAUSED",
+                ad_results=[ad_result],
+                safe_error="",
+            )
+            self._checkpoint("final_persistence")
+            result["performance_trace"] = tuple(self._performance_trace)
+            self._progress("Done — 1 Meta carousel ad is PAUSED")
+            return result
+        except (
+            PostingAbandonedError,
+            PostingAmbiguousError,
+            PostingBusyError,
+        ):
+            raise
+        except (PostingValidationError, MetaCarouselDiagnosticSafetyError) as error:
+            safe_error = sanitize_meta_error(error)
+            result = self.store.update_stage(
+                submission_id,
+                "FAILED",
+                safe_error=safe_error,
+                ad_results=[ad_result],
+            )
+            raise PostingValidationError(safe_error, result=result) from error
+        except MetaAdsAmbiguousResultError as error:
+            self._ambiguous(submission_id, error, record=record)
+        except MetaAdsApiError as error:
+            safe_error = sanitize_meta_error(error)
+            ad_result["status"] = "FAILED"
+            ad_result["safe_error"] = safe_error
+            result = self.store.update_stage(
+                submission_id,
+                "FAILED",
+                safe_error=safe_error,
+                ad_results=[ad_result],
+            )
+            raise PostingError(safe_error, result=result) from error
+        except Exception as error:
+            safe_error = (
+                "The Meta Carousel request failed. Any objects already created remain "
+                "paused and are listed below."
+            )
+            ad_result["status"] = "FAILED"
+            ad_result["safe_error"] = safe_error
+            result = self.store.update_stage(
+                submission_id,
+                "FAILED",
+                safe_error=safe_error,
+                ad_results=[ad_result],
+            )
+            raise PostingError(safe_error, result=result) from error
+
     def create_paused_campaign(self, request):
+        if str(getattr(request, "ad_type", AD_TYPE) or AD_TYPE) == CAROUSEL_AD_TYPE:
+            return self.create_paused_carousel_campaign(request)
         self._start_performance_trace()
         self._progress("Preparing Meta campaign…")
         clean = validate_posting_request(request)
@@ -1841,6 +3092,7 @@ class MetaPostingService:
         claim = self.store.claim(
             {
                 "submission_id": submission_id, "request_fingerprint": fingerprint,
+                "ad_type": AD_TYPE,
                 "product_id": clean["product_id"], "product_title": clean["product_title"],
                 "product_handle": clean["product_handle"], "country": clean["country"],
                 "sport": clean["sport"], "catalog_id": clean["catalog_id"],
@@ -1883,6 +3135,10 @@ class MetaPostingService:
         self._checkpoint("ledger_claim")
         record = dict(claim.get("record") or {})
         submission_id = str(record.get("submission_id") or submission_id)
+        if str(record.get("ad_type") or AD_TYPE) != AD_TYPE:
+            raise PostingValidationError(
+                "This Posting run belongs to a different Ad Type. Start a new run."
+            )
         record_mode = str(record.get("posting_mode") or POSTING_MODE_NEW).upper()
         if record_mode != posting_mode:
             raise PostingValidationError(
