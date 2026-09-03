@@ -2115,6 +2115,20 @@ class PostingServiceTests(unittest.TestCase):
             {row["configured_status"] for row in client.copy_ads.values()},
             {"PAUSED"},
         )
+        self.assertEqual(
+            [
+                payload["object_story_spec"]["link_data"]["message"]
+                for payload in client.creative_payloads
+            ],
+            ["Primary 1", "Primary 2", "Primary 3"],
+        )
+        self.assertEqual(
+            [
+                payload["object_story_spec"]["link_data"]["name"]
+                for payload in client.creative_payloads
+            ],
+            ["Headline 1", "Headline 2", "Headline 3"],
+        )
         self.assertTrue(
             all(ad_id in client.copy_ads for ad_id, _name in client.rename_calls)
         )
@@ -2223,6 +2237,13 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("canvas"), 3)
         self.assertEqual(client.calls.count("template_copy"), 4)
         self.assertEqual(len(client.copy_ads), 3)
+        self.assertEqual(
+            [
+                payload["object_story_spec"]["link_data"]["message"]
+                for payload in client.creative_payloads
+            ],
+            ["Primary 1", "Primary 2", "Primary 3"],
+        )
         self.assertEqual(
             [row["meta_ad_id"] for row in result["ad_results"]],
             ["ad-1", "ad-2", "ad-3"],

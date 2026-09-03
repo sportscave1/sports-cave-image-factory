@@ -1,6 +1,7 @@
 import csv
 import io
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 from PIL import Image
@@ -11,6 +12,7 @@ import ads_image_workflow
 import ads_posting_page
 import posting_import_csv as posting_csv_module
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
+from meta_posting_service import _request_fingerprint, validate_posting_request
 from posting_import_csv import (
     ADS_COPY_HEADERS,
     POSTING_IMPORT_FILENAME,
@@ -168,6 +170,23 @@ def ads_workflow():
     return {"ad_notes": {"instant_experience_concepts": notes}, "slots": {}}
 
 
+def shared_primary_text_workflow():
+    """Mirror New Ads' ordered copy set while keeping route headlines distinct."""
+
+    workflow = ads_workflow()
+    primary_texts = (
+        "ROUTE ONE PRIMARY TEXT",
+        "ROUTE TWO PRIMARY TEXT",
+        "ROUTE THREE PRIMARY TEXT",
+    )
+    notes = workflow["ad_notes"]["instant_experience_concepts"]
+    for route_index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
+        for variation_index, variation in enumerate(notes[concept["id"]]):
+            variation["primary_text"] = primary_texts[variation_index]
+            variation["headline"] = f"ROUTE {route_index} HEADLINE"
+    return workflow
+
+
 def product_records():
     return ads_page.build_ads_product_selector_records(
         [
@@ -206,6 +225,108 @@ def indexed_ads_copy_csv(*, index_header="index", reverse_rows=False):
 
 
 class PostingImportContractTests(unittest.TestCase):
+    def test_new_ads_copy_maps_primary_text_number_to_matching_route_only(self):
+        workflow = shared_primary_text_workflow()
+        data = ads_page.build_instant_experience_copy_csv(ads_result(), workflow)
+
+        canonical = ads_page.parse_instant_experience_copy_csv(data, ads_result())
+        self.assertEqual(
+            tuple(
+                canonical[concept["id"]][variation_index]["primary_text"]
+                for variation_index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS)
+            ),
+            (
+                "ROUTE ONE PRIMARY TEXT",
+                "ROUTE TWO PRIMARY TEXT",
+                "ROUTE THREE PRIMARY TEXT",
+            ),
+        )
+
+        batch = parse_posting_import_csv(data)
+        self.assertEqual(
+            tuple(ad["primary_text"] for ad in batch["ads"]),
+            (
+                "ROUTE ONE PRIMARY TEXT",
+                "ROUTE TWO PRIMARY TEXT",
+                "ROUTE THREE PRIMARY TEXT",
+            ),
+        )
+        self.assertEqual(
+            tuple(ad["headline"] for ad in batch["ads"]),
+            ("ROUTE 1 HEADLINE", "ROUTE 2 HEADLINE", "ROUTE 3 HEADLINE"),
+        )
+        direct_batch = parse_ads_import_csv(data)
+        self.assertEqual(
+            tuple(ad["primary_text"] for ad in direct_batch["ads"]),
+            (
+                "ROUTE ONE PRIMARY TEXT",
+                "ROUTE TWO PRIMARY TEXT",
+                "ROUTE THREE PRIMARY TEXT",
+            ),
+        )
+
+    def test_route_primary_text_survives_hydration_request_validation_and_fingerprint(self):
+        data = ads_page.build_instant_experience_copy_csv(
+            ads_result(), shared_primary_text_workflow()
+        )
+        batch = parse_posting_import_csv(data)
+        state = {}
+        ads_posting_page.apply_posting_import_to_state(batch, (), state=state)
+        expected = (
+            "ROUTE ONE PRIMARY TEXT",
+            "ROUTE TWO PRIMARY TEXT",
+            "ROUTE THREE PRIMARY TEXT",
+        )
+        self.assertEqual(
+            tuple(state[key] for key in ads_posting_page.PRIMARY_TEXT_KEYS),
+            expected,
+        )
+
+        request = ads_posting_page._build_posting_request(
+            submission_id="11111111-1111-4111-8111-111111111111",
+            product_id="product-1",
+            product_title="Route Mapping Wall Art",
+            product_handle="route-mapping-wall-art",
+            product_url=(
+                "https://www.sportscaveshop.com/products/route-mapping-wall-art"
+            ),
+            country="AUS",
+            sport="Motorsport",
+            catalog_id="catalog-1",
+            product_set_id="product-set-1",
+            audience={"type": "broad"},
+            creatives=tuple(
+                {
+                    "image": {
+                        "data": png_image_bytes(color=(40 * index, 50, 60)),
+                        "name": f"route-{index}.png",
+                    },
+                    "primary_text": state[ads_posting_page.PRIMARY_TEXT_KEYS[index - 1]],
+                    "headline": state[ads_posting_page.HEADLINE_KEYS[index - 1]],
+                    "description": "",
+                }
+                for index in range(1, 4)
+            ),
+        )
+        self.assertEqual(tuple(item.primary_text for item in request.creatives), expected)
+        clean = validate_posting_request(request)
+        self.assertEqual(
+            tuple(item["primary_text"] for item in clean["creatives"]), expected
+        )
+
+        fingerprint = _request_fingerprint(clean)
+        for index in range(3):
+            changed_creatives = list(request.creatives)
+            changed_creatives[index] = replace(
+                changed_creatives[index],
+                primary_text=f"CHANGED ROUTE {index + 1}",
+            )
+            changed = replace(request, creatives=tuple(changed_creatives))
+            self.assertNotEqual(
+                _request_fingerprint(validate_posting_request(changed)),
+                fingerprint,
+            )
+
     def test_schema_is_versioned_three_route_nine_copy_row_contract(self):
         rows = posting_rows()
         self.assertEqual(len(rows), 9)
@@ -916,7 +1037,7 @@ class PostingCSVImportTests(unittest.TestCase):
         product_rows = tuple(record["row"] for record in product_records())
         source = ads_page.build_instant_experience_copy_csv(
             ads_result(),
-            ads_workflow(),
+            shared_primary_text_workflow(),
         )
         with (
             mock.patch.object(
@@ -958,7 +1079,9 @@ class PostingCSVImportTests(unittest.TestCase):
                 )
             )
             for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS, start=1):
-                expected = ads_workflow()["ad_notes"]["instant_experience_concepts"]
+                expected = shared_primary_text_workflow()["ad_notes"][
+                    "instant_experience_concepts"
+                ]
                 primary_widget = next(
                     item
                     for item in app.text_area
@@ -971,7 +1094,7 @@ class PostingCSVImportTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     primary_widget.value,
-                    expected[concept["id"]][0]["primary_text"],
+                    expected[concept["id"]][index - 1]["primary_text"],
                 )
                 self.assertEqual(
                     headline_widget.value,
@@ -984,13 +1107,21 @@ class PostingCSVImportTests(unittest.TestCase):
                 if item.label == "Primary Text 1"
             ).set_value("Manual edit after import")
             app.run(timeout=20)
-            self.assertEqual(
+            rerun_primary_values = tuple(
                 next(
                     item
                     for item in app.text_area
-                    if item.label == "Primary Text 1"
-                ).value,
-                "Manual edit after import",
+                    if item.label == f"Primary Text {index}"
+                ).value
+                for index in range(1, 4)
+            )
+            self.assertEqual(
+                rerun_primary_values,
+                (
+                    "Manual edit after import",
+                    "ROUTE TWO PRIMARY TEXT",
+                    "ROUTE THREE PRIMARY TEXT",
+                ),
             )
             self.assertEqual(parser.call_count, 1)
             self.assertEqual(hydration.call_count, 1)
@@ -1085,7 +1216,7 @@ class PostingCSVImportTests(unittest.TestCase):
         for index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS):
             self.assertEqual(
                 state[ads_posting_page.PRIMARY_TEXT_KEYS[index]],
-                expected[concept["id"]][0]["primary_text"],
+                expected[concept["id"]][index]["primary_text"],
             )
             self.assertEqual(
                 state[ads_posting_page.HEADLINE_KEYS[index]],

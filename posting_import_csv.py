@@ -70,7 +70,7 @@ POSTING_IMPORT_HEADER_ALIASES = {
     "call_to_action": "cta",
 }
 POSTING_IMPORT_MAX_BYTES = 2 * 1024 * 1024
-ADS_CSV_IMPORT_RUNTIME_VERSION = "2026-09-02-canonical-ads-copy-v3"
+ADS_CSV_IMPORT_RUNTIME_VERSION = "2026-09-03-route-primary-text-v4"
 ADS_COPY_SCHEMA_VERSION = "2"
 ADS_COPY_CAMPAIGN_TYPE = "instant_experience"
 ADS_COPY_HEADERS = (
@@ -799,12 +799,19 @@ def _batch_from_ads_copy_rows(clean_rows, source_headers):
             row for row in clean_rows if row["route_key"] == route_key
         )
         primary = next(row for row in route_rows if row["variation"] == 1)
+        route_primary_text = next(
+            row for row in route_rows if row["variation"] == ad_number
+        )
         ads.append(
             {
                 "ad_number": ad_number,
                 "route_key": route_key,
                 "route_label": primary["route_label"],
-                "primary_text": primary["primary_text"],
+                # New Ads exports the same ordered three-description set under
+                # every image route.  Posting pairs route 1/2/3 with Primary
+                # Text 1/2/3 respectively; the route-specific variation-1
+                # headline/CTA contract remains unchanged.
+                "primary_text": route_primary_text["primary_text"],
                 "headline": primary["headline"],
                 "description": "",
                 "cta": primary["cta"],
@@ -881,12 +888,13 @@ def _batch_from_canonical_ads_copy(parsed, concepts):
                 }
             )
         primary = variations[POSTING_IMPORT_PRIMARY_VARIATION - 1]
+        route_primary_text = variations[ad_number - 1]
         ads.append(
             {
                 "ad_number": ad_number,
                 "route_key": route_key,
                 "route_label": route_label,
-                "primary_text": primary["primary_text"],
+                "primary_text": route_primary_text["primary_text"],
                 "headline": primary["headline"],
                 "description": "",
                 "cta": primary["cta"],

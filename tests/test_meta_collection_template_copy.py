@@ -58,7 +58,13 @@ def source_creative():
 
 
 class FakeTemplateCopyClient:
-    def __init__(self, *, invalid_target=False, rename_readback_names=()):
+    def __init__(
+        self,
+        *,
+        invalid_target=False,
+        rename_readback_names=(),
+        copied_primary_text="",
+    ):
         self.invalid_target = invalid_target
         self.copy_calls = []
         self.rename_calls = []
@@ -66,6 +72,7 @@ class FakeTemplateCopyClient:
         self.creative_reads = []
         self.copy_exists = False
         self.rename_readback_names = list(rename_readback_names)
+        self.copied_primary_text = str(copied_primary_text or "")
         self.rename_requested = False
         self.source_ad = {
             "id": SOURCE_AD_ID,
@@ -103,7 +110,12 @@ class FakeTemplateCopyClient:
         if str(creative_id) == "source-creative":
             return source_creative()
         if str(creative_id) == "copied-creative-1":
-            return {"id": "copied-creative-1", **target_creative()}
+            creative = {"id": "copied-creative-1", **target_creative()}
+            if self.copied_primary_text:
+                creative["object_story_spec"]["link_data"]["message"] = (
+                    self.copied_primary_text
+                )
+            return creative
         raise AssertionError(f"Unexpected creative read: {creative_id}")
 
     def ad_copies(self, source_ad_id):
@@ -277,6 +289,20 @@ class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertTrue(result["reconciled_existing_copy"])
         self.assertEqual(client.copy_calls, [])
+
+    def test_wrong_route_primary_text_readback_fails_closed(self):
+        client = FakeTemplateCopyClient(
+            copied_primary_text="WRONG ROUTE PRIMARY TEXT"
+        )
+        with self.assertRaises(MetaCollectionTemplateCopyVerificationError) as caught:
+            MetaCollectionTemplateCopyService(client).create_one_paused_copy(
+                source_ad_id=SOURCE_AD_ID,
+                target_adset_id=TARGET_ADSET_ID,
+                creative_parameters=target_creative(),
+            )
+
+        self.assertIn("primary_text", caught.exception.result["failed_checks"])
+        self.assertFalse(caught.exception.result["checks"]["primary_text"])
 
     def test_rename_stale_once_then_expected_name_passes_without_real_sleep(self):
         expected_name = "Six Laps Ahead Peter Brock IA 1"
