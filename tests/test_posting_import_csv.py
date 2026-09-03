@@ -682,6 +682,10 @@ class PostingCSVImportTests(unittest.TestCase):
             state[ads_posting_page.RUN_STATE_KEY],
             ads_posting_page.RUN_STATE_DRAFT,
         )
+        self.assertEqual(
+            state[ads_posting_page.CUSTOMER_LIFECYCLE_KEY],
+            ads_posting_page.CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
 
     def test_new_campaign_starts_new_run_and_preserves_staging_only(self):
         old_run_id = "11111111-1111-4111-8111-111111111111"
@@ -712,6 +716,9 @@ class PostingCSVImportTests(unittest.TestCase):
             ads_posting_page.SPORT_KEY: "Motorsport",
             ads_posting_page.PRODUCT_SET_KEY: "keep-product-set",
             ads_posting_page.AUDIENCE_KEY: "keep-audience",
+            ads_posting_page.CUSTOMER_LIFECYCLE_KEY: (
+                ads_posting_page.CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+            ),
             ads_posting_page.IMAGE_STATE_KEYS[0]: {"data": b"keep-image"},
             ads_posting_page.PRIMARY_TEXT_KEYS[0]: "Keep copy",
         }
@@ -740,6 +747,10 @@ class PostingCSVImportTests(unittest.TestCase):
             state[ads_posting_page.PRODUCT_SET_KEY], "keep-product-set"
         )
         self.assertEqual(state[ads_posting_page.AUDIENCE_KEY], "keep-audience")
+        self.assertEqual(
+            state[ads_posting_page.CUSTOMER_LIFECYCLE_KEY],
+            ads_posting_page.CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
         self.assertEqual(
             state[ads_posting_page.IMAGE_STATE_KEYS[0]]["data"], b"keep-image"
         )
@@ -1609,6 +1620,10 @@ class PostingImageCaptureTests(unittest.TestCase):
         self.assertEqual(
             [creative.headline for creative in request.creatives],
             ["Headline 1", "Headline 2", "Headline 3"],
+        )
+        self.assertEqual(
+            request.customer_lifecycle_strategy,
+            ads_posting_page.CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
         )
 
         existing_request = ads_posting_page._build_posting_request(

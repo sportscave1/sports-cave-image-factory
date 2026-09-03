@@ -55,6 +55,18 @@ POSTING_STATUSES = (
 POSTING_MODE_NEW = "NEW"
 POSTING_MODE_EXISTING = "EXISTING"
 POSTING_MODES = (POSTING_MODE_NEW, POSTING_MODE_EXISTING)
+CUSTOMER_LIFECYCLE_ALL_AUDIENCES = "ALL_AUDIENCES"
+CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS = "ACQUIRE_NEW_CUSTOMERS"
+CUSTOMER_LIFECYCLE_UNKNOWN = "UNKNOWN"
+CUSTOMER_LIFECYCLE_STRATEGIES = (
+    CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+    CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+)
+CUSTOMER_LIFECYCLE_LABELS = {
+    CUSTOMER_LIFECYCLE_ALL_AUDIENCES: "Get conversions from all audiences",
+    CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS: "Acquire new customers",
+    CUSTOMER_LIFECYCLE_UNKNOWN: "Unknown",
+}
 META_OBJECT_CREATED_BY_RUN = "CREATED_BY_RUN"
 META_OBJECT_EXISTING_TARGET = "EXISTING_TARGET"
 SELECTABLE_EXISTING_STATUSES = {"ACTIVE", "PAUSED"}
@@ -598,6 +610,7 @@ class PostingRequest:
     creatives: tuple[PostingCreative, ...]
     audience_type: str = "broad"
     audience_id: str = ""
+    customer_lifecycle_strategy: str = CUSTOMER_LIFECYCLE_ALL_AUDIENCES
     posting_mode: str = POSTING_MODE_NEW
     target_campaign_id: str = ""
     target_adset_id: str = ""
@@ -702,6 +715,11 @@ def _request_fingerprint(clean):
             "posting_mode", "target_campaign_id", "target_adset_id",
         )
     }
+    # Preserve fingerprints for legacy/default All Audiences runs while making
+    # any future non-default lifecycle selection part of mutation protection.
+    lifecycle = str(clean.get("customer_lifecycle_strategy") or "").upper()
+    if lifecycle not in ("", CUSTOMER_LIFECYCLE_ALL_AUDIENCES):
+        payload["customer_lifecycle_strategy"] = lifecycle
     payload["creatives"] = [
         {
             "image_checksum": creative["image_checksum"],
@@ -824,6 +842,7 @@ def validate_posting_request(request):
             raise PostingValidationError("Select an existing Meta Ad Set.")
         audience_type = "inherited"
         audience_id = ""
+        customer_lifecycle_strategy = ""
     else:
         if target_campaign_id or target_adset_id:
             raise PostingValidationError(
@@ -831,6 +850,22 @@ def validate_posting_request(request):
             )
         audience_type = str(request.audience_type or "broad").strip().casefold()
         audience_id = str(request.audience_id or "").strip()
+        customer_lifecycle_strategy = str(
+            getattr(
+                request,
+                "customer_lifecycle_strategy",
+                CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+            )
+            or CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+        ).strip().upper()
+        if customer_lifecycle_strategy not in CUSTOMER_LIFECYCLE_STRATEGIES:
+            raise PostingValidationError("Select a valid Customer Lifecycle Strategy.")
+        if customer_lifecycle_strategy == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
+            raise PostingValidationError(
+                "Acquire new customers is not available yet because Meta's complete "
+                "existing-customer audience contract has not been verified. Choose "
+                "Get conversions from all audiences."
+            )
     if audience_type not in {"broad", "saved", "custom", "inherited"}:
         raise PostingValidationError("Select a valid Meta audience.")
     if audience_type != "broad" and not audience_id:
@@ -848,6 +883,7 @@ def validate_posting_request(request):
         "product_set_id": product_set_id,
         "audience_type": audience_type,
         "audience_id": audience_id,
+        "customer_lifecycle_strategy": customer_lifecycle_strategy,
         "posting_mode": posting_mode,
         "target_campaign_id": target_campaign_id,
         "target_adset_id": target_adset_id,
@@ -886,11 +922,31 @@ def build_targeting(*, country, audience_type="broad", audience=None):
     return targeting
 
 
-def build_adset_payload(*, name, campaign_id, product_set_id, pixel_id, targeting, start_time=None):
+def build_adset_payload(
+    *,
+    name,
+    campaign_id,
+    product_set_id,
+    pixel_id,
+    targeting,
+    customer_lifecycle_strategy=CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+    start_time=None,
+):
     begins = start_time or datetime.now(timezone.utc)
-    # Meta represents "Get conversions from all audiences" by omitting the
-    # acquisition-only ad_set_goal and existing_customer_budget_percentage
-    # fields. Audience targeting and PURCHASE optimisation remain unchanged.
+    lifecycle = str(
+        customer_lifecycle_strategy or CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+    ).strip().upper()
+    if lifecycle != CUSTOMER_LIFECYCLE_ALL_AUDIENCES:
+        raise PostingValidationError(
+            "Acquire new customers cannot be sent until Meta's complete "
+            "existing-customer audience contract is configured."
+        )
+    # Meta v26 exposes acquisition configuration through ad_set_goal and
+    # existing_customer_budget_percentage, but its generated models expose no
+    # documented ALL_AUDIENCES enum/value. The non-acquisition contract is
+    # therefore deliberately explicit in Sports Cave state and deliberately
+    # omitted from the Graph payload. Audience targeting and PURCHASE
+    # optimisation remain unchanged.
     return {
         "name": str(name), "campaign_id": str(campaign_id), "status": "PAUSED",
         "billing_event": "IMPRESSIONS", "optimization_goal": "OFFSITE_CONVERSIONS",
@@ -904,13 +960,55 @@ def build_adset_payload(*, name, campaign_id, product_set_id, pixel_id, targetin
     }
 
 
-def adset_uses_all_audiences(adset):
-    """Confirm Meta did not apply acquisition-only customer-lifecycle settings."""
+def classify_adset_customer_lifecycle(adset, *, acquisition_fields_requested=False):
+    """Classify Graph lifecycle state without inventing undocumented goal values.
+
+    Missing fields are only meaningful when the caller confirms that its Graph
+    request explicitly requested both acquisition fields. This prevents a
+    partial Ad Set dict from being misclassified as All Audiences.
+    """
+
     adset = dict(adset or {})
-    return (
-        adset.get("ad_set_goal") in (None, "", {})
-        and adset.get("existing_customer_budget_percentage") in (None, "")
+    goal = adset.get("ad_set_goal")
+    existing_customer_budget = adset.get("existing_customer_budget_percentage")
+    if goal not in (None, "", {}) or existing_customer_budget not in (None, ""):
+        return CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+    fields_present = {
+        "ad_set_goal",
+        "existing_customer_budget_percentage",
+    }.issubset(adset)
+    # A valid Graph node plus an explicit request for both acquisition fields
+    # makes their absence meaningful. An empty/partial mapping remains UNKNOWN.
+    if fields_present or (acquisition_fields_requested and adset.get("id")):
+        return CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+    return CUSTOMER_LIFECYCLE_UNKNOWN
+
+
+def customer_lifecycle_verification(adset, *, acquisition_fields_requested=False):
+    strategy = classify_adset_customer_lifecycle(
+        adset,
+        acquisition_fields_requested=acquisition_fields_requested,
     )
+    if strategy == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
+        source = "Meta Graph returned acquisition-only Ad Set configuration"
+    elif strategy == CUSTOMER_LIFECYCLE_ALL_AUDIENCES:
+        source = "Meta Graph read-back returned no acquisition-only configuration"
+    else:
+        source = "Meta Graph lifecycle fields were not available in this read"
+    return {
+        "strategy": strategy,
+        "label": CUSTOMER_LIFECYCLE_LABELS[strategy],
+        "verification_source": source,
+    }
+
+
+def adset_uses_all_audiences(adset, *, acquisition_fields_requested=False):
+    """Compatibility predicate backed by the explicit three-state classifier."""
+
+    return classify_adset_customer_lifecycle(
+        adset,
+        acquisition_fields_requested=acquisition_fields_requested,
+    ) == CUSTOMER_LIFECYCLE_ALL_AUDIENCES
 
 
 def build_collection_creative_features_spec():
@@ -1290,7 +1388,9 @@ class SupabasePostingStore:
                     "submission_id", "request_fingerprint", "status", "product_id",
                     "product_title", "product_handle", "country", "sport", "catalog_id",
                     "catalog_name", "product_set_id", "product_set_name", "audience_type",
-                    "audience_id", "audience_name", "pixel_id", "pixel_name", "account_currency", "campaign_name",
+                    "audience_id", "audience_name", "requested_lifecycle_strategy",
+                    "verified_lifecycle_strategy", "lifecycle_verification_source",
+                    "pixel_id", "pixel_name", "account_currency", "campaign_name",
                     "adset_name", "ad_name", "destination_url", "image_checksum",
                     "posting_mode", "campaign_ownership", "adset_ownership",
                     "campaign_id", "adset_id", "campaign_configured_status",
@@ -1303,6 +1403,12 @@ class SupabasePostingStore:
                     if column == "status"
                     else json.dumps(request_data.get(column) or [])
                     if column == "ad_results"
+                    else CUSTOMER_LIFECYCLE_UNKNOWN
+                    if column == "verified_lifecycle_strategy"
+                    and not request_data.get(column)
+                    else ""
+                    if column == "lifecycle_verification_source"
+                    and request_data.get(column) is None
                     else request_data.get(column)
                     for column in columns
                 )
@@ -1355,6 +1461,8 @@ class SupabasePostingStore:
             "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_name",
             "campaign_ownership", "adset_ownership", "campaign_configured_status",
             "adset_configured_status",
+            "requested_lifecycle_strategy", "verified_lifecycle_strategy",
+            "lifecycle_verification_source",
             "meta_image_hash", "meta_page_photo_id", "meta_canvas_photo_element_id",
             "meta_canvas_product_element_id", "meta_canvas_button_element_id",
             "meta_canvas_footer_element_id", "meta_instant_experience_id",
@@ -1403,7 +1511,9 @@ class SupabasePostingStore:
                            ad_name, meta_instant_experience_id, meta_ad_id, meta_creative_id,
                            meta_status, safe_error, ad_results, posting_mode,
                            campaign_ownership, adset_ownership,
-                           campaign_configured_status, adset_configured_status
+                           campaign_configured_status, adset_configured_status,
+                           requested_lifecycle_strategy, verified_lifecycle_strategy,
+                           lifecycle_verification_source
                     FROM meta_posting_submissions ORDER BY created_at DESC LIMIT %s
                     """,
                     (max(1, min(int(limit or 20), 100)),),
@@ -1693,6 +1803,11 @@ class MetaPostingService:
                 "product_set_name": str(product_set.get("name") or ""),
                 "audience_type": clean["audience_type"],
                 "audience_id": str(audience.get("id") or ""), "audience_name": audience_label,
+                "requested_lifecycle_strategy": (
+                    clean["customer_lifecycle_strategy"] if not is_existing_mode else None
+                ),
+                "verified_lifecycle_strategy": CUSTOMER_LIFECYCLE_UNKNOWN,
+                "lifecycle_verification_source": "",
                 "pixel_id": str(pixel.get("id") or ""), "pixel_name": str(pixel.get("name") or ""),
                 "account_currency": str((references.get("account") or {}).get("currency") or ""),
                 "campaign_name": campaign_label, "adset_name": adset_label,
@@ -1793,6 +1908,10 @@ class MetaPostingService:
                 adset_id = clean["target_adset_id"]
                 campaign_label = str(configured_campaign.get("name") or campaign_id)
                 adset_label = str(configured_adset.get("name") or adset_id)
+                lifecycle_verification = customer_lifecycle_verification(
+                    configured_adset,
+                    acquisition_fields_requested=True,
+                )
                 record = self.store.update_stage(
                     submission_id,
                     "VALIDATING",
@@ -1804,6 +1923,10 @@ class MetaPostingService:
                     adset_ownership=META_OBJECT_EXISTING_TARGET,
                     campaign_configured_status=target["campaign_status"],
                     adset_configured_status=target["adset_status"],
+                    verified_lifecycle_strategy=lifecycle_verification["strategy"],
+                    lifecycle_verification_source=lifecycle_verification[
+                        "verification_source"
+                    ],
                     ad_results=ad_results,
                 )
             elif campaign_id:
@@ -1858,6 +1981,9 @@ class MetaPostingService:
                             name=adset_label, campaign_id=campaign_id,
                             product_set_id=clean["product_set_id"], pixel_id=pixel["id"],
                             targeting=targeting,
+                            customer_lifecycle_strategy=clean[
+                                "customer_lifecycle_strategy"
+                            ],
                         )
                     ),
                     lambda: self.client.find_adsets_by_name(campaign_id, adset_label),
@@ -1871,8 +1997,29 @@ class MetaPostingService:
                     campaign_ownership=META_OBJECT_CREATED_BY_RUN,
                     adset_ownership=META_OBJECT_CREATED_BY_RUN,
                 )
-                configured_adset = self.client.configured_adset(adset_id)
-                if not adset_uses_all_audiences(configured_adset):
+            if not is_existing_mode:
+                if configured_adset is None:
+                    configured_adset = self.client.configured_adset(adset_id)
+                lifecycle_verification = customer_lifecycle_verification(
+                    configured_adset,
+                    acquisition_fields_requested=True,
+                )
+                record = self.store.update_stage(
+                    submission_id,
+                    "ADSET_CREATED",
+                    requested_lifecycle_strategy=clean[
+                        "customer_lifecycle_strategy"
+                    ],
+                    verified_lifecycle_strategy=lifecycle_verification["strategy"],
+                    lifecycle_verification_source=lifecycle_verification[
+                        "verification_source"
+                    ],
+                    ad_results=ad_results,
+                )
+                if (
+                    lifecycle_verification["strategy"]
+                    != clean["customer_lifecycle_strategy"]
+                ):
                     self._ambiguous(
                         submission_id,
                         (

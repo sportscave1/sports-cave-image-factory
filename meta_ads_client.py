@@ -11,6 +11,15 @@ DEFAULT_META_API_VERSION = "v26.0"
 META_BASE_URL = "https://graph.facebook.com"
 LOGGER = logging.getLogger(__name__)
 
+META_AD_PREVIEW_FORMATS = (
+    "MOBILE_FEED_STANDARD",
+    "FACEBOOK_STORY_MOBILE",
+    "FACEBOOK_REELS_MOBILE",
+    "INSTAGRAM_STANDARD",
+    "INSTAGRAM_STORY",
+    "INSTAGRAM_REELS",
+)
+
 
 class MetaAdsApiError(RuntimeError):
     def __init__(
@@ -126,6 +135,42 @@ def is_optional_canvas_read_capability_error(error):
             "unknown field",
             "unsupported field",
             "tried accessing nonexisting field",
+        )
+    )
+
+
+def is_optional_meta_diagnostic_read_error(error):
+    """Classify only unavailable optional diagnostic reads.
+
+    This helper is intentionally used only by GET-only diagnostics. It must
+    never be used to suppress an error from a production create/update call.
+    Authentication failures and permission loss continue to propagate.
+    """
+
+    if not isinstance(error, MetaAdsApiError):
+        return False
+    if str(getattr(error, "error_code", "")) == "3":
+        return True
+    if str(getattr(error, "error_code", "")) != "100":
+        return False
+    detail = " ".join(
+        (
+            str(error),
+            str(getattr(error, "error_user_title", "") or ""),
+            str(getattr(error, "error_user_msg", "") or ""),
+        )
+    ).casefold()
+    return any(
+        marker in detail
+        for marker in (
+            "nonexisting field",
+            "non-existing field",
+            "unknown field",
+            "unsupported field",
+            "cannot query field",
+            "tried accessing nonexisting field",
+            "unsupported ad format",
+            "ad format is not supported",
         )
     )
 
@@ -1231,6 +1276,7 @@ class MetaPostingClient:
                         "id,name,status,configured_status,effective_status,campaign_id,"
                         "account_id,optimization_goal,billing_event,destination_type,"
                         "promoted_object,targeting,daily_budget,lifetime_budget,"
+                        "ad_set_goal,existing_customer_budget_percentage,"
                         "campaign{objective}"
                     ),
                     "limit": 100,
@@ -1715,6 +1761,20 @@ class MetaPostingClient:
             config=self.config,
         )
 
+    def ad_crop_details(self, ad_id):
+        """Read additional timing metadata for a GET-only crop audit."""
+
+        return _request(
+            str(ad_id or ""),
+            params={
+                "fields": (
+                    "id,name,status,configured_status,effective_status,"
+                    "creative{id},adset_id,source_ad_id,created_time,updated_time"
+                )
+            },
+            config=self.config,
+        )
+
     def creative(self, creative_id):
         """Read the Collection fields required by template-copy verification."""
         return _request(
@@ -1754,6 +1814,9 @@ class MetaPostingClient:
         unavailable = {}
         for field in (
             "image_crops",
+            "image_url",
+            "thumbnail_url",
+            "effective_object_story_id",
             "format_transformation_spec",
             "asset_feed_spec",
             "platform_customizations",
@@ -1766,20 +1829,7 @@ class MetaPostingClient:
                     config=self.config,
                 )
             except MetaAdsApiError as error:
-                lowered = sanitize_meta_error(error).casefold()
-                optional_field_error = str(error.error_code or "") == "3" or (
-                    str(error.error_code or "") == "100"
-                    and any(
-                        marker in lowered
-                        for marker in (
-                            "nonexisting field",
-                            "unknown field",
-                            "unsupported field",
-                            "cannot query field",
-                        )
-                    )
-                )
-                if not optional_field_error:
+                if not is_optional_meta_diagnostic_read_error(error):
                     raise
                 unavailable[field] = {
                     "error_code": error.error_code,
@@ -1801,14 +1851,15 @@ class MetaPostingClient:
         clean_hash = str(image_hash or "").strip()
         if not clean_hash:
             raise MetaAdsApiError("A Meta image hash is required for the crop audit.")
+        base_params = {
+            "fields": "hash,width,height,original_width,original_height",
+            # Meta's generated SDK defines ``hashes`` as list<string>.
+            "hashes": json.dumps([clean_hash]),
+            "limit": 10,
+        }
         rows = _paged_get(
             f"{self.ad_account_id}/adimages",
-            params={
-                "fields": "hash,width,height,original_width,original_height",
-                # Meta's generated SDK defines ``hashes`` as list<string>.
-                "hashes": json.dumps([clean_hash]),
-                "limit": 10,
-            },
+            params=base_params,
             config=self.config,
         ).get("rows") or ()
         matches = [
@@ -1820,7 +1871,83 @@ class MetaPostingClient:
             raise MetaAdsApiError(
                 "Meta did not return exactly one image matching the requested hash."
             )
-        return matches[0]
+        image = matches[0]
+        try:
+            optional_rows = _paged_get(
+                f"{self.ad_account_id}/adimages",
+                params={
+                    **base_params,
+                    "fields": (
+                        "hash,url,url_128,permalink_url,created_time,updated_time"
+                    ),
+                },
+                config=self.config,
+            ).get("rows") or ()
+        except MetaAdsApiError as error:
+            if not is_optional_meta_diagnostic_read_error(error):
+                raise
+            image["_unavailable_image_fields"] = {
+                "error_code": error.error_code,
+                "error_subcode": error.error_subcode,
+                "reason": "not available to this Meta app/token",
+            }
+            return image
+        optional_match = next(
+            (
+                dict(row)
+                for row in optional_rows
+                if str(dict(row or {}).get("hash") or "").strip() == clean_hash
+            ),
+            None,
+        )
+        if optional_match:
+            image.update(optional_match)
+        else:
+            image["_unavailable_image_fields"] = {"reason": "omitted by Meta"}
+        return image
+
+    def ad_preview(self, ad_id, *, ad_format):
+        """Read one official Meta placement preview without exposing its HTML.
+
+        The returned rows are sanitized by the crop diagnostic before display.
+        Unsupported optional preview capabilities are reported as unavailable;
+        authentication and other core errors are never hidden.
+        """
+
+        clean_ad_id = str(ad_id or "").strip()
+        clean_format = str(ad_format or "").strip().upper()
+        if not clean_ad_id:
+            raise MetaAdsApiError("A Meta Ad ID is required for preview inspection.")
+        if clean_format not in META_AD_PREVIEW_FORMATS:
+            raise MetaAdsApiError("The requested Meta preview format is not supported.")
+        try:
+            result = _paged_get(
+                f"{clean_ad_id}/previews",
+                params={
+                    "fields": "body,transformation_spec",
+                    "ad_format": clean_format,
+                    "limit": 1,
+                },
+                config=self.config,
+                max_pages=1,
+            )
+        except MetaAdsApiError as error:
+            if not is_optional_meta_diagnostic_read_error(error):
+                raise
+            return {
+                "ad_format": clean_format,
+                "rows": (),
+                "unavailable": {
+                    "error_code": error.error_code,
+                    "error_subcode": error.error_subcode,
+                    "reason": "not available to this Meta app/token",
+                },
+            }
+        return {
+            "ad_format": clean_format,
+            "rows": tuple(result.get("rows") or ()),
+            "unavailable": {},
+        }
 
 
 def fetch_meta_ads(config=None):

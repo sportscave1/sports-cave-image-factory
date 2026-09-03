@@ -20,6 +20,9 @@ from meta_posting_service import (
     EXTERNALLY_ABANDONED_MESSAGE,
     EXISTING_TARGET_MISSING_MESSAGE,
     EXPECTED_PIXEL_NAME,
+    CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+    CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+    CUSTOMER_LIFECYCLE_UNKNOWN,
     META_OBJECT_CREATED_BY_RUN,
     META_OBJECT_EXISTING_TARGET,
     POSTING_MODE_EXISTING,
@@ -45,6 +48,8 @@ from meta_posting_service import (
     campaign_name,
     COUNTRY_META_CODES,
     catalog_ids_from_sales_campaigns,
+    classify_adset_customer_lifecycle,
+    customer_lifecycle_verification,
     dataset_ids_from_purchase_adsets,
     load_posting_reference_snapshot,
     load_existing_posting_targets,
@@ -135,6 +140,8 @@ def existing_target_rows(*, campaign_status="ACTIVE", adset_status="ACTIVE"):
             },
             "targeting": {"geo_locations": {"countries": ["AU"]}},
             "daily_budget": "2500",
+            "ad_set_goal": None,
+            "existing_customer_budget_percentage": None,
         },
     )
 
@@ -484,7 +491,8 @@ class ExistingTargetClientTests(unittest.TestCase):
         self.assertIn("account_id", campaign_fields)
         for field in (
             "campaign_id", "optimization_goal", "billing_event", "promoted_object",
-            "targeting", "daily_budget", "lifetime_budget",
+            "targeting", "daily_budget", "lifetime_budget", "ad_set_goal",
+            "existing_customer_budget_percentage",
         ):
             self.assertIn(field, adset_fields)
 
@@ -502,6 +510,8 @@ class ExistingTargetClientTests(unittest.TestCase):
         self.assertIn("billing_event", adset_fields)
         self.assertIn("promoted_object", adset_fields)
         self.assertIn("targeting", adset_fields)
+        self.assertIn("ad_set_goal", adset_fields)
+        self.assertIn("existing_customer_budget_percentage", adset_fields)
 
 
 class PostingNavigationTests(unittest.TestCase):
@@ -547,6 +557,14 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn('"Add 3 Paused Ads to Existing Ad Set"', source)
         self.assertIn('"Audience and targeting will not be changed."', source)
         self.assertIn('"Existing campaign budget will not be changed."', source)
+
+    def test_lifecycle_ui_defaults_all_audiences_and_keeps_acquisition_fail_closed(self):
+        source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
+        self.assertIn('"Customer Lifecycle Strategy"', source)
+        self.assertIn("CUSTOMER_LIFECYCLE_ALL_AUDIENCES", source)
+        self.assertIn("CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS", source)
+        self.assertIn("Acquire new customers is not available yet", source)
+        self.assertIn("Customer lifecycle settings will not be changed.", source)
 
     def test_existing_adset_options_are_filtered_by_campaign(self):
         targets = {
@@ -653,12 +671,17 @@ class PostingPayloadTests(unittest.TestCase):
         self.assertEqual(clean["posting_mode"], POSTING_MODE_NEW)
         self.assertEqual(clean["target_campaign_id"], "")
         self.assertEqual(clean["target_adset_id"], "")
+        self.assertEqual(
+            clean["customer_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
 
     def test_existing_mode_uses_inherited_audience_and_requires_both_targets(self):
         clean = validate_posting_request(existing_request())
         self.assertEqual(clean["posting_mode"], POSTING_MODE_EXISTING)
         self.assertEqual(clean["audience_type"], "inherited")
         self.assertEqual(clean["audience_id"], "")
+        self.assertEqual(clean["customer_lifecycle_strategy"], "")
         with self.assertRaisesRegex(PostingValidationError, "existing Meta Ad Set"):
             validate_posting_request(
                 request_for(
@@ -857,7 +880,19 @@ class PostingPayloadTests(unittest.TestCase):
         )
 
     def test_customer_lifecycle_readback_requires_no_acquisition_configuration(self):
-        self.assertTrue(adset_uses_all_audiences({}))
+        self.assertFalse(adset_uses_all_audiences({}))
+        self.assertEqual(
+            classify_adset_customer_lifecycle({}),
+            CUSTOMER_LIFECYCLE_UNKNOWN,
+        )
+        self.assertFalse(
+            adset_uses_all_audiences({}, acquisition_fields_requested=True)
+        )
+        self.assertTrue(
+            adset_uses_all_audiences(
+                {"id": "adset-1"}, acquisition_fields_requested=True
+            )
+        )
         self.assertTrue(
             adset_uses_all_audiences(
                 {"ad_set_goal": None, "existing_customer_budget_percentage": None}
@@ -865,6 +900,67 @@ class PostingPayloadTests(unittest.TestCase):
         )
         self.assertFalse(adset_uses_all_audiences({"ad_set_goal": {"type": "NEW_CUSTOMER"}}))
         self.assertFalse(adset_uses_all_audiences({"existing_customer_budget_percentage": 0}))
+
+    def test_customer_lifecycle_verification_has_three_evidence_based_states(self):
+        unknown = customer_lifecycle_verification({})
+        all_audiences = customer_lifecycle_verification(
+            {"id": "adset-1"}, acquisition_fields_requested=True
+        )
+        acquisition = customer_lifecycle_verification(
+            {"ad_set_goal": {"type": 1}},
+            acquisition_fields_requested=True,
+        )
+        self.assertEqual(unknown["strategy"], CUSTOMER_LIFECYCLE_UNKNOWN)
+        self.assertEqual(
+            all_audiences["strategy"], CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+        )
+        self.assertEqual(
+            acquisition["strategy"],
+            CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+        )
+        self.assertNotIn("type", acquisition["verification_source"])
+
+    def test_unverified_acquire_new_customers_never_builds_partial_payload(self):
+        with self.assertRaisesRegex(
+            PostingValidationError,
+            "complete existing-customer audience contract",
+        ):
+            validate_posting_request(
+                request_for(
+                    customer_lifecycle_strategy=(
+                        CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+                    )
+                )
+            )
+        with self.assertRaisesRegex(PostingValidationError, "cannot be sent"):
+            build_adset_payload(
+                name="Ad set",
+                campaign_id="campaign-1",
+                product_set_id="set-1",
+                pixel_id="pixel-1",
+                targeting=build_targeting(country="AUS"),
+                customer_lifecycle_strategy=(
+                    CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+                ),
+            )
+
+    def test_non_default_lifecycle_is_part_of_request_content_not_run_identity(self):
+        clean = validate_posting_request(request_for())
+        default_fingerprint = _request_fingerprint(clean)
+        acquisition_content = dict(clean)
+        acquisition_content["customer_lifecycle_strategy"] = (
+            CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+        )
+        self.assertNotEqual(
+            default_fingerprint,
+            _request_fingerprint(acquisition_content),
+        )
+        another_run = validate_posting_request(
+            request_for(
+                submission_id="22222222-2222-4222-8222-222222222222"
+            )
+        )
+        self.assertEqual(default_fingerprint, _request_fingerprint(another_run))
 
     def test_collection_creative_contract(self):
         payload = build_collection_creative_payload(
@@ -2001,6 +2097,12 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(result["adset_ownership"], META_OBJECT_EXISTING_TARGET)
         self.assertEqual(result["campaign_configured_status"], "ACTIVE")
         self.assertEqual(result["adset_configured_status"], "ACTIVE")
+        self.assertIsNone(result["requested_lifecycle_strategy"])
+        self.assertEqual(
+            result["verified_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        self.assertTrue(result["lifecycle_verification_source"])
         self.assertEqual(client.calls.count("campaign"), 0)
         self.assertEqual(client.calls.count("adset"), 0)
         self.assertEqual(client.calls.count("canvas"), 3)
@@ -2159,6 +2261,7 @@ class PostingServiceTests(unittest.TestCase):
 
     def test_new_adset_acquisition_configuration_blocks_before_route_writes(self):
         client = FakePostingClient()
+        store = FakePostingStore()
         client.configured_adset = mock.Mock(
             return_value={
                 "id": "adset-1",
@@ -2168,7 +2271,7 @@ class PostingServiceTests(unittest.TestCase):
         )
         with self.assertRaises(PostingAmbiguousError) as caught:
             MetaPostingService(
-                client=client, store=FakePostingStore()
+                client=client, store=store
             ).create_paused_campaign(request_for())
 
         self.assertIn("Get conversions from all audiences", str(caught.exception))
@@ -2176,6 +2279,15 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.adset_payload["status"], "PAUSED")
         self.assertNotIn("ad_image", client.calls)
         self.assertNotIn("page_photo", client.calls)
+        self.assertEqual(
+            store.record["requested_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        self.assertEqual(
+            store.record["verified_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+        )
+        self.assertTrue(store.record["lifecycle_verification_source"])
 
     def test_missing_page_token_blocks_before_campaign_creation(self):
         client = FakePostingClient()
@@ -2208,6 +2320,15 @@ class PostingServiceTests(unittest.TestCase):
         result = MetaPostingService(client=client, store=store).create_paused_campaign(request_for())
         self.assertEqual(result["status"], "COMPLETE")
         self.assertEqual(result["meta_status"], "PAUSED")
+        self.assertEqual(
+            result["requested_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        self.assertEqual(
+            result["verified_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        self.assertIn("Meta Graph", result["lifecycle_verification_source"])
         self.assertEqual(result["campaign_id"], "campaign-1")
         self.assertEqual(result["adset_id"], "adset-1")
         self.assertEqual(
@@ -2369,6 +2490,10 @@ class PostingServiceTests(unittest.TestCase):
                 self.assertEqual(targeting["geo_locations"], {"countries": ["AU"]})
                 self.assertEqual(
                     targeting["targeting_automation"], {"advantage_audience": 1}
+                )
+                self.assertNotIn("ad_set_goal", client.adset_payload)
+                self.assertNotIn(
+                    "existing_customer_budget_percentage", client.adset_payload
                 )
 
     def test_wrong_instant_experience_button_url_blocks_before_template_copy(self):
@@ -2619,6 +2744,14 @@ class PostingServiceTests(unittest.TestCase):
         client.fail_at = ""
         completed = service.create_paused_campaign(request_for())
         self.assertEqual(completed["status"], "COMPLETE")
+        self.assertEqual(
+            completed["requested_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
+        self.assertEqual(
+            completed["verified_lifecycle_strategy"],
+            CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+        )
         self.assertEqual(client.calls.count("campaign"), 1)
         self.assertEqual(client.calls.count("adset"), 1)
         self.assertEqual(client.calls[len(calls_before_retry):].count("template_copy"), 1)
@@ -3309,6 +3442,28 @@ class ReviewAndPersistenceTests(unittest.TestCase):
         self.assertIn("adset_ownership", source)
         self.assertIn("EXISTING_TARGET", source)
         self.assertIn("CREATED_BY_RUN", source)
+        self.assertNotIn("DELETE FROM", source.upper())
+        self.assertNotIn("DROP TABLE", source.upper())
+        self.assertNotIn("UPDATE META_POSTING_SUBMISSIONS", source.upper())
+        self.assertIn(
+            f'BASE_DIR / "migrations" / "{migration_name}"',
+            (ROOT / "supabase_backend.py").read_text(encoding="utf-8"),
+        )
+
+    def test_customer_lifecycle_migration_is_additive_and_sanitized(self):
+        migration_name = "20260903_meta_posting_customer_lifecycle.sql"
+        source = (ROOT / "migrations" / migration_name).read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "requested_lifecycle_strategy",
+            "verified_lifecycle_strategy",
+            "lifecycle_verification_source",
+            "ALL_AUDIENCES",
+            "ACQUIRE_NEW_CUSTOMERS",
+            "UNKNOWN",
+        ):
+            self.assertIn(field, source)
         self.assertNotIn("DELETE FROM", source.upper())
         self.assertNotIn("DROP TABLE", source.upper())
         self.assertNotIn("UPDATE META_POSTING_SUBMISSIONS", source.upper())

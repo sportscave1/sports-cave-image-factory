@@ -29,6 +29,10 @@ from meta_posting_service import (
     AD_TYPE,
     CAMPAIGN_DAILY_BUDGET_MINOR,
     COUNTRY_META_CODES,
+    CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+    CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+    CUSTOMER_LIFECYCLE_LABELS,
+    CUSTOMER_LIFECYCLE_UNKNOWN,
     EXPECTED_CATALOG_NAME,
     EXPECTED_PIXEL_NAME,
     INSTANT_EXPERIENCE_BUTTON_TEXT,
@@ -50,6 +54,7 @@ from meta_posting_service import (
     adset_name,
     build_collection_creative_payload,
     campaign_name,
+    customer_lifecycle_verification,
     next_instant_experience_ad_names,
     load_posting_reference_snapshot,
     load_existing_posting_targets,
@@ -74,6 +79,7 @@ SPORT_KEY = f"{STATE_PREFIX}sport"
 CATALOG_KEY = f"{STATE_PREFIX}catalog"
 PRODUCT_SET_KEY = f"{STATE_PREFIX}product_set"
 AUDIENCE_KEY = f"{STATE_PREFIX}audience"
+CUSTOMER_LIFECYCLE_KEY = f"{STATE_PREFIX}customer_lifecycle_strategy"
 IMAGE_KEYS = tuple(f"{STATE_PREFIX}image_{index}" for index in range(1, 4))
 IMAGE_STATE_KEYS = tuple(f"{STATE_PREFIX}image_state_{index}" for index in range(1, 4))
 POSTING_IMAGE_RUNTIME_VERSION = "2026-09-01-durable-source-v2"
@@ -567,6 +573,7 @@ def _build_posting_request(
     product_set_id,
     audience,
     creatives,
+    customer_lifecycle_strategy=CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
     posting_mode=POSTING_MODE_NEW,
     target_campaign_id="",
     target_adset_id="",
@@ -585,6 +592,9 @@ def _build_posting_request(
         product_set_id=product_set_id,
         audience_type=str((audience or {}).get("type") or "broad"),
         audience_id=str((audience or {}).get("id") or ""),
+        customer_lifecycle_strategy=str(
+            customer_lifecycle_strategy or CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+        ),
         posting_mode=str(posting_mode or POSTING_MODE_NEW),
         target_campaign_id=str(target_campaign_id or ""),
         target_adset_id=str(target_adset_id or ""),
@@ -798,6 +808,7 @@ def _ensure_posting_run(state=None):
         state[SUBMISSION_ID_KEY] = run_id
     state.setdefault(RUN_STATE_KEY, RUN_STATE_DRAFT)
     state.setdefault(POSTING_MODE_KEY, POSTING_MODE_LABELS[POSTING_MODE_NEW])
+    state.setdefault(CUSTOMER_LIFECYCLE_KEY, CUSTOMER_LIFECYCLE_ALL_AUDIENCES)
     return run_id
 
 
@@ -843,6 +854,7 @@ def _start_new_posting_run(*, state=None):
     state[SUBMISSION_ID_KEY] = run_id
     state[RUN_STATE_KEY] = RUN_STATE_DRAFT
     state[POSTING_MODE_KEY] = POSTING_MODE_LABELS[POSTING_MODE_NEW]
+    state[CUSTOMER_LIFECYCLE_KEY] = CUSTOMER_LIFECYCLE_ALL_AUDIENCES
     state[PROCESSING_KEY] = False
     state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = False
     state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = False
@@ -1050,6 +1062,13 @@ def _render_success(result):
     st.success(SUCCESS_MESSAGE)
     _render_object_result(result, title=str(result.get("ad_name") or "Created Meta hierarchy"))
     currency = str(result.get("account_currency") or "account currency")
+    verified_lifecycle = str(
+        result.get("verified_lifecycle_strategy") or "UNKNOWN"
+    ).upper()
+    lifecycle_label = CUSTOMER_LIFECYCLE_LABELS.get(
+        verified_lifecycle,
+        "Inherited from selected Ad Set",
+    )
     st.caption(
         f"Product: **{result.get('product_title') or ''}** · Country: **{result.get('country') or ''}** · "
         f"Product set: **{result.get('product_set_name') or result.get('product_set_id') or ''}** · "
@@ -1061,11 +1080,18 @@ def _render_success(result):
             "3 new route ads: **PAUSED** · Multi-advertiser ads: **On** · "
             "Generate backgrounds: **Off**"
         )
+        st.caption(f"Customer lifecycle: **Inherited — {lifecycle_label}**")
     else:
         st.caption(
             f"Campaign budget: **$25.00 {currency}/day** · Objective: **Sales** · Optimization: **Purchase** · "
             "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
             "Generate backgrounds: **Off**"
+        )
+        st.caption(f"Customer lifecycle: **{lifecycle_label}**")
+    if result.get("lifecycle_verification_source"):
+        st.caption(
+            "Lifecycle verification: "
+            + str(result.get("lifecycle_verification_source"))
         )
     first_ad = posting_ad_results(result.get("ad_results"))[0]
     link = ads_manager_url(
@@ -1464,6 +1490,28 @@ def render_page():
             "id": "",
             "name": "Inherited from existing Ad Set",
         }
+        inherited_lifecycle = (
+            customer_lifecycle_verification(
+                target_adset,
+                acquisition_fields_requested=True,
+            )
+            if target_adset
+            else {}
+        )
+        inherited_lifecycle_label = str(inherited_lifecycle.get("label") or "")
+        if inherited_lifecycle.get("strategy") == CUSTOMER_LIFECYCLE_UNKNOWN:
+            inherited_lifecycle_label = ""
+        st.text_input(
+            "Customer Lifecycle Strategy",
+            value=(
+                f"Inherited: {inherited_lifecycle_label}"
+                if inherited_lifecycle_label
+                else "Inherited from selected Ad Set"
+            ),
+            disabled=True,
+        )
+        st.caption("Customer lifecycle settings will not be changed.")
+        customer_lifecycle_strategy = ""
     else:
         audiences = _audience_options(references)
         audience_by_key = {row["key"]: row for row in audiences}
@@ -1476,6 +1524,21 @@ def render_page():
             key=AUDIENCE_KEY,
         )
         audience = audience_by_key[audience_key]
+        customer_lifecycle_strategy = st.selectbox(
+            "Customer Lifecycle Strategy",
+            (
+                CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+                CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
+            ),
+            format_func=lambda value: CUSTOMER_LIFECYCLE_LABELS[value],
+            key=CUSTOMER_LIFECYCLE_KEY,
+            disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
+        )
+        if customer_lifecycle_strategy == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
+            st.info(
+                "Acquire new customers is not available yet because Meta's complete "
+                "existing-customer audience contract has not been verified."
+            )
     st.text_input("Ad type", value=AD_TYPE, disabled=True)
 
     dataset_id = str(dataset_resolution.get("id") or "") if dataset_resolution.get("resolved") else ""
@@ -1586,6 +1649,14 @@ def render_page():
                 f"Purchase optimization · Existing audience · {country} package copy · "
                 "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
             )
+            st.caption(
+                "Customer lifecycle: "
+                + (
+                    f"Inherited — {inherited_lifecycle_label}"
+                    if inherited_lifecycle_label
+                    else "Inherited from selected Ad Set"
+                )
+            )
         else:
             st.markdown(
                 f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
@@ -1596,6 +1667,10 @@ def render_page():
                 f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
                 f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
                 "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
+            )
+            st.caption(
+                "Customer lifecycle: "
+                f"{CUSTOMER_LIFECYCLE_LABELS[customer_lifecycle_strategy]}"
             )
         st.caption(
             f"Catalog: {catalog_label if catalog_id else 'Unresolved'} · Product set: {product_set_label} · "
@@ -1653,6 +1728,9 @@ def render_page():
             and not existing_targets_error
             and not existing_compatibility_error
         )
+    ) and bool(
+        posting_mode == POSTING_MODE_EXISTING
+        or customer_lifecycle_strategy == CUSTOMER_LIFECYCLE_ALL_AUDIENCES
     )
 
     if posting_mode == POSTING_MODE_EXISTING:
@@ -1700,6 +1778,7 @@ def render_page():
             product_set_id=product_set_id,
             audience=audience,
             creatives=creative_inputs,
+            customer_lifecycle_strategy=customer_lifecycle_strategy,
             posting_mode=posting_mode,
             target_campaign_id=target_campaign_id,
             target_adset_id=target_adset_id,
