@@ -35,7 +35,7 @@ BASE_DIR = Path(__file__).resolve().parent
 LOCAL_STORE_PATH = BASE_DIR / "output" / "_cache" / "seo_workspace.json"
 LEGACY_CITATION_IMPORT_VERSION = "legacy-citation-tracker-v1"
 LEGACY_CITATION_FIXTURE_PATH = BASE_DIR / "data" / "seo_citations_legacy_v1.json"
-SEO_STORE_CACHE_SECONDS = 5.0
+SEO_STORE_CACHE_SECONDS = 30.0
 
 BLOG_STATUSES = (
     "Idea",

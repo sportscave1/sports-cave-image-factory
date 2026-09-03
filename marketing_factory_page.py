@@ -359,7 +359,10 @@ def _load_meta_summary(date_range="last_30_days"):
     except Exception:
         mapping = []
     try:
-        opportunities = supabase_backend.list_product_opportunities_from_ads(date_range=date_range)
+        opportunities = supabase_backend.list_product_opportunities_from_ads(
+            date_range=date_range,
+            ad_rows=mapping,
+        )
     except Exception:
         opportunities = []
     try:

@@ -1173,7 +1173,10 @@ def render_page():
     demographic_rows = supabase_backend.list_meta_ad_insights_age_gender(date_range=selected_range)
     platform_rows = supabase_backend.list_meta_ad_insights_platform(date_range=selected_range)
     mapping_rows = supabase_backend.list_ads_product_mapping_status(date_range=selected_range, limit=500)
-    product_opportunities = supabase_backend.list_product_opportunities_from_ads(date_range=selected_range)
+    product_opportunities = supabase_backend.list_product_opportunities_from_ads(
+        date_range=selected_range,
+        ad_rows=mapping_rows,
+    )
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
     st.caption(f"Showing Meta-attributed data for {selected_range}.")

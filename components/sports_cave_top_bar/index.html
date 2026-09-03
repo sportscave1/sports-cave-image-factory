@@ -979,7 +979,12 @@
         }));
       } catch (_error) {}
     };
-    const statusRefreshDelay = (kind, interval = 30000) => {
+    const ORDER_STATUS_REFRESH_MS = 60000;
+    const PLANNER_STATUS_REFRESH_MS = 30000;
+    const statusRefreshDelay = (
+      kind,
+      interval = kind === "orders" ? ORDER_STATUS_REFRESH_MS : PLANNER_STATUS_REFRESH_MS,
+    ) => {
       const checkedAt = Number(readStatusCache(kind).checked_at || 0);
       return Math.max(0, interval - (Date.now() - checkedAt));
     };
@@ -1783,7 +1788,7 @@
       } catch (_error) {
         // Keep the last visible local state when the lightweight status read is unavailable.
       } finally {
-        later(refreshOrderStatus, 30000);
+        later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS);
       }
     };
     const compactTimerLabel = (seconds) => {
@@ -1925,7 +1930,7 @@
       updatePlannerMirror();
       handlePlannerEvents(events);
     };
-    const schedulePlannerStatus = (delay=30000) => {
+    const schedulePlannerStatus = (delay=PLANNER_STATUS_REFRESH_MS) => {
       if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
       state.plannerStatusTimer = parentWindow.setTimeout(() => refreshPlannerStatus(), delay);
     };
@@ -1955,7 +1960,7 @@
         if (immediate) updatePlannerMirror();
       } finally {
         state.plannerStatusPending = false;
-        schedulePlannerStatus(30000);
+        schedulePlannerStatus(PLANNER_STATUS_REFRESH_MS);
       }
     };
     const receivePlannerTimerState = (payload) => {

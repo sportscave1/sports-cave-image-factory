@@ -24702,6 +24702,44 @@ ADS_BREAKDOWN_TABLES = {
     },
 }
 
+ADS_INSIGHT_READ_BASE_COLUMNS = (
+    "id",
+    "date",
+    "account_id",
+    "campaign_id",
+    "campaign_name",
+    "adset_id",
+    "adset_name",
+    "ad_id",
+    "ad_name",
+    "spend",
+    "impressions",
+    "reach",
+    "clicks",
+    "inline_link_clicks",
+    "ctr",
+    "cpc",
+    "cpm",
+    "frequency",
+    "purchases",
+    "purchase_value",
+    "cost_per_purchase",
+    "roas",
+    "add_to_cart",
+    "initiate_checkout",
+)
+ADS_INSIGHT_READ_METADATA_COLUMNS = ("synced_at", "created_at", "updated_at")
+
+
+def _ads_insight_read_columns(alias="i", extra_columns=()):
+    """Return every public insight column except the unused, high-volume raw JSON."""
+    columns = (
+        *ADS_INSIGHT_READ_BASE_COLUMNS,
+        *tuple(extra_columns or ()),
+        *ADS_INSIGHT_READ_METADATA_COLUMNS,
+    )
+    return ", ".join(f"{alias}.{column}" for column in columns)
+
 
 def save_meta_ads_breakdown_insights(kind, insights=None, account_id="", date_range_label=""):
     ensure_ads_schema()
@@ -24819,13 +24857,14 @@ def _list_meta_breakdown_insights(kind, days=None, limit=5000, date_range="last_
     if not config or not is_configured():
         return []
     table = config["table"]
+    insight_columns = _ads_insight_read_columns("i", config["extra_columns"])
     date_where, date_params = _ads_date_where("i.date", date_range=date_range, days=days)
     try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+                    SELECT {insight_columns}, t.product_handle, t.product_title, t.sport, t.country_focus,
                            t.mockup_type, t.room_type, t.ad_angle, t.hook_style, t.creative_format AS tag_creative_format,
                            t.funnel_stage, t.notes AS tag_notes,
                            a.status AS ad_status, a.effective_status AS ad_effective_status,
@@ -24864,8 +24903,9 @@ def list_meta_ad_insights(days=None, limit=5000, date_range="last_30_days"):
         return []
     date_where, date_params = _ads_date_where("i.date", date_range=date_range, days=days)
     params = (*date_params, int(limit or 5000))
+    insight_columns = _ads_insight_read_columns("i", ("country", "placement"))
     new_query = """
-        SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+        SELECT {insight_columns}, t.product_handle, t.product_title, t.sport, t.country_focus,
                t.mockup_type, t.room_type, t.ad_angle, t.hook_style, t.creative_format AS tag_creative_format,
                t.funnel_stage, t.notes AS tag_notes,
                a.status AS ad_status, a.effective_status AS ad_effective_status,
@@ -24879,9 +24919,9 @@ def list_meta_ad_insights(days=None, limit=5000, date_range="last_30_days"):
         {date_where}
         ORDER BY i.date DESC, i.spend DESC
         LIMIT %s
-    """.format(date_where=date_where)
+    """.format(date_where=date_where, insight_columns=insight_columns)
     fallback_query = """
-        SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+        SELECT {insight_columns}, t.product_handle, t.product_title, t.sport, t.country_focus,
                t.mockup_type, t.ad_angle, t.funnel_stage, t.notes AS tag_notes,
                a.status AS ad_status, a.effective_status AS ad_effective_status
         FROM meta_ad_insights_daily i
@@ -24891,7 +24931,7 @@ def list_meta_ad_insights(days=None, limit=5000, date_range="last_30_days"):
         {date_where}
         ORDER BY i.date DESC, i.spend DESC
         LIMIT %s
-    """.format(date_where=date_where)
+    """.format(date_where=date_where, insight_columns=insight_columns)
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -25272,7 +25312,8 @@ def list_ads_product_mapping_status(date_range="last_7_days", limit=500):
     params = (*date_params, int(limit or 500))
     new_query = f"""
         WITH recent AS (
-            SELECT *
+            SELECT ad_id, ad_name, campaign_name, adset_name,
+                   spend, purchases, purchase_value, clicks, impressions
             FROM meta_ad_insights_daily
             WHERE 1=1
             {date_where}
@@ -25321,7 +25362,8 @@ def list_ads_product_mapping_status(date_range="last_7_days", limit=500):
     """
     fallback_query = f"""
         WITH recent AS (
-            SELECT *
+            SELECT ad_id, ad_name, campaign_name, adset_name,
+                   spend, purchases, purchase_value, clicks, impressions
             FROM meta_ad_insights_daily
             WHERE 1=1
             {date_where}
@@ -25437,8 +25479,11 @@ def suggest_ads_product_mappings(limit=500):
     return {"suggested": len(saved), "rows": saved}
 
 
-def list_product_opportunities_from_ads(date_range="last_7_days"):
-    ad_rows = list_ads_product_mapping_status(date_range=date_range, limit=500)
+def list_product_opportunities_from_ads(date_range="last_7_days", *, ad_rows=None):
+    if ad_rows is None:
+        ad_rows = list_ads_product_mapping_status(date_range=date_range, limit=500)
+    else:
+        ad_rows = list(ad_rows)
     sales_rows = list_recent_product_sales_by_handle(date_range=date_range, limit=500)
     edition_rows = list_product_edition_summary()
     sales_by_handle = {str(row.get("product_handle") or ""): row for row in sales_rows}

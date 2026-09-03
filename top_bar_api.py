@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import threading
+import time
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
@@ -27,6 +29,9 @@ NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
 ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
 DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
 REPAIR_REQUESTS_PATH = "/api/os/top-bar/repair-requests"
+ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS = 30.0
+_ORDER_SUMMARY_DISPLAY_CACHE_LOCK = threading.Lock()
+_ORDER_SUMMARY_DISPLAY_CACHE = {"expires_at": 0.0, "value": None}
 _TASK_SEARCH_FIELDS = ("title", "text", "section", "category", "status")
 _TASK_METADATA_FIELDS = (
     "sport",
@@ -122,6 +127,30 @@ def _json(payload, status_code=200):
         status_code=status_code,
         headers={"Cache-Control": "no-store"},
     )
+
+
+def clear_order_summary_display_cache():
+    """Invalidate the short-lived, display-only top-bar order summary cache."""
+    with _ORDER_SUMMARY_DISPLAY_CACHE_LOCK:
+        _ORDER_SUMMARY_DISPLAY_CACHE["expires_at"] = 0.0
+        _ORDER_SUMMARY_DISPLAY_CACHE["value"] = None
+
+
+def _cached_order_action_summary(backend, *, now=None):
+    """Coalesce identical badge reads without caching any allocation decision data."""
+    checked_at = time.monotonic() if now is None else float(now)
+    with _ORDER_SUMMARY_DISPLAY_CACHE_LOCK:
+        cached = _ORDER_SUMMARY_DISPLAY_CACHE.get("value")
+        if cached is not None and checked_at < float(
+            _ORDER_SUMMARY_DISPLAY_CACHE.get("expires_at") or 0
+        ):
+            return dict(cached)
+        summary = dict(backend.get_order_action_summary() or {})
+        _ORDER_SUMMARY_DISPLAY_CACHE["value"] = dict(summary)
+        _ORDER_SUMMARY_DISPLAY_CACHE["expires_at"] = (
+            checked_at + ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS
+        )
+        return dict(summary)
 
 
 def _claims(request: Request):
@@ -818,16 +847,14 @@ def load_notification_sources(claims):
                     if exists.get("table_name"):
                         cur.execute(
                             """
-                            SELECT to_jsonb(activity) AS payload
-                            FROM audit_logs activity
+                            SELECT event_type, entity_type, entity_id, source,
+                                   created_at, new_value
+                            FROM audit_logs
                             ORDER BY created_at DESC
                             LIMIT 24
                             """
                         )
-                        activity_rows = [
-                            dict((row or {}).get("payload") or {})
-                            for row in cur.fetchall()
-                        ]
+                        activity_rows = [dict(row or {}) for row in cur.fetchall()]
     except Exception:
         activity_rows = []
     return activity_rows, []
@@ -871,7 +898,7 @@ def load_order_status(claims):
 
         supabase_configured = supabase_backend.is_configured()
         if supabase_configured:
-            summary = supabase_backend.get_order_action_summary()
+            summary = _cached_order_action_summary(supabase_backend)
             supabase_summary_loaded = True
     except Exception as error:
         print(
