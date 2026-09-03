@@ -409,6 +409,12 @@ MOCKUPS_MAX_CONCURRENT_GENERATIONS = max(
 MOCKUPS_GENERATION_SEMAPHORE = threading.BoundedSemaphore(MOCKUPS_MAX_CONCURRENT_GENERATIONS)
 MOCKUPS_GENERATION_ACTIVE_KEY = "mockups_generation_active_run_id"
 MOCKUPS_LAST_RUN_SIGNATURE_KEY = "mockups_last_run_signature"
+MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY = "mockups_upload_identity_cache"
+MOCKUPS_UPLOAD_IDENTITY_CACHE_MAX_ITEMS = 64
+MOCKUPS_UPLOAD_PROCESSING_CACHE_MAX_ITEMS = 32
+MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY = "mockups_lifestyle_upload_lifecycle"
+MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_MAX_ITEMS = 64
+MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS = 120
 MOCKUPS_DROPBOX_RETRY_ATTEMPTS = 3
 SPORT_OPTIONS = [
     "AFL",
@@ -4365,6 +4371,12 @@ def init_session_state():
     if "mockups_upload_processing_cache" not in st.session_state:
         st.session_state.mockups_upload_processing_cache = {}
 
+    if MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY not in st.session_state:
+        st.session_state[MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY] = {}
+
+    if MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY not in st.session_state:
+        st.session_state[MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY] = {}
+
     if MOCKUPS_GENERATION_ACTIVE_KEY not in st.session_state:
         st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
 
@@ -5260,25 +5272,47 @@ def get_uploaded_file_signature(uploaded_file):
     return hashlib.sha1(f"{name}|{size}".encode("utf-8")).hexdigest()[:16]
 
 
-def get_uploaded_file_provisional_signature(uploaded_file):
-    if uploaded_file is None:
-        return None
-
-    name = getattr(uploaded_file, "name", "")
-    size = getattr(uploaded_file, "size", 0)
-    mime_type = getattr(uploaded_file, "type", "")
-    return hashlib.sha1(f"{name}|{size}|{mime_type}".encode("utf-8")).hexdigest()[:16]
-
-
 def _mockups_upload_processing_cache():
     if "mockups_upload_processing_cache" not in st.session_state:
         st.session_state.mockups_upload_processing_cache = {}
     return st.session_state.mockups_upload_processing_cache
 
 
-def hash_uploaded_file_stream(uploaded_file, *, chunk_size=1024 * 1024):
+def _mockups_upload_identity_cache():
+    if MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY not in st.session_state:
+        st.session_state[MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY] = {}
+    return st.session_state[MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY]
+
+
+def _bounded_cache_store(cache, key, value, *, max_items):
+    cache.pop(key, None)
+    cache[key] = value
+    while len(cache) > max_items:
+        cache.pop(next(iter(cache)), None)
+
+
+def get_mockups_upload_transport_identity(uploaded_file):
+    """Identify one Streamlit upload selection without using its filename."""
+    upload_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
+    if upload_file_id:
+        return f"streamlit-file-id:{upload_file_id}"
+    return f"upload-object:{id(uploaded_file)}"
+
+
+def hash_uploaded_file_stream(
+    uploaded_file,
+    *,
+    chunk_size=1024 * 1024,
+    max_size_bytes=None,
+    size_error_message=None,
+):
     digest = hashlib.sha1()
     total = 0
+    max_size_bytes = int(max_size_bytes or image_factory.MAX_UPLOAD_SIZE_BYTES)
+    size_error_message = size_error_message or (
+        "Uploaded image is too large for the current Render instance. "
+        "Please upload a JPG or WebP under 20MB."
+    )
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
     try:
@@ -5288,15 +5322,63 @@ def hash_uploaded_file_stream(uploaded_file, *, chunk_size=1024 * 1024):
                 break
             digest.update(chunk)
             total += len(chunk)
-            if total > image_factory.MAX_UPLOAD_SIZE_BYTES:
-                raise ValueError(
-                    "Uploaded image is too large for the current Render instance. "
-                    "Please upload a JPG or WebP under 20MB."
-                )
+            if total > max_size_bytes:
+                raise ValueError(size_error_message)
     finally:
         if hasattr(uploaded_file, "seek"):
             uploaded_file.seek(0)
     return digest.hexdigest()[:16], total
+
+
+def get_mockups_uploaded_content_signature(
+    uploaded_file,
+    *,
+    max_size_bytes=None,
+    size_error_message=None,
+):
+    """Return a stable content identity without retaining uploaded image bytes."""
+    if uploaded_file is None:
+        return None, 0
+
+    max_size_bytes = int(max_size_bytes or image_factory.MAX_UPLOAD_SIZE_BYTES)
+    declared_size = getattr(uploaded_file, "size", None)
+    if declared_size is not None and declared_size <= 0:
+        raise ValueError("Uploaded file is empty.")
+    if declared_size is not None and declared_size > max_size_bytes:
+        raise ValueError(size_error_message or "Uploaded image is too large.")
+
+    upload_file_id = str(getattr(uploaded_file, "file_id", "") or "").strip()
+    cache_key = get_mockups_upload_transport_identity(uploaded_file) if upload_file_id else ""
+    identity_cache = _mockups_upload_identity_cache()
+    cached = identity_cache.get(cache_key) if cache_key else None
+    if not cached:
+        cached = getattr(uploaded_file, "_sports_cave_content_identity", None)
+    if isinstance(cached, dict):
+        cached_size = int(cached.get("size") or 0)
+        cached_signature = str(cached.get("signature") or "")
+        if cached_signature and cached_size > 0:
+            if cached_size > max_size_bytes:
+                raise ValueError(size_error_message or "Uploaded image is too large.")
+            if hasattr(uploaded_file, "seek"):
+                uploaded_file.seek(0)
+            return cached_signature, cached_size
+
+    signature, measured_size = hash_uploaded_file_stream(
+        uploaded_file,
+        max_size_bytes=max_size_bytes,
+        size_error_message=size_error_message,
+    )
+    identity = {"signature": signature, "size": measured_size}
+    if cache_key:
+        _bounded_cache_store(
+            identity_cache,
+            cache_key,
+            identity,
+            max_items=MOCKUPS_UPLOAD_IDENTITY_CACHE_MAX_ITEMS,
+        )
+    with suppress(Exception):
+        setattr(uploaded_file, "_sports_cave_content_identity", identity)
+    return signature, measured_size
 
 
 def process_uploaded_artwork_once(uploaded_file):
@@ -5305,21 +5387,6 @@ def process_uploaded_artwork_once(uploaded_file):
         return None
 
     started = time.perf_counter()
-    provisional_signature = get_uploaded_file_provisional_signature(uploaded_file)
-    cache = _mockups_upload_processing_cache()
-    cached = cache.get(provisional_signature)
-    if cached:
-        preview_path = cached.get("preview_path")
-        if not preview_path or Path(preview_path).exists():
-            logging.info(
-                "MOCKUPS_UPLOAD cache_hit signature=%s elapsed_ms=%s",
-                cached.get("signature"),
-                int((time.perf_counter() - started) * 1000),
-            )
-            if hasattr(uploaded_file, "seek"):
-                uploaded_file.seek(0)
-            return dict(cached)
-
     file_size = getattr(uploaded_file, "size", None)
     if file_size is not None and file_size <= 0:
         raise ValueError("Uploaded file is empty.")
@@ -5335,7 +5402,14 @@ def process_uploaded_artwork_once(uploaded_file):
         raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
 
     read_started = time.perf_counter()
-    signature, measured_size = hash_uploaded_file_stream(uploaded_file)
+    signature, measured_size = get_mockups_uploaded_content_signature(
+        uploaded_file,
+        max_size_bytes=image_factory.MAX_UPLOAD_SIZE_BYTES,
+        size_error_message=(
+            "Uploaded image is too large for the current Render instance. "
+            "Please upload a JPG or WebP under 20MB."
+        ),
+    )
     logging.info(
         "MOCKUPS_UPLOAD read_bytes signature=%s bytes=%s elapsed_ms=%s",
         signature,
@@ -5344,6 +5418,20 @@ def process_uploaded_artwork_once(uploaded_file):
     )
     if measured_size <= 0:
         raise ValueError("Uploaded file is empty.")
+
+    cache = _mockups_upload_processing_cache()
+    cached = cache.get(signature)
+    if cached:
+        preview_path = cached.get("preview_path")
+        if not preview_path or Path(preview_path).exists():
+            logging.info(
+                "MOCKUPS_UPLOAD cache_hit signature=%s elapsed_ms=%s",
+                cached.get("signature"),
+                int((time.perf_counter() - started) * 1000),
+            )
+            if hasattr(uploaded_file, "seek"):
+                uploaded_file.seek(0)
+            return dict(cached)
 
     source_image = None
     preview_image = None
@@ -5388,8 +5476,12 @@ def process_uploaded_artwork_once(uploaded_file):
             int((time.perf_counter() - pil_started) * 1000),
             int((time.perf_counter() - started) * 1000),
         )
-        cache[provisional_signature] = dict(upload_details)
-        cache[signature] = dict(upload_details)
+        _bounded_cache_store(
+            cache,
+            signature,
+            dict(upload_details),
+            max_items=MOCKUPS_UPLOAD_PROCESSING_CACHE_MAX_ITEMS,
+        )
         if hasattr(uploaded_file, "seek"):
             uploaded_file.seek(0)
         return upload_details
@@ -7937,39 +8029,244 @@ def get_uploaded_lifestyle_signature(uploaded_file):
     if uploaded_file is None:
         return None
 
-    upload_bytes = uploaded_file.getvalue()
-    signature = hashlib.sha1(upload_bytes).hexdigest()[:16]
-    if hasattr(uploaded_file, "seek"):
-        uploaded_file.seek(0)
+    signature, _measured_size = get_mockups_uploaded_content_signature(
+        uploaded_file,
+        max_size_bytes=image_factory.MAX_LIFESTYLE_UPLOAD_SIZE_BYTES,
+        size_error_message=image_factory.LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE,
+    )
+    return signature
 
-    return "|".join(
-        [
-            str(getattr(uploaded_file, "name", "")),
-            str(getattr(uploaded_file, "size", len(upload_bytes))),
-            str(getattr(uploaded_file, "type", "")),
-            signature,
-        ]
+
+def _mockups_lifestyle_upload_lifecycle():
+    if MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY not in st.session_state:
+        st.session_state[MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY] = {}
+    return st.session_state[MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY]
+
+
+def get_lifestyle_upload_slot_key(result, prompt_path):
+    return f"{result['run_dir']}::{Path(prompt_path).name}"
+
+
+def get_lifestyle_upload_lifecycle(result, prompt_path):
+    record = _mockups_lifestyle_upload_lifecycle().get(
+        get_lifestyle_upload_slot_key(result, prompt_path)
+    )
+    return dict(record) if isinstance(record, dict) else {}
+
+
+def _store_lifestyle_upload_lifecycle(slot_key, record):
+    lifecycle = _mockups_lifestyle_upload_lifecycle()
+    _bounded_cache_store(
+        lifecycle,
+        slot_key,
+        dict(record),
+        max_items=MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_MAX_ITEMS,
     )
 
 
+def _legacy_lifestyle_signature_matches(legacy_signature, content_signature):
+    legacy_signature = str(legacy_signature or "")
+    return bool(
+        content_signature
+        and (
+            legacy_signature == content_signature
+            or legacy_signature.rsplit("|", 1)[-1] == content_signature
+        )
+    )
+
+
+def _safe_lifestyle_upload_error(error):
+    message = str(error or "").strip()
+    clean_messages = {
+        getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
+        getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+    }
+    if (
+        isinstance(
+            error,
+            (
+                ValueError,
+                MemoryError,
+                getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
+            ),
+        )
+        or message in clean_messages
+        or "Memory limit reached" in message
+    ):
+        return message or "Could not process the uploaded lifestyle image."
+    return "Could not save the lifestyle image for this prompt."
+
+
+def _isolated_lifestyle_upload_result(result):
+    """Copy lightweight result metadata so a failed replacement cannot damage it."""
+    isolated = dict(result or {})
+    isolated["lifestyle_mockup_paths"] = dict(
+        (result or {}).get("lifestyle_mockup_paths") or {}
+    )
+    isolated["assets"] = [dict(asset or {}) for asset in (result or {}).get("assets") or ()]
+    return isolated
+
+
+def _current_mockups_result_for_run(result):
+    latest = st.session_state.get("last_generation_result")
+    if (
+        isinstance(latest, dict)
+        and str(latest.get("run_dir") or "") == str(result.get("run_dir") or "")
+    ):
+        return normalize_generation_result(latest)
+    return result
+
+
 def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
+    """Process one file once per prompt slot and keep reruns exception-safe.
+
+    Task-level state (the generation result, prompt edits, product and selected
+    options) survives. Only this prompt slot's image/derived asset changes.
+    Lifecycle records are temporary state and are superseded by new content.
+    """
+    result = normalize_generation_result(result)
     prompt_name = Path(prompt_path).name
     upload_signature_key = f"lifestyle-upload-signature::{result['run_dir']}::{prompt_name}"
+    slot_key = get_lifestyle_upload_slot_key(result, prompt_path)
+    lifecycle = _mockups_lifestyle_upload_lifecycle()
     saved_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
     if uploaded_file is None:
         if saved_paths and st.session_state.get(upload_signature_key):
             updated_result = remove_uploaded_lifestyle_result(result, prompt_path)
             st.session_state.pop(upload_signature_key, None)
+            lifecycle.pop(slot_key, None)
             st.session_state.last_generation_result = updated_result
             return updated_result
+        lifecycle.pop(slot_key, None)
         return result
 
-    upload_signature = get_uploaded_lifestyle_signature(uploaded_file)
-    if st.session_state.get(upload_signature_key) == upload_signature and saved_paths:
+    transport_identity = get_mockups_upload_transport_identity(uploaded_file)
+    current_record = lifecycle.get(slot_key) or {}
+    if current_record.get("transport_identity") == transport_identity:
+        status = current_record.get("status")
+        if status == "SUCCEEDED" and saved_paths:
+            return result
+        if status == "FAILED":
+            return result
+        if status == "PROCESSING":
+            started_at = float(current_record.get("started_at") or 0)
+            if time.time() - started_at < MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS:
+                return result
+            current_record = dict(current_record)
+            current_record.update(
+                {
+                    "status": "FAILED",
+                    "error_message": (
+                        "The previous image-processing attempt did not finish. "
+                        "Choose another image, or clear and reselect this image to retry."
+                    ),
+                }
+            )
+            _store_lifestyle_upload_lifecycle(slot_key, current_record)
+            return result
+
+    try:
+        upload_signature = get_uploaded_lifestyle_signature(uploaded_file)
+    except Exception as error:
+        _store_lifestyle_upload_lifecycle(
+            slot_key,
+            {
+                "content_signature": "",
+                "transport_identity": transport_identity,
+                "request_id": secrets.token_hex(12),
+                "status": "FAILED",
+                "started_at": time.time(),
+                "error_message": _safe_lifestyle_upload_error(error),
+            },
+        )
+        raise
+
+    legacy_signature = st.session_state.get(upload_signature_key)
+    if saved_paths and _legacy_lifestyle_signature_matches(legacy_signature, upload_signature):
+        _store_lifestyle_upload_lifecycle(
+            slot_key,
+            {
+                "content_signature": upload_signature,
+                "transport_identity": transport_identity,
+                "request_id": "restored-success",
+                "status": "SUCCEEDED",
+                "started_at": 0,
+                "error_message": "",
+            },
+        )
         return result
 
-    updated_result = save_uploaded_lifestyle_result(result, prompt_path, uploaded_file)
+    current_record = lifecycle.get(slot_key) or {}
+    if current_record.get("content_signature") == upload_signature:
+        status = current_record.get("status")
+        if status == "SUCCEEDED" and saved_paths:
+            return result
+        if status == "FAILED":
+            return result
+        if status == "PROCESSING":
+            started_at = float(current_record.get("started_at") or 0)
+            if time.time() - started_at < MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS:
+                return result
+            current_record = dict(current_record)
+            current_record.update(
+                {
+                    "status": "FAILED",
+                    "error_message": (
+                        "The previous image-processing attempt did not finish. "
+                        "Choose another image, or clear and reselect this image to retry."
+                    ),
+                }
+            )
+            _store_lifestyle_upload_lifecycle(slot_key, current_record)
+            return result
+
+    request_id = secrets.token_hex(12)
+    _store_lifestyle_upload_lifecycle(
+        slot_key,
+        {
+            "content_signature": upload_signature,
+            "transport_identity": transport_identity,
+            "request_id": request_id,
+            "supersedes_request_id": current_record.get("request_id") or "",
+            "status": "PROCESSING",
+            "started_at": time.time(),
+            "error_message": "",
+        },
+    )
+
+    updated_result = None
+    processing_error = None
+    try:
+        updated_result = save_uploaded_lifestyle_result(
+            _isolated_lifestyle_upload_result(result),
+            prompt_path,
+            uploaded_file,
+        )
+    except Exception as error:
+        processing_error = error
+        raise
+    finally:
+        authoritative = lifecycle.get(slot_key) or {}
+        if authoritative.get("request_id") == request_id:
+            if processing_error is None and updated_result is not None:
+                authoritative.update({"status": "SUCCEEDED", "error_message": ""})
+            else:
+                authoritative.update(
+                    {
+                        "status": "FAILED",
+                        "error_message": _safe_lifestyle_upload_error(processing_error),
+                    }
+                )
+            _store_lifestyle_upload_lifecycle(slot_key, authoritative)
+        if hasattr(uploaded_file, "seek"):
+            with suppress(Exception):
+                uploaded_file.seek(0)
+
+    authoritative = lifecycle.get(slot_key) or {}
+    if authoritative.get("request_id") != request_id:
+        return _current_mockups_result_for_run(result)
+
     st.session_state[upload_signature_key] = upload_signature
     st.session_state.last_generation_result = updated_result
     return updated_result
@@ -8662,6 +8959,7 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
                 key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
             )
 
+            upload_error_rendered = False
             try:
                 result = auto_register_lifestyle_upload(
                     result,
@@ -8688,10 +8986,23 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
                 )
                 if is_clean_lifestyle_error:
                     st.error(error_message)
+                    upload_error_rendered = True
                     gc.collect()
                 else:
                     st.error("Could not save the lifestyle image for this prompt.")
                     st.exception(error)
+                    upload_error_rendered = True
+
+            upload_lifecycle = get_lifestyle_upload_lifecycle(result, prompt_path)
+            if (
+                uploaded_lifestyle_image is not None
+                and upload_lifecycle.get("status") == "FAILED"
+                and not upload_error_rendered
+            ):
+                st.error(
+                    upload_lifecycle.get("error_message")
+                    or "Could not save the lifestyle image for this prompt."
+                )
 
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
             if saved_lifestyle_paths:
