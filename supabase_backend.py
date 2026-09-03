@@ -23830,6 +23830,7 @@ ADS_SCHEMA_MIGRATIONS = (
     BASE_DIR / "migrations" / "20260831_meta_posting_v1.sql",
     BASE_DIR / "migrations" / "20260901_meta_posting_v2.sql",
     BASE_DIR / "migrations" / "20260901_meta_posting_v3.sql",
+    BASE_DIR / "migrations" / "20260903_meta_posting_run_identity.sql",
 )
 
 

@@ -73,7 +73,7 @@ def build_paused_template_copy_request(*, target_adset_id, creative_parameters):
         )
     if not creative_parameters:
         raise MetaCollectionTemplateCopySafetyError(
-            "The Peter Brock creative overrides are empty. No Meta copy was made."
+            "The route-specific creative overrides are empty. No Meta copy was made."
         )
     return {
         "adset_id": clean_adset_id,

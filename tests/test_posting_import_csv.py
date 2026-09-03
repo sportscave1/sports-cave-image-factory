@@ -665,6 +665,220 @@ class PostingImportContractTests(unittest.TestCase):
 
 
 class PostingCSVImportTests(unittest.TestCase):
+    def test_streamlit_rerun_reuses_the_same_draft_posting_run_id(self):
+        state = {}
+        with mock.patch.object(
+            ads_posting_page,
+            "posting_submission_id",
+            return_value="11111111-1111-4111-8111-111111111111",
+        ) as create_id:
+            first = ads_posting_page._ensure_posting_run(state)
+            second = ads_posting_page._ensure_posting_run(state)
+            third = ads_posting_page._ensure_posting_run(state)
+        self.assertEqual(first, second)
+        self.assertEqual(second, third)
+        self.assertEqual(create_id.call_count, 1)
+        self.assertEqual(
+            state[ads_posting_page.RUN_STATE_KEY],
+            ads_posting_page.RUN_STATE_DRAFT,
+        )
+
+    def test_new_campaign_starts_new_run_and_preserves_staging_only(self):
+        old_run_id = "11111111-1111-4111-8111-111111111111"
+        state = {
+            ads_posting_page.SUBMISSION_ID_KEY: old_run_id,
+            ads_posting_page.RUN_STATE_KEY: ads_posting_page.RUN_STATE_COMPLETE,
+            ads_posting_page.POSTING_MODE_KEY: "Add to Existing",
+            ads_posting_page.EXISTING_CAMPAIGN_KEY: "existing-campaign",
+            ads_posting_page.EXISTING_ADSET_KEY: "existing-adset",
+            ads_posting_page.RESULT_KEY: {
+                "status": "COMPLETE",
+                "campaign_id": "old-campaign",
+                "adset_id": "old-adset",
+                "meta_ad_id": "old-ad",
+                "ad_results": [
+                    {
+                        "meta_page_photo_id": "old-photo",
+                        "meta_instant_experience_id": "old-ia",
+                        "meta_creative_id": "old-creative",
+                        "meta_ad_id": "old-ad",
+                    }
+                ],
+            },
+            ads_posting_page.COLLECTION_DIAGNOSTIC_RESULT_KEY: {"old": True},
+            ads_posting_page.COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY: {"old": True},
+            ads_posting_page.PRODUCT_KEY: "keep-product",
+            ads_posting_page.COUNTRY_KEY: "AUS",
+            ads_posting_page.SPORT_KEY: "Motorsport",
+            ads_posting_page.PRODUCT_SET_KEY: "keep-product-set",
+            ads_posting_page.AUDIENCE_KEY: "keep-audience",
+            ads_posting_page.IMAGE_STATE_KEYS[0]: {"data": b"keep-image"},
+            ads_posting_page.PRIMARY_TEXT_KEYS[0]: "Keep copy",
+        }
+        with mock.patch.object(
+            ads_posting_page,
+            "posting_submission_id",
+            return_value="22222222-2222-4222-8222-222222222222",
+        ):
+            new_run_id = ads_posting_page._start_new_posting_run(state=state)
+
+        self.assertNotEqual(new_run_id, old_run_id)
+        self.assertNotIn(ads_posting_page.RESULT_KEY, state)
+        self.assertNotIn(ads_posting_page.COLLECTION_DIAGNOSTIC_RESULT_KEY, state)
+        self.assertNotIn(
+            ads_posting_page.COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY, state
+        )
+        self.assertNotIn(ads_posting_page.EXISTING_CAMPAIGN_KEY, state)
+        self.assertNotIn(ads_posting_page.EXISTING_ADSET_KEY, state)
+        self.assertEqual(
+            state[ads_posting_page.POSTING_MODE_KEY], "New Campaign"
+        )
+        self.assertEqual(state[ads_posting_page.PRODUCT_KEY], "keep-product")
+        self.assertEqual(state[ads_posting_page.COUNTRY_KEY], "AUS")
+        self.assertEqual(state[ads_posting_page.SPORT_KEY], "Motorsport")
+        self.assertEqual(
+            state[ads_posting_page.PRODUCT_SET_KEY], "keep-product-set"
+        )
+        self.assertEqual(state[ads_posting_page.AUDIENCE_KEY], "keep-audience")
+        self.assertEqual(
+            state[ads_posting_page.IMAGE_STATE_KEYS[0]]["data"], b"keep-image"
+        )
+        self.assertEqual(
+            state[ads_posting_page.RUN_STATE_KEY],
+            ads_posting_page.RUN_STATE_DRAFT,
+        )
+
+    def test_csv_import_in_draft_run_hydrates_without_rotating_run_id(self):
+        run_id = "11111111-1111-4111-8111-111111111111"
+        state = {
+            ads_posting_page.SUBMISSION_ID_KEY: run_id,
+            ads_posting_page.RUN_STATE_KEY: ads_posting_page.RUN_STATE_DRAFT,
+        }
+        status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                ads_page.build_instant_experience_copy_csv(
+                    ads_result(), ads_workflow()
+                ),
+                name="same-draft-run.csv",
+                file_id="same-draft-run",
+            ),
+            (),
+            state=state,
+        )
+        self.assertTrue(status["ok"])
+        self.assertEqual(state[ads_posting_page.SUBMISSION_ID_KEY], run_id)
+
+    def test_csv_import_after_abandoned_run_starts_clean_run(self):
+        state = {
+            ads_posting_page.SUBMISSION_ID_KEY:
+                "11111111-1111-4111-8111-111111111111",
+            ads_posting_page.RUN_STATE_KEY:
+                ads_posting_page.RUN_STATE_ABANDONED,
+            ads_posting_page.RESULT_KEY: {
+                "status": "ABANDONED_EXTERNALLY",
+                "campaign_id": "deleted-campaign",
+                "adset_id": "old-adset",
+                "meta_ad_id": "old-ad",
+            },
+            ads_posting_page.PRODUCT_SET_KEY: "keep-product-set",
+            ads_posting_page.IMAGE_STATE_KEYS[0]: {"data": b"keep-image"},
+        }
+        with mock.patch.object(
+            ads_posting_page,
+            "posting_submission_id",
+            return_value="22222222-2222-4222-8222-222222222222",
+        ):
+            status = ads_posting_page.process_posting_csv_upload(
+                FakeUpload(
+                    ads_page.build_instant_experience_copy_csv(
+                        ads_result(), ads_workflow()
+                    ),
+                    name="fresh-after-abandoned.csv",
+                    file_id="fresh-after-abandoned",
+                ),
+                (),
+                state=state,
+            )
+        self.assertTrue(status["ok"])
+        self.assertEqual(
+            state[ads_posting_page.SUBMISSION_ID_KEY],
+            "22222222-2222-4222-8222-222222222222",
+        )
+        self.assertNotIn(ads_posting_page.RESULT_KEY, state)
+        self.assertEqual(
+            state[ads_posting_page.PRODUCT_SET_KEY], "keep-product-set"
+        )
+        self.assertEqual(
+            state[ads_posting_page.IMAGE_STATE_KEYS[0]]["data"], b"keep-image"
+        )
+
+    def test_csv_import_after_completed_run_starts_clean_run(self):
+        state = {
+            ads_posting_page.SUBMISSION_ID_KEY:
+                "11111111-1111-4111-8111-111111111111",
+            ads_posting_page.RUN_STATE_KEY:
+                ads_posting_page.RUN_STATE_COMPLETE,
+            ads_posting_page.RESULT_KEY: {
+                "status": "COMPLETE",
+                "campaign_id": "completed-campaign",
+                "adset_id": "completed-adset",
+            },
+            ads_posting_page.PRODUCT_KEY: "keep-product",
+        }
+        with mock.patch.object(
+            ads_posting_page,
+            "posting_submission_id",
+            return_value="22222222-2222-4222-8222-222222222222",
+        ):
+            status = ads_posting_page.process_posting_csv_upload(
+                FakeUpload(
+                    ads_page.build_instant_experience_copy_csv(
+                        ads_result(), ads_workflow()
+                    ),
+                    name="fresh-after-complete.csv",
+                    file_id="fresh-after-complete",
+                ),
+                (),
+                state=state,
+            )
+        self.assertTrue(status["ok"])
+        self.assertEqual(
+            state[ads_posting_page.SUBMISSION_ID_KEY],
+            "22222222-2222-4222-8222-222222222222",
+        )
+        self.assertNotIn(ads_posting_page.RESULT_KEY, state)
+        self.assertEqual(state[ads_posting_page.PRODUCT_KEY], "keep-product")
+
+    def test_different_csv_cannot_detach_a_started_partial_run(self):
+        run_id = "11111111-1111-4111-8111-111111111111"
+        state = {
+            ads_posting_page.SUBMISSION_ID_KEY: run_id,
+            ads_posting_page.RUN_STATE_KEY: ads_posting_page.RUN_STATE_FAILED,
+            ads_posting_page.RESULT_KEY: {
+                "status": "FAILED",
+                "campaign_id": "partial-campaign",
+                "adset_id": "partial-adset",
+            },
+            ads_posting_page.PRIMARY_TEXT_KEYS[0]: "Current run copy",
+        }
+        status = ads_posting_page.process_posting_csv_upload(
+            FakeUpload(
+                ads_page.build_instant_experience_copy_csv(
+                    ads_result(), ads_workflow()
+                ),
+                name="different-package.csv",
+                file_id="different-package",
+            ),
+            (),
+            state=state,
+        )
+        self.assertFalse(status["ok"])
+        self.assertIn("Start fresh campaign", status["message"])
+        self.assertEqual(state[ads_posting_page.SUBMISSION_ID_KEY], run_id)
+        self.assertEqual(
+            state[ads_posting_page.PRIMARY_TEXT_KEYS[0]], "Current run copy"
+        )
+
     def test_visible_posting_widgets_hydrate_from_new_ads_csv_before_render(self):
         overview = {
             "connected": True,
@@ -1396,6 +1610,29 @@ class PostingImageCaptureTests(unittest.TestCase):
             [creative.headline for creative in request.creatives],
             ["Headline 1", "Headline 2", "Headline 3"],
         )
+
+        existing_request = ads_posting_page._build_posting_request(
+            submission_id="22222222-2222-4222-8222-222222222222",
+            product_id="shopify-1",
+            product_title="Product",
+            product_handle="product",
+            product_url="https://www.sportscaveshop.com/products/product",
+            country="AUS",
+            sport="Motorsport",
+            catalog_id="catalog-1",
+            product_set_id="set-1",
+            audience={"type": "inherited", "id": ""},
+            creatives=creatives,
+            posting_mode=ads_posting_page.POSTING_MODE_EXISTING,
+            target_campaign_id="existing-campaign",
+            target_adset_id="existing-adset",
+        )
+        self.assertEqual(
+            existing_request.posting_mode,
+            ads_posting_page.POSTING_MODE_EXISTING,
+        )
+        self.assertEqual(existing_request.target_campaign_id, "existing-campaign")
+        self.assertEqual(existing_request.target_adset_id, "existing-adset")
 
 
 if __name__ == "__main__":

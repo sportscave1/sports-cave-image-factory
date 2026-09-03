@@ -17,12 +17,19 @@ from meta_collection_template_copy import (
 )
 from meta_posting_service import (
     _request_fingerprint,
+    EXTERNALLY_ABANDONED_MESSAGE,
+    EXISTING_TARGET_MISSING_MESSAGE,
     EXPECTED_PIXEL_NAME,
+    META_OBJECT_CREATED_BY_RUN,
+    META_OBJECT_EXISTING_TARGET,
+    POSTING_MODE_EXISTING,
+    POSTING_MODE_NEW,
     adset_uses_all_audiences,
     SUCCESS_MESSAGE,
     MetaPostingService,
     SupabasePostingStore,
     PostingAmbiguousError,
+    PostingAbandonedError,
     PostingError,
     PostingCreative,
     PostingRequest,
@@ -40,6 +47,8 @@ from meta_posting_service import (
     catalog_ids_from_sales_campaigns,
     dataset_ids_from_purchase_adsets,
     load_posting_reference_snapshot,
+    load_existing_posting_targets,
+    is_meta_object_missing_or_inaccessible,
     next_instant_experience_ad_name,
     next_instant_experience_ad_names,
     posting_ad_results,
@@ -48,6 +57,7 @@ from meta_posting_service import (
     resolve_dataset_reference,
     verify_instant_experience_destination,
     validate_posting_request,
+    validate_existing_posting_target,
 )
 
 
@@ -94,6 +104,60 @@ def request_for(**overrides):
     return PostingRequest(**values)
 
 
+def existing_target_rows(*, campaign_status="ACTIVE", adset_status="ACTIVE"):
+    return (
+        {
+            "id": "existing-campaign",
+            "name": "Existing Sales Campaign",
+            "status": campaign_status,
+            "configured_status": campaign_status,
+            "effective_status": campaign_status,
+            "account_id": "123",
+            "objective": "OUTCOME_SALES",
+            "promoted_object": {"product_catalog_id": "catalog-1"},
+            "daily_budget": "5000",
+        },
+        {
+            "id": "existing-adset",
+            "name": "Existing Motorsport AU",
+            "status": adset_status,
+            "configured_status": adset_status,
+            "effective_status": adset_status,
+            "campaign_id": "existing-campaign",
+            "account_id": "123",
+            "optimization_goal": "OFFSITE_CONVERSIONS",
+            "billing_event": "IMPRESSIONS",
+            "destination_type": "WEBSITE",
+            "promoted_object": {
+                "pixel_id": "pixel-1",
+                "custom_event_type": "PURCHASE",
+                "product_set_id": "set-1",
+            },
+            "targeting": {"geo_locations": {"countries": ["AU"]}},
+            "daily_budget": "2500",
+        },
+    )
+
+
+def existing_request(**overrides):
+    return request_for(
+        posting_mode=POSTING_MODE_EXISTING,
+        target_campaign_id="existing-campaign",
+        target_adset_id="existing-adset",
+        **overrides,
+    )
+
+
+def configure_existing_target(client, *, campaign_status="ACTIVE", adset_status="ACTIVE"):
+    campaign, adset = existing_target_rows(
+        campaign_status=campaign_status,
+        adset_status=adset_status,
+    )
+    client.configured_campaign = mock.Mock(return_value=dict(campaign))
+    client.configured_adset = mock.Mock(return_value=dict(adset))
+    return campaign, adset
+
+
 class FakePostingStore:
     def __init__(self, existing=None):
         self.record = dict(existing or {})
@@ -102,6 +166,10 @@ class FakePostingStore:
 
     def claim(self, request_data, *, lease_token):
         self.claims += 1
+        existing_run_id = str(self.record.get("submission_id") or "")
+        requested_run_id = str(request_data.get("submission_id") or "")
+        if existing_run_id and existing_run_id != requested_run_id:
+            self.record = {}
         if self.record:
             if self.record.get("status") == "FAILED":
                 return {"claimed": True, "record": dict(self.record)}
@@ -203,7 +271,7 @@ class FakePostingClient:
     def create_campaign(self, payload):
         self.calls.append("campaign")
         self.campaign_payload = payload
-        return "campaign-1"
+        return f"campaign-{self.calls.count('campaign')}"
 
     def find_campaigns_by_name(self, name):
         return ()
@@ -211,7 +279,7 @@ class FakePostingClient:
     def create_adset(self, payload):
         self.calls.append("adset")
         self.adset_payload = payload
-        return "adset-1"
+        return f"adset-{self.calls.count('adset')}"
 
     def find_adsets_by_name(self, campaign_id, name):
         return ()
@@ -383,6 +451,59 @@ class FakePostingClient:
         return {"id": ad_id, "status": "PAUSED", "configured_status": "PAUSED"}
 
 
+class ExistingTargetClientTests(unittest.TestCase):
+    def config(self):
+        return {
+            "configured": True,
+            "ad_account_id": "act_123",
+            "access_token": "secret",
+            "api_version": "v26.0",
+            "page_id": "page-1",
+            "page_access_token": "page-secret",
+            "instagram_user_id": "ig-1",
+        }
+
+    @mock.patch("meta_ads_client._paged_get")
+    def test_existing_target_discovery_uses_two_read_only_account_edges(self, get):
+        get.side_effect = (
+            {"rows": [existing_target_rows()[0]]},
+            {"rows": [existing_target_rows()[1]]},
+        )
+        client = meta_ads_client.MetaPostingClient(self.config())
+
+        result = load_existing_posting_targets(client)
+
+        self.assertEqual(result["campaigns"][0]["id"], "existing-campaign")
+        self.assertEqual(result["adsets"][0]["id"], "existing-adset")
+        self.assertEqual(get.call_count, 2)
+        paths = [call.args[0] for call in get.call_args_list]
+        self.assertEqual(paths, ["act_123/campaigns", "act_123/adsets"])
+        campaign_fields = get.call_args_list[0].kwargs["params"]["fields"]
+        adset_fields = get.call_args_list[1].kwargs["params"]["fields"]
+        self.assertIn("objective", campaign_fields)
+        self.assertIn("account_id", campaign_fields)
+        for field in (
+            "campaign_id", "optimization_goal", "billing_event", "promoted_object",
+            "targeting", "daily_budget", "lifetime_budget",
+        ):
+            self.assertIn(field, adset_fields)
+
+    @mock.patch("meta_ads_client._request")
+    def test_configured_target_reads_include_compatibility_fields(self, request):
+        request.return_value = {}
+        client = meta_ads_client.MetaPostingClient(self.config())
+        client.configured_campaign("campaign-1")
+        campaign_fields = request.call_args.kwargs["params"]["fields"]
+        client.configured_adset("adset-1")
+        adset_fields = request.call_args.kwargs["params"]["fields"]
+        self.assertIn("objective", campaign_fields)
+        self.assertIn("promoted_object", campaign_fields)
+        self.assertIn("optimization_goal", adset_fields)
+        self.assertIn("billing_event", adset_fields)
+        self.assertIn("promoted_object", adset_fields)
+        self.assertIn("targeting", adset_fields)
+
+
 class PostingNavigationTests(unittest.TestCase):
     def test_meta_review_is_last_ads_child(self):
         self.assertEqual(
@@ -404,12 +525,40 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn('st.subheader("Creatives")', source)
         self.assertIn("for index in range(1, 4)", source)
         self.assertIn("one paused campaign, one paused ad set and three paused", source)
+        self.assertIn('button("New campaign"', source)
+        self.assertIn('button("Start fresh campaign"', source)
+        self.assertIn("_start_new_posting_run()", source)
         self.assertIn(
             'st.expander("Advanced Meta Diagnostics", expanded=False)', source
         )
         self.assertLess(
             source.index('"Create 3 Paused Meta Ads"'),
             source.index('st.expander("Advanced Meta Diagnostics", expanded=False)'),
+        )
+
+    def test_posting_mode_ui_defaults_new_and_keeps_existing_controls_conditional(self):
+        source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
+        self.assertIn('"New Campaign"', source)
+        self.assertIn('"Add to Existing"', source)
+        self.assertIn('st.segmented_control(', source)
+        self.assertIn('if posting_mode == POSTING_MODE_EXISTING:', source)
+        self.assertIn('"Existing Campaign"', source)
+        self.assertIn('"Existing Ad Set"', source)
+        self.assertIn('"Add 3 Paused Ads to Existing Ad Set"', source)
+        self.assertIn('"Audience and targeting will not be changed."', source)
+        self.assertIn('"Existing campaign budget will not be changed."', source)
+
+    def test_existing_adset_options_are_filtered_by_campaign(self):
+        targets = {
+            "adsets": (
+                {"id": "a", "campaign_id": "campaign-1"},
+                {"id": "b", "campaign_id": "campaign-2"},
+                {"id": "c", "campaign_id": "campaign-1"},
+            )
+        }
+        self.assertEqual(
+            [row["id"] for row in ads_posting_page._adsets_for_campaign(targets, "campaign-1")],
+            ["a", "c"],
         )
 
     def test_posting_result_shows_safe_ia_verification_status_and_source(self):
@@ -463,8 +612,143 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn("NOT AVAILABLE VIA META API", info.call_args.args[0])
         warning.assert_not_called()
 
+    def test_existing_target_result_keeps_active_status_while_new_ads_show_paused(self):
+        result = {
+            "status": "COMPLETE",
+            "meta_status": "PAUSED",
+            "posting_mode": POSTING_MODE_EXISTING,
+            "campaign_id": "existing-campaign",
+            "campaign_name": "Existing Campaign",
+            "campaign_ownership": META_OBJECT_EXISTING_TARGET,
+            "campaign_configured_status": "ACTIVE",
+            "adset_id": "existing-adset",
+            "adset_name": "Existing Ad Set",
+            "adset_ownership": META_OBJECT_EXISTING_TARGET,
+            "adset_configured_status": "ACTIVE",
+            "ad_results": tuple(
+                {
+                    "index": index,
+                    "meta_ad_id": f"new-ad-{index}",
+                    "meta_ad_configured_status": "PAUSED",
+                }
+                for index in range(1, 4)
+            ),
+        }
+        with mock.patch.object(ads_posting_page.st, "subheader"), mock.patch.object(
+            ads_posting_page.st, "dataframe"
+        ) as dataframe, mock.patch.object(ads_posting_page.st, "caption"):
+            ads_posting_page._render_object_result(result, title="Completed")
+        rows = dataframe.call_args.args[0]
+        self.assertEqual(rows[0]["State"], "ACTIVE")
+        self.assertEqual(rows[1]["State"], "ACTIVE")
+        self.assertEqual(
+            [row["State"] for row in rows if row["Object"] in {"Ad 1", "Ad 2", "Ad 3"}],
+            ["PAUSED", "PAUSED", "PAUSED"],
+        )
+
 
 class PostingPayloadTests(unittest.TestCase):
+    def test_posting_request_defaults_to_new_campaign_without_external_ids(self):
+        clean = validate_posting_request(request_for())
+        self.assertEqual(clean["posting_mode"], POSTING_MODE_NEW)
+        self.assertEqual(clean["target_campaign_id"], "")
+        self.assertEqual(clean["target_adset_id"], "")
+
+    def test_existing_mode_uses_inherited_audience_and_requires_both_targets(self):
+        clean = validate_posting_request(existing_request())
+        self.assertEqual(clean["posting_mode"], POSTING_MODE_EXISTING)
+        self.assertEqual(clean["audience_type"], "inherited")
+        self.assertEqual(clean["audience_id"], "")
+        with self.assertRaisesRegex(PostingValidationError, "existing Meta Ad Set"):
+            validate_posting_request(
+                request_for(
+                    posting_mode=POSTING_MODE_EXISTING,
+                    target_campaign_id="existing-campaign",
+                    target_adset_id="",
+                )
+            )
+
+    def test_new_mode_rejects_external_ids_from_another_run(self):
+        with self.assertRaisesRegex(PostingValidationError, "cannot use Campaign"):
+            validate_posting_request(
+                request_for(
+                    posting_mode=POSTING_MODE_NEW,
+                    target_campaign_id="historical-campaign",
+                )
+            )
+
+    def test_existing_target_compatibility_requires_sales_purchase_pixel_and_product_set(self):
+        campaign, adset = existing_target_rows()
+        validated = validate_existing_posting_target(
+            campaign=campaign,
+            adset=adset,
+            expected_campaign_id="existing-campaign",
+            expected_adset_id="existing-adset",
+            expected_account_id="act_123",
+            expected_catalog_id="catalog-1",
+            expected_product_set_id="set-1",
+            expected_pixel_id="pixel-1",
+        )
+        self.assertEqual(validated["campaign_status"], "ACTIVE")
+        for field, value, message in (
+            ("optimization_goal", "LINK_CLICKS", "website Purchase"),
+            ("billing_event", "APP_INSTALLS", "billing"),
+        ):
+            incompatible = dict(adset)
+            incompatible[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                PostingValidationError, message
+            ):
+                validate_existing_posting_target(
+                    campaign=campaign,
+                    adset=incompatible,
+                    expected_campaign_id="existing-campaign",
+                    expected_adset_id="existing-adset",
+                    expected_account_id="act_123",
+                    expected_catalog_id="catalog-1",
+                    expected_product_set_id="set-1",
+                    expected_pixel_id="pixel-1",
+                )
+
+        compatibility_cases = (
+            ("campaign", "objective", "OUTCOME_AWARENESS", "Sales campaign"),
+            ("campaign", "account_id", "999", "ad account"),
+            ("adset", "account_id", "999", "ad account"),
+        )
+        for row_name, field, value, message in compatibility_cases:
+            changed_campaign = dict(campaign)
+            changed_adset = dict(adset)
+            (changed_campaign if row_name == "campaign" else changed_adset)[field] = value
+            with self.subTest(row=row_name, field=field), self.assertRaisesRegex(
+                PostingValidationError, message
+            ):
+                validate_existing_posting_target(
+                    campaign=changed_campaign,
+                    adset=changed_adset,
+                    expected_campaign_id="existing-campaign",
+                    expected_adset_id="existing-adset",
+                    expected_account_id="act_123",
+                    expected_catalog_id="catalog-1",
+                    expected_product_set_id="set-1",
+                    expected_pixel_id="pixel-1",
+                )
+        wrong_pixel = dict(adset)
+        wrong_pixel["promoted_object"] = {
+            **adset["promoted_object"],
+            "pixel_id": "another-pixel",
+        }
+        with self.assertRaisesRegex(PostingValidationError, "different Pixel"):
+            validate_existing_posting_target(
+                campaign=campaign,
+                adset=wrong_pixel,
+                expected_campaign_id="existing-campaign",
+                expected_adset_id="existing-adset",
+                expected_account_id="act_123",
+                expected_catalog_id="catalog-1",
+                expected_product_set_id="set-1",
+                expected_pixel_id="pixel-1",
+            )
+
     def test_names_remove_generic_suffix_and_increment_ia(self):
         self.assertEqual(
             product_short_name("Max Verstappen Victory — Sports Wall Art"),
@@ -1345,6 +1629,30 @@ class PostingReferenceRepairTests(unittest.TestCase):
         self.assertEqual((first["sequence"], cached["sequence"], refreshed["sequence"]), (1, 1, 2))
         self.assertEqual(calls, ["discover", "discover"])
 
+    def test_existing_target_discovery_is_short_cached_and_refreshable(self):
+        targets = {
+            "campaigns": (existing_target_rows()[0],),
+            "adsets": (existing_target_rows()[1],),
+        }
+        ads_posting_page._load_existing_meta_targets.clear()
+        try:
+            with mock.patch.object(
+                ads_posting_page,
+                "load_existing_posting_targets",
+                return_value=targets,
+            ) as load:
+                first, first_error = ads_posting_page._existing_targets_state()
+                cached, cached_error = ads_posting_page._existing_targets_state()
+                refreshed, refreshed_error = ads_posting_page._existing_targets_state(
+                    force=True
+                )
+        finally:
+            ads_posting_page._load_existing_meta_targets.clear()
+        self.assertEqual((first_error, cached_error, refreshed_error), ("", "", ""))
+        self.assertEqual(first, cached)
+        self.assertEqual(cached, refreshed)
+        self.assertEqual(load.call_count, 2)
+
     def test_catalog_resolution_is_deterministic_and_not_name_only(self):
         configured = resolve_catalog_reference(
             self.references(catalogs=()), environ={"META_CATALOG_ID": "catalog-configured"}
@@ -1676,6 +1984,179 @@ class PostingReferenceRepairTests(unittest.TestCase):
 
 
 class PostingServiceTests(unittest.TestCase):
+    def test_existing_mode_creates_only_three_new_ias_and_three_paused_ads(self):
+        client = FakePostingClient()
+        campaign_before, adset_before = configure_existing_target(client)
+        store = FakePostingStore()
+
+        result = MetaPostingService(client=client, store=store).create_paused_campaign(
+            existing_request()
+        )
+
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["posting_mode"], POSTING_MODE_EXISTING)
+        self.assertEqual(result["campaign_id"], "existing-campaign")
+        self.assertEqual(result["adset_id"], "existing-adset")
+        self.assertEqual(result["campaign_ownership"], META_OBJECT_EXISTING_TARGET)
+        self.assertEqual(result["adset_ownership"], META_OBJECT_EXISTING_TARGET)
+        self.assertEqual(result["campaign_configured_status"], "ACTIVE")
+        self.assertEqual(result["adset_configured_status"], "ACTIVE")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("canvas"), 3)
+        self.assertEqual(client.calls.count("template_copy"), 3)
+        self.assertEqual(
+            {row["adset_id"] for row in client.copy_ads.values()},
+            {"existing-adset"},
+        )
+        self.assertEqual(
+            {row["configured_status"] for row in client.copy_ads.values()},
+            {"PAUSED"},
+        )
+        self.assertTrue(
+            all(ad_id in client.copy_ads for ad_id, _name in client.rename_calls)
+        )
+        self.assertEqual(client.configured_campaign.call_count, 1)
+        self.assertEqual(client.configured_adset.call_count, 1)
+        self.assertEqual(client.configured_campaign.return_value, campaign_before)
+        self.assertEqual(client.configured_adset.return_value, adset_before)
+        self.assertEqual(client.template_source_ad["status"], "ACTIVE")
+
+    def test_existing_mode_accepts_paused_target_without_changing_it(self):
+        client = FakePostingClient()
+        configure_existing_target(
+            client, campaign_status="PAUSED", adset_status="PAUSED"
+        )
+        result = MetaPostingService(
+            client=client, store=FakePostingStore()
+        ).create_paused_campaign(existing_request())
+        self.assertEqual(result["campaign_configured_status"], "PAUSED")
+        self.assertEqual(result["adset_configured_status"], "PAUSED")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+
+    def test_existing_mode_product_set_mismatch_blocks_before_meta_writes(self):
+        client = FakePostingClient()
+        campaign, adset = existing_target_rows()
+        adset["promoted_object"] = {
+            **adset["promoted_object"],
+            "product_set_id": "different-set",
+        }
+        client.configured_campaign = mock.Mock(return_value=campaign)
+        client.configured_adset = mock.Mock(return_value=adset)
+
+        with self.assertRaisesRegex(PostingValidationError, "different Product Set"):
+            MetaPostingService(
+                client=client, store=FakePostingStore()
+            ).create_paused_campaign(existing_request())
+
+        self.assertNotIn("campaign", client.calls)
+        self.assertNotIn("adset", client.calls)
+        self.assertNotIn("ad_image", client.calls)
+        self.assertNotIn("page_photo", client.calls)
+        self.assertNotIn("template_copy", client.calls)
+
+    def test_existing_mode_wrong_campaign_relationship_blocks_before_writes(self):
+        client = FakePostingClient()
+        campaign, adset = existing_target_rows()
+        adset["campaign_id"] = "another-campaign"
+        client.configured_campaign = mock.Mock(return_value=campaign)
+        client.configured_adset = mock.Mock(return_value=adset)
+        with self.assertRaisesRegex(PostingValidationError, "does not belong"):
+            MetaPostingService(
+                client=client, store=FakePostingStore()
+            ).create_paused_campaign(existing_request())
+        self.assertNotIn("ad_image", client.calls)
+        self.assertNotIn("template_copy", client.calls)
+
+    def test_existing_mode_deleted_target_is_abandoned_without_replacement(self):
+        client = FakePostingClient()
+        client.configured_campaign = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsApiError(
+                "Unsupported get request. Object with ID does not exist.",
+                error_code=100,
+            )
+        )
+        store = FakePostingStore()
+        with self.assertRaises(PostingAbandonedError) as caught:
+            MetaPostingService(client=client, store=store).create_paused_campaign(
+                existing_request()
+            )
+        self.assertEqual(str(caught.exception), EXISTING_TARGET_MISSING_MESSAGE)
+        self.assertEqual(store.record["status"], "ABANDONED_EXTERNALLY")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("template_copy"), 0)
+
+        adset_missing_client = FakePostingClient()
+        campaign, _adset = existing_target_rows()
+        adset_missing_client.configured_campaign = mock.Mock(return_value=campaign)
+        adset_missing_client.configured_adset = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsApiError(
+                "Unsupported get request. Ad Set does not exist.", error_code=100
+            )
+        )
+        missing_store = FakePostingStore()
+        with self.assertRaises(PostingAbandonedError):
+            MetaPostingService(
+                client=adset_missing_client, store=missing_store
+            ).create_paused_campaign(existing_request())
+        self.assertEqual(missing_store.record["status"], "ABANDONED_EXTERNALLY")
+        self.assertNotIn("template_copy", adset_missing_client.calls)
+
+    def test_existing_mode_same_run_retry_reuses_routes_and_never_creates_hierarchy(self):
+        client = FakePostingClient(fail_at="ad_2")
+        configure_existing_target(client)
+        store = FakePostingStore()
+        service = MetaPostingService(client=client, store=store)
+        with self.assertRaises(PostingError):
+            service.create_paused_campaign(existing_request())
+
+        client.fail_at = ""
+        result = service.create_paused_campaign(existing_request())
+
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("canvas"), 3)
+        self.assertEqual(client.calls.count("template_copy"), 4)
+        self.assertEqual(len(client.copy_ads), 3)
+        self.assertEqual(
+            [row["meta_ad_id"] for row in result["ad_results"]],
+            ["ad-1", "ad-2", "ad-3"],
+        )
+
+    def test_two_existing_mode_runs_can_add_distinct_routes_to_same_adset(self):
+        client = FakePostingClient()
+        configure_existing_target(client)
+        store = FakePostingStore()
+        service = MetaPostingService(client=client, store=store)
+        first = service.create_paused_campaign(
+            existing_request(
+                submission_id="22222222-2222-4222-8222-222222222222"
+            )
+        )
+        second = service.create_paused_campaign(
+            existing_request(
+                submission_id="33333333-3333-4333-8333-333333333333"
+            )
+        )
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("canvas"), 6)
+        self.assertEqual(client.calls.count("template_copy"), 6)
+        self.assertTrue(
+            set(row["meta_instant_experience_id"] for row in first["ad_results"])
+            .isdisjoint(
+                row["meta_instant_experience_id"] for row in second["ad_results"]
+            )
+        )
+        self.assertTrue(
+            set(row["meta_ad_id"] for row in first["ad_results"]).isdisjoint(
+                row["meta_ad_id"] for row in second["ad_results"]
+            )
+        )
+
     def test_new_adset_acquisition_configuration_blocks_before_route_writes(self):
         client = FakePostingClient()
         client.configured_adset = mock.Mock(
@@ -2147,7 +2628,7 @@ class PostingServiceTests(unittest.TestCase):
             ["ad-1", "ad-2", "ad-3"],
         )
 
-    def test_new_submission_id_resumes_unique_partial_campaign_and_adset(self):
+    def test_new_submission_id_does_not_resume_partial_campaign_and_adset(self):
         original_submission_id = "22222222-2222-4222-8222-222222222222"
         existing = {
             "submission_id": original_submission_id,
@@ -2171,11 +2652,13 @@ class PostingServiceTests(unittest.TestCase):
         result = MetaPostingService(client=client, store=store).create_paused_campaign(
             request_for(submission_id="33333333-3333-4333-8333-333333333333")
         )
-        self.assertEqual(result["submission_id"], original_submission_id)
-        self.assertEqual(result["campaign_id"], "120249720387120554")
-        self.assertEqual(result["adset_id"], "120249720389890554")
-        self.assertEqual(client.calls.count("campaign"), 0)
-        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(
+            result["submission_id"], "33333333-3333-4333-8333-333333333333"
+        )
+        self.assertEqual(result["campaign_id"], "campaign-1")
+        self.assertEqual(result["adset_id"], "adset-1")
+        self.assertEqual(client.calls.count("campaign"), 1)
+        self.assertEqual(client.calls.count("adset"), 1)
         self.assertEqual(client.calls.count("template_copy"), 3)
 
     def test_retry_reuses_peter_brock_campaign_adset_and_first_instant_experience(self):
@@ -2216,7 +2699,7 @@ class PostingServiceTests(unittest.TestCase):
             "six-laps-ahead-peter-brock-wall-art"
         )
         retry_request = request_for(
-            submission_id="33333333-3333-4333-8333-333333333333",
+            submission_id=original_submission_id,
             product_title="Six Laps Ahead Peter Brock Wall Art",
             product_handle="six-laps-ahead-peter-brock-wall-art",
             destination_url=product_url,
@@ -2381,7 +2864,7 @@ class PostingServiceTests(unittest.TestCase):
             "six-laps-ahead-peter-brock-wall-art"
         )
         retry_request = request_for(
-            submission_id="33333333-3333-4333-8333-333333333333",
+            submission_id=original_submission_id,
             product_title="Six Laps Ahead Peter Brock Wall Art",
             product_handle="six-laps-ahead-peter-brock-wall-art",
             destination_url=product_url,
@@ -2511,19 +2994,16 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.rename_calls, [("ad-3", "Six Laps Ahead Peter Brock IA 3")])
         self.assertEqual(client.template_source_ad, source_before)
 
-    def test_store_claim_reuses_unique_failed_fingerprint_without_inserting_new_job(self):
-        original_submission_id = "22222222-2222-4222-8222-222222222222"
-        partial = {
-            "submission_id": original_submission_id,
-            "request_fingerprint": "same-fingerprint",
-            "status": "FAILED",
-            "campaign_id": "120249720387120554",
-            "adset_id": "120249720389890554",
-        }
+    def test_store_claim_uses_exact_run_id_and_never_queries_fingerprint_history(self):
         cursor = mock.MagicMock()
         cursor.__enter__.return_value = cursor
-        cursor.fetchone.side_effect = [None, partial, partial]
-        cursor.fetchall.return_value = [partial]
+        inserted = {
+            "submission_id": "33333333-3333-4333-8333-333333333333",
+            "request_fingerprint": "same-fingerprint",
+            "status": "VALIDATING",
+        }
+        claimed_row = {**inserted, "status": "VALIDATING"}
+        cursor.fetchone.side_effect = [inserted, claimed_row]
         connection = mock.MagicMock()
         connection.__enter__.return_value = connection
         connection.cursor.return_value = cursor
@@ -2542,10 +3022,140 @@ class PostingServiceTests(unittest.TestCase):
             )
 
         self.assertTrue(claim["claimed"])
-        self.assertEqual(claim["record"]["submission_id"], original_submission_id)
+        self.assertEqual(
+            claim["record"]["submission_id"],
+            "33333333-3333-4333-8333-333333333333",
+        )
         statements = [str(call.args[0]) for call in cursor.execute.call_args_list]
-        self.assertTrue(any("status='FAILED'" in statement for statement in statements))
-        self.assertFalse(any("INSERT INTO meta_posting_submissions" in statement for statement in statements))
+        self.assertTrue(any("INSERT INTO meta_posting_submissions" in statement for statement in statements))
+        self.assertFalse(any("WHERE request_fingerprint" in statement for statement in statements))
+
+    def test_identical_request_content_in_two_runs_creates_two_complete_hierarchies(self):
+        client = FakePostingClient()
+        store = FakePostingStore()
+        service = MetaPostingService(client=client, store=store)
+        source_before = dict(client.template_source_ad)
+
+        first_request = request_for(
+            submission_id="22222222-2222-4222-8222-222222222222"
+        )
+        second_request = request_for(
+            submission_id="33333333-3333-4333-8333-333333333333"
+        )
+        self.assertEqual(
+            _request_fingerprint(validate_posting_request(first_request)),
+            _request_fingerprint(validate_posting_request(second_request)),
+        )
+
+        first = service.create_paused_campaign(first_request)
+        second = service.create_paused_campaign(second_request)
+
+        self.assertNotEqual(first["submission_id"], second["submission_id"])
+        self.assertNotEqual(first["campaign_id"], second["campaign_id"])
+        self.assertNotEqual(first["adset_id"], second["adset_id"])
+        self.assertTrue(
+            set(row["meta_instant_experience_id"] for row in first["ad_results"])
+            .isdisjoint(
+                row["meta_instant_experience_id"] for row in second["ad_results"]
+            )
+        )
+        self.assertTrue(
+            set(row["meta_ad_id"] for row in first["ad_results"]).isdisjoint(
+                row["meta_ad_id"] for row in second["ad_results"]
+            )
+        )
+        self.assertEqual(client.calls.count("campaign"), 2)
+        self.assertEqual(client.calls.count("adset"), 2)
+        self.assertEqual(client.calls.count("canvas"), 6)
+        self.assertEqual(client.calls.count("template_copy"), 6)
+        self.assertEqual(
+            {row["status"] for row in client.copy_ads.values()}, {"PAUSED"}
+        )
+        self.assertEqual(client.template_source_ad, source_before)
+
+    def test_missing_campaign_abandons_same_run_without_meta_writes(self):
+        request = request_for()
+        existing = {
+            "submission_id": request.submission_id,
+            "request_fingerprint": _request_fingerprint(
+                validate_posting_request(request)
+            ),
+            "status": "FAILED",
+            "campaign_id": "deleted-campaign",
+            "campaign_name": "Old campaign",
+            "adset_id": "old-adset",
+            "adset_name": "Old ad set",
+            "ad_results": posting_ad_results(()),
+        }
+        client = FakePostingClient()
+        client.configured_campaign = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsApiError(
+                "Unsupported get request. Object with ID does not exist or is inaccessible.",
+                error_code=100,
+            )
+        )
+        store = FakePostingStore(existing=existing)
+
+        with self.assertRaises(PostingAbandonedError) as caught:
+            MetaPostingService(client=client, store=store).create_paused_campaign(
+                request
+            )
+
+        self.assertEqual(str(caught.exception), EXTERNALLY_ABANDONED_MESSAGE)
+        self.assertEqual(store.record["status"], "ABANDONED_EXTERNALLY")
+        self.assertEqual(store.record["campaign_id"], "deleted-campaign")
+        self.assertEqual(store.record["adset_id"], "old-adset")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("template_copy"), 0)
+
+    def test_new_run_after_external_abandonment_creates_fresh_campaign(self):
+        abandoned = {
+            "submission_id": "22222222-2222-4222-8222-222222222222",
+            "request_fingerprint": "same-content",
+            "status": "ABANDONED_EXTERNALLY",
+            "campaign_id": "deleted-campaign",
+            "adset_id": "old-adset",
+            "ad_results": posting_ad_results(()),
+        }
+        client = FakePostingClient()
+        result = MetaPostingService(
+            client=client,
+            store=FakePostingStore(existing=abandoned),
+        ).create_paused_campaign(
+            request_for(submission_id="33333333-3333-4333-8333-333333333333")
+        )
+        self.assertEqual(
+            result["submission_id"], "33333333-3333-4333-8333-333333333333"
+        )
+        self.assertEqual(result["campaign_id"], "campaign-1")
+        self.assertEqual(result["adset_id"], "adset-1")
+        self.assertNotEqual(result["campaign_id"], abandoned["campaign_id"])
+        self.assertNotEqual(result["adset_id"], abandoned["adset_id"])
+
+    def test_auth_error_reading_persisted_campaign_is_not_classified_as_missing(self):
+        error = meta_ads_client.MetaAdsApiError(
+            "Invalid OAuth access token.", error_code=190
+        )
+        self.assertFalse(is_meta_object_missing_or_inaccessible(error))
+
+    def test_campaign_ambiguous_response_never_reuses_an_old_same_name_campaign(self):
+        client = FakePostingClient()
+        client.create_campaign = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsAmbiguousResultError(
+                "Campaign request timed out after dispatch."
+            )
+        )
+        client.find_campaigns_by_name = mock.Mock(
+            side_effect=AssertionError("campaign names are labels, not run identity")
+        )
+        store = FakePostingStore()
+        with self.assertRaises(PostingAmbiguousError):
+            MetaPostingService(client=client, store=store).create_paused_campaign(
+                request_for()
+            )
+        client.find_campaigns_by_name.assert_not_called()
+        self.assertEqual(store.record["status"], "AMBIGUOUS")
 
     def test_three_name_sequence_advances_as_one_batch(self):
         self.assertEqual(
@@ -2556,11 +3166,19 @@ class PostingServiceTests(unittest.TestCase):
             ("Legends IA 4", "Legends IA 5", "Legends IA 6"),
         )
 
-    def test_complete_fingerprint_result_is_returned_without_writes(self):
-        existing = {"status": "COMPLETE", "meta_ad_id": "existing-ad"}
+    def test_complete_result_for_exact_same_run_is_returned_without_writes(self):
+        request = request_for()
+        existing = {
+            "submission_id": request.submission_id,
+            "request_fingerprint": _request_fingerprint(
+                validate_posting_request(request)
+            ),
+            "status": "COMPLETE",
+            "meta_ad_id": "existing-ad",
+        }
         client = FakePostingClient()
         store = FakePostingStore(existing=existing)
-        result = MetaPostingService(client=client, store=store).create_paused_campaign(request_for())
+        result = MetaPostingService(client=client, store=store).create_paused_campaign(request)
         self.assertEqual(result["meta_ad_id"], "existing-ad")
         self.assertNotIn("campaign", client.calls)
 
@@ -2675,6 +3293,27 @@ class ReviewAndPersistenceTests(unittest.TestCase):
         self.assertNotIn("DROP TABLE", source.upper())
         self.assertIn(
             'BASE_DIR / "migrations" / "20260901_meta_posting_v3.sql"',
+            (ROOT / "supabase_backend.py").read_text(encoding="utf-8"),
+        )
+
+    def test_run_identity_migration_is_additive_and_keeps_history(self):
+        migration_name = "20260903_meta_posting_run_identity.sql"
+        source = (ROOT / "migrations" / migration_name).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ABANDONED_EXTERNALLY", source)
+        self.assertIn("submission_id", source)
+        self.assertIn("request_fingerprint", source)
+        self.assertIn("posting_mode", source)
+        self.assertIn("campaign_ownership", source)
+        self.assertIn("adset_ownership", source)
+        self.assertIn("EXISTING_TARGET", source)
+        self.assertIn("CREATED_BY_RUN", source)
+        self.assertNotIn("DELETE FROM", source.upper())
+        self.assertNotIn("DROP TABLE", source.upper())
+        self.assertNotIn("UPDATE META_POSTING_SUBMISSIONS", source.upper())
+        self.assertIn(
+            f'BASE_DIR / "migrations" / "{migration_name}"',
             (ROOT / "supabase_backend.py").read_text(encoding="utf-8"),
         )
 

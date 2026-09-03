@@ -1211,7 +1211,8 @@ class MetaPostingClient:
                 f"{self.ad_account_id}/campaigns",
                 params={
                     "fields": (
-                        "id,name,status,effective_status,objective,promoted_object,"
+                        "id,name,status,configured_status,effective_status,account_id,"
+                        "objective,promoted_object,daily_budget,lifetime_budget,"
                         "created_time,updated_time"
                     ),
                     "limit": 100,
@@ -1227,8 +1228,10 @@ class MetaPostingClient:
                 f"{self.ad_account_id}/adsets",
                 params={
                     "fields": (
-                        "id,name,status,effective_status,campaign_id,optimization_goal,"
-                        "promoted_object,campaign{objective}"
+                        "id,name,status,configured_status,effective_status,campaign_id,"
+                        "account_id,optimization_goal,billing_event,destination_type,"
+                        "promoted_object,targeting,daily_budget,lifetime_budget,"
+                        "campaign{objective}"
                     ),
                     "limit": 100,
                 },
@@ -1478,7 +1481,12 @@ class MetaPostingClient:
     def configured_campaign(self, campaign_id):
         return _request(
             str(campaign_id or ""),
-            params={"fields": "id,name,status,configured_status,effective_status,account_id"},
+            params={
+                "fields": (
+                    "id,name,status,configured_status,effective_status,account_id,"
+                    "objective,promoted_object,daily_budget,lifetime_budget"
+                )
+            },
             config=self.config,
         )
 
@@ -1488,7 +1496,9 @@ class MetaPostingClient:
             params={
                 "fields": (
                     "id,name,status,configured_status,effective_status,campaign_id,account_id,"
-                    "ad_set_goal,existing_customer_budget_percentage"
+                    "optimization_goal,billing_event,destination_type,promoted_object,"
+                    "targeting,daily_budget,lifetime_budget,ad_set_goal,"
+                    "existing_customer_budget_percentage"
                 )
             },
             config=self.config,

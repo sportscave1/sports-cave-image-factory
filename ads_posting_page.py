@@ -32,11 +32,15 @@ from meta_posting_service import (
     EXPECTED_CATALOG_NAME,
     EXPECTED_PIXEL_NAME,
     INSTANT_EXPERIENCE_BUTTON_TEXT,
+    META_OBJECT_EXISTING_TARGET,
+    POSTING_MODE_EXISTING,
+    POSTING_MODE_NEW,
     PRODUCT_DESCRIPTION,
     SPORT_OPTIONS,
     SUCCESS_MESSAGE,
     MetaPostingService,
     PostingAmbiguousError,
+    PostingAbandonedError,
     PostingBusyError,
     PostingCreative,
     PostingError,
@@ -48,8 +52,10 @@ from meta_posting_service import (
     campaign_name,
     next_instant_experience_ad_names,
     load_posting_reference_snapshot,
+    load_existing_posting_targets,
     posting_ad_results,
     posting_submission_id,
+    validate_existing_posting_target,
 )
 from posting_import_csv import (
     ADS_CSV_IMPORT_RUNTIME_VERSION,
@@ -80,6 +86,10 @@ HEADLINE_KEY = HEADLINE_KEYS[0]
 DESCRIPTION_KEY = DESCRIPTION_KEYS[0]
 RESULT_KEY = f"{STATE_PREFIX}result"
 PROCESSING_KEY = f"{STATE_PREFIX}processing"
+RUN_STATE_KEY = f"{STATE_PREFIX}run_state"
+POSTING_MODE_KEY = f"{STATE_PREFIX}posting_mode"
+EXISTING_CAMPAIGN_KEY = f"{STATE_PREFIX}existing_campaign"
+EXISTING_ADSET_KEY = f"{STATE_PREFIX}existing_adset"
 COLLECTION_DIAGNOSTIC_RESULT_KEY = f"{STATE_PREFIX}collection_diagnostic_result"
 COLLECTION_DIAGNOSTIC_PROCESSING_KEY = f"{STATE_PREFIX}collection_diagnostic_processing"
 COLLECTION_TEMPLATE_COPY_RESULT_KEY = f"{STATE_PREFIX}collection_template_copy_result"
@@ -96,6 +106,31 @@ CSV_IMPORT_KEY = f"{STATE_PREFIX}csv_import"
 CSV_IMPORT_STATE_KEY = f"{STATE_PREFIX}csv_import_state"
 ADS_COPY_ROUTES_STATE_KEY = f"{STATE_PREFIX}ads_copy_routes"
 
+RUN_STATE_DRAFT = "DRAFT"
+RUN_STATE_ACTIVE = "ACTIVE"
+RUN_STATE_FAILED = "FAILED"
+RUN_STATE_COMPLETE = "COMPLETE"
+RUN_STATE_ABANDONED = "ABANDONED_EXTERNALLY"
+RUN_TERMINAL_STATES = {RUN_STATE_COMPLETE, RUN_STATE_ABANDONED}
+RUN_STARTED_STATES = {
+    RUN_STATE_ACTIVE,
+    RUN_STATE_FAILED,
+    "VALIDATING",
+    "CAMPAIGN_CREATED",
+    "ADSET_CREATED",
+    "IMAGE_UPLOADED",
+    "PAGE_PHOTO_CREATED",
+    "INSTANT_EXPERIENCE_CREATED",
+    "CREATIVE_CREATED",
+    "AD_CREATED",
+    "AMBIGUOUS",
+}
+
+POSTING_MODE_LABELS = {
+    POSTING_MODE_NEW: "New Campaign",
+    POSTING_MODE_EXISTING: "Add to Existing",
+}
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_meta_overview():
@@ -107,6 +142,11 @@ def _load_meta_references():
     return load_posting_reference_snapshot(MetaPostingClient())
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_existing_meta_targets():
+    return load_existing_posting_targets(MetaPostingClient())
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_recent_posts():
     return tuple(dict(row) for row in MetaPostingService().recent_posts(limit=20))
@@ -115,6 +155,7 @@ def _load_recent_posts():
 def _clear_meta_cache():
     _load_meta_overview.clear()
     _load_meta_references.clear()
+    _load_existing_meta_targets.clear()
     for key in (
         META_OVERVIEW_STATE_KEY,
         META_OVERVIEW_ERROR_KEY,
@@ -158,6 +199,26 @@ def _meta_state(*, force=False):
         force=force,
     )
     return overview, references, overview_error, references_error
+
+
+def _existing_targets_state(*, force=False):
+    """Return short-TTL, read-only Campaign/Ad Set selector data."""
+
+    if force:
+        _load_existing_meta_targets.clear()
+    try:
+        return dict(_load_existing_meta_targets() or {}), ""
+    except MetaAdsApiError as error:
+        return {}, str(error)
+
+
+def _adsets_for_campaign(targets, campaign_id):
+    campaign_id = str(campaign_id or "")
+    return tuple(
+        dict(row)
+        for row in dict(targets or {}).get("adsets") or ()
+        if str(row.get("campaign_id") or "") == campaign_id
+    )
 
 
 def _product_rows_state():
@@ -349,10 +410,10 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
     ads = tuple(dict(row or {}) for row in (batch or {}).get("ads") or ())
     if len(ads) != 3:
         raise PostingImportCSVError("Posting CSV must contain exactly three ads.")
+    _prepare_posting_run_for_import(state)
 
     if str((batch or {}).get("source_schema_kind") or "") == "ads_copy":
         updates = {
-            SUBMISSION_ID_KEY: posting_submission_id(),
             ADS_COPY_ROUTES_STATE_KEY: ads,
         }
         for index, ad in enumerate(ads):
@@ -400,7 +461,6 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
         PRODUCT_TRACK_KEY: str(matched.get("identity") or ""),
         COUNTRY_KEY: str(batch.get("country") or ""),
         SPORT_KEY: str(batch.get("sport_category") or ""),
-        SUBMISSION_ID_KEY: posting_submission_id(),
     }
     for index, ad in enumerate(ads):
         updates[PRIMARY_TEXT_KEYS[index]] = str(ad.get("primary_text") or "")
@@ -507,6 +567,9 @@ def _build_posting_request(
     product_set_id,
     audience,
     creatives,
+    posting_mode=POSTING_MODE_NEW,
+    target_campaign_id="",
+    target_adset_id="",
 ):
     """Map reviewed local creative state into the existing Meta request contract."""
 
@@ -522,6 +585,9 @@ def _build_posting_request(
         product_set_id=product_set_id,
         audience_type=str((audience or {}).get("type") or "broad"),
         audience_id=str((audience or {}).get("id") or ""),
+        posting_mode=str(posting_mode or POSTING_MODE_NEW),
+        target_campaign_id=str(target_campaign_id or ""),
+        target_adset_id=str(target_adset_id or ""),
         creatives=tuple(
             PostingCreative(
                 image_bytes=bytes((creative.get("image") or {}).get("data") or b""),
@@ -724,11 +790,84 @@ def run_collection_template_copy_from_posting_state(
     )
 
 
+def _ensure_posting_run(state=None):
+    state = st.session_state if state is None else state
+    run_id = str(state.get(SUBMISSION_ID_KEY) or "").strip()
+    if not run_id:
+        run_id = posting_submission_id()
+        state[SUBMISSION_ID_KEY] = run_id
+    state.setdefault(RUN_STATE_KEY, RUN_STATE_DRAFT)
+    state.setdefault(POSTING_MODE_KEY, POSTING_MODE_LABELS[POSTING_MODE_NEW])
+    return run_id
+
+
+def _posting_mode(state=None):
+    state = st.session_state if state is None else state
+    value = str(
+        state.get(POSTING_MODE_KEY) or POSTING_MODE_LABELS[POSTING_MODE_NEW]
+    )
+    return next(
+        (
+            mode
+            for mode, label in POSTING_MODE_LABELS.items()
+            if value in {mode, label}
+        ),
+        POSTING_MODE_NEW,
+    )
+
+
+def _current_run_state(state):
+    result = dict(state.get(RESULT_KEY) or {})
+    return str(
+        result.get("status") or state.get(RUN_STATE_KEY) or RUN_STATE_DRAFT
+    ).upper()
+
+
+def _start_new_posting_run(*, state=None):
+    """Open a blank Meta run while retaining the VA's reviewed staging inputs."""
+
+    state = st.session_state if state is None else state
+    for key in (
+        RESULT_KEY,
+        PROCESSING_KEY,
+        COLLECTION_DIAGNOSTIC_RESULT_KEY,
+        COLLECTION_DIAGNOSTIC_PROCESSING_KEY,
+        COLLECTION_TEMPLATE_COPY_RESULT_KEY,
+        COLLECTION_TEMPLATE_COPY_PROCESSING_KEY,
+        COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY,
+        EXISTING_CAMPAIGN_KEY,
+        EXISTING_ADSET_KEY,
+    ):
+        state.pop(key, None)
+    run_id = posting_submission_id()
+    state[SUBMISSION_ID_KEY] = run_id
+    state[RUN_STATE_KEY] = RUN_STATE_DRAFT
+    state[POSTING_MODE_KEY] = POSTING_MODE_LABELS[POSTING_MODE_NEW]
+    state[PROCESSING_KEY] = False
+    state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = False
+    state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = False
+    return run_id
+
+
+def _prepare_posting_run_for_import(state):
+    """Treat a valid CSV as staging data, never as historical run identity."""
+
+    _ensure_posting_run(state)
+    run_state = _current_run_state(state)
+    if run_state in RUN_TERMINAL_STATES:
+        return _start_new_posting_run(state=state)
+    if run_state in RUN_STARTED_STATES:
+        raise PostingImportCSVError(
+            "This Posting run already has Meta history. Retry it unchanged or "
+            "choose Start fresh campaign before importing a different package."
+        )
+    return str(state[SUBMISSION_ID_KEY])
+
+
 def _reset_posting_state():
-    for key in tuple(st.session_state):
-        if str(key).startswith(STATE_PREFIX):
-            st.session_state.pop(key, None)
-    st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
+    """Compatibility wrapper for the result-screen New campaign action."""
+
+    return _start_new_posting_run()
 
 
 def _connection_status(container, label, *, tone):
@@ -808,12 +947,30 @@ def _render_object_result(result, *, title):
         ("Ad set", "adset_name", "adset_id"),
     ):
         object_id = str(result.get(id_key) or "")
+        ownership_key = "campaign_ownership" if label == "Campaign" else "adset_ownership"
+        status_key = (
+            "campaign_configured_status"
+            if label == "Campaign"
+            else "adset_configured_status"
+        )
+        is_existing_target = (
+            str(result.get(ownership_key) or "").upper()
+            == META_OBJECT_EXISTING_TARGET
+        )
         rows.append(
             {
                 "Object": label,
                 "Name": str(result.get(name_key) or ""),
                 "ID": object_id,
-                "State": "PAUSED" if object_id and completed_paused else "Created" if object_id else "Not created",
+                "State": (
+                    str(result.get(status_key) or "Existing").upper()
+                    if object_id and is_existing_target
+                    else "PAUSED"
+                    if object_id and completed_paused
+                    else "Created"
+                    if object_id
+                    else "Not created"
+                ),
             }
         )
     for ad_result in posting_ad_results(result.get("ad_results")):
@@ -898,11 +1055,18 @@ def _render_success(result):
         f"Product set: **{result.get('product_set_name') or result.get('product_set_id') or ''}** · "
         f"Destination: {result.get('destination_url') or ''}"
     )
-    st.caption(
-        f"Campaign budget: **$25.00 {currency}/day** · Objective: **Sales** · Optimization: **Purchase** · "
-        "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
-        "Generate backgrounds: **Off**"
-    )
+    if str(result.get("posting_mode") or POSTING_MODE_NEW).upper() == POSTING_MODE_EXISTING:
+        st.caption(
+            "Existing Campaign and Ad Set retained their status, budget, audience and targeting · "
+            "3 new route ads: **PAUSED** · Multi-advertiser ads: **On** · "
+            "Generate backgrounds: **Off**"
+        )
+    else:
+        st.caption(
+            f"Campaign budget: **$25.00 {currency}/day** · Objective: **Sales** · Optimization: **Purchase** · "
+            "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
+            "Generate backgrounds: **Off**"
+        )
     first_ad = posting_ad_results(result.get("ad_results"))[0]
     link = ads_manager_url(
         account_id=MetaPostingClient().ad_account_id,
@@ -1055,17 +1219,50 @@ def _render_recent_posts():
 
 def render_page():
     st.title("Post Ad")
-    st.caption("Build one Meta Sales campaign, one ad set and three Instant Experience ads — all paused.")
-    st.session_state.setdefault(SUBMISSION_ID_KEY, posting_submission_id())
+    st.caption("Create three route-specific Collection + Instant Experience ads safely in Meta.")
+    _ensure_posting_run()
     st.session_state.setdefault(PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_TEMPLATE_COPY_PROCESSING_KEY, False)
+
+    st.caption("**POSTING MODE**")
+    st.segmented_control(
+        "Posting mode",
+        tuple(POSTING_MODE_LABELS.values()),
+        default=POSTING_MODE_LABELS[POSTING_MODE_NEW],
+        key=POSTING_MODE_KEY,
+        label_visibility="collapsed",
+        disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
+    )
+    posting_mode = _posting_mode(st.session_state)
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
     if str(result.get("status") or "") == "COMPLETE":
         _render_success(result)
         _render_recent_posts()
         return
+    if str(result.get("status") or "") == "ABANDONED_EXTERNALLY":
+        st.error(
+            str(
+                result.get("safe_error")
+                or "The Meta campaign for this Posting run no longer exists. "
+                "Start a New Campaign to create a fresh set of ads."
+            )
+        )
+        _render_object_result(result, title="Posting run abandoned externally")
+        if st.button("Start fresh campaign", type="primary"):
+            _start_new_posting_run()
+            st.rerun()
+        _render_recent_posts()
+        return
+    if str(result.get("status") or "") in {"FAILED", "AMBIGUOUS"}:
+        st.warning(
+            "This Posting run has Meta history. Retry the current run to reconcile it, "
+            "or start fresh to create a new campaign without reusing these IDs."
+        )
+        if st.button("Start fresh campaign", type="secondary"):
+            _start_new_posting_run()
+            st.rerun()
 
     status_col, refresh_col = st.columns([5, 1])
     refresh_meta = refresh_col.button(
@@ -1106,6 +1303,69 @@ def render_page():
     warnings = tuple(str(value) for value in references.get("warnings") or () if str(value).strip())
     if warnings:
         st.caption("⚠ " + " · ".join(warnings[:3]))
+
+    target_campaign_id = ""
+    target_adset_id = ""
+    target_campaign = {}
+    target_adset = {}
+    existing_targets_error = ""
+    if posting_mode == POSTING_MODE_EXISTING:
+        st.markdown("#### Existing Meta destination")
+        refresh_existing = st.button(
+            "Refresh Meta campaigns",
+            type="secondary",
+            disabled=st.session_state[PROCESSING_KEY],
+            key=f"{STATE_PREFIX}refresh_existing_targets",
+        )
+        with st.spinner("Loading existing Meta campaigns and ad sets…"):
+            existing_targets, existing_targets_error = _existing_targets_state(
+                force=refresh_existing
+            )
+        if existing_targets_error:
+            st.error(f"Existing Meta campaigns could not be loaded — {existing_targets_error}")
+            existing_targets = {}
+        campaigns = tuple(dict(row) for row in existing_targets.get("campaigns") or ())
+        campaign_by_id = {
+            str(row.get("id")): row for row in campaigns if row.get("id")
+        }
+        if str(st.session_state.get(EXISTING_CAMPAIGN_KEY) or "") not in campaign_by_id:
+            st.session_state.pop(EXISTING_CAMPAIGN_KEY, None)
+        target_campaign_id = st.selectbox(
+            "Existing Campaign",
+            tuple(campaign_by_id),
+            index=None,
+            placeholder="Select an ACTIVE or PAUSED Sales campaign",
+            format_func=lambda value: str(campaign_by_id[value].get("name") or value),
+            key=EXISTING_CAMPAIGN_KEY,
+            disabled=not campaign_by_id,
+        ) if campaign_by_id else ""
+        target_campaign = dict(campaign_by_id.get(str(target_campaign_id)) or {})
+
+        adsets = _adsets_for_campaign(existing_targets, target_campaign_id)
+        adset_by_id = {str(row.get("id")): row for row in adsets if row.get("id")}
+        if str(st.session_state.get(EXISTING_ADSET_KEY) or "") not in adset_by_id:
+            st.session_state.pop(EXISTING_ADSET_KEY, None)
+        target_adset_id = st.selectbox(
+            "Existing Ad Set",
+            tuple(adset_by_id),
+            index=None,
+            placeholder="Select an Ad Set in this Campaign",
+            format_func=lambda value: str(adset_by_id[value].get("name") or value),
+            key=EXISTING_ADSET_KEY,
+            disabled=not adset_by_id,
+        ) if adset_by_id else ""
+        target_adset = dict(adset_by_id.get(str(target_adset_id)) or {})
+        if target_campaign and target_adset:
+            st.markdown(
+                f"Campaign: **{html.escape(str(target_campaign.get('name') or ''))}**  \n"
+                f"Campaign status: **{html.escape(str(target_campaign.get('status') or 'UNKNOWN'))}**  \n"
+                f"Ad Set: **{html.escape(str(target_adset.get('name') or ''))}**  \n"
+                f"Ad Set status: **{html.escape(str(target_adset.get('status') or 'UNKNOWN'))}**  \n"
+                "New ads: **Will be created PAUSED**"
+            )
+            st.caption(
+                f"Campaign ID: {target_campaign_id} · Ad Set ID: {target_adset_id}"
+            )
 
     product_rows = _product_rows_state()
     product_records, record_by_identity = _product_selector_state(product_rows)
@@ -1149,10 +1409,9 @@ def render_page():
     if selected_identity and selected_identity != str(st.session_state.get(PRODUCT_TRACK_KEY) or ""):
         st.session_state[PRODUCT_TRACK_KEY] = selected_identity
         st.session_state[SPORT_KEY] = _infer_sport(selection)
-        st.session_state[SUBMISSION_ID_KEY] = posting_submission_id()
-        st.session_state.pop(RESULT_KEY, None)
-        st.session_state.pop(COLLECTION_DIAGNOSTIC_RESULT_KEY, None)
-        st.session_state.pop(COLLECTION_TEMPLATE_COPY_RESULT_KEY, None)
+        if _current_run_state(st.session_state) == RUN_STATE_DRAFT:
+            st.session_state.pop(COLLECTION_DIAGNOSTIC_RESULT_KEY, None)
+            st.session_state.pop(COLLECTION_TEMPLATE_COPY_RESULT_KEY, None)
     product_title = str(selection.get("selected_label") or selected_row.get("product_title") or "")
     product_url = str(ads_page.canonical_shopify_product_url_from_row(selected_row) or "")
     product_id = str(selection.get("product_id") or selected_row.get("shopify_product_id") or "")
@@ -1191,17 +1450,32 @@ def render_page():
     if catalog_id and not product_set_by_id:
         st.error("Product Sets could not be loaded for the resolved Shopify catalog.")
 
-    audiences = _audience_options(references)
-    audience_by_key = {row["key"]: row for row in audiences}
-    audience_key = st.selectbox(
-        "Audience", tuple(audience_by_key),
-        format_func=lambda value: (
-            "Broad — Sports Cave Default" if value == "broad"
-            else f"{audience_by_key[value]['label_type']} — {audience_by_key[value]['name']}"
-        ),
-        key=AUDIENCE_KEY,
-    )
-    audience = audience_by_key[audience_key]
+    if posting_mode == POSTING_MODE_EXISTING:
+        st.text_input(
+            "Audience",
+            value="Inherited from the selected Ad Set",
+            disabled=True,
+        )
+        st.caption("Audience and targeting will not be changed.")
+        audience = {
+            "key": "inherited",
+            "type": "inherited",
+            "label_type": "Inherited",
+            "id": "",
+            "name": "Inherited from existing Ad Set",
+        }
+    else:
+        audiences = _audience_options(references)
+        audience_by_key = {row["key"]: row for row in audiences}
+        audience_key = st.selectbox(
+            "Audience", tuple(audience_by_key),
+            format_func=lambda value: (
+                "Broad — Sports Cave Default" if value == "broad"
+                else f"{audience_by_key[value]['label_type']} — {audience_by_key[value]['name']}"
+            ),
+            key=AUDIENCE_KEY,
+        )
+        audience = audience_by_key[audience_key]
     st.text_input("Ad type", value=AD_TYPE, disabled=True)
 
     dataset_id = str(dataset_resolution.get("id") or "") if dataset_resolution.get("resolved") else ""
@@ -1256,8 +1530,16 @@ def render_page():
             )
 
     existing_names = tuple(references.get("existing_ad_names") or ())
-    generated_campaign_name = campaign_name(product_title, country, sport) if product_title else ""
-    generated_adset_name = adset_name(country, sport, audience["name"])
+    generated_campaign_name = (
+        str(target_campaign.get("name") or target_campaign_id)
+        if posting_mode == POSTING_MODE_EXISTING
+        else campaign_name(product_title, country, sport) if product_title else ""
+    )
+    generated_adset_name = (
+        str(target_adset.get("name") or target_adset_id)
+        if posting_mode == POSTING_MODE_EXISTING
+        else adset_name(country, sport, audience["name"])
+    )
     generated_ad_names = (
         next_instant_experience_ad_names(product_title, existing_names, count=3)
         if product_title else ("", "", "")
@@ -1265,18 +1547,56 @@ def render_page():
     product_set_label = str((product_set_by_id.get(product_set_id) or {}).get("name") or "Unresolved")
     account_currency = str((references.get("account") or {}).get("currency") or "account currency")
 
+    existing_compatibility_error = ""
+    if (
+        posting_mode == POSTING_MODE_EXISTING
+        and target_campaign
+        and target_adset
+        and dataset_id
+        and product_set_id
+    ):
+        try:
+            validate_existing_posting_target(
+                campaign=target_campaign,
+                adset=target_adset,
+                expected_campaign_id=target_campaign_id,
+                expected_adset_id=target_adset_id,
+                expected_account_id=MetaPostingClient().ad_account_id,
+                expected_catalog_id=catalog_id,
+                expected_product_set_id=product_set_id,
+                expected_pixel_id=dataset_id,
+            )
+        except PostingValidationError as error:
+            existing_compatibility_error = str(error)
+            st.error(existing_compatibility_error)
+
     st.subheader("Review")
     with st.container(border=True):
-        st.markdown(
-            f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
-            f"Ad set: **{html.escape(generated_adset_name)}**  \n"
-            "Structure: **1 Campaign → 1 Ad Set → 3 Ads**"
-        )
-        st.markdown(
-            f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
-            f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
-            "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
-        )
+        if posting_mode == POSTING_MODE_EXISTING:
+            st.markdown(
+                f"Campaign: **{html.escape(generated_campaign_name or 'Select a Campaign')}**  \n"
+                f"Ad set: **{html.escape(generated_adset_name or 'Select an Ad Set')}**  \n"
+                "Structure: **Existing Campaign → Existing Ad Set → 3 New Ads**"
+            )
+            st.markdown(
+                "**Existing settings:** Campaign and Ad Set statuses, budget, audience, "
+                "targeting and optimization will not be changed."
+            )
+            st.caption(
+                f"Purchase optimization · Existing audience · {country} package copy · "
+                "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
+            )
+        else:
+            st.markdown(
+                f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
+                f"Ad set: **{html.escape(generated_adset_name)}**  \n"
+                "Structure: **1 New Campaign → 1 New Ad Set → 3 New Ads**"
+            )
+            st.markdown(
+                f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
+                f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
+                "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
+            )
         st.caption(
             f"Catalog: {catalog_label if catalog_id else 'Unresolved'} · Product set: {product_set_label} · "
             f"Dataset: {dataset_label} · "
@@ -1325,18 +1645,49 @@ def render_page():
         product_set_id=product_set_id,
         dataset_id=dataset_id,
         identities_ready=identities_ready,
+    ) and bool(
+        posting_mode == POSTING_MODE_NEW
+        or (
+            target_campaign_id
+            and target_adset_id
+            and not existing_targets_error
+            and not existing_compatibility_error
+        )
     )
 
-    st.caption(
-        "Creates one paused campaign, one paused ad set and three paused "
-        "Instant Experience ads in Meta for review."
-    )
+    if posting_mode == POSTING_MODE_EXISTING:
+        st.info(
+            "Sports Cave OS will add 3 PAUSED ads to:\n\n"
+            f"{generated_campaign_name or 'Select a Campaign'}\n\n"
+            f"{generated_adset_name or 'Select an Ad Set'}\n\n"
+            "Existing live ads and settings will not be changed."
+        )
+        st.caption("Existing campaign budget will not be changed.")
+        spinner_label = "Creating three paused ads in the selected existing Ad Set…"
+    else:
+        st.caption(
+            "Creates one paused campaign, one paused ad set and three paused "
+            "Instant Experience ads in Meta for review."
+        )
+        spinner_label = "Creating one paused campaign, one ad set and three ads…"
 
-    if st.button(
-        "Create 3 Paused Meta Ads", type="primary", use_container_width=True,
-        disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
-    ):
+    if posting_mode == POSTING_MODE_EXISTING:
+        create_clicked = st.button(
+            "Add 3 Paused Ads to Existing Ad Set",
+            type="primary",
+            use_container_width=True,
+            disabled=not ready or st.session_state[PROCESSING_KEY],
+            key=f"{STATE_PREFIX}create",
+        )
+    else:
+        create_clicked = st.button(
+            "Create 3 Paused Meta Ads", type="primary", use_container_width=True,
+            disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
+        )
+
+    if create_clicked:
         st.session_state[PROCESSING_KEY] = True
+        st.session_state[RUN_STATE_KEY] = RUN_STATE_ACTIVE
         request = _build_posting_request(
             submission_id=st.session_state[SUBMISSION_ID_KEY],
             product_id=product_id,
@@ -1349,17 +1700,35 @@ def render_page():
             product_set_id=product_set_id,
             audience=audience,
             creatives=creative_inputs,
+            posting_mode=posting_mode,
+            target_campaign_id=target_campaign_id,
+            target_adset_id=target_adset_id,
         )
         try:
-            with st.spinner("Creating one paused campaign, one ad set and three ads…"):
+            with st.spinner(spinner_label):
                 posted = MetaPostingService().create_paused_campaign(request)
-        except (PostingValidationError, PostingBusyError, PostingAmbiguousError, PostingError) as error:
+        except (
+            PostingValidationError,
+            PostingBusyError,
+            PostingAbandonedError,
+            PostingAmbiguousError,
+            PostingError,
+        ) as error:
             st.error(str(error))
             partial = dict(getattr(error, "result", {}) or {})
             if partial:
+                st.session_state[RESULT_KEY] = partial
+                st.session_state[RUN_STATE_KEY] = str(
+                    partial.get("status") or RUN_STATE_FAILED
+                ).upper()
                 _render_object_result(partial, title="Partial result — all created ad objects remain paused")
+            elif isinstance(error, PostingValidationError):
+                st.session_state[RUN_STATE_KEY] = RUN_STATE_DRAFT
+            else:
+                st.session_state[RUN_STATE_KEY] = RUN_STATE_FAILED
         else:
             st.session_state[RESULT_KEY] = dict(posted)
+            st.session_state[RUN_STATE_KEY] = RUN_STATE_COMPLETE
             _load_recent_posts.clear()
             st.rerun()
         finally:

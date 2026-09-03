@@ -49,7 +49,28 @@ SPORT_OPTIONS = (
 POSTING_STATUSES = (
     "VALIDATING", "CAMPAIGN_CREATED", "ADSET_CREATED", "IMAGE_UPLOADED",
     "PAGE_PHOTO_CREATED", "INSTANT_EXPERIENCE_CREATED", "CREATIVE_CREATED",
-    "AD_CREATED", "COMPLETE", "FAILED", "AMBIGUOUS",
+    "AD_CREATED", "COMPLETE", "FAILED", "AMBIGUOUS", "ABANDONED_EXTERNALLY",
+)
+
+POSTING_MODE_NEW = "NEW"
+POSTING_MODE_EXISTING = "EXISTING"
+POSTING_MODES = (POSTING_MODE_NEW, POSTING_MODE_EXISTING)
+META_OBJECT_CREATED_BY_RUN = "CREATED_BY_RUN"
+META_OBJECT_EXISTING_TARGET = "EXISTING_TARGET"
+SELECTABLE_EXISTING_STATUSES = {"ACTIVE", "PAUSED"}
+COMPATIBLE_EXISTING_CAMPAIGN_OBJECTIVES = {
+    CAMPAIGN_OBJECTIVE,
+    "PRODUCT_CATALOG_SALES",
+}
+
+EXTERNALLY_ABANDONED_MESSAGE = (
+    "The Meta campaign for this Posting run no longer exists or is not accessible. "
+    "Start a New Campaign to create a fresh set of ads."
+)
+
+EXISTING_TARGET_MISSING_MESSAGE = (
+    "The selected Meta Campaign or Ad Set no longer exists or is not accessible. "
+    "Choose another existing Ad Set or start a New Campaign."
 )
 
 
@@ -369,6 +390,136 @@ def load_posting_reference_snapshot(
     return references
 
 
+def load_existing_posting_targets(client):
+    """Load selectable Campaigns and Ad Sets from the configured account only.
+
+    The account-level edges avoid one Ad Set request per Campaign. This helper
+    is read-only and is cached by the Posting page only while Existing mode is
+    visible.
+    """
+
+    campaigns = tuple(dict(row) for row in client.reference_campaigns() or ())
+    adsets = tuple(dict(row) for row in client.reference_adsets() or ())
+    return {
+        "campaigns": tuple(
+            row
+            for row in campaigns
+            if str(row.get("status") or "").strip().upper()
+            in SELECTABLE_EXISTING_STATUSES
+        ),
+        "adsets": tuple(
+            row
+            for row in adsets
+            if str(row.get("status") or "").strip().upper()
+            in SELECTABLE_EXISTING_STATUSES
+        ),
+    }
+
+
+def validate_existing_posting_target(
+    *,
+    campaign,
+    adset,
+    expected_campaign_id,
+    expected_adset_id,
+    expected_account_id,
+    expected_catalog_id,
+    expected_product_set_id,
+    expected_pixel_id,
+):
+    """Fail closed unless an existing hierarchy matches the Posting contract."""
+
+    campaign = dict(campaign or {})
+    adset = dict(adset or {})
+    campaign_id = str(expected_campaign_id or "").strip()
+    adset_id = str(expected_adset_id or "").strip()
+    if str(campaign.get("id") or "").strip() != campaign_id:
+        raise PostingValidationError(EXISTING_TARGET_MISSING_MESSAGE)
+    if str(adset.get("id") or "").strip() != adset_id:
+        raise PostingValidationError(EXISTING_TARGET_MISSING_MESSAGE)
+    if str(adset.get("campaign_id") or "").strip() != campaign_id:
+        raise PostingValidationError(
+            "The selected Ad Set does not belong to the selected Campaign. "
+            "Choose a matching Ad Set."
+        )
+
+    account_id = normalize_account_id(expected_account_id)
+    for entity, row in (("Campaign", campaign), ("Ad Set", adset)):
+        row_account_id = normalize_account_id(row.get("account_id"))
+        if not row_account_id or row_account_id != account_id:
+            raise PostingValidationError(
+                f"The selected Meta {entity} does not belong to the configured Sports Cave ad account."
+            )
+        status = str(
+            row.get("configured_status") or row.get("status") or ""
+        ).strip().upper()
+        if status not in SELECTABLE_EXISTING_STATUSES:
+            raise PostingValidationError(
+                f"The selected Meta {entity} must be ACTIVE or PAUSED."
+            )
+
+    objective = str(campaign.get("objective") or "").strip().upper()
+    if objective not in COMPATIBLE_EXISTING_CAMPAIGN_OBJECTIVES:
+        raise PostingValidationError(
+            "The selected Campaign is not a compatible Sales campaign. "
+            "Choose a Sales Campaign or create a New Campaign."
+        )
+    campaign_promoted = dict(campaign.get("promoted_object") or {})
+    campaign_catalog_id = str(
+        campaign_promoted.get("product_catalog_id") or ""
+    ).strip()
+    if campaign_catalog_id and campaign_catalog_id != str(expected_catalog_id or ""):
+        raise PostingValidationError(
+            "The selected Campaign uses a different catalog. Choose a compatible "
+            "Campaign or create a New Campaign."
+        )
+
+    optimization_goal = str(adset.get("optimization_goal") or "").strip().upper()
+    if optimization_goal != "OFFSITE_CONVERSIONS":
+        raise PostingValidationError(
+            "The selected Ad Set is not configured for website Purchase conversions."
+        )
+    if str(adset.get("billing_event") or "").strip().upper() != "IMPRESSIONS":
+        raise PostingValidationError(
+            "The selected Ad Set uses an incompatible billing configuration."
+        )
+    destination_type = str(adset.get("destination_type") or "").strip().upper()
+    if destination_type and destination_type != "WEBSITE":
+        raise PostingValidationError(
+            "The selected Ad Set does not use a compatible Website destination."
+        )
+
+    promoted = dict(adset.get("promoted_object") or {})
+    event_type = str(promoted.get("custom_event_type") or "").strip().upper()
+    if event_type != "PURCHASE":
+        raise PostingValidationError(
+            "The selected Ad Set is not configured for the Purchase conversion event."
+        )
+    pixel_id = str(promoted.get("pixel_id") or promoted.get("dataset_id") or "").strip()
+    if not pixel_id or pixel_id != str(expected_pixel_id or "").strip():
+        raise PostingValidationError(
+            "The selected Ad Set uses a different Pixel/Dataset. Choose a compatible "
+            "Ad Set or create a New Campaign."
+        )
+    product_set_id = str(promoted.get("product_set_id") or "").strip()
+    if not product_set_id or product_set_id != str(expected_product_set_id or "").strip():
+        raise PostingValidationError(
+            "This Ad Set uses a different Product Set. Choose a compatible Ad Set "
+            "or create a New Campaign."
+        )
+
+    return {
+        "campaign": campaign,
+        "adset": adset,
+        "campaign_status": str(
+            campaign.get("configured_status") or campaign.get("status") or ""
+        ).upper(),
+        "adset_status": str(
+            adset.get("configured_status") or adset.get("status") or ""
+        ).upper(),
+    }
+
+
 class PostingError(RuntimeError):
     def __init__(self, message, *, result=None):
         super().__init__(message)
@@ -385,6 +536,43 @@ class PostingBusyError(PostingError):
 
 class PostingAmbiguousError(PostingError):
     pass
+
+
+class PostingAbandonedError(PostingError):
+    """The durable run points at a Meta hierarchy that can no longer be resumed."""
+
+
+def is_meta_object_missing_or_inaccessible(error):
+    """Identify an unavailable persisted object without swallowing auth failures.
+
+    This is deliberately used only while reading the campaign already recorded
+    against the current Posting run. Token error 190 remains a normal hard error.
+    """
+
+    if not isinstance(error, MetaAdsApiError):
+        return False
+    if str(getattr(error, "error_code", "") or "") == "190":
+        return False
+    detail = " ".join(
+        (
+            str(error),
+            str(getattr(error, "error_user_title", "") or ""),
+            str(getattr(error, "error_user_msg", "") or ""),
+        )
+    ).casefold()
+    return any(
+        marker in detail
+        for marker in (
+            "unsupported get request",
+            "does not exist",
+            "object with id",
+            "cannot be loaded",
+            "could not be loaded",
+            "not accessible",
+            "not have permission to access",
+            "missing permissions",
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -410,6 +598,9 @@ class PostingRequest:
     creatives: tuple[PostingCreative, ...]
     audience_type: str = "broad"
     audience_id: str = ""
+    posting_mode: str = POSTING_MODE_NEW
+    target_campaign_id: str = ""
+    target_adset_id: str = ""
 
 
 def normalize_account_id(value):
@@ -508,6 +699,7 @@ def _request_fingerprint(clean):
         for key in (
             "product_id", "product_title", "destination_url", "country", "sport",
             "catalog_id", "product_set_id", "audience_type", "audience_id",
+            "posting_mode", "target_campaign_id", "target_adset_id",
         )
     }
     payload["creatives"] = [
@@ -616,12 +808,34 @@ def validate_posting_request(request):
         raise PostingValidationError("Select the Shopify product catalog.")
     if not product_set_id:
         raise PostingValidationError("Select a Meta product set.")
-    audience_type = str(request.audience_type or "broad").strip().casefold()
-    if audience_type not in {"broad", "saved", "custom"}:
+    posting_mode = str(
+        getattr(request, "posting_mode", POSTING_MODE_NEW) or POSTING_MODE_NEW
+    ).strip().upper()
+    if posting_mode not in POSTING_MODES:
+        raise PostingValidationError("Select a valid Posting mode.")
+    target_campaign_id = str(
+        getattr(request, "target_campaign_id", "") or ""
+    ).strip()
+    target_adset_id = str(getattr(request, "target_adset_id", "") or "").strip()
+    if posting_mode == POSTING_MODE_EXISTING:
+        if not target_campaign_id:
+            raise PostingValidationError("Select an existing Meta Campaign.")
+        if not target_adset_id:
+            raise PostingValidationError("Select an existing Meta Ad Set.")
+        audience_type = "inherited"
+        audience_id = ""
+    else:
+        if target_campaign_id or target_adset_id:
+            raise PostingValidationError(
+                "New Campaign mode cannot use Campaign or Ad Set IDs from another run."
+            )
+        audience_type = str(request.audience_type or "broad").strip().casefold()
+        audience_id = str(request.audience_id or "").strip()
+    if audience_type not in {"broad", "saved", "custom", "inherited"}:
         raise PostingValidationError("Select a valid Meta audience.")
-    audience_id = str(request.audience_id or "").strip()
     if audience_type != "broad" and not audience_id:
-        raise PostingValidationError("Select a saved or custom audience.")
+        if audience_type != "inherited":
+            raise PostingValidationError("Select a saved or custom audience.")
     return {
         "product_id": str(request.product_id or "").strip(),
         "product_title": product_title,
@@ -634,6 +848,9 @@ def validate_posting_request(request):
         "product_set_id": product_set_id,
         "audience_type": audience_type,
         "audience_id": audience_id,
+        "posting_mode": posting_mode,
+        "target_campaign_id": target_campaign_id,
+        "target_adset_id": target_adset_id,
     }
 
 
@@ -1053,7 +1270,11 @@ def build_collection_creative_payload(
 
 
 class SupabasePostingStore:
-    """Persistent lease ledger for safe retries and partial Meta object recovery."""
+    """Persistent lease ledger keyed by one intentional Posting run UUID.
+
+    ``submission_id`` is the campaign-run identity. ``request_fingerprint`` is
+    content evidence only and must never select another historical run.
+    """
 
     def _backend(self):
         import supabase_backend
@@ -1064,46 +1285,16 @@ class SupabasePostingStore:
         backend.ensure_ads_schema()
         with backend.connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT * FROM meta_posting_submissions
-                    WHERE request_fingerprint=%s AND status='COMPLETE'
-                      AND created_at >= now() - interval '15 minutes'
-                    ORDER BY completed_at DESC NULLS LAST LIMIT 1
-                    """,
-                    (request_data["request_fingerprint"],),
-                )
-                completed = dict(cur.fetchone() or {})
-                if completed:
-                    conn.commit()
-                    return {"claimed": False, "record": completed}
-                cur.execute(
-                    """
-                    SELECT * FROM meta_posting_submissions
-                    WHERE request_fingerprint=%s AND status='FAILED'
-                      AND (campaign_id IS NOT NULL OR adset_id IS NOT NULL)
-                      AND created_at >= now() - interval '7 days'
-                    ORDER BY updated_at DESC LIMIT 2
-                    """,
-                    (request_data["request_fingerprint"],),
-                )
-                resumable = [dict(row) for row in cur.fetchall()]
-                if len(resumable) > 1:
-                    raise PostingValidationError(
-                        "Multiple partial Meta Posting jobs match this request. Review Posting history "
-                        "before retrying so no duplicate campaign is created."
-                    )
-                target_submission_id = (
-                    str(resumable[0].get("submission_id") or "")
-                    if resumable
-                    else str(request_data["submission_id"])
-                )
+                target_submission_id = str(request_data["submission_id"])
                 columns = (
                     "submission_id", "request_fingerprint", "status", "product_id",
                     "product_title", "product_handle", "country", "sport", "catalog_id",
                     "catalog_name", "product_set_id", "product_set_name", "audience_type",
                     "audience_id", "audience_name", "pixel_id", "pixel_name", "account_currency", "campaign_name",
                     "adset_name", "ad_name", "destination_url", "image_checksum",
+                    "posting_mode", "campaign_ownership", "adset_ownership",
+                    "campaign_id", "adset_id", "campaign_configured_status",
+                    "adset_configured_status",
                     "ad_results",
                 )
                 placeholders = ["%s::uuid", *(["%s"] * (len(columns) - 1))]
@@ -1116,12 +1307,11 @@ class SupabasePostingStore:
                     for column in columns
                 )
                 placeholders[-1] = "%s::jsonb"
-                if target_submission_id == str(request_data["submission_id"]):
-                    cur.execute(
-                        f"INSERT INTO meta_posting_submissions({', '.join(columns)}) "
-                        f"VALUES ({', '.join(placeholders)}) ON CONFLICT (submission_id) DO NOTHING",
-                        values,
-                    )
+                cur.execute(
+                    f"INSERT INTO meta_posting_submissions({', '.join(columns)}) "
+                    f"VALUES ({', '.join(placeholders)}) ON CONFLICT (submission_id) DO NOTHING",
+                    values,
+                )
                 cur.execute(
                     "SELECT * FROM meta_posting_submissions WHERE submission_id=%s::uuid",
                     (target_submission_id,),
@@ -1129,9 +1319,12 @@ class SupabasePostingStore:
                 existing = dict(cur.fetchone() or {})
                 if str(existing.get("request_fingerprint") or "") != request_data["request_fingerprint"]:
                     raise PostingValidationError(
-                        "This submission changed after posting began. Reset and create a new submission."
+                        "This Posting run changed after Meta creation began. Retry it unchanged "
+                        "or choose Start fresh campaign to create a new run."
                     )
-                if str(existing.get("status") or "") in {"COMPLETE", "AMBIGUOUS"}:
+                if str(existing.get("status") or "") in {
+                    "COMPLETE", "AMBIGUOUS", "ABANDONED_EXTERNALLY",
+                }:
                     conn.commit()
                     return {"claimed": False, "record": existing}
                 cur.execute(
@@ -1160,6 +1353,8 @@ class SupabasePostingStore:
             raise ValueError("Unknown Posting status.")
         allowed = {
             "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_name",
+            "campaign_ownership", "adset_ownership", "campaign_configured_status",
+            "adset_configured_status",
             "meta_image_hash", "meta_page_photo_id", "meta_canvas_photo_element_id",
             "meta_canvas_product_element_id", "meta_canvas_button_element_id",
             "meta_canvas_footer_element_id", "meta_instant_experience_id",
@@ -1176,7 +1371,7 @@ class SupabasePostingStore:
             else:
                 assignments.append(f"{key}=%s")
                 params.append(value)
-        if status in {"COMPLETE", "FAILED", "AMBIGUOUS"}:
+        if status in {"COMPLETE", "FAILED", "AMBIGUOUS", "ABANDONED_EXTERNALLY"}:
             assignments.extend(["lease_token=NULL", "lease_expires_at=NULL"])
         if status == "COMPLETE":
             assignments.append("completed_at=now()")
@@ -1206,7 +1401,9 @@ class SupabasePostingStore:
                     SELECT submission_id, created_at, completed_at, status, product_title,
                            country, sport, campaign_id, campaign_name, adset_id, adset_name,
                            ad_name, meta_instant_experience_id, meta_ad_id, meta_creative_id,
-                           meta_status, safe_error, ad_results
+                           meta_status, safe_error, ad_results, posting_mode,
+                           campaign_ownership, adset_ownership,
+                           campaign_configured_status, adset_configured_status
                     FROM meta_posting_submissions ORDER BY created_at DESC LIMIT %s
                     """,
                     (max(1, min(int(limit or 20), 100)),),
@@ -1385,14 +1582,16 @@ class MetaPostingService:
     def _configured_status(row):
         return str(row.get("configured_status") or row.get("status") or "").upper()
 
-    def _create_or_reconcile(self, create, reconcile, *, submission_id, entity):
+    def _create_or_reconcile(self, create, reconcile=None, *, submission_id, entity):
         try:
             return str(create() or "")
         except MetaAdsAmbiguousResultError as error:
-            try:
-                matches = tuple(reconcile() or ())
-            except MetaAdsApiError:
-                matches = ()
+            matches = ()
+            if reconcile is not None:
+                try:
+                    matches = tuple(reconcile() or ())
+                except MetaAdsApiError:
+                    matches = ()
             if len(matches) == 1 and matches[0].get("id"):
                 return str(matches[0]["id"])
             self._ambiguous(
@@ -1404,6 +1603,55 @@ class MetaPostingService:
     def _one_match(row):
         return (row,) if row else ()
 
+    def _existing_target_for_run(
+        self,
+        *,
+        clean,
+        pixel,
+        submission_id,
+        ad_results,
+        record,
+    ):
+        """Read and validate an external target before any route Meta writes."""
+
+        campaign_id = str(record.get("campaign_id") or clean["target_campaign_id"])
+        adset_id = str(record.get("adset_id") or clean["target_adset_id"])
+        try:
+            campaign = dict(self.client.configured_campaign(campaign_id) or {})
+            adset = dict(self.client.configured_adset(adset_id) or {})
+        except MetaAdsApiError as error:
+            if not is_meta_object_missing_or_inaccessible(error):
+                raise
+            abandoned = self.store.update_stage(
+                submission_id,
+                "ABANDONED_EXTERNALLY",
+                safe_error=EXISTING_TARGET_MISSING_MESSAGE,
+                ad_results=ad_results,
+            )
+            raise PostingAbandonedError(
+                EXISTING_TARGET_MISSING_MESSAGE,
+                result=abandoned or record,
+            ) from error
+        try:
+            return validate_existing_posting_target(
+                campaign=campaign,
+                adset=adset,
+                expected_campaign_id=campaign_id,
+                expected_adset_id=adset_id,
+                expected_account_id=self.client.ad_account_id,
+                expected_catalog_id=clean["catalog_id"],
+                expected_product_set_id=clean["product_set_id"],
+                expected_pixel_id=pixel["id"],
+            )
+        except PostingValidationError as error:
+            failed = self.store.update_stage(
+                submission_id,
+                "FAILED",
+                safe_error=str(error),
+                ad_results=ad_results,
+            )
+            raise PostingValidationError(str(error), result=failed or record) from error
+
     def create_paused_campaign(self, request):
         clean = validate_posting_request(request)
         try:
@@ -1411,9 +1659,23 @@ class MetaPostingService:
             existing_ad_names = tuple(self.client.existing_ad_names())
         except MetaAdsApiError as error:
             raise PostingError(sanitize_meta_error(error)) from error
-        campaign_label = campaign_name(clean["product_title"], clean["country"], clean["sport"])
-        audience_label = str(audience.get("name") or "Broad")
-        adset_label = adset_name(clean["country"], clean["sport"], audience_label)
+        posting_mode = clean["posting_mode"]
+        is_existing_mode = posting_mode == POSTING_MODE_EXISTING
+        campaign_label = (
+            clean["target_campaign_id"]
+            if is_existing_mode
+            else campaign_name(clean["product_title"], clean["country"], clean["sport"])
+        )
+        audience_label = (
+            "Inherited from existing Ad Set"
+            if is_existing_mode
+            else str(audience.get("name") or "Broad")
+        )
+        adset_label = (
+            clean["target_adset_id"]
+            if is_existing_mode
+            else adset_name(clean["country"], clean["sport"], audience_label)
+        )
         proposed_ad_names = next_instant_experience_ad_names(
             clean["product_title"], existing_ad_names, count=3
         )
@@ -1436,6 +1698,21 @@ class MetaPostingService:
                 "campaign_name": campaign_label, "adset_name": adset_label,
                 "ad_name": proposed_ad_names[0], "ad_results": initial_ad_results,
                 "destination_url": clean["destination_url"],
+                "posting_mode": posting_mode,
+                "campaign_ownership": (
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                "adset_ownership": (
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                "campaign_id": clean["target_campaign_id"] if is_existing_mode else None,
+                "adset_id": clean["target_adset_id"] if is_existing_mode else None,
+                "campaign_configured_status": "",
+                "adset_configured_status": "",
                 "image_checksum": ",".join(
                     creative["image_checksum"] for creative in clean["creatives"]
                 ),
@@ -1444,6 +1721,32 @@ class MetaPostingService:
         )
         record = dict(claim.get("record") or {})
         submission_id = str(record.get("submission_id") or submission_id)
+        record_mode = str(record.get("posting_mode") or POSTING_MODE_NEW).upper()
+        if record_mode != posting_mode:
+            raise PostingValidationError(
+                "This Posting run belongs to a different Posting mode. Start a new run."
+            )
+        if is_existing_mode and (
+            str(record.get("campaign_id") or "") != clean["target_campaign_id"]
+            or str(record.get("adset_id") or "") != clean["target_adset_id"]
+            or str(record.get("campaign_ownership") or "").upper()
+            != META_OBJECT_EXISTING_TARGET
+            or str(record.get("adset_ownership") or "").upper()
+            != META_OBJECT_EXISTING_TARGET
+        ):
+            raise PostingValidationError(
+                "This Posting run does not own the selected existing Meta target. "
+                "Start a new run and select the Campaign and Ad Set again."
+            )
+        if not is_existing_mode and (
+            str(record.get("campaign_ownership") or META_OBJECT_CREATED_BY_RUN).upper()
+            != META_OBJECT_CREATED_BY_RUN
+            or str(record.get("adset_ownership") or META_OBJECT_CREATED_BY_RUN).upper()
+            != META_OBJECT_CREATED_BY_RUN
+        ):
+            raise PostingValidationError(
+                "This Posting run references an external Meta target. Start a New Campaign run."
+            )
         if not claim.get("claimed"):
             status = str(record.get("status") or "")
             if status == "COMPLETE":
@@ -1451,6 +1754,11 @@ class MetaPostingService:
             if status == "AMBIGUOUS":
                 raise PostingAmbiguousError(
                     str(record.get("safe_error") or "Meta did not confirm the earlier result."),
+                    result=record,
+                )
+            if status == "ABANDONED_EXTERNALLY":
+                raise PostingAbandonedError(
+                    str(record.get("safe_error") or EXTERNALLY_ABANDONED_MESSAGE),
                     result=record,
                 )
             raise PostingBusyError(
@@ -1469,12 +1777,67 @@ class MetaPostingService:
 
         try:
             campaign_id = str(record.get("campaign_id") or "")
+            configured_campaign = None
+            configured_adset = None
+            if is_existing_mode:
+                target = self._existing_target_for_run(
+                    clean=clean,
+                    pixel=pixel,
+                    submission_id=submission_id,
+                    ad_results=ad_results,
+                    record=record,
+                )
+                configured_campaign = target["campaign"]
+                configured_adset = target["adset"]
+                campaign_id = clean["target_campaign_id"]
+                adset_id = clean["target_adset_id"]
+                campaign_label = str(configured_campaign.get("name") or campaign_id)
+                adset_label = str(configured_adset.get("name") or adset_id)
+                record = self.store.update_stage(
+                    submission_id,
+                    "VALIDATING",
+                    campaign_id=campaign_id,
+                    campaign_name=campaign_label,
+                    adset_id=adset_id,
+                    adset_name=adset_label,
+                    campaign_ownership=META_OBJECT_EXISTING_TARGET,
+                    adset_ownership=META_OBJECT_EXISTING_TARGET,
+                    campaign_configured_status=target["campaign_status"],
+                    adset_configured_status=target["adset_status"],
+                    ad_results=ad_results,
+                )
+            elif campaign_id:
+                try:
+                    configured_campaign = self.client.configured_campaign(campaign_id)
+                except MetaAdsApiError as error:
+                    if not is_meta_object_missing_or_inaccessible(error):
+                        raise
+                    abandoned = self.store.update_stage(
+                        submission_id,
+                        "ABANDONED_EXTERNALLY",
+                        safe_error=EXTERNALLY_ABANDONED_MESSAGE,
+                        ad_results=ad_results,
+                    )
+                    raise PostingAbandonedError(
+                        EXTERNALLY_ABANDONED_MESSAGE,
+                        result=abandoned or record,
+                    ) from error
+                if str((configured_campaign or {}).get("id") or "") != campaign_id:
+                    abandoned = self.store.update_stage(
+                        submission_id,
+                        "ABANDONED_EXTERNALLY",
+                        safe_error=EXTERNALLY_ABANDONED_MESSAGE,
+                        ad_results=ad_results,
+                    )
+                    raise PostingAbandonedError(
+                        EXTERNALLY_ABANDONED_MESSAGE,
+                        result=abandoned or record,
+                    )
             if not campaign_id:
                 campaign_id = self._create_or_reconcile(
                     lambda: self.client.create_campaign(
                         build_campaign_payload(name=campaign_label, catalog_id=clean["catalog_id"])
                     ),
-                    lambda: self.client.find_campaigns_by_name(campaign_label),
                     submission_id=submission_id, entity="campaign",
                 )
                 record = self.store.update_stage(
@@ -1482,12 +1845,13 @@ class MetaPostingService:
                     campaign_name=campaign_label,
                 )
 
-            targeting = build_targeting(
-                country=clean["country"], audience_type=clean["audience_type"], audience=audience
-            )
             adset_id = str(record.get("adset_id") or "")
-            configured_adset = None
-            if not adset_id:
+            if not is_existing_mode and not adset_id:
+                targeting = build_targeting(
+                    country=clean["country"],
+                    audience_type=clean["audience_type"],
+                    audience=audience,
+                )
                 adset_id = self._create_or_reconcile(
                     lambda: self.client.create_adset(
                         build_adset_payload(
@@ -1500,7 +1864,12 @@ class MetaPostingService:
                     submission_id=submission_id, entity="ad set",
                 )
                 record = self.store.update_stage(
-                    submission_id, "ADSET_CREATED", adset_id=adset_id, adset_name=adset_label
+                    submission_id,
+                    "ADSET_CREATED",
+                    adset_id=adset_id,
+                    adset_name=adset_label,
+                    campaign_ownership=META_OBJECT_CREATED_BY_RUN,
+                    adset_ownership=META_OBJECT_CREATED_BY_RUN,
                 )
                 configured_adset = self.client.configured_adset(adset_id)
                 if not adset_uses_all_audiences(configured_adset):
@@ -1618,7 +1987,6 @@ class MetaPostingService:
                                 ad_result["meta_canvas_footer_element_id"],
                             ),
                         ),
-                        lambda: self.client.find_canvases_by_name(canvas_label),
                         submission_id=submission_id, entity=f"Instant Experience {index}",
                     )
                     ad_result["meta_instant_experience_id"] = canvas_id
@@ -1786,20 +2154,24 @@ class MetaPostingService:
                     ),
                 )
 
-            statuses = {
-                "campaign": self._configured_status(self.client.configured_campaign(campaign_id)),
-                "ad set": self._configured_status(
-                    configured_adset or self.client.configured_adset(adset_id)
-                ),
-            }
-            statuses.update(
-                {
-                    f"ad {row['index']}": self._configured_status(
-                        self.client.ad(row["meta_ad_id"])
-                    )
-                    for row in ad_results
-                }
+            campaign_status = self._configured_status(
+                configured_campaign or self.client.configured_campaign(campaign_id)
             )
+            adset_status = self._configured_status(
+                configured_adset or self.client.configured_adset(adset_id)
+            )
+            statuses = {
+                f"ad {row['index']}": self._configured_status(
+                    self.client.ad(row["meta_ad_id"])
+                )
+                for row in ad_results
+            }
+            if not is_existing_mode:
+                statuses = {
+                    "campaign": campaign_status,
+                    "ad set": adset_status,
+                    **statuses,
+                }
             not_paused = [entity for entity, status in statuses.items() if status != "PAUSED"]
             if not_paused:
                 self._ambiguous(
@@ -1850,6 +2222,19 @@ class MetaPostingService:
             first = ad_results[0]
             return self.store.update_stage(
                 submission_id, "COMPLETE", campaign_id=campaign_id, adset_id=adset_id,
+                campaign_name=campaign_label, adset_name=adset_label,
+                campaign_ownership=(
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                adset_ownership=(
+                    META_OBJECT_EXISTING_TARGET
+                    if is_existing_mode
+                    else META_OBJECT_CREATED_BY_RUN
+                ),
+                campaign_configured_status=campaign_status,
+                adset_configured_status=adset_status,
                 ad_name=first["ad_name"], meta_image_hash=first["meta_image_hash"],
                 meta_page_photo_id=first["meta_page_photo_id"],
                 meta_instant_experience_id=first["meta_instant_experience_id"],
@@ -1857,7 +2242,12 @@ class MetaPostingService:
                 meta_ad_id=first["meta_ad_id"], meta_status="PAUSED",
                 ad_results=ad_results, safe_error="",
             )
-        except (PostingAmbiguousError, PostingBusyError, PostingValidationError):
+        except (
+            PostingAbandonedError,
+            PostingAmbiguousError,
+            PostingBusyError,
+            PostingValidationError,
+        ):
             raise
         except (
             MetaCollectionTemplateCopySafetyError,

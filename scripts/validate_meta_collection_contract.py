@@ -26,16 +26,12 @@ from meta_collection_diagnostics import (  # noqa: E402
 from meta_posting_service import build_collection_creative_payload  # noqa: E402
 
 
-PETER_BROCK_ADSET_ID = "120249720389890554"
-PETER_BROCK_IA1_ID = "1390026833255926"
-
-
 def _parser():
     parser = argparse.ArgumentParser(
         description="Validate standalone versus inline Meta Collection creation without writes."
     )
-    parser.add_argument("--adset-id", default=PETER_BROCK_ADSET_ID)
-    parser.add_argument("--canvas-id", default=PETER_BROCK_IA1_ID)
+    parser.add_argument("--adset-id", required=True)
+    parser.add_argument("--canvas-id", required=True)
     parser.add_argument("--image-hash", required=True)
     parser.add_argument("--product-set-id", required=True)
     parser.add_argument("--primary-text", required=True)
@@ -52,7 +48,7 @@ def main(argv=None):
     args = _parser().parse_args(argv)
     config = get_meta_config()
     creative = build_collection_creative_payload(
-        name="Sports Cave validate-only Peter Brock route 1 | Collection",
+        name="Sports Cave validate-only Collection route | Collection",
         page_id=config.get("page_id"),
         instagram_user_id=config.get("instagram_user_id"),
         image_hash=args.image_hash,
@@ -81,7 +77,7 @@ def main(argv=None):
         probe = MetaCollectionValidateOnlyProbe(config)
         report["status"] = "validate_only_complete"
         report["results"] = probe.run_ab(
-            ad_name="Sports Cave validate-only Peter Brock route 1",
+            ad_name="Sports Cave validate-only Collection route",
             adset_id=args.adset_id,
             creative_payload=creative,
         )
