@@ -40,6 +40,14 @@ class FakeUpload:
         return self._data
 
 
+def png_image_bytes(color=(40, 70, 110), size=(96, 96)):
+    output = io.BytesIO()
+    image = Image.new("RGB", size, color)
+    image.save(output, format="PNG")
+    image.close()
+    return output.getvalue()
+
+
 def posting_ads():
     return (
         {
@@ -255,14 +263,15 @@ class PostingImportContractTests(unittest.TestCase):
     def test_package_adds_current_ads_csv_without_changing_text_exports(self):
         result = ads_result()
         workflow = ads_workflow()
+        source_image = png_image_bytes()
         for concept in INSTANT_EXPERIENCE_CONCEPTS:
             workflow["slots"][concept["slot_id"]] = {
                 "valid": True,
-                "data": b"original-image-bytes",
+                "data": source_image,
                 "original_name": f"{concept['id']}.png",
                 "source_format": "PNG",
-                "source_width": 1024,
-                "source_height": 1024,
+                "source_width": 96,
+                "source_height": 96,
             }
         final_editor_headline = "Final editor headline after CSV import"
         final_widget_key = ads_page._instant_experience_copy_widget_key(
@@ -612,14 +621,15 @@ class PostingImportContractTests(unittest.TestCase):
                 )
                 self.assertIs(ads_state[expected_state_key], imported_workflow)
                 self.assertNotIn(other_state_key, ads_state)
-                for concept in INSTANT_EXPERIENCE_CONCEPTS:
+                for concept_index, concept in enumerate(INSTANT_EXPERIENCE_CONCEPTS):
+                    source_image = png_image_bytes(color=(40 + concept_index, 70, 110))
                     imported_workflow["slots"][concept["slot_id"]] = {
                         "valid": True,
-                        "data": f"image-{concept['id']}".encode("utf-8"),
+                        "data": source_image,
                         "original_name": f"{concept['id']}.png",
                         "source_format": "PNG",
-                        "source_width": 1024,
-                        "source_height": 1024,
+                        "source_width": 96,
+                        "source_height": 96,
                     }
 
                 stored_items = {

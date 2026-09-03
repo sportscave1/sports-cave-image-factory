@@ -17,6 +17,7 @@ from meta_collection_template_copy import (
     MetaCollectionTemplateCopySafetyError,
     MetaCollectionTemplateCopyService,
     MetaCollectionTemplateCopyVerificationError,
+    REQUIRED_COLLECTION_FEATURES,
     configured_collection_template_ad_id,
 )
 from meta_ads_client import (
@@ -670,6 +671,9 @@ def build_targeting(*, country, audience_type="broad", audience=None):
 
 def build_adset_payload(*, name, campaign_id, product_set_id, pixel_id, targeting, start_time=None):
     begins = start_time or datetime.now(timezone.utc)
+    # Meta represents "Get conversions from all audiences" by omitting the
+    # acquisition-only ad_set_goal and existing_customer_budget_percentage
+    # fields. Audience targeting and PURCHASE optimisation remain unchanged.
     return {
         "name": str(name), "campaign_id": str(campaign_id), "status": "PAUSED",
         "billing_event": "IMPRESSIONS", "optimization_goal": "OFFSITE_CONVERSIONS",
@@ -683,13 +687,21 @@ def build_adset_payload(*, name, campaign_id, product_set_id, pixel_id, targetin
     }
 
 
+def adset_uses_all_audiences(adset):
+    """Confirm Meta did not apply acquisition-only customer-lifecycle settings."""
+    adset = dict(adset or {})
+    return (
+        adset.get("ad_set_goal") in (None, "", {})
+        and adset.get("existing_customer_budget_percentage") in (None, "")
+    )
+
+
 def build_collection_creative_features_spec():
-    """Match the feature flags returned by Sports Cave's working Collection ad."""
+    """Build supported v26 Collection enhancements and artwork protections."""
     return {
         "creative_features_spec": {
-            "image_uncrop": {"enroll_status": "OPT_OUT"},
-            "media_type_automation": {"enroll_status": "OPT_IN"},
-            "product_browsing": {"enroll_status": "OPT_OUT"},
+            name: {"enroll_status": enrollment}
+            for name, enrollment in REQUIRED_COLLECTION_FEATURES.items()
         }
     }
 
@@ -1004,6 +1016,11 @@ def assess_product_set_health(payload):
         "message": message,
         "read_only": True,
     }
+
+
+def is_optional_product_set_health_capability_error(error):
+    """Classify code 3 only for the optional Product Set health read."""
+    return isinstance(error, MetaAdsApiError) and str(error.error_code or "") == "3"
 
 
 def build_collection_creative_payload(
@@ -1469,6 +1486,7 @@ class MetaPostingService:
                 country=clean["country"], audience_type=clean["audience_type"], audience=audience
             )
             adset_id = str(record.get("adset_id") or "")
+            configured_adset = None
             if not adset_id:
                 adset_id = self._create_or_reconcile(
                     lambda: self.client.create_adset(
@@ -1484,6 +1502,16 @@ class MetaPostingService:
                 record = self.store.update_stage(
                     submission_id, "ADSET_CREATED", adset_id=adset_id, adset_name=adset_label
                 )
+                configured_adset = self.client.configured_adset(adset_id)
+                if not adset_uses_all_audiences(configured_adset):
+                    self._ambiguous(
+                        submission_id,
+                        (
+                            "Meta did not confirm 'Get conversions from all audiences' "
+                            "for the new paused Ad Set. No Instant Experiences or Ads were created."
+                        ),
+                        record=record,
+                    )
 
             for index, (creative, ad_result) in enumerate(
                 zip(clean["creatives"], ad_results), start=1
@@ -1760,7 +1788,9 @@ class MetaPostingService:
 
             statuses = {
                 "campaign": self._configured_status(self.client.configured_campaign(campaign_id)),
-                "ad set": self._configured_status(self.client.configured_adset(adset_id)),
+                "ad set": self._configured_status(
+                    configured_adset or self.client.configured_adset(adset_id)
+                ),
             }
             statuses.update(
                 {
@@ -1782,22 +1812,40 @@ class MetaPostingService:
                     self.client.product_set_health(clean["product_set_id"])
                 )
             except MetaAdsApiError as error:
-                product_set_health = {
-                    "status": "WARNING",
-                    "product_set_id": clean["product_set_id"],
-                    "product_set_name": str(product_set.get("name") or ""),
-                    "reported_product_count": None,
-                    "readable_product_count": None,
-                    "eligible_product_count": None,
-                    "reason_counts": {},
-                    "reason_details": (),
-                    "message": (
-                        "Collection ads were created successfully, but Product Set health "
-                        "could not be read from Meta. Review Commerce Manager before activation. "
-                        + sanitize_meta_error(error)
-                    ),
-                    "read_only": True,
-                }
+                if is_optional_product_set_health_capability_error(error):
+                    product_set_health = {
+                        "status": "NOT AVAILABLE VIA META API",
+                        "product_set_id": clean["product_set_id"],
+                        "product_set_name": str(product_set.get("name") or ""),
+                        "reported_product_count": None,
+                        "readable_product_count": None,
+                        "eligible_product_count": None,
+                        "reason_counts": {},
+                        "reason_details": (),
+                        "message": (
+                            "Meta does not expose this optional Product Set health read "
+                            "to the configured app. Ad creation completed successfully; "
+                            "review Commerce Manager before activation."
+                        ),
+                        "read_only": True,
+                    }
+                else:
+                    product_set_health = {
+                        "status": "WARNING",
+                        "product_set_id": clean["product_set_id"],
+                        "product_set_name": str(product_set.get("name") or ""),
+                        "reported_product_count": None,
+                        "readable_product_count": None,
+                        "eligible_product_count": None,
+                        "reason_counts": {},
+                        "reason_details": (),
+                        "message": (
+                            "Collection ads were created successfully, but Product Set health "
+                            "could not be read from Meta. Review Commerce Manager before activation. "
+                            + sanitize_meta_error(error)
+                        ),
+                        "read_only": True,
+                    }
             ad_results[0]["product_set_health"] = product_set_health
             first = ad_results[0]
             return self.store.update_stage(

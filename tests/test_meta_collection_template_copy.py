@@ -10,6 +10,7 @@ import meta_ads_client
 from meta_collection_template_copy import (
     COLLECTION_TEMPLATE_AD_ENV_KEY,
     INITIAL_COLLECTION_TEMPLATE_AD_ID,
+    REQUIRED_COLLECTION_FEATURES,
     MetaCollectionTemplateCopySafetyError,
     MetaCollectionTemplateCopyService,
     MetaCollectionTemplateCopyVerificationError,
@@ -215,11 +216,12 @@ class MetaCollectionTemplateCopyTransportTests(unittest.TestCase):
 class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
     def test_collection_features_are_semantic_subset_not_exact_object(self):
         actual = {
-            "image_uncrop": {"enroll_status": "OPT_OUT"},
-            "media_type_automation": {"enroll_status": "OPT_IN"},
-            "product_browsing": {"enroll_status": "OPT_OUT"},
-            "meta_generated_feature": {"enroll_status": "OPT_OUT"},
+            name: {"enroll_status": enrollment}
+            for name, enrollment in REQUIRED_COLLECTION_FEATURES.items()
         }
+        actual.update({
+            "meta_generated_feature": {"enroll_status": "OPT_OUT"},
+        })
         self.assertTrue(collection_features_match(actual))
         actual["product_browsing"]["enroll_status"] = "OPT_IN"
         self.assertFalse(collection_features_match(actual))

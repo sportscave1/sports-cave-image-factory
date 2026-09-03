@@ -4914,7 +4914,7 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_instant_experience_package_keeps_historical_text_and_image_assets_without_posting_schema(self):
+    def test_instant_experience_package_exports_jpegs_and_keeps_historical_text_without_posting_schema(self):
         result = instant_experience_csv_result()
         notes = instant_experience_csv_notes()
         slots = {}
@@ -4958,8 +4958,34 @@ PRIMARY TEXT VARIATIONS
 
         items = ads_page._instant_experience_package_items(result, workflow)
         paths = {item["relative_path"] for item in items}
+        image_items = [item for item in items if item["kind"] == "image"]
 
-        self.assertEqual(sum(item["kind"] == "image" for item in items), 3)
+        self.assertEqual(len(image_items), 3)
+        self.assertEqual(
+            [item["concept_id"] for item in image_items],
+            [
+                "premium_scarcity_right",
+                "premium_scarcity_front",
+                "premium_scarcity_left",
+            ],
+        )
+        self.assertEqual(
+            [item["filename"] for item in image_items],
+            [
+                "premium_scarcity_right_cover_original.jpg",
+                "premium_scarcity_front_cover_original.jpg",
+                "premium_scarcity_left_cover_original.jpg",
+            ],
+        )
+        self.assertFalse(any(item["filename"].endswith(".png") for item in image_items))
+        for image_item in image_items:
+            self.assertEqual(image_item["content_type"], "image/jpeg")
+            self.assertTrue(image_item["data"].startswith(b"\xff\xd8\xff"))
+            with Image.open(io.BytesIO(image_item["data"])) as exported:
+                exported.load()
+                self.assertEqual(exported.format, "JPEG")
+                self.assertEqual(exported.mode, "RGB")
+                self.assertEqual(exported.size, (96, 96))
         for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
             self.assertIn(f"{concept['folder']}/ad-copy.txt", paths)
             for variation_number in range(
@@ -5369,7 +5395,7 @@ PRIMARY TEXT VARIATIONS
             workflow,
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
-        self.assertEqual(filename, "premium_scarcity_right_cover_original.png")
+        self.assertEqual(filename, "premium_scarcity_right_cover_original.jpg")
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertIn(slot_id, workflow["slots"])

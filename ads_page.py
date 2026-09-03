@@ -9460,6 +9460,10 @@ def _meta_output_filename(result, workflow, slot):
             slot,
             saved_slot.get("original_name"),
             saved_slot.get("source_format") or saved_slot.get("output_format"),
+            force_jpeg=(
+                normalize_ads_workflow_mode(result.get("workflow_mode"))
+                == ADS_WORKFLOW_MODE_NEW
+            ),
         )
     filename = ads_image_workflow.build_meta_image_filename(
         result["product_name"],
@@ -9471,6 +9475,23 @@ def _meta_output_filename(result, workflow, slot):
     if saved_slot.get("output_format") == "PNG":
         return re.sub(r"\.jpg$", ".png", filename)
     return filename
+
+
+def _instant_experience_export_image_details(result, slot_data):
+    if normalize_ads_workflow_mode(result.get("workflow_mode")) != ADS_WORKFLOW_MODE_NEW:
+        return slot_data
+    image_data = slot_data.get("data") or b""
+    source_hash = slot_data.get("source_hash") or ads_image_workflow.source_image_signature(
+        image_data
+    )
+    cached_jpeg = slot_data.get("new_ads_package_jpeg") or {}
+    if cached_jpeg.get("source_hash") != source_hash:
+        cached_jpeg = ads_image_workflow.prepare_new_ads_package_jpeg(
+            image_data,
+            original_name=slot_data.get("original_name"),
+        )
+        slot_data["new_ads_package_jpeg"] = cached_jpeg
+    return cached_jpeg
 
 
 def _ads_export_date_compact(workflow):
@@ -11264,6 +11285,8 @@ def _instant_experience_package_items(result, workflow):
             "Instant Experience copy must be complete and use approved This Edition CTAs before packaging."
         )
     slots = workflow.get("slots") or {}
+    workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
+    export_new_ads_jpeg = workflow_mode == ADS_WORKFLOW_MODE_NEW
     items = []
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         slot = _instant_experience_slot_for_concept(concept)
@@ -11272,10 +11295,13 @@ def _instant_experience_package_items(result, workflow):
             raise ValueError(f"{concept['display_name']} needs a valid full-resolution cover.")
         copy_text = _instant_experience_concept_ad_copy_text(result, workflow, concept)
         copy_bytes = copy_text.encode("utf-8")
+        image_details = _instant_experience_export_image_details(result, slot_data)
+        image_data = image_details["data"]
         image_filename = ads_image_workflow.build_instant_experience_original_filename(
             concept,
             slot_data.get("original_name"),
             slot_data.get("source_format") or slot_data.get("output_format"),
+            force_jpeg=export_new_ads_jpeg,
         )
         image_relative_path = f"{concept['folder']}/{image_filename}"
         copy_relative_path = f"{concept['folder']}/ad-copy.txt"
@@ -11289,13 +11315,21 @@ def _instant_experience_package_items(result, workflow):
                 "label": slot["label"],
                 "relative_path": image_relative_path,
                 "filename": image_filename,
-                "data": slot_data["data"],
-                "size": len(slot_data["data"]),
+                "data": image_data,
+                "size": len(image_data),
                 "original_name": slot_data.get("original_name") or "",
                 "source_hash": slot_data.get("source_hash") or "",
                 "source_format": slot_data.get("source_format") or slot_data.get("output_format") or "",
                 "source_width": slot_data.get("source_width") or slot_data.get("output_width") or 0,
                 "source_height": slot_data.get("source_height") or slot_data.get("output_height") or 0,
+                "output_format": image_details.get("output_format") or image_details.get("source_format") or "",
+                "output_width": image_details.get("output_width") or image_details.get("source_width") or 0,
+                "output_height": image_details.get("output_height") or image_details.get("source_height") or 0,
+                "content_type": image_details.get("content_type")
+                or ads_image_workflow.mime_type_for_image_filename(
+                    image_filename,
+                    source_format=image_details.get("output_format"),
+                ),
                 "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
             }
         )
@@ -11335,7 +11369,6 @@ def _instant_experience_package_items(result, workflow):
             )
     current_csv = build_instant_experience_copy_csv(result, workflow)
     current_csv_filename = _instant_experience_current_copy_csv_filename(result)
-    workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
     csv_slot_id = (
         "_creative_refresh_copy_csv"
         if workflow_mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
@@ -11822,13 +11855,20 @@ def _render_instant_experience_concepts(result, workflow):
                     )
                     st.caption(f"Original size: {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
                     output_filename = _meta_output_filename(result, workflow, slot)
+                    export_image = _instant_experience_export_image_details(
+                        result,
+                        saved_slot,
+                    )
                     st.download_button(
                         "Download Full-Resolution Cover",
-                        data=saved_slot["data"],
+                        data=export_image["data"],
                         file_name=output_filename,
-                        mime=ads_image_workflow.mime_type_for_image_filename(
+                        mime=export_image.get("content_type")
+                        or ads_image_workflow.mime_type_for_image_filename(
                             output_filename,
-                            source_format=saved_slot.get("source_format") or saved_slot.get("output_format") or "",
+                            source_format=export_image.get("output_format")
+                            or export_image.get("source_format")
+                            or "",
                         ),
                         key=f"ads-ie-cover-download::{result['context_key']}::{concept_id}",
                         use_container_width=True,

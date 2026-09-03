@@ -17,6 +17,7 @@ from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 META_IMAGE_EDGE = 1080
 INSTANT_EXPERIENCE_IMAGE_EDGE = 1024
 META_IMAGE_QUALITY = 91
+NEW_ADS_PACKAGE_JPEG_QUALITY = 95
 META_IMAGE_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 META_IMAGE_MAX_SOURCE_PIXELS = 25_000_000
 META_IMAGE_ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
@@ -456,6 +457,94 @@ def srgb_profile_bytes():
     return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
 
+def prepare_new_ads_package_jpeg(data, *, original_name=""):
+    """Return a full-resolution JPEG for a New Ads package without resizing or cropping."""
+
+    source_bytes = bytes(data or b"")
+    details = _source_image_details(source_bytes, original_name=original_name)
+    source = None
+    oriented = None
+    flattened = None
+    converted = None
+    try:
+        source = Image.open(io.BytesIO(source_bytes))
+        source.load()
+        orientation = source.getexif().get(274, 1)
+        if (
+            details["source_format"] == "JPEG"
+            and source.mode == "RGB"
+            and orientation in (None, 1)
+        ):
+            return {
+                **details,
+                "output_format": "JPEG",
+                "output_mode": "RGB",
+                "output_width": source.width,
+                "output_height": source.height,
+                "output_size": len(source_bytes),
+                "content_type": "image/jpeg",
+                "reencoded": False,
+                "data": source_bytes,
+            }
+
+        oriented = ImageOps.exif_transpose(source)
+        oriented.load()
+        flattened = _flatten_transparency(oriented)
+        converted = _convert_to_srgb(flattened)
+        output = io.BytesIO()
+        converted.save(
+            output,
+            format="JPEG",
+            quality=NEW_ADS_PACKAGE_JPEG_QUALITY,
+            optimize=True,
+            progressive=True,
+            subsampling=0,
+            icc_profile=srgb_profile_bytes(),
+        )
+        output_bytes = output.getvalue()
+        with Image.open(io.BytesIO(output_bytes)) as check:
+            check.load()
+            if (
+                check.format != "JPEG"
+                or check.mode != "RGB"
+                or check.size != (oriented.width, oriented.height)
+            ):
+                raise AdsImageValidationError("The New Ads package JPEG could not be verified.")
+        return {
+            **details,
+            "output_format": "JPEG",
+            "output_mode": "RGB",
+            "output_width": oriented.width,
+            "output_height": oriented.height,
+            "output_size": len(output_bytes),
+            "content_type": "image/jpeg",
+            "reencoded": True,
+            "data": output_bytes,
+        }
+    except AdsImageValidationError:
+        raise
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        OSError,
+        SyntaxError,
+        ValueError,
+    ) as error:
+        raise AdsImageValidationError(
+            "This image could not be prepared as a JPEG for the New Ads package."
+        ) from error
+    finally:
+        seen = set()
+        for image in (converted, flattened, oriented, source):
+            if image is not None and id(image) not in seen:
+                seen.add(id(image))
+                try:
+                    image.close()
+                except Exception:
+                    pass
+
+
 def optimize_meta_image(
     data,
     *,
@@ -619,12 +708,19 @@ def source_extension(original_name="", source_format=""):
     return format_map.get(str(source_format or "").upper(), ".png")
 
 
-def build_instant_experience_original_filename(concept, original_name="", source_format=""):
+def build_instant_experience_original_filename(
+    concept,
+    original_name="",
+    source_format="",
+    *,
+    force_jpeg=False,
+):
     prefix = sanitize_product_filename(
         (concept or {}).get("filename_prefix") or "cover-original",
         max_length=120,
     )
-    return f"{prefix}{source_extension(original_name, source_format)}"
+    extension = ".jpg" if force_jpeg else source_extension(original_name, source_format)
+    return f"{prefix}{extension}"
 
 
 def mime_type_for_image_filename(filename, *, source_format=""):

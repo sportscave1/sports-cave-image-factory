@@ -1485,7 +1485,12 @@ class MetaPostingClient:
     def configured_adset(self, adset_id):
         return _request(
             str(adset_id or ""),
-            params={"fields": "id,name,status,configured_status,effective_status,campaign_id,account_id"},
+            params={
+                "fields": (
+                    "id,name,status,configured_status,effective_status,campaign_id,account_id,"
+                    "ad_set_goal,existing_customer_budget_percentage"
+                )
+            },
             config=self.config,
         )
 

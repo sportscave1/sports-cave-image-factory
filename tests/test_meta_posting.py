@@ -11,12 +11,15 @@ import ads_navigation
 import ads_page
 import ads_posting_page
 import meta_ads_client
+from meta_collection_template_copy import REQUIRED_COLLECTION_FEATURES
 from meta_posting_service import (
     _request_fingerprint,
     EXPECTED_PIXEL_NAME,
+    adset_uses_all_audiences,
     SUCCESS_MESSAGE,
     MetaPostingService,
     SupabasePostingStore,
+    PostingAmbiguousError,
     PostingError,
     PostingCreative,
     PostingRequest,
@@ -431,6 +434,32 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn("VERIFIED VIA CREATION RECORD", rendered)
         self.assertIn("Persisted creation provenance", rendered)
 
+    def test_optional_product_health_capability_is_rendered_neutrally(self):
+        result = {
+            "status": "COMPLETE",
+            "ad_results": (
+                {
+                    "index": 1,
+                    "product_set_health": {
+                        "status": "NOT AVAILABLE VIA META API",
+                        "message": "Optional read is unavailable.",
+                    },
+                },
+            ),
+        }
+        with mock.patch.object(ads_posting_page.st, "subheader"), mock.patch.object(
+            ads_posting_page.st, "dataframe"
+        ), mock.patch.object(ads_posting_page.st, "caption"), mock.patch.object(
+            ads_posting_page.st, "success"
+        ), mock.patch.object(ads_posting_page.st, "warning") as warning, mock.patch.object(
+            ads_posting_page.st, "info"
+        ) as info:
+            ads_posting_page._render_object_result(result, title="Completed")
+
+        self.assertEqual(info.call_count, 1)
+        self.assertIn("NOT AVAILABLE VIA META API", info.call_args.args[0])
+        warning.assert_not_called()
+
 
 class PostingPayloadTests(unittest.TestCase):
     def test_names_remove_generic_suffix_and_increment_ia(self):
@@ -534,6 +563,21 @@ class PostingPayloadTests(unittest.TestCase):
         self.assertEqual(payload["optimization_goal"], "OFFSITE_CONVERSIONS")
         self.assertEqual(payload["promoted_object"]["custom_event_type"], "PURCHASE")
         self.assertEqual(payload["promoted_object"]["product_set_id"], "set-1")
+        self.assertNotIn("ad_set_goal", payload)
+        self.assertNotIn("existing_customer_budget_percentage", payload)
+        self.assertEqual(
+            payload["targeting"], build_targeting(country="AUS")
+        )
+
+    def test_customer_lifecycle_readback_requires_no_acquisition_configuration(self):
+        self.assertTrue(adset_uses_all_audiences({}))
+        self.assertTrue(
+            adset_uses_all_audiences(
+                {"ad_set_goal": None, "existing_customer_budget_percentage": None}
+            )
+        )
+        self.assertFalse(adset_uses_all_audiences({"ad_set_goal": {"type": "NEW_CUSTOMER"}}))
+        self.assertFalse(adset_uses_all_audiences({"existing_customer_budget_percentage": 0}))
 
     def test_collection_creative_contract(self):
         payload = build_collection_creative_payload(
@@ -567,11 +611,21 @@ class PostingPayloadTests(unittest.TestCase):
         self.assertEqual(
             features,
             {
-                "image_uncrop": {"enroll_status": "OPT_OUT"},
-                "media_type_automation": {"enroll_status": "OPT_IN"},
-                "product_browsing": {"enroll_status": "OPT_OUT"},
+                name: {"enroll_status": enrollment}
+                for name, enrollment in REQUIRED_COLLECTION_FEATURES.items()
             },
         )
+        self.assertEqual(features["description_automation"]["enroll_status"], "OPT_IN")
+        self.assertEqual(features["inline_comment"]["enroll_status"], "OPT_IN")
+        self.assertEqual(features["hide_price"]["enroll_status"], "OPT_IN")
+        self.assertEqual(features["enhance_cta"]["enroll_status"], "OPT_IN")
+        self.assertEqual(features["image_background_gen"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(features["adapt_to_placement"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(features["image_auto_crop"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(features["image_touchups"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(features["pac_genai_recomposition"]["enroll_status"], "OPT_OUT")
+        self.assertEqual(features["pac_recomposition"]["enroll_status"], "OPT_OUT")
+        self.assertNotIn("standard_enhancements", features)
         self.assertIn("utm_source=facebook", payload["url_tags"])
 
     def test_storefront_component_contract(self):
@@ -581,6 +635,10 @@ class PostingPayloadTests(unittest.TestCase):
             button_element_id="button-1",
         )
         self.assertEqual(specs["canvas_photo"]["photo_id"], "photo-1")
+        self.assertEqual(
+            specs["canvas_photo"],
+            {"photo_id": "photo-1", "style": "FIT_TO_WIDTH"},
+        )
         self.assertEqual(specs["canvas_product_set"]["product_set_id"], "set-1")
         self.assertEqual(specs["canvas_product_set"]["item_headline"], "{{product.name}}")
         self.assertEqual(specs["canvas_product_set"]["item_description"], "Limited Edition")
@@ -837,6 +895,13 @@ class MetaPostingClientTests(unittest.TestCase):
             access_token="page-secret",
         )
         self.assertEqual(post.call_args.kwargs["data"]["access_token"], "page-secret")
+
+    @mock.patch("meta_ads_client._request", return_value={"id": "adset-1"})
+    def test_configured_adset_readback_requests_customer_lifecycle_fields(self, request):
+        meta_ads_client.MetaPostingClient(self.config()).configured_adset("adset-1")
+        fields = request.call_args.kwargs["params"]["fields"]
+        self.assertIn("ad_set_goal", fields)
+        self.assertIn("existing_customer_budget_percentage", fields)
 
     @mock.patch("meta_ads_client.requests.post")
     def test_page_token_is_redacted_from_meta_errors(self, post):
@@ -1589,6 +1654,26 @@ class PostingReferenceRepairTests(unittest.TestCase):
 
 
 class PostingServiceTests(unittest.TestCase):
+    def test_new_adset_acquisition_configuration_blocks_before_route_writes(self):
+        client = FakePostingClient()
+        client.configured_adset = mock.Mock(
+            return_value={
+                "id": "adset-1",
+                "configured_status": "PAUSED",
+                "ad_set_goal": {"type": "NEW_CUSTOMER"},
+            }
+        )
+        with self.assertRaises(PostingAmbiguousError) as caught:
+            MetaPostingService(
+                client=client, store=FakePostingStore()
+            ).create_paused_campaign(request_for())
+
+        self.assertIn("Get conversions from all audiences", str(caught.exception))
+        self.assertEqual(client.campaign_payload["status"], "PAUSED")
+        self.assertEqual(client.adset_payload["status"], "PAUSED")
+        self.assertNotIn("ad_image", client.calls)
+        self.assertNotIn("page_photo", client.calls)
+
     def test_missing_page_token_blocks_before_campaign_creation(self):
         client = FakePostingClient()
         client.page_access_token = ""
@@ -1698,9 +1783,8 @@ class PostingServiceTests(unittest.TestCase):
             self.assertEqual(
                 payload["degrees_of_freedom_spec"]["creative_features_spec"],
                 {
-                    "image_uncrop": {"enroll_status": "OPT_OUT"},
-                    "media_type_automation": {"enroll_status": "OPT_IN"},
-                    "product_browsing": {"enroll_status": "OPT_OUT"},
+                    name: {"enroll_status": enrollment}
+                    for name, enrollment in REQUIRED_COLLECTION_FEATURES.items()
                 },
             )
             self.assertIn("utm_source=facebook", payload["url_tags"])
@@ -1897,6 +1981,38 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(health["status"], "WARNING")
         self.assertEqual(health["eligible_product_count"], 0)
         self.assertTrue(health["read_only"])
+
+    def test_optional_product_health_code_three_is_neutral(self):
+        client = FakePostingClient()
+        client.product_set_health = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsApiError(
+                "Application does not have the capability to make this API call.",
+                status_code=400,
+                error_code=3,
+            )
+        )
+        result = MetaPostingService(
+            client=client, store=FakePostingStore()
+        ).create_paused_campaign(request_for())
+        health = result["ad_results"][0]["product_set_health"]
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(health["status"], "NOT AVAILABLE VIA META API")
+        self.assertTrue(health["read_only"])
+        self.assertNotIn("permission", health["message"].casefold())
+
+    def test_non_capability_product_health_error_remains_warning(self):
+        client = FakePostingClient()
+        client.product_set_health = mock.Mock(
+            side_effect=meta_ads_client.MetaAdsApiError(
+                "Catalogue access was denied.", status_code=403, error_code=200
+            )
+        )
+        result = MetaPostingService(
+            client=client, store=FakePostingStore()
+        ).create_paused_campaign(request_for())
+        health = result["ad_results"][0]["product_set_health"]
+        self.assertEqual(health["status"], "WARNING")
+        self.assertIn("Catalogue access was denied", health["message"])
 
     def test_mixed_source_formats_stay_mapped_to_their_own_meta_upload(self):
         source_rows = (

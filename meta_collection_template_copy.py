@@ -20,7 +20,21 @@ from meta_ads_client import (
 COLLECTION_TEMPLATE_AD_ENV_KEY = "META_COLLECTION_TEMPLATE_AD_ID"
 INITIAL_COLLECTION_TEMPLATE_AD_ID = "120249557468150554"
 REQUIRED_COLLECTION_FEATURES = {
+    # Requested Advantage+ creative defaults (Meta Marketing API v26 names).
+    "description_automation": "OPT_IN",
+    "inline_comment": "OPT_IN",
+    "hide_price": "OPT_IN",
+    "enhance_cta": "OPT_IN",
+    "image_background_gen": "OPT_OUT",
+    # Preserve supplied Sports Cave artwork instead of opting into automatic
+    # cropping, touch-ups, generative extension or recomposition.
+    "adapt_to_placement": "OPT_OUT",
+    "image_auto_crop": "OPT_OUT",
+    "image_touchups": "OPT_OUT",
     "image_uncrop": "OPT_OUT",
+    "pac_genai_recomposition": "OPT_OUT",
+    "pac_recomposition": "OPT_OUT",
+    # Proven Collection settings retained from the working template contract.
     "media_type_automation": "OPT_IN",
     "product_browsing": "OPT_OUT",
 }

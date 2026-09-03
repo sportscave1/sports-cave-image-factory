@@ -873,14 +873,17 @@ def _render_object_result(result, *, title):
         message = str(product_health.get("message") or "Product Set health unavailable.")
         if label == "READY":
             st.success(f"Product Set health: READY — {message}")
+        elif label == "NOT AVAILABLE VIA META API":
+            st.info(f"Product Set health: NOT AVAILABLE VIA META API — {message}")
         else:
             st.warning(f"Product Set health: WARNING — {message}")
-        counts = (
-            f"Reported: {product_health.get('reported_product_count')} · "
-            f"Readable: {product_health.get('readable_product_count')} · "
-            f"Eligible: {product_health.get('eligible_product_count')}"
-        )
-        st.caption(counts)
+        if label != "NOT AVAILABLE VIA META API":
+            counts = (
+                f"Reported: {product_health.get('reported_product_count')} · "
+                f"Readable: {product_health.get('readable_product_count')} · "
+                f"Eligible: {product_health.get('eligible_product_count')}"
+            )
+            st.caption(counts)
         reason_details = tuple(product_health.get("reason_details") or ())
         if reason_details:
             st.caption("Reasons: " + " · ".join(str(value) for value in reason_details))
