@@ -546,7 +546,10 @@ def _row_from_supabase_product(product):
         sync_status = "needs_shopify_sync"
     if allocation_blocked:
         sync_status = "needs_reconciliation"
-        sync_error = "Non-contiguous allocation history; automatic allocation and storefront mirroring are blocked."
+        sync_error = str(product.get("allocation_integrity_issue") or "").strip() or (
+            "Current allocation state requires review before automatic allocation or "
+            "storefront mirroring."
+        )
     row = {
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
         "shopify_product_gid": product.get("shopify_product_gid") or product.get("shopify_product_id") or "",

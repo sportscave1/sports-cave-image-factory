@@ -23,6 +23,7 @@ from meta_ads_client import (
     MetaAdsAmbiguousResultError,
     MetaAdsApiError,
     MetaPostingClient,
+    is_optional_canvas_read_capability_error,
     sanitize_meta_error,
 )
 
@@ -1644,6 +1645,29 @@ class MetaPostingService:
                     expected_request_fingerprint=fingerprint,
                     expected_submission_id=submission_id,
                 )
+                if preliminary_verification["verification_state"] == "UNAVAILABLE":
+                    optional_details = {}
+                    try:
+                        optional_details = (
+                            self.client.instant_experience_optional_details(canvas_id)
+                        )
+                    except AttributeError:
+                        optional_details = {}
+                    except MetaAdsApiError as error:
+                        if not is_optional_canvas_read_capability_error(error):
+                            raise
+                    if optional_details:
+                        instant_experience = {
+                            **dict(instant_experience or {}),
+                            **dict(optional_details),
+                        }
+                        preliminary_verification = verify_instant_experience_destination(
+                            instant_experience,
+                            expected_url=clean["destination_url"],
+                            expected_canvas_id=canvas_id,
+                            expected_request_fingerprint=fingerprint,
+                            expected_submission_id=submission_id,
+                        )
                 child_elements = ()
                 if preliminary_verification["verification_state"] == "UNAVAILABLE":
                     verification_element_ids = (
@@ -1661,8 +1685,11 @@ class MetaPostingService:
                         child_elements = self.client.instant_experience_elements(
                             verification_element_ids
                         )
-                    except (AttributeError, MetaAdsApiError):
+                    except AttributeError:
                         child_elements = ()
+                    except MetaAdsApiError as error:
+                        if not is_optional_canvas_read_capability_error(error):
+                            raise
                 destination_verification = verify_instant_experience_destination(
                     instant_experience,
                     expected_url=clean["destination_url"],

@@ -97,6 +97,39 @@ def sanitize_meta_error(message, extra_secrets=()):
     return cleaned
 
 
+def is_optional_canvas_read_capability_error(error):
+    """Return whether an optional Canvas inspection is unsupported by this app.
+
+    This classification is deliberately narrow and is only used by read-only,
+    best-effort Canvas diagnostics. Core Meta reads and every write continue to
+    propagate the same errors normally.
+    """
+
+    if not isinstance(error, MetaAdsApiError):
+        return False
+    if str(getattr(error, "error_code", "")) == "3":
+        return True
+    if str(getattr(error, "error_code", "")) != "100":
+        return False
+    detail = " ".join(
+        (
+            str(error),
+            str(getattr(error, "error_user_title", "") or ""),
+            str(getattr(error, "error_user_msg", "") or ""),
+        )
+    ).casefold()
+    return any(
+        marker in detail
+        for marker in (
+            "nonexisting field",
+            "non-existing field",
+            "unknown field",
+            "unsupported field",
+            "tried accessing nonexisting field",
+        )
+    )
+
+
 def get_meta_config():
     account_id = str(os.getenv("META_AD_ACCOUNT_ID", "")).strip()
     if account_id and not account_id.startswith("act_"):
@@ -1360,15 +1393,30 @@ class MetaPostingClient:
         """Read the published IA body for fixed-button destination verification."""
         return _request(
             str(canvas_id or "").strip(),
-            params={
-                "fields": (
-                    "id,name,is_published,body_elements,fb_body_elements,"
-                    "element_payload,store_url,use_retailer_item_ids"
-                )
-            },
+            params={"fields": "id,name,is_published,body_elements"},
             config=self.config,
             access_token=self.page_access_token,
         )
+
+    def instant_experience_optional_details(self, canvas_id):
+        """Best-effort read of optional Canvas fields used only as evidence."""
+
+        try:
+            return _request(
+                str(canvas_id or "").strip(),
+                params={
+                    "fields": (
+                        "fb_body_elements,element_payload,store_url,"
+                        "use_retailer_item_ids"
+                    )
+                },
+                config=self.config,
+                access_token=self.page_access_token,
+            )
+        except MetaAdsApiError as error:
+            if is_optional_canvas_read_capability_error(error):
+                return {}
+            raise
 
     def instant_experience_elements(self, element_ids):
         """Read matching Canvas elements from the Page-owned, read-only edge."""
@@ -1380,12 +1428,17 @@ class MetaPostingClient:
         }
         if not expected_ids:
             return ()
-        payload = _paged_get(
-            f"{self.page_id}/canvas_elements",
-            params={"fields": "id,element", "limit": 100},
-            config=self.config,
-            access_token=self.page_access_token,
-        )
+        try:
+            payload = _paged_get(
+                f"{self.page_id}/canvas_elements",
+                params={"fields": "id,element", "limit": 100},
+                config=self.config,
+                access_token=self.page_access_token,
+            )
+        except MetaAdsApiError as error:
+            if is_optional_canvas_read_capability_error(error):
+                return ()
+            raise
         return tuple(
             dict(row)
             for row in payload.get("rows") or ()

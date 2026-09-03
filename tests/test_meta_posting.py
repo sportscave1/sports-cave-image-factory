@@ -134,7 +134,11 @@ class FakePostingClient:
         self.canvas_names = []
         self.canvas_element_payloads = []
         self.canvas_readbacks = {}
+        self.optional_canvas_readbacks = {}
         self.canvas_element_specs = {}
+        self.instant_experience_error = None
+        self.optional_canvas_details_error = None
+        self.instant_experience_elements_error = None
         self.uploaded_images = []
         self.copy_ads = {}
         self.copy_creatives = {}
@@ -252,10 +256,20 @@ class FakePostingClient:
 
     def instant_experience(self, canvas_id):
         self.calls.append("read_instant_experience")
+        if self.instant_experience_error:
+            raise self.instant_experience_error
         return dict(self.canvas_readbacks.get(str(canvas_id)) or {})
+
+    def instant_experience_optional_details(self, canvas_id):
+        self.calls.append("read_instant_experience_optional_details")
+        if self.optional_canvas_details_error:
+            raise self.optional_canvas_details_error
+        return dict(self.optional_canvas_readbacks.get(str(canvas_id)) or {})
 
     def instant_experience_elements(self, element_ids):
         self.calls.append("read_instant_experience_elements")
+        if self.instant_experience_elements_error:
+            raise self.instant_experience_elements_error
         return tuple(
             {
                 "id": str(element_id),
@@ -1047,15 +1061,45 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertEqual(client.instant_experience("canvas-1"), {"id": "canvas-1"})
         self.assertEqual(request.call_args.args[0], "canvas-1")
         self.assertEqual(request.call_args.kwargs["access_token"], "page-secret")
-        fields = request.call_args.kwargs["params"]["fields"]
-        for field in (
-            "body_elements",
-            "fb_body_elements",
-            "element_payload",
-            "store_url",
-            "use_retailer_item_ids",
-        ):
-            self.assertIn(field, fields)
+        self.assertEqual(
+            request.call_args.kwargs["params"]["fields"],
+            "id,name,is_published,body_elements",
+        )
+
+    @mock.patch("meta_ads_client._request")
+    def test_instant_experience_base_read_does_not_swallow_code_three(self, request):
+        request.side_effect = meta_ads_client.MetaAdsApiError(
+            "Application does not have the capability to make this API call.",
+            error_code=3,
+        )
+        with self.assertRaises(meta_ads_client.MetaAdsApiError):
+            meta_ads_client.MetaPostingClient(self.config()).instant_experience("canvas-1")
+
+    @mock.patch("meta_ads_client._request")
+    def test_optional_instant_experience_details_swallow_code_three(self, request):
+        request.side_effect = meta_ads_client.MetaAdsApiError(
+            "Application does not have the capability to make this API call.",
+            error_code=3,
+        )
+        client = meta_ads_client.MetaPostingClient(self.config())
+        self.assertEqual(client.instant_experience_optional_details("canvas-1"), {})
+        self.assertEqual(request.call_args.args[0], "canvas-1")
+        self.assertEqual(request.call_args.kwargs["access_token"], "page-secret")
+        self.assertEqual(
+            request.call_args.kwargs["params"]["fields"],
+            "fb_body_elements,element_payload,store_url,use_retailer_item_ids",
+        )
+
+    @mock.patch("meta_ads_client._request")
+    def test_optional_instant_experience_details_do_not_swallow_auth_error(self, request):
+        request.side_effect = meta_ads_client.MetaAdsApiError(
+            "Invalid OAuth access token.",
+            error_code=190,
+        )
+        with self.assertRaises(meta_ads_client.MetaAdsApiError):
+            meta_ads_client.MetaPostingClient(
+                self.config()
+            ).instant_experience_optional_details("canvas-1")
 
     @mock.patch("meta_ads_client._paged_get")
     def test_instant_experience_element_read_is_page_scoped_and_read_only(
@@ -1078,6 +1122,30 @@ class MetaPostingClientTests(unittest.TestCase):
         self.assertEqual(
             paged_get.call_args.kwargs["params"]["fields"], "id,element"
         )
+
+    @mock.patch("meta_ads_client._paged_get")
+    def test_optional_instant_experience_element_read_swallows_code_three(
+        self, paged_get
+    ):
+        paged_get.side_effect = meta_ads_client.MetaAdsApiError(
+            "Application does not have the capability to make this API call.",
+            error_code=3,
+        )
+        client = meta_ads_client.MetaPostingClient(self.config())
+        self.assertEqual(client.instant_experience_elements(("button-1",)), ())
+
+    @mock.patch("meta_ads_client._paged_get")
+    def test_optional_instant_experience_element_read_does_not_swallow_auth_error(
+        self, paged_get
+    ):
+        paged_get.side_effect = meta_ads_client.MetaAdsApiError(
+            "Invalid OAuth access token.",
+            error_code=190,
+        )
+        with self.assertRaises(meta_ads_client.MetaAdsApiError):
+            meta_ads_client.MetaPostingClient(self.config()).instant_experience_elements(
+                ("button-1",)
+            )
 
     @mock.patch("meta_ads_client._post")
     @mock.patch("meta_ads_client._paged_get", return_value={"rows": ({"id": "p1"},)})
@@ -1737,6 +1805,34 @@ class PostingServiceTests(unittest.TestCase):
             )
         self.assertEqual(client.calls.count("template_copy"), 0)
 
+    def test_optional_canvas_auth_error_still_blocks_posting(self):
+        client = FakePostingClient()
+        original_read = client.instant_experience
+
+        def reference_only_readback(canvas_id):
+            canvas = original_read(canvas_id)
+            return {
+                "id": canvas.get("id"),
+                "name": canvas.get("name"),
+                "is_published": canvas.get("is_published"),
+                "body_elements": [
+                    {"id": f"reference-{index}"} for index in range(1, 4)
+                ],
+            }
+
+        client.instant_experience = reference_only_readback
+        client.optional_canvas_details_error = meta_ads_client.MetaAdsApiError(
+            "Invalid OAuth access token.",
+            error_code=190,
+        )
+
+        with self.assertRaisesRegex(PostingError, "Invalid OAuth access token"):
+            MetaPostingService(
+                client=client, store=FakePostingStore()
+            ).create_paused_campaign(request_for())
+
+        self.assertEqual(client.calls.count("template_copy"), 0)
+
     def test_unknown_reused_instant_experience_without_provenance_blocks(self):
         request = request_for()
         clean = validate_posting_request(request)
@@ -1967,6 +2063,14 @@ class PostingServiceTests(unittest.TestCase):
                 {"id": "existing-footer-element"},
             ],
         }
+        client.optional_canvas_details_error = meta_ads_client.MetaAdsApiError(
+            "Application does not have the capability to make this API call.",
+            error_code=3,
+        )
+        client.instant_experience_elements_error = meta_ads_client.MetaAdsApiError(
+            "Application does not have the capability to make this API call.",
+            error_code=3,
+        )
         existing_route_one_creative = build_collection_creative_payload(
             name="Six Laps Ahead Peter Brock IA 1 | Collection",
             page_id=client.page_id,
@@ -2038,6 +2142,8 @@ class PostingServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["ad_results"][0]["meta_ad_reused"])
         self.assertTrue(result["ad_results"][0]["meta_instant_experience_reused"])
+        self.assertIn("read_instant_experience_optional_details", client.calls)
+        self.assertIn("read_instant_experience_elements", client.calls)
         self.assertEqual(
             result["ad_results"][0]["instant_experience_verification"][
                 "display_status"

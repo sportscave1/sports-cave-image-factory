@@ -8890,6 +8890,130 @@ def _normalize_edition_product_rows(rows):
     return [_normalize_edition_product_row(row) for row in rows or []]
 
 
+def edition_allocation_integrity_from_read_row(row):
+    """Classify current allocation safety without rewriting historical truth.
+
+    Sparse legacy rows are informational only. The blocking checks apply to the
+    identity-enforced suffix owned by the current atomic allocator and to the
+    stored next-number boundary, which must not collide with or move behind an
+    existing reserved edition.
+    """
+
+    values = dict(row or {})
+    edition_total = max(_int_value(values.get("edition_total"), 100), 1)
+    product_next = _int_value(values.get("next_edition_number"), 1)
+    run_next = _int_value(
+        values.get("active_run_next_edition_number"),
+        product_next,
+    )
+    sold_count = max(_int_value(values.get("sold_count"), 0), 0)
+    last_assigned = max(_int_value(values.get("last_assigned_edition"), 0), 0)
+    baseline = max(_int_value(values.get("allocation_baseline_sold_count"), 0), 0)
+    historical_count = max(_int_value(values.get("historical_allocation_count"), 0), 0)
+    historical_min = _int_value(values.get("historical_min_assigned"), 0)
+    historical_max = max(_int_value(values.get("historical_max_assigned"), 0), 0)
+    historical_invalid = max(
+        _int_value(values.get("historical_invalid_number_count"), 0),
+        0,
+    )
+    live_duplicates = max(
+        _int_value(values.get("live_duplicate_number_count"), 0),
+        0,
+    )
+    next_occupied = max(_int_value(values.get("next_occupied_count"), 0), 0)
+    active_count = max(_int_value(values.get("active_suffix_count"), 0), 0)
+    active_min = _int_value(values.get("active_suffix_min"), 0)
+    active_max = max(_int_value(values.get("active_suffix_max"), 0), 0)
+    active_duplicates = max(
+        _int_value(values.get("active_suffix_duplicate_count"), 0),
+        0,
+    )
+    active_invalid = max(
+        _int_value(values.get("active_suffix_invalid_number_count"), 0),
+        0,
+    )
+    active_above_limit = max(
+        _int_value(values.get("active_suffix_above_limit_count"), 0),
+        0,
+    )
+    active_identity_mismatches = max(
+        _int_value(values.get("active_suffix_identity_mismatch_count"), 0),
+        0,
+    )
+    expected_baseline = sold_count - active_count
+
+    historical_gap = bool(
+        historical_count
+        and (
+            historical_min != 1
+            or historical_count != historical_max
+        )
+    )
+    issues = []
+    if historical_invalid or active_invalid:
+        issues.append("An allocation has an invalid edition number of zero or less.")
+    if live_duplicates:
+        issues.append(
+            "Two live allocations use the same edition number for this product identity."
+        )
+    if active_duplicates:
+        issues.append(
+            "The current atomic allocation suffix contains a duplicate edition number."
+        )
+    if active_above_limit:
+        issues.append(
+            "The current atomic allocation suffix contains an edition above the product limit."
+        )
+    if active_identity_mismatches:
+        issues.append(
+            "The current atomic allocation suffix contains a product identity mismatch."
+        )
+    if expected_baseline < 0:
+        issues.append(
+            "The current atomic allocation count exceeds the stored sold boundary."
+        )
+    elif active_count and (
+        active_min != expected_baseline + 1
+        or active_max != sold_count
+        or active_count != active_max - active_min + 1
+    ):
+        issues.append(
+            "The current atomic allocation suffix is not contiguous from its recorded baseline."
+        )
+    if baseline > sold_count:
+        issues.append("The current allocation baseline is ahead of the stored sold boundary.")
+    if product_next < 1 or run_next < 1:
+        issues.append("The current next edition number must be greater than zero.")
+    if run_next != product_next:
+        issues.append(
+            "The active run and product disagree on the current next edition number."
+        )
+    if next_occupied:
+        issues.append(
+            f"The current next edition number #{product_next:03d} is already occupied."
+        )
+    minimum_safe_next = max(
+        baseline + 1,
+        sold_count + 1,
+        last_assigned + 1,
+        historical_max + 1,
+        active_max + 1,
+        1,
+    )
+    if product_next < minimum_safe_next or run_next < minimum_safe_next:
+        issues.append(
+            "The current next edition number points behind the authoritative allocation boundary."
+        )
+
+    return {
+        "allocation_blocked": bool(issues),
+        "allocation_integrity_issue": " ".join(dict.fromkeys(issues)),
+        "historical_allocation_gap": historical_gap,
+        "allocation_integrity_scope": "current_atomic_suffix",
+        "edition_total": edition_total,
+    }
+
+
 def _get_active_edition_run_for_handle(cur, shopify_handle, *, lock=False, create_missing=True):
     handle = str(shopify_handle or "").strip()
     if not handle:
@@ -9207,12 +9331,14 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                    ep.product_title,
                    ep.edition_total,
                    ep.next_edition_number,
+                   ep.last_assigned_edition,
+                   ep.sold_count,
+                   ep.remaining_count,
                    ep.active,
                    ep.sold_out,
                    ep.updated_at,
                    ep.edition_name,
                    ep.allow_counter_history_override,
-                   ep.last_assigned_edition,
                    ep.active_edition_run_id,
                    ep.metafields_sync_status,
                    ep.last_metafield_error,
@@ -9224,8 +9350,21 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
         ),
         selected_orders AS (
             SELECT selected.shopify_handle AS current_shopify_handle,
+                   selected.active_edition_run_id,
+                   selected.next_edition_number AS current_next_edition_number,
+                   selected.edition_total AS current_edition_total,
+                   COALESCE(
+                       NULLIF(selected.shopify_product_gid, ''),
+                       NULLIF(selected.shopify_product_id, '')
+                   ) AS current_product_gid,
                    eo.edition_run_id,
-                   eo.edition_number
+                   eo.edition_number,
+                   COALESCE(
+                       NULLIF(eo.shopify_product_gid, ''),
+                       NULLIF(eo.shopify_product_id, '')
+                   ) AS allocation_product_gid,
+                   eo.identity_enforced,
+                   eo.status
             FROM edition_orders eo
             JOIN selected_products selected
               ON eo.shopify_product_gid = COALESCE(
@@ -9249,7 +9388,18 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
             SELECT current_shopify_handle AS shopify_handle,
                    COUNT(*) AS sold_count,
                    COALESCE(MIN(edition_number), 0) AS min_assigned,
-                   COALESCE(MAX(edition_number), 0) AS max_assigned
+                   COALESCE(MAX(edition_number), 0) AS max_assigned,
+                   COUNT(*) FILTER (WHERE edition_number <= 0) AS invalid_number_count,
+                   COUNT(*) FILTER (
+                       WHERE COALESCE(status, '') NOT IN
+                           ('voided', 'refunded', 'cancelled', 'superseded')
+                   ) - COUNT(DISTINCT edition_number) FILTER (
+                       WHERE COALESCE(status, '') NOT IN
+                           ('voided', 'refunded', 'cancelled', 'superseded')
+                   ) AS live_duplicate_number_count,
+                   COUNT(*) FILTER (
+                       WHERE edition_number = current_next_edition_number
+                   ) AS next_occupied_count
             FROM selected_orders
             GROUP BY current_shopify_handle
         ),
@@ -9259,6 +9409,39 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
             FROM selected_orders
             WHERE edition_run_id IS NOT NULL
             GROUP BY edition_run_id
+        ),
+        active_suffix_totals AS (
+            SELECT current_shopify_handle AS shopify_handle,
+                   edition_run_id,
+                   COUNT(*) AS allocation_count,
+                   COALESCE(MIN(edition_number), 0) AS min_assigned,
+                   COALESCE(MAX(edition_number), 0) AS max_assigned,
+                   COUNT(*) - COUNT(DISTINCT edition_number) AS duplicate_count,
+                   COUNT(*) FILTER (WHERE edition_number <= 0) AS invalid_number_count,
+                   COUNT(*) FILTER (
+                       WHERE edition_number > current_edition_total
+                   ) AS above_limit_count,
+                   COUNT(*) FILTER (
+                       WHERE COALESCE(current_product_gid, '') <> ''
+                         AND COALESCE(allocation_product_gid, '') <> ''
+                         AND regexp_replace(
+                                 current_product_gid,
+                                 '^gid://shopify/Product/',
+                                 '',
+                                 'i'
+                             ) <> regexp_replace(
+                                 allocation_product_gid,
+                                 '^gid://shopify/Product/',
+                                 '',
+                                 'i'
+                             )
+                   ) AS identity_mismatch_count
+            FROM selected_orders
+            WHERE edition_run_id = active_edition_run_id
+              AND COALESCE(identity_enforced, FALSE)
+              AND COALESCE(status, '') NOT IN
+                  ('voided', 'refunded', 'cancelled', 'superseded')
+            GROUP BY current_shopify_handle, edition_run_id
         )
         SELECT ep.id,
                ep.shopify_product_id,
@@ -9266,12 +9449,9 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                ep.shopify_handle,
                ep.product_title,
                ep.edition_total,
-               CASE WHEN COALESCE(ht.sold_count, 0)=0 THEN 1 ELSE ht.max_assigned + 1 END AS next_edition_number,
+               ep.next_edition_number,
                ep.active,
-               (
-                   COALESCE(ht.sold_count, 0) > 0
-                   AND (ht.min_assigned <> 1 OR ht.sold_count <> ht.max_assigned)
-               ) OR COALESCE(ht.max_assigned, 0) >= COALESCE(ep.edition_total, 100) AS sold_out,
+               ep.sold_out,
                ep.updated_at,
                ep.edition_name,
                ep.allow_counter_history_override,
@@ -9284,7 +9464,11 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                er.id AS edition_run_id,
                er.edition_name AS run_edition_name,
                er.edition_total AS run_edition_total,
-               CASE WHEN COALESCE(ht.sold_count, 0)=0 THEN 1 ELSE ht.max_assigned + 1 END AS run_next_edition_number,
+               COALESCE(er.next_edition_number, ep.next_edition_number)
+                   AS run_next_edition_number,
+               er.next_edition_number AS active_run_next_edition_number,
+               COALESCE(er.allocation_baseline_sold_count, 0)
+                   AS allocation_baseline_sold_count,
                er.status AS run_status,
                er.updated_at AS run_updated_at,
                COALESCE(rt.max_assigned, 0) AS active_run_max_assigned,
@@ -9293,32 +9477,55 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                    NULLIF(shp.featured_image_url, ''),
                    NULLIF(shp.image_url, '')
                ) AS display_image_url,
-               COALESCE(ht.min_assigned, 0) AS first_assigned_edition,
-               COALESCE(ht.max_assigned, 0) AS last_assigned_edition,
-               COALESCE(ht.sold_count, 0) AS sold_count,
-               GREATEST(
-                   COALESCE(ep.edition_total, 100) - COALESCE(ht.sold_count, 0),
-                   0
-               ) AS remaining_count,
-               GREATEST(
-                   COALESCE(ep.edition_total, 100) - COALESCE(ht.sold_count, 0),
-                   0
-               ) AS remaining_editions,
-               (
-                   COALESCE(ht.sold_count, 0) > 0
-                   AND (ht.min_assigned <> 1 OR ht.sold_count <> ht.max_assigned)
-               ) AS allocation_blocked
+               ep.last_assigned_edition,
+               ep.sold_count,
+               ep.remaining_count,
+               ep.remaining_count AS remaining_editions,
+               COALESCE(ht.sold_count, 0) AS historical_allocation_count,
+               COALESCE(ht.min_assigned, 0) AS historical_min_assigned,
+               COALESCE(ht.max_assigned, 0) AS historical_max_assigned,
+               COALESCE(ht.invalid_number_count, 0)
+                   AS historical_invalid_number_count,
+               COALESCE(ht.live_duplicate_number_count, 0)
+                   AS live_duplicate_number_count,
+               COALESCE(ht.next_occupied_count, 0) AS next_occupied_count,
+               COALESCE(ast.allocation_count, 0) AS active_suffix_count,
+               COALESCE(ast.min_assigned, 0) AS active_suffix_min,
+               COALESCE(ast.max_assigned, 0) AS active_suffix_max,
+               COALESCE(ast.duplicate_count, 0) AS active_suffix_duplicate_count,
+               COALESCE(ast.invalid_number_count, 0)
+                   AS active_suffix_invalid_number_count,
+               COALESCE(ast.above_limit_count, 0)
+                   AS active_suffix_above_limit_count,
+               COALESCE(ast.identity_mismatch_count, 0)
+                   AS active_suffix_identity_mismatch_count
         FROM selected_products ep
         {active_run_join}
         LEFT JOIN shopify_products shp ON shp.handle = ep.shopify_handle
         LEFT JOIN handle_totals ht ON ht.shopify_handle = ep.shopify_handle
         LEFT JOIN run_totals rt ON rt.edition_run_id = er.id
+        LEFT JOIN active_suffix_totals ast
+          ON ast.shopify_handle = ep.shopify_handle
+         AND ast.edition_run_id = er.id
         ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
     """
 
     def read_products(cur):
         cur.execute(query, tuple(params))
-        return _normalize_edition_product_rows(cur.fetchall())
+        rows = []
+        for source_row in cur.fetchall() or []:
+            source_row = dict(source_row or {})
+            integrity = edition_allocation_integrity_from_read_row(source_row)
+            normalized = _normalize_edition_product_row({**source_row, **integrity})
+            for counter_field in (
+                "last_assigned_edition",
+                "sold_count",
+                "remaining_count",
+            ):
+                normalized[counter_field] = source_row.get(counter_field)
+            normalized["remaining_editions"] = source_row.get("remaining_count")
+            rows.append(normalized)
+        return rows
 
     rows, diagnostic = _run_read_operation(operation, read_products)
     diagnostic = {
