@@ -1865,8 +1865,38 @@ class MetaPostingService:
         ) as error:
             safe_error = sanitize_meta_error(error)
             if active_ad_index is not None:
-                ad_results[active_ad_index]["status"] = "FAILED"
-                ad_results[active_ad_index]["safe_error"] = safe_error
+                active_result = ad_results[active_ad_index]
+                verification_result = (
+                    dict(error.result or {})
+                    if isinstance(error, MetaCollectionTemplateCopyVerificationError)
+                    else {}
+                )
+                copied_ad_id = str(verification_result.get("copied_ad_id") or "")
+                copied_status = str(
+                    verification_result.get("copied_status") or ""
+                )
+                copied_configured_status = str(
+                    verification_result.get("copied_configured_status") or ""
+                )
+                if copied_ad_id:
+                    active_result["meta_ad_id"] = copied_ad_id
+                    active_result["meta_creative_id"] = str(
+                        verification_result.get("copied_creative_id") or ""
+                    )
+                    active_result["meta_ad_configured_status"] = copied_configured_status
+                    active_result["meta_ad_reused"] = bool(
+                        verification_result.get("reconciled_existing_copy")
+                    )
+                active_result["status"] = (
+                    "VERIFICATION_PENDING"
+                    if (
+                        copied_ad_id
+                        and copied_status.upper() == "PAUSED"
+                        and copied_configured_status.upper() == "PAUSED"
+                    )
+                    else "FAILED"
+                )
+                active_result["safe_error"] = safe_error
             result = self.store.update_stage(
                 submission_id, "FAILED", safe_error=safe_error, ad_results=ad_results
             )

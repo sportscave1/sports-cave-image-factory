@@ -10,6 +10,7 @@ import meta_ads_client
 from meta_collection_template_copy import (
     COLLECTION_TEMPLATE_AD_ENV_KEY,
     INITIAL_COLLECTION_TEMPLATE_AD_ID,
+    RENAME_READBACK_DELAYS_SECONDS,
     REQUIRED_COLLECTION_FEATURES,
     MetaCollectionTemplateCopySafetyError,
     MetaCollectionTemplateCopyService,
@@ -57,13 +58,15 @@ def source_creative():
 
 
 class FakeTemplateCopyClient:
-    def __init__(self, *, invalid_target=False):
+    def __init__(self, *, invalid_target=False, rename_readback_names=()):
         self.invalid_target = invalid_target
         self.copy_calls = []
         self.rename_calls = []
         self.ad_reads = []
         self.creative_reads = []
         self.copy_exists = False
+        self.rename_readback_names = list(rename_readback_names)
+        self.rename_requested = False
         self.source_ad = {
             "id": SOURCE_AD_ID,
             "name": "LEGENDS IA 2",
@@ -88,7 +91,11 @@ class FakeTemplateCopyClient:
         if str(ad_id) == SOURCE_AD_ID:
             return dict(self.source_ad)
         if str(ad_id) == "copied-ad-1":
-            return dict(self.copied_ad)
+            copied_ad = dict(self.copied_ad)
+            if self.rename_requested and self.rename_readback_names:
+                copied_ad["name"] = self.rename_readback_names.pop(0)
+                self.copied_ad["name"] = copied_ad["name"]
+            return copied_ad
         raise AssertionError(f"Unexpected ad read: {ad_id}")
 
     def creative(self, creative_id):
@@ -121,7 +128,9 @@ class FakeTemplateCopyClient:
         self.rename_calls.append((ad_id, name, protected_source_ad_id))
         if str(ad_id) == str(protected_source_ad_id):
             raise AssertionError("source ad must never be renamed")
-        self.copied_ad["name"] = str(name)
+        self.rename_requested = True
+        if not self.rename_readback_names:
+            self.copied_ad["name"] = str(name)
 
 
 class MetaCollectionTemplateCopyTransportTests(unittest.TestCase):
@@ -268,6 +277,100 @@ class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertTrue(result["reconciled_existing_copy"])
         self.assertEqual(client.copy_calls, [])
+
+    def test_rename_stale_once_then_expected_name_passes_without_real_sleep(self):
+        expected_name = "Six Laps Ahead Peter Brock IA 1"
+        client = FakeTemplateCopyClient(
+            rename_readback_names=("LEGENDS IA 2 – Copy", expected_name)
+        )
+        client.copied_ad["name"] = "LEGENDS IA 2 – Copy"
+        sleeper = mock.Mock()
+        result = MetaCollectionTemplateCopyService(
+            client,
+            sleeper=sleeper,
+            rename_readback_delays=(0.0, 0.4, 0.8),
+        ).create_one_paused_copy(
+            source_ad_id=SOURCE_AD_ID,
+            target_adset_id=TARGET_ADSET_ID,
+            creative_parameters=target_creative(),
+            expected_ad_name=expected_name,
+        )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["rename_readback_attempts"], 2)
+        sleeper.assert_called_once_with(0.4)
+
+    def test_rename_stale_three_times_then_expected_name_passes(self):
+        expected_name = "Six Laps Ahead Peter Brock IA 2"
+        client = FakeTemplateCopyClient(
+            rename_readback_names=(
+                "LEGENDS IA 2 – Copy",
+                "LEGENDS IA 2 – Copy",
+                "LEGENDS IA 2 – Copy",
+                expected_name,
+            )
+        )
+        sleeps = []
+        result = MetaCollectionTemplateCopyService(
+            client,
+            sleeper=sleeps.append,
+            rename_readback_delays=(0.0, 0.4, 0.8, 1.2, 2.0),
+        ).create_one_paused_copy(
+            source_ad_id=SOURCE_AD_ID,
+            target_adset_id=TARGET_ADSET_ID,
+            creative_parameters=target_creative(),
+            expected_ad_name=expected_name,
+        )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["rename_readback_attempts"], 4)
+        self.assertEqual(sleeps, [0.4, 0.8, 1.2])
+
+    def test_rename_never_propagates_and_wrong_name_remains_fail_closed(self):
+        expected_name = "Six Laps Ahead Peter Brock IA 2"
+        client = FakeTemplateCopyClient(
+            rename_readback_names=("Old name", "Still old", "Wrong final name")
+        )
+        sleeps = []
+        with self.assertRaises(MetaCollectionTemplateCopyVerificationError) as caught:
+            MetaCollectionTemplateCopyService(
+                client,
+                sleeper=sleeps.append,
+                rename_readback_delays=(0.0, 0.4, 0.8),
+            ).create_one_paused_copy(
+                source_ad_id=SOURCE_AD_ID,
+                target_adset_id=TARGET_ADSET_ID,
+                creative_parameters=target_creative(),
+                expected_ad_name=expected_name,
+            )
+
+        self.assertEqual(caught.exception.result["failed_checks"], ["route_ad_name"])
+        self.assertEqual(caught.exception.result["rename_readback_attempts"], 3)
+        self.assertEqual(sleeps, [0.4, 0.8])
+        self.assertFalse(caught.exception.result["checks"]["route_ad_name"])
+
+    def test_existing_correct_route_name_does_not_rename_or_sleep(self):
+        client = FakeTemplateCopyClient()
+        client.copy_exists = True
+        sleeper = mock.Mock()
+        result = MetaCollectionTemplateCopyService(
+            client,
+            sleeper=sleeper,
+        ).create_one_paused_copy(
+            source_ad_id=SOURCE_AD_ID,
+            target_adset_id=TARGET_ADSET_ID,
+            creative_parameters=target_creative(),
+            expected_ad_name="Six Laps Ahead Peter Brock IA 1",
+        )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["rename_readback_attempts"], 0)
+        self.assertEqual(client.rename_calls, [])
+        sleeper.assert_not_called()
+
+    def test_default_rename_readback_window_is_bounded_to_eight_point_four_seconds(self):
+        self.assertEqual(RENAME_READBACK_DELAYS_SECONDS[0], 0.0)
+        self.assertEqual(sum(RENAME_READBACK_DELAYS_SECONDS), 8.4)
 
     def test_failed_readback_blocks_any_second_copy(self):
         client = FakeTemplateCopyClient(invalid_target=True)

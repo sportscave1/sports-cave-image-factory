@@ -1682,7 +1682,10 @@ class MetaPostingClient:
         if not clean_name:
             raise MetaAdsApiError("The copied Collection ad name cannot be blank.")
         current = dict(self.ad(clean_ad_id) or {})
-        if str(current.get("configured_status") or current.get("status") or "").upper() != "PAUSED":
+        if not (
+            str(current.get("status") or "").upper() == "PAUSED"
+            and str(current.get("configured_status") or "").upper() == "PAUSED"
+        ):
             raise MetaAdsApiError("The copied Collection ad is not PAUSED, so it was not renamed.")
         _post(
             clean_ad_id,
@@ -1714,6 +1717,100 @@ class MetaPostingClient:
             },
             config=self.config,
         )
+
+    def creative_crop_details(self, creative_id):
+        """Read optional crop/placement state without changing Posting behaviour.
+
+        This deliberately remains separate from :meth:`creative`: some Meta apps
+        can create and read a creative while lacking one of the newer diagnostic
+        fields.  A crop audit may report that limitation, but the production
+        template-copy verifier must continue to use its proven minimal read.
+        """
+
+        clean_id = str(creative_id or "").strip()
+        details = dict(
+            _request(
+                clean_id,
+                params={
+                    "fields": (
+                        "id,name,image_hash,object_story_spec,"
+                        "degrees_of_freedom_spec"
+                    )
+                },
+                config=self.config,
+            )
+            or {}
+        )
+        unavailable = {}
+        for field in (
+            "image_crops",
+            "format_transformation_spec",
+            "asset_feed_spec",
+            "platform_customizations",
+            "portrait_customizations",
+        ):
+            try:
+                response = _request(
+                    clean_id,
+                    params={"fields": f"id,{field}"},
+                    config=self.config,
+                )
+            except MetaAdsApiError as error:
+                lowered = sanitize_meta_error(error).casefold()
+                optional_field_error = str(error.error_code or "") == "3" or (
+                    str(error.error_code or "") == "100"
+                    and any(
+                        marker in lowered
+                        for marker in (
+                            "nonexisting field",
+                            "unknown field",
+                            "unsupported field",
+                            "cannot query field",
+                        )
+                    )
+                )
+                if not optional_field_error:
+                    raise
+                unavailable[field] = {
+                    "error_code": error.error_code,
+                    "error_subcode": error.error_subcode,
+                    "reason": "not available to this Meta app/token",
+                }
+                continue
+            response = dict(response or {})
+            if field in response:
+                details[field] = response[field]
+            else:
+                unavailable[field] = {"reason": "omitted by Meta"}
+        details["_unavailable_crop_fields"] = unavailable
+        return details
+
+    def ad_image_details(self, image_hash):
+        """Read Meta's stored and original dimensions for one existing image hash."""
+
+        clean_hash = str(image_hash or "").strip()
+        if not clean_hash:
+            raise MetaAdsApiError("A Meta image hash is required for the crop audit.")
+        rows = _paged_get(
+            f"{self.ad_account_id}/adimages",
+            params={
+                "fields": "hash,width,height,original_width,original_height",
+                # Meta's generated SDK defines ``hashes`` as list<string>.
+                "hashes": json.dumps([clean_hash]),
+                "limit": 10,
+            },
+            config=self.config,
+        ).get("rows") or ()
+        matches = [
+            dict(row)
+            for row in rows
+            if str(dict(row or {}).get("hash") or "").strip() == clean_hash
+        ]
+        if len(matches) != 1:
+            raise MetaAdsApiError(
+                "Meta did not return exactly one image matching the requested hash."
+            )
+        return matches[0]
 
 
 def fetch_meta_ads(config=None):

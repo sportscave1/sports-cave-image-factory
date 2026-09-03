@@ -9,6 +9,7 @@ Campaign, ad-set, image and Instant Experience creation remain outside this modu
 from __future__ import annotations
 
 import os
+import time
 
 from meta_ads_client import (
     MetaAdsAmbiguousResultError,
@@ -19,6 +20,7 @@ from meta_ads_client import (
 
 COLLECTION_TEMPLATE_AD_ENV_KEY = "META_COLLECTION_TEMPLATE_AD_ID"
 INITIAL_COLLECTION_TEMPLATE_AD_ID = "120249557468150554"
+RENAME_READBACK_DELAYS_SECONDS = (0.0, 0.4, 0.8, 1.2, 2.0, 2.0, 2.0)
 REQUIRED_COLLECTION_FEATURES = {
     # Requested Advantage+ creative defaults (Meta Marketing API v26 names).
     "description_automation": "OPT_IN",
@@ -261,8 +263,29 @@ def verify_template_copy_readback(
 class MetaCollectionTemplateCopyService:
     """Copy or reconcile one uniquely identified route in a target Ad Set."""
 
-    def __init__(self, client):
+    def __init__(self, client, *, sleeper=None, rename_readback_delays=None):
         self.client = client
+        self._sleep = sleeper or time.sleep
+        self._rename_readback_delays = tuple(
+            RENAME_READBACK_DELAYS_SECONDS
+            if rename_readback_delays is None
+            else rename_readback_delays
+        ) or (0.0,)
+
+    def _read_back_renamed_ad(self, ad_id, *, expected_ad_name):
+        """Poll a copied ad for Meta's bounded, eventually-consistent name update."""
+        expected_ad_name = str(expected_ad_name or "").strip()
+        copied_ad = {}
+        attempts = 0
+        for delay in self._rename_readback_delays:
+            clean_delay = max(0.0, float(delay or 0.0))
+            if clean_delay:
+                self._sleep(clean_delay)
+            copied_ad = dict(self.client.ad(ad_id) or {})
+            attempts += 1
+            if str(copied_ad.get("name") or "").strip() == expected_ad_name:
+                break
+        return copied_ad, attempts
 
     @staticmethod
     def _route_signature_matches(ad, creative, expected_creative):
@@ -389,7 +412,12 @@ class MetaCollectionTemplateCopyService:
                 protected_source_ad_id=source_ad_id,
             )
             renamed = True
-            copied_ad = dict(self.client.ad(copied_ad_id) or {})
+            copied_ad, rename_readback_attempts = self._read_back_renamed_ad(
+                copied_ad_id,
+                expected_ad_name=expected_ad_name,
+            )
+        else:
+            rename_readback_attempts = 0
         # Always re-read the source after Meta returns the copied ad, even if the
         # copied creative itself is unreadable. Source immutability is mandatory.
         source_after = dict(self.client.ad(source_ad_id) or {})
@@ -410,20 +438,33 @@ class MetaCollectionTemplateCopyService:
                 },
             )
         copied_creative = dict(self.client.creative(copied_creative_id) or {})
-        result = verify_template_copy_readback(
-            source_ad_before=source_before,
-            source_ad_after=source_after,
-            source_creative=source_creative,
-            copied_ad=copied_ad,
-            copied_creative=copied_creative,
-            source_ad_id=source_ad_id,
-            target_adset_id=request["adset_id"],
-            expected_creative=request["creative_parameters"],
-            expected_ad_name=expected_ad_name,
-        )
+        try:
+            result = verify_template_copy_readback(
+                source_ad_before=source_before,
+                source_ad_after=source_after,
+                source_creative=source_creative,
+                copied_ad=copied_ad,
+                copied_creative=copied_creative,
+                source_ad_id=source_ad_id,
+                target_adset_id=request["adset_id"],
+                expected_creative=request["creative_parameters"],
+                expected_ad_name=expected_ad_name,
+            )
+        except MetaCollectionTemplateCopyVerificationError as error:
+            error.result.update(
+                {
+                    "persistent_meta_writes": "ONE PAUSED AD" if created_now else "NONE",
+                    "created_now": created_now,
+                    "reconciled_existing_copy": not created_now,
+                    "renamed": renamed,
+                    "rename_readback_attempts": rename_readback_attempts,
+                }
+            )
+            raise
         result["created_now"] = created_now
         result["reconciled_existing_copy"] = not created_now
         result["renamed"] = renamed
+        result["rename_readback_attempts"] = rename_readback_attempts
         return result
 
     def create_one_paused_copy(

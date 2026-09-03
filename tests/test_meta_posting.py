@@ -11,7 +11,10 @@ import ads_navigation
 import ads_page
 import ads_posting_page
 import meta_ads_client
-from meta_collection_template_copy import REQUIRED_COLLECTION_FEATURES
+from meta_collection_template_copy import (
+    REQUIRED_COLLECTION_FEATURES,
+    MetaCollectionTemplateCopyVerificationError,
+)
 from meta_posting_service import (
     _request_fingerprint,
     EXPECTED_PIXEL_NAME,
@@ -1252,6 +1255,25 @@ class MetaPostingClientTests(unittest.TestCase):
             )
         self.assertEqual(post.call_count, 1)
 
+    @mock.patch("meta_ads_client._post")
+    @mock.patch(
+        "meta_ads_client._request",
+        return_value={
+            "id": "copied-ad",
+            "status": "PAUSED",
+            "configured_status": "ACTIVE",
+        },
+    )
+    def test_rename_requires_both_status_fields_to_be_paused(self, request, post):
+        client = meta_ads_client.MetaPostingClient(self.config())
+        with self.assertRaisesRegex(meta_ads_client.MetaAdsApiError, "not PAUSED"):
+            client.rename_paused_ad(
+                "copied-ad",
+                name="Six Laps Ahead Peter Brock IA 2",
+                protected_source_ad_id="source-ad",
+            )
+        post.assert_not_called()
+
     @mock.patch("meta_ads_client._paged_get")
     def test_dataset_and_reference_fallbacks_use_current_read_edges(self, paged_get):
         paged_get.return_value = {"rows": ()}
@@ -2066,6 +2088,40 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(result["meta_page_photo_id"], "photo-1")
         self.assertNotIn("ad", client.calls)
 
+    def test_paused_copy_with_pending_name_verification_is_preserved_for_retry(self):
+        class PendingNameVerificationService:
+            def create_or_reconcile_paused_route_copy(self, **_kwargs):
+                raise MetaCollectionTemplateCopyVerificationError(
+                    "Meta created or returned a PAUSED template copy, but read-back "
+                    "verification failed. Further copies are blocked. Failed checks: "
+                    "route_ad_name.",
+                    result={
+                        "copied_ad_id": "created-but-stale-ad",
+                        "copied_creative_id": "created-but-stale-creative",
+                        "copied_status": "PAUSED",
+                        "copied_configured_status": "PAUSED",
+                        "reconciled_existing_copy": False,
+                        "failed_checks": ["route_ad_name"],
+                    },
+                )
+
+        store = FakePostingStore()
+        with self.assertRaises(PostingError) as caught:
+            MetaPostingService(
+                client=FakePostingClient(),
+                store=store,
+                template_copy_service=PendingNameVerificationService(),
+            ).create_paused_campaign(request_for())
+
+        route_one = caught.exception.result["ad_results"][0]
+        self.assertEqual(route_one["meta_ad_id"], "created-but-stale-ad")
+        self.assertEqual(
+            route_one["meta_creative_id"], "created-but-stale-creative"
+        )
+        self.assertEqual(route_one["meta_ad_configured_status"], "PAUSED")
+        self.assertEqual(route_one["status"], "VERIFICATION_PENDING")
+        self.assertEqual(store.record["status"], "FAILED")
+
     def test_ad_three_failure_retries_without_recreating_ads_one_and_two(self):
         client = FakePostingClient(fail_at="ad_3")
         store = FakePostingStore()
@@ -2312,6 +2368,148 @@ class PostingServiceTests(unittest.TestCase):
             ],
             ["Headline 2", "Headline 3"],
         )
+
+    def test_retry_reconciles_existing_route_two_after_stale_name_readback(self):
+        original_submission_id = "22222222-2222-4222-8222-222222222222"
+        campaign_id = "120249745234420554"
+        adset_id = "120249745234830554"
+        ia_ids = ("4648209915398007", "1023273974081022")
+        ad_ids = ("120249745246230554", "120249745250000554")
+        image_hashes = ("existing-route-1-hash", "existing-route-2-hash")
+        product_url = (
+            "https://sportscaveshop.com/products/"
+            "six-laps-ahead-peter-brock-wall-art"
+        )
+        retry_request = request_for(
+            submission_id="33333333-3333-4333-8333-333333333333",
+            product_title="Six Laps Ahead Peter Brock Wall Art",
+            product_handle="six-laps-ahead-peter-brock-wall-art",
+            destination_url=product_url,
+        )
+        fingerprint = _request_fingerprint(validate_posting_request(retry_request))
+        ad_results = posting_ad_results(
+            (),
+            ad_names=(
+                "Six Laps Ahead Peter Brock IA 1",
+                "Six Laps Ahead Peter Brock IA 2",
+                "Six Laps Ahead Peter Brock IA 3",
+            ),
+        )
+        for index in range(2):
+            route = index + 1
+            ad_results[index].update(
+                {
+                    "meta_image_hash": image_hashes[index],
+                    "meta_page_photo_id": f"existing-page-photo-{route}",
+                    "meta_canvas_photo_element_id": f"existing-photo-element-{route}",
+                    "meta_canvas_product_element_id": f"existing-product-element-{route}",
+                    "meta_canvas_button_element_id": f"existing-button-element-{route}",
+                    "meta_canvas_footer_element_id": f"existing-footer-element-{route}",
+                    "meta_instant_experience_id": ia_ids[index],
+                    "meta_ad_id": ad_ids[index] if index == 0 else "",
+                    "meta_creative_id": f"existing-creative-{route}" if index == 0 else "",
+                    "meta_ad_configured_status": "PAUSED" if index == 0 else "",
+                    "status": "CREATED" if index == 0 else "VERIFICATION_PENDING",
+                }
+            )
+        existing = {
+            "submission_id": original_submission_id,
+            "status": "FAILED",
+            "campaign_id": campaign_id,
+            "campaign_name": "030926 AUS Motorsport Six Laps Ahead Peter Brock",
+            "adset_id": adset_id,
+            "adset_name": "AUS Motorsport Motor Racing Classic Cars Men 35-65+ 110326",
+            "ad_name": "Six Laps Ahead Peter Brock IA 1",
+            "destination_url": product_url,
+            "request_fingerprint": fingerprint,
+            "ad_results": ad_results,
+        }
+        client = FakePostingClient()
+        for index in range(2):
+            route = index + 1
+            creative_id = f"existing-creative-{route}"
+            creative_payload = build_collection_creative_payload(
+                name=f"Six Laps Ahead Peter Brock IA {route} | Collection",
+                page_id=client.page_id,
+                instagram_user_id=client.instagram_user_id,
+                image_hash=image_hashes[index],
+                canvas_id=ia_ids[index],
+                product_set_id="set-1",
+                destination_url=product_url,
+                primary_text=f"Primary {route}",
+                headline=f"Headline {route}",
+            )
+            client.copy_creatives[creative_id] = {
+                "id": creative_id,
+                **creative_payload,
+            }
+            client.copy_ads[ad_ids[index]] = {
+                "id": ad_ids[index],
+                "name": f"Six Laps Ahead Peter Brock IA {route}",
+                "status": "PAUSED",
+                "configured_status": "PAUSED",
+                "effective_status": "IN_PROCESS",
+                "adset_id": adset_id,
+                "source_ad_id": "120249557468150554",
+                "creative": {"id": creative_id},
+            }
+            client.canvas_readbacks[ia_ids[index]] = {
+                "id": ia_ids[index],
+                "name": f"Six Laps Ahead Peter Brock IA {route} | Storefront",
+                "is_published": True,
+                "body_elements": [
+                    {"id": f"existing-photo-element-{route}"},
+                    {"id": f"existing-product-element-{route}"},
+                    {"id": f"existing-footer-element-{route}"},
+                ],
+            }
+
+        source_before = dict(client.template_source_ad)
+        result = MetaPostingService(
+            client=client,
+            store=FakePostingStore(existing=existing),
+        ).create_paused_campaign(retry_request)
+
+        self.assertEqual(result["submission_id"], original_submission_id)
+        self.assertEqual(result["campaign_id"], campaign_id)
+        self.assertEqual(result["adset_id"], adset_id)
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 0)
+        self.assertEqual(client.calls.count("ad_image"), 1)
+        self.assertEqual(client.calls.count("page_photo"), 1)
+        self.assertEqual(client.calls.count("canvas"), 1)
+        self.assertEqual(client.calls.count("template_copy"), 1)
+        self.assertEqual(
+            [row["meta_instant_experience_id"] for row in result["ad_results"]],
+            [ia_ids[0], ia_ids[1], "canvas-1"],
+        )
+        self.assertEqual(
+            [row["meta_ad_id"] for row in result["ad_results"]],
+            [ad_ids[0], ad_ids[1], "ad-3"],
+        )
+        self.assertEqual(len(client.copy_ads), 3)
+        self.assertIn(ad_ids[1], client.copy_ads)
+        self.assertEqual(
+            {row["status"] for row in client.copy_ads.values()}, {"PAUSED"}
+        )
+        self.assertEqual(
+            {row["configured_status"] for row in client.copy_ads.values()},
+            {"PAUSED"},
+        )
+        self.assertEqual(
+            [row["meta_ad_configured_status"] for row in result["ad_results"]],
+            ["PAUSED", "PAUSED", "PAUSED"],
+        )
+        self.assertEqual(
+            [row["ad_name"] for row in result["ad_results"]],
+            [
+                "Six Laps Ahead Peter Brock IA 1",
+                "Six Laps Ahead Peter Brock IA 2",
+                "Six Laps Ahead Peter Brock IA 3",
+            ],
+        )
+        self.assertEqual(client.rename_calls, [("ad-3", "Six Laps Ahead Peter Brock IA 3")])
+        self.assertEqual(client.template_source_ad, source_before)
 
     def test_store_claim_reuses_unique_failed_fingerprint_without_inserting_new_job(self):
         original_submission_id = "22222222-2222-4222-8222-222222222222"
