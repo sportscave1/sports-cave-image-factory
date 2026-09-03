@@ -235,6 +235,40 @@ class MetaCollectionTemplateCopyTransportTests(unittest.TestCase):
 
 
 class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
+    def test_caller_owned_source_snapshot_is_reused_and_still_rechecked(self):
+        client = FakeTemplateCopyClient()
+        service = MetaCollectionTemplateCopyService(client)
+
+        snapshot = service.read_source_snapshot(SOURCE_AD_ID)
+        result = service.create_or_reconcile_paused_route_copy(
+            source_ad_id=SOURCE_AD_ID,
+            target_adset_id=TARGET_ADSET_ID,
+            expected_ad_name="Six Laps Ahead Peter Brock IA 1",
+            creative_parameters=target_creative(),
+            source_snapshot=snapshot,
+        )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(client.ad_reads.count(SOURCE_AD_ID), 2)
+        self.assertEqual(client.creative_reads.count("source-creative"), 1)
+        self.assertTrue(result["checks"]["source_ad_unchanged"])
+
+    def test_invalid_source_snapshot_blocks_before_copy(self):
+        client = FakeTemplateCopyClient()
+        service = MetaCollectionTemplateCopyService(client)
+        with self.assertRaisesRegex(
+            MetaCollectionTemplateCopySafetyError,
+            "per-run Collection template snapshot is invalid",
+        ):
+            service.create_or_reconcile_paused_route_copy(
+                source_ad_id=SOURCE_AD_ID,
+                target_adset_id=TARGET_ADSET_ID,
+                expected_ad_name="Six Laps Ahead Peter Brock IA 1",
+                creative_parameters=target_creative(),
+                source_snapshot={"source_ad_id": "wrong"},
+            )
+        self.assertEqual(client.copy_calls, [])
+
     def test_collection_features_are_semantic_subset_not_exact_object(self):
         actual = {
             name: {"enroll_status": enrollment}

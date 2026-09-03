@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import uuid
 from urllib.parse import quote, unquote, urlparse
 from zoneinfo import ZoneInfo
@@ -1581,13 +1582,54 @@ class MetaPostingService:
         store=None,
         url_tags=META_AD_URL_PARAMETERS,
         template_copy_service=None,
+        progress_callback=None,
+        clock=None,
     ):
         self.client = client or MetaPostingClient()
         self.store = store or SupabasePostingStore()
         self.url_tags = str(url_tags or "")
+        self._progress_callback = progress_callback
+        self._clock = clock or time.perf_counter
+        self._performance_started = None
+        self._performance_last = None
+        self._performance_trace = []
         self.template_copy_service = (
             template_copy_service or MetaCollectionTemplateCopyService(self.client)
         )
+
+    def _start_performance_trace(self):
+        now = float(self._clock())
+        self._performance_started = now
+        self._performance_last = now
+        self._performance_trace = []
+
+    def _checkpoint(self, stage):
+        now = float(self._clock())
+        previous = self._performance_last
+        started = self._performance_started
+        if previous is None or started is None:
+            self._start_performance_trace()
+            now = float(self._clock())
+            previous = self._performance_last
+            started = self._performance_started
+        self._performance_trace.append(
+            {
+                "stage": str(stage or ""),
+                "duration_ms": round(max(0.0, now - float(previous)) * 1000, 3),
+                "elapsed_ms": round(max(0.0, now - float(started)) * 1000, 3),
+            }
+        )
+        self._performance_last = now
+
+    def _progress(self, message):
+        callback = self._progress_callback
+        if not callable(callback):
+            return
+        try:
+            callback(str(message or ""))
+        except Exception:
+            # Progress is presentation-only and must never change Posting safety.
+            return
 
     @staticmethod
     def _one(rows, *, entity, expected_id="", expected_name=""):
@@ -1763,12 +1805,16 @@ class MetaPostingService:
             raise PostingValidationError(str(error), result=failed or record) from error
 
     def create_paused_campaign(self, request):
+        self._start_performance_trace()
+        self._progress("Preparing Meta campaign…")
         clean = validate_posting_request(request)
+        self._checkpoint("request_validation")
         try:
             references, catalog, product_set, pixel, audience = self._validate_references(clean)
             existing_ad_names = tuple(self.client.existing_ad_names())
         except MetaAdsApiError as error:
             raise PostingError(sanitize_meta_error(error)) from error
+        self._checkpoint("meta_reference_validation")
         posting_mode = clean["posting_mode"]
         is_existing_mode = posting_mode == POSTING_MODE_EXISTING
         campaign_label = (
@@ -1834,6 +1880,7 @@ class MetaPostingService:
             },
             lease_token=str(uuid.uuid4()),
         )
+        self._checkpoint("ledger_claim")
         record = dict(claim.get("record") or {})
         submission_id = str(record.get("submission_id") or submission_id)
         record_mode = str(record.get("posting_mode") or POSTING_MODE_NEW).upper()
@@ -1865,6 +1912,7 @@ class MetaPostingService:
         if not claim.get("claimed"):
             status = str(record.get("status") or "")
             if status == "COMPLETE":
+                record["performance_trace"] = tuple(self._performance_trace)
                 return record
             if status == "AMBIGUOUS":
                 raise PostingAmbiguousError(
@@ -1894,6 +1942,11 @@ class MetaPostingService:
             campaign_id = str(record.get("campaign_id") or "")
             configured_campaign = None
             configured_adset = None
+            self._progress(
+                "Checking existing Meta campaign…"
+                if is_existing_mode or campaign_id
+                else "Creating campaign…"
+            )
             if is_existing_mode:
                 target = self._existing_target_for_run(
                     clean=clean,
@@ -1967,8 +2020,14 @@ class MetaPostingService:
                     submission_id, "CAMPAIGN_CREATED", campaign_id=campaign_id,
                     campaign_name=campaign_label,
                 )
+            self._checkpoint("campaign_resolution")
 
             adset_id = str(record.get("adset_id") or "")
+            self._progress(
+                "Checking existing Meta Ad Set…"
+                if is_existing_mode or adset_id
+                else "Creating Ad Set…"
+            )
             if not is_existing_mode and not adset_id:
                 targeting = build_targeting(
                     country=clean["country"],
@@ -2029,9 +2088,24 @@ class MetaPostingService:
                         record=record,
                     )
 
+            self._checkpoint("adset_resolution")
+
+            source_ad_id = configured_collection_template_ad_id()
+            source_snapshot_loader = getattr(
+                self.template_copy_service,
+                "read_source_snapshot",
+                None,
+            )
+            source_snapshot = (
+                source_snapshot_loader(source_ad_id)
+                if callable(source_snapshot_loader)
+                else None
+            )
+
             for index, (creative, ad_result) in enumerate(
                 zip(clean["creatives"], ad_results), start=1
             ):
+                self._progress(f"Creating Ad {index} of 3…")
                 active_ad_index = index - 1
                 ad_label = str(ad_result.get("ad_name") or proposed_ad_names[index - 1])
                 persisted_route_ids = {
@@ -2184,6 +2258,7 @@ class MetaPostingService:
                 preliminary_verification = verify_instant_experience_destination(
                     instant_experience,
                     expected_url=clean["destination_url"],
+                    provenance=provenance,
                     expected_canvas_id=canvas_id,
                     expected_request_fingerprint=fingerprint,
                     expected_submission_id=submission_id,
@@ -2253,7 +2328,6 @@ class MetaPostingService:
                     "instant_experience_creation_provenance"
                 ):
                     ad_result["instant_experience_creation_provenance"] = provenance
-                persist("INSTANT_EXPERIENCE_CREATED")
 
                 creative_label = f"{ad_label} | Collection"
                 creative_payload = build_collection_creative_payload(
@@ -2269,12 +2343,19 @@ class MetaPostingService:
                     description=creative["description"],
                     url_tags=self.url_tags,
                 )
-                copy_result = self.template_copy_service.create_or_reconcile_paused_route_copy(
-                    source_ad_id=configured_collection_template_ad_id(),
-                    target_adset_id=adset_id,
-                    expected_ad_name=ad_label,
-                    creative_parameters=creative_payload,
-                    persisted_ad_id=str(ad_result.get("meta_ad_id") or ""),
+                copy_arguments = {
+                    "source_ad_id": source_ad_id,
+                    "target_adset_id": adset_id,
+                    "expected_ad_name": ad_label,
+                    "creative_parameters": creative_payload,
+                    "persisted_ad_id": str(ad_result.get("meta_ad_id") or ""),
+                }
+                if source_snapshot is not None:
+                    copy_arguments["source_snapshot"] = source_snapshot
+                copy_result = (
+                    self.template_copy_service.create_or_reconcile_paused_route_copy(
+                        **copy_arguments
+                    )
                 )
                 ad_result["meta_creative_id"] = str(
                     copy_result.get("copied_creative_id") or ""
@@ -2300,7 +2381,9 @@ class MetaPostingService:
                         else {}
                     ),
                 )
+                self._checkpoint(f"route_{index}")
 
+            self._progress("Verifying paused Meta ads…")
             campaign_status = self._configured_status(
                 configured_campaign or self.client.configured_campaign(campaign_id)
             )
@@ -2308,9 +2391,9 @@ class MetaPostingService:
                 configured_adset or self.client.configured_adset(adset_id)
             )
             statuses = {
-                f"ad {row['index']}": self._configured_status(
-                    self.client.ad(row["meta_ad_id"])
-                )
+                f"ad {row['index']}": str(
+                    row.get("meta_ad_configured_status") or ""
+                ).upper()
                 for row in ad_results
             }
             if not is_existing_mode:
@@ -2326,48 +2409,20 @@ class MetaPostingService:
                     f"Meta did not confirm PAUSED status for: {', '.join(not_paused)}. Review in Ads Manager.",
                     record=record,
                 )
-            try:
-                product_set_health = assess_product_set_health(
-                    self.client.product_set_health(clean["product_set_id"])
-                )
-            except MetaAdsApiError as error:
-                if is_optional_product_set_health_capability_error(error):
-                    product_set_health = {
-                        "status": "NOT AVAILABLE VIA META API",
-                        "product_set_id": clean["product_set_id"],
-                        "product_set_name": str(product_set.get("name") or ""),
-                        "reported_product_count": None,
-                        "readable_product_count": None,
-                        "eligible_product_count": None,
-                        "reason_counts": {},
-                        "reason_details": (),
-                        "message": (
-                            "Meta does not expose this optional Product Set health read "
-                            "to the configured app. Ad creation completed successfully; "
-                            "review Commerce Manager before activation."
-                        ),
-                        "read_only": True,
-                    }
-                else:
-                    product_set_health = {
-                        "status": "WARNING",
-                        "product_set_id": clean["product_set_id"],
-                        "product_set_name": str(product_set.get("name") or ""),
-                        "reported_product_count": None,
-                        "readable_product_count": None,
-                        "eligible_product_count": None,
-                        "reason_counts": {},
-                        "reason_details": (),
-                        "message": (
-                            "Collection ads were created successfully, but Product Set health "
-                            "could not be read from Meta. Review Commerce Manager before activation. "
-                            + sanitize_meta_error(error)
-                        ),
-                        "read_only": True,
-                    }
+            self._checkpoint("paused_status_verification")
+            # Compatibility and ownership were verified before creation. This
+            # broader catalogue-health read is optional, unsupported for the
+            # configured app, and is intentionally outside the critical path.
+            product_set_health = {
+                "status": "NOT RUN",
+                "product_set_id": clean["product_set_id"],
+                "product_set_name": str(product_set.get("name") or ""),
+                "message": "Optional post-creation Product Set health diagnostic was not run.",
+                "read_only": True,
+            }
             ad_results[0]["product_set_health"] = product_set_health
             first = ad_results[0]
-            return self.store.update_stage(
+            result = self.store.update_stage(
                 submission_id, "COMPLETE", campaign_id=campaign_id, adset_id=adset_id,
                 campaign_name=campaign_label, adset_name=adset_label,
                 campaign_ownership=(
@@ -2389,6 +2444,10 @@ class MetaPostingService:
                 meta_ad_id=first["meta_ad_id"], meta_status="PAUSED",
                 ad_results=ad_results, safe_error="",
             )
+            self._checkpoint("final_persistence")
+            result["performance_trace"] = tuple(self._performance_trace)
+            self._progress("Done — 3 Meta ads are PAUSED")
+            return result
         except (
             PostingAbandonedError,
             PostingAmbiguousError,

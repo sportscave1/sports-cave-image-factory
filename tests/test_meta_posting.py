@@ -419,6 +419,7 @@ class FakePostingClient:
         self.copy_ads[str(ad_id)]["name"] = str(name)
 
     def creative(self, creative_id):
+        self.calls.append("read_creative")
         if str(creative_id) == "source-creative":
             return {"id": "source-creative", **dict(self.template_source_creative)}
         return dict(self.copy_creatives.get(str(creative_id)) or {})
@@ -445,12 +446,15 @@ class FakePostingClient:
         }
 
     def configured_campaign(self, campaign_id):
+        self.calls.append("read_configured_campaign")
         return {"id": campaign_id, "configured_status": "PAUSED"}
 
     def configured_adset(self, adset_id):
+        self.calls.append("read_configured_adset")
         return {"id": adset_id, "configured_status": "PAUSED"}
 
     def ad(self, ad_id):
+        self.calls.append("read_ad")
         if str(ad_id) == str(self.template_source_ad["id"]):
             return dict(self.template_source_ad)
         if str(ad_id) in self.copy_ads:
@@ -629,6 +633,104 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertEqual(info.call_count, 1)
         self.assertIn("NOT AVAILABLE VIA META API", info.call_args.args[0])
         warning.assert_not_called()
+
+    def test_normal_success_ui_is_compact_and_hides_technical_diagnostics(self):
+        base_result = {
+            "status": "COMPLETE",
+            "meta_status": "PAUSED",
+            "campaign_id": "campaign-1",
+            "campaign_name": "Campaign",
+            "adset_id": "adset-1",
+            "adset_name": "Ad Set",
+            "product_title": "Hidden Product",
+            "country": "AUS",
+            "product_set_name": "Hidden Product Set",
+            "destination_url": "https://sportscaveshop.com/products/hidden",
+            "verified_lifecycle_strategy": CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
+            "lifecycle_verification_source": "Hidden lifecycle verification",
+            "ad_results": tuple(
+                {
+                    "index": index,
+                    "ad_name": f"Route {index}",
+                    "instant_experience_name": f"Route {index} | Storefront",
+                    "meta_instant_experience_id": f"canvas-{index}",
+                    "meta_ad_id": f"ad-{index}",
+                    "meta_ad_configured_status": "PAUSED",
+                    "instant_experience_verification": {
+                        "display_status": "VERIFIED VIA CREATION RECORD",
+                        "verification_source": "Persisted creation provenance",
+                    },
+                    "product_set_health": {
+                        "status": "NOT AVAILABLE VIA META API",
+                        "message": "Hidden Product Set health message",
+                    },
+                }
+                for index in range(1, 4)
+            ),
+        }
+        for posting_mode, expected_message in (
+            (POSTING_MODE_NEW, SUCCESS_MESSAGE),
+            (POSTING_MODE_EXISTING, "3 Meta ads added successfully — PAUSED"),
+        ):
+            with self.subTest(posting_mode=posting_mode):
+                result = {**base_result, "posting_mode": posting_mode}
+                actions = (mock.Mock(), mock.Mock(), mock.Mock())
+                actions[1].button.return_value = False
+                with mock.patch.object(
+                    ads_posting_page.st, "success"
+                ) as success, mock.patch.object(
+                    ads_posting_page.st, "subheader"
+                ), mock.patch.object(
+                    ads_posting_page.st, "dataframe"
+                ) as dataframe, mock.patch.object(
+                    ads_posting_page.st, "caption"
+                ) as caption, mock.patch.object(
+                    ads_posting_page.st, "info"
+                ) as info, mock.patch.object(
+                    ads_posting_page.st, "warning"
+                ) as warning, mock.patch.object(
+                    ads_posting_page.st, "columns", return_value=actions
+                ), mock.patch.object(
+                    ads_posting_page, "MetaPostingClient"
+                ) as client_type:
+                    client_type.return_value.ad_account_id = "act_123"
+                    ads_posting_page._render_success(result)
+
+                self.assertEqual(success.call_args.args[0], expected_message)
+                rows = dataframe.call_args.args[0]
+                self.assertEqual(len(rows), 8)
+                self.assertEqual(
+                    [row["Object"] for row in rows],
+                    [
+                        "Campaign",
+                        "Ad set",
+                        "Instant Experience 1",
+                        "Ad 1",
+                        "Instant Experience 2",
+                        "Ad 2",
+                        "Instant Experience 3",
+                        "Ad 3",
+                    ],
+                )
+                visible = f"{expected_message} {rows}"
+                for hidden_text in (
+                    "VERIFIED VIA CREATION RECORD",
+                    "Persisted creation provenance",
+                    "Product Set health",
+                    "Product:",
+                    "Campaign budget:",
+                    "Customer lifecycle:",
+                    "Lifecycle verification:",
+                ):
+                    self.assertNotIn(hidden_text, visible)
+                caption.assert_not_called()
+                info.assert_not_called()
+                warning.assert_not_called()
+                actions[0].link_button.assert_called_once()
+                self.assertEqual(
+                    actions[0].link_button.call_args.args[0], "Open in Ads Manager"
+                )
+                self.assertEqual(actions[1].button.call_args.args[0], "New campaign")
 
     def test_existing_target_result_keeps_active_status_while_new_ads_show_paused(self):
         result = {
@@ -2453,8 +2555,9 @@ class PostingServiceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            result["ad_results"][0]["product_set_health"]["status"], "READY"
+            result["ad_results"][0]["product_set_health"]["status"], "NOT RUN"
         )
+        self.assertEqual(client.calls.count("read_product_set_health"), 0)
         for index, row in enumerate(result["ad_results"], start=1):
             provenance = row["instant_experience_creation_provenance"]
             self.assertEqual(
@@ -2470,6 +2573,69 @@ class PostingServiceTests(unittest.TestCase):
             self.assertTrue(provenance["button_element_id"])
             self.assertTrue(provenance["footer_element_id"])
             self.assertTrue(provenance["request_fingerprint"])
+
+    def test_success_path_removes_only_redundant_reads_and_reports_progress(self):
+        client = FakePostingClient()
+        store = FakePostingStore()
+        progress = []
+        ticks = iter(float(value) for value in range(20))
+
+        result = MetaPostingService(
+            client=client,
+            store=store,
+            progress_callback=progress.append,
+            clock=lambda: next(ticks),
+        ).create_paused_campaign(request_for())
+
+        self.assertEqual(
+            progress,
+            [
+                "Preparing Meta campaign…",
+                "Creating campaign…",
+                "Creating Ad Set…",
+                "Creating Ad 1 of 3…",
+                "Creating Ad 2 of 3…",
+                "Creating Ad 3 of 3…",
+                "Verifying paused Meta ads…",
+                "Done — 3 Meta ads are PAUSED",
+            ],
+        )
+        self.assertEqual(
+            [row["stage"] for row in result["performance_trace"]],
+            [
+                "request_validation",
+                "meta_reference_validation",
+                "ledger_claim",
+                "campaign_resolution",
+                "adset_resolution",
+                "route_1",
+                "route_2",
+                "route_3",
+                "paused_status_verification",
+                "final_persistence",
+            ],
+        )
+        self.assertTrue(
+            all(row["duration_ms"] == 1000.0 for row in result["performance_trace"])
+        )
+        self.assertEqual(client.calls.count("read_instant_experience"), 3)
+        self.assertEqual(client.calls.count("read_ad"), 13)
+        self.assertEqual(client.calls.count("read_creative"), 7)
+        self.assertEqual(client.calls.count("read_product_set_health"), 0)
+        self.assertEqual(store.claims, 1)
+        self.assertEqual(len(store.stages), 28)
+        self.assertEqual(store.claims + len(store.stages), 29)
+        self.assertEqual(
+            [
+                payload["object_story_spec"]["link_data"]["message"]
+                for payload in client.creative_payloads
+            ],
+            ["Primary 1", "Primary 2", "Primary 3"],
+        )
+        self.assertEqual(
+            [row["meta_ad_configured_status"] for row in result["ad_results"]],
+            ["PAUSED", "PAUSED", "PAUSED"],
+        )
 
     def test_future_new_adset_uses_selected_saved_custom_or_broad_audience(self):
         cases = (
@@ -2559,10 +2725,13 @@ class PostingServiceTests(unittest.TestCase):
             error_code=190,
         )
 
-        with self.assertRaisesRegex(PostingError, "Invalid OAuth access token"):
-            MetaPostingService(
-                client=client, store=FakePostingStore()
-            ).create_paused_campaign(request_for())
+        with mock.patch(
+            "meta_posting_service.build_instant_experience_creation_provenance",
+            return_value={},
+        ), self.assertRaisesRegex(PostingError, "Invalid OAuth access token"):
+            MetaPostingService(client=client, store=FakePostingStore()).create_paused_campaign(
+                request_for()
+            )
 
         self.assertEqual(client.calls.count("template_copy"), 0)
 
@@ -2602,7 +2771,7 @@ class PostingServiceTests(unittest.TestCase):
 
         self.assertEqual(client.calls.count("template_copy"), 0)
 
-    def test_zero_eligible_products_complete_with_read_only_warning(self):
+    def test_optional_product_health_is_not_on_the_creation_critical_path(self):
         client = FakePostingClient()
         client.product_set_health = mock.Mock(
             return_value={
@@ -2627,11 +2796,11 @@ class PostingServiceTests(unittest.TestCase):
         ).create_paused_campaign(request_for())
         health = result["ad_results"][0]["product_set_health"]
         self.assertEqual(result["status"], "COMPLETE")
-        self.assertEqual(health["status"], "WARNING")
-        self.assertEqual(health["eligible_product_count"], 0)
+        self.assertEqual(health["status"], "NOT RUN")
         self.assertTrue(health["read_only"])
+        client.product_set_health.assert_not_called()
 
-    def test_optional_product_health_code_three_is_neutral(self):
+    def test_optional_product_health_code_three_cannot_delay_creation(self):
         client = FakePostingClient()
         client.product_set_health = mock.Mock(
             side_effect=meta_ads_client.MetaAdsApiError(
@@ -2645,11 +2814,11 @@ class PostingServiceTests(unittest.TestCase):
         ).create_paused_campaign(request_for())
         health = result["ad_results"][0]["product_set_health"]
         self.assertEqual(result["status"], "COMPLETE")
-        self.assertEqual(health["status"], "NOT AVAILABLE VIA META API")
+        self.assertEqual(health["status"], "NOT RUN")
         self.assertTrue(health["read_only"])
-        self.assertNotIn("permission", health["message"].casefold())
+        client.product_set_health.assert_not_called()
 
-    def test_non_capability_product_health_error_remains_warning(self):
+    def test_optional_product_health_non_capability_error_is_not_hidden_by_creation(self):
         client = FakePostingClient()
         client.product_set_health = mock.Mock(
             side_effect=meta_ads_client.MetaAdsApiError(
@@ -2660,8 +2829,8 @@ class PostingServiceTests(unittest.TestCase):
             client=client, store=FakePostingStore()
         ).create_paused_campaign(request_for())
         health = result["ad_results"][0]["product_set_health"]
-        self.assertEqual(health["status"], "WARNING")
-        self.assertIn("Catalogue access was denied", health["message"])
+        self.assertEqual(health["status"], "NOT RUN")
+        client.product_set_health.assert_not_called()
 
     def test_mixed_source_formats_stay_mapped_to_their_own_meta_upload(self):
         source_rows = (
@@ -2951,8 +3120,8 @@ class PostingServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["ad_results"][0]["meta_ad_reused"])
         self.assertTrue(result["ad_results"][0]["meta_instant_experience_reused"])
-        self.assertIn("read_instant_experience_optional_details", client.calls)
-        self.assertIn("read_instant_experience_elements", client.calls)
+        self.assertNotIn("read_instant_experience_optional_details", client.calls)
+        self.assertNotIn("read_instant_experience_elements", client.calls)
         self.assertEqual(
             result["ad_results"][0]["instant_experience_verification"][
                 "display_status"

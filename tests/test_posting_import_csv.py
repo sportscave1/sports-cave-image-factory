@@ -1142,6 +1142,178 @@ class PostingCSVImportTests(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(third, first)
 
+    def test_product_rows_are_loaded_once_per_session(self):
+        state = {}
+        rows = tuple(record["row"] for record in product_records())
+        with mock.patch.object(
+            ads_posting_page,
+            "load_live_edition_product_rows",
+            return_value=rows,
+        ) as loader:
+            first = ads_posting_page._product_rows_state(state=state)
+            second = ads_posting_page._product_rows_state(state=state)
+            third = ads_posting_page._product_rows_state(state=state)
+
+        self.assertEqual(loader.call_count, 1)
+        self.assertEqual(first, rows)
+        self.assertEqual(second, rows)
+        self.assertEqual(third, rows)
+
+    def test_ready_startup_snapshot_skips_duplicate_full_meta_diagnostic(self):
+        state = {}
+        references = {
+            "account": {"id": "act-1"},
+            "page": {"id": "page-1"},
+            "instagram": {"id": "ig-1"},
+            "catalog_resolution": {"resolved": True, "id": "catalog-1"},
+            "dataset_resolution": {"resolved": True, "id": "dataset-1"},
+            "product_sets": ({"id": "set-1"},),
+        }
+        config = {
+            "configured": True,
+            "page_token_present": True,
+            "page_id_present": True,
+            "instagram_user_id_present": True,
+            "api_version": "v26.0",
+            "api_version_source": "default",
+        }
+        with mock.patch.object(
+            ads_posting_page,
+            "safe_meta_config_status",
+            return_value=config,
+        ), mock.patch.object(
+            ads_posting_page,
+            "_load_meta_references",
+            return_value=references,
+        ) as reference_loader, mock.patch.object(
+            ads_posting_page,
+            "_load_meta_overview",
+        ) as full_diagnostic:
+            first = ads_posting_page._meta_state(state=state)
+            second = ads_posting_page._meta_state(state=state)
+
+        self.assertTrue(first[0]["posting_ready"])
+        self.assertEqual(second, first)
+        self.assertEqual(reference_loader.call_count, 1)
+        full_diagnostic.assert_not_called()
+
+    def test_transient_startup_failure_does_not_poison_session_cache(self):
+        state = {}
+        loader = mock.Mock(
+            side_effect=(
+                ads_posting_page.MetaAdsApiError("temporary timeout"),
+                {"ready": True},
+            )
+        )
+        first = ads_posting_page._session_cached_load(
+            state,
+            "value",
+            "error",
+            loader,
+        )
+        second = ads_posting_page._session_cached_load(
+            state,
+            "value",
+            "error",
+            loader,
+        )
+
+        self.assertEqual(first, ({}, "temporary timeout"))
+        self.assertEqual(second, ({"ready": True}, ""))
+        self.assertNotIn("error", state)
+        self.assertEqual(loader.call_count, 2)
+
+    def test_empty_startup_snapshot_can_be_explicitly_refreshed(self):
+        state = {}
+        config = {
+            "configured": True,
+            "page_token_present": True,
+            "page_id_present": True,
+            "instagram_user_id_present": True,
+            "api_version": "v26.0",
+            "api_version_source": "default",
+        }
+        ready = {
+            "account": {"id": "act-1"},
+            "page": {"id": "page-1"},
+            "instagram": {"id": "ig-1"},
+        }
+        with mock.patch.object(
+            ads_posting_page,
+            "safe_meta_config_status",
+            return_value=config,
+        ), mock.patch.object(
+            ads_posting_page,
+            "_load_meta_references",
+            side_effect=({}, ready),
+        ) as references, mock.patch.object(
+            ads_posting_page,
+            "_load_meta_overview",
+            return_value={"connected": False, "posting_ready": False},
+        ):
+            first = ads_posting_page._meta_state(state=state)
+            recovered = ads_posting_page._meta_state(state=state, force=True)
+
+        self.assertFalse(first[0]["posting_ready"])
+        self.assertTrue(recovered[0]["posting_ready"])
+        self.assertEqual(references.call_count, 2)
+
+    def test_new_campaign_first_render_keeps_optional_reads_lazy(self):
+        overview = {
+            "connected": True,
+            "posting_ready": True,
+            "summary": "Meta connected",
+        }
+        references = {
+            "catalog_resolution": {
+                "resolved": True,
+                "id": "catalog-1",
+                "name": "Shopify Product Catalog",
+            },
+            "dataset_resolution": {
+                "resolved": True,
+                "id": "dataset-1",
+                "name": "Sports Cave Pixel",
+            },
+            "product_sets": ({"id": "set-1", "name": "Products"},),
+            "page": {"id": "page-1"},
+            "instagram": {"id": "ig-1"},
+            "account": {"currency": "AUD"},
+            "existing_ad_names": (),
+        }
+        product_rows = tuple(record["row"] for record in product_records())
+        with mock.patch.object(
+            ads_posting_page,
+            "_meta_state",
+            return_value=(overview, references, "", ""),
+        ), mock.patch.object(
+            ads_posting_page,
+            "_product_rows_state",
+            return_value=product_rows,
+        ), mock.patch.object(
+            ads_posting_page,
+            "_existing_targets_state",
+        ) as existing_targets, mock.patch.object(
+            ads_posting_page,
+            "_load_recent_posts",
+        ) as recent_posts, mock.patch.object(
+            ads_posting_page,
+            "run_collection_validation_from_posting_state",
+        ) as collection_diagnostic, mock.patch.object(
+            ads_posting_page,
+            "run_collection_template_copy_from_posting_state",
+        ) as template_diagnostic:
+            app = AppTest.from_string(
+                "import ads_posting_page\nads_posting_page.render_page()"
+            ).run(timeout=20)
+            app.run(timeout=20)
+
+        existing_targets.assert_not_called()
+        recent_posts.assert_not_called()
+        collection_diagnostic.assert_not_called()
+        template_diagnostic.assert_not_called()
+        self.assertEqual(len(app.exception), 0)
+
     def test_ads_csv_dispatch_does_not_parse_rows_before_canonical_parser(self):
         source = ads_page.build_instant_experience_copy_csv(
             ads_result(),

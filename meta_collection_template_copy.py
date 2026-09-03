@@ -8,6 +8,7 @@ Campaign, ad-set, image and Instant Experience creation remain outside this modu
 
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 import time
 
@@ -272,6 +273,44 @@ class MetaCollectionTemplateCopyService:
             else rename_readback_delays
         ) or (0.0,)
 
+    def read_source_snapshot(self, source_ad_id):
+        """Read the immutable source once for one caller-owned Posting run."""
+
+        source_ad_id = str(source_ad_id or "").strip()
+        if not source_ad_id:
+            raise MetaCollectionTemplateCopySafetyError(
+                f"Configure {COLLECTION_TEMPLATE_AD_ENV_KEY} before running the template copy."
+            )
+        source_ad = dict(self.client.ad(source_ad_id) or {})
+        source_creative_id = _creative_id(source_ad)
+        if not source_creative_id:
+            raise MetaCollectionTemplateCopySafetyError(
+                "The configured Collection template ad has no readable creative. No copy was made."
+            )
+        source_creative = dict(self.client.creative(source_creative_id) or {})
+        return {
+            "source_ad_id": source_ad_id,
+            "source_ad": deepcopy(source_ad),
+            "source_creative": deepcopy(source_creative),
+        }
+
+    @staticmethod
+    def _validated_source_snapshot(source_ad_id, source_snapshot):
+        snapshot = dict(source_snapshot or {})
+        source_before = dict(snapshot.get("source_ad") or {})
+        source_creative = dict(snapshot.get("source_creative") or {})
+        if (
+            str(snapshot.get("source_ad_id") or "").strip() != source_ad_id
+            or str(source_before.get("id") or "").strip() != source_ad_id
+            or not _creative_id(source_before)
+            or str(source_creative.get("id") or "").strip()
+            != _creative_id(source_before)
+        ):
+            raise MetaCollectionTemplateCopySafetyError(
+                "The per-run Collection template snapshot is invalid. No copy was made."
+            )
+        return source_before, source_creative
+
     def _read_back_renamed_ad(self, ad_id, *, expected_ad_name):
         """Poll a copied ad for Meta's bounded, eventually-consistent name update."""
         expected_ad_name = str(expected_ad_name or "").strip()
@@ -349,6 +388,7 @@ class MetaCollectionTemplateCopyService:
         expected_ad_name,
         creative_parameters,
         persisted_ad_id="",
+        source_snapshot=None,
     ):
         """Create or reuse exactly one route-specific paused template copy."""
         source_ad_id = str(source_ad_id or "").strip()
@@ -360,13 +400,17 @@ class MetaCollectionTemplateCopyService:
             target_adset_id=target_adset_id,
             creative_parameters=creative_parameters,
         )
-        source_before = dict(self.client.ad(source_ad_id) or {})
-        source_creative_id = _creative_id(source_before)
-        if not source_creative_id:
-            raise MetaCollectionTemplateCopySafetyError(
-                "The configured Collection template ad has no readable creative. No copy was made."
+        if source_snapshot is None:
+            snapshot = self.read_source_snapshot(source_ad_id)
+            source_before, source_creative = self._validated_source_snapshot(
+                source_ad_id,
+                snapshot,
             )
-        source_creative = dict(self.client.creative(source_creative_id) or {})
+        else:
+            source_before, source_creative = self._validated_source_snapshot(
+                source_ad_id,
+                source_snapshot,
+            )
 
         matches = self._matching_route_copies(
             source_ad_id=source_ad_id,

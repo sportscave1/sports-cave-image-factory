@@ -12,7 +12,12 @@ from ads_image_workflow import (
     source_image_signature,
 )
 from ads_product_catalog import load_live_edition_product_rows
-from meta_ads_client import MetaAdsApiError, MetaPostingClient, diagnose_meta_posting_connection
+from meta_ads_client import (
+    MetaAdsApiError,
+    MetaPostingClient,
+    diagnose_meta_posting_connection,
+    safe_meta_config_status,
+)
 from meta_collection_diagnostics import (
     MetaCollectionDiagnosticSafetyError,
     MetaCollectionValidateOnlyProbe,
@@ -105,6 +110,7 @@ META_OVERVIEW_STATE_KEY = "ads_posting_meta_overview"
 META_OVERVIEW_ERROR_KEY = "ads_posting_meta_overview_error"
 META_REFERENCES_STATE_KEY = "ads_posting_meta_references"
 META_REFERENCES_ERROR_KEY = "ads_posting_meta_references_error"
+RECENT_POSTS_VISIBLE_KEY = f"{STATE_PREFIX}recent_posts_visible"
 PRODUCT_ROWS_STATE_KEY = "ads_posting_product_rows"
 PRODUCT_SELECTOR_STATE_KEY = "ads_posting_product_selector"
 PRODUCT_SELECTOR_RUNTIME_VERSION = "2026-09-03-session-selector-v1"
@@ -181,30 +187,80 @@ def _session_cached_load(state, value_key, error_key, loader, *, force=False):
     try:
         value = dict(loader() or {})
     except MetaAdsApiError as error:
-        state[error_key] = str(error)
+        # Do not poison the whole browser session with a transient first-read
+        # failure. The visible Refresh Meta action can retry immediately and the
+        # next ordinary rerun can also recover without restarting Sports Cave OS.
+        state.pop(error_key, None)
         return {}, str(error)
     state[value_key] = value
     return value, ""
 
 
-def _meta_state(*, force=False):
-    overview, overview_error = _session_cached_load(
-        st.session_state,
-        META_OVERVIEW_STATE_KEY,
-        META_OVERVIEW_ERROR_KEY,
-        _load_meta_overview,
-        force=force,
+def _startup_overview_from_references(references, *, config=None):
+    """Derive the normal page-ready state without a duplicate Graph diagnostic.
+
+    Full token/app/page diagnostics remain available as a fallback when the
+    required reference snapshot is incomplete. Creation still performs its own
+    fresh permission, Page-token and reference validation before any Meta write.
+    """
+
+    references = dict(references or {})
+    config = dict(config or safe_meta_config_status() or {})
+    account_ready = bool(references.get("account"))
+    identities_ready = bool(references.get("page") and references.get("instagram"))
+    connected = bool(config.get("configured") and account_ready)
+    posting_ready = bool(
+        connected
+        and config.get("page_token_present")
+        and config.get("page_id_present")
+        and config.get("instagram_user_id_present")
+        and identities_ready
     )
-    if overview_error or not overview.get("connected"):
+    return {
+        "connected": connected,
+        "posting_ready": posting_ready,
+        "summary": "Meta connected" if connected else "Meta unavailable",
+        "api_version": str(config.get("api_version") or "unknown"),
+        "api_version_source": str(config.get("api_version_source") or ""),
+        "permission_state": "verified before creation",
+        "checks": {},
+        "startup_source": "Posting reference snapshot",
+    }
+
+
+def _meta_state(*, force=False, state=None):
+    state = st.session_state if state is None else state
+    config = dict(safe_meta_config_status() or {})
+    if not config.get("configured"):
+        overview, overview_error = _session_cached_load(
+            state,
+            META_OVERVIEW_STATE_KEY,
+            META_OVERVIEW_ERROR_KEY,
+            _load_meta_overview,
+            force=force,
+        )
         return overview, {}, overview_error, ""
+
     references, references_error = _session_cached_load(
-        st.session_state,
+        state,
         META_REFERENCES_STATE_KEY,
         META_REFERENCES_ERROR_KEY,
         _load_meta_references,
         force=force,
     )
-    return overview, references, overview_error, references_error
+    overview = _startup_overview_from_references(references, config=config)
+    if references_error or not overview.get("posting_ready"):
+        diagnostic, overview_error = _session_cached_load(
+            state,
+            META_OVERVIEW_STATE_KEY,
+            META_OVERVIEW_ERROR_KEY,
+            _load_meta_overview,
+            force=force,
+        )
+        if diagnostic:
+            overview = diagnostic
+        return overview, references, overview_error, references_error
+    return overview, references, "", references_error
 
 
 def _existing_targets_state(*, force=False):
@@ -227,10 +283,11 @@ def _adsets_for_campaign(targets, campaign_id):
     )
 
 
-def _product_rows_state():
-    if PRODUCT_ROWS_STATE_KEY not in st.session_state:
-        st.session_state[PRODUCT_ROWS_STATE_KEY] = tuple(load_live_edition_product_rows())
-    return tuple(st.session_state.get(PRODUCT_ROWS_STATE_KEY) or ())
+def _product_rows_state(*, state=None):
+    state = st.session_state if state is None else state
+    if PRODUCT_ROWS_STATE_KEY not in state:
+        state[PRODUCT_ROWS_STATE_KEY] = tuple(load_live_edition_product_rows())
+    return tuple(state.get(PRODUCT_ROWS_STATE_KEY) or ())
 
 
 def _product_selector_state(product_rows, *, state=None):
@@ -947,8 +1004,9 @@ def _audience_options(references):
     return tuple(rows)
 
 
-def _render_object_result(result, *, title):
-    st.subheader(title)
+def _render_object_result(result, *, title, show_technical_details=True):
+    if title:
+        st.subheader(title)
     rows = []
     completed_paused = (
         str(result.get("status") or "").upper() == "COMPLETE"
@@ -1017,6 +1075,8 @@ def _render_object_result(result, *, title):
             )
         )
     st.dataframe(rows, hide_index=True, use_container_width=True)
+    if not show_technical_details:
+        return
     for ad_result in posting_ad_results(result.get("ad_results")):
         verification = dict(
             ad_result.get("instant_experience_verification") or {}
@@ -1059,40 +1119,20 @@ def _render_object_result(result, *, title):
 
 
 def _render_success(result):
-    st.success(SUCCESS_MESSAGE)
-    _render_object_result(result, title=str(result.get("ad_name") or "Created Meta hierarchy"))
-    currency = str(result.get("account_currency") or "account currency")
-    verified_lifecycle = str(
-        result.get("verified_lifecycle_strategy") or "UNKNOWN"
-    ).upper()
-    lifecycle_label = CUSTOMER_LIFECYCLE_LABELS.get(
-        verified_lifecycle,
-        "Inherited from selected Ad Set",
+    is_existing_mode = (
+        str(result.get("posting_mode") or POSTING_MODE_NEW).upper()
+        == POSTING_MODE_EXISTING
     )
-    st.caption(
-        f"Product: **{result.get('product_title') or ''}** · Country: **{result.get('country') or ''}** · "
-        f"Product set: **{result.get('product_set_name') or result.get('product_set_id') or ''}** · "
-        f"Destination: {result.get('destination_url') or ''}"
+    st.success(
+        "3 Meta ads added successfully — PAUSED"
+        if is_existing_mode
+        else SUCCESS_MESSAGE
     )
-    if str(result.get("posting_mode") or POSTING_MODE_NEW).upper() == POSTING_MODE_EXISTING:
-        st.caption(
-            "Existing Campaign and Ad Set retained their status, budget, audience and targeting · "
-            "3 new route ads: **PAUSED** · Multi-advertiser ads: **On** · "
-            "Generate backgrounds: **Off**"
-        )
-        st.caption(f"Customer lifecycle: **Inherited — {lifecycle_label}**")
-    else:
-        st.caption(
-            f"Campaign budget: **$25.00 {currency}/day** · Objective: **Sales** · Optimization: **Purchase** · "
-            "Placements: **Advantage+** · Audience: **Advantage+** · Multi-advertiser ads: **On** · "
-            "Generate backgrounds: **Off**"
-        )
-        st.caption(f"Customer lifecycle: **{lifecycle_label}**")
-    if result.get("lifecycle_verification_source"):
-        st.caption(
-            "Lifecycle verification: "
-            + str(result.get("lifecycle_verification_source"))
-        )
+    _render_object_result(
+        result,
+        title="Created Meta objects",
+        show_technical_details=False,
+    )
     first_ad = posting_ad_results(result.get("ad_results"))[0]
     link = ads_manager_url(
         account_id=MetaPostingClient().ad_account_id,
@@ -1214,6 +1254,14 @@ def _render_collection_template_copy(result):
 
 def _render_recent_posts():
     with st.expander("Recent Posting jobs", expanded=False):
+        if not st.session_state.get(RECENT_POSTS_VISIBLE_KEY):
+            st.caption("Load Posting history only when you need it.")
+            if not st.button(
+                "Load recent Posting jobs",
+                key=f"{STATE_PREFIX}load_recent_posts",
+            ):
+                return
+            st.session_state[RECENT_POSTS_VISIBLE_KEY] = True
         try:
             records = _load_recent_posts()
         except Exception:
@@ -1783,9 +1831,15 @@ def render_page():
             target_campaign_id=target_campaign_id,
             target_adset_id=target_adset_id,
         )
+        progress_status = st.status(spinner_label, expanded=False)
+
+        def update_progress(message):
+            progress_status.update(label=str(message or spinner_label), state="running")
+
         try:
-            with st.spinner(spinner_label):
-                posted = MetaPostingService().create_paused_campaign(request)
+            posted = MetaPostingService(
+                progress_callback=update_progress
+            ).create_paused_campaign(request)
         except (
             PostingValidationError,
             PostingBusyError,
@@ -1793,6 +1847,10 @@ def render_page():
             PostingAmbiguousError,
             PostingError,
         ) as error:
+            progress_status.update(
+                label="Posting stopped — review the result below",
+                state="error",
+            )
             st.error(str(error))
             partial = dict(getattr(error, "result", {}) or {})
             if partial:
@@ -1806,6 +1864,10 @@ def render_page():
             else:
                 st.session_state[RUN_STATE_KEY] = RUN_STATE_FAILED
         else:
+            progress_status.update(
+                label="Done — 3 Meta ads are PAUSED",
+                state="complete",
+            )
             st.session_state[RESULT_KEY] = dict(posted)
             st.session_state[RUN_STATE_KEY] = RUN_STATE_COMPLETE
             _load_recent_posts.clear()
