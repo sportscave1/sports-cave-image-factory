@@ -66,17 +66,14 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
                 ],
             )
             batch = _batch_from_carousel_rows(rows)
-            # Posting's existing contract uses one product URL and fixed SHOP_NOW.
-            # Never silently publish a different destination or CTA from the saved card.
+            # Posting uses one destination and the system SHOP_NOW CTA. Legacy
+            # card CTAs remain in source_copy/CSV for compatibility, but are not
+            # Posting inputs and must never prevent a Carousel handoff.
             for card in source_copy["cards"]:
                 if card.get("destination_url", "").strip() not in {"", shared["product_url"]}:
                     raise SavedPackageError(
                         f"Card {card['position']} has a different destination URL. "
                         "Posting supports one product URL for all five cards."
-                    )
-                if card.get("cta", "").strip().casefold().replace("_", " ") not in {"", "shop now"}:
-                    raise SavedPackageError(
-                        f"Card {card['position']} CTA is incompatible with Posting's fixed Shop Now CTA."
                     )
         else:
             # The very CSV bytes just uploaded: same canonical parser/route selection as manual import.

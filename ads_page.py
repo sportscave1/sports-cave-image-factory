@@ -21,7 +21,7 @@ from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 
 from activity_log import record_activity_log
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
-from ads_meta_contract import META_AD_URL_PARAMETERS
+from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import os_accounts
@@ -10064,6 +10064,8 @@ def _carousel_copy_notes_with_widget_state(result, workflow):
                 )
     for card in carousel["cards"]:
         for field_key in CAROUSEL_CARD_FIELDS:
+            if field_key == "cta":
+                continue  # Legacy CSV metadata only; Carousel has no CTA widget.
             widget_key = _carousel_card_widget_key(
                 context_key,
                 card["position"],
@@ -10382,6 +10384,8 @@ def apply_carousel_copy_csv(result, workflow, data):
             ] = value
     for card in parsed["cards"]:
         for field_key in CAROUSEL_CARD_FIELDS:
+            if field_key == "cta":
+                continue
             widget_updates[
                 _carousel_card_widget_key(
                     context_key,
@@ -11733,7 +11737,8 @@ def _render_carousel_setup_notes(result, workflow):
     with st.container(key="ads-setup-notes"):
         st.caption(
             "Edit the five ad-copy variations and the five card records. "
-            "Every card remains permanently mapped to its numbered image slot."
+            "Every card remains permanently mapped to its numbered image slot. "
+            f"Carousel always uses {META_DEFAULT_CTA.replace('_', ' ').title()}."
         )
         st.markdown("**Ad copy variations**")
         for position in range(1, CAROUSEL_COPY_VARIATION_COUNT + 1):
@@ -11824,29 +11829,16 @@ def _render_carousel_setup_notes(result, workflow):
                             ),
                             placeholder=f"Up to {CAROUSEL_CARD_MAX_CHARACTERS} characters",
                         )
-                    third, fourth = st.columns([2, 1])
-                    with third:
-                        card["destination_url"] = _carousel_text_input(
-                            f"Card {position} destination URL",
-                            card["destination_url"],
-                            key=_carousel_card_widget_key(
-                                context_key,
-                                position,
-                                "destination_url",
-                            ),
-                            placeholder="https://www.sportscaveshop.com/products/...",
-                        )
-                    with fourth:
-                        card["cta"] = _carousel_text_input(
-                            f"Card {position} CTA",
-                            card["cta"],
-                            key=_carousel_card_widget_key(
-                                context_key,
-                                position,
-                                "cta",
-                            ),
-                            placeholder="Shop Now",
-                        )
+                    card["destination_url"] = _carousel_text_input(
+                        f"Card {position} destination URL",
+                        card["destination_url"],
+                        key=_carousel_card_widget_key(
+                            context_key,
+                            position,
+                            "destination_url",
+                        ),
+                        placeholder="https://www.sportscaveshop.com/products/...",
+                    )
                     card["setup_notes"] = _carousel_text_area(
                         f"Card {position} setup notes (optional)",
                         card["setup_notes"],
@@ -12514,14 +12506,47 @@ def _retain_saved_posting_package(result, workflow, outcomes, items, folder):
             result=result, source_signature=_ads_saved_source_signature(result, saved_workflow),
             source_copy=source_copy, copy_csv=copy_csv, assets=assets, files=files, folder=folder,
         )
+        workflow.pop("posting_package_error", None)
     except (posting_handoff.SavedPackageError, ValueError) as error:
         # A handoff validation failure must not turn a successful Dropbox save into a failed save.
         workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
         workflow["posting_package_error"] = str(error)
 
 
+def _restore_saved_carousel_posting_package(result, workflow):
+    """Recover a previously blocked handoff from verified local save receipts.
+
+    Reuse the normal package builder only when the current copy still matches
+    the saved CSV and notes hashes. No download, upload or package re-save.
+    """
+    outcomes = workflow.get("outcomes") or {}
+    folder = workflow.get("saved_folder_path")
+    if not folder or (outcomes.get("_carousel_copy_csv") or {}).get("status") != "saved":
+        return
+    copy_csv = build_carousel_copy_csv(
+        result, workflow, carousel_notes=_carousel_copy_notes_from_workflow(result, workflow),
+    )
+    notes_bytes = build_ads_setup_notes_text(result, workflow, image_outcomes=outcomes).encode("utf-8")
+    for slot_id, data in (("_carousel_copy_csv", copy_csv), ("_ad_setup_notes", notes_bytes)):
+        if hashlib.sha256(data).hexdigest() != (outcomes.get(slot_id) or {}).get("signature"):
+            workflow["posting_package_error"] = "This Carousel has unsaved changes. Save the updated package before POST NOW."
+            return
+    items = [
+        {"slot_id": slot["id"], "kind": "image",
+         "data": ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data", b"")}
+        for slot in ads_image_workflow.campaign_image_slots("Carousel")
+    ] + [
+        {"slot_id": "_ad_setup_notes", "data": notes_bytes},
+        {"slot_id": "_carousel_copy_csv", "data": copy_csv},
+    ]
+    _retain_saved_posting_package(result, workflow, outcomes, items, folder)
+
+
 def _render_saved_ad_post_now(result, workflow, *, source_matches=True):
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
+    if not package and source_matches and result.get("campaign_type") == "Carousel":
+        _restore_saved_carousel_posting_package(result, workflow)
+        package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
     if not package:
         if workflow.get("posting_package_error"):
             st.info(str(workflow["posting_package_error"]))

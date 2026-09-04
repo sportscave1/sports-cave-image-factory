@@ -12,6 +12,8 @@ from streamlit.testing.v1 import AppTest
 import ads_page as ads
 import ads_posting_page as posting
 import ads_posting_handoff as handoff
+from ads_meta_contract import META_DEFAULT_CTA
+from meta_posting_service import build_carousel_creative_payload
 from posting_import_csv import parse_posting_import_csv, serialize_carousel_posting_import_csv
 from tests.test_ads_page import carousel_csv_notes, instant_experience_csv_notes
 from tests.test_posting_import_csv import ads_result, product_records
@@ -183,16 +185,110 @@ class SavedPackageTests(unittest.TestCase):
             next(iter(edited["slots"].values()))["data"] = b"replacement"
             self.assertNotEqual(original, ads._ads_saved_source_signature(result, edited))
 
-    def test_incompatible_carousel_fields_preserve_saved_outputs_and_explain_failure(self):
-        for field, value in (("destination_url", "https://example.com/different"), ("cta", "Learn More")):
-            with self.subTest(field=field):
+    def test_incompatible_carousel_destination_preserves_saved_outputs_and_explains_failure(self):
+        result, workflow = completed_ad()
+        workflow["ad_notes"]["carousel"]["cards"][0]["destination_url"] = "https://example.com/different"
+        uploaded = save_locally(result, workflow)
+        self.assertTrue(uploaded)
+        self.assertEqual(workflow["outcomes"]["_carousel_copy_csv"]["status"], "saved")
+        self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
+        self.assertIn("different destination URL", workflow["posting_package_error"])
+
+    def test_legacy_empty_and_absent_carousel_ctas_do_not_block_readiness(self):
+        for cta in ("Learn More", "Claim Your Edition", "", None):
+            with self.subTest(cta=cta):
                 result, workflow = completed_ad()
-                workflow["ad_notes"]["carousel"]["cards"][0][field] = value
-                uploaded = save_locally(result, workflow)
-                self.assertTrue(uploaded)
-                self.assertEqual(workflow["outcomes"]["_carousel_copy_csv"]["status"], "saved")
+                for card in workflow["ad_notes"]["carousel"]["cards"]:
+                    if cta is None:
+                        card.pop("cta")
+                    else:
+                        card["cta"] = cta
+                save_locally(result, workflow)
+                self.assertNotIn("posting_package_error", workflow)
+                package = workflow[handoff.SAVED_PACKAGE_KEY]
+                self.assertIs(handoff.validate_saved_package(package), package)
+                self.assertEqual(len(package["assets"]), 5)
+
+    def test_legacy_csv_hydrates_exact_copy_and_images_with_fixed_shop_now_payload(self):
+        result, workflow = completed_ad()
+        original = deepcopy(workflow["ad_notes"]["carousel"])
+        for card, cta in zip(original["cards"], ("Learn More", "Claim Your Edition", "", "Sign Up", "SHOP_NOW")):
+            card["cta"] = cta
+        legacy_csv = ads.build_carousel_copy_csv(result, carousel_notes=original)
+        self.assertEqual(ads.parse_carousel_copy_csv(legacy_csv, result), original)
+        stale_key = ads._carousel_card_widget_key(result["context_key"], 1, "cta")
+        with mock.patch.object(ads.st, "session_state", {stale_key: "A stale editable CTA"}):
+            ads.apply_carousel_copy_csv(result, workflow, legacy_csv)
+            self.assertEqual(ads._carousel_copy_notes_with_widget_state(result, workflow)["cards"][0]["cta"], "Learn More")
+        uploaded = save_locally(result, workflow)
+        package = workflow[handoff.SAVED_PACKAGE_KEY]
+        state = {}
+        handoff.queue_saved_package(package, state=state)
+        self.assertTrue(posting.consume_saved_posting_package(product_records(), state=state))
+        # The original CSV and every variation/card field survive in the loaded
+        # source package; CTA metadata cannot override the native Meta button.
+        loaded = state[handoff.LOADED_KEY]
+        self.assertEqual(loaded, package)
+        for field in ("headlines", "descriptions", "primary_texts", "setup_notes"):
+            self.assertEqual(loaded["source_copy"][field], original[field])
+        cards = []
+        for index, asset in enumerate(package["assets"]):
+            source = loaded["source_copy"]["cards"][index]
+            for field in ads.CAROUSEL_CARD_FIELDS:
+                self.assertEqual(source[field], original["cards"][index][field])
+            image = state[posting.CAROUSEL_IMAGE_STATE_KEYS[index]]
+            self.assertEqual(image["data"], uploaded[asset["path"]])
+            self.assertEqual(image["saved_asset"]["position"], index + 1)
+            self.assertEqual(image["saved_asset"]["slot_id"], f"carousel-{index + 1:02d}")
+            self.assertEqual(state[posting.CAROUSEL_HEADLINE_KEYS[index]], source["headline"])
+            self.assertEqual(state[posting.CAROUSEL_DESCRIPTION_KEYS[index]], source["description"])
+            cards.append({"image_hash": image["source_hash"],
+                          "headline": state[posting.CAROUSEL_HEADLINE_KEYS[index]],
+                          "description": state[posting.CAROUSEL_DESCRIPTION_KEYS[index]],
+                          "cta": source["cta"]})
+        primary = [state[key] for key in posting.CAROUSEL_PRIMARY_TEXT_KEYS]
+        self.assertEqual(primary, original["primary_texts"])
+        self.assertEqual(state[posting.COUNTRY_KEY], "AUS")
+        self.assertEqual(state[posting.SAVED_PRODUCT_URL_KEY]["url"], result["product_url"])
+        payload = build_carousel_creative_payload(
+            name="Local CTA regression", page_id="test-page", instagram_user_id="test-ig",
+            cards=cards, primary_texts=primary, destination_url=state[posting.SAVED_PRODUCT_URL_KEY]["url"],
+        )
+        link_data = payload["object_story_spec"]["link_data"]
+        self.assertEqual(link_data["call_to_action"]["type"], META_DEFAULT_CTA)
+        self.assertEqual([card["call_to_action"]["type"] for card in link_data["child_attachments"]], ["SHOP_NOW"] * 5)
+
+    def test_saved_receipt_recovery_rejects_unsaved_copy_missing_images_and_failed_saves(self):
+        for mutation in ("copy", "missing-image", "changed-image", "failed-notes", "failed-csv", "wrong-folder"):
+            with self.subTest(mutation=mutation):
+                result, workflow = completed_ad()
+                save_locally(result, workflow)
+                workflow.pop(handoff.SAVED_PACKAGE_KEY)
+                if mutation == "copy":
+                    workflow["ad_notes"]["carousel"]["primary_texts"][0] = "An unsaved edit"
+                elif mutation == "missing-image":
+                    workflow["slots"].pop("carousel-05")
+                elif mutation == "changed-image":
+                    workflow["slots"]["carousel-05"]["data"] = b"unsaved replacement"
+                elif mutation in {"failed-notes", "failed-csv"}:
+                    key = "_ad_setup_notes" if mutation == "failed-notes" else "_carousel_copy_csv"
+                    workflow["outcomes"][key]["status"] = "failed"
+                else:
+                    workflow["outcomes"]["carousel-05"]["path"] = "/different-folder/image.jpg"
+                ads._restore_saved_carousel_posting_package(result, workflow)
                 self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
-                self.assertIn("Card 1", workflow["posting_package_error"])
+
+    def test_instant_experience_creative_ctas_remain_exact(self):
+        result, workflow = completed_ad("Instant Experience")
+        original = deepcopy(workflow["ad_notes"]["instant_experience_concepts"])
+        save_locally(result, workflow)
+        state = {}
+        handoff.queue_saved_package(workflow[handoff.SAVED_PACKAGE_KEY], state=state)
+        posting.consume_saved_posting_package(product_records(), state=state)
+        self.assertEqual(state[handoff.LOADED_KEY]["source_copy"], original)
+        for route in state[posting.ADS_COPY_ROUTES_STATE_KEY]:
+            expected = original[route["route_key"]]
+            self.assertEqual([v["cta"] for v in route["variations"]], [v["cta"] for v in expected])
 
     def test_new_handoff_replaces_a_previous_complete_run_without_reusing_meta_ids(self):
         result, workflow = completed_ad()
@@ -290,6 +386,8 @@ ads_page._render_carousel_setup_notes(st.session_state["result"], st.session_sta
         for index in range(1, 6):
             for label in (f"Headline variation {index}", f"Description variation {index}", f"Primary text variation {index}", f"Card {index} headline"):
                 self.assertEqual(labels.count(label), 1)
+            self.assertNotIn(f"Card {index} CTA", labels)
+        self.assertTrue(any("Carousel always uses Shop Now" in item.value for item in app.caption))
         tree = ast.parse(Path(ads.__file__).read_text(encoding="utf-8"))
         renderer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "render_supported_result")
         calls = [n.value.func.id for n in renderer.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)]
@@ -301,6 +399,9 @@ ads_page._render_carousel_setup_notes(st.session_state["result"], st.session_sta
             for ad_type in ("Carousel", "Instant Experience"):
                 with self.subTest(source=source, ad_type=ad_type):
                     result, workflow = completed_ad(ad_type, source)
+                    if ad_type == "Carousel":
+                        for card in workflow["ad_notes"]["carousel"]["cards"]:
+                            card["cta"] = "Learn More"
                     save_locally(result, workflow)
                     with (
                         mock.patch.object(posting, "_meta_state", return_value=({}, {}, "", "")),
@@ -319,7 +420,7 @@ else:
     ads_page._render_saved_ad_post_now(st.session_state["result"], st.session_state["workflow"], source_matches=st.session_state.get("source_matches", True))
 ''')
                         app.session_state["result"] = result
-                        app.session_state["workflow"] = {**workflow, handoff.SAVED_PACKAGE_KEY: None}
+                        app.session_state["workflow"] = {**workflow, handoff.SAVED_PACKAGE_KEY: None, "outcomes": {}}
                         app.run(timeout=20)
                         self.assertNotIn("POST NOW", [button.label for button in app.button])
                         app.session_state["workflow"] = workflow
@@ -328,6 +429,8 @@ else:
                         self.assertNotIn("POST NOW", [button.label for button in app.button])
                         app.session_state["source_matches"] = True
                         app.run(timeout=20)
+                        self.assertIn("POST NOW", [button.label for button in app.button])
+                        self.assertFalse(any("CTA is incompatible" in item.value for item in app.info))
                         app.button[0].click().run(timeout=20)
                         self.assertEqual(len(app.exception), 0)
                         self.assertEqual(app.session_state[posting.AD_TYPE_KEY], ad_type)
@@ -340,6 +443,32 @@ else:
                         publish.assert_not_called()
                         diagnostic.assert_not_called()
                         template.assert_not_called()
+
+    def test_previously_cta_blocked_save_recovers_post_now_without_upload_or_copy_edits(self):
+        result, workflow = completed_ad()
+        workflow["ad_notes"]["carousel"]["cards"][0]["cta"] = "Claim Your Edition"
+        old_error = "Card 1 CTA is incompatible with Posting's fixed Shop Now CTA."
+        with mock.patch.object(handoff, "build_saved_package", side_effect=handoff.SavedPackageError(old_error)):
+            uploaded = save_locally(result, workflow, collision=True)
+        self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
+        self.assertEqual(workflow["posting_package_error"], old_error)
+        original_notes = deepcopy(workflow["ad_notes"])
+        with mock.patch.object(ads.dropbox_integration, "upload_batch", side_effect=AssertionError("No re-save")):
+            app = AppTest.from_string('''
+import streamlit as st
+import ads_page
+ads_page._render_saved_ad_post_now(st.session_state["result"], st.session_state["workflow"])
+''')
+            app.session_state["result"], app.session_state["workflow"] = result, workflow
+            app.run(timeout=20)
+            self.assertEqual(len(app.exception), 0)
+            self.assertIn("POST NOW", [button.label for button in app.button])
+            restored = app.session_state["workflow"]
+            self.assertNotIn("posting_package_error", restored)
+            self.assertEqual(restored["ad_notes"], original_notes)
+            package = restored[handoff.SAVED_PACKAGE_KEY]
+            for file in package["files"]:
+                self.assertEqual(file["sha256"], hashlib.sha256(uploaded[file["path"]]).hexdigest())
 
 
 if __name__ == "__main__":
