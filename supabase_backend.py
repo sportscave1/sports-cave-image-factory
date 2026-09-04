@@ -9631,6 +9631,8 @@ def update_edition_product(
     status=None,
     current_edition=None,
     allow_history_override=False,
+    manual_next_number_override=False,
+    expected_next_edition_number=None,
     reason="Manual edition edit",
 ):
     ensure_schema()
@@ -9650,6 +9652,8 @@ def update_edition_product(
                 status=status,
                 current_edition=current_edition,
                 allow_history_override=allow_history_override,
+                manual_next_number_override=manual_next_number_override,
+                expected_next_edition_number=expected_next_edition_number,
                 reason=reason,
             )
         conn.commit()
@@ -9668,12 +9672,16 @@ def _update_edition_product_with_cursor(
     status=None,
     current_edition=None,
     allow_history_override=False,
+    manual_next_number_override=False,
+    expected_next_edition_number=None,
     reason="Manual edition edit",
 ):
     handle = str(shopify_handle or "").strip()
     if not handle:
         raise ValueError("Shopify handle is required.")
-    product, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+    product, run = _get_active_edition_run_for_handle(
+        cur, handle, lock=True, create_missing=not manual_next_number_override
+    )
     if not product or not run:
         raise ValueError(f"No edition product found for {handle}.")
 
@@ -9705,6 +9713,62 @@ def _update_edition_product_with_cursor(
     allocation_count = _int_value(ledger_state.get("allocation_count"), 0)
     min_assigned = _int_value(ledger_state.get("min_assigned"), 0)
     max_assigned = _int_value(ledger_state.get("max_assigned"), 0)
+    if manual_next_number_override:
+        # Edition Ops explicitly edited this pointer. Do not rebuild allocation
+        # history/counters or copy stale Enabled/total values from its table.
+        proposed_next = _int_value(next_edition_number, 0)
+        if expected_next_edition_number is None or old_next != _int_value(expected_next_edition_number, 0):
+            raise ValueError("Next edition number changed since this table was loaded. Reload before saving the correction.")
+        if proposed_next < 1 or proposed_next > new_total + 1:
+            raise ValueError("Next edition number must be between 1 and one past the edition total.")
+        if new_total > 100 or (edition_total is not None and _int_value(edition_total, 0) < 1):
+            raise ValueError("Edition total must be between 1 and 100.")
+
+        run_fields = {"next_edition_number": proposed_next}
+        product_fields = {"next_edition_number": proposed_next}
+        if new_total != old_total:
+            if allocation_count:
+                raise ValueError("Edition total is immutable after the first allocation.")
+            stored_sold = _int_value(product.get("sold_count"), 0)
+            if new_total < max(max_assigned, stored_sold):
+                raise ValueError("Edition total cannot be below issued editions.")
+            run_fields["edition_total"] = new_total
+            product_fields.update(edition_total=new_total, remaining_count=new_total - stored_sold)
+        if active is not None and bool(active) != old_enabled:
+            requested_status = (
+                SOLD_OUT_RUN_STATUS if max_assigned >= new_total
+                else ACTIVE_RUN_STATUS if active else INACTIVE_RUN_STATUS
+            )
+            run_fields["status"] = requested_status
+            flags = _status_flags_from_run(requested_status)
+            product_fields.update(
+                active=flags["active"], is_active=flags["active"],
+                sold_out=flags["sold_out"], is_sold_out=flags["sold_out"],
+            )
+
+        # Column names come only from the fixed fields above, never UI input.
+        cur.execute(
+            "UPDATE edition_runs SET " + ", ".join(f"{field}=%s" for field in run_fields)
+            + ", updated_at=now() WHERE id=%s RETURNING *",
+            (*run_fields.values(), run.get("id")),
+        )
+        updated_run = cur.fetchone() or run
+        cur.execute(
+            "UPDATE edition_products SET " + ", ".join(f"{field}=%s" for field in product_fields)
+            + ", updated_at=now() WHERE id=%s",
+            (*product_fields.values(), product.get("id")),
+        )
+        _insert_edition_adjustment_with_cursor(
+            cur, product=product, run=updated_run, old_next=old_next, new_next=proposed_next,
+            old_total=old_total, new_total=new_total, reason=reason, source="manual_app",
+        )
+        return {
+            "handle": handle,
+            "next_edition_number": proposed_next,
+            "edition_total": new_total,
+            "manual_next_number_lowered": proposed_next <= max_assigned,
+            "highest_assigned_edition": max_assigned,
+        }
     if allocation_count and (min_assigned != 1 or allocation_count != max_assigned):
         raise ValueError(
             "Edition ledger sequence is not contiguous. Run the read-only reconciliation before editing this product."
@@ -9715,6 +9779,10 @@ def _update_edition_product_with_cursor(
         requested_next = _int_value(current_edition, 0) + 1
     elif next_edition_number is not None:
         requested_next = _int_value(next_edition_number, proposed_next)
+    if requested_next == old_next:
+        # An Enabled/total edit can carry an already-saved manual pointer.
+        # Keeping that value is not a new counter override.
+        proposed_next = old_next
     if requested_next is not None and requested_next != proposed_next:
         raise ValueError(
             f"Next edition number is ledger-derived ({proposed_next}) and cannot be edited directly."
@@ -9899,6 +9967,8 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
                         sold_out=(row or {}).get("sold_out"),
                         status=(row or {}).get("status"),
                         allow_history_override=bool((row or {}).get("allow_history_override")),
+                        manual_next_number_override=bool((row or {}).get("manual_next_number_override")),
+                        expected_next_edition_number=(row or {}).get("expected_next_edition_number"),
                         reason=row_reason,
                     )
                     results.append(

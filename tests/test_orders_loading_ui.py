@@ -2259,6 +2259,9 @@ class EditionOpsUiTests(unittest.TestCase):
             def file_uploader(self, *args, **kwargs):
                 return None
 
+            def empty(self):
+                return self
+
             def button(self, *args, **kwargs):
                 return False
 
@@ -2431,7 +2434,7 @@ class EditionOpsUiTests(unittest.TestCase):
             def form(self, *args, **kwargs):
                 return FakeContext()
 
-            def form_submit_button(self, label, *args, **kwargs):
+            def button(self, label, *args, **kwargs):
                 self.buttons.append((label, kwargs))
                 if label == "Save Changes" and not self.clicked:
                     self.clicked = True
@@ -3830,7 +3833,7 @@ class EditionOpsUiTests(unittest.TestCase):
         unchanged_status_only = dict(original)
         unchanged_status_only["sync_status"] = "Unsaved"
 
-        self.assertEqual(edition_ops._changed_rows([changed], [original]), [])
+        self.assertEqual(edition_ops._changed_rows([changed], [original]), [changed])
         self.assertEqual(edition_ops._changed_rows([unchanged_status_only], [original]), [])
         config_change = dict(original)
         config_change["edition_enabled"] = not original["edition_enabled"]
@@ -4302,7 +4305,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(saved["reason"], "Edition archived from Edition Ops")
         display_row = fake_st.session_state[edition_ops.ROWS_KEY][0]
         self.assertEqual(display_row["edition_remaining"], 59)
-        self.assertEqual(display_row["edition_status"], "Limited Edition")
+        self.assertEqual(display_row["edition_status"], "Inactive")
 
     def test_reenabling_archived_row_requires_next_number_inside_total(self):
         original = edition_ops._normalise_row(
@@ -4344,7 +4347,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "Warning: this product has assigned editions above this next number. Manual correction saved.",
         )
 
-    def test_save_changed_rows_ignores_manual_counter_lowering(self):
+    def test_save_changed_rows_persists_manual_counter_lowering_with_warning(self):
         original = edition_ops._normalise_row(
             {
                 "edition_product_id": "101",
@@ -4381,8 +4384,12 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             edition_ops._save_changed_rows()
 
-        self.assertEqual(saved_batches, [])
-        self.assertEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
+        self.assertEqual(len(saved_batches), 1)
+        self.assertEqual(saved_batches[0][0]["next_edition_number"], 80)
+        self.assertTrue(saved_batches[0][0]["manual_next_number_override"])
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_sold_count"], 94)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_remaining"], 6)
+        self.assertIn("Manual correction saved", fake_st.session_state[edition_ops.NOTICE_KEY])
         self.assertEqual(fake_st.session_state[edition_ops.NOTICE_LEVEL_KEY], "warning")
 
     def test_repeated_saves_use_latest_editor_widget_state(self):
@@ -4509,7 +4516,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
 
-    def test_editor_changes_recalculate_derived_fields_without_order_data(self):
+    def test_editor_pointer_changes_preserve_stored_derived_fields(self):
         source = edition_ops._normalise_row(
             {
                 "shopify_product_gid": "gid://shopify/Product/1",
@@ -4525,8 +4532,8 @@ class EditionOpsUiTests(unittest.TestCase):
             [source],
         )
 
-        self.assertEqual(merged[0]["edition_sold_count"], 19)
-        self.assertEqual(merged[0]["edition_remaining"], 81)
+        self.assertEqual(merged[0]["edition_sold_count"], 15)
+        self.assertEqual(merged[0]["edition_remaining"], 85)
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
