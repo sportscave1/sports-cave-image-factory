@@ -2113,6 +2113,17 @@ def build_product_image_manifest(assets, *, product_slug="product", sport_slug="
     output_names = set()
     for spec in PRODUCT_IMAGE_SLOT_SPECS:
         asset = _product_slot_asset(spec, normalized_assets)
+        if spec.get("prompt_filename") and asset.get("website_mockup_variant"):
+            # Keep the existing slot/order and filename format; only the selected
+            # website room identity varies for a submitted V2 brief.
+            spec = dict(spec)
+            room_label = str(asset["website_mockup_room"])
+            spec.update(
+                filename_suffix="black-framed-{sport}-" + slugify(asset["website_mockup_variant"]),
+                display_label=room_label,
+                image_type=slugify(room_label).replace("-", "_"),
+                shopify_alt_text_source=f"{room_label} lifestyle room",
+            )
         local_webp = _manifest_local_file(asset.get("webp_path"))
         local_jpg = _manifest_local_file(asset.get("jpg_path"))
         local_path = local_webp or local_jpg
@@ -3092,7 +3103,7 @@ def create_complete_pack_zip(
     return complete_zip_path
 
 
-def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
+def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file, *, room_variant=None):
     run_dir = Path(run_dir)
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
     jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
@@ -3101,7 +3112,7 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     jpg_dir.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    variant_slug = LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
+    variant_slug = slugify(room_variant) if room_variant else LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
     should_save_webp = is_product_page_prompt_filename(prompt_filename)
     webp_output_path = webp_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.webp"
     jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"

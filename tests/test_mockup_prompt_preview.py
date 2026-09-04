@@ -74,6 +74,15 @@ def tiny_png_bytes(color=(212, 165, 76)):
     return buffer.getvalue()
 
 
+def submit_default_website_brief(app_test):
+    for label, room in (("Mockup 1", "man-cave"), ("Mockup 2", "office"), ("Mockup 3", "living-room")):
+        next(select for select in app_test.selectbox if select.label == label).select(room)
+    app_test.run(timeout=30)
+    next(button for button in app_test.button if button.label == "Create Mockup Brief").click()
+    app_test.run(timeout=30)
+    return app_test
+
+
 def build_restored_generation_result(run_dir):
     run_dir = Path(run_dir)
     prompt_dir = run_dir / image_factory.PROMPTS_FOLDER_NAME
@@ -645,7 +654,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("Image Generation Prompts", mockups_page)
         self.assertNotIn("prompt_preview_rendered", mockups_page)
         self.assertLess(
-            mockups_page.index("final_prompt_items = build_mockup_final_prompt_items("),
+            mockups_page.index("final_prompt_items = []"),
             mockups_page.index('st.subheader("2. Generate Core Shopify Images")'),
         )
         self.assertIn("final_prompt_items=final_prompt_items", mockups_page)
@@ -673,14 +682,16 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("render_lifestyle_cards=False", mockups_page)
         self.assertNotIn("render_zip=False", mockups_page)
 
-    def test_stale_prompt_paths_are_refreshed_to_current_prompt_collection(self):
+    def test_historical_prompt_files_are_preserved_but_fixed_grid_is_not_rendered(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             app_test = AppTest.from_file(str(ROOT / "app.py"))
             app_test.session_state["sports_cave_authenticated"] = True
             app_test.session_state["selected_page"] = "Mockups"
             app_test.session_state["startup_shell_loaded"] = True
-            app_test.session_state["last_generation_result"] = build_stale_legacy_prompt_generation_result(run_dir)
+            historical = build_stale_legacy_prompt_generation_result(run_dir)
+            before = {path: Path(path).read_bytes() for path in historical["prompt_paths"]}
+            app_test.session_state["last_generation_result"] = historical
             app_test.run(timeout=30)
 
             self.assertEqual(len(app_test.exception), 0)
@@ -691,17 +702,11 @@ class MockupPromptPreviewTests(unittest.TestCase):
                 + [caption.value for caption in app_test.caption]
             )
 
-            self.assertEqual(prompt_names, EXPECTED_MOCKUP_PROMPT_FILENAMES)
-            self.assertEqual(
-                [item["filename"] for item in result["final_prompt_items"]],
-                EXPECTED_MOCKUP_PROMPT_FILENAMES,
-            )
-            self.assertNotIn("14-retired-social-prompt.txt", prompt_names)
+            self.assertEqual(prompt_names, [Path(path).name for path in before])
+            self.assertEqual({path: Path(path).read_bytes() for path in before}, before)
             self.assertNotIn("Retired Social Prompt", rendered_text)
-            self.assertIn("14 - Premium Man Cave With Pool Table (Social)", rendered_text)
-            self.assertIn("15 - Premium Tool Shed / Workshop (Social)", rendered_text)
-            self.assertIn("16 - Man Cave With Pool Table (Social)", rendered_text)
-            self.assertIn("17 - Architectural Loft / Statement Wall (Social)", rendered_text)
+            self.assertIn("Website Mockup Brief", [header.value for header in app_test.subheader])
+            self.assertEqual(len(app_test.file_uploader), 1)
 
     def test_image_factory_import_is_reloaded_when_prompt_specs_change(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -721,6 +726,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertIn("importlib.reload(image_factory)", reload_branch_source)
 
     def test_prompt_card_upload_auto_registers_for_zip_without_add_to_zip_click(self):
+        import app
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             app_test = AppTest.from_file(str(ROOT / "app.py"))
@@ -728,59 +734,28 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test.session_state["selected_page"] = "Mockups"
             app_test.session_state["startup_shell_loaded"] = True
             app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
-            app_test.run(timeout=20)
-
+            app_test.run(timeout=30)
+            submit_default_website_brief(app_test)
             self.assertEqual(len(app_test.exception), 0)
-            self.assertEqual(len(app_test.file_uploader), 18)
+            self.assertEqual(len(app_test.file_uploader), 4)
             self.assertNotIn("Add To ZIP", [button.label for button in app_test.button])
-
-            app_test.file_uploader[-1].set_value(
-                [("architectural-loft.png", tiny_png_bytes((20, 40, 80)), "image/png")]
+            app_test.file_uploader[3].set_value(
+                [("living-room.png", tiny_png_bytes((20, 40, 80)), "image/png")]
             )
             app_test.run(timeout=30)
-
             result = app_test.session_state["last_generation_result"]
-            prompt_name = "15-premium-tool-shed-workshop-prompt.txt"
+            prompt_name = "03-living-room-prompt.txt"
             self.assertIn(prompt_name, result["lifestyle_mockup_paths"])
-            social_assets = [
-                asset
-                for asset in result["assets"]
-                if asset.get("prompt_filename") == prompt_name
-                and asset.get("zip_group") == image_factory.ASSET_CATEGORY_SOCIAL
-            ]
-            self.assertEqual(len(social_assets), 1)
-            self.assertIsNone(social_assets[0]["webp_path"])
-            self.assertTrue(Path(social_assets[0]["jpg_path"]).exists())
-
-            core_checkbox = next(
-                checkbox
-                for checkbox in app_test.checkbox
-                if checkbox.label == "Core Images"
-            )
-            core_checkbox.uncheck()
-            app_test.run(timeout=30)
-
-            captions = [caption.value for caption in app_test.caption]
-            selected_count_captions = [
-                caption
-                for caption in captions
-                if "files selected for ZIP" in caption
-            ]
-            self.assertIn("1 files selected for ZIP", selected_count_captions)
-
-            zip_paths = sorted((run_dir / "zip").glob("apptest-product-selected-*.zip"), key=lambda path: path.stat().st_mtime)
-            self.assertTrue(zip_paths)
-            with zipfile.ZipFile(zip_paths[-1]) as archive:
-                names = set(archive.namelist())
-
-            self.assertEqual(
-                names,
-                {
-                    "jpg/apptest-product-black-framed-afl-premium-tool-shed-workshop-lifestyle.jpg",
-                },
-            )
-            self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
-            self.assertEqual(len(names), 1)
+            asset = next(asset for asset in result["assets"] if asset.get("prompt_filename") == prompt_name)
+            self.assertEqual(asset["zip_group"], image_factory.ASSET_CATEGORY_PRODUCT)
+            self.assertTrue(Path(asset["webp_path"]).exists())
+            self.assertTrue(Path(asset["jpg_path"]).exists())
+            package = app.build_filtered_download_zip(result, [image_factory.ASSET_CATEGORY_PRODUCT])
+            with zipfile.ZipFile(package) as archive:
+                self.assertEqual(archive.namelist(), [
+                    "WEBP/apptest-product-black-framed-afl-living-room-lifestyle.webp",
+                    "jpg/apptest-product-black-framed-afl-living-room-lifestyle.jpg",
+                ])
 
     def test_prompt_card_uploads_do_not_force_full_page_reruns(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -811,8 +786,9 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
             app_test.run(timeout=20)
 
+            submit_default_website_brief(app_test)
             uploader_count = len(app_test.file_uploader)
-            self.assertEqual(uploader_count, 18)
+            self.assertEqual(uploader_count, 4)
             app_test.file_uploader[1].set_value(
                 [("first-lifestyle.png", tiny_png_bytes((20, 40, 80)), "image/png")]
             )

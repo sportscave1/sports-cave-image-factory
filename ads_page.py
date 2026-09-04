@@ -2788,7 +2788,7 @@ CAROUSEL_NOSTALGIC_WALL_TONES = {
     "other": ("muted gallery taupe", "restrained collector galleries and warm painted walls"),
 }
 CAROUSEL_WALL_SPORT_ALIASES = {
-    "basketball": "nba", "nba basketball": "nba",
+    "basketball": "nba", "nba basketball": "nba", "basketball nba": "nba",
     "soccer": "football", "association football": "football", "football soccer": "football",
     "american football": "nfl", "american football nfl": "nfl",
     "afl": "australian rules", "aussie rules": "australian rules", "australian rules football": "australian rules",
@@ -2802,7 +2802,7 @@ CAROUSEL_WALL_SPORT_ALIASES = {
 
 
 def carousel_nostalgic_wall_treatment(category):
-    sport = _normalise_option_label(re.sub(r"[^\w]+", " ", str(category or "").casefold()))
+    sport = _normalise_option_label(re.sub(r"[\W_]+", " ", str(category or "").casefold()))
     sport = CAROUSEL_WALL_SPORT_ALIASES.get(sport, sport)
     tone, heritage = CAROUSEL_NOSTALGIC_WALL_TONES.get(sport, CAROUSEL_NOSTALGIC_WALL_TONES["other"])
     return (
@@ -2843,7 +2843,7 @@ def build_carousel_card_one_mockups_close_up_foundation(*, category="", workflow
         ).replace("premium black timber frame.", "preserve the source frame material and colour; premium black timber only when the uploaded frame uses black timber.")
         foundation = foundation.replace("artwork and black frame,", "artwork and its unchanged frame,").replace(
             "No logos.", "No added logos. Preserve every logo already present in the uploaded artwork."
-        )
+        ).replace("makes the black frame and artwork stand out", "makes the supplied frame and artwork stand out")
     return foundation.strip()
 
 
@@ -2921,7 +2921,7 @@ Reject flat pasted-on artwork, fake or missing glass, plastic frame materials, a
         prompt = prompt.replace(
             "At most, allow a small restrained edge of a console, cabinet or surface at the bottom of the image, but only if it does not reduce the frame's required product dominance.",
             "Do not add furniture or room decor; keep only the frame and narrow wall context.",
-        )
+        ).replace("physically convincing premium timber frame depth", "physically convincing depth in the exact source frame material")
         if "Required nostalgic wall tone:" not in prompt:
             prompt += "\n\n" + carousel_nostalgic_wall_treatment(category)
         prompt += """
@@ -3050,6 +3050,8 @@ def build_carousel_image_prompt_schema(
         ).replace("realistic black timber or frame depth", "realistic source frame depth; black timber only when the source uses it")
         photorealism_lock = photorealism_lock.replace(
             "genuine high-end interior photograph", "genuine high-end product photograph"
+        ).replace(
+            "convincing timber depth", "convincing depth in its exact source material"
         ).replace(
             "Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic.",
             "Keep the wall restrained and believable. No people, furniture or decor. Only the framed product and the objects explicitly required by this card may appear.",
@@ -6675,9 +6677,9 @@ def apply_campaign_visual_output_contract(
         return prompt
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
     expected_version = ads_prompt_contract_version_for_campaign(campaign_type, workflow_mode=workflow_mode)
-    if expected_version in prompt:
-        return prompt
     new_carousel = campaign_type == "Carousel" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW
+    if expected_version in prompt or (new_carousel and expected_version.replace("; ", "\n") in prompt):
+        return prompt
     if campaign_type != "Instant Experience" and not new_carousel and ADS_PROMPT_CONTRACT_VERSION in prompt:
         return prompt
     if marker in prompt:

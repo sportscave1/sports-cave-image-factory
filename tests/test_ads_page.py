@@ -2683,7 +2683,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("The frame should be the hero of the image.", card_one)
         self.assertIn("approximately 65-80% of the useful square composition", card_one)
         self.assertIn("Keep all four outer frame edges and all four corners completely visible.", card_one)
-        self.assertIn("Use an almost perfectly straight-on camera position", card_one)
+        self.assertIn("Require a subtle 5–12 degree off-axis / slight three-quarter camera angle", card_one)
+        self.assertNotIn("almost perfectly straight-on", card_one)
         self.assertIn("premium 70-85 mm product-photography lens", card_one)
         self.assertIn("No wide-angle room view.", card_one)
         self.assertIn("No room-establishing composition.", card_one)
@@ -2750,11 +2751,11 @@ PRIMARY TEXT VARIATIONS
                 self.assertNotIn("approximately 65-80% of the useful square composition", sections[index])
 
         self.assertIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", sections[5])
-        self.assertIn("dramatic product-led scarcity image using a close or medium-close composition", sections[5])
-        self.assertIn("must remain one of the largest elements", sections[5])
-        self.assertIn("must not become secondary to scarcity messaging", sections[5])
-        self.assertIn("never invent, replace or modify an edition number", sections[5])
-        self.assertIn("Do not zoom out significantly farther than Cards 2-4.", sections[5])
+        self.assertIn("premium photorealistic magnifying glass detail shot", sections[5])
+        self.assertIn("Keep the framed edition among the largest elements", sections[5])
+        self.assertIn("genuine limited-edition detail becomes the visual hero through the lens", sections[5])
+        self.assertIn("Never invent, replace or modify an edition number", sections[5])
+        self.assertIn("No distortion or artificial blur outside the magnifying glass", sections[5])
         self.assertIn("Keep the complete outer frame visible", sections[5])
         self.assertNotIn("approximately 65-80% of the useful square composition", sections[5])
 
@@ -2793,12 +2794,13 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
                 self.assertIn("LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
                 self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", section)
-                self.assertIn("genuine high-end interior photograph", section)
+                self.assertIn("genuine high-end product photograph" if index in {1, 5} else "genuine high-end interior photograph", section)
                 self.assertIn("Create realistic contact shadows behind and below the frame.", section)
                 self.assertIn("subtle, controlled glass reflections without obscuring the artwork", section)
-                self.assertIn("convincing timber depth, sharp corners, natural texture and accurate mounting", section)
+                material_depth = "convincing depth in its exact source material" if index in {1, 5} else "convincing timber depth"
+                self.assertIn(f"{material_depth}, sharp corners, natural texture and accurate mounting", section)
                 self.assertIn("Avoid warped walls, bent furniture, duplicate objects", section)
-                self.assertIn("Do not add people unless the individual carousel concept explicitly requires them", section)
+                self.assertIn("No people, furniture or decor" if index in {1, 5} else "Do not add people unless the individual carousel concept explicitly requires them", section)
                 self.assertIn(ads_page.build_carousel_final_square_format_check(), section)
 
     def test_carousel_square_lock_reaches_every_category_country_and_role_variation(self):

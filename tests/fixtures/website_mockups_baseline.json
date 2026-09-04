@@ -1,0 +1,42 @@
+{
+  "prompts": {
+    "01-man-cave-prompt.txt": "a2d1a8d3e7d978555a198926a58e14608779ee91ff2ba96a805c23245f8d4214",
+    "02-office-prompt.txt": "f2f9f01ecf64cccb1a163c1eb69cb41945bb1b3b3b408cdf88f02a65c6d07376",
+    "03-living-room-prompt.txt": "5ee9752529d26e32d869436e793a973cb4de98e0ae089146025b281e07a26002",
+    "04-close-up-wall-prompt.txt": "4846f17174492b45bd40ec8943a8e9123dce7c2b1cdcd3ecef9311428f3f8511",
+    "05-limited-edition-detail-prompt.txt": "29e41e39d37a59a1ac71710afb98091a8ed74323ebb626eb262df1a783ed1a7a",
+    "06-instant-experience-cover-prompt.txt": "6ffe8e18ea6500e3e9fbbfdc900b6c12f6f8979aaa47420edcb1f8075a2ecfb1",
+    "07-home-sports-bar-prompt.txt": "56a2569adc6aea75cc5319eca89c00e886eafa688f9404f0aad6fbd296b6fa4c",
+    "08-collector-display-room-prompt.txt": "ec30468e352cb55b33ee787fb8bb1ef6386a48f277ea035120aa1a742d867360",
+    "09-luxury-entry-wall-prompt.txt": "581e70cdfde3dfe8f696e90a5614ffa72c29d83c52fbebe4384255f4d0007e94",
+    "10-private-club-lounge-prompt.txt": "3ce080eee4ab5cd51a4783d232e589aa089d71bf3ccf55a8571b694dd47d73df",
+    "11-wall-upgrade-moment-prompt.txt": "831796c800af3d163ee00c5b2fc0ed32020596e9c795199524eafc0e1ff7e9c3",
+    "12-fireplace-feature-wall-prompt.txt": "c74ecde9720246baecb22c2525419c5856c10d0a4f311068b57ad5354b75894f",
+    "13-premium-bedroom-prompt.txt": "78205884b841c7d2662c5312f8c3aba45f008ec30d08788b99c5bf9485456d2b",
+    "14-man-cave-pool-table-prompt.txt": "76487202d9f50aec3abbe8117a3185c7018f57152d305eb3540eae8bcab3695b",
+    "15-premium-tool-shed-workshop-prompt.txt": "4ba63ada618f4c22a3e026e13eb3c5130ce099b7253066ccd7f1cedffd4b8e1b",
+    "16-man-cave-with-pool-table-prompt.txt": "89bcf804b137b741ef01696139a99b35a09266dceeaab2bae36408e8e4b0f9a4",
+    "17-architectural-loft-prompt.txt": "b542b4ead98fe01a97e3eab05aa5509acdf1f9dc04ad7885f85e6b700b400d8d"
+  },
+  "functions": {
+    "image_factory.py:copy_uploaded_image_to_temp": "e828798e6d8fb418193348d198e73dc28c8c39584cee6ba552a5e27ed865802f",
+    "image_factory.py:resize_lifestyle_source_if_needed": "8ea2b51c790cbfd5247b83adb528fe2a2dac72ebccc540f724c3627dec5a823f",
+    "image_factory.py:slugify": "fd6887c3576cca1b004798498f4382c3797b6b207a35da51a53926bb2f62c996",
+    "image_factory.py:rebuild_export_folders": "1dae1a36e9f37044e5b6d250b86585280ba98d15e52ccacd6d038434b96ed92e",
+    "image_factory.py:create_download_bundle_zip": "e73ce4bcfe5336a648da0f45ae7e18c810a212f779c9b16ad0f73356721819fd",
+    "image_factory.py:create_complete_pack_zip": "19eb34b22db31fb430800672cc6f9e049a6bdcd44feeb666c08cc5636ffe6539",
+    "image_factory.py:generate_product_images": "b69097c96fc4b4a23b32db301439103324194d0cd9441c60b398cf429050800b",
+    "app.py:process_uploaded_artwork_once": "c6f891199c98d66603bb655410719a9e7ad33465e8791b3531e288c8fb75a4ac",
+    "app.py:validate_uploaded_artwork": "a20485d1ea75aa7369ed57d345ead44b08059397adb9b815db586d20ae422f8d",
+    "app.py:render_asset_download_controls": "7f2c360f3741e4cb8de14931abe428c08f45b34a3fc8324eda6722049bbabaee",
+    "app.py:render_preview_card": "706d8db17f430599892e1a0755817c0f6568a1f0cf7ee22725a8097acf8df70f",
+    "app.py:render_generated_previews": "8cc2dedddf6fb5d3cdc98adeef6f6c9a425d770a2991038e810e5a360b24ff9e",
+    "app.py:_save_mockups_to_dropbox": "02864eb47b4ded3342d68d7a43e3a938b876498b9afe5b9cd1160612de3a3b0b",
+    "app.py:render_final_zip_download": "8074bcdda7c6bfa6e14c3e91757d49d19b207c4730e6b42a97119d2eb14c74a2",
+    "design_studio_styles.py:style_labels": "68aebc6525b30fc2d194ff9362012e525ed0ca16dd49a3e893322edb85dad007",
+    "design_studio_styles.py:normalize_design_style": "f0991f4e4d8c72b25006d78bb1858026ff0286c7a187699aa1946171ef6f832b",
+    "sports_cave_prompt_blocks.py:build_sports_cave_image_realism_rules": "59f5603e1f52b687576c5a2b26b57ccbbc459a8718597b5fbb7ff96fdc181dfa",
+    "sports_cave_prompt_blocks.py:append_sports_cave_prompt_blocks": "93db25b31e842b93310f6496993ed22c6dddb57b6d19e7b94eddbb9e1658607b"
+  },
+  "master": "1b289e57c80a523c2e6e9eca0ac63a3f2cf0058e22d661cca21f783f193b9b12"
+}

@@ -367,7 +367,9 @@ class MockupEightImageManifestTests(unittest.TestCase):
         )
         self.assertIn("@st.fragment", inspect.getsource(app.render_prompt_cards))
         self.assertNotIn("st.rerun", source)
-        self.assertIn("lifestyle-upload::{result['run_dir']}::{prompt_name}", source)
+        self.assertIn("lifestyle-upload::{get_lifestyle_upload_slot_key(result, prompt_path)}", source)
+        self.assertEqual(app.get_lifestyle_upload_slot_key({"run_dir": "existing-run"}, "01-man-cave-prompt.txt"),
+                         "existing-run::01-man-cave-prompt.txt")
 
     def test_complete_zip_keeps_supporting_prompt_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
