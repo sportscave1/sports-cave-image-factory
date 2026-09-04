@@ -6788,14 +6788,8 @@ def normalize_generation_result(result):
     }
     normalized = defaults.copy()
     normalized.update(result or {})
-    if not normalized.get("website_mockup_brief"):
-        normalized = migrate_legacy_product_room_state(normalized)
+    normalized = migrate_legacy_product_room_state(normalized)
     normalized = ensure_result_assets(normalized)
-    if normalized.get("website_mockup_brief"):
-        import website_mockups
-        normalized["assets"] = website_mockups.apply_snapshot_assets(
-            normalized["assets"], normalized["website_mockup_brief"]
-        )
     normalized["product_image_manifest"] = factory.build_product_image_manifest(
         normalized["assets"],
         product_slug=normalized.get("product_slug") or "product",
@@ -7508,9 +7502,6 @@ def write_local_manifest(result, uploaded_files=None):
         }
     )
 
-    for key in ("website_mockups_version", "website_mockup_brief", "website_mockup_history"):
-        if key in result:
-            manifest_data[key] = result[key]
     manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
     result["manifest_path"] = manifest_path
     return manifest_path
@@ -7687,10 +7678,6 @@ def prompt_items_match_current_mockup_collection(prompt_items):
 
 
 def build_current_mockup_prompt_items_for_result(result):
-    if result.get("website_mockups_version") == 2:
-        import website_mockups
-        snapshot = result.get("website_mockup_brief")
-        return website_mockups.prompt_items(snapshot) if snapshot else []
     factory = get_image_factory()
     return factory.build_lifestyle_prompt_items(
         result.get("product_name"),
@@ -7723,19 +7710,6 @@ def write_lifestyle_prompt_text_files(result):
 
 def ensure_lifestyle_prompts(result):
     result = normalize_generation_result(result)
-
-    if result.get("website_mockups_version") == 2:
-        items = build_current_mockup_prompt_items_for_result(result)
-        if not items:
-            result["final_prompt_items"], result["prompt_paths"] = [], []
-            return result
-        expected = [item["filename"] for item in items]
-        existing = [Path(path) for path in result.get("prompt_paths", [])]
-        if result.get("final_prompt_items") != items or [path.name for path in existing if path.exists()] != expected:
-            result["final_prompt_items"] = items
-            result = write_lifestyle_prompt_text_files(result)
-            write_local_manifest(result)
-        return result
 
     existing_prompt_paths = [
         str(Path(prompt_path))
@@ -7812,11 +7786,7 @@ def build_lifestyle_prompt_pack(result):
     run_dir = Path(result["run_dir"])
     zip_dir = Path(result["zip_dir"] or (run_dir / "zip"))
     zip_dir.mkdir(parents=True, exist_ok=True)
-    if result.get("website_mockups_version") == 2:
-        result["final_prompt_items"] = build_current_mockup_prompt_items_for_result(result)
-        if not result["final_prompt_items"]:
-            raise ValueError("Create the Website Mockup Brief first.")
-    elif not prompt_items_match_current_mockup_collection(result.get("final_prompt_items")):
+    if not prompt_items_match_current_mockup_collection(result.get("final_prompt_items")):
         result["final_prompt_items"] = build_current_mockup_prompt_items_for_result(result)
 
     prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
@@ -7985,25 +7955,12 @@ def get_zip_manifest_hash(assets, selected_groups):
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
-def build_lifestyle_asset(prompt_path, saved_paths, *, snapshot=None):
-    asset = build_lifestyle_asset_from_prompt_filename(Path(prompt_path).name, saved_paths)
-    if snapshot:
-        import website_mockups
-        asset = website_mockups.apply_slot_metadata(asset, website_mockups.selected_slot(snapshot, Path(prompt_path).name))
-    return asset
+def build_lifestyle_asset(prompt_path, saved_paths):
+    return build_lifestyle_asset_from_prompt_filename(Path(prompt_path).name, saved_paths)
 
 
 def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
     result = normalize_generation_result(result)
-
-    save_options = {}
-    snapshot = result.get("website_mockup_brief")
-    if snapshot:
-        import website_mockups
-        slot = website_mockups.selected_slot(snapshot, Path(prompt_path).name)
-        if slot is None:
-            raise ValueError("This upload does not belong to the submitted mockup brief.")
-        save_options["room_variant"] = slot["variant"]
 
     saved_paths = image_factory.save_lifestyle_mockup(
         run_dir=result["run_dir"],
@@ -8011,21 +7968,19 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         sport_slug=result["sport_slug"],
         prompt_filename=Path(prompt_path).name,
         image_file=uploaded_file,
-        **save_options,
     )
 
     prompt_filename = Path(prompt_path).name
     result["lifestyle_mockup_paths"][prompt_filename] = saved_paths
-    result = upsert_result_asset(result, build_lifestyle_asset(prompt_path, saved_paths, snapshot=snapshot))
+    result = upsert_result_asset(result, build_lifestyle_asset(prompt_path, saved_paths))
 
-    saved_label = f"{slot['number']:02d} — {slot['label']}" if snapshot else get_prompt_label(prompt_path)
     result["lifestyle_pack_error"] = None
-    result["status_text"] = f"Saved lifestyle image for {saved_label}."
+    result["status_text"] = f"Saved lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
     record_activity_log(
         "mockup_uploaded",
         "Mockups",
-        f"Added mockup: {saved_label}",
+        f"Added mockup: {get_prompt_label(prompt_path)}",
         entity_type="mockup_run",
         entity_id=str(result.get("run_dir") or ""),
         metadata={
@@ -8089,9 +8044,7 @@ def _mockups_lifestyle_upload_lifecycle():
 
 
 def get_lifestyle_upload_slot_key(result, prompt_path):
-    key = f"{result['run_dir']}::{Path(prompt_path).name}"
-    brief_id = (result.get("website_mockup_brief") or {}).get("id")
-    return f"{key}::{brief_id}" if brief_id else key
+    return f"{result['run_dir']}::{Path(prompt_path).name}"
 
 
 def get_lifestyle_upload_lifecycle(result, prompt_path):
@@ -8173,12 +8126,8 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
     """
     result = normalize_generation_result(result)
     prompt_name = Path(prompt_path).name
+    upload_signature_key = f"lifestyle-upload-signature::{result['run_dir']}::{prompt_name}"
     slot_key = get_lifestyle_upload_slot_key(result, prompt_path)
-    upload_signature_key = f"lifestyle-upload-signature::{slot_key}"
-    latest = st.session_state.get("last_generation_result")
-    if result.get("website_mockup_brief") and isinstance(latest, dict) and str(latest.get("run_dir")) == str(result.get("run_dir")):
-        if (latest.get("website_mockup_brief") or {}).get("id") != result["website_mockup_brief"]["id"]:
-            return normalize_generation_result(latest)
     lifecycle = _mockups_lifestyle_upload_lifecycle()
     saved_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
@@ -8317,11 +8266,6 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
     authoritative = lifecycle.get(slot_key) or {}
     if authoritative.get("request_id") != request_id:
         return _current_mockups_result_for_run(result)
-
-    latest = st.session_state.get("last_generation_result")
-    if result.get("website_mockup_brief") and isinstance(latest, dict) and str(latest.get("run_dir")) == str(result.get("run_dir")):
-        if (latest.get("website_mockup_brief") or {}).get("id") != result["website_mockup_brief"]["id"]:
-            return normalize_generation_result(latest)
 
     st.session_state[upload_signature_key] = upload_signature
     st.session_state.last_generation_result = updated_result
@@ -8998,29 +8942,21 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
         st.caption(caption)
     cols = st.columns(3)
 
-    snapshot = result.get("website_mockup_brief")
     for index, prompt_path in enumerate(prompt_paths):
         with cols[index % 3]:
             prompt_title = get_prompt_label(prompt_path)
-            if snapshot:
-                import website_mockups
-                slot = website_mockups.selected_slot(snapshot, prompt_path.name)
-                if slot is None:
-                    continue
-                prompt_title = f"{slot['number']:02d} — {slot['label']}"
             st.markdown(f"**{prompt_title}**")
             prompt_name = prompt_path.name
-            if not snapshot:
-                default_prompt_text = prompt_path.read_text(encoding="utf-8")
-                prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
-                prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
-                prompt_key = f"{result['run_dir']}::{prompt_name}"
-                render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
+            default_prompt_text = prompt_path.read_text(encoding="utf-8")
+            prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
+            prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
+            prompt_key = f"{result['run_dir']}::{prompt_name}"
+            render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
                 type=["png", "jpg", "jpeg", "webp"],
-                key=f"lifestyle-upload::{get_lifestyle_upload_slot_key(result, prompt_path)}",
+                key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
             )
 
             upload_error_rendered = False
@@ -9072,7 +9008,7 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
             if saved_lifestyle_paths:
                 saved_preview_path = saved_lifestyle_paths.get("preview_path")
                 if saved_preview_path and Path(saved_preview_path).exists():
-                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths, snapshot=snapshot)
+                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
                     render_preview_card(
                         lifestyle_asset,
                         result["run_dir"],
@@ -9212,8 +9148,7 @@ def render_optional_package_controls(result):
 
 def render_generation_result(result):
     result = normalize_generation_result(result)
-    if result.get("website_mockups_version") == 2:
-        result = ensure_lifestyle_prompts(result)
+    result = ensure_lifestyle_prompts(result)
     if not result_is_dropbox_backed(result):
         result = ensure_primary_download_zip(result)
     st.session_state.last_generation_result = result
@@ -9241,92 +9176,30 @@ def render_generation_result(result):
             f"{result['lifestyle_pack_error']}"
         )
 
-    render_website_mockup_brief(result)
+    prompt_paths = [
+        Path(prompt_path)
+        for prompt_path in result["prompt_paths"]
+        if Path(prompt_path).exists()
+    ]
 
+    if prompt_paths:
+        st.info(
+            "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
+        )
+        product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
+        social_prompts = [
+            path
+            for path in prompt_paths
+            if not is_product_page_prompt(path) and not is_reels_prompt(path)
+        ]
 
-def submit_website_mockup_brief(result, design_type, era, rooms):
-    import website_mockups
-
-    # Build and validate before touching the active run. Snapshot history stores
-    # associations only; previous image files and historical folders stay put.
-    snapshot = website_mockups.create_snapshot(
-        result.get("product_name"), result.get("sport_category"), design_type, era, rooms
-    )
-    lifecycle_prefix = f"{result['run_dir']}::"
-    if any(key.startswith(lifecycle_prefix) and record.get("status") == "PROCESSING"
-           and time.time() - float(record.get("started_at") or 0) < MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS
-           for key, record in _mockups_lifestyle_upload_lifecycle().items()):
-        raise ValueError("Wait for the current image upload to finish before creating another brief.")
-    updated = _isolated_lifestyle_upload_result(normalize_generation_result(result))
-    history = list(updated.get("website_mockup_history") or [])
-    if updated.get("website_mockup_brief") or updated.get("lifestyle_mockup_paths"):
-        history.append(json.loads(json.dumps({
-            "brief": updated.get("website_mockup_brief"),
-            "lifestyle_mockup_paths": updated.get("lifestyle_mockup_paths"),
-            "assets": [asset for asset in updated["assets"] if asset.get("asset_group") == "lifestyle"],
-        }, default=str)))
-    updated.update(website_mockups_version=2, website_mockup_brief=snapshot, website_mockup_history=history,
-                   lifestyle_mockup_paths={}, final_prompt_items=website_mockups.prompt_items(snapshot), prompt_paths=[])
-    updated["assets"] = [asset for asset in updated["assets"] if asset.get("asset_group") != "lifestyle"]
-    # Detach old package pointers before the existing rebuild; don't unlink a
-    # historical package when a new brief is submitted.
-    for key in ("zip_path", "social_zip_path", "complete_zip_path", "prompt_zip_path"):
-        updated[key] = None
-    updated = write_lifestyle_prompt_text_files(updated)
-    updated = rebuild_result_artifacts(updated)
-    updated["status_text"] = "Website mockup brief ready. Upload the three matching images."
-    st.session_state.last_generation_result = updated
-    return updated
-
-
-def render_website_mockup_brief(result):
-    import website_mockups
-
-    st.subheader("Website Mockup Brief")
-    run_key = hashlib.sha1(str(result["run_dir"]).encode()).hexdigest()[:12]
-    prefix = f"website-brief::{run_key}"
-    snapshot = result.get("website_mockup_brief")
-    design_options = website_mockups.design_type_options()
-    design_key, era_key = f"{prefix}::design", f"{prefix}::era"
-    if design_key not in st.session_state:
-        st.session_state[design_key] = snapshot["design_type"] if snapshot else design_options[0]
-    if era_key not in st.session_state:
-        st.session_state[era_key] = snapshot["era"] if snapshot else "Not Sure"
-    design_col, era_col = st.columns(2)
-    with design_col:
-        design_type = st.selectbox("Design Type", design_options, key=design_key)
-    with era_col:
-        era = st.selectbox("Era / Fan Nostalgia Period", website_mockups.ERA_OPTIONS, key=era_key)
-    context = (result.get("product_name"), result.get("sport_category"), design_type, era)
-    context_key = f"{prefix}::recommendation-context"
-    room_keys = [f"{prefix}::room-{number}" for number in (1, 2, 3)]
-    if st.session_state.get(context_key) != context:
-        recommended = website_mockups.recommend_rooms(result.get("sport_category"), design_type, era, result.get("product_name") or "")
-        # A restored run starts from its submitted selection; editing audience
-        # context refreshes draft recommendations only, never the active brief.
-        if context_key not in st.session_state and snapshot and design_type == snapshot["design_type"] and era == snapshot["era"]:
-            recommended = tuple(slot["room_key"] for slot in snapshot["slots"])
-        for key, room in zip(room_keys, recommended):
-            st.session_state[key] = room
-        st.session_state[context_key] = context
-    selected = []
-    for number, (col, key) in enumerate(zip(st.columns(3), room_keys), 1):
-        with col:
-            selected.append(st.selectbox(f"Mockup {number}", tuple(website_mockups.ROOM_BY_KEY),
-                                         format_func=lambda value: website_mockups.room_for(value).label, key=key))
-    if snapshot:
-        st.caption("Your current brief stays locked until you submit again. A new brief starts three empty upload cards; saved source files are retained.")
-    if st.button("Create Mockup Brief", key=f"{prefix}::submit", type="primary"):
-        try:
-            result = submit_website_mockup_brief(result, design_type, era, selected)
-            snapshot = result["website_mockup_brief"]
-        except ValueError as error:
-            st.error(str(error))
-    if snapshot:
-        render_copy_prompt_button(snapshot["master_prompt"], f"{prefix}::{snapshot['id']}",
-                                  label="Copy Master Prompt", background="#F5F2EA", border_color="rgba(212,165,76,0.85)")
-        st.caption('Paste into ChatGPT with the full-resolution reference. Generate Mockup 1, then request "Generate Mockup 2" and "Generate Mockup 3".')
-        render_prompt_cards(result, (([Path(path) for path in result["prompt_paths"]], "Website Lifestyle Mockups", None),))
+        render_prompt_cards(
+            result,
+            (
+                (product_page_prompts, "Product Page Lifestyle Mockups", None),
+                (social_prompts, "Social Lifestyle Mockups", None),
+            ),
+        )
     else:
         render_prompt_cards(result, ())
 
@@ -9833,8 +9706,11 @@ def render_mockups_page():
         )
 
     sport_category = get_sport_category(sport_option, custom_sport)
-    # Website lifestyle prompts are submitted below the unchanged core workflow.
-    final_prompt_items = []
+    final_prompt_items = build_mockup_final_prompt_items(
+        product_name,
+        sport_category,
+        artwork_reference_available=uploaded_file is not None and not upload_validation_error,
+    )
 
     st.subheader("2. Generate Core Shopify Images")
     generate_clicked = st.button("Generate Core Shopify Images", type="primary")
@@ -9936,7 +9812,6 @@ def render_mockups_page():
             )
 
             update_status("Finalising previews...", 92)
-            result["website_mockups_version"] = 2
             result = normalize_generation_result(result)
             result["status_text"] = (
                 "Core image previews are ready. Save All to Dropbox at the bottom when finished."
