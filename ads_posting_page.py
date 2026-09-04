@@ -36,7 +36,6 @@ from meta_posting_service import (
     AD_TYPE,
     AD_TYPES,
     CAROUSEL_AD_TYPE,
-    CAMPAIGN_DAILY_BUDGET_MINOR,
     COUNTRY_META_CODES,
     CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
     CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
@@ -2083,7 +2082,6 @@ def render_page():
     product_set_label = str(
         (product_set_by_id.get(product_set_id) or {}).get("name") or "Unresolved"
     )
-    account_currency = str((references.get("account") or {}).get("currency") or "account currency")
 
     existing_compatibility_error = ""
     if (
@@ -2163,7 +2161,7 @@ def render_page():
                 )
             )
             st.markdown(
-                f"**Sales setup:** ${CAMPAIGN_DAILY_BUDGET_MINOR / 100:.2f} {account_currency}/day campaign budget · "
+                "**Sales setup:** "
                 f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
                 "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
             )

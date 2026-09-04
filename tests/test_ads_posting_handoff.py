@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 import ads_page as ads
 import ads_posting_page as posting
 import ads_posting_handoff as handoff
+import meta_posting_service
 from ads_meta_contract import META_DEFAULT_CTA
 from meta_posting_service import build_carousel_creative_payload
 from posting_import_csv import parse_posting_import_csv, serialize_carousel_posting_import_csv
@@ -434,6 +435,22 @@ else:
                         app.button[0].click().run(timeout=20)
                         self.assertEqual(len(app.exception), 0)
                         self.assertEqual(app.session_state[posting.AD_TYPE_KEY], ad_type)
+                        self.assertIn("Review", [item.value for item in app.subheader])
+                        visible = " ".join(
+                            str(item.value)
+                            for element_type in ("markdown", "caption", "text", "info", "warning", "metric")
+                            for item in app.get(element_type)
+                        )
+                        self.assertIn("**Sales setup:** Purchase optimization", visible)
+                        for hidden_budget in ("$25", "25.00", "2500", "per day", "/day", "campaign budget"):
+                            self.assertNotIn(hidden_budget, visible)
+                        self.assertEqual(meta_posting_service.CAMPAIGN_DAILY_BUDGET_MINOR, 2500)
+                        campaign_payload = (
+                            meta_posting_service.build_carousel_campaign_payload(name="Campaign")
+                            if ad_type == "Carousel"
+                            else meta_posting_service.build_campaign_payload(name="Campaign", catalog_id="catalog-1")
+                        )
+                        self.assertEqual(campaign_payload["daily_budget"], "2500")
                         self.assertEqual(app.query_params["page"], ["ads_posting"])
                         primary = next(item for item in app.text_area if item.label == "Primary Text 1")
                         primary.set_value("Reviewed manual edit").run(timeout=20)
