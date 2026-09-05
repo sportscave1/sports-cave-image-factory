@@ -63,6 +63,7 @@ from meta_posting_service import (
     adset_name,
     build_collection_creative_payload,
     campaign_name,
+    compatible_adset_name,
     customer_lifecycle_verification,
     next_instant_experience_ad_names,
     next_carousel_ad_name,
@@ -126,6 +127,8 @@ RUN_STATE_KEY = f"{STATE_PREFIX}run_state"
 POSTING_MODE_KEY = f"{STATE_PREFIX}posting_mode"
 EXISTING_CAMPAIGN_KEY = f"{STATE_PREFIX}existing_campaign"
 EXISTING_ADSET_KEY = f"{STATE_PREFIX}existing_adset"
+COMPATIBLE_ADSET_KEY = f"{STATE_PREFIX}compatible_adset"
+CREATE_COMPATIBLE_ADSET_KEY = f"{STATE_PREFIX}create_compatible_adset"
 COLLECTION_DIAGNOSTIC_RESULT_KEY = f"{STATE_PREFIX}collection_diagnostic_result"
 COLLECTION_DIAGNOSTIC_PROCESSING_KEY = f"{STATE_PREFIX}collection_diagnostic_processing"
 COLLECTION_TEMPLATE_COPY_RESULT_KEY = f"{STATE_PREFIX}collection_template_copy_result"
@@ -322,6 +325,54 @@ def _adsets_for_campaign(targets, campaign_id):
         for row in dict(targets or {}).get("adsets") or ()
         if str(row.get("campaign_id") or "") == campaign_id
     )
+
+
+def _compatible_instant_experience_adsets(
+    adsets,
+    *,
+    campaign,
+    campaign_id,
+    account_id,
+    catalog_id,
+    product_set_id,
+    pixel_id,
+):
+    """Return fully compatible sibling Ad Sets from the selected Campaign."""
+
+    compatible = []
+    for adset in adsets or ():
+        adset = dict(adset or {})
+        adset_id = str(adset.get("id") or "")
+        if not adset_id:
+            continue
+        try:
+            validate_existing_posting_target(
+                campaign=campaign,
+                adset=adset,
+                expected_campaign_id=campaign_id,
+                expected_adset_id=adset_id,
+                expected_account_id=account_id,
+                expected_catalog_id=catalog_id,
+                expected_product_set_id=product_set_id,
+                expected_pixel_id=pixel_id,
+            )
+        except PostingValidationError:
+            continue
+        compatible.append(adset)
+    return tuple(compatible)
+
+
+def _use_compatible_existing_adset(adset_id):
+    st.session_state[EXISTING_ADSET_KEY] = str(adset_id or "")
+    st.session_state.pop(CREATE_COMPATIBLE_ADSET_KEY, None)
+
+
+def _existing_review_structure(ad_type, *, create_compatible_adset=False):
+    if create_compatible_adset:
+        return "Existing Campaign → New Ad Set → 3 New Ads"
+    if ad_type == CAROUSEL_AD_TYPE:
+        return "Existing Campaign → Existing Ad Set → 1 New Carousel Ad"
+    return "Existing Campaign → Existing Ad Set → 3 New Ads"
 
 
 def _product_rows_state(*, state=None):
@@ -853,6 +904,7 @@ def _build_posting_request(
     posting_mode=POSTING_MODE_NEW,
     target_campaign_id="",
     target_adset_id="",
+    create_new_adset_under_existing_campaign=False,
     ad_type=AD_TYPE,
     carousel_cards=(),
     carousel_primary_texts=(),
@@ -877,6 +929,9 @@ def _build_posting_request(
         posting_mode=str(posting_mode or POSTING_MODE_NEW),
         target_campaign_id=str(target_campaign_id or ""),
         target_adset_id=str(target_adset_id or ""),
+        create_new_adset_under_existing_campaign=bool(
+            create_new_adset_under_existing_campaign
+        ),
         ad_type=str(ad_type or AD_TYPE),
         carousel_cards=tuple(
             CarouselCard(
@@ -2084,6 +2139,7 @@ def render_page():
     )
 
     existing_compatibility_error = ""
+    create_compatible_adset = False
     if (
         posting_mode == POSTING_MODE_EXISTING
         and target_campaign
@@ -2114,13 +2170,94 @@ def render_page():
                 )
         except PostingValidationError as error:
             existing_compatibility_error = str(error)
-            st.error(existing_compatibility_error)
+            product_set_mismatch_only = False
+            if ad_type == AD_TYPE:
+                try:
+                    mismatch_result = validate_existing_posting_target(
+                        campaign=target_campaign,
+                        adset=target_adset,
+                        expected_campaign_id=target_campaign_id,
+                        expected_adset_id=target_adset_id,
+                        expected_account_id=MetaPostingClient().ad_account_id,
+                        expected_catalog_id=catalog_id,
+                        expected_product_set_id=product_set_id,
+                        expected_pixel_id=dataset_id,
+                        allow_product_set_mismatch=True,
+                    )
+                    product_set_mismatch_only = not mismatch_result[
+                        "product_set_compatible"
+                    ]
+                except PostingValidationError:
+                    pass
+            if product_set_mismatch_only:
+                st.warning(existing_compatibility_error)
+                compatible_adsets = _compatible_instant_experience_adsets(
+                    adsets,
+                    campaign=target_campaign,
+                    campaign_id=target_campaign_id,
+                    account_id=MetaPostingClient().ad_account_id,
+                    catalog_id=catalog_id,
+                    product_set_id=product_set_id,
+                    pixel_id=dataset_id,
+                )
+                compatible_adsets = tuple(
+                    row
+                    for row in compatible_adsets
+                    if str(row.get("id") or "") != str(target_adset_id or "")
+                )
+                if compatible_adsets:
+                    compatible_by_id = {
+                        str(row["id"]): row for row in compatible_adsets
+                    }
+                    if str(st.session_state.get(COMPATIBLE_ADSET_KEY) or "") not in compatible_by_id:
+                        st.session_state.pop(COMPATIBLE_ADSET_KEY, None)
+                    compatible_adset_id = st.selectbox(
+                        "Compatible Existing Ad Set",
+                        tuple(compatible_by_id),
+                        index=0,
+                        format_func=lambda value: str(
+                            compatible_by_id[value].get("name") or value
+                        ),
+                        key=COMPATIBLE_ADSET_KEY,
+                    )
+                    st.button(
+                        "Use Compatible Existing Ad Set",
+                        type="secondary",
+                        on_click=_use_compatible_existing_adset,
+                        args=(compatible_adset_id,),
+                    )
+                    st.session_state.pop(CREATE_COMPATIBLE_ADSET_KEY, None)
+                    st.caption(
+                        "A compatible Ad Set already exists in this Campaign. Select it "
+                        "to keep the current Campaign and use that Ad Set."
+                    )
+                else:
+                    create_compatible_adset = st.checkbox(
+                        "Create a new compatible Ad Set under this existing Campaign",
+                        key=CREATE_COMPATIBLE_ADSET_KEY,
+                    )
+                    if create_compatible_adset:
+                        existing_compatibility_error = ""
+                    st.caption(
+                        "The new Ad Set will use the selected Product Set, inherit the "
+                        "selected Ad Set's audience and customer lifecycle settings, and "
+                        "remain PAUSED."
+                    )
+            else:
+                st.error(existing_compatibility_error)
         else:
+            st.session_state.pop(CREATE_COMPATIBLE_ADSET_KEY, None)
             if ad_type == CAROUSEL_AD_TYPE:
                 st.caption(
                     "Static compatibility checks passed. Meta validate_only will test this "
                     "exact Ad Set before any persistent Meta write."
                 )
+
+    if create_compatible_adset:
+        generated_adset_name = compatible_adset_name(
+            target_adset,
+            product_set_by_id.get(product_set_id) or {"id": product_set_id},
+        )
 
     st.subheader("Review")
     with st.container(border=True):
@@ -2128,16 +2265,19 @@ def render_page():
             st.markdown(
                 f"Campaign: **{html.escape(generated_campaign_name or 'Select a Campaign')}**  \n"
                 f"Ad set: **{html.escape(generated_adset_name or 'Select an Ad Set')}**  \n"
-                + (
-                    "Structure: **Existing Campaign → Existing Ad Set → 1 New Carousel Ad**"
-                    if ad_type == CAROUSEL_AD_TYPE
-                    else "Structure: **Existing Campaign → Existing Ad Set → 3 New Ads**"
+                f"Structure: **{_existing_review_structure(ad_type, create_compatible_adset=create_compatible_adset)}**"
+            )
+            if create_compatible_adset:
+                st.markdown(
+                    "**Existing Campaign:** Its status and settings will not be changed. "
+                    "The new PAUSED Ad Set will use the selected Product Set and inherit "
+                    "the selected Ad Set's audience targeting and customer lifecycle."
                 )
-            )
-            st.markdown(
-                "**Existing settings:** Campaign and Ad Set statuses, budget, audience, "
-                "targeting and optimization will not be changed."
-            )
+            else:
+                st.markdown(
+                    "**Existing settings:** Campaign and Ad Set statuses, budget, audience, "
+                    "targeting and optimization will not be changed."
+                )
             st.caption(
                 f"Purchase optimization · Existing audience · {country} package copy · "
                 "Facebook + Instagram identities · Multi-advertiser ads On · Generate backgrounds Off"
@@ -2283,6 +2423,9 @@ def render_page():
 
     if posting_mode == POSTING_MODE_EXISTING:
         existing_action = (
+            "Sports Cave OS will create 1 compatible PAUSED Ad Set and add 3 PAUSED ads to:\n\n"
+            if create_compatible_adset
+            else
             "Sports Cave OS will add 1 PAUSED carousel ad to:\n\n"
             if ad_type == CAROUSEL_AD_TYPE
             else "Sports Cave OS will add 3 PAUSED ads to:\n\n"
@@ -2295,6 +2438,9 @@ def render_page():
         )
         st.caption("Existing campaign budget will not be changed.")
         spinner_label = (
+            "Creating one compatible paused Ad Set and three paused ads in the selected existing Campaign…"
+            if create_compatible_adset
+            else
             "Creating one paused carousel ad in the selected existing Ad Set…"
             if ad_type == CAROUSEL_AD_TYPE
             else "Creating three paused ads in the selected existing Ad Set…"
@@ -2315,7 +2461,9 @@ def render_page():
 
     if posting_mode == POSTING_MODE_EXISTING:
         create_clicked = st.button(
-            "Add 1 Paused Carousel Ad to Existing Ad Set"
+            "Create Compatible Ad Set + 3 Paused Ads"
+            if create_compatible_adset
+            else "Add 1 Paused Carousel Ad to Existing Ad Set"
             if ad_type == CAROUSEL_AD_TYPE
             else "Add 3 Paused Ads to Existing Ad Set",
             type="primary",
@@ -2357,6 +2505,7 @@ def render_page():
             posting_mode=posting_mode,
             target_campaign_id=target_campaign_id,
             target_adset_id=target_adset_id,
+            create_new_adset_under_existing_campaign=create_compatible_adset,
             ad_type=ad_type,
             carousel_cards=carousel_cards,
             carousel_primary_texts=carousel_primary_texts,

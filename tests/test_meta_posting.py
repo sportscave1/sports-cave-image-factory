@@ -17,6 +17,7 @@ from meta_collection_template_copy import (
 )
 from meta_posting_service import (
     _request_fingerprint,
+    AD_TYPE,
     EXTERNALLY_ABANDONED_MESSAGE,
     EXISTING_TARGET_MISSING_MESSAGE,
     EXPECTED_PIXEL_NAME,
@@ -43,6 +44,7 @@ from meta_posting_service import (
     build_instant_experience_creation_provenance,
     build_storefront_element_specs,
     build_targeting,
+    compatible_adset_name,
     assess_product_set_health,
     adset_name,
     campaign_name,
@@ -872,6 +874,119 @@ class PostingPayloadTests(unittest.TestCase):
                 expected_catalog_id="catalog-1",
                 expected_product_set_id="set-1",
                 expected_pixel_id="pixel-1",
+            )
+
+    def test_product_set_compatibility_normalizes_equivalent_meta_ids(self):
+        campaign, adset = existing_target_rows()
+        adset["promoted_object"] = {
+            **adset["promoted_object"],
+            "product_set_id": 123456789.0,
+        }
+        validated = validate_existing_posting_target(
+            campaign=campaign,
+            adset=adset,
+            expected_campaign_id="existing-campaign",
+            expected_adset_id="existing-adset",
+            expected_account_id="act_123",
+            expected_catalog_id="catalog-1",
+            expected_product_set_id="123456789",
+            expected_pixel_id="pixel-1",
+        )
+        self.assertTrue(validated["product_set_compatible"])
+
+    def test_only_product_set_mismatch_can_be_resolved_with_a_sibling_adset(self):
+        campaign, adset = existing_target_rows()
+        adset["promoted_object"] = {
+            **adset["promoted_object"],
+            "product_set_id": "different-set",
+        }
+        validated = validate_existing_posting_target(
+            campaign=campaign,
+            adset=adset,
+            expected_campaign_id="existing-campaign",
+            expected_adset_id="existing-adset",
+            expected_account_id="act_123",
+            expected_catalog_id="catalog-1",
+            expected_product_set_id="set-1",
+            expected_pixel_id="pixel-1",
+            allow_product_set_mismatch=True,
+        )
+        self.assertFalse(validated["product_set_compatible"])
+
+        wrong_pixel = dict(adset)
+        wrong_pixel["promoted_object"] = {
+            **adset["promoted_object"],
+            "pixel_id": "different-pixel",
+        }
+        with self.assertRaisesRegex(PostingValidationError, "different Pixel"):
+            validate_existing_posting_target(
+                campaign=campaign,
+                adset=wrong_pixel,
+                expected_campaign_id="existing-campaign",
+                expected_adset_id="existing-adset",
+                expected_account_id="act_123",
+                expected_catalog_id="catalog-1",
+                expected_product_set_id="set-1",
+                expected_pixel_id="pixel-1",
+                allow_product_set_mismatch=True,
+            )
+
+    def test_existing_campaign_can_offer_another_compatible_adset(self):
+        campaign, selected = existing_target_rows()
+        selected["promoted_object"] = {
+            **selected["promoted_object"],
+            "product_set_id": "different-set",
+        }
+        compatible = {
+            **existing_target_rows()[1],
+            "id": "compatible-adset",
+            "name": "Compatible Instant Experience",
+        }
+        candidates = ads_posting_page._compatible_instant_experience_adsets(
+            (selected, compatible),
+            campaign=campaign,
+            campaign_id="existing-campaign",
+            account_id="act_123",
+            catalog_id="catalog-1",
+            product_set_id="set-1",
+            pixel_id="pixel-1",
+        )
+        self.assertEqual([row["id"] for row in candidates], ["compatible-adset"])
+        self.assertEqual(
+            ads_posting_page._compatible_instant_experience_adsets(
+                (selected,),
+                campaign=campaign,
+                campaign_id="existing-campaign",
+                account_id="act_123",
+                catalog_id="catalog-1",
+                product_set_id="set-1",
+                pixel_id="pixel-1",
+            ),
+            (),
+        )
+
+    def test_existing_campaign_review_structure_matches_selected_resolution(self):
+        self.assertEqual(
+            ads_posting_page._existing_review_structure(AD_TYPE),
+            "Existing Campaign → Existing Ad Set → 3 New Ads",
+        )
+        self.assertEqual(
+            ads_posting_page._existing_review_structure(
+                AD_TYPE, create_compatible_adset=True
+            ),
+            "Existing Campaign → New Ad Set → 3 New Ads",
+        )
+        page_source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
+        for amount in ("$25", "$25/day", "$25.00/day", "2500"):
+            self.assertNotIn(amount, page_source)
+
+    def test_existing_campaign_request_records_new_compatible_adset_choice(self):
+        request = existing_request(create_new_adset_under_existing_campaign=True)
+        clean = validate_posting_request(request)
+        self.assertTrue(clean["create_new_adset_under_existing_campaign"])
+        with self.assertRaisesRegex(PostingValidationError, "existing Campaign"):
+            validate_posting_request(
+                request_for(create_new_adset_under_existing_campaign=True)
             )
 
     def test_names_remove_generic_suffix_and_increment_ia(self):
@@ -2273,6 +2388,86 @@ class PostingServiceTests(unittest.TestCase):
         self.assertNotIn("ad_image", client.calls)
         self.assertNotIn("page_photo", client.calls)
         self.assertNotIn("template_copy", client.calls)
+
+    def test_product_set_mismatch_creates_compatible_adset_under_existing_campaign(self):
+        client = FakePostingClient()
+        campaign, source_adset = existing_target_rows()
+        source_adset["promoted_object"] = {
+            **source_adset["promoted_object"],
+            "product_set_id": "carousel-product-set",
+        }
+        source_adset["targeting"] = {
+            "geo_locations": {"countries": ["US"]},
+            "age_min": 25,
+            "publisher_platforms": ["facebook", "instagram"],
+            "facebook_positions": ["feed"],
+        }
+        expected_name = compatible_adset_name(
+            source_adset, {"id": "set-1", "name": "Motorsport"}
+        )
+        created_adset = {
+            **source_adset,
+            "id": "adset-1",
+            "name": expected_name,
+            "status": "PAUSED",
+            "configured_status": "PAUSED",
+            "effective_status": "PAUSED",
+            "promoted_object": {
+                **source_adset["promoted_object"],
+                "product_set_id": "set-1",
+            },
+            "targeting": {
+                "geo_locations": {"countries": ["AU"]},
+                "age_min": 25,
+                "targeting_automation": {"advantage_audience": 1},
+            },
+        }
+        client.configured_campaign = mock.Mock(return_value=campaign)
+        client.configured_adset = mock.Mock(
+            side_effect=lambda adset_id: (
+                source_adset if adset_id == "existing-adset" else created_adset
+            )
+        )
+
+        result = MetaPostingService(
+            client=client, store=FakePostingStore()
+        ).create_paused_campaign(
+            existing_request(create_new_adset_under_existing_campaign=True)
+        )
+
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["campaign_id"], "existing-campaign")
+        self.assertEqual(result["adset_id"], "adset-1")
+        self.assertEqual(result["campaign_ownership"], META_OBJECT_EXISTING_TARGET)
+        self.assertEqual(result["adset_ownership"], META_OBJECT_CREATED_BY_RUN)
+        self.assertEqual(result["campaign_configured_status"], "ACTIVE")
+        self.assertEqual(result["adset_configured_status"], "PAUSED")
+        self.assertEqual(client.calls.count("campaign"), 0)
+        self.assertEqual(client.calls.count("adset"), 1)
+        self.assertEqual(client.adset_payload["campaign_id"], "existing-campaign")
+        self.assertEqual(
+            client.adset_payload["promoted_object"]["product_set_id"], "set-1"
+        )
+        self.assertEqual(client.adset_payload["status"], "PAUSED")
+        self.assertEqual(
+            client.adset_payload["targeting"]["geo_locations"],
+            {"countries": ["AU"]},
+        )
+        self.assertEqual(client.adset_payload["targeting"]["age_min"], 25)
+        self.assertEqual(
+            client.adset_payload["targeting"]["targeting_automation"],
+            {"advantage_audience": 1},
+        )
+        self.assertNotIn("publisher_platforms", client.adset_payload["targeting"])
+        self.assertNotIn("facebook_positions", client.adset_payload["targeting"])
+        self.assertEqual(
+            {row["adset_id"] for row in client.copy_ads.values()}, {"adset-1"}
+        )
+        self.assertEqual(len(result["ad_results"]), 3)
+        self.assertEqual(
+            {row["meta_ad_configured_status"] for row in result["ad_results"]},
+            {"PAUSED"},
+        )
 
     def test_existing_mode_wrong_campaign_relationship_blocks_before_writes(self):
         client = FakePostingClient()

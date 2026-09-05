@@ -486,6 +486,7 @@ def validate_existing_posting_target(
     expected_catalog_id,
     expected_product_set_id,
     expected_pixel_id,
+    allow_product_set_mismatch=False,
 ):
     """Fail closed unless an existing hierarchy matches the Posting contract."""
 
@@ -561,11 +562,15 @@ def validate_existing_posting_target(
             "The selected Ad Set uses a different Pixel/Dataset. Choose a compatible "
             "Ad Set or create a New Campaign."
         )
-    product_set_id = str(promoted.get("product_set_id") or "").strip()
-    if not product_set_id or product_set_id != str(expected_product_set_id or "").strip():
+    product_set_id = normalize_meta_id(promoted.get("product_set_id"))
+    product_set_compatible = bool(
+        product_set_id
+        and product_set_id == normalize_meta_id(expected_product_set_id)
+    )
+    if not product_set_compatible and not allow_product_set_mismatch:
         raise PostingValidationError(
-            "This Ad Set uses a different Product Set. Choose a compatible Ad Set "
-            "or create a New Campaign."
+            "This Ad Set uses a different Product Set. A compatible Ad Set is required "
+            "for this Instant Experience."
         )
 
     return {
@@ -577,6 +582,7 @@ def validate_existing_posting_target(
         "adset_status": str(
             adset.get("configured_status") or adset.get("status") or ""
         ).upper(),
+        "product_set_compatible": product_set_compatible,
     }
 
 
@@ -796,6 +802,7 @@ class PostingRequest:
     posting_mode: str = POSTING_MODE_NEW
     target_campaign_id: str = ""
     target_adset_id: str = ""
+    create_new_adset_under_existing_campaign: bool = False
     ad_type: str = AD_TYPE
     carousel_cards: tuple[CarouselCard, ...] = ()
     carousel_primary_texts: tuple[str, ...] = ()
@@ -803,6 +810,15 @@ class PostingRequest:
 
 def normalize_account_id(value):
     return re.sub(r"^act_", "", str(value or "").strip(), flags=re.IGNORECASE)
+
+
+def normalize_meta_id(value):
+    """Canonicalize a Graph ID without treating a numeric representation as different."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
 def validate_destination_url(value):
@@ -915,6 +931,8 @@ def _request_fingerprint(clean):
     lifecycle = str(clean.get("customer_lifecycle_strategy") or "").upper()
     if lifecycle not in ("", CUSTOMER_LIFECYCLE_ALL_AUDIENCES):
         payload["customer_lifecycle_strategy"] = lifecycle
+    if clean.get("create_new_adset_under_existing_campaign"):
+        payload["create_new_adset_under_existing_campaign"] = True
     ad_type = str(clean.get("ad_type") or AD_TYPE)
     # Preserve every existing Instant Experience fingerprint exactly. Ad type
     # becomes explicit only for the new, independent Carousel content contract.
@@ -1215,6 +1233,9 @@ def validate_posting_request(request):
         getattr(request, "target_campaign_id", "") or ""
     ).strip()
     target_adset_id = str(getattr(request, "target_adset_id", "") or "").strip()
+    create_new_adset_under_existing_campaign = bool(
+        getattr(request, "create_new_adset_under_existing_campaign", False)
+    )
     if posting_mode == POSTING_MODE_EXISTING:
         if not target_campaign_id:
             raise PostingValidationError("Select an existing Meta Campaign.")
@@ -1224,6 +1245,10 @@ def validate_posting_request(request):
         audience_id = ""
         customer_lifecycle_strategy = ""
     else:
+        if create_new_adset_under_existing_campaign:
+            raise PostingValidationError(
+                "A compatible Ad Set can only be created under an existing Campaign."
+            )
         if target_campaign_id or target_adset_id:
             raise PostingValidationError(
                 "New Campaign mode cannot use Campaign or Ad Set IDs from another run."
@@ -1268,6 +1293,9 @@ def validate_posting_request(request):
         "posting_mode": posting_mode,
         "target_campaign_id": target_campaign_id,
         "target_adset_id": target_adset_id,
+        "create_new_adset_under_existing_campaign": (
+            create_new_adset_under_existing_campaign
+        ),
     }
 
 
@@ -1315,6 +1343,29 @@ def build_targeting(*, country, audience_type="broad", audience=None):
     targeting["geo_locations"] = {"countries": [COUNTRY_META_CODES[str(country).upper()]]}
     targeting["targeting_automation"] = {"advantage_audience": 1}
     return targeting
+
+
+def targeting_for_compatible_adset(source_adset, *, country):
+    """Reuse the selected audience while retaining Advantage+ placements."""
+    targeting = deepcopy(dict(source_adset or {}).get("targeting") or {})
+    for key in _PLACEMENT_KEYS:
+        targeting.pop(key, None)
+    targeting["geo_locations"] = {
+        "countries": [COUNTRY_META_CODES[str(country).upper()]]
+    }
+    targeting["targeting_automation"] = {"advantage_audience": 1}
+    return targeting
+
+
+def compatible_adset_name(source_adset, product_set):
+    """Name a Product Set-specific sibling of the selected Ad Set."""
+    source_name = str(dict(source_adset or {}).get("name") or "Instant Experience")
+    product_set_label = str(
+        dict(product_set or {}).get("name")
+        or dict(product_set or {}).get("id")
+        or "Compatible Product Set"
+    )
+    return f"{source_name} | {product_set_label}"
 
 
 def build_adset_payload(
@@ -2448,6 +2499,7 @@ class MetaPostingService:
         submission_id,
         ad_results,
         record,
+        allow_product_set_mismatch=False,
     ):
         """Read and validate an external target before any route Meta writes."""
 
@@ -2479,6 +2531,7 @@ class MetaPostingService:
                 expected_catalog_id=clean["catalog_id"],
                 expected_product_set_id=clean["product_set_id"],
                 expected_pixel_id=pixel["id"],
+                allow_product_set_mismatch=allow_product_set_mismatch,
             )
         except PostingValidationError as error:
             failed = self.store.update_stage(
@@ -3068,6 +3121,9 @@ class MetaPostingService:
         self._checkpoint("meta_reference_validation")
         posting_mode = clean["posting_mode"]
         is_existing_mode = posting_mode == POSTING_MODE_EXISTING
+        create_compatible_adset = bool(
+            clean.get("create_new_adset_under_existing_campaign")
+        )
         campaign_label = (
             clean["target_campaign_id"]
             if is_existing_mode
@@ -3118,12 +3174,18 @@ class MetaPostingService:
                     else META_OBJECT_CREATED_BY_RUN
                 ),
                 "adset_ownership": (
-                    META_OBJECT_EXISTING_TARGET
+                    META_OBJECT_CREATED_BY_RUN
+                    if create_compatible_adset
+                    else META_OBJECT_EXISTING_TARGET
                     if is_existing_mode
                     else META_OBJECT_CREATED_BY_RUN
                 ),
                 "campaign_id": clean["target_campaign_id"] if is_existing_mode else None,
-                "adset_id": clean["target_adset_id"] if is_existing_mode else None,
+                "adset_id": (
+                    None
+                    if create_compatible_adset
+                    else clean["target_adset_id"] if is_existing_mode else None
+                ),
                 "campaign_configured_status": "",
                 "adset_configured_status": "",
                 "image_checksum": ",".join(
@@ -3144,14 +3206,25 @@ class MetaPostingService:
             raise PostingValidationError(
                 "This Posting run belongs to a different Posting mode. Start a new run."
             )
-        if is_existing_mode and (
-            str(record.get("campaign_id") or "") != clean["target_campaign_id"]
-            or str(record.get("adset_id") or "") != clean["target_adset_id"]
-            or str(record.get("campaign_ownership") or "").upper()
-            != META_OBJECT_EXISTING_TARGET
-            or str(record.get("adset_ownership") or "").upper()
-            != META_OBJECT_EXISTING_TARGET
-        ):
+        existing_target_record_valid = (
+            str(record.get("campaign_id") or "") == clean["target_campaign_id"]
+            and str(record.get("campaign_ownership") or "").upper()
+            == META_OBJECT_EXISTING_TARGET
+            and (
+                (
+                    create_compatible_adset
+                    and str(record.get("adset_ownership") or "").upper()
+                    == META_OBJECT_CREATED_BY_RUN
+                )
+                or (
+                    not create_compatible_adset
+                    and str(record.get("adset_id") or "") == clean["target_adset_id"]
+                    and str(record.get("adset_ownership") or "").upper()
+                    == META_OBJECT_EXISTING_TARGET
+                )
+            )
+        )
+        if is_existing_mode and not existing_target_record_valid:
             raise PostingValidationError(
                 "This Posting run does not own the selected existing Meta target. "
                 "Start a new run and select the Campaign and Ad Set again."
@@ -3210,28 +3283,48 @@ class MetaPostingService:
                     submission_id=submission_id,
                     ad_results=ad_results,
                     record=record,
+                    allow_product_set_mismatch=create_compatible_adset,
                 )
                 configured_campaign = target["campaign"]
-                configured_adset = target["adset"]
+                source_adset = target["adset"]
                 campaign_id = clean["target_campaign_id"]
-                adset_id = clean["target_adset_id"]
                 campaign_label = str(configured_campaign.get("name") or campaign_id)
-                adset_label = str(configured_adset.get("name") or adset_id)
-                lifecycle_verification = customer_lifecycle_verification(
-                    configured_adset,
-                    acquisition_fields_requested=True,
-                )
+                if create_compatible_adset:
+                    if target["product_set_compatible"]:
+                        raise PostingValidationError(
+                            "The selected Ad Set is already compatible. Use it directly."
+                        )
+                    adset_id = str(record.get("adset_id") or "")
+                    adset_label = compatible_adset_name(source_adset, product_set)
+                    lifecycle_verification = customer_lifecycle_verification(
+                        source_adset,
+                        acquisition_fields_requested=True,
+                    )
+                else:
+                    configured_adset = source_adset
+                    adset_id = clean["target_adset_id"]
+                    adset_label = str(configured_adset.get("name") or adset_id)
+                    lifecycle_verification = customer_lifecycle_verification(
+                        configured_adset,
+                        acquisition_fields_requested=True,
+                    )
                 record = self.store.update_stage(
                     submission_id,
                     "VALIDATING",
                     campaign_id=campaign_id,
                     campaign_name=campaign_label,
-                    adset_id=adset_id,
+                    adset_id=adset_id or None,
                     adset_name=adset_label,
                     campaign_ownership=META_OBJECT_EXISTING_TARGET,
-                    adset_ownership=META_OBJECT_EXISTING_TARGET,
+                    adset_ownership=(
+                        META_OBJECT_CREATED_BY_RUN
+                        if create_compatible_adset
+                        else META_OBJECT_EXISTING_TARGET
+                    ),
                     campaign_configured_status=target["campaign_status"],
-                    adset_configured_status=target["adset_status"],
+                    adset_configured_status=(
+                        "" if create_compatible_adset else target["adset_status"]
+                    ),
                     verified_lifecycle_strategy=lifecycle_verification["strategy"],
                     lifecycle_verification_source=lifecycle_verification[
                         "verification_source"
@@ -3284,11 +3377,26 @@ class MetaPostingService:
                 if is_existing_mode or adset_id
                 else "Creating Ad Set…"
             )
-            if not is_existing_mode and not adset_id:
-                targeting = build_targeting(
-                    country=clean["country"],
-                    audience_type=clean["audience_type"],
-                    audience=audience,
+            new_adset_lifecycle = (
+                lifecycle_verification["strategy"]
+                if create_compatible_adset
+                and lifecycle_verification["strategy"]
+                != CUSTOMER_LIFECYCLE_UNKNOWN
+                else CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+                if create_compatible_adset
+                else clean["customer_lifecycle_strategy"]
+            )
+            if (not is_existing_mode or create_compatible_adset) and not adset_id:
+                targeting = (
+                    targeting_for_compatible_adset(
+                        source_adset, country=clean["country"]
+                    )
+                    if create_compatible_adset
+                    else build_targeting(
+                        country=clean["country"],
+                        audience_type=clean["audience_type"],
+                        audience=audience,
+                    )
                 )
                 adset_id = self._create_or_reconcile(
                     lambda: self.client.create_adset(
@@ -3296,9 +3404,7 @@ class MetaPostingService:
                             name=adset_label, campaign_id=campaign_id,
                             product_set_id=clean["product_set_id"], pixel_id=pixel["id"],
                             targeting=targeting,
-                            customer_lifecycle_strategy=clean[
-                                "customer_lifecycle_strategy"
-                            ],
+                            customer_lifecycle_strategy=new_adset_lifecycle,
                         )
                     ),
                     lambda: self.client.find_adsets_by_name(campaign_id, adset_label),
@@ -3309,12 +3415,27 @@ class MetaPostingService:
                     "ADSET_CREATED",
                     adset_id=adset_id,
                     adset_name=adset_label,
-                    campaign_ownership=META_OBJECT_CREATED_BY_RUN,
+                    campaign_ownership=(
+                        META_OBJECT_EXISTING_TARGET
+                        if create_compatible_adset
+                        else META_OBJECT_CREATED_BY_RUN
+                    ),
                     adset_ownership=META_OBJECT_CREATED_BY_RUN,
                 )
-            if not is_existing_mode:
+            if not is_existing_mode or create_compatible_adset:
                 if configured_adset is None:
                     configured_adset = self.client.configured_adset(adset_id)
+                if create_compatible_adset:
+                    validate_existing_posting_target(
+                        campaign=configured_campaign,
+                        adset=configured_adset,
+                        expected_campaign_id=campaign_id,
+                        expected_adset_id=adset_id,
+                        expected_account_id=self.client.ad_account_id,
+                        expected_catalog_id=clean["catalog_id"],
+                        expected_product_set_id=clean["product_set_id"],
+                        expected_pixel_id=pixel["id"],
+                    )
                 lifecycle_verification = customer_lifecycle_verification(
                     configured_adset,
                     acquisition_fields_requested=True,
@@ -3322,9 +3443,7 @@ class MetaPostingService:
                 record = self.store.update_stage(
                     submission_id,
                     "ADSET_CREATED",
-                    requested_lifecycle_strategy=clean[
-                        "customer_lifecycle_strategy"
-                    ],
+                    requested_lifecycle_strategy=new_adset_lifecycle,
                     verified_lifecycle_strategy=lifecycle_verification["strategy"],
                     lifecycle_verification_source=lifecycle_verification[
                         "verification_source"
@@ -3333,7 +3452,7 @@ class MetaPostingService:
                 )
                 if (
                     lifecycle_verification["strategy"]
-                    != clean["customer_lifecycle_strategy"]
+                    != new_adset_lifecycle
                 ):
                     self._ambiguous(
                         submission_id,
@@ -3652,12 +3771,13 @@ class MetaPostingService:
                 ).upper()
                 for row in ad_results
             }
-            if not is_existing_mode:
+            if not is_existing_mode or create_compatible_adset:
                 statuses = {
-                    "campaign": campaign_status,
                     "ad set": adset_status,
                     **statuses,
                 }
+                if not is_existing_mode:
+                    statuses = {"campaign": campaign_status, **statuses}
             not_paused = [entity for entity, status in statuses.items() if status != "PAUSED"]
             if not_paused:
                 self._ambiguous(
@@ -3687,8 +3807,9 @@ class MetaPostingService:
                     else META_OBJECT_CREATED_BY_RUN
                 ),
                 adset_ownership=(
-                    META_OBJECT_EXISTING_TARGET
-                    if is_existing_mode
+                    META_OBJECT_CREATED_BY_RUN
+                    if create_compatible_adset
+                    else META_OBJECT_EXISTING_TARGET if is_existing_mode
                     else META_OBJECT_CREATED_BY_RUN
                 ),
                 campaign_configured_status=campaign_status,
