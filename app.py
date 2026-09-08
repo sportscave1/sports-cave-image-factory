@@ -8990,7 +8990,7 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
                     gc.collect()
                 else:
                     st.error("Could not save the lifestyle image for this prompt.")
-                    st.exception(error)
+                    logging.warning("Mockups lifestyle upload failed (%s)", type(error).__name__)
                     upload_error_rendered = True
 
             upload_lifecycle = get_lifestyle_upload_lifecycle(result, prompt_path)

@@ -58,6 +58,10 @@ LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE = (
 LIFESTYLE_UPLOAD_INVALID_MESSAGE = (
     "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
 )
+LIFESTYLE_UPLOAD_MEMORY_MESSAGE = (
+    "Memory limit reached while processing the lifestyle image. "
+    "Clear and reselect the image to retry when memory is available."
+)
 
 
 class MemoryLimitExceededError(RuntimeError):
@@ -178,14 +182,18 @@ def copy_uploaded_image_to_temp(image_file, temp_dir):
     if hasattr(image_file, "seek"):
         image_file.seek(0)
 
-    with temp_path.open("wb") as destination:
-        shutil.copyfileobj(image_file, destination, length=1024 * 1024)
+    try:
+        with temp_path.open("wb") as destination:
+            shutil.copyfileobj(image_file, destination, length=1024 * 1024)
 
-    if temp_path.stat().st_size > MAX_LIFESTYLE_UPLOAD_SIZE_BYTES:
-        raise ValueError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE)
-
-    if hasattr(image_file, "seek"):
-        image_file.seek(0)
+        # This is the unchanged source file, before any decoding or conversion.
+        if temp_path.stat().st_size > MAX_LIFESTYLE_UPLOAD_SIZE_BYTES:
+            raise ValueError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE)
+        if temp_path.stat().st_size == 0:
+            raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
+    finally:
+        if hasattr(image_file, "seek"):
+            image_file.seek(0)
 
     return temp_path
 
@@ -3119,6 +3127,8 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", Image.DecompressionBombWarning)
                     with Image.open(temp_source_path) as source_image:
+                        if source_image.format not in {"JPEG", "PNG", "WEBP"}:
+                            raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
                         working_image = ImageOps.exif_transpose(source_image)
                         if resize_lifestyle_source_if_needed(working_image):
                             collect_garbage(f"After lifestyle source resize: {prompt_filename}")
@@ -3151,7 +3161,9 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     ) as error:
         raise RuntimeError(LIFESTYLE_UPLOAD_INVALID_MESSAGE) from error
     except (MemoryError, MemoryLimitExceededError) as error:
-        raise RuntimeError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE) from error
+        # Process RSS / decoder allocation failures are not source-file sizes.
+        close_image(image_export)
+        raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
     finally:
         if hasattr(image_file, "seek"):
             image_file.seek(0)
