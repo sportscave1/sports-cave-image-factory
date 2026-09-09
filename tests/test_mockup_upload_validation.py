@@ -42,7 +42,8 @@ class MockupUploadValidationTests(unittest.TestCase):
         self.enterContext(patch.object(app, "image_factory", image_factory))
         self.enterContext(patch.object(app.st, "session_state", SessionState()))
         # Deterministic headroom; individual resource-error tests override this.
-        self.enterContext(patch.object(image_factory, "get_memory_usage_mb", return_value=100))
+        self.enterContext(patch.object(image_factory, "get_memory_usage_mb", return_value=600))
+        self.enterContext(patch.object(image_factory, "lifestyle_available_memory_bytes", return_value=1024**3))
 
     def save(self, upload, prompt="01-man-cave-prompt.txt"):
         return image_factory.save_lifestyle_mockup(
@@ -107,17 +108,15 @@ class MockupUploadValidationTests(unittest.TestCase):
         self.assertTrue(app.get_uploaded_lifestyle_signature(upload))
         self.assertTrue(Path(self.save(upload)["jpg_path"]).exists())
 
-    def test_process_rss_limit_is_not_source_size_error(self):
-        upload = Upload(image_bytes(source_size=2_100_000))
-        with patch.object(image_factory, "get_memory_usage_mb", return_value=431):
-            # Source validation succeeds even when the process has no headroom.
-            self.assertTrue(app.get_uploaded_lifestyle_signature(upload))
-            with self.assertRaises(image_factory.MemoryLimitExceededError) as caught:
-                self.save(upload)
-        self.assertEqual(str(caught.exception), image_factory.LIFESTYLE_UPLOAD_MEMORY_MESSAGE)
-        self.assertEqual(app._safe_lifestyle_upload_error(caught.exception), str(caught.exception))
-        self.assertNotIn("15 MB", str(caught.exception))
-        self.assertEqual(upload.tell(), 0)
+    def test_process_rss_above_430_accepts_three_normal_pngs_sequentially(self):
+        with patch.object(image_factory, "get_memory_usage_mb", return_value=431), \
+             patch.object(image_factory, "lifestyle_available_memory_bytes", return_value=81 * 1024**2), \
+             patch.object(image_factory, "ensure_memory_available", side_effect=AssertionError("Legacy RSS guard called")):
+            for prompt in sorted(image_factory.PRODUCT_PAGE_PROMPT_FILENAMES):
+                upload = Upload(image_bytes(dimensions=(1536, 1024), source_size=2_100_000))
+                self.assertTrue(app.get_uploaded_lifestyle_signature(upload))
+                self.assertTrue(Path(self.save(upload, prompt)["jpg_path"]).exists())
+                self.assertEqual(upload.tell(), 0)
 
     def test_decoder_memory_error_is_not_source_size_error(self):
         with patch.object(image_factory.ImageOps, "exif_transpose", side_effect=MemoryError("private detail")):
@@ -129,9 +128,9 @@ class MockupUploadValidationTests(unittest.TestCase):
     def test_export_memory_error_is_not_source_size_error(self):
         upload = Upload(image_bytes())
         with patch.object(image_factory.Image.Image, "save", side_effect=MemoryError()):
-            with self.assertRaises(MemoryError) as caught:
+            with self.assertRaises(image_factory.MemoryLimitExceededError) as caught:
                 self.save(upload)
-        self.assertNotIn("15 MB", app._safe_lifestyle_upload_error(caught.exception))
+        self.assertEqual(app._safe_lifestyle_upload_error(caught.exception), image_factory.LIFESTYLE_UPLOAD_MEMORY_MESSAGE)
 
     def test_corrupt_unsupported_and_empty_files_are_not_size_errors(self):
         for data in (b"invalid png", image_bytes("BMP"), b""):

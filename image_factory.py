@@ -11,6 +11,7 @@ import re
 import shutil
 import tempfile
 import warnings
+import threading
 from datetime import datetime
 from textwrap import dedent
 
@@ -62,6 +63,97 @@ LIFESTYLE_UPLOAD_MEMORY_MESSAGE = (
     "Memory limit reached while processing the lifestyle image. "
     "Clear and reselect the image to retry when memory is available."
 )
+LIFESTYLE_MEMORY_RESERVE_BYTES = 16 * 1024 * 1024
+_lifestyle_processing_lock = threading.Lock()
+
+
+def _cgroup_memory_headroom(proc_root=Path("/proc/self")):
+    """Read this process's mounted v1/v2 limits, including constrained parents.
+
+    Host available RAM alone is not a container budget. Resolve mount roots
+    rather than assuming Render exposes a particular /sys/fs/cgroup layout.
+    """
+    try:
+        memberships = [line.split(":", 2) for line in (proc_root / "cgroup").read_text().splitlines()]
+        mounts = (proc_root / "mountinfo").read_text().splitlines()
+    except OSError:
+        return None
+    headrooms = []
+    for line in mounts:
+        before, separator, after = line.partition(" - ")
+        fields, fs = before.split(), after.split()
+        if not separator or len(fields) < 5 or len(fs) < 3:
+            continue
+        if fs[0] == "cgroup2":
+            members = [path for _, controllers, path in memberships if not controllers]
+            limit_name, usage_name = "memory.max", "memory.current"
+        elif fs[0] == "cgroup" and "memory" in fs[2].split(","):
+            members = [path for _, controllers, path in memberships if "memory" in controllers.split(",")]
+            limit_name, usage_name = "memory.limit_in_bytes", "memory.usage_in_bytes"
+        else:
+            continue
+        unescape = lambda value: re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), value)
+        root, mount = Path(unescape(fields[3])), Path(unescape(fields[4]))
+        for member in members:
+            try:
+                relative = Path(member).relative_to(root)
+            except ValueError:
+                # A cgroup namespace can present membership as '/' while the
+                # mount root still names the host-side group.
+                relative = Path(".")
+            node = mount / relative
+            while node.is_relative_to(mount):
+                try:
+                    raw_limit = (node / limit_name).read_text().strip()
+                    if raw_limit != "max":
+                        limit = int(raw_limit)
+                        # v1 uses a near-LONG_MAX sentinel for no limit.
+                        if 0 < limit < (1 << 60):
+                            try:
+                                used = int((node / usage_name).read_text().strip())
+                            except OSError as error:
+                                # A known container limit must never fall back
+                                # to host RAM just because usage is unreadable.
+                                raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
+                            headrooms.append(max(0, limit - used))
+                except FileNotFoundError:
+                    pass
+                except (OSError, ValueError) as error:
+                    raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
+                if node == mount:
+                    break
+                node = node.parent
+    return min(headrooms) if headrooms else None
+
+
+def lifestyle_available_memory_bytes():
+    available = []
+    if psutil is not None:
+        try:
+            available.append(max(0, int(psutil.virtual_memory().available)))
+        except (OSError, AttributeError):
+            pass
+    container_available = _cgroup_memory_headroom()
+    if container_available is not None:
+        available.append(container_available)
+    return min(available) if available else None
+
+
+def validate_lifestyle_processing_memory(width, height):
+    pixels = width * height
+    if width <= 0 or height <= 0 or pixels > MAX_SOURCE_PIXELS:
+        raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
+    # Up to four 4-byte pixel buffers for decode/orientation/RGB/resampling,
+    # two bounded export buffers, plus codec workspace and a separate reserve.
+    export_edge = min(MAX_EXPORT_EDGE, width, height)
+    required = pixels * 16 + export_edge * export_edge * 8 + 16 * 1024 * 1024
+    available = lifestyle_available_memory_bytes()
+    if available is not None and available < required + LIFESTYLE_MEMORY_RESERVE_BYTES:
+        gc.collect()
+        available = lifestyle_available_memory_bytes()
+        if available is not None and available < required + LIFESTYLE_MEMORY_RESERVE_BYTES:
+            raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE)
+    return required
 
 
 class MemoryLimitExceededError(RuntimeError):
@@ -3101,6 +3193,19 @@ def create_complete_pack_zip(
 
 
 def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
+    # Serialize decoded lifestyle work across Streamlit sessions as well as slots.
+    with _lifestyle_processing_lock:
+        try:
+            return _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file)
+        except (MemoryError, MemoryLimitExceededError) as error:
+            raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
+        finally:
+            if hasattr(image_file, "seek"):
+                image_file.seek(0)
+            gc.collect()
+
+
+def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
     run_dir = Path(run_dir)
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
     jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
@@ -3122,16 +3227,16 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
         with tempfile.TemporaryDirectory(prefix="sports-cave-lifestyle-") as temp_dir:
             temp_source_path = copy_uploaded_image_to_temp(image_file, temp_dir)
 
-            ensure_memory_available(f"Before source image open: {prompt_filename}")
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", Image.DecompressionBombWarning)
                     with Image.open(temp_source_path) as source_image:
                         if source_image.format not in {"JPEG", "PNG", "WEBP"}:
                             raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
-                        working_image = ImageOps.exif_transpose(source_image)
-                        if resize_lifestyle_source_if_needed(working_image):
-                            collect_garbage(f"After lifestyle source resize: {prompt_filename}")
+                        validate_lifestyle_processing_memory(*source_image.size)
+                        ImageOps.exif_transpose(source_image, in_place=True)
+                        working_image = source_image
+                        resize_lifestyle_source_if_needed(working_image)
 
                         if working_image.mode != "RGB":
                             rgb_image = working_image.convert("RGB")
@@ -3151,7 +3256,6 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
                 close_image(rgb_image)
                 close_image(working_image)
                 del rgb_image, working_image
-                collect_garbage(f"After source image open: {prompt_filename}")
     except ValueError:
         raise
     except (
@@ -3176,7 +3280,6 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
                 quality=EXPORT_WEBP_QUALITY,
                 method=EXPORT_WEBP_METHOD,
             )
-            collect_garbage(f"After lifestyle WEBP save: {prompt_filename}")
         else:
             with suppress(FileNotFoundError, PermissionError):
                 webp_output_path.unlink()
@@ -3187,7 +3290,6 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
             quality=EXPORT_JPG_QUALITY,
             optimize=True,
         )
-        collect_garbage(f"After lifestyle JPG save: {prompt_filename}")
 
         preview_image = image_export.copy()
         try:
@@ -3204,7 +3306,6 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     finally:
         close_image(image_export)
         del image_export
-        collect_garbage(f"After saving lifestyle mockup: {prompt_filename}")
 
     return {
         "webp_path": webp_output_path if should_save_webp else None,
