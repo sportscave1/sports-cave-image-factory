@@ -24971,6 +24971,49 @@ def list_meta_ad_insights_platform(days=None, limit=5000, date_range="last_30_da
     return _list_meta_breakdown_insights("platform", days=days, limit=limit, date_range=date_range)
 
 
+def list_creative_refresh_campaigns():
+    """Synced campaigns only; no schema creation, sync or Meta request."""
+    if not is_configured():
+        return []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT campaign_id, campaign_name FROM meta_campaigns
+                ORDER BY campaign_name, campaign_id
+            """)
+            return cur.fetchall()
+
+
+def list_creative_refresh_winner_candidates(campaign_id):
+    """Aggregate all stored daily attribution before joining canonical copy.
+
+    Group at ad level, without report limits or averaging daily ROAS. Published
+    copy is a current synced snapshot, not asset-level attribution history.
+    """
+    if not is_configured() or not campaign_id:
+        return []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH performance AS (
+                    SELECT ad_id, SUM(spend) AS spend,
+                           SUM(purchase_value) AS purchase_value,
+                           BOOL_OR(spend IS NULL OR purchase_value IS NULL) AS metrics_incomplete
+                    FROM meta_ad_insights_daily WHERE campaign_id = %s
+                    GROUP BY ad_id
+                )
+                SELECT a.ad_id, a.ad_name, a.campaign_id, a.creative_id,
+                       c.primary_text, c.headline, c.call_to_action, c.link_url,
+                       p.spend, p.purchase_value, p.metrics_incomplete
+                FROM meta_ads a
+                JOIN meta_creatives c ON c.creative_id = a.creative_id
+                LEFT JOIN performance p ON p.ad_id = a.ad_id
+                WHERE a.campaign_id = %s
+                ORDER BY a.ad_id
+            """, (str(campaign_id), str(campaign_id)))
+            return cur.fetchall()
+
+
 def list_meta_ad_insights(days=None, limit=5000, date_range="last_30_days"):
     if not is_configured():
         return []

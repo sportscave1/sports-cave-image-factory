@@ -786,7 +786,7 @@ class CreativeRefreshPromptTests(unittest.TestCase):
 
 
 class CreativeRefreshV2Tests(unittest.TestCase):
-    def test_new_ads_and_creative_refresh_share_the_exact_prompt_suffix_and_output_contract(self):
+    def test_refresh_refines_winner_without_changing_new_ads_contract(self):
         kwargs = {
             "product_url": "https://sportscave.com.au/products/purple-reign",
             "variation_token": "fixed-parity-test",
@@ -813,7 +813,9 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         winner_block = ads_page.build_creative_refresh_winner_context(winner_context)
 
-        self.assertEqual(refresh_prompt, f"{winner_block}\n\n{new_ads_prompt}")
+        self.assertIn("controlled sibling evolutions", refresh_prompt)
+        self.assertIn(winner_context["winning_primary_text"], refresh_prompt)
+        self.assertIn(winner_context["winning_headline"], refresh_prompt)
         self.assertEqual(
             ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
             (
@@ -838,7 +840,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         self.assertEqual(
             refresh_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
-            3,
+            0,
         )
 
     def test_shared_ie_prompt_requires_three_different_homes_not_camera_only(self):
@@ -1379,7 +1381,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             result["creative_refresh_context"]["winning_headline"],
             "Only 100 Shane Warne Editions",
         )
-        self.assertTrue(result["master_prompt"].startswith("IMPORTANT:\n"))
+        self.assertIn("WINNER REFINEMENT", result["master_prompt"])
         self.assertIn(
             "Attach the actual winning advertisement image to this ChatGPT message before running this prompt.",
             result["master_prompt"],

@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 import streamlit.components.v1 as components
 import ads_posting_handoff as posting_handoff
+import ads_refresh_winners
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 
 from activity_log import record_activity_log
@@ -7299,6 +7300,125 @@ def normalize_creative_refresh_context(context=None):
     }
 
 
+def _refresh_copy_count(value):
+    return 1 if (
+        (value or {}).get("campaign_type") == "Instant Experience"
+        and (value or {}).get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    ) else INSTANT_EXPERIENCE_COPY_VARIATION_COUNT
+
+
+def _configure_refresh_copy(result, workflow):
+    if _refresh_copy_count(result) != 1:
+        return
+    workflow["workflow_mode"] = ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    workflow["campaign_type"] = "Instant Experience"
+    notes = dict(workflow.get("ad_notes") or {})
+    notes["instant_experience_concepts"] = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        pair = notes["instant_experience_concepts"][concept["id"]][0]
+        if not pair.get("cta"):
+            pair["cta"] = INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept["id"], "")
+    workflow["ad_notes"] = notes
+    # Retire old widget options in this editing context only. Saved historical
+    # files and immutable saved-package snapshots are never rewritten.
+    prefix = f"ads-ie-concept-copy-field::{result.get('context_key')}::"
+    for key in list(st.session_state):
+        if str(key).startswith(prefix) and str(key).rsplit("::", 1)[-1] in {"2", "3"}:
+            st.session_state.pop(key, None)
+
+
+def build_instant_experience_winner_refinement_prompt(product_name, category, country, product_url, context, *, product_metadata=None, campaign_moment=None):
+    winner = normalize_creative_refresh_context(context)
+    identity = {"campaign_type": "Instant Experience", "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH}
+    csv_template = build_instant_experience_copy_csv(identity, blank=True).decode("utf-8-sig")
+    return f"""SPORTS CAVE — INSTANT EXPERIENCE WINNER REFINEMENT
+
+This is a proven winning ad. Do not reinvent the strategy. Create controlled sibling evolutions of the winner. Preserve the winning hook, tone, structure, product positioning and emotional style. Improve rather than replace.
+Attach the actual winning advertisement image to this ChatGPT message before running this prompt.
+Attach the winning advertisement as the style reference and the canonical Sports Cave product image as the immutable artwork reference.
+
+Product: {product_name}
+Sport/category: {category}
+Market: {country}
+Destination URL: {product_url}
+Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+Campaign moment (use only if supplied, without changing the winner's urgency): {json.dumps(campaign_moment or {}, ensure_ascii=False, default=str)}
+Winning Primary Text / Description:
+{winner['winning_primary_text']}
+Winning Headline:
+{winner['winning_headline']}
+
+Return THREE refreshed creatives, in the existing permanent slot order below. Every creative must preserve the winner's advertising angle, emotional hook, copy rhythm, customer motivation, visual language, message hierarchy, urgency and scarcity style. Make only a small improvement: cleaner wording, opening line, clarity, crop, hierarchy or subtle scene refinement. Keep the winning room style and composition; do not force different homes or unrelated strategies. Never invent claims, reviews, discounts or scarcity quantities.
+
+For EACH creative return exactly ONE Primary Text / Description and ONE Headline, plus ONE standalone image-generation brief. No alternative copy options. Preserve intentional paragraphs. Use the one existing stable CTA in its CSV row.
+Each brief must repeat the product lock: use the exact canonical artwork and frame, preserving identity, proportions, colour and every product detail. Never reconstruct artwork from the winning advertisement. Preserve the winning presentation with a modest composition refinement. Produce a premium photorealistic 1024 x 1024 square cover, with mobile-readable hierarchy and no clipping. Do not generate images until explicitly requested.
+
+Fill the attached/exported CSV using precisely these headers and identity cells. Return exactly THREE data rows (one per image), variation=1, output_mode=winner_refinement. Return the readable copy and briefs followed by a downloadable UTF-8 CSV containing the identical copy. No additional columns or rows; quote commas and paragraph breaks correctly. The description identity columns are stable compatibility IDs, not alternative copy styles.
+{csv_template}
+Keep the slot identities and order unchanged. Route and description labels in the CSV are compatibility identifiers, not instructions to add scarcity or change copy strategy. The three outputs are sibling refinements of this winner.
+""".strip()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_refresh_campaigns():
+    import supabase_backend
+    return supabase_backend.list_creative_refresh_campaigns()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_refresh_winners(campaign_id):
+    import supabase_backend
+    return ads_refresh_winners.rank_winner_candidates(
+        supabase_backend.list_creative_refresh_winner_candidates(campaign_id)
+    )
+
+
+def _render_refresh_winner_picker():
+    try:
+        campaigns = _load_refresh_campaigns()
+    except Exception:
+        st.info("Synced campaign history is unavailable. Enter the winning copy manually below.")
+        return
+    if not campaigns:
+        st.info("No synced campaign history is available. Enter the winning copy manually below.")
+        return
+    by_id = {str(row["campaign_id"]): row for row in campaigns}
+    campaign_id = st.selectbox(
+        "Previous Campaign", tuple(by_id), index=None,
+        placeholder="Search campaigns, or leave blank for manual entry",
+        format_func=lambda value: str(by_id[value].get("campaign_name") or value),
+        key="ads-refresh-previous-campaign",
+    )
+    candidate = None
+    if campaign_id:
+        try:
+            candidates = _load_refresh_winners(campaign_id)
+        except Exception:
+            st.info("Winner history is unavailable. Manual winning copy remains available.")
+            return
+        if candidates:
+            candidate_by_id = {str(row["ad_id"]): row for row in candidates}
+            def label(value):
+                row = candidate_by_id[value]
+                roas = f"{row['roas']:.2f}x" if row["roas"] is not None else "No ROAS"
+                best = " · Best performer" if row is candidates[0] and row["roas"] is not None else ""
+                return f"{roas}{best} · {row.get('ad_name') or value} · {row['headline']} · {row['primary_text'][:120]}"
+            key = "ads-refresh-winning-candidate"
+            if st.session_state.get("ads-refresh-candidate-campaign") != campaign_id:
+                st.session_state[key] = str(candidates[0]["ad_id"])
+                st.session_state["ads-refresh-candidate-campaign"] = campaign_id
+            candidate_id = st.selectbox("Winning Ad / Copy", tuple(candidate_by_id), format_func=label, key=key)
+            candidate = candidate_by_id[candidate_id]
+            st.caption("Ad-level ROAS across all stored daily insights. The displayed synced copy is not independently attributed; dynamic text assets and historical copy changes cannot be ranked separately.")
+        else:
+            st.info("No usable synced copy was found for this campaign. Enter the winner manually below.")
+    ads_refresh_winners.apply_winner_selection(
+        candidate, state=st.session_state, identity_key="ads-refresh-applied-winner",
+        primary_key=ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY,
+        headline_key=ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY,
+    )
+
+
 def validate_creative_refresh_context(context=None):
     normalized = normalize_creative_refresh_context(context)
     missing = []
@@ -8878,6 +8998,11 @@ def build_ads_prompt(
     recent_instant_experience_fingerprints=None,
     creative_refresh_context=None,
 ):
+    if campaign_type == "Instant Experience" and creative_refresh_context:
+        return build_instant_experience_winner_refinement_prompt(
+            product_name, category, country, product_url, creative_refresh_context,
+            product_metadata=product_metadata, campaign_moment=campaign_moment,
+        )
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9187,7 +9312,7 @@ def build_ads_result_record(
             campaign_moment=clean_campaign_moment,
             variation_token=clean_variation_token,
         )
-        if campaign_type == "Instant Experience"
+        if campaign_type == "Instant Experience" and not clean_creative_refresh_context
         else []
     )
     master_prompt = build_ads_prompt(
@@ -9266,6 +9391,8 @@ def ads_prompt_contract_version_for_campaign(
         )
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
+        if campaign_type == "Instant Experience":
+            version += "; WINNER REFINEMENT SINGLE COPY V1"
     return version
 
 
@@ -9334,6 +9461,7 @@ def _ads_image_workflow(result):
     if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
         workflow = _new_ads_image_workflow(result)
         st.session_state[_ads_image_state_key()] = workflow
+    _configure_refresh_copy(result, workflow)
     return workflow
 
 
@@ -10557,6 +10685,8 @@ def _instant_experience_copy_widget_key(
 
 
 def _instant_experience_copy_csv_output_mode(result):
+    if _refresh_copy_count(result) == 1:
+        return "winner_refinement"
     settings = (
         (result or {}).get("instant_experience_settings")
         if isinstance(result, dict)
@@ -10591,6 +10721,7 @@ def _instant_experience_copy_csv_route_label(concept):
 
 
 def _instant_experience_copy_notes_with_widget_state(result, workflow):
+    _configure_refresh_copy(result, workflow)
     notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     context_key = str((result or {}).get("context_key") or "")
     merged = {
@@ -10599,7 +10730,7 @@ def _instant_experience_copy_notes_with_widget_state(result, workflow):
     }
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         variations = merged[concept["id"]]
-        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
+        for variation_number in range(1, _refresh_copy_count(result) + 1):
             variation = _with_instant_experience_description_metadata(
                 variations[variation_number - 1],
                 variation_number,
@@ -10647,7 +10778,7 @@ def build_instant_experience_copy_csv(
         variations = _normalise_instant_experience_variations(
             concept_notes.get(concept["id"])
         )
-        for variation_number, variation in enumerate(variations, start=1):
+        for variation_number, variation in enumerate(variations[:_refresh_copy_count(result)], start=1):
             variant = _instant_experience_description_variant(variation_number)
             writer.writerow(
                 {
@@ -10670,7 +10801,7 @@ def build_instant_experience_copy_csv(
                         else _preserve_multiline_text(variation.get("headline"))
                     ),
                     "cta": (
-                        ""
+                        (INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept["id"], "") if _refresh_copy_count(result) == 1 else "")
                         if blank
                         else _preserve_multiline_text(variation.get("cta"))
                     ),
@@ -10693,7 +10824,7 @@ def _instant_experience_copy_csv_expected_rows(result):
             "description_label": _instant_experience_description_variant(variation_number)["label"],
         }
         for concept in INSTANT_EXPERIENCE_CONCEPTS
-        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1)
+        for variation_number in range(1, _refresh_copy_count(result) + 1)
     ]
 
 
@@ -10802,6 +10933,13 @@ def parse_instant_experience_copy_csv(data, result):
             "The copy CSV could not be read. Check its quoting and line breaks."
         ) from error
 
+    if (result or {}).get("allow_refresh_mode") and rows and all(row.get("output_mode") == "winner_refinement" for row in rows):
+        result = {**result, "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH}
+    if _refresh_copy_count(result) == 1 and len(rows) == 9 and all(row.get("output_mode") != "winner_refinement" for row in rows):
+        legacy_result = {**result, "workflow_mode": ADS_WORKFLOW_MODE_NEW}
+        legacy_result.pop("allow_refresh_mode", None)
+        legacy = parse_instant_experience_copy_csv(data, legacy_result)
+        return {key: variations[:1] for key, variations in legacy.items()}
     expected_rows = {
         (row["route_key"], int(row["variation"])): row
         for row in _instant_experience_copy_csv_expected_rows(result)
@@ -10816,7 +10954,7 @@ def parse_instant_experience_copy_csv(data, result):
         concept["id"]: concept for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
     parsed = {
-        concept["id"]: _blank_instant_experience_variations()
+        concept["id"]: _blank_instant_experience_variations()[:_refresh_copy_count(result)]
         for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
     seen = set()
@@ -10896,6 +11034,7 @@ def parse_instant_experience_copy_csv(data, result):
 
 
 def apply_instant_experience_copy_csv(result, workflow, data):
+    _configure_refresh_copy(result, workflow)
     parsed = parse_instant_experience_copy_csv(data, result)
     context_key = str((result or {}).get("context_key") or "")
     widget_updates = {}
@@ -10922,7 +11061,7 @@ def apply_instant_experience_copy_csv(result, workflow, data):
     return {
         "concept_notes": parsed,
         "variation_count": len(INSTANT_EXPERIENCE_CONCEPTS)
-        * INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+        * _refresh_copy_count(result),
         "field_count": len(widget_updates),
     }
 
@@ -11029,7 +11168,7 @@ def _instant_experience_concept_copy_notes_from_workflow(workflow):
                     if legacy_id in concept_notes:
                         raw_variations = concept_notes.get(legacy_id)
                         break
-            mapped_notes[concept_id] = _normalise_instant_experience_variations(raw_variations)
+            mapped_notes[concept_id] = _normalise_instant_experience_variations(raw_variations)[:_refresh_copy_count(workflow)]
         return mapped_notes
 
     legacy = _legacy_instant_experience_copy_notes(workflow)
@@ -11062,7 +11201,7 @@ def _instant_experience_concept_copy_notes_from_workflow(workflow):
                     ctas[source_index] if source_index < len(ctas) else ""
                 ),
             }
-    return mapped
+    return {key: rows[:_refresh_copy_count(workflow)] for key, rows in mapped.items()}
 
 
 def _instant_experience_variation_complete(
@@ -11444,6 +11583,7 @@ def instant_experience_package_ready(result, workflow):
 
 
 def _instant_experience_package_items(result, workflow):
+    _configure_refresh_copy(result, workflow)
     _compact_instant_experience_slots(workflow)
     if not instant_experience_copy_complete(workflow):
         raise ValueError(
@@ -11495,7 +11635,7 @@ def _instant_experience_package_items(result, workflow):
                     image_filename,
                     source_format=image_details.get("output_format"),
                 ),
-                "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+                "copy_variation_count": _refresh_copy_count(result),
             }
         )
         items.append(
@@ -11510,7 +11650,7 @@ def _instant_experience_package_items(result, workflow):
                 "filename": "ad-copy.txt",
                 "data": copy_bytes,
                 "size": len(copy_bytes),
-                "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+                "copy_variation_count": _refresh_copy_count(result),
             }
         )
         variations = _instant_experience_concept_copy_notes_from_workflow(workflow).get(
@@ -11553,7 +11693,7 @@ def _instant_experience_package_items(result, workflow):
             "size": len(current_csv),
             "copy_variation_count": (
                 len(INSTANT_EXPERIENCE_CONCEPTS)
-                * INSTANT_EXPERIENCE_COPY_VARIATION_COUNT
+                * _refresh_copy_count(result)
             ),
         }
     )
@@ -11964,18 +12104,21 @@ def _render_instant_experience_copy_csv_control(result, workflow):
 
 
 def _render_instant_experience_concepts(result, workflow):
+    _configure_refresh_copy(result, workflow)
     _compact_instant_experience_slots(workflow)
     slot_specs = ads_image_workflow.campaign_image_slots("Instant Experience")
     slot_by_concept = {slot.get("concept_id"): slot for slot in slot_specs}
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     _render_instant_experience_copy_csv_control(result, workflow)
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
-    st.caption("Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
+    st.caption("Upload one cover and one matching Primary Text / Headline pair per creative." if _refresh_copy_count(result) == 1 else "Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
 
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         concept_id = concept["id"]
         slot = slot_by_concept.get(concept_id) or {}
         heading = f"{concept['display_name'].upper()} — {concept['supporting_label']}"
+        if _refresh_copy_count(result) == 1:
+            heading = f"REFRESH CREATIVE {concept['position']} — WINNER REFINEMENT"
         with st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
             st.markdown(f"**{heading}**")
             image_column, copy_column = st.columns([1, 2])
@@ -12056,12 +12199,12 @@ def _render_instant_experience_concepts(result, workflow):
 
             with copy_column:
                 variations = concept_notes.get(concept_id) or _blank_instant_experience_variations()
-                for index in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
+                for index in range(1, _refresh_copy_count(result) + 1):
                     variation = _with_instant_experience_description_metadata(
                         variations[index - 1],
                         index,
                     )
-                    st.markdown(f"**{variation['description_label']}**")
+                    st.markdown("**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
                     field_columns = st.columns([2, 1, 1])
                     for field_column, (field_key, field_label) in zip(
                         field_columns,
@@ -12089,7 +12232,7 @@ def _render_instant_experience_concepts(result, workflow):
                                 widget_args["value"] = _preserve_multiline_text(
                                     variation.get(field_key)
                                 )
-                            variation[field_key] = st.text_area(field_label, **widget_args)
+                            variation[field_key] = st.text_area(("Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
                             if field_key == "primary_text":
                                 render_prompt_copy_button(
                                     _preserve_multiline_text(variation[field_key]),
@@ -12115,7 +12258,7 @@ def _render_instant_experience_concepts(result, workflow):
                 st.caption(
                     f"{concept['display_name']}: "
                     f"{'Image ready' if image_ready else 'Image needed'} · "
-                    f"{complete_count} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} description options complete"
+                    f"{complete_count} of {_refresh_copy_count(result)} copy pairs complete"
                 )
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -12898,6 +13041,7 @@ def _open_ads_files_folder(path):
 
 
 def _render_instant_experience_package_save(result, workflow):
+    _configure_refresh_copy(result, workflow)
     _compact_instant_experience_slots(workflow)
     ready_count = _instant_experience_image_ready_count(workflow)
     required_count = len(INSTANT_EXPERIENCE_CONCEPTS)
@@ -12907,7 +13051,7 @@ def _render_instant_experience_package_save(result, workflow):
         st.caption(
             f"{concept['display_name']}: "
             f"{'Image ready' if row['image_ready'] else 'Image needed'} · "
-            f"{row['copy_complete_count']} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} description options complete"
+            f"{row['copy_complete_count']} of {_refresh_copy_count(result)} copy pairs complete"
         )
 
     package_ready = instant_experience_package_ready(result, workflow)
@@ -12921,7 +13065,7 @@ def _render_instant_experience_package_save(result, workflow):
             and package_outcome.get("signature") == package_signature
         )
     if not package_ready:
-        st.caption("Complete all three covers and all nine description options before saving the package.")
+        st.caption("Complete all three covers and their single copy pairs before saving the package." if _refresh_copy_count(result) == 1 else "Complete all three covers and all nine description options before saving the package.")
 
     if st.button(
         "Save Instant Experience Package",
@@ -13976,7 +14120,8 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     if is_creative_refresh:
         st.title("Creative Refresh")
-        st.caption("Turn a proven winner into three fresh controlled challengers.")
+        st.caption("Refine a proven winner while preserving what worked.")
+        _render_refresh_winner_picker()
     else:
         st.title("Ads")
         st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")

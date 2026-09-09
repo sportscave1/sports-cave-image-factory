@@ -126,11 +126,11 @@ class SavedPackageTests(unittest.TestCase):
                         csv = package["copy_csv"]
                         fields = (*posting.PRIMARY_TEXT_KEYS, *posting.HEADLINE_KEYS)
                         self.assertEqual(len(state[posting.ADS_COPY_ROUTES_STATE_KEY]), 3)
-                        self.assertEqual(sum(len(ad["variations"]) for ad in state[posting.ADS_COPY_ROUTES_STATE_KEY]), 9)
+                        self.assertEqual(sum(len(ad["variations"]) for ad in state[posting.ADS_COPY_ROUTES_STATE_KEY]), 3 if source == ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH else 9)
                         self.assertIn("refreshed", state[posting.HEADLINE_KEYS[0]])
                         for index, concept in enumerate(ads.INSTANT_EXPERIENCE_CONCEPTS):
                             saved = package["source_copy"][concept["id"]]
-                            self.assertEqual(state[posting.PRIMARY_TEXT_KEYS[index]], saved[index]["primary_text"])
+                            self.assertEqual(state[posting.PRIMARY_TEXT_KEYS[index]], saved[0 if source == ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH else index]["primary_text"])
                             self.assertEqual(state[posting.HEADLINE_KEYS[index]], saved[0]["headline"])
                     manual = {}
                     posting.apply_posting_import_to_state(parse_posting_import_csv(csv), product_records(), state=manual)

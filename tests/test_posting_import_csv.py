@@ -364,7 +364,8 @@ class PostingImportContractTests(unittest.TestCase):
             refresh_result,
             workflow,
         )
-        self.assertEqual(new_data, refresh_data)
+        self.assertNotEqual(new_data, refresh_data)
+        self.assertEqual(len(parse_posting_import_csv(refresh_data)["rows"]), 3)
         headers = tuple(
             next(csv.reader(io.StringIO(new_data.decode("utf-8-sig"))))
         )
@@ -782,7 +783,7 @@ class PostingImportContractTests(unittest.TestCase):
                 self.assertEqual(stored_items[csv_filename]["slot_id"], expected_slot)
                 posting_batch = parse_posting_import_csv(stored_csv)
                 self.assertEqual(posting_batch["source_schema_kind"], "ads_copy")
-                self.assertEqual(len(posting_batch["rows"]), 9)
+                self.assertEqual(len(posting_batch["rows"]), 3 if workflow_mode == ads_page.ADS_WORKFLOW_MODE_CREATIVE_REFRESH else 9)
 
 
 class PostingCSVImportTests(unittest.TestCase):

@@ -14,6 +14,7 @@ from ads_image_workflow import (
     source_image_signature,
 )
 from ads_product_catalog import load_live_edition_product_rows
+from ads_target_relevance import rank_relevant_meta_options
 from meta_ads_client import (
     MetaAdsApiError,
     MetaPostingClient,
@@ -1296,6 +1297,23 @@ def _audience_options(references):
     return tuple(rows)
 
 
+def _relevant_target_options(rows, *, product_title, sport, key, id_key="id", default_selection=""):
+    selected = str(st.session_state.get(key) or default_selection)
+    ranked = rank_relevant_meta_options(
+        rows, product_title=product_title, sport=sport, selected=selected, id_key=id_key,
+    )
+    if not ranked["has_context"]:
+        return tuple(row[id_key] for row in ranked["options"])
+    if not ranked["relevant_count"]:
+        st.caption("No relevant matches found. Use Show more to see all available options.")
+    if len(ranked["options"]) < len(ranked["all_options"]):
+        expanded = st.toggle("Show more", key=f"{key}_show_more")
+    else:
+        expanded = False
+    rows = ranked["all_options"] if expanded else ranked["options"]
+    return tuple(row[id_key] for row in rows)
+
+
 def _render_object_result(result, *, title, show_technical_details=True):
     if title:
         st.subheader(title)
@@ -1884,6 +1902,8 @@ def render_page():
     targeting_cols = st.columns(2)
     country = targeting_cols[0].selectbox("Country", tuple(COUNTRY_META_CODES), key=COUNTRY_KEY)
     sport = targeting_cols[1].selectbox("Sport / category", SPORT_OPTIONS, key=SPORT_KEY)
+    # An untouched default sport is not product context on an empty Posting form.
+    relevance_sport = sport if product_title else ""
 
     catalog_id = ""
     catalog_label = "Not used"
@@ -1918,10 +1938,13 @@ def render_page():
         }
         if str(st.session_state.get(PRODUCT_SET_KEY) or "") not in product_set_by_id:
             st.session_state.pop(PRODUCT_SET_KEY, None)
+        visible_product_sets = _relevant_target_options(
+            tuple(product_set_by_id.values()), product_title=product_title, sport=relevance_sport, key=PRODUCT_SET_KEY,
+        )
         product_set_id = (
             st.selectbox(
                 "Product set",
-                tuple(product_set_by_id),
+                visible_product_sets,
                 index=None,
                 placeholder="Select a Meta product set",
                 format_func=lambda value: str(
@@ -1980,8 +2003,14 @@ def render_page():
     else:
         audiences = _audience_options(references)
         audience_by_key = {row["key"]: row for row in audiences}
+        visible_audiences = _relevant_target_options(
+            audiences, product_title=product_title, sport=relevance_sport, key=AUDIENCE_KEY,
+            id_key="key", default_selection="broad",
+        )
+        if AUDIENCE_KEY not in st.session_state:
+            st.session_state[AUDIENCE_KEY] = "broad"
         audience_key = st.selectbox(
-            "Audience", tuple(audience_by_key),
+            "Audience", visible_audiences,
             format_func=lambda value: (
                 "Broad — Sports Cave Default" if value == "broad"
                 else f"{audience_by_key[value]['label_type']} — {audience_by_key[value]['name']}"

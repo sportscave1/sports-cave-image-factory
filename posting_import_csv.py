@@ -1069,14 +1069,14 @@ def _batch_from_canonical_ads_copy(parsed, concepts):
                 {
                     "schema_version": ADS_COPY_SCHEMA_VERSION,
                     "campaign_type": ADS_COPY_CAMPAIGN_TYPE,
-                    "output_mode": "standard_three_descriptions",
+                    "output_mode": "winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions",
                     "route_key": route_key,
                     "route_label": route_label,
                     **variation,
                 }
             )
         primary = variations[POSTING_IMPORT_PRIMARY_VARIATION - 1]
-        route_primary_text = variations[ad_number - 1]
+        route_primary_text = variations[0] if len(variations) == 1 else variations[ad_number - 1]
         ads.append(
             {
                 "ad_number": ad_number,
@@ -1100,7 +1100,7 @@ def _batch_from_canonical_ads_copy(parsed, concepts):
         "country": "",
         "sport_category": "",
         "campaign_type": "Instant Experience",
-        "output_mode": "standard_three_descriptions",
+        "output_mode": "winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions",
         "ads": tuple(ads),
         "rows": tuple(rows),
     }
@@ -1197,6 +1197,7 @@ def parse_posting_import_csv(
                 {
                     "campaign_type": "Instant Experience",
                     "output_mode": "standard_three_descriptions",
+                    "allow_refresh_mode": True,
                 },
             )
         except ads_page.InstantExperienceCopyCSVError as error:

@@ -844,7 +844,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             ],
         )
         self.assertTrue(all(item["data"].startswith(b"\x89PNG\r\n\x1a\n") for item in image_items))
-        self.assertEqual(len(text_items), 18)
+        self.assertEqual(len(text_items), 6)
         self.assertIn(
             "01-premium-scarcity-right/01-legacy-standard/primary-text.txt",
             text_items,
