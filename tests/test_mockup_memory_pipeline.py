@@ -325,6 +325,7 @@ class MockupMemoryPipelineTests(unittest.TestCase):
 
     def test_memory_error_is_rendered_once_in_mockups_page(self):
         source = Path(app.__file__).read_text(encoding="utf-8")
+        source = source[source.index("    if generate_clicked:"):]
         block = source[
             source.index("except image_factory.MemoryLimitExceededError")
             : source.index("except Exception as error:", source.index("except image_factory.MemoryLimitExceededError"))

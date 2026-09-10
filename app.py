@@ -5392,8 +5392,8 @@ def process_uploaded_artwork_once(uploaded_file):
         raise ValueError("Uploaded file is empty.")
     if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
         raise ValueError(
-            "Uploaded image is too large for the current Render instance. "
-            "Please upload a JPG or WebP under 20MB."
+            "Artwork exceeds the 20 MB upload file-size limit. "
+            "Upload a JPG, PNG, or WebP within that limit."
         )
 
     filename = getattr(uploaded_file, "name", "")
@@ -5406,8 +5406,8 @@ def process_uploaded_artwork_once(uploaded_file):
         uploaded_file,
         max_size_bytes=image_factory.MAX_UPLOAD_SIZE_BYTES,
         size_error_message=(
-            "Uploaded image is too large for the current Render instance. "
-            "Please upload a JPG or WebP under 20MB."
+            "Artwork exceeds the 20 MB upload file-size limit. "
+            "Upload a JPG, PNG, or WebP within that limit."
         ),
     )
     logging.info(
@@ -5440,8 +5440,13 @@ def process_uploaded_artwork_once(uploaded_file):
         pil_started = time.perf_counter()
         if hasattr(uploaded_file, "seek"):
             uploaded_file.seek(0)
-        source_image = Image.open(uploaded_file)
+        source_image = Image.open(image_factory.BorrowedImageStream(uploaded_file))
         width, height = source_image.size
+        logging.info("MOCKUPS_ARTWORK stage=preview_metadata dimensions=%sx%s mode=%s upload_bytes=%s",
+                     width, height, source_image.mode, measured_size)
+        image_factory.validate_image_dimensions(width, height)
+        if source_image.format not in {"JPEG", "PNG", "WEBP"}:
+            raise ValueError("Upload a valid JPG, PNG, or WebP image.")
         upload_details = {
             "file_size": file_size if file_size is not None else measured_size,
             "width": width,
@@ -5455,11 +5460,15 @@ def process_uploaded_artwork_once(uploaded_file):
             UPLOAD_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
             preview_path = UPLOAD_PREVIEW_DIR / f"{signature}.webp"
             if not preview_path.exists():
-                preview_image = ImageOps.exif_transpose(source_image)
+                if source_image.format == "JPEG":
+                    source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
+                image_factory.validate_processing_memory(*source_image.size)
+                ImageOps.exif_transpose(source_image, in_place=True)
+                preview_image = source_image
                 preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
-                if preview_image.mode != "RGB":
-                    preview_image = preview_image.convert("RGB")
-                preview_image.save(
+                if preview_image.mode not in {"RGB", "RGBA"}:
+                    preview_image = source_image.convert("RGBA" if "transparency" in source_image.info else "RGB")
+                image_factory.save_image_atomic(preview_image,
                     preview_path,
                     format="WEBP",
                     quality=image_factory.PREVIEW_WEBP_QUALITY,
@@ -5485,11 +5494,16 @@ def process_uploaded_artwork_once(uploaded_file):
         if hasattr(uploaded_file, "seek"):
             uploaded_file.seek(0)
         return upload_details
+    except (MemoryError, image_factory.MemoryLimitExceededError) as error:
+        logging.exception("MOCKUPS_ARTWORK stage=upload_preview bytes=%s", measured_size)
+        raise image_factory.MemoryLimitExceededError(image_factory.PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE) from error
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
+        raise ValueError(image_factory.IMAGE_DIMENSIONS_MESSAGE) from error
     except UnidentifiedImageError as error:
         raise ValueError(
             "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
         ) from error
-    except ValueError:
+    except (ValueError, RuntimeError):
         raise
     except Exception as error:
         raise RuntimeError("Unable to validate uploaded artwork file.") from error
@@ -5503,7 +5517,6 @@ def process_uploaded_artwork_once(uploaded_file):
             with suppress(Exception):
                 source_image.close()
         del preview_image, source_image
-        gc.collect()
 
 
 def create_uploaded_preview(uploaded_file):
@@ -5523,14 +5536,17 @@ def create_uploaded_preview(uploaded_file):
     try:
         log_app_memory("Before upload preview creation")
         uploaded_file.seek(0)
-        source_image = Image.open(uploaded_file)
+        source_image = Image.open(image_factory.BorrowedImageStream(uploaded_file))
         if (source_image.format or "").upper() in {"JPEG", "JPG"}:
             source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
-        preview_image = ImageOps.exif_transpose(source_image)
+        image_factory.validate_image_dimensions(*source_image.size)
+        image_factory.validate_processing_memory(*source_image.size)
+        ImageOps.exif_transpose(source_image, in_place=True)
+        preview_image = source_image
         preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
-        if preview_image.mode != "RGB":
-            preview_image = preview_image.convert("RGB")
-        preview_image.save(
+        if preview_image.mode not in {"RGB", "RGBA"}:
+            preview_image = source_image.convert("RGBA" if "transparency" in source_image.info else "RGB")
+        image_factory.save_image_atomic(preview_image,
             preview_path,
             format="WEBP",
             quality=image_factory.PREVIEW_WEBP_QUALITY,
@@ -5547,7 +5563,6 @@ def create_uploaded_preview(uploaded_file):
             with suppress(Exception):
                 source_image.close()
         del preview_image, source_image
-        gc.collect()
 
 
 def get_local_recent_runs(limit=5):
@@ -6281,45 +6296,10 @@ def build_product_upload_prompt(
 
 
 def validate_uploaded_artwork(uploaded_file):
-    Image, _, UnidentifiedImageError = get_pillow_modules()
     if uploaded_file is None:
         raise ValueError("Please upload an artwork image first.")
+    return process_uploaded_artwork_once(uploaded_file)
 
-    file_size = getattr(uploaded_file, "size", None)
-    if file_size is not None and file_size <= 0:
-        raise ValueError("Uploaded file is empty.")
-    if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
-        raise ValueError(
-            "Uploaded image is too large for the current Render instance. "
-            "Please upload a JPG or WebP under 20MB."
-        )
-
-    filename = getattr(uploaded_file, "name", "")
-    suffix = Path(filename).suffix.lower()
-    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-        raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
-
-    try:
-        image_factory.log_memory("Before upload validation")
-        uploaded_file.seek(0)
-        with Image.open(uploaded_file) as image:
-            width, height = image.size
-            image.verify()
-        image_factory.log_memory("After upload validation")
-    except UnidentifiedImageError as error:
-        raise ValueError(
-            "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
-        ) from error
-    except Exception as error:
-        raise RuntimeError("Unable to validate uploaded artwork file.") from error
-    finally:
-        uploaded_file.seek(0)
-
-    return {
-        "file_size": file_size,
-        "width": width,
-        "height": height,
-    }
 
 
 def should_defer_uploaded_preview(upload_details):
@@ -8080,6 +8060,7 @@ def _safe_lifestyle_upload_error(error):
     clean_messages = {
         getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
         getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+        getattr(image_factory, "MEMORY_TELEMETRY_MESSAGE", ""),
     }
     if (
         isinstance(
@@ -8971,6 +8952,7 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
                 clean_lifestyle_errors = {
                     getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
                     getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+        getattr(image_factory, "MEMORY_TELEMETRY_MESSAGE", ""),
                 }
                 is_clean_lifestyle_error = (
                     isinstance(
@@ -9681,10 +9663,15 @@ def render_mockups_page():
         except ValueError as error:
             upload_validation_error = str(error)
             st.error(upload_validation_error)
-        except Exception as error:
-            upload_validation_error = "Could not validate the uploaded artwork."
+        except image_factory.MemoryLimitExceededError as error:
+            upload_validation_error = str(error)
             st.error(upload_validation_error)
-            st.exception(error)
+        except Exception as error:
+            logging.exception("MOCKUPS_ARTWORK upload validation failed")
+            upload_validation_error = (image_factory.MEMORY_TELEMETRY_MESSAGE
+                                       if str(error) == image_factory.MEMORY_TELEMETRY_MESSAGE
+                                       else "Could not validate the uploaded artwork.")
+            st.error(upload_validation_error)
 
     product_name = st.text_input(
         "Product name",
@@ -9718,9 +9705,10 @@ def render_mockups_page():
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
         if upload_validation_error:
-            st.session_state.uploaded_preview_signature = None
-            st.session_state.uploaded_preview_path = None
-            st.caption("Upload preview unavailable until the file validates cleanly.")
+            previous_preview = st.session_state.get("uploaded_preview_path")
+            if previous_preview and Path(previous_preview).exists():
+                st.image(str(previous_preview), caption="Previous valid artwork", width=400)
+            st.caption("The replacement preview is unavailable until the file validates cleanly.")
         elif should_defer_uploaded_preview(upload_details):
             st.session_state.uploaded_preview_signature = None
             st.session_state.uploaded_preview_path = None

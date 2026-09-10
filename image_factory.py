@@ -1,7 +1,6 @@
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
 from contextlib import suppress
-import gc
 import hashlib
 import json
 import logging
@@ -43,15 +42,14 @@ EXPORT_WEBP_METHOD = 4
 EXPORT_JPG_QUALITY = 92
 PREVIEW_WEBP_QUALITY = 70
 PREVIEW_WEBP_METHOD = 4
-MEMORY_LIMIT_MB = 430
 TEMP_RUN_MAX_AGE_SECONDS = 6 * 60 * 60
 TEMP_ROOT_ENV = "SPORTS_CAVE_TEMP_DIR"
 MEMORY_LIMIT_MESSAGE = (
-    "Memory limit reached before completion. Try a smaller uploaded image or upgrade the Render instance."
+    "Not enough memory to complete image processing. Retry when memory is available."
 )
 PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE = (
-    "Memory limit reached while preparing the uploaded artwork. "
-    "Try exporting the artwork as JPG/WebP under 20MB, or upgrade Render to a higher-memory instance."
+    "Not enough memory to prepare the uploaded artwork. Retry when memory is available "
+    "or reduce the image's pixel dimensions."
 )
 LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE = (
     "This uploaded image is too large. Please upload a JPG, PNG or WebP under 15 MB."
@@ -65,6 +63,8 @@ LIFESTYLE_UPLOAD_MEMORY_MESSAGE = (
 )
 LIFESTYLE_MEMORY_RESERVE_BYTES = 16 * 1024 * 1024
 _lifestyle_processing_lock = threading.Lock()
+IMAGE_DIMENSIONS_MESSAGE = "Image dimensions exceed the supported limit of 25 million pixels. Reduce the pixel dimensions."
+MEMORY_TELEMETRY_MESSAGE = "Cannot determine the container's available memory safely. Retry after memory monitoring is restored."
 
 
 def _cgroup_memory_headroom(proc_root=Path("/proc/self")):
@@ -114,12 +114,12 @@ def _cgroup_memory_headroom(proc_root=Path("/proc/self")):
                             except OSError as error:
                                 # A known container limit must never fall back
                                 # to host RAM just because usage is unreadable.
-                                raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
+                                raise RuntimeError(MEMORY_TELEMETRY_MESSAGE) from error
                             headrooms.append(max(0, limit - used))
                 except FileNotFoundError:
                     pass
                 except (OSError, ValueError) as error:
-                    raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
+                    raise RuntimeError(MEMORY_TELEMETRY_MESSAGE) from error
                 if node == mount:
                     break
                 node = node.parent
@@ -140,19 +140,26 @@ def lifestyle_available_memory_bytes():
 
 
 def validate_lifestyle_processing_memory(width, height):
+    return validate_processing_memory(width, height, LIFESTYLE_UPLOAD_MEMORY_MESSAGE)
+
+
+def validate_image_dimensions(width, height):
+    if width <= 0 or height <= 0 or width * height > MAX_SOURCE_PIXELS:
+        raise ValueError(IMAGE_DIMENSIONS_MESSAGE)
+
+
+def validate_processing_memory(width, height, message=PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE):
     pixels = width * height
-    if width <= 0 or height <= 0 or pixels > MAX_SOURCE_PIXELS:
-        raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
+    validate_image_dimensions(width, height)
     # Up to four 4-byte pixel buffers for decode/orientation/RGB/resampling,
     # two bounded export buffers, plus codec workspace and a separate reserve.
     export_edge = min(MAX_EXPORT_EDGE, width, height)
     required = pixels * 16 + export_edge * export_edge * 8 + 16 * 1024 * 1024
     available = lifestyle_available_memory_bytes()
+    logging.info("MOCKUPS_MEMORY dimensions=%sx%s estimated_bytes=%s reserve_bytes=%s available_bytes=%s rss_mb=%s",
+                 width, height, required, LIFESTYLE_MEMORY_RESERVE_BYTES, available, get_memory_usage_mb())
     if available is not None and available < required + LIFESTYLE_MEMORY_RESERVE_BYTES:
-        gc.collect()
-        available = lifestyle_available_memory_bytes()
-        if available is not None and available < required + LIFESTYLE_MEMORY_RESERVE_BYTES:
-            raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE)
+        raise MemoryLimitExceededError(message)
     return required
 
 
@@ -179,11 +186,9 @@ def log_memory(stage):
 
 
 def ensure_memory_available(stage, error_message=MEMORY_LIMIT_MESSAGE):
-    memory_usage = log_memory(stage)
-    if memory_usage is not None and memory_usage >= MEMORY_LIMIT_MB:
-        raise MemoryLimitExceededError(error_message)
-
-    return memory_usage
+    # Compatibility for stage markers: RSS is telemetry, not an allocation budget.
+    # Image allocations are checked using dimensions and runtime headroom.
+    return log_memory(stage)
 
 
 def close_image(image):
@@ -196,8 +201,34 @@ def close_image(image):
         pass
 
 
+class BorrowedImageStream:
+    """Let Pillow close its image without closing Streamlit's retryable upload."""
+    def __init__(self, stream):
+        self.stream = stream
+
+    def read(self, *args):
+        return self.stream.read(*args)
+
+    def seek(self, *args):
+        return self.stream.seek(*args)
+
+    def tell(self):
+        return self.stream.tell()
+
+    def close(self):
+        pass
+
+
+def save_image_atomic(image, path, **options):
+    """Only publish a preview once its encoder has completed successfully."""
+    path = Path(path)
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix="preview-stage-") as staging:
+        staged = Path(staging) / path.name
+        image.save(staged, **options)
+        os.replace(staged, path)
+
+
 def collect_garbage(stage, error_message=MEMORY_LIMIT_MESSAGE):
-    gc.collect()
     ensure_memory_available(stage, error_message=error_message)
 
 
@@ -313,8 +344,9 @@ def log_image_details(stage, image_format, width, height, file_size_bytes):
 def load_artwork_image(image_path):
     try:
         with Image.open(image_path) as image:
-            image.load()
-            return ImageOps.exif_transpose(image).convert("RGB")
+            validate_processing_memory(*image.size)
+            ImageOps.exif_transpose(image, in_place=True)
+            return image.convert("RGB")
     except UnidentifiedImageError as error:
         raise RuntimeError(
             f"Cannot open artwork file {image_path}. Please upload a valid JPG, PNG, or WEBP image."
@@ -1979,83 +2011,55 @@ def resize_for_export(image, max_edge=MAX_EXPORT_EDGE):
 
 
 def prepare_working_artwork(image_path, upload_dir):
+    with _lifestyle_processing_lock:
+        return _prepare_working_artwork(image_path, upload_dir)
+
+
+def _prepare_working_artwork(image_path, upload_dir):
     upload_dir = Path(upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     image_path = Path(image_path)
     working_path = upload_dir / "working-artwork.webp"
-
-    ensure_memory_available(
-        "Before source image open",
-        error_message=PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE,
-    )
-
-    source_image = None
     working_image = None
-
+    stage = "metadata"
     try:
-        source_image = Image.open(image_path)
-        source_format = (source_image.format or image_path.suffix.lstrip(".") or "unknown").upper()
-        source_width, source_height = source_image.size
-        file_size_bytes = image_path.stat().st_size if image_path.exists() else 0
-
-        log_image_details(
-            "Source upload metadata",
-            source_format,
-            source_width,
-            source_height,
-            file_size_bytes,
-        )
-        log_memory("After reading source metadata")
-
-        if source_format in {"JPEG", "JPG"}:
-            source_image.draft("RGB", (MAX_WORKING_EDGE, MAX_WORKING_EDGE))
-
-        if max(source_image.size) > MAX_WORKING_EDGE or (source_image.width * source_image.height) > MAX_SOURCE_PIXELS:
-            source_image.thumbnail(
-                (MAX_WORKING_EDGE, MAX_WORKING_EDGE),
-                Image.LANCZOS,
-                reducing_gap=3.0,
-            )
-            log_memory("After source downscale before transpose")
-
-        working_image = ImageOps.exif_transpose(source_image)
-
-        if max(working_image.size) > MAX_WORKING_EDGE or (working_image.width * working_image.height) > MAX_SOURCE_PIXELS:
-            working_image.thumbnail(
-                (MAX_WORKING_EDGE, MAX_WORKING_EDGE),
-                Image.LANCZOS,
-                reducing_gap=3.0,
-            )
-
-        if working_image.mode != "RGB":
-            rgb_image = working_image.convert("RGB")
-            close_image(working_image)
-            working_image = rgb_image
-
-        working_image.save(
-            working_path,
-            format="WEBP",
-            quality=EXPORT_WEBP_QUALITY,
-            method=EXPORT_WEBP_METHOD,
-        )
-        log_memory("After downscaled working image saved")
+        with tempfile.TemporaryDirectory(dir=upload_dir, prefix="prepare-") as staging:
+            staged_path = Path(staging) / working_path.name
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(image_path) as source:
+                    size = image_path.stat().st_size
+                    logging.info("MOCKUPS_ARTWORK stage=%s dimensions=%sx%s mode=%s upload_bytes=%s",
+                                 stage, *source.size, source.mode, size)
+                    if size > MAX_UPLOAD_SIZE_BYTES:
+                        raise ValueError("Artwork exceeds the 20 MB upload file-size limit.")
+                    if source.format not in {"JPEG", "PNG", "WEBP"}:
+                        raise ValueError("Upload a valid JPG, PNG, or WebP image.")
+                    validate_image_dimensions(*source.size)
+                    if source.format == "JPEG":
+                        source.draft("RGB", (MAX_WORKING_EDGE, MAX_WORKING_EDGE))
+                    validate_processing_memory(*source.size)
+                    stage = "decode/resize/orient"
+                    source.thumbnail((MAX_WORKING_EDGE, MAX_WORKING_EDGE), Image.LANCZOS, reducing_gap=3.0)
+                    ImageOps.exif_transpose(source, in_place=True)
+                    working_image = source if source.mode in {"RGB", "RGBA"} else source.convert(
+                        "RGBA" if "transparency" in source.info else "RGB")
+                    stage = "working export"
+                    working_image.save(staged_path, format="WEBP", quality=EXPORT_WEBP_QUALITY,
+                                       method=EXPORT_WEBP_METHOD)
+            stage = "commit"
+            os.replace(staged_path, working_path)
+    except (MemoryError, MemoryLimitExceededError) as error:
+        logging.exception("MOCKUPS_ARTWORK failed stage=%s rss_mb=%s", stage, get_memory_usage_mb())
+        raise MemoryLimitExceededError(PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE) from error
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as error:
+        raise ValueError(IMAGE_DIMENSIONS_MESSAGE) from error
     except UnidentifiedImageError as error:
-        raise RuntimeError(
-            f"Cannot open artwork file {image_path}. Please upload a valid JPG, PNG, or WEBP image."
-        ) from error
+        raise ValueError("Upload a valid JPG, PNG, or WebP image.") from error
     finally:
         close_image(working_image)
-        close_image(source_image)
-        del working_image, source_image
-        gc.collect()
-        log_memory("After closing source image")
-
-    collect_garbage(
-        "After preparing lightweight working image",
-        error_message=PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE,
-    )
-
     return working_path
+
 
 
 def create_preview_file(source_image_path, preview_dir, preview_name):
@@ -2551,7 +2555,6 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
     finally:
         close_image(export_image)
         del export_image
-        gc.collect()
 
     return review_path, webp_path, jpg_path
 
@@ -2597,7 +2600,6 @@ def generate_framed_product_image(
         close_image(artwork)
         close_image(template)
         del fitted_artwork, artwork, template
-        gc.collect()
 
 
 def generate_unframed_product_image(
@@ -2637,7 +2639,6 @@ def generate_unframed_product_image(
         close_image(artwork)
         close_image(template)
         del fitted_artwork, artwork, template
-        gc.collect()
 
 
 def generate_size_guide(template_path, artwork_path, review_dir, webp_dir, jpg_dir, webp_name, jpg_name):
@@ -2670,7 +2671,6 @@ def generate_size_guide(template_path, artwork_path, review_dir, webp_dir, jpg_d
         close_image(artwork)
         close_image(template)
         del artwork, template
-        gc.collect()
 
 
 def create_shopify_pack_zip(
@@ -3193,16 +3193,43 @@ def create_complete_pack_zip(
 
 
 def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
-    # Serialize decoded lifestyle work across Streamlit sessions as well as slots.
     with _lifestyle_processing_lock:
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
         try:
-            return _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file)
+            with tempfile.TemporaryDirectory(dir=run_dir, prefix="lifestyle-stage-") as staging:
+                staged = _save_lifestyle_mockup(staging, product_slug, sport_slug, prompt_filename, image_file)
+                result, committed, backups = {}, [], {}
+                try:
+                    for key, value in staged.items():
+                        if value is None:
+                            result[key] = None
+                            continue
+                        value = Path(value)
+                        target = run_dir / value.relative_to(staging)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        if target.exists():
+                            backup = Path(staging) / (key + ".backup")
+                            shutil.copy2(target, backup)
+                            backups[target] = backup
+                        os.replace(value, target)
+                        committed.append(target)
+                        result[key] = target
+                except Exception:
+                    for target in reversed(committed):
+                        if target in backups:
+                            os.replace(backups[target], target)
+                        else:
+                            target.unlink(missing_ok=True)
+                    raise
+                return result
         except (MemoryError, MemoryLimitExceededError) as error:
+            logging.exception("MOCKUPS_LIFESTYLE allocation/budget failure rss_mb=%s", get_memory_usage_mb())
             raise MemoryLimitExceededError(LIFESTYLE_UPLOAD_MEMORY_MESSAGE) from error
         finally:
             if hasattr(image_file, "seek"):
                 image_file.seek(0)
-            gc.collect()
+
 
 
 def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
@@ -3233,6 +3260,8 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
                     with Image.open(temp_source_path) as source_image:
                         if source_image.format not in {"JPEG", "PNG", "WEBP"}:
                             raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
+                        logging.info("MOCKUPS_LIFESTYLE stage=decode dimensions=%sx%s mode=%s upload_bytes=%s",
+                                     *source_image.size, source_image.mode, temp_source_path.stat().st_size)
                         validate_lifestyle_processing_memory(*source_image.size)
                         ImageOps.exif_transpose(source_image, in_place=True)
                         working_image = source_image
@@ -3258,11 +3287,9 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
                 del rgb_image, working_image
     except ValueError:
         raise
-    except (
-        UnidentifiedImageError,
-        Image.DecompressionBombError,
-        Image.DecompressionBombWarning,
-    ) as error:
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
+        raise ValueError(IMAGE_DIMENSIONS_MESSAGE) from error
+    except UnidentifiedImageError as error:
         raise RuntimeError(LIFESTYLE_UPLOAD_INVALID_MESSAGE) from error
     except (MemoryError, MemoryLimitExceededError) as error:
         # Process RSS / decoder allocation failures are not source-file sizes.
