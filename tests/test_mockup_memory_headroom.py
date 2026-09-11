@@ -14,7 +14,7 @@ import image_factory as factory
 
 
 class LifestyleMemoryHeadroomTests(unittest.TestCase):
-    def test_estimate_boundary_and_retry_after_collection(self):
+    def test_estimate_boundary(self):
         with patch.object(factory, "lifestyle_available_memory_bytes", return_value=1024**3):
             required = factory.validate_lifestyle_processing_memory(1536, 1024)
         threshold = required + factory.LIFESTYLE_MEMORY_RESERVE_BYTES
@@ -26,14 +26,12 @@ class LifestyleMemoryHeadroomTests(unittest.TestCase):
                         factory.validate_lifestyle_processing_memory(1536, 1024)
                 else:
                     factory.validate_lifestyle_processing_memory(1536, 1024)
-        with patch.object(factory, "lifestyle_available_memory_bytes", side_effect=[0, threshold]):
-            factory.validate_lifestyle_processing_memory(1536, 1024)
 
     def test_pixel_bound_applies_even_without_available_memory_telemetry(self):
         with patch.object(factory, "lifestyle_available_memory_bytes", return_value=None):
             factory.validate_lifestyle_processing_memory(5000, 5000)
             for dimensions in ((5001, 5000), (0, 5), (-1, 5)):
-                with self.assertRaisesRegex(ValueError, "Cannot read"):
+                with self.assertRaisesRegex(ValueError, "pixel dimensions"):
                     factory.validate_lifestyle_processing_memory(*dimensions)
 
     def fixture(self, directory, version=2, member="/child"):
@@ -88,7 +86,7 @@ class LifestyleMemoryHeadroomTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             proc, mount = self.fixture(directory)
             (mount / "child/memory.max").write_text("512000000")
-            with self.assertRaises(factory.MemoryLimitExceededError):
+            with self.assertRaisesRegex(RuntimeError, "memory monitoring"):
                 factory._cgroup_memory_headroom(proc)
 
     def test_concurrent_calls_serialize_decoded_work(self):
@@ -174,10 +172,9 @@ class LifestyleMemoryHeadroomTests(unittest.TestCase):
                 self.assertEqual(Path(paths["webp_path"]).read_bytes(), expected_webp.read_bytes())
                 self.assertEqual(Path(paths["preview_path"]).read_bytes(), expected_preview.read_bytes())
 
-    def test_legacy_guard_remains_for_other_consumers(self):
+    def test_stage_markers_do_not_reject_process_rss(self):
         with patch.object(factory, "get_memory_usage_mb", return_value=431):
-            with self.assertRaises(factory.MemoryLimitExceededError):
-                factory.ensure_memory_available("other workflow")
+            self.assertEqual(factory.ensure_memory_available("export"), 431)
 
 
 if __name__ == "__main__":

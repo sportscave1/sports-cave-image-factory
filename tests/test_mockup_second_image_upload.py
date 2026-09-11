@@ -45,9 +45,9 @@ def png_bytes(color):
     return buffer.getvalue()
 
 
-def bmp_bytes(color):
+def equal_size_png_bytes(color):
     buffer = io.BytesIO()
-    Image.new("RGB", (12, 12), color).save(buffer, format="BMP")
+    Image.new("RGB", (12, 12), color).save(buffer, format="PNG", compress_level=0)
     return buffer.getvalue()
 
 
@@ -279,8 +279,8 @@ class MockupSecondImageUploadTests(unittest.TestCase):
         self.assertIn("did not finish", lifecycle["error_message"])
 
     def test_primary_artwork_cache_uses_content_not_filename_size_or_type(self):
-        first_bytes = bmp_bytes((10, 20, 30))
-        second_bytes = bmp_bytes((30, 20, 10))
+        first_bytes = equal_size_png_bytes((10, 20, 30))
+        second_bytes = equal_size_png_bytes((30, 20, 10))
         self.assertEqual(len(first_bytes), len(second_bytes))
         first = CountingUpload(first_bytes, file_id="main-a", name="same.png")
         second = CountingUpload(second_bytes, file_id="main-b", name="same.png")

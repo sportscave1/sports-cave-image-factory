@@ -7382,6 +7382,10 @@ def _active_or_draft_product(product):
     return str(product.get("status") or "").strip().upper() in {"ACTIVE", "DRAFT"}
 
 
+def _live_edition_product(product):
+    return str(product.get("status") or "").strip().upper() == "ACTIVE"
+
+
 def _product_sync_image_url(product):
     return product.get("thumbnail_url") or _first_image_url(product)
 
@@ -7463,7 +7467,7 @@ def _same_existing_product(left, right):
 def _safe_existing_product_updates(existing, product, by_handle):
     safe = _product_sync_safe_fields(product)
     updates = {}
-    for key in ("shopify_product_id", "shopify_product_gid", "product_title", "active", "is_active", "featured_image_url"):
+    for key in ("shopify_product_id", "shopify_product_gid", "product_title", "featured_image_url"):
         value = safe.get(key)
         if value in (None, "") and key in {"shopify_product_id", "shopify_product_gid"}:
             continue
@@ -7493,7 +7497,7 @@ def _plan_edition_product_incremental_sync(products, existing_rows):
     actions = []
     seen_products = set()
     for product in products or []:
-        if not _active_or_draft_product(product):
+        if not _live_edition_product(product):
             continue
         candidates = _shopify_product_identity_candidates(product)
         handle = str(product.get("handle") or "").strip()
@@ -7550,6 +7554,9 @@ def _plan_edition_product_incremental_sync(products, existing_rows):
 
         if not existing:
             safe = _product_sync_safe_fields(product)
+            if not re.fullmatch(r"gid://shopify/Product/[0-9]+", str(safe.get("shopify_product_gid") or "")):
+                actions.append({"action": "error", "product": product, "error": "Valid Shopify product GID is required."})
+                continue
             if not safe.get("shopify_handle"):
                 actions.append({"action": "error", "product": product, "error": "Shopify product handle is missing."})
                 continue
@@ -7749,7 +7756,7 @@ def _candidate_edition_products_for_shopify_products(cur, products):
             for candidate in _shopify_product_identity_candidates(product)
         }
     )
-    handles = sorted({str(product.get("handle") or "").strip() for product in products or [] if str(product.get("handle") or "").strip()})
+    handles = sorted({str(product.get("handle") or "").strip().lower() for product in products or [] if str(product.get("handle") or "").strip()})
     titles = sorted(
         {
             str(product.get("title") or "").strip().lower()
@@ -7765,7 +7772,7 @@ def _candidate_edition_products_for_shopify_products(cur, products):
         FROM edition_products ep
         WHERE ep.shopify_product_id = ANY(%s)
            OR ep.shopify_product_gid = ANY(%s)
-           OR ep.shopify_handle = ANY(%s)
+           OR LOWER(ep.shopify_handle) = ANY(%s)
            OR (
                 COALESCE(ep.shopify_product_id, '') = ''
                 AND COALESCE(ep.shopify_product_gid, '') = ''
@@ -7779,6 +7786,27 @@ def _candidate_edition_products_for_shopify_products(cur, products):
 
 
 def _insert_edition_product_from_shopify(cur, fields):
+    # Fail closed for orphaned history. Never reconstruct or renumber it here.
+    candidates = sorted(_shopify_product_identity_candidates(fields))
+    handle = fields.get("shopify_handle") or ""
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM edition_orders
+            WHERE shopify_product_id = ANY(%s) OR shopify_product_gid = ANY(%s)
+               OR LOWER(shopify_handle) = LOWER(%s) OR LOWER(product_handle) = LOWER(%s)
+            UNION ALL
+            SELECT 1 FROM edition_runs
+            WHERE shopify_product_id = ANY(%s) OR LOWER(shopify_handle) = LOWER(%s)
+            UNION ALL
+            SELECT 1 FROM edition_allocation_tombstones
+            WHERE shopify_product_gid = ANY(%s)
+        ) AS has_history
+        """,
+        (candidates, candidates, handle, handle, candidates, handle, candidates),
+    )
+    if (cur.fetchone() or {}).get("has_history"):
+        raise RuntimeError(f"Existing edition history for {handle}; automatic initialization refused.")
     raw_json = json_dumps(fields.get("raw") or {})
     cur.execute(
         """
@@ -7815,8 +7843,6 @@ def _update_existing_edition_product_safe_fields(cur, existing, updates):
         "shopify_product_gid",
         "shopify_handle",
         "product_title",
-        "active",
-        "is_active",
         "featured_image_url",
     )
     assignments = []
@@ -7916,7 +7942,27 @@ def _apply_edition_product_incremental_plan(cur, actions, *, sync_variants=True)
                 summary["errors"].append(action.get("error") or "Product sync planning failed.")
         except Exception as error:
             summary["errors"].append(f"{product.get('handle') or product.get('title') or 'Product'}: {error}")
-    _ensure_active_edition_runs_for_products(cur)
+    # Only rows inserted in this transaction receive a run. The global helper
+    # copies run counters over ALL edition products and must never run here.
+    if summary["inserted_handles"]:
+        cur.execute(
+            """
+            WITH new_runs AS (
+                INSERT INTO edition_runs(
+                    edition_product_id, shopify_product_id, shopify_handle, product_title,
+                    edition_name, edition_total, next_edition_number, status, started_at, updated_at
+                )
+                SELECT id, shopify_product_id, shopify_handle, product_title,
+                       edition_name, edition_total, next_edition_number, 'active', now(), now()
+                FROM edition_products
+                WHERE shopify_handle = ANY(%s) AND active_edition_run_id IS NULL
+                RETURNING id, edition_product_id
+            )
+            UPDATE edition_products ep SET active_edition_run_id=nr.id
+            FROM new_runs nr WHERE ep.id=nr.edition_product_id
+            """,
+            (summary["inserted_handles"],),
+        )
     return summary
 
 
@@ -7935,7 +7981,7 @@ def upsert_shopify_products_to_edition_products(
     Existing rows only receive Shopify identity/display updates. Edition counters
     remain owned by Edition Ops and order allocation.
     """
-    active_draft_products = [product for product in (products or []) if _active_or_draft_product(product)]
+    active_draft_products = [product for product in (products or []) if _live_edition_product(product)]
     summary = {
         "source": source,
         "products_checked": len(active_draft_products),
@@ -7954,6 +8000,9 @@ def upsert_shopify_products_to_edition_products(
 
     with connect() as conn:
         with conn.cursor() as cur:
+            # Serialize identity lookup + insertion, including changed/legacy handles.
+            # This transaction contains database work only, never Shopify requests.
+            cur.execute("LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE")
             existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
             actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
             if sync_variants:
@@ -7964,6 +8013,8 @@ def upsert_shopify_products_to_edition_products(
                     actions,
                     sync_variants=False,
                 )
+            if apply_summary.get("errors"):
+                raise RuntimeError("; ".join(apply_summary["errors"][:3]))
         conn.commit()
 
     summary.update(
@@ -8170,7 +8221,7 @@ def _classify_new_shopify_products(products, existing_rows):
     errors = []
     seen_ids = set()
     for product in products or []:
-        if not _active_or_draft_product(product):
+        if not _live_edition_product(product):
             continue
         candidates = set(_shopify_product_identity_candidates(product))
         canonical_id = canonical_shopify_id(
@@ -8588,10 +8639,10 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
 
 def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback=None):
     """Fetch and atomically reconcile the complete Edition Ops Shopify catalogue."""
-    ensure_schema()
     config = dict(config or shopify_sync.get_config())
     attempted_at = utc_now_datetime()
-    run_id = start_sync_run("shopify_products_incremental_sync")
+    # Product discovery must not run global schema/run backfills.
+    run_id = start_sync_run("shopify_products_incremental_sync", ensure_schema_first=False)
     products_seen = 0
     active_draft_products = []
     summary = {
@@ -19449,12 +19500,12 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             shopify_product_id=product.get("shopify_product_id") or "",
             shopify_handle=product.get("handle") or "",
         )
-        if not _active_or_draft_product(product):
+        if not _live_edition_product(product):
             result = {
                 "source": "webhook",
                 "duplicate": False,
                 "processed": True,
-                "reason": "Product is not active or draft.",
+                "reason": "Product is not active; a later products/update can initialize it.",
                 "shopify_product_id": product.get("shopify_product_id") or "",
                 "shopify_handle": product.get("handle") or "",
                 "new_products_inserted": 0,

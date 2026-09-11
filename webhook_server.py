@@ -377,7 +377,7 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
     hmac_header = _header(request.headers, "X-Shopify-Hmac-Sha256", "X-Shopify-Hmac-SHA256")
     hmac_result = verify_shopify_webhook_hmac(raw_body, request.headers)
     _webhook_log(
-        "shopify_products_create_webhook_received",
+        "shopify_products_webhook_received",
         webhook_id=webhook_id,
         topic=topic,
         shop_domain=shop_domain,
@@ -444,13 +444,17 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
     except ValueError:
         return Response("Invalid JSON payload.", status_code=400)
 
+    if not isinstance(payload, dict) or not payload.get("id") or not payload.get("handle"):
+        return Response("Product ID and handle are required.", status_code=400)
+
     try:
         import supabase_backend
 
         if not supabase_backend.is_configured():
             return Response("Supabase is not configured for webhook processing.", status_code=500)
 
-        claim = supabase_backend.claim_product_create_webhook_receipt(
+        claim = await run_in_threadpool(
+            supabase_backend.claim_product_create_webhook_receipt,
             payload,
             webhook_id,
             topic,
@@ -468,7 +472,8 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
             "webhook_id": webhook_id,
         }
     try:
-        result = supabase_backend.process_product_create_webhook(
+        result = await run_in_threadpool(
+            supabase_backend.process_product_create_webhook,
             payload,
             claim.get("webhook_id") or webhook_id,
             topic,

@@ -3472,6 +3472,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
     def test_product_create_webhook_inserts_new_product_with_next_number_one(self):
         class FakeCursor:
+            def execute(self, sql, params=None):
+                assert sql == "LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE"
+
             def __enter__(self):
                 return self
 
@@ -3559,6 +3562,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
     def test_product_create_webhook_existing_product_is_not_duplicated(self):
         class FakeCursor:
+            def execute(self, sql, params=None):
+                assert sql == "LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE"
+
             def __enter__(self):
                 return self
 
@@ -3674,6 +3680,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
     def test_product_create_webhook_leaves_new_row_pending_configuration(self):
         class FakeCursor:
+            def execute(self, sql, params=None):
+                assert sql == "LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE"
+
             def __enter__(self):
                 return self
 
@@ -3746,6 +3755,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
     def test_product_create_webhook_does_not_call_order_allocation_or_certificate_helpers(self):
         class FakeCursor:
+            def execute(self, sql, params=None):
+                assert sql == "LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE"
+
             def __enter__(self):
                 return self
 

@@ -752,7 +752,18 @@ def _write_snapshot(rows, originals=None, meta=None):
 
 def _hydrate_from_snapshot_once():
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
-        return
+        loaded_at = st.session_state.setdefault("edition_ops_snapshot_checked_at", time.monotonic())
+        if time.monotonic() - loaded_at < EDITION_OPS_CACHE_TTL_SECONDS:
+            return
+        # Refresh the display on normal page reruns, without discarding edits.
+        editor_delta = st.session_state.get(EDITOR_KEY) or {}
+        if (isinstance(editor_delta, dict) and editor_delta.get("edited_rows")) or _changed_rows(
+            st.session_state.get(EDITOR_ROWS_KEY) or st.session_state.get(ROWS_KEY) or [],
+            st.session_state.get(ORIGINAL_ROWS_KEY) or [],
+        ):
+            return
+        _clear_editor_state()
+        _bump_editor_version()
     snapshot = _load_snapshot()
     if snapshot:
         st.session_state[ROWS_KEY] = snapshot["rows"]
@@ -770,6 +781,7 @@ def _hydrate_from_snapshot_once():
         st.session_state[LOAD_ERROR_KEY] = snapshot.get("load_error") or ""
         st.session_state[LOAD_DIAGNOSTIC_KEY] = dict(snapshot.get("database_read") or {})
     st.session_state[SNAPSHOT_LOADED_KEY] = True
+    st.session_state["edition_ops_snapshot_checked_at"] = time.monotonic()
 
 
 def _editable_snapshot(row):
