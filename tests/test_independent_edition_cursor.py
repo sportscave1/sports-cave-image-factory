@@ -146,6 +146,13 @@ class IndependentEditionCursorTests(unittest.TestCase):
         outcome.assert_not_called()
         conn.commit.assert_not_called()
 
+    def test_normal_startup_never_runs_incident_repairs(self):
+        import webhook_server
+        with patch.dict("os.environ", {"SC3148_REPAIR_APPROVAL": repair.APPROVAL, "SC3148_READ_ONLY_AUDIT": "0"}), patch.object(webhook_server.shopify_order_reconciliation_worker, "start") as start, patch.object(webhook_server.threading, "Thread") as thread:
+            webhook_server._start_recent_order_reconciliation()
+        start.assert_called_once()
+        thread.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

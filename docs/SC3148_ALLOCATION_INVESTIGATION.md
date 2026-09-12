@@ -1,122 +1,135 @@
-# SC3148 allocation investigation — pending authoritative database audit
+# SC3148 — production allocation repair
 
-Inspected 12 September 2026. No production writes, deployments, migrations or
-certificate generation have been performed for this incident.
+## Root cause
 
-## Confirmed evidence
+The installed `allocate_edition_line_units_atomic` RPC from
+`20260828_fix_sparse_legacy_allocator.sql` required next=sold+1 and
+last_assigned=sold. Edition Ops correctly permits an independent manual cursor.
+The old RPC rejected the valid next=50/sold=0 state before entering its quantity
+loop. This was not a race between two purchased variants: Shopify has one Black/L
+line with quantity two. Numeric/GID ingestion aliases represented the same line.
 
-- Shopify order `gid://shopify/Order/7408832905523` is PAID, not cancelled.
-- It has **one** line, `gid://shopify/LineItem/17545899573555`, quantity **2**,
-  variant `gid://shopify/ProductVariant/54020683989299` (Black / L), SKU `FSWOA2B`.
-- Product `gid://shopify/Product/10431944393011`, handle
-  `the-first-shift-willie-o-ree-wall-art`, is ACTIVE.
-- Read-only Shopify inspection returned sports_cave metafields: total 100,
-  next 50, last_assigned 49, sold 0, remaining 100, enabled true,
-  is_sold_out false. These are mirrors, not proof of allocation history.
-- Render webhook service `srv-d9146onlk1mc739nrm7g` received the order at
-  `2026-09-11T23:53:03Z`. At `23:53:15Z` the atomic RPC rejected it:
-  `Atomic edition suffix is not contiguous ... enforced rows 0, min 0,
-  max 0, product sold 0, next 50. Repair is required before allocation`.
-- The same guard rejected reconciliation at approximately 23:55 UTC,
-  00:11 UTC and 04:18 UTC. The initial result reported zero assignments.
+Render first recorded the failed allocation on 11 September 2026 at 23:53 UTC;
+reconciliation repeated the same error. The local PostgreSQL regression harness
+reproduces that exact old-RPC failure and validates the replacement.
 
-## Confirmed code mismatch
+## Authoritative evidence before repair
 
-The manual override branch of `_update_edition_product_with_cursor` updates
-product/run next pointers while explicitly preserving sold/remaining/history.
-Commit `86b331b` restored this editing behaviour. The installed allocator from
-`20260828_fix_sparse_legacy_allocator.sql` still requires both next pointers to
-equal sold_count + 1 and sold_count to equal last_assigned_edition. It derives
-the next allocation from sold_count. Consequently a permitted pointer override
-can create a state that this older allocator refuses.
+- Product 657, `gid://shopify/Product/10431944393011`.
+- Handle `the-first-shift-willie-o-ree-wall-art`.
+- Active run `9799b113-0ff2-4dd6-9185-381357d04748`, Original Edition, total 100.
+- Product/run next 50; sold 0; remaining 100; active, not sold out.
+- Adjustment `c50e76f5-e622-412b-ba24-b63e4e59c647`: manual_app / Edition Ops save,
+  next 1 to 50 on 6 September 2026 at 23:43:22 UTC. Sales stayed independent.
+- No product allocations, tombstones/reservations or certificates. 50/51 were unused.
+- Order `gid://shopify/Order/7408832905523`, #SC3148: PAID, not cancelled.
+- Line `gid://shopify/LineItem/17545899573555`, quantity/currentQuantity 2.
+- Variant `gid://shopify/ProductVariant/54020683989299`, Black/L, SKU FSWOA2B.
+- Both numeric and GID ingestion aliases were Error. No other orders matched the
+  old allocator error in the read-only scan.
+- Old function MD5 `1e5f260172220751170863b927f1f2a8`.
+- Initial read-only audit SHA256
+  `9e15ed654a17b2670c69b032196dc3e7c544c4dba816960017a1cf508eec94d6`.
+- Rechecked at 05:20:18 UTC immediately before the authorized repair; allocation
+  state remained unchanged.
 
-The failure occurs before the quantity loop. There is no evidence that these
-two copies raced. The existing RPC already locks by canonical product GID and
-locks the product/run rows, inserts all units of a line in one transaction,
-and uses channel/order/line/unit identities plus database uniqueness.
+## Production repair and readback
 
-**Not yet established:** who/what set this product's pointer, the active run,
-historical or reserved #50/#51, partial older allocations, certificates,
-adjustment reasons and whether 49 is an approved historical sold baseline.
-The Shopify mirror cannot establish those facts. The RPC error excludes only
-valid identity-enforced rows in its selected run; it does not prove that all
-other history is empty.
+User explicitly authorized commit, push main and existing Render deployments.
+The existing webhook service executed the scoped repair at **12 September 2026,
+05:23:08 UTC**. Backup, function installation and allocation were one transaction.
+The helper checked product/run/order/variant identity, quantity, paid state,
+manual adjustment, empty history/reservations and exact counters under locks.
 
-## Local changes so far
+- Edition order **488**, unit ordinal 1: **#050/100**.
+- Edition order **489**, unit ordinal 2: **#051/100**.
+- Both retain the exact canonical Shopify order, line, product and variant IDs.
+- Both numeric/GID ingestion aliases now Assigned with empty allocation errors.
+- Product and active run: **next 52**. Product: **sold 2, remaining 98**, last assigned 51.
+- Both allocations valid and identity-enforced, mirror_status synced.
+- Normal Orders loader/converter: two rows #050/100 and #051/100, **Needs certificate**.
+- Normal Edition Ops loader: next 52, sold 2, remaining 98, enabled true, no sync error.
+- Shopify canonical AND legacy metafields read back as next 52, sold 2, remaining 98,
+  total 100, enabled true, is_sold_out false, status limited_release.
+- Public product page independently reloaded: **NEXT AVAILABLE #052 / 100**,
+  NUMBERED EDITION / CERTIFICATE INCLUDED. No template/text was hard-coded.
+- No certificates generated/sent; ordinary fulfilment must generate them.
+- Post-repair audit found no remaining lines matching the old invariant error.
 
-- Atomic RPC diagnostics now log stable identities and committed unit results,
-  reject incomplete unit responses before commit, and report failures without
-  copying raw SQL exceptions that could contain customer data.
-- Order webhook diagnostic completion events now say failed when allocation or
-  mirror errors are present. This does not hide or clear Orders errors.
-- `scripts/audit_sc3148.py` uses a repeatable-read, read-only transaction to
-  inspect this product/order, allocation numbers, tombstones, adjustment history,
-  certificates, repair audit metadata and other lines with the same error.
-  It fingerprints the snapshot and complete product allocation rows.
+Backup/audit row: `044d3d3f-85a1-4d00-af1e-5902b4c79301`, repair key
+`sc3148-independent-cursor-20260912`. It stores original product/run/order/line
+records, adjustments and the previous function definition inside Supabase.
+Snapshot SHA256 `3e52492a8c2209c1bf0270708f6cf9fc0ad743d4f78ddc29c4df27fcac6e3a5c`.
+The new function MD5 is `9856bdfeb974670ea6bb108cd8614292`.
+Readback audit SHA256 `30f8d86431551b8df025e8b421857a1bfcd0260d0b81e7641def22c5f0061e67`.
 
-The SQL allocator algorithm is **not changed yet**. No proposed sold baseline
-has been applied. Nine added tests cover diagnostics and audit safety; they do
-not constitute the requested complete allocator/concurrency regression suite.
+## Permanent protection
 
-Validation: 295 tests run across the incident diagnostics, edition ledger,
-atomic incident repair, product webhook restoration, Shopify sync, Edition Ops
-and Supabase modules: 261 passed, 34 skipped. All three changed/new Python files
-compiled successfully. `git diff --check` passed. No real PostgreSQL concurrency
-test or production data readback has been performed.
+Migration `20260912045939_independent_edition_cursor.sql` replaces only the RPC;
+installation does not recalculate product data. Allocation uses the authoritative
+locked cursor. Sales increase only by missing units actually committed. Existing
+allocations return unchanged on retries, including completed lines after sellout.
+Partial legacy retries fill only missing unit ordinals. Numeric/GID source aliases
+normalize to one source identity. Variant/product mismatches fail closed.
 
-## Required next step
+Existing PostgreSQL advisory transaction locks, product/run FOR UPDATE locks and
+source-unit/run-number uniqueness protect multiple lines, variants and concurrent
+orders. Bounds, disabled/closed runs, cursor collisions, tombstones and invalid
+sales counts remain guarded. No historical number is modified or reused.
 
-Use an existing authenticated Supabase connection or OS-configured Render shell
-to run the read-only audit. With this local file present in that environment:
+Storefront mirroring reads stored Supabase next/sold/remaining independently.
+It no longer invents a cursor from sold counts or blocks legitimate manual gaps.
+The ingestion-exists shortcut was removed: actual saved allocations decide whether
+a paid-line retry is complete. No certificates are generated by webhook repair.
 
-```sh
-python scripts/audit_sc3148.py
-```
+## Validation and release
 
-Do not paste credentials. No configured local database, Supabase connector or
-authenticated database browser session was available during this investigation.
+- 338 focused Python tests in isolated modules: **304 passed, 34 skipped**.
+- **17 real PostgreSQL/PLpgSQL scenarios passed**, using PGlite 0.5.8 and the actual
+  ledger-write trigger and old/new RPC definitions.
+- PGlite serializes submitted calls; it is not a multi-process PostgreSQL stress
+  test. Production cross-process exclusion uses the database locks and unique keys.
+- Broad combined unittest discovery was attempted and interrupted after shared
+  Streamlit form state contaminated unrelated UI tests. Isolated Edition Ops
+  editing tests pass (12/12). No unrelated UI code was changed.
+- All 11 changed Python files compile; git whitespace checks and Render topology validation pass.
+- Audit release: `0521dbfe16d801fd409154e16b1ca1ce025ab2f1`.
+- Allocator release: `2ee8b46469d3dc15edfd4e3a391ea991c2b65eba`.
+- Ingestion finalization: `15aa7244e2b7c6247c6d815ab0574cf63e177932`.
+- Primary service remains sports-cave-os / srv-d8kl4on7f7vs73dvavv0.
+- Webhook service remains sports-cave-os-webhooks / srv-d9146onlk1mc739nrm7g.
+- Allocator deployment IDs: dep-daie1c95efls738ssoe0 (primary),
+  dep-daie1c95efls738sspc0 (webhook), both live.
+- Approved production repair deployment: dep-daie2ojm8hqs73cfrib0, live.
 
-Review the audit before choosing #50/#51 or changing any sold baseline. If either
-number is reserved or history conflicts, stop. After a reviewed allocator fix,
-use a narrowly scoped, locked, snapshot-guarded repair of this source line,
-preserve all old allocation rows, leave certificates missing unless already
-present, mirror via the existing service and read back every affected state.
-Installing a replacement SQL function is code deployment and is not included
-in the user's narrow production data-repair authorization.
+Changed files: supabase_backend.py, webhook_server.py, run_migrations.py,
+scripts/audit_sc3148.py, scripts/repair_sc3148.py, the new migration,
+tests/independent_cursor_postgres.mjs, tests/test_independent_edition_cursor.py,
+tests/test_atomic_allocation_incident_repair.py,
+tests/test_edition_ops_allocation_integrity.py, tests/test_limited_editions_phase2.py,
+tests/test_shopify_sync.py and this report. Earlier audit diagnostics also added
+tests/test_sc3148_allocation_diagnostics.py.
+
+NO EXISTING HISTORICAL EDITION NUMBERS WERE CHANGED.
+
+THE ALLOCATOR NO LONGER REQUIRES NEXT_EDITION_NUMBER = SOLD_COUNT + 1.
 
 
-## Authoritative audit and approved final repair � 12 September 2026
+## Finalization and cleanup
 
-User explicitly approved commit, push main and deploy in the conversation.
-Read-only audit ran in the existing webhook Render service at 05:00:45 UTC.
+The optional marketplace ingestion columns are absent in this production database.
+The finalizer detects that schema and skips those optional fields; it does not add
+columns or change unrelated marketplace infrastructure. The authoritative order-line
+statuses are Assigned with empty errors. This schema difference does not affect
+allocation, certificates, the normal Orders display or Edition Ops.
 
-- Product 657 / gid://shopify/Product/10431944393011, run 9799b113-0ff2-4dd6-9185-381357d04748.
-- Supabase: total 100, next 50, sold 0, remaining 100; enabled, active run.
-- Manual adjustment c50e76f5-e622-412b-ba24-b63e4e59c647 changed next 1 to 50 on 6 September without sales.
-- No product allocations, tombstones/reservations or certificates. Numbers 50/51 are unused.
-- Order 7408832905523 is PAID, not cancelled; one line 17545899573555, quantity two, variant 54020683989299.
-- Ingestion contains numeric and GID aliases for this same line, both Error. These must become two physical units, never four.
-- Other failures matching the old SQL invariant: only these SC3148 aliases.
-- Old RPC definition MD5: 1e5f260172220751170863b927f1f2a8.
-- Audit snapshot SHA256: 9e15ed654a17b2670c69b032196dc3e7c544c4dba816960017a1cf508eec94d6.
+The temporary write-on-startup incident hook is removed in the final cleanup release.
+The narrowly scoped repair/audit scripts remain for auditability; ordinary service
+startup only starts the existing reconciliation worker. The temporary MCP connection
+probe script and generated protocol directory were removed from the local temp folder.
 
-The old RPC required next=sold+1 and last_assigned=sold before entering its quantity loop.
-This was not a two-line race. The valid manual cursor triggered that incorrect precondition.
-The replacement uses the locked cursor, counts only newly committed units, preserves source-unit
-identities on retries and rejects occupied/reserved numbers, inactive runs and inconsistent sales.
-
-The reviewed migration installs only a function; it does not rewrite historical product rows.
-The explicitly gated incident helper backs up original records and the old function in
-edition_repair_audits, installs the function and allocates SC3148 in one transaction. It updates
-both ingestion aliases through the existing status helper. After commit it invokes the normal
-single-product Shopify mirror and reads the normal Orders and Edition Ops loaders. It never
-creates or sends certificates. Restart after commit validates existing units and only retries the mirror.
-
-Expected verified result: editions 50/51, next 52, sold 2, remaining 98. Production execution and
-final readback are recorded below when complete.
-
-Validation: 16 actual PostgreSQL/PLpgSQL scenarios executed using isolated PGlite 0.5.8.
-PGlite serializes connections; cross-process exclusion relies on the existing PostgreSQL advisory
-transaction lock, product/run FOR UPDATE locks and source-unit/run-number unique constraints.
-Relevant Python modules are run in separate processes because a combined broad unittest discovery
-leaks Streamlit form context between unrelated UI suites. The isolated Edition Ops UI tests pass.
+Final idempotent readback completed at 05:33:56 UTC on 12 September 2026.
+Action was `already_repaired`; allocation IDs 488/489 and the complete allocation
+history fingerprint `fe5d9c47aa0376af1248603876b9e274` were unchanged.
+Order optional ingestion fields were null, with has_ingestion_error false.
+Both temporary incident environment flags were disabled after that readback.
