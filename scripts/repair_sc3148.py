@@ -136,6 +136,32 @@ def apply(conn):
         return {"action": "repaired", "editions": [50, 51], **final}
 
 
+def finalize_ingestion():
+    """Optional marketplace diagnostics are not installed in every OS database."""
+    required = {"source_name", "ingestion_status", "ingestion_method", "ingestion_result",
+                "ingestion_reason", "ingestion_duration_ms", "last_ingested_at", "updated_at"}
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='shopify_orders'")
+            columns = {r["column_name"] for r in cur.fetchall()}
+        conn.rollback()
+    if not required.issubset(columns):
+        return "not_applicable_legacy_schema"
+    backend._set_order_ingestion_outcome(
+        {"shopify_order_id": ORDER_ID, "order_name": "#SC3148"},
+        ingestion_method="sc3148_verified_repair", ingestion_status="complete",
+        import_result="repaired_existing_assignments", reason="",
+    )
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT ingestion_status, ingestion_reason FROM shopify_orders WHERE shopify_order_id=%s", (ORDER_ID,))
+            ingestion = dict(cur.fetchone() or {})
+        conn.rollback()
+    require(ingestion.get("ingestion_status") == "complete" and not ingestion.get("ingestion_reason"),
+            "order ingestion completion was not persisted")
+    return "complete"
+
+
 def run(approval):
     require(approval == APPROVAL, "explicit incident approval gate absent")
     with backend.connect() as conn:
@@ -164,21 +190,7 @@ def run(approval):
     result["orders_ui_rows"] = [{k: v for k, v in r.items() if k in allowed} for r in rows]
     require(len(rows) == 2 and sorted(int(r.get("edition_number") or 0) for r in rows) == [50, 51],
             "Orders loader did not return the two verified fulfilment units")
-    # Clear the order-level retryable ingestion outcome only after the normal
-    # loader and mirror both confirm the repaired units. No allocation is repeated.
-    backend._set_order_ingestion_outcome(
-        {"shopify_order_id": ORDER_ID, "order_name": "#SC3148"},
-        ingestion_method="sc3148_verified_repair", ingestion_status="complete",
-        import_result="repaired_existing_assignments", reason="",
-    )
-    with backend.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT ingestion_status, ingestion_reason FROM shopify_orders WHERE shopify_order_id=%s", (ORDER_ID,))
-            ingestion = dict(cur.fetchone() or {})
-        conn.rollback()
-    require(ingestion.get("ingestion_status") == "complete" and not ingestion.get("ingestion_reason"),
-            "order ingestion completion was not persisted")
-    result["ingestion_status"] = "complete"
+    result["ingestion_status"] = finalize_ingestion()
     product_rows = backend.list_edition_products_read_only(search=HANDLE, limit=5)
     result["edition_ops"] = [
         {key: value for key, value in edition_ops._row_from_supabase_product(row).items()

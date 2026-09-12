@@ -105,11 +105,46 @@ class IndependentEditionCursorTests(unittest.TestCase):
             changed[0][field] = value
             with self.assertRaises(ValueError):
                 validate_before(*changed)
+
         for index in (4, 5, 6):
             changed = copy.deepcopy(args)
             changed[index] = [{"id": "conflict"}]
             with self.assertRaises(ValueError):
                 validate_before(*changed)
+
+    def test_finalization_marks_only_sc3148_complete_after_verified_readback(self):
+        import order_allocator
+        import orders_page
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.cursor.return_value.__enter__.return_value.fetchone.return_value = {
+            "ingestion_status": "complete", "ingestion_reason": ""}
+        conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [
+            {"column_name": key} for key in ("source_name", "ingestion_status", "ingestion_method", "ingestion_result",
+                "ingestion_reason", "ingestion_duration_ms", "last_ingested_at", "updated_at")]
+        units = [{"edition_number": 50}, {"edition_number": 51}]
+        with patch.object(backend, "connect", return_value=conn), \
+             patch.object(repair, "apply", return_value={"action": "already_repaired"}), \
+             patch.object(backend, "sync_product_edition_metafields", return_value={"source_values": {}, "metafields_after": []}), \
+             patch.object(backend, "list_hybrid_order_rows", return_value=[]), \
+             patch.object(order_allocator, "_snapshot_rows_from_supabase_order_rows", return_value=units), \
+             patch.object(orders_page, "_normalise_row", side_effect=lambda row: row), \
+             patch.object(backend, "list_edition_products_read_only", return_value=[]), \
+             patch.object(backend, "_set_order_ingestion_outcome") as outcome:
+            result = repair.run(repair.APPROVAL)
+        self.assertEqual(result["ingestion_status"], "complete")
+        self.assertEqual(outcome.call_args.args[0]["shopify_order_id"], repair.ORDER_ID)
+        self.assertEqual(outcome.call_args.kwargs["ingestion_status"], "complete")
+        conn.commit.assert_called_once()
+
+    def test_finalization_legacy_schema_never_writes_optional_columns(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [{"column_name": "shopify_order_id"}]
+        with patch.object(backend, "connect", return_value=conn), patch.object(backend, "_set_order_ingestion_outcome") as outcome:
+            self.assertEqual(repair.finalize_ingestion(), "not_applicable_legacy_schema")
+        outcome.assert_not_called()
+        conn.commit.assert_not_called()
 
 
 if __name__ == "__main__":
