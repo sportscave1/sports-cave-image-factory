@@ -14,6 +14,8 @@ CREATE TABLE edition_runs(id uuid primary key, edition_total int, next_edition_n
 CREATE TABLE edition_orders(id serial primary key, ${strings.map(s=>s+' text').join(',')}, edition_run_id uuid, unit_ordinal int, edition_number int, edition_total int, allocation_index int, quantity int, identity_enforced boolean, allocation_valid boolean default true, assigned_at timestamptz, updated_at timestamptz, UNIQUE(source_channel,external_order_id,external_line_item_id,unit_ordinal), UNIQUE(edition_run_id,edition_number));
 CREATE TABLE edition_allocation_tombstones(source_channel text, external_order_id text, external_line_item_id text, shopify_product_gid text, former_edition_number int);
 `);
+const originalLedger=readFileSync(new URL("../migrations/20260825_atomic_edition_allocation_ledger.sql",import.meta.url),"utf8");
+await db.exec(originalLedger.slice(originalLedger.indexOf("CREATE OR REPLACE FUNCTION enforce_edition_order_ledger_writes()"),originalLedger.indexOf("-- Allocate every unit")));
 await db.exec(sql);
 const run='9799b113-0ff2-4dd6-9185-381357d04748', product='gid://shopify/Product/10431944393011';
 async function reset(next=50,sold=0) {
@@ -28,6 +30,7 @@ async function allocate(qty=1,line='17545899573555',order='7408832905523',varian
 async function state(){return (await db.query('SELECT next_edition_number,sold_count,remaining_count FROM edition_products')).rows[0];}
 let passed=0;
 async function test(name,fn){await reset();await fn();passed++;console.log('PASS '+name);}
+await test('previous production RPC reproduces exact pre-loop failure',async()=>{await db.exec(readFileSync(new URL('../migrations/20260828_fix_sparse_legacy_allocator.sql',import.meta.url),'utf8'));await assert.rejects(allocate(2),/Atomic edition suffix is not contiguous/);assert.deepEqual(await state(),{next_edition_number:50,sold_count:0,remaining_count:100});await db.exec(sql);});
 await test('SC3148 cursor50 sold0 valid; two units50/51 and sales2',async()=>{const r=await allocate(2);assert.deepEqual(r.map(x=>x.allocation.edition_number),[50,51]);assert.deepEqual(await state(),{next_edition_number:52,sold_count:2,remaining_count:98});});
 await test('single unit consumes50 and increments sales by one',async()=>{assert.equal((await allocate())[0].allocation.edition_number,50);assert.equal((await state()).sold_count,1);});
 await test('two separate lines share product sequence',async()=>{await allocate();const r=await allocate(1,'222');assert.equal(r[0].allocation.edition_number,51);});

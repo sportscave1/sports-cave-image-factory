@@ -70,7 +70,9 @@ def audit(conn):
                       "md5(last_error) AS error_fingerprint FROM shopify_order_lines "
                       "WHERE shopify_order_id IN (%s, %s) ORDER BY shopify_line_item_id", order_identity)
         orders = query(cur, "SELECT shopify_order_id, order_name, financial_status, cancelled_at, "
-                       "processed_at, synced_at FROM shopify_orders WHERE shopify_order_id IN (%s, %s)", order_identity)
+                       "processed_at, synced_at, ingestion_status, ingestion_result, "
+                       "(COALESCE(ingestion_reason, '') <> '') AS has_ingestion_error "
+                       "FROM shopify_orders WHERE shopify_order_id IN (%s, %s)", order_identity)
         certificates = query(cur, "SELECT id, edition_order_id, related_edition_order_id, shopify_order_id, "
                              "shopify_line_item_id, line_item_unit_index, edition_number, edition_total, "
                              "shopify_file_status FROM certificates WHERE shopify_product_id IN (%s, %s) "

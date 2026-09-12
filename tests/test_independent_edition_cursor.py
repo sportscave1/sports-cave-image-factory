@@ -52,7 +52,7 @@ class IndependentEditionCursorTests(unittest.TestCase):
         self.assertEqual(result["edition_status"], "archived")
 
     def test_sales_mismatch_and_missing_pointer_fail_closed(self):
-        for changes in ({"sold_count": 0}, {"remaining_count": 100}, {"next_edition_number": None}, {"next_edition_number": 51}):
+        for changes in ({"sold_count": 0}, {"remaining_count": 100}, {"next_edition_number": None}, {"next_edition_number": 51}, {"stored_product_next": 99}):
             row = self.row()
             row.update(changes)
             self.assertTrue(backend.calculate_product_edition_metafield_values(row)["allocation_blocked"])
