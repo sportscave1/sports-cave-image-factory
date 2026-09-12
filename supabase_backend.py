@@ -16606,7 +16606,22 @@ def allocate_edition_line_units_atomic(
         )
     if not product_gid:
         raise ValueError("A canonical Shopify product GID is required for edition allocation.")
-    quantity = max(_int_value(quantity, 1), 1)
+    quantity = _int_value(quantity, 0)
+    if quantity < 1 or quantity > 100:
+        raise ValueError("Edition line quantity must be between 1 and 100.")
+    allocation_context = {
+        "order_name": order.get("order_name") or order.get("name") or "",
+        "shopify_order_id": order.get("shopify_order_id") or external_order_id,
+        "line_item_id": line_item.get("shopify_line_item_id") or external_line_item_id,
+        "source_channel": channel,
+        "external_order_id": external_order_id,
+        "external_line_item_id": external_line_item_id,
+        "product_gid": product_gid,
+        "handle": (product or {}).get("shopify_handle") or (product or {}).get("handle") or "",
+        "variant_id": line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
+        "quantity": quantity,
+    }
+    _webhook_log("atomic_edition_allocation_attempt", **allocation_context)
     with connect() as conn:
         try:
             with conn.cursor() as cur:
@@ -16650,10 +16665,32 @@ def allocate_edition_line_units_atomic(
                             "was_created": bool(result.get("was_created")),
                         }
                     )
+            # Do not acknowledge a partial/malformed RPC response as success.
+            ordinals = sorted(_int_value(r["assignment"].get("unit_ordinal"), 0) for r in allocation_results)
+            if ordinals != list(range(1, quantity + 1)):
+                raise RuntimeError("Atomic allocator returned an incomplete source line; transaction rolled back.")
             conn.commit()
-        except Exception:
+        except Exception as error:
             conn.rollback()
+            # SQL exceptions can include full failing rows and customer data.
+            # Log identifiers and SQLSTATE, never the raw exception payload.
+            reason = (
+                "counter_contract_mismatch: inspect product/run counters and edition_adjustments; do not reset"
+                if "Atomic edition suffix is not contiguous" in str(error)
+                else "allocation_failed: inspect scoped ledger and database error code before retry"
+            )
+            _webhook_log(
+                "atomic_edition_allocation_failed", "failed", **allocation_context,
+                error_code=getattr(error, "sqlstate", None) or type(error).__name__, reason=reason,
+            )
             raise
+    for result in allocation_results:
+        assignment = result["assignment"]
+        _webhook_log(
+            "atomic_edition_unit_committed", "created" if result["was_created"] else "already_exists",
+            **allocation_context, unit_index=assignment.get("unit_ordinal"),
+            run_id=assignment.get("edition_run_id"), edition_number=assignment.get("edition_number"),
+        )
     assignments = [result["assignment"] for result in allocation_results]
     new_assignments = [
         result["assignment"]
@@ -19929,7 +19966,7 @@ def process_single_paid_shopify_order_for_editions(
     )
     _webhook_log(
         "edition_allocation_completed",
-        "completed",
+        "failed" if allocation_result.get("errors") else "completed",
         source=source,
         order_name=order_name,
         assignments=allocation_result.get("assignments_created") or 0,
@@ -19980,7 +20017,7 @@ def process_single_paid_shopify_order_for_editions(
         "errors": errors,
     }
     _webhook_log("orders_snapshot_invalidated", "completed", source=source, order_name=order_name)
-    _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
+    _webhook_log("webhook_order_processing_finished", "failed" if errors else "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
     return result
 
 

@@ -73,6 +73,28 @@ def _service_version_info():
 @app.on_event("startup")
 def _start_recent_order_reconciliation():
     shopify_order_reconciliation_worker.start()
+    if os.getenv("SC3148_READ_ONLY_AUDIT") == "1":
+        threading.Thread(target=_audit_sc3148_read_only, daemon=True, name="sc3148-audit").start()
+
+
+def _audit_sc3148_read_only():
+    """Explicit incident diagnostic; no public endpoint and no database writes."""
+    try:
+        from scripts.audit_sc3148 import audit
+        import supabase_backend
+        with supabase_backend.connect() as conn:
+            try:
+                evidence = audit(conn)
+            finally:
+                conn.rollback()
+        for section, records in evidence.items():
+            # Individual rows stay below Render's log truncation boundary.
+            for index, row in enumerate(records if isinstance(records, list) else [records]):
+                _webhook_log("sc3148_read_only_audit", section=section, index=index, record=row)
+        _webhook_log("sc3148_read_only_audit_complete", snapshot_sha256=evidence['snapshot_sha256'])
+    except Exception as error:
+        _webhook_log("sc3148_read_only_audit_failed", error_type=type(error).__name__,
+                     sqlstate=getattr(error, 'sqlstate', None))
 
 
 @app.on_event("shutdown")
