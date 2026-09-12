@@ -2276,26 +2276,28 @@ def _manual_certificate_dialog(row, eligibility, backend, actor):
         confirmed = st.checkbox("I confirm this duplicate certificate number", key=f"manual-duplicate-{number}")
     if st.button("Save Manual Certificate", type="primary", disabled=not reason.strip() or (duplicate and not confirmed)):
         try:
-            backend.save_manual_order_line_edition(
+            saved = backend.save_manual_order_line_edition(
                 source_channel=eligibility["source_channel"], external_order_id=eligibility["external_order_id"],
                 external_line_item_id=eligibility["external_line_item_id"],
                 expected_product_gid=eligibility["canonical_product_gid"],
                 edition_number=number, edition_total=total, reason=reason, actor=actor,
                 duplicate_confirmed=confirmed,
             )
-        except Exception as error:
-            st.error(f"Manual certificate was not saved: {error}")
-        else:
+            if not saved.get("saved") or saved.get("edition_number") != number or saved.get("edition_total") != total:
+                raise RuntimeError("The database did not confirm the entered certificate number.")
             _reload_orders_from_source()
+        except Exception as error:
+            st.error(f"Manual certificate save could not be verified: {error}")
+        else:
             st.session_state[NOTICE_KEY] = "Manual certificate saved. Complete Fulfilment QA before generating the certificate."
             st.rerun()
     if eligibility.get("existing_manual_id") and st.button("Remove Manual Certificate"):
         try:
             backend.remove_manual_order_line_edition(manual_id=eligibility["existing_manual_id"], actor=actor)
+            _reload_orders_from_source()
         except Exception as error:
             st.error(f"Manual certificate was not removed: {error}")
         else:
-            _reload_orders_from_source()
             st.session_state[NOTICE_KEY] = "Manual certificate removed. Edition Ops was not changed."
             st.rerun()
     if st.button("Cancel"):

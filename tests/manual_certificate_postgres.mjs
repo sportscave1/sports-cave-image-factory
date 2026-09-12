@@ -3,8 +3,10 @@
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 const {PGlite}=await import(pathToFileURL(process.env.PGLITE_MODULE).href);
-const db=new PGlite();
+let db=new PGlite();
 await db.exec(`
 CREATE ROLE anon; CREATE ROLE authenticated;
 CREATE TABLE os_users(id uuid primary key,role text,is_active boolean,account_status text,email text,display_name text,username text);
@@ -16,7 +18,7 @@ CREATE TABLE edition_orders(id serial,allocation_valid boolean,edition_number in
 CREATE TABLE prodigi_dispatch_rows(shopify_line_item_id text,prodigi_status text);
 CREATE TABLE certificates(edition_order_id text,shopify_order_id text,shopify_line_item_id text);
 `);
-for(const name of ['20260828_manual_expired_order_line_editions.sql','20260829_fix_manual_expired_edition_identity.sql','20260912224424_manual_certificate_controls.sql'])
+for(const name of ['20260828_manual_expired_order_line_editions.sql','20260829_fix_manual_expired_edition_identity.sql','20260912224424_manual_certificate_controls.sql','20260912231446_manual_certificate_identity.sql'])
  await db.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
 const actor='00000000-0000-0000-0000-000000000001';
 await db.exec(`
@@ -29,20 +31,23 @@ INSERT INTO edition_orders VALUES(1,true,100,100,'shopify','old','old','old','gi
 `);
 const baseline=JSON.stringify((await db.query('SELECT * FROM edition_products')).rows);
 const ledger=JSON.stringify((await db.query('SELECT * FROM edition_orders')).rows);
-async function save(number=100,confirmed=false){return (await db.query(`
+async function save(number=100,confirmed=false,numeric=false){return (await db.query(`
 INSERT INTO manual_order_line_editions(source_channel,external_order_id,external_line_item_id,canonical_product_gid,
 edition_number,edition_total,reason,created_by_user_id,created_by_email,created_by_display_name,verified_order_name,
 verified_product_title,verified_assignment_status,verified_last_error,verified_series_status,verified_sold_count,
 verified_remaining_count,verified_next_edition_number,duplicate_confirmed)
-VALUES('shopify','gid://shopify/Order/1','gid://shopify/LineItem/2','gid://shopify/Product/3',$1,100,'Exception',$2,'','','','','','','',0,0,0,$3)
-ON CONFLICT(source_channel,external_order_id,external_line_item_id) DO UPDATE SET edition_number=EXCLUDED.edition_number,
-reason=EXCLUDED.reason,duplicate_confirmed=EXCLUDED.duplicate_confirmed,created_by_user_id=EXCLUDED.created_by_user_id RETURNING *`,[number,actor,confirmed])).rows[0];}
+VALUES('shopify',$4,$5,'gid://shopify/Product/3',$1,100,'Exception',$2,'','','','','','','',0,0,0,$3)
+ON CONFLICT(source_channel,(regexp_replace(external_order_id,'^gid://shopify/Order/','')),
+(regexp_replace(external_line_item_id,'^gid://shopify/LineItem/',''))) DO UPDATE SET edition_number=EXCLUDED.edition_number,
+reason=EXCLUDED.reason,duplicate_confirmed=EXCLUDED.duplicate_confirmed,created_by_user_id=EXCLUDED.created_by_user_id RETURNING *`,[number,actor,confirmed,numeric?'1':'gid://shopify/Order/1',numeric?'2':'gid://shopify/LineItem/2'])).rows[0];}
 let passed=0;
 async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
 await test('duplicate history requires confirmation',()=>assert.rejects(save(),/Confirm the duplicate/));
 let record;
 await test('confirmed duplicate accepted without allocation',async()=>{record=await save(100,true);assert.equal(record.edition_number,100);});
-await test('edit retains identity and old audited number',async()=>{const edited=await save(99);assert.equal(edited.id,record.id);const a=(await db.query("SELECT old_value,new_value FROM manual_certificate_audit WHERE action='UPDATE'")).rows[0];assert.equal(a.old_value.edition_number,100);assert.equal(a.new_value.edition_number,99);});
+await test('numeric and GID save address the same override',async()=>{assert.equal((await save(100,true,true)).id,record.id);assert.equal((await db.query('SELECT count(*) n FROM manual_order_line_editions')).rows[0].n,1);});
+await test('fresh database instance retains committed value',async()=>{const dump=await db.dumpDataDir();await db.close();db=new PGlite({loadDataDir:dump});const persisted=(await db.query('SELECT * FROM manual_order_line_editions')).rows[0];assert.equal(persisted.id,record.id);assert.equal(persisted.edition_number,100);assert.equal(persisted.duplicate_confirmed,true);});
+await test('edit retains identity and old audited number',async()=>{const edited=await save(99);assert.equal(edited.id,record.id);const a=(await db.query("SELECT old_value,new_value FROM manual_certificate_audit WHERE action='UPDATE' ORDER BY id DESC LIMIT 1")).rows[0];assert.equal(a.old_value.edition_number,100);assert.equal(a.new_value.edition_number,99);});
 await test('audit cannot be rewritten',()=>assert.rejects(db.exec("UPDATE manual_certificate_audit SET action='hidden'"),/immutable/));
 await test('removal requires administrator',()=>assert.rejects(db.exec('DELETE FROM manual_order_line_editions'),/administrator/));
 await db.query("SELECT set_config('sports_cave.manual_certificate_actor',$1,false)",[actor]);
@@ -53,4 +58,25 @@ await test('generated certificate locks edit',()=>assert.rejects(save(99),/certi
 await test('generated certificate locks remove',()=>assert.rejects(db.exec('DELETE FROM manual_order_line_editions'),/certificate already exists/));
 await test('all counters and history byte-for-byte unchanged',async()=>{assert.equal(JSON.stringify((await db.query('SELECT * FROM edition_products')).rows),baseline);assert.equal(JSON.stringify((await db.query('SELECT * FROM edition_orders')).rows),ledger);});
 console.log(`${passed} PostgreSQL tests passed`);
+// Execute the real Python schema contract's catalogue SQL against PostgreSQL.
+const python=process.env.PYTHON || fileURLToPath(new URL('../.venv/Scripts/python.exe',import.meta.url));
+const capture=`import json,manual_certificate_schema as s
+class C:
+ def __init__(self): self.q=[]
+ def execute(self,sql,args=None): self.q.append([sql,args])
+ def fetchall(self): return []
+ def fetchone(self): return None
+c=C();s.schema_issues(c);print(json.dumps(c.q))`;
+const queries=JSON.parse(execFileSync(python,['-c',capture],{encoding:'utf8'}));
+const results=[];
+for(const [sql,args] of queries){let i=0;results.push((await db.query(sql.replace(/%s/g,()=>'$'+(++i)),args||[])).rows);}
+const verify=`import json,sys,manual_certificate_schema as s
+class C:
+ def __init__(self): self.rows=iter(json.load(sys.stdin))
+ def execute(self,*args): self.result=next(self.rows)
+ def fetchall(self): return self.result
+ def fetchone(self): return next(iter(self.result),None)
+print(json.dumps(s.schema_issues(C())))`;
+assert.deepEqual(JSON.parse(execFileSync(python,['-c',verify],{input:JSON.stringify(results),encoding:'utf8'})),[]);
+console.log('PASS actual production schema compatibility queries');
 await db.close();

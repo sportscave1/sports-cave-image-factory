@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 import psycopg
+import manual_certificate_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,6 +46,7 @@ MANUAL_EXPIRED_EDITION_IDENTITY_MIGRATION = (
     "20260829_fix_manual_expired_edition_identity.sql"
 )
 REVIEWED_MIGRATION_SHA256 = {
+    '20260912231446_manual_certificate_identity.sql': 'b90b3d649e86ba5cccba05231d1e8c0ae8f80965b470d8f12ee390847ad7591d',
     "20260912224424_manual_certificate_controls.sql": "59b72a16e4e41d78ed261374cddeee449e75a5f34300836c8ebf1f44be7a8c24",
     "20260912045939_independent_edition_cursor.sql": "145bcd1ee8d87c1bb6ce9aa56deb1bb65ed7dd20ffd22dab69d216e3c8172fbe",
     LEGACY_ALLOCATOR_REPAIR_MIGRATION: (
@@ -57,6 +59,12 @@ REVIEWED_MIGRATION_SHA256 = {
         "4bb67951fac76d71ec4023360c24f21c9db843225458b00d7513f9d2ba966209"
     ),
 }
+# Explicit deployment manifest: do not replay historic allocator/repair migrations.
+# Every entry additionally requires its reviewed SHA, even for additive SQL.
+DEPLOYMENT_MIGRATIONS = (
+    "20260912224424_manual_certificate_controls.sql",
+    "20260912231446_manual_certificate_identity.sql",
+)
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
     ("shopify_orders", "source_name"): ("text", "NO", "''"),
@@ -317,10 +325,81 @@ def run_migrations(*, only=None, check=False):
         print(f"SKIPPED {filename}: {reason}")
 
 
+def _migration_body(sql):
+    # SQL files carry their own transaction wrappers for manual execution.
+    # Deployment owns one transaction for DDL, validation AND tracking records.
+    return re.sub(r"(?im)^\s*(?:BEGIN|COMMIT);\s*$", "", sql)
+
+
+def _existing_controls_match(cur, sql):
+    if manual_certificate_schema.schema_issues(cur, include_identity=False):
+        return False
+    expected = dict(re.findall(
+        r"CREATE OR REPLACE FUNCTION\s+(\w+)\(\).*?AS\s+\$\$(.*?)\$\$",
+        sql, flags=re.S | re.I,
+    ))
+    cur.execute("""SELECT proname, prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                   WHERE n.nspname='public' AND pronargs=0 AND proname=ANY(%s)""", (list(expected),))
+    actual = {r['proname']: r['prosrc'].strip() for r in cur.fetchall()}
+    return bool(expected) and all(actual.get(name) == body.strip() for name, body in expected.items())
+
+
+def run_deployment_migrations(*, check=False):
+    """Apply only the explicit SHA-reviewed deployment set; fail closed."""
+    selected = [(MIGRATIONS_DIR / name, (MIGRATIONS_DIR / name).read_text(encoding='utf-8'))
+                for name in DEPLOYMENT_MIGRATIONS]
+    for path, sql in selected:
+        if not reviewed_migration_sql(path, sql):
+            raise RuntimeError(f"Deployment migration is not SHA-reviewed: {path.name}")
+    if check:
+        print('READY deployment migration manifest: ' + ', '.join(DEPLOYMENT_MIGRATIONS))
+        return
+    database_url, source = get_database_url()
+    if not database_url:
+        raise RuntimeError('Deployment migration failed: database URL is missing')
+    from psycopg.rows import dict_row
+    applied = []
+    with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
+                          prepare_threshold=None) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout='60s'")
+            cur.execute("SET LOCAL statement_timeout='120s'")
+            cur.execute("SELECT pg_advisory_xact_lock(731948321)")
+            before = manual_certificate_schema.schema_issues(cur)
+            print('DEPLOY manual certificate schema before: ' + ('; '.join(before) or 'ready'), flush=True)
+            cur.execute("CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())")
+            for path, sql in selected:
+                cur.execute('SELECT filename FROM schema_migrations WHERE filename=%s', (path.name,))
+                if cur.fetchone():
+                    continue
+                already_present = (path.name == DEPLOYMENT_MIGRATIONS[0] and _existing_controls_match(cur, sql))
+                if not already_present:
+                    cur.execute(_migration_body(sql))
+                cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
+                applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
+            issues = manual_certificate_schema.schema_issues(cur)
+            if issues:
+                raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
+        conn.commit()
+    # Independently verify committed schema. No application listener starts first.
+    with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
+                          options='-c default_transaction_read_only=on') as conn:
+        with conn.cursor() as cur:
+            issues = manual_certificate_schema.schema_issues(cur)
+            if issues:
+                raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
+            cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')
+            count = cur.fetchone()['count']
+    for name, result in applied:
+        print(f'DEPLOY {result}: {name}', flush=True)
+    print(f'READY manual certificate schema source={source} persisted_overrides={count}', flush=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply reviewed Sports Cave database migrations.")
     parser.add_argument("--only", help="Apply one migration filename from the migrations directory.")
     parser.add_argument("--check", action="store_true", help="Validate selection and safety without connecting.")
+    parser.add_argument("--deploy", action="store_true", help="Apply the SHA-reviewed deployment manifest and verify compatibility.")
     parser.add_argument(
         "--verify-required-schema",
         action="store_true",
@@ -332,7 +411,11 @@ if __name__ == "__main__":
         help="Read-only verification of optional marketplace diagnostic columns and indexes.",
     )
     args = parser.parse_args()
-    if args.verify_required_schema or args.verify_marketplace_schema:
+    if args.deploy:
+        if args.only or args.verify_required_schema or args.verify_marketplace_schema:
+            parser.error('--deploy cannot be combined with another migration selection')
+        run_deployment_migrations(check=args.check)
+    elif args.verify_required_schema or args.verify_marketplace_schema:
         if args.only or args.check:
             parser.error("schema verification cannot be combined with --only or --check.")
         if args.verify_required_schema and args.verify_marketplace_schema:

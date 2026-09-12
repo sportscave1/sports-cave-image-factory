@@ -58,5 +58,10 @@ Before every Blueprint sync:
 
 Normal application deployment follows the established auto-deploy from `main`.
 Do not commit, push, or manually deploy from an incident audit unless separately
-authorised. Database migrations remain controlled, additive actions outside the
-interactive application startup path.
+authorised. Database migrations remain controlled actions outside the interactive
+Streamlit request path. The primary `sports_cave_server.py` process now runs the
+explicit SHA-reviewed deployment manifest in `run_migrations.py` before opening
+its port. This is the migration-aware path used by the existing primary start
+command. Failure stops startup. It does not replay historic allocator migrations.
+The webhook Free service has no pre-deploy command; do not restore the stale
+allocator-only pre-deploy command formerly present in the Blueprint.

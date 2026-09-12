@@ -117,6 +117,10 @@ def prepare_google_seo_storage():
 if __name__ == "__main__":
     import uvicorn
 
+    # Run once per process, before listening. An incompatible deployment must fail
+    # rather than advertising a healthy application with disabled persistence.
+    if os.getenv("RENDER") or run_migrations.get_database_url()[0]:
+        run_migrations.run_deployment_migrations()
     prepare_google_seo_storage()
     # Readiness logging is diagnostic only. Never delay port binding on a
     # Shopify Admin API call during a process restart.

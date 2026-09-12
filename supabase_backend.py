@@ -21859,7 +21859,9 @@ def _manual_edition_eligibility_from_state(state, *, allow_existing=False):
         "allocated_numbers": row.get("allocated_numbers") or [],
     }
     if not row.get("schema_available"):
-        result["reason"] = "The manual-edition database migration is not installed."
+        result["reason"] = "Manual certificate schema is not ready: " + "; ".join(
+            row.get("schema_issues") or ["required certificate storage is missing"]
+        )
         return result
     if not row.get("line_found"):
         result["reason"] = "The immutable order and line-item IDs were not found together."
@@ -21959,9 +21961,12 @@ def _manual_edition_state_with_cursor(
     order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
     line_id = canonical_shopify_gid_or_raw("LineItem", external_line_item_id)
     product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
-    if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE) or not column_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE, "duplicate_confirmed"):
+    from manual_certificate_schema import schema_issues
+    missing = schema_issues(cur)
+    if missing:
         return {
             "schema_available": False,
+            "schema_issues": missing,
             "expected_source_channel": expected_source,
             "shopify_order_id": order_id,
             "shopify_line_item_id": line_id,
@@ -22231,7 +22236,9 @@ def save_manual_order_line_edition(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     '', '', '', '', '', '', '', 0, 0, 0
                 )
-                ON CONFLICT (source_channel, external_order_id, external_line_item_id)
+                ON CONFLICT (source_channel,
+                    (regexp_replace(external_order_id, '^gid://shopify/Order/', '')),
+                    (regexp_replace(external_line_item_id, '^gid://shopify/LineItem/', '')))
                 DO UPDATE SET edition_number=EXCLUDED.edition_number,
                     reason=EXCLUDED.reason, duplicate_confirmed=EXCLUDED.duplicate_confirmed,
                     created_by_user_id=EXCLUDED.created_by_user_id
@@ -22250,17 +22257,36 @@ def save_manual_order_line_edition(
                 ),
             )
             saved = dict(cur.fetchone() or {})
+            if not saved.get("id"):
+                raise RuntimeError("Database did not return a saved manual certificate record.")
         conn.commit()
-    return {
-        "saved": True,
-        "id": str(saved.get("id") or ""),
-        "source_channel": saved.get("source_channel") or source,
-        "external_order_id": saved.get("external_order_id") or order_id,
-        "external_line_item_id": saved.get("external_line_item_id") or line_id,
-        "edition_number": _int_value(saved.get("edition_number"), number),
-        "edition_total": _int_value(saved.get("edition_total"), total),
-        "created_at": saved.get("created_at"),
-    }
+    # A separate connection proves visibility after commit, independent of UI state.
+    persisted = get_manual_order_line_edition(source_channel=source,
+        external_order_id=order_id, external_line_item_id=line_id, expected_product_gid=product_gid)
+    if (not persisted or str(persisted['id']) != str(saved['id'])
+        or persisted['edition_number'] != number or persisted['edition_total'] != total
+        or persisted['reason'] != clean_reason[:1000]
+        or bool(persisted['duplicate_confirmed']) != bool(duplicate_confirmed)):
+        raise RuntimeError("Manual certificate commit could not be verified. Refresh before retrying.")
+    return {**persisted, "id": str(persisted['id']), "saved": True}
+
+
+def get_manual_order_line_edition(*, source_channel, external_order_id,
+                                external_line_item_id, expected_product_gid):
+    """Read one canonical certificate override from a fresh database connection."""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT * FROM manual_order_line_editions
+                WHERE source_channel=%s
+                  AND regexp_replace(external_order_id, '^gid://shopify/Order/', '')=%s
+                  AND regexp_replace(external_line_item_id, '^gid://shopify/LineItem/', '')=%s
+                  AND canonical_product_gid=%s LIMIT 2""",
+                (_manual_edition_source_channel(source_channel), canonical_shopify_id(external_order_id),
+                 canonical_shopify_id(external_line_item_id), edition_ledger.canonical_shopify_gid('Product', expected_product_gid)))
+            rows = cur.fetchall()
+    if len(rows) > 1:
+        raise RuntimeError("Ambiguous manual certificate identity; no value was selected.")
+    return dict(rows[0]) if rows else None
 
 
 def remove_manual_order_line_edition(*, manual_id, actor):
@@ -22277,6 +22303,11 @@ def remove_manual_order_line_edition(*, manual_id, actor):
             if not cur.fetchone():
                 raise ValueError("Manual certificate no longer exists. Refresh Orders.")
         conn.commit()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id FROM manual_order_line_editions WHERE id=%s', (manual_id,))
+            if cur.fetchone():
+                raise RuntimeError('Manual certificate removal could not be verified. Refresh before retrying.')
 
 
 def _require_manual_certificate_qa(cur, assignment):
@@ -22749,9 +22780,20 @@ def list_hybrid_order_rows(limit=50, search=""):
         if order_name:
             assignments_by_order_name.setdefault(order_name, []).append(assignment)
 
+    manual_targets = {
+        (_manual_edition_source_channel(row.get('source_name')),
+         canonical_shopify_id(row.get('shopify_order_id')),
+         canonical_shopify_id(row.get('shopify_line_item_id')),
+         edition_ledger.canonical_shopify_gid('Product', row.get('shopify_product_id')))
+        for row in base_rows
+    }
     for manual_row in manual_edition_rows:
         line_id = canonical_shopify_id(manual_row.get("shopify_line_item_id"))
-        if not line_id or line_id in valid_normal_line_ids:
+        manual_identity = (
+            manual_row.get('source_channel'), canonical_shopify_id(manual_row.get('shopify_order_id')),
+            line_id, edition_ledger.canonical_shopify_gid('Product', manual_row.get('shopify_product_id')),
+        )
+        if not line_id or line_id in valid_normal_line_ids or manual_identity not in manual_targets:
             continue
         assignments_by_line[line_id] = [{
             "edition_order_id": (

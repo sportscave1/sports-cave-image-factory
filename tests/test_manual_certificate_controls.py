@@ -73,6 +73,9 @@ class ManualCertificateControlsTests(unittest.TestCase):
         cur.fetchone.return_value = {'id': REF.split(':')[1], 'edition_number': 100, 'edition_total': 100}
         with patch.object(backend, 'connect', return_value=conn), \
              patch.object(backend, '_manual_edition_state_with_cursor', return_value=eligible_state()), \
+             patch.object(backend, 'get_manual_order_line_edition', return_value={
+                 'id': REF.split(':')[1], 'edition_number': 100, 'edition_total': 100,
+                 'reason': 'Legacy checkout', 'duplicate_confirmed': False}), \
              patch.object(backend, 'ensure_schema') as ddl:
             backend.save_manual_order_line_edition(source_channel='Shopify', external_order_id='1',
                 external_line_item_id='2', expected_product_gid='3', edition_number=100,

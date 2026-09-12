@@ -1,6 +1,7 @@
 # Manual certificate edition override
 
-Implemented locally; no production data, certificates, deployments or Git pushes were performed.
+The production server runs the reviewed certificate migrations before opening its
+port. No live order overrides or customer certificates are created by this repair.
 
 ## Operator workflow
 
@@ -25,14 +26,33 @@ This supports the SC3150-style sold-out exception without reopening the edition.
 
 ## Migration
 
-`migrations/20260912224424_manual_certificate_controls.sql` extends only certificate-override storage and guards. Generated with Supabase CLI 2.117.0; its reviewed SHA-256 is registered in `run_migrations.py`. Apply through the normal migration process when deploying this feature. It has **not** been applied to production.
+`migrations/20260912224424_manual_certificate_controls.sql` extends only certificate-override storage and guards. `20260912231446_manual_certificate_identity.sql` adds normalized order/line identity uniqueness without rewriting rows. Both are in the explicit SHA-reviewed deployment manifest in `run_migrations.py`.
+
+The existing primary command, `python sports_cave_server.py`, applies that manifest
+before listening. Only unapplied manifest entries run, under a database lock and
+one transaction that includes schema verification and tracking. Historic allocator
+migrations are excluded. An additional connection verifies committed schema;
+failure prevents startup. `python run_migrations.py --deploy --check` validates the
+manifest without connecting.
+
+Save now commits and rereads the exact override on a new connection before
+reporting success. Numeric and GID aliases share a unique database identity.
+Removal is also verified on a fresh connection. Orders reloads the authoritative
+row and checks source, order, line and product identity. Errors do not set a fake
+success value in session state.
+
+The production gap was confirmed in Render settings: the primary pre-deploy
+command applied only `20260901_os_repair_requests.sql`. Neither primary startup
+nor webhook startup applied the certificate migration. Logs at 23:03 and 23:08 UTC
+on 12 September nevertheless show the resolver reading an existing SC3150 manual
+record and blocking on QA; they do not demonstrate deletion of that record.
 
 ## Local validation
 
-- 120 focused backend/certificate/Orders/ledger tests passed, including 17 new manual-certificate tests.
+- 132 focused backend/certificate/Orders/ledger/deployment tests passed, including 12 persistence/deployment regressions.
 - 7 Orders/Fulfilment loading tests and 8 Supabase tests passed.
 - Broader Orders UI module: 136 passed; one existing unrelated Mockups source assertion failed (`test_mockups_prompt_cards_use_compact_modal_prompt_actions`). `app.py` is unchanged.
-- 9 isolated PostgreSQL/PGlite trigger tests passed, including duplicate confirmation, audit immutability, edit/remove locks and byte-for-byte unchanged allocation history/counters.
+- 12 isolated PostgreSQL/PGlite checks passed, including duplicate confirmation, normalized identity, database restart persistence, schema catalogue validation, audit immutability, edit/remove locks and byte-for-byte unchanged allocation history/counters.
 - Changed Python files compile; `git diff --check` passes.
 
-No live SC3150 override was entered and no customer certificate was generated. Local tests use fixtures/mocks and isolated PostgreSQL only.
+No live SC3150 override is entered by deployment and no customer certificate is generated. Local tests use fixtures/mocks and isolated PostgreSQL only. Nathan can test the normal Manual Certificate → refresh → Fulfilment QA → Generate + Upload workflow after deployment.
