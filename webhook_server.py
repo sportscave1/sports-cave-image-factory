@@ -72,9 +72,31 @@ def _service_version_info():
 
 @app.on_event("startup")
 def _start_recent_order_reconciliation():
+    if os.getenv("SC3148_REPAIR_APPROVAL"):
+        threading.Thread(target=_repair_sc3148_approved, daemon=True, name="sc3148-repair").start()
+        return
     shopify_order_reconciliation_worker.start()
     if os.getenv("SC3148_READ_ONLY_AUDIT") == "1":
         threading.Thread(target=_audit_sc3148_read_only, daemon=True, name="sc3148-audit").start()
+
+
+def _repair_sc3148_approved():
+    """Explicit incident gate; ordinary startups never install SQL or repair data."""
+    try:
+        from scripts.repair_sc3148 import run
+        result = run(os.getenv("SC3148_REPAIR_APPROVAL"))
+        for key, value in result.items():
+            _webhook_log("sc3148_repair_result", section=key, record=value)
+        _audit_sc3148_read_only()
+        _webhook_log("sc3148_repair_complete")
+    except Exception as error:
+        # Our guard messages contain identifiers/reasons only; SQL errors may
+        # contain customer rows and are represented by SQLSTATE instead.
+        _webhook_log("sc3148_repair_failed", error_type=type(error).__name__,
+                     sqlstate=getattr(error, "sqlstate", None),
+                     reason=str(error) if isinstance(error, ValueError) else "scoped_transaction_or_mirror_failed")
+    finally:
+        shopify_order_reconciliation_worker.start()
 
 
 def _audit_sc3148_read_only():

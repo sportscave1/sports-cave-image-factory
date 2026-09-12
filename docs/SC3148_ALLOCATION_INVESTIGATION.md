@@ -83,3 +83,40 @@ preserve all old allocation rows, leave certificates missing unless already
 present, mirror via the existing service and read back every affected state.
 Installing a replacement SQL function is code deployment and is not included
 in the user's narrow production data-repair authorization.
+
+
+## Authoritative audit and approved final repair — 12 September 2026
+
+User explicitly approved commit, push main and deploy in the conversation.
+Read-only audit ran in the existing webhook Render service at 05:00:45 UTC.
+
+- Product 657 / gid://shopify/Product/10431944393011, run 9799b113-0ff2-4dd6-9185-381357d04748.
+- Supabase: total 100, next 50, sold 0, remaining 100; enabled, active run.
+- Manual adjustment c50e76f5-e622-412b-ba24-b63e4e59c647 changed next 1 to 50 on 6 September without sales.
+- No product allocations, tombstones/reservations or certificates. Numbers 50/51 are unused.
+- Order 7408832905523 is PAID, not cancelled; one line 17545899573555, quantity two, variant 54020683989299.
+- Ingestion contains numeric and GID aliases for this same line, both Error. These must become two physical units, never four.
+- Other failures matching the old SQL invariant: only these SC3148 aliases.
+- Old RPC definition MD5: 1e5f260172220751170863b927f1f2a8.
+- Audit snapshot SHA256: 9e15ed654a17b2670c69b032196dc3e7c544c4dba816960017a1cf508eec94d6.
+
+The old RPC required next=sold+1 and last_assigned=sold before entering its quantity loop.
+This was not a two-line race. The valid manual cursor triggered that incorrect precondition.
+The replacement uses the locked cursor, counts only newly committed units, preserves source-unit
+identities on retries and rejects occupied/reserved numbers, inactive runs and inconsistent sales.
+
+The reviewed migration installs only a function; it does not rewrite historical product rows.
+The explicitly gated incident helper backs up original records and the old function in
+edition_repair_audits, installs the function and allocates SC3148 in one transaction. It updates
+both ingestion aliases through the existing status helper. After commit it invokes the normal
+single-product Shopify mirror and reads the normal Orders and Edition Ops loaders. It never
+creates or sends certificates. Restart after commit validates existing units and only retries the mirror.
+
+Expected verified result: editions 50/51, next 52, sold 2, remaining 98. Production execution and
+final readback are recorded below when complete.
+
+Validation: 16 actual PostgreSQL/PLpgSQL scenarios executed using isolated PGlite 0.5.8.
+PGlite serializes connections; cross-process exclusion relies on the existing PostgreSQL advisory
+transaction lock, product/run FOR UPDATE locks and source-unit/run-number unique constraints.
+Relevant Python modules are run in separate processes because a combined broad unittest discovery
+leaks Streamlit form context between unrelated UI suites. The isolated Edition Ops UI tests pass.

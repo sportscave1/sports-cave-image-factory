@@ -156,20 +156,6 @@ class EditionOpsAllocationIntegrityTests(unittest.TestCase):
                 },
                 "behind the authoritative allocation boundary",
             ),
-            "suffix_gap": (
-                {
-                    "next_edition_number": 13,
-                    "active_run_next_edition_number": 13,
-                    "run_next_edition_number": 13,
-                    "last_assigned_edition": 12,
-                    "sold_count": 12,
-                    "remaining_count": 88,
-                    "active_suffix_count": 2,
-                    "active_suffix_min": 10,
-                    "active_suffix_max": 12,
-                },
-                "current atomic allocation suffix is not contiguous",
-            ),
             "invalid_number": (
                 {"historical_invalid_number_count": 1},
                 "zero or less",

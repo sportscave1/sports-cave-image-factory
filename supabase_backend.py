@@ -9010,7 +9010,10 @@ def _normalize_edition_product_row(row):
     latest_sent = max(next_number - 1, 0)
     active_run_max = _int_value(normalized.get("active_run_max_assigned"), 0)
     historical_max = max(active_run_max, _int_value(normalized.get("last_assigned_edition"), 0))
-    remaining = max(edition_total - latest_sent, 0)
+    remaining = max(
+        _int_value(normalized.get("remaining_count"),
+                   edition_total - _int_value(normalized.get("sold_count"), 0)), 0
+    )
     normalized.update(
         {
             "active_edition_run_id": run_id,
@@ -9021,13 +9024,13 @@ def _normalize_edition_product_row(row):
             "edition_total": edition_total,
             "next_edition_number": next_number,
             "latest_sent": latest_sent,
-            "last_assigned_edition": latest_sent,
+            "last_assigned_edition": _int_value(normalized.get("last_assigned_edition"), active_run_max),
             "historical_max_assigned_edition": historical_max,
             "active_run_max_assigned": active_run_max,
             "remaining_count": remaining,
             "remaining_editions": remaining,
             "status": run_status,
-            "active": run_status == ACTIVE_RUN_STATUS,
+            "active": run_status == ACTIVE_RUN_STATUS and normalized.get("active") is not False,
             "sold_out": run_status == SOLD_OUT_RUN_STATUS,
             "updated_at": normalized.get("run_updated_at") or normalized.get("updated_at"),
         }
@@ -9121,14 +9124,6 @@ def edition_allocation_integrity_from_read_row(row):
         issues.append(
             "The current atomic allocation count exceeds the stored sold boundary."
         )
-    elif active_count and (
-        active_min != expected_baseline + 1
-        or active_max != sold_count
-        or active_count != active_max - active_min + 1
-    ):
-        issues.append(
-            "The current atomic allocation suffix is not contiguous from its recorded baseline."
-        )
     if baseline > sold_count:
         issues.append("The current allocation baseline is ahead of the stored sold boundary.")
     if product_next < 1 or run_next < 1:
@@ -9142,8 +9137,6 @@ def edition_allocation_integrity_from_read_row(row):
             f"The current next edition number #{product_next:03d} is already occupied."
         )
     minimum_safe_next = max(
-        baseline + 1,
-        sold_count + 1,
         last_assigned + 1,
         historical_max + 1,
         active_max + 1,
@@ -10366,50 +10359,30 @@ def format_edition_display_number(edition_number, edition_total):
 
 def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
-    ledger_values_present = "valid_allocation_count" in row
-    if ledger_values_present:
-        allocation_baseline = max(
-            _safe_int(row.get("allocation_baseline_sold_count"), 0),
-            0,
-        )
-        active_allocation_count = max(
-            _safe_int(row.get("valid_allocation_count"), 0),
-            0,
-        )
-        highest_assigned = max(
-            _safe_int(row.get("last_assigned_edition"), 0),
-            allocation_baseline,
-        )
-        lowest_assigned = max(_safe_int(row.get("first_assigned_edition"), 0), 0)
-        valid_allocation_count = allocation_baseline + active_allocation_count
-        allocation_blocked = bool(
-            active_allocation_count
-            and (
-                lowest_assigned != allocation_baseline + 1
-                or active_allocation_count != highest_assigned - allocation_baseline
-            )
-        )
-    else:
-        highest_assigned = max(
-            _safe_int(row.get("highest_assigned_edition"), 0),
-            _safe_int(row.get("max_assigned_edition"), 0),
-            _safe_int(row.get("historical_max_assigned_edition"), 0),
-            _safe_int(row.get("active_run_max_assigned"), 0),
-            _safe_int(row.get("last_assigned_edition"), 0),
-            0,
-        )
-        lowest_assigned = 1 if highest_assigned else 0
-        valid_allocation_count = max(_safe_int(row.get("sold_count"), 0), 0)
-        allocation_blocked = bool(
-            valid_allocation_count
-            and (lowest_assigned != 1 or valid_allocation_count != highest_assigned)
-        )
-    next_number = highest_assigned + 1
-    last_assigned = highest_assigned
-    sold_count = valid_allocation_count
-    remaining_count = max(edition_total - valid_allocation_count, 0)
+    # The cursor and sales are independent Supabase fields. Missing authoritative
+    # state fails closed instead of reconstructing numbering from sales/metafields.
+    next_number = _safe_int(row.get("next_edition_number"), 0)
+    sold_count = _safe_int(row.get("sold_count"), -1)
+    remaining_count = _safe_int(row.get("remaining_count"), -1)
+    last_assigned = max(_safe_int(row.get("active_run_max_assigned"), 0),
+                        _safe_int(row.get("last_assigned_edition"), 0))
+    allocation_count = _safe_int(row.get("valid_allocation_count"), 0)
+    allocation_blocked = bool(
+        row.get("allocation_blocked") or next_number < 1
+        or sold_count < 0 or sold_count > edition_total
+        or remaining_count != edition_total - sold_count
+        or allocation_count > sold_count or last_assigned >= next_number
+        or (allocation_count > 0 and "first_assigned_edition" in row
+            and _safe_int(row.get("first_assigned_edition"), 0) < 1)
+        or _safe_int(row.get("stored_product_next"), next_number) != next_number
+        or _safe_int(row.get("run_next_edition_number"), next_number) != next_number
+    )
     is_sold_out = allocation_blocked or next_number > edition_total or remaining_count <= 0
-    if allocation_blocked:
+    archived = bool(row.get("is_archived")) or row.get("active") is False or str(row.get("run_status") or "").lower() in {"archived", "expired", "closed"}
+    if archived:
+        edition_status = "archived"
+        edition_display_text = "Sold Out Archive"
+    elif allocation_blocked:
         edition_status = "allocation_blocked"
         edition_display_text = "Edition allocation paused — reconciliation required"
     elif is_sold_out:
@@ -10431,6 +10404,7 @@ def calculate_product_edition_metafield_values(row):
         "sold_count": sold_count,
         "remaining_count": remaining_count,
         "is_sold_out": is_sold_out,
+        "is_archived": archived,
         "allocation_blocked": allocation_blocked,
         "edition_status": edition_status,
         "edition_display_text": edition_display_text,
@@ -10450,7 +10424,8 @@ def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first
             active_run_join = _active_run_lateral_sql()
             cur.execute(
                 f"""
-                SELECT ep.*, sp.shopify_product_id AS synced_shopify_product_id,
+                SELECT ep.*, ep.next_edition_number AS stored_product_next,
+                       sp.shopify_product_id AS synced_shopify_product_id,
                        sp.shopify_product_gid AS synced_shopify_product_gid,
                        sp.admin_url, sp.online_store_url,
                        er.id AS edition_run_id,
@@ -10598,7 +10573,7 @@ def pending_allocation_metafield_mirror_handles(*, ensure_schema_first=True):
                     FROM edition_orders eo
                     JOIN edition_runs er
                       ON er.id=eo.edition_run_id
-                     AND LOWER(COALESCE(er.status, ''))='active'
+                     AND LOWER(COALESCE(er.status, '')) IN ('active', 'sold_out')
                     WHERE COALESCE(eo.allocation_valid, TRUE)
                       AND COALESCE(eo.mirror_status, 'pending') IN ('pending', 'failed')
                       AND COALESCE(eo.shopify_handle, '') <> ''
@@ -10611,11 +10586,9 @@ def pending_allocation_metafield_mirror_handles(*, ensure_schema_first=True):
                             AND COALESCE(product_ledger.status, '') NOT IN
                                 ('voided', 'refunded', 'cancelled', 'superseded')
                           GROUP BY product_ledger.edition_run_id
-                          HAVING MIN(product_ledger.edition_number)
-                                     <> COALESCE(er.allocation_baseline_sold_count, 0) + 1
-                              OR COUNT(*)
-                                     <> MAX(product_ledger.edition_number)
-                                        - COALESCE(er.allocation_baseline_sold_count, 0)
+                          HAVING MIN(product_ledger.edition_number) < 1
+                              OR MAX(product_ledger.edition_number) > er.edition_total
+                              OR COUNT(*) <> COUNT(DISTINCT product_ledger.edition_number)
                       )
                     ORDER BY eo.shopify_handle
                     """
@@ -10953,7 +10926,7 @@ def sync_product_edition_metafields(
     )
     if payload.get("allocation_blocked"):
         raise ValueError(
-            f"{shopify_handle} has a non-contiguous edition ledger; storefront mirroring is blocked pending reconciliation."
+            f"{shopify_handle} has inconsistent authoritative edition state; storefront mirroring is blocked pending review."
         )
     owner_gid = payload.get("shopify_product_gid") or payload.get("shopify_product_id") or ""
     before_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
@@ -19918,36 +19891,6 @@ def process_single_paid_shopify_order_for_editions(
         existing_lines=len(existing_line_ids),
         new_lines=len(new_line_ids),
     )
-    if line_item_ids and not new_line_ids and source != "targeted_reconciliation":
-        result = {
-            "source": source,
-            "processed": True,
-            "reason": "All Shopify line items already exist.",
-            "order_name": order_name,
-            "shopify_order_id": order_id,
-            "source_name": source_name,
-            "import_result": "unchanged",
-            "ingestion_status": "complete",
-            "mapping_methods": [],
-            "imported_lines": 0,
-            "skipped_existing_lines": len(existing_line_ids),
-            "editions_assigned": 0,
-            "assigned_editions": [],
-            "affected_handles": [],
-            "metafields_updated": 0,
-            "order_visible_refresh_hint": False,
-            "new_order_inserted": False,
-            "errors": [],
-        }
-        _webhook_log(
-            "webhook_order_processing_finished",
-            "completed",
-            source=source,
-            source_name=source_name,
-            order_name=order_name,
-            elapsed_ms=int((time.perf_counter() - started) * 1000),
-        )
-        return result
     _webhook_log("edition_allocation_started", source=source, order_name=order_name, new_lines=len(new_line_ids))
     allocation_result = process_shopify_order_for_editions(
         order,

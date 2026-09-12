@@ -213,6 +213,9 @@ class AtomicAllocationIncidentRepairTests(unittest.TestCase):
             {
                 "edition_total": 100,
                 "allocation_baseline_sold_count": 74,
+                "next_edition_number": 82,
+                "sold_count": 81,
+                "remaining_count": 19,
                 "first_assigned_edition": 75,
                 "last_assigned_edition": 81,
                 "valid_allocation_count": 7,
@@ -224,7 +227,7 @@ class AtomicAllocationIncidentRepairTests(unittest.TestCase):
         self.assertEqual(values["last_assigned_edition"], 81)
         self.assertEqual(values["next_edition_number"], 82)
 
-    def test_storefront_values_reject_a_gap_inside_the_active_run(self):
+    def test_storefront_values_reject_missing_authoritative_cursor_and_sales(self):
         values = supabase_backend.calculate_product_edition_metafield_values(
             {
                 "edition_total": 100,

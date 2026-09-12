@@ -43,6 +43,8 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
             "next_edition_number": 12,
             "run_edition_name": "Playoff Edition",
             "run_edition_total": 150,
+            "sold_count": 70,
+            "remaining_count": 80,
             "run_next_edition_number": 71,
             "run_status": "active",
             "active_run_max_assigned": 70,
@@ -58,7 +60,7 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
         self.assertTrue(normalized["active"])
         self.assertFalse(normalized["sold_out"])
 
-    def test_metafield_payload_uses_highest_assignment_when_counter_is_stale(self):
+    def test_metafield_payload_blocks_stale_cursor_without_reconstructing_it(self):
         row = {
             "shopify_handle": "jalen-brunson",
             "product_title": "Jalen Brunson Built for Big Moments",
@@ -75,12 +77,12 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
 
         self.assertEqual(normalized["next_edition_number"], 10)
         self.assertEqual(normalized["latest_sent"], 9)
-        self.assertEqual(normalized["last_assigned_edition"], 9)
+        self.assertEqual(normalized["last_assigned_edition"], 70)
         self.assertEqual(normalized["historical_max_assigned_edition"], 70)
-        self.assertEqual(payload["next_edition_number"], 71)
+        self.assertEqual(payload["next_edition_number"], 10)
         self.assertEqual(payload["sold_count"], 70)
         self.assertEqual(payload["remaining_count"], 30)
-        self.assertIn("#071/100", payload["edition_display_text"])
+        self.assertTrue(payload["allocation_blocked"])
 
 
 if __name__ == "__main__":

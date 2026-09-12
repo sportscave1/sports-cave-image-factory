@@ -6242,7 +6242,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     )
     @patch.object(supabase_backend, "process_shopify_order_for_editions")
     @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
-    def test_webhook_existing_line_skips_allocation_and_mirror(
+    def test_webhook_existing_ingestion_retries_idempotent_allocation(
         self,
         sync_product_edition_metafields_for_handles,
         process_shopify_order_for_editions,
@@ -6251,6 +6251,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         _fetch_latest_paid_orders,
         _ensure_schema,
     ):
+        process_shopify_order_for_editions.return_value = {"assignments_created": 0, "existing_assignments_skipped": 1, "affected_handles": [], "errors": []}
         order = self.paid_order(
             order_id="gid://shopify/Order/2879",
             order_name="#SC2879",
@@ -6269,7 +6270,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["imported_lines"], 0)
         self.assertEqual(result["skipped_existing_lines"], 1)
         self.assertEqual(result["editions_assigned"], 0)
-        process_shopify_order_for_editions.assert_not_called()
+        process_shopify_order_for_editions.assert_called_once()
         sync_product_edition_metafields_for_handles.assert_not_called()
 
     @patch.object(supabase_backend, "process_single_paid_shopify_order_for_editions")
