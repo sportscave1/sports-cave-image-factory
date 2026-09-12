@@ -268,9 +268,9 @@ class ManualExpiredEditionArchitectureTests(unittest.TestCase):
     def test_ui_control_is_admin_gated_and_calls_server_eligibility(self):
         source = inspect.getsource(orders_page._render_manual_edition_entry)
 
-        self.assertIn("_developer_mode()", source)
+        self.assertIn('actor.get("role") != "admin"', source)
         self.assertIn("_manual_edition_eligibility", source)
-        self.assertIn("save_manual_order_line_edition", source)
+        self.assertIn("save_manual_order_line_edition", inspect.getsource(orders_page._manual_certificate_dialog))
         self.assertIn("sports_cave_current_user", source)
 
     def test_incident_script_is_exactly_four_rows_and_never_targets_messi(self):

@@ -307,11 +307,15 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
 
         generated_path = ""
         if normalised.get("edition_order_id"):
+            manual_options = {}
+            if str(normalised["edition_order_id"]).startswith("manual-edition:"):
+                manual_options["expected_manual_number"] = normalised.get("edition_number")
             generated_path = supabase_backend.generate_certificate_for_edition_order(
                 normalised.get("edition_order_id"),
                 force=force,
                 source_page=source_page,
                 ensure_schema_first=False,
+                **manual_options,
             )
             generated_path = str(generated_path or "").strip()
             if generated_path and Path(generated_path).exists():

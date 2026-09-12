@@ -637,6 +637,11 @@ def _normalise_row(row):
     updated["assignment_status"] = str(updated.get("assignment_status") or "")
     updated["assignment_source"] = str(updated.get("assignment_source") or "")
     updated["manual_edition_override"] = bool(updated.get("manual_edition_override"))
+    if updated["manual_edition_override"] and updated["edition_order_id"].startswith("manual-edition:"):
+        updated["edition"] = f"Not allocated · Manual cert {_format_edition_with_total(edition_number, updated['edition_total'])}"
+        updated["has_saved_allocation"] = False
+        updated["assignment_status"] = "Not allocated"
+
     updated["prodigi_status"] = str(updated.get("prodigi_status") or "")
     updated["prodigi_row_id"] = str(updated.get("prodigi_row_id") or "")
     updated["certificate_id"] = str(updated.get("certificate_id") or "")
@@ -1398,7 +1403,7 @@ def _lock_allocation_for_row(row, config):
 
 def _update_row_from_certificate(row, record):
     updates = {
-        "has_saved_allocation": True,
+        "has_saved_allocation": not str(row.get("edition_order_id") or "").startswith("manual-edition:"),
         "certificate_id": record.get("certificate_id") or "",
         "certificate_status": record.get("status") or "",
         "certificate_pdf_path": record.get("local_pdf_path") or "",
@@ -2235,95 +2240,66 @@ def _manual_edition_eligibility(row, backend):
 
 
 def _render_manual_edition_entry(selected_rows, backend):
-    if not _developer_mode() or not backend or len(selected_rows) != 1:
+    actor = st.session_state.get("sports_cave_current_user") or {}
+    if actor.get("role") != "admin" or not backend or len(selected_rows) != 1:
         return
     row = _normalise_row(selected_rows[0])
-    if row.get("edition_number"):
+    manual = str(row.get("edition_order_id") or "").startswith("manual-edition:")
+    if row.get("edition_number") and not manual:
         return
     try:
         eligibility = _manual_edition_eligibility(row, backend)
     except Exception as error:
-        st.caption(f"Manual edition entry unavailable: {error}")
+        st.caption(f"Manual Certificate unavailable: {error}")
         return
     if not eligibility.get("eligible"):
-        st.caption(f"Manual edition entry unavailable: {eligibility.get('reason') or 'server eligibility checks failed.'}")
+        st.caption(f"Manual Certificate unavailable: {eligibility.get('reason')}")
         return
+    label = "Edit Manual Certificate" if manual else "Manual Certificate"
+    if st.button(label, key="orders-manual-certificate"):
+        _manual_certificate_dialog(row, eligibility, backend, actor)
 
-    total = max(int(eligibility.get("canonical_edition_total") or 100), 1)
-    order_label = row.get("order") or eligibility.get("external_order_id") or "selected order"
-    with st.expander(f"Manual expired-edition entry — {order_label}", expanded=True):
-        st.caption(
-            "This value is used only for Orders display and the certificate. "
-            "It does not allocate an edition or change counters."
-        )
-        st.caption(
-            "Verified series: "
-            f"{eligibility.get('series_status') or 'blocked'} · "
-            f"sold {int(eligibility.get('sold_count') or 0)} · "
-            f"remaining {int(eligibility.get('remaining_count') or 0)} · "
-            f"next {int(eligibility.get('next_edition_number') or 0)}"
-        )
-        form_key = (
-            "manual-expired-edition-"
-            + re.sub(r"[^a-zA-Z0-9_-]+", "-", row.get("shopify_line_item_id") or "line")
-        )
-        with st.form(form_key, clear_on_submit=False):
-            input_cols = st.columns(2)
-            edition_number = input_cols[0].number_input(
-                "Edition number",
-                min_value=1,
-                max_value=total,
-                value=total,
-                step=1,
+
+@st.dialog("Manual Certificate")
+def _manual_certificate_dialog(row, eligibility, backend, actor):
+    total = int(eligibility["canonical_edition_total"])
+    st.warning("Certificate-only override. This does not allocate an edition or change Edition Ops.")
+    number = st.number_input("Manual edition number", min_value=1, max_value=total,
+                             value=int(eligibility.get("manual_number") or total), step=1)
+    st.caption(f"Edition size: {total} · #{number:03d}/{total}")
+    reason = st.text_area("Reason", value=eligibility.get("manual_reason") or "",
+                          placeholder="Legacy checkout completed after edition sold out")
+    duplicate = number in eligibility.get("allocated_numbers", [])
+    confirmed = False
+    if duplicate:
+        st.warning(f"Edition #{number} already exists in the numbered allocation history. Continuing will create a duplicate certificate number but will NOT modify Edition Ops.")
+        confirmed = st.checkbox("I confirm this duplicate certificate number", key=f"manual-duplicate-{number}")
+    if st.button("Save Manual Certificate", type="primary", disabled=not reason.strip() or (duplicate and not confirmed)):
+        try:
+            backend.save_manual_order_line_edition(
+                source_channel=eligibility["source_channel"], external_order_id=eligibility["external_order_id"],
+                external_line_item_id=eligibility["external_line_item_id"],
+                expected_product_gid=eligibility["canonical_product_gid"],
+                edition_number=number, edition_total=total, reason=reason, actor=actor,
+                duplicate_confirmed=confirmed,
             )
-            edition_total = input_cols[1].number_input(
-                "Edition total",
-                min_value=1,
-                max_value=100,
-                value=total,
-                step=1,
-            )
-            reason = st.text_input(
-                "Audit reason",
-                placeholder="Why this expired line needs a manual certificate value",
-            )
-            submitted = st.form_submit_button(
-                "Save manual edition",
-                type="primary",
-                use_container_width=False,
-            )
-        if submitted:
-            actor = st.session_state.get("sports_cave_current_user") or {}
-            try:
-                saved = backend.save_manual_order_line_edition(
-                    source_channel=eligibility.get("source_channel") or row.get("channel") or "Shopify",
-                    external_order_id=eligibility.get("external_order_id") or row.get("shopify_order_id") or "",
-                    external_line_item_id=eligibility.get("external_line_item_id") or row.get("shopify_line_item_id") or "",
-                    expected_product_gid=eligibility.get("canonical_product_gid") or row.get("shopify_product_id") or "",
-                    edition_number=int(edition_number),
-                    edition_total=int(edition_total),
-                    reason=reason,
-                    actor=actor,
-                )
-            except Exception as error:
-                st.error(f"Manual edition was not saved: {error}")
-            else:
-                _reload_orders_from_source()
-                st.session_state[NOTICE_KEY] = (
-                    f"Saved {_format_edition_with_total(saved.get('edition_number'), saved.get('edition_total'))} "
-                    f"for {order_label}. Counters were not changed."
-                )
-                _record_order_activity(
-                    "manual_expired_edition_saved",
-                    f"Manual expired-edition value saved: {order_label}",
-                    row=row,
-                    metadata={
-                        "edition_number": saved.get("edition_number"),
-                        "edition_total": saved.get("edition_total"),
-                        "manual_edition_id": saved.get("id"),
-                    },
-                )
-                st.rerun()
+        except Exception as error:
+            st.error(f"Manual certificate was not saved: {error}")
+        else:
+            _reload_orders_from_source()
+            st.session_state[NOTICE_KEY] = "Manual certificate saved. Complete Fulfilment QA before generating the certificate."
+            st.rerun()
+    if eligibility.get("existing_manual_id") and st.button("Remove Manual Certificate"):
+        try:
+            backend.remove_manual_order_line_edition(manual_id=eligibility["existing_manual_id"], actor=actor)
+        except Exception as error:
+            st.error(f"Manual certificate was not removed: {error}")
+        else:
+            _reload_orders_from_source()
+            st.session_state[NOTICE_KEY] = "Manual certificate removed. Edition Ops was not changed."
+            st.rerun()
+    if st.button("Cancel"):
+        st.rerun()
 
 
 def _render_top_actions(rows, duplicate_diagnostics=None):

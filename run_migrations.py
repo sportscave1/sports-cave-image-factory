@@ -45,6 +45,7 @@ MANUAL_EXPIRED_EDITION_IDENTITY_MIGRATION = (
     "20260829_fix_manual_expired_edition_identity.sql"
 )
 REVIEWED_MIGRATION_SHA256 = {
+    "20260912224424_manual_certificate_controls.sql": "59b72a16e4e41d78ed261374cddeee449e75a5f34300836c8ebf1f44be7a8c24",
     "20260912045939_independent_edition_cursor.sql": "145bcd1ee8d87c1bb6ce9aa56deb1bb65ed7dd20ffd22dab69d216e3c8172fbe",
     LEGACY_ALLOCATOR_REPAIR_MIGRATION: (
         "488120bb6f36c3b7dcd59a8a933db74c3fb2266e5c5bc06f1d283392e35be4e9"

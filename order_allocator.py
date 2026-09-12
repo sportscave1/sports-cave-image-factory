@@ -1807,7 +1807,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
                         "edition_number": edition_number,
                         "edition": f"#{edition_number:03d}",
                         "edition_total": _positive_int(assignment.get("edition_total"), 100),
-                        "has_saved_allocation": True,
+                        "has_saved_allocation": not str(assignment.get("edition_order_id") or "").startswith("manual-edition:"),
                         "edition_offset": max(allocation_index - 1, 0),
                         "allocation_index": allocation_index,
                         "assignment_status": str(assignment.get("assignment_status") or "Assigned"),
@@ -1822,7 +1822,11 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
                         "certificate_pdf_url": certificate_url,
                         "shopify_file_url": certificate_url,
                         "certificate_shopify_file_id": str(assignment.get("shopify_file_id") or ""),
-                        "certificate_generated_at": _safe_iso(assignment.get("generated_at") or assignment.get("assigned_at")),
+                        "certificate_generated_at": _safe_iso(
+                            assignment.get("generated_at")
+                            or (None if str(assignment.get("edition_order_id") or "").startswith("manual-edition:")
+                                else assignment.get("assigned_at"))
+                        ),
                         "certificate_preview_path": str(assignment.get("certificate_preview_r2_key") or ""),
                     }
                 )

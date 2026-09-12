@@ -161,7 +161,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("I have manually checked this order and confirm the fulfilment details are correct.", prodigi_page)
         self.assertIn("Confirm Manual Override & Complete", prodigi_page)
         self.assertIn("prodigi_complete_with_manual_override", prodigi_page)
-        self.assertIn("certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)", prodigi_page)
+        self.assertIn("certificate_result = prodigi_generate_upload_certificate_for_row(completion_row, qa_answers=qa_answers)", prodigi_page)
         self.assertIn('status="Complete"', prodigi_page)
         self.assertIn("Submitted Dispatch Log", prodigi_page)
         self.assertIn("Last 7 Days", prodigi_page)
@@ -1369,7 +1369,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("Is this order error-free and ready to finalise?", source)
         self.assertIn("Generate + Upload Certificate", source)
-        self.assertIn("prodigi_generate_upload_certificate_for_row(completion_row)", source)
+        self.assertIn("prodigi_generate_upload_certificate_for_row(completion_row, qa_answers=qa_answers)", source)
         self.assertIn('status="Complete"', source)
 
     def test_prodigi_dispatch_recent_log_filters_last_7_days_and_searches_history(self):

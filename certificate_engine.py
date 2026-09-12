@@ -290,6 +290,8 @@ def certificate_record_from_order_row(row):
     variant_gid = row.get("variant_id") or row.get("variant_gid") or row.get("shopify_variant_id") or ""
     created_at = row.get("certificate_generated_at") or row.get("created_at") or now_iso()
     return {
+        **({"edition_order_id": row["edition_order_id"]}
+           if str(row.get("edition_order_id") or "").startswith("manual-edition:") else {}),
         "certificate_id": certificate_service.certificate_id(order_name, edition_number, handle),
         "order_gid": order_gid,
         "shopify_order_id": order_gid,

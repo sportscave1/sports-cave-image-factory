@@ -4376,7 +4376,7 @@ def prodigi_complete_with_manual_override(
     )
 
 
-def prodigi_generate_upload_certificate_for_row(row, *, config=None):
+def prodigi_generate_upload_certificate_for_row(row, *, config=None, qa_answers=None):
     started = time.perf_counter()
     print(
         "CERTIFICATE ACTION: certificate action started "
@@ -4405,6 +4405,13 @@ def prodigi_generate_upload_certificate_for_row(row, *, config=None):
     if not config.get("configured"):
         raise RuntimeError("Store connection is not configured for certificate upload.")
 
+    if str(row.get("edition_order_id") or "").startswith("manual-edition:") and qa_answers is not None:
+        blockers = prodigi_completion_blockers(row, qa_answers)
+        if blockers:
+            raise ValueError("Complete Fulfilment QA: " + "; ".join(blockers))
+        # Persist reviewed answers before certificate generation, without claiming completion.
+        prodigi_save_dispatch_row(row, status="QA checked - certificate pending", qa_answers=qa_answers,
+                                  ensure_schema_first=False)
     result = certificate_job.run_certificate_job_with_timeout(row, source_page="Prodigi", upload=True)
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or "Certificate upload failed.")
@@ -4471,7 +4478,9 @@ def prodigi_dispatch_table_records(rows):
                 "Order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
                 "Customer": row.get("customer_name") or "",
                 "Product": row.get("product_title") or "",
-                "Edition #": f"#{edition_number:03d}" if edition_number else "",
+                "Edition #": (f"Not allocated · Manual cert #{edition_number:03d}/{row.get('edition_total') or 100}"
+                              if str(row.get("edition_order_id") or "").startswith("manual-edition:")
+                              else f"#{edition_number:03d}" if edition_number else ""),
                 "Variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
                 "Fulfilment Code": row.get("prodigi_product_code") or row.get("prodigi_code") or "",
                 "QA Status": qa_status,
@@ -5049,7 +5058,7 @@ def render_prodigi_page():
             try:
                 _prodigi_set_certificate_action_state(completion_row)
                 if _prodigi_is_limited_edition(completion_row):
-                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)
+                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row, qa_answers=qa_answers)
                     record = certificate_result.get("record") or {}
                     completion_row.update(
                         {
@@ -5121,7 +5130,7 @@ def render_prodigi_page():
             try:
                 _prodigi_set_certificate_action_state(completion_row)
                 if _prodigi_is_limited_edition(completion_row):
-                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)
+                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row, qa_answers=qa_answers)
                     record = certificate_result.get("record") or {}
                     completion_row.update(
                         {

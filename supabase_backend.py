@@ -15300,6 +15300,8 @@ def upsert_certificate_metadata(metadata, *, ensure_schema_first=True):
     if not is_configured():
         return {"ok": False, "skipped": True, "reason": "Supabase DATABASE_URL is not configured."}
     metadata = dict(metadata or {})
+    if str(metadata.get("edition_order_id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+        ensure_schema_first = False
     account_record = shopify_sync.order_certificate_account_record(metadata)
     now_value = datetime.now(timezone.utc).isoformat(timespec="seconds")
     certificate_url = account_record.get("certificate_file_url") or ""
@@ -15410,40 +15412,41 @@ def upsert_certificate_metadata(metadata, *, ensure_schema_first=True):
                     )
                     certificate_row_id = (cur.fetchone() or {}).get("id")
                     action = "inserted"
-                cur.execute(
-                    """
-                    UPDATE edition_orders
-                    SET shopify_customer_id=%s,
-                        shopify_order_name=%s,
-                        shopify_variant_id=%s,
-                        product_handle=%s,
-                        edition_display=%s,
-                        certificate_status=%s,
-                        certificate_id=%s,
-                        shopify_file_id=%s,
-                        shopify_file_status=%s,
-                        certificate_file_url=%s,
-                        purchase_date=%s,
-                        updated_at=now()
-                    WHERE shopify_line_item_id=%s
-                      AND allocation_index=%s
-                    """,
-                    (
-                        row["shopify_customer_id"],
-                        row["shopify_order_name"],
-                        row["shopify_variant_id"],
-                        row["product_handle"],
-                        row["edition_display"],
-                        row["certificate_status"],
-                        row["certificate_id"],
-                        row["shopify_file_id"],
-                        row["shopify_file_status"],
-                        row["certificate_file_url"],
-                        row["purchase_date"],
-                        row["shopify_line_item_id"],
-                        row["line_item_unit_index"],
-                    ),
-                )
+                if not str(row.get("edition_order_id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+                    cur.execute(
+                        """
+                        UPDATE edition_orders
+                        SET shopify_customer_id=%s,
+                            shopify_order_name=%s,
+                            shopify_variant_id=%s,
+                            product_handle=%s,
+                            edition_display=%s,
+                            certificate_status=%s,
+                            certificate_id=%s,
+                            shopify_file_id=%s,
+                            shopify_file_status=%s,
+                            certificate_file_url=%s,
+                            purchase_date=%s,
+                            updated_at=now()
+                        WHERE shopify_line_item_id=%s
+                          AND allocation_index=%s
+                        """,
+                        (
+                            row["shopify_customer_id"],
+                            row["shopify_order_name"],
+                            row["shopify_variant_id"],
+                            row["product_handle"],
+                            row["edition_display"],
+                            row["certificate_status"],
+                            row["certificate_id"],
+                            row["shopify_file_id"],
+                            row["shopify_file_status"],
+                            row["certificate_file_url"],
+                            row["purchase_date"],
+                            row["shopify_line_item_id"],
+                            row["line_item_unit_index"],
+                        ),
+                    )
             conn.commit()
     except Exception as error:
         schema_message = certificate_schema_missing_error_message(error)
@@ -15646,23 +15649,24 @@ def _upload_certificate_outputs_to_r2(cur, assignment, pdf_path, preview_path=""
             str(assignment.get("id")),
         ),
     )
-    cur.execute(
-        """
-        UPDATE edition_orders
-        SET certificate_r2_bucket=%s,
-            certificate_r2_key=%s,
-            certificate_preview_r2_bucket=%s,
-            certificate_preview_r2_key=%s
-        WHERE id::text=%s
-        """,
-        (
-            certificate_update["certificate_r2_bucket"],
-            certificate_update["certificate_r2_key"],
-            certificate_update["certificate_preview_r2_bucket"],
-            certificate_update["certificate_preview_r2_key"],
-            str(assignment.get("id")),
-        ),
-    )
+    if not str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+        cur.execute(
+            """
+            UPDATE edition_orders
+            SET certificate_r2_bucket=%s,
+                certificate_r2_key=%s,
+                certificate_preview_r2_bucket=%s,
+                certificate_preview_r2_key=%s
+            WHERE id::text=%s
+            """,
+            (
+                certificate_update["certificate_r2_bucket"],
+                certificate_update["certificate_r2_key"],
+                certificate_update["certificate_preview_r2_bucket"],
+                certificate_update["certificate_preview_r2_key"],
+                str(assignment.get("id")),
+            ),
+        )
     return {"pdf": pdf_upload, "preview": preview_upload, **certificate_update}
 
 
@@ -15681,6 +15685,7 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 
 
 def _generate_certificate_for_assignment(cur, assignment, *, force=False):
+    manual_certificate = str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
     local_file_path = ""
     local_preview_path = ""
     try:
@@ -15706,10 +15711,11 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             or (existing_certificate.get("certificate_r2_bucket") and existing_certificate.get("certificate_r2_key"))
             )
         ):
-            cur.execute(
-                "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
-                (str(assignment["id"]),),
-            )
+            if not manual_certificate:
+                cur.execute(
+                    "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
+                    (str(assignment["id"]),),
+                )
             return (
                 existing_certificate.get("local_file_path")
                 or existing_certificate.get("shopify_file_url")
@@ -15822,15 +15828,17 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             ),
         )
         _upload_certificate_outputs_to_r2(cur, assignment, local_file_path, local_preview_path)
-        cur.execute(
-            "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
-            (str(assignment["id"]),),
-        )
+        if not manual_certificate:
+            cur.execute(
+                "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
+                (str(assignment["id"]),),
+            )
     except Exception as error:
-        cur.execute(
-            "UPDATE edition_orders SET certificate_status='Certificate Missing' WHERE id::text=%s",
-            (str(assignment["id"]),),
-        )
+        if not manual_certificate:
+            cur.execute(
+                "UPDATE edition_orders SET certificate_status='Certificate Missing' WHERE id::text=%s",
+                (str(assignment["id"]),),
+            )
         raise error
     return local_file_path
 
@@ -21827,7 +21835,7 @@ def _manual_edition_source_channel(value):
         return "shopify"
 
 
-def _manual_edition_eligibility_from_state(state):
+def _manual_edition_eligibility_from_state(state, *, allow_existing=False):
     """Return fail-closed manual-entry eligibility from canonical DB facts."""
 
     row = dict(state or {})
@@ -21846,6 +21854,9 @@ def _manual_edition_eligibility_from_state(state):
         "assignment_status": str(row.get("assignment_status") or "").strip(),
         "last_error": str(row.get("last_error") or "").strip(),
         "existing_manual_id": str(row.get("manual_edition_id") or "").strip(),
+        "manual_number": row.get("manual_number"),
+        "manual_reason": row.get("manual_reason") or "",
+        "allocated_numbers": row.get("allocated_numbers") or [],
     }
     if not row.get("schema_available"):
         result["reason"] = "The manual-edition database migration is not installed."
@@ -21866,7 +21877,7 @@ def _manual_edition_eligibility_from_state(state):
     ):
         result["reason"] = "The canonical product identity does not match the immutable order line."
         return result
-    if result["existing_manual_id"]:
+    if result["existing_manual_id"] and not allow_existing:
         result["reason"] = "A manual edition value has already been saved for this line."
         return result
     if _int_value(row.get("valid_normal_allocation_count"), 0):
@@ -21948,7 +21959,7 @@ def _manual_edition_state_with_cursor(
     order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
     line_id = canonical_shopify_gid_or_raw("LineItem", external_line_item_id)
     product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
-    if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+    if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE) or not column_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE, "duplicate_confirmed"):
         return {
             "schema_available": False,
             "expected_source_channel": expected_source,
@@ -22000,6 +22011,15 @@ def _manual_edition_state_with_cursor(
             COALESCE(ep.active, ep.is_active, TRUE) AS product_active,
             BTRIM(COALESCE(er.status, '') || ' / ' || COALESCE(ep.edition_status, '')) AS series_status,
             manual.id::text AS manual_edition_id,
+            manual.edition_number AS manual_number,
+            manual.reason AS manual_reason,
+            (SELECT array_agg(DISTINCT eo.edition_number ORDER BY eo.edition_number)
+             FROM edition_orders eo
+             WHERE COALESCE(eo.allocation_valid, TRUE)
+               AND eo.edition_number BETWEEN 1 AND eo.edition_total
+               AND (REGEXP_REPLACE(COALESCE(eo.shopify_product_id, ''), '^gid://shopify/Product/', '')
+                    =REGEXP_REPLACE(ep.shopify_product_gid, '^gid://shopify/Product/', '')
+                    OR eo.shopify_handle=ep.shopify_handle)) AS allocated_numbers,
             (
                 LOWER(BTRIM(COALESCE(
                     NULLIF(o.fulfillment_status, ''),
@@ -22137,7 +22157,6 @@ def get_manual_order_line_edition_eligibility(
     external_line_item_id,
     expected_product_gid,
 ):
-    ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             state = _manual_edition_state_with_cursor(
@@ -22147,7 +22166,7 @@ def get_manual_order_line_edition_eligibility(
                 external_line_item_id=external_line_item_id,
                 expected_product_gid=expected_product_gid,
             )
-    return _manual_edition_eligibility_from_state(state)
+    return _manual_edition_eligibility_from_state(state, allow_existing=True)
 
 
 def save_manual_order_line_edition(
@@ -22160,17 +22179,19 @@ def save_manual_order_line_edition(
     edition_total,
     reason,
     actor,
+    duplicate_confirmed=False,
 ):
-    """Insert one immutable display/certificate value after locked DB guards."""
+    """Save a certificate-only value; database triggers preserve every revision."""
 
-    ensure_schema()
     source = _manual_edition_source_channel(source_channel)
     order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
     line_id = canonical_shopify_gid_or_raw("LineItem", external_line_item_id)
     product_gid = edition_ledger.canonical_shopify_gid("Product", expected_product_gid)
     actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
     clean_reason = str(reason or "").strip()
-    number = _int_value(edition_number, 0)
+    if isinstance(edition_number, bool) or not str(edition_number).isdigit():
+        raise ValueError("Manual edition number must be an integer.")
+    number = int(edition_number)
     total = _int_value(edition_total, 0)
     if not actor_id:
         raise PermissionError("Only an authenticated administrator may save a manual edition value.")
@@ -22189,25 +22210,31 @@ def save_manual_order_line_edition(
                 external_line_item_id=line_id,
                 expected_product_gid=product_gid,
             )
-            eligibility = _manual_edition_eligibility_from_state(state)
+            eligibility = _manual_edition_eligibility_from_state(state, allow_existing=True)
             if not eligibility.get("eligible"):
                 raise ValueError(eligibility.get("reason") or "This line is not eligible for manual edition entry.")
             if total != _int_value(eligibility.get("canonical_edition_total"), 0):
                 raise ValueError("Edition total must match the canonical edition total.")
+            if number in eligibility.get("allocated_numbers", []) and not duplicate_confirmed:
+                raise ValueError("Edition already exists in allocation history. Confirm the duplicate certificate number.")
             cur.execute(
                 """
                 INSERT INTO manual_order_line_editions (
                     source_channel, external_order_id, external_line_item_id,
-                    canonical_product_gid, edition_number, edition_total, reason,
+                    canonical_product_gid, edition_number, edition_total, reason, duplicate_confirmed,
                     created_by_user_id, created_by_email, created_by_display_name,
                     verified_order_name, verified_product_title,
                     verified_assignment_status, verified_last_error,
                     verified_series_status, verified_sold_count,
                     verified_remaining_count, verified_next_edition_number
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     '', '', '', '', '', '', '', 0, 0, 0
                 )
+                ON CONFLICT (source_channel, external_order_id, external_line_item_id)
+                DO UPDATE SET edition_number=EXCLUDED.edition_number,
+                    reason=EXCLUDED.reason, duplicate_confirmed=EXCLUDED.duplicate_confirmed,
+                    created_by_user_id=EXCLUDED.created_by_user_id
                 RETURNING *
                 """,
                 (
@@ -22218,6 +22245,7 @@ def save_manual_order_line_edition(
                     number,
                     total,
                     clean_reason[:1000],
+                    bool(duplicate_confirmed),
                     actor_id,
                 ),
             )
@@ -22233,6 +22261,45 @@ def save_manual_order_line_edition(
         "edition_total": _int_value(saved.get("edition_total"), total),
         "created_at": saved.get("created_at"),
     }
+
+
+def remove_manual_order_line_edition(*, manual_id, actor):
+    """Remove only the active certificate override, retaining the DB audit trail."""
+    actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
+    if not actor_id:
+        raise PermissionError("An authenticated administrator is required.")
+    if not _coerce_uuid_or_none(manual_id):
+        raise ValueError("Invalid manual certificate identity.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT set_config('sports_cave.manual_certificate_actor', %s, true)", (actor_id,))
+            cur.execute("DELETE FROM manual_order_line_editions WHERE id=%s RETURNING id", (manual_id,))
+            if not cur.fetchone():
+                raise ValueError("Manual certificate no longer exists. Refresh Orders.")
+        conn.commit()
+
+
+def _require_manual_certificate_qa(cur, assignment):
+    """Use persisted pre-certificate QA answers, never a UI/session flag."""
+    if not str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+        return
+    cur.execute("""
+        SELECT row_json->'qa_answers' AS answers
+        FROM prodigi_dispatch_rows
+        WHERE REGEXP_REPLACE(shopify_order_id, '^gid://shopify/Order/', '')
+              =REGEXP_REPLACE(%s, '^gid://shopify/Order/', '')
+          AND REGEXP_REPLACE(shopify_line_item_id, '^gid://shopify/LineItem/', '')
+              =REGEXP_REPLACE(%s, '^gid://shopify/LineItem/', '')
+          AND row_json->>'edition_order_id'=%s
+          AND edition_number=%s AND updated_at >= %s
+        ORDER BY updated_at DESC LIMIT 1
+    """, (assignment.get("shopify_order_id"), assignment.get("shopify_line_item_id"),
+          assignment["id"], assignment["edition_number"], assignment["verified_at"]))
+    answers = (cur.fetchone() or {}).get("answers") or {}
+    required = ("artwork_upload", "product_option", "frame", "size", "shipping",
+                "sent_to_production", "final_check", "edition_number")
+    if not isinstance(answers, dict) or any(answers.get(key) != "Yes" for key in required):
+        raise ValueError("Complete Fulfilment QA before generating this manual certificate.")
 
 
 def list_hybrid_order_rows(limit=50, search=""):
@@ -22696,7 +22763,7 @@ def list_hybrid_order_rows(limit=50, search=""):
             "allocation_index": 1,
             "assigned_at": manual_row.get("assigned_at"),
             "certificate_status": manual_row.get("certificate_status"),
-            "assignment_status": "Assigned",
+            "assignment_status": "Not allocated",
             "assignment_source": "manual_expired_edition_display_certificate",
             "manual_override": True,
             "manual_edition_override": True,
@@ -23264,7 +23331,7 @@ def _manual_order_line_edition_assignment(cur, reference):
             li.variant_title, li.sku,
             o.customer_name, o.customer_email,
             NULLIF(to_jsonb(o)->>'shopify_customer_id', '') AS shopify_customer_id,
-            manual.edition_number, manual.edition_total,
+            manual.edition_number, manual.edition_total, manual.verified_at,
             1 AS allocation_index,
             manual.created_at AS assigned_at
         FROM manual_order_line_editions manual
@@ -23342,6 +23409,7 @@ def _manual_order_line_edition_assignment(cur, reference):
                        )
                 )
           )
+        FOR UPDATE OF manual
         """,
         (manual_id,),
     )
@@ -23359,7 +23427,9 @@ def _manual_order_line_edition_assignment(cur, reference):
     }
 
 
-def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend", ensure_schema_first=True):
+def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend", ensure_schema_first=True, expected_manual_number=None):
+    if str(edition_order_id or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX):
+        ensure_schema_first = False
     started = time.perf_counter()
     path = ""
     set_certificate_log_context(source_page=source_page, edition_order_id=edition_order_id)
@@ -23396,6 +23466,11 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
                             order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",
                             edition_order_id=edition_order_id,
                         )
+                if (reference.startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
+                    and expected_manual_number is not None
+                    and _int_value(expected_manual_number, 0) != assignment.get("edition_number")):
+                    raise ValueError("Manual certificate changed. Refresh the row and repeat Fulfilment QA.")
+                _require_manual_certificate_qa(cur, assignment)
                 path = _generate_certificate_for_assignment(cur, assignment, force=force)
             conn.commit()
         certificate_stage_log("certificate_backend_entered", "completed", started_at=started)
