@@ -55,8 +55,9 @@ class MemoryDatabase:
 
             def commit(self):
                 db.commits += 1
-                db.lock.release()
-                self.held = False
+                if self.held:
+                    db.lock.release()
+                    self.held = False
 
         class Cursor:
             rowcount = 1
@@ -83,6 +84,12 @@ class MemoryDatabase:
                     db.lock.acquire()
                     self.conn.held = True
                     self.conn.before = deepcopy((db.rows, db.runs, db.display))
+                elif compact.startswith('SELECT * FROM edition_products') and 'FOR UPDATE' in compact:
+                    db.lock.acquire()
+                    self.conn.held = True
+                    self.conn.before = deepcopy((db.rows, db.runs, db.display))
+                    self.result = deepcopy(next((r for r in db.rows if r['shopify_product_gid'] == params[0]
+                                                 and r.get('metafields_sync_status') == 'Pending automatic mirror'), None))
                 elif compact.startswith('SELECT ep.* FROM edition_products'):
                     assert self.conn.held, 'Identity must be read after serialization'
                 elif compact.startswith('SELECT EXISTS'):
@@ -95,12 +102,15 @@ class MemoryDatabase:
                     row.update(id=len(db.rows)+1, edition_total=100, next_edition_number=1,
                                last_assigned_edition=0, sold_count=0, remaining_count=100,
                                active=True, is_active=True, sold_out=False, is_sold_out=False,
+                               metafields_sync_status='Pending automatic mirror', edition_status='limited_release',
                                featured_image_url=params[5], edition_name=params[4])
                     db.rows.append(row)
                     self.result = {'shopify_handle': row['shopify_handle']}
                 elif compact.startswith('UPDATE edition_products SET'):
                     assignments = compact.split(' SET ', 1)[1].split(' WHERE ', 1)[0].split(', ')
                     row = next(r for r in db.rows if r['id'] == params[-1])
+                    if "metafields_sync_status='Synced'" in compact:
+                        row['metafields_sync_status'] = 'Synced'
                     index = 0
                     for assignment in assignments:
                         if '%s' in assignment:
@@ -136,9 +146,20 @@ class ProductLifecycleTests(unittest.TestCase):
         self.stack.enter_context(patch.object(backend, '_webhook_log'))
         self.global_runs = self.stack.enter_context(patch.object(backend, '_ensure_active_edition_runs_for_products', side_effect=AssertionError('Global counter rewrite forbidden')))
         self.payload = {'id': 987, 'handle': 'new-art', 'title': 'New Art', 'status': 'active'}
+        self.fetch_context = threading.local()
+        self.canonical = self.stack.enter_context(patch.object(backend.shopify_sync, 'fetch_product_by_shopify_id', side_effect=lambda *a, **k: self.full_product(getattr(self.fetch_context, 'payload', self.payload))))
+        self.stack.enter_context(patch.object(backend, '_mirror_pending_registered_product', return_value=False))
+
+    def full_product(self, payload):
+        return {**backend._normalize_shopify_product_create_payload(payload),
+                'vendor': 'Sports Cave', 'product_type': 'Framed Art',
+                'tags': ['Collector Series'], 'online_store_url': 'https://example.com/art',
+                '_edition_registration_canonical': True}
 
     def deliver(self, **changes):
-        return backend.process_product_create_webhook({**self.payload, **changes}, 'test-event', 'products/update', claim_event=False)
+        payload = {**self.payload, **changes}
+        self.fetch_context.payload = payload
+        return backend.process_product_create_webhook(payload, 'test-event', 'products/update', claim_event=False)
 
     def test_new_active_product_visible_in_normal_loader_at_one(self):
         result = self.deliver()
@@ -185,7 +206,7 @@ class ProductLifecycleTests(unittest.TestCase):
         self.assertEqual(self.db.rows[1]['next_edition_number'], 1)
 
     def test_draft_create_skips_then_active_update_initializes(self):
-        result = backend.process_product_create_webhook({**self.payload, 'status': 'draft'}, 'draft', 'products/create', claim_event=False)
+        result = self.deliver(status='draft')
         self.assertEqual(result['new_products_inserted'], 0)
         self.assertEqual(self.db.rows, [])
         self.deliver()

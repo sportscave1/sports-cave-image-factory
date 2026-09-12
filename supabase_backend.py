@@ -7785,8 +7785,11 @@ def _candidate_edition_products_for_shopify_products(cur, products):
     return cur.fetchall()
 
 
-def _insert_edition_product_from_shopify(cur, fields):
+def _assert_new_edition_product_safe(cur, fields):
     # Fail closed for orphaned history. Never reconstruct or renumber it here.
+    warning = shopify_sync.edition_registration_history_warning(fields.get("raw") or {})
+    if warning:
+        raise RuntimeError(warning)
     candidates = sorted(_shopify_product_identity_candidates(fields))
     handle = fields.get("shopify_handle") or ""
     cur.execute(
@@ -7807,6 +7810,10 @@ def _insert_edition_product_from_shopify(cur, fields):
     )
     if (cur.fetchone() or {}).get("has_history"):
         raise RuntimeError(f"Existing edition history for {handle}; automatic initialization refused.")
+
+
+def _insert_edition_product_from_shopify(cur, fields):
+    _assert_new_edition_product_safe(cur, fields)
     raw_json = json_dumps(fields.get("raw") or {})
     cur.execute(
         """
@@ -7820,7 +7827,7 @@ def _insert_edition_product_from_shopify(cur, fields):
         VALUES (
             %s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s,
             TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb,
-            'Pending configuration', '', now(), now()
+            'Pending automatic mirror', '', now(), now()
         )
         RETURNING shopify_handle
         """,
@@ -7966,6 +7973,95 @@ def _apply_edition_product_incremental_plan(cur, actions, *, sync_variants=True)
     return summary
 
 
+def _mirror_pending_registered_product(product_id, *, config=None):
+    """Mirror only a new registration, using the locked Supabase row verbatim.
+
+    Existing/manual rows never acquire this marker. A failed mirror rolls back
+    its acknowledgement, so webhook retries resume without creating/resetting.
+    Row locking also serializes this initial mirror with order/manual edits.
+    """
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT * FROM edition_products
+                   WHERE shopify_product_gid=%s
+                     AND metafields_sync_status='Pending automatic mirror'
+                   FOR UPDATE""", (product_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            total = int(row["edition_total"])
+            next_number = int(row["next_edition_number"])
+            remaining = int(row["remaining_count"])
+            status = str(row.get("edition_status") or "").casefold()
+            closed = any(word in status for word in ("archiv", "expir", "inactive", "disabled", "complet", "sold", "ended"))
+            enabled = bool(row.get("active")) and bool(row.get("is_active")) and not closed and not bool(row.get("sold_out") or row.get("is_sold_out")) and remaining > 0 and next_number <= total
+            if not enabled:
+                # A manual close/allocation may have happened after registration.
+                # Do not change that product's mirror through this initializer.
+                _webhook_log("edition_initial_mirror_skipped", "skipped", shopify_product_id=product_id,
+                             handle=row.get("shopify_handle"), action="skipped", reason="ledger_closed_or_disabled")
+                return False
+            shopify_sync.sync_complete_product_edition_metafields({
+                **row, "edition_enabled": enabled, "edition_next_number": next_number,
+                "edition_sold_count": int(row["sold_count"]), "edition_remaining": remaining,
+                "edition_label": row.get("edition_name") or DEFAULT_EDITION_NAME,
+            }, config=config)
+            cur.execute(
+                """UPDATE edition_products SET metafields_sync_status='Synced',
+                   metafields_synced_at=now(), last_metafield_error=''
+                   WHERE id=%s""", (row["id"],),
+            )
+        conn.commit()
+    return True
+
+
+def register_shopify_products_for_edition_ops(products, *, source="manual_sync", config=None,
+                                             missing_only=False, webhook_id="", topic=""):
+    """Canonical registration for manual discovery, webhooks and safe recovery."""
+    eligible = []
+    decisions = []
+    for candidate in products or []:
+        product_id = candidate.get("shopify_product_id") or candidate.get("id")
+        product = candidate if candidate.get("_edition_registration_canonical") else shopify_sync.fetch_product_by_shopify_id(product_id, config=config)
+        decision = shopify_sync.edition_registration_eligibility(product)
+        details = {"shopify_product_id": product.get("shopify_product_id"), "handle": product.get("handle"), "product_status": product.get("status"),
+                   **decision, "action": "eligible" if decision["eligible"] else "skipped"}
+        decisions.append(details)
+        _webhook_log("edition_product_classified", "eligible" if decision["eligible"] else "skipped",
+                     topic=topic, webhook_id=webhook_id, source=source, **details)
+        if decision.get("retryable") and source == "webhook":
+            raise RuntimeError(f"Product registration deferred: {decision['reason']}; retry current Shopify state.")
+        if decision["eligible"]:
+            eligible.append(product)
+    try:
+        result = upsert_shopify_products_to_edition_products(
+            eligible, source=source, config=config, sync_inserted_metafields=False,
+            sync_variants=False, missing_only=missing_only,
+        )
+    except Exception as error:
+        _webhook_log("edition_product_registration_error", "failed", topic=topic, webhook_id=webhook_id,
+                     source=source, action="error", reason="supabase_registration_failed", error_type=type(error).__name__)
+        raise
+    result["eligibility_results"] = decisions
+    for product in eligible:
+        handle = product.get("handle")
+        action = "created" if handle in result.get("inserted_handles", []) else "updated_metadata" if handle in result.get("updated_handles", []) else "already_exists"
+        try:
+            mirrored = _mirror_pending_registered_product(product["shopify_product_id"], config=config)
+        except Exception as error:
+            _webhook_log("edition_product_registration_error", "failed", topic=topic, webhook_id=webhook_id,
+                         shopify_product_id=product["shopify_product_id"], handle=handle,
+                         action="error", reason="initial_mirror_failed", error_type=type(error).__name__)
+            raise RuntimeError("Initial edition mirror failed; Supabase registration is committed and retryable.") from error
+        result["shopify_metafields_pushed"] = int(result.get("shopify_metafields_pushed") or 0) + int(mirrored)
+        _webhook_log("edition_product_registered", "processed", topic=topic, webhook_id=webhook_id,
+                     shopify_product_id=product["shopify_product_id"], handle=handle, eligible=True,
+                     action=action, mirrored=mirrored)
+    return result
+
+
 def upsert_shopify_products_to_edition_products(
     products,
     *,
@@ -7975,6 +8071,7 @@ def upsert_shopify_products_to_edition_products(
     metafield_ensure_schema_first=None,
     raise_on_apply_errors=False,
     sync_variants=True,
+    missing_only=False,
 ):
     """Shared Shopify product -> edition_products upsert path.
 
@@ -8005,6 +8102,10 @@ def upsert_shopify_products_to_edition_products(
             cur.execute("LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE")
             existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
             actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
+            if missing_only:
+                for action in actions:
+                    if action.get("action") == "update":
+                        action["action"] = "skip"
             if sync_variants:
                 apply_summary = _apply_edition_product_incremental_plan(cur, actions)
             else:
@@ -8549,12 +8650,10 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
                 summary["continuation_cursor"] = after
                 summary["continuation_created_after"] = created_after
 
-        upsert_summary = upsert_shopify_products_to_edition_products(
+        upsert_summary = register_shopify_products_for_edition_ops(
             products,
             source="new_product_pull",
             config=config,
-            sync_inserted_metafields=False,
-            sync_variants=False,
         )
         summary.update(
             {
@@ -8567,6 +8666,7 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
                 "existing_products_skipped": int(
                     upsert_summary.get("existing_products_skipped") or 0
                 ),
+                "shopify_metafields_pushed": int(upsert_summary.get("shopify_metafields_pushed") or 0),
                 "variant_sync_errors": list(
                     upsert_summary.get("variant_sync_errors") or []
                 ),
@@ -8686,12 +8786,10 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
         summary["products_checked"] = len(active_draft_products)
         summary["shopify_pages"] = int(catalogue.get("page_count") or 0)
 
-        upsert_summary = upsert_shopify_products_to_edition_products(
+        upsert_summary = register_shopify_products_for_edition_ops(
             active_draft_products,
             source="manual_sync",
             config=config,
-            sync_inserted_metafields=False,
-            sync_variants=False,
         )
         summary.update(
             {
@@ -19490,22 +19588,32 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                 "errors": [],
             }
 
-    _update_webhook_event_status(webhook_id, "processing")
-    _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_RECEIVED_KEY, utc_now())
     try:
+        _update_webhook_event_status(webhook_id, "processing")
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_RECEIVED_KEY, utc_now())
         product = _normalize_shopify_product_create_payload(payload)
+        # Webhook payloads are snapshots and can arrive out of order. Always
+        # classify the current Shopify product, including publication and tags.
+        product = shopify_sync.fetch_product_by_shopify_id(product["shopify_product_id"], config=config)
+        product["_edition_registration_canonical"] = True
         _webhook_log(
             "webhook_product_processing_started",
             source="webhook",
+            topic=topic,
+            webhook_id=webhook_id,
             shopify_product_id=product.get("shopify_product_id") or "",
             shopify_handle=product.get("handle") or "",
         )
         if not _live_edition_product(product):
+            _webhook_log("edition_product_classified", "skipped", topic=topic, webhook_id=webhook_id,
+                         shopify_product_id=product.get("shopify_product_id"), handle=product.get("handle"),
+                         product_status=product.get("status"), eligible=False, action="skipped", reason="not_active")
             result = {
                 "source": "webhook",
                 "duplicate": False,
                 "processed": True,
                 "reason": "Product is not active; a later products/update can initialize it.",
+                "status": "skipped", "action": "skipped",
                 "shopify_product_id": product.get("shopify_product_id") or "",
                 "shopify_handle": product.get("handle") or "",
                 "new_products_inserted": 0,
@@ -19531,17 +19639,18 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "")
             return result
 
-        apply_summary = upsert_shopify_products_to_edition_products(
+        apply_summary = register_shopify_products_for_edition_ops(
             [product],
             source="webhook",
             config=config,
-            sync_inserted_metafields=False,
-            metafield_ensure_schema_first=False,
-            raise_on_apply_errors=True,
+            topic=topic,
+            webhook_id=webhook_id,
         )
         errors = list(apply_summary.get("errors") or [])
         errors.extend(apply_summary.get("variant_sync_errors") or [])
-        status = "processed" if not errors else "processed_with_warnings"
+        decisions = apply_summary.get("eligibility_results") or []
+        ineligible = bool(decisions) and not any(item.get("eligible") for item in decisions)
+        status = "skipped" if ineligible else "processed" if not errors else "processed_with_warnings"
         inserted_count = int(apply_summary.get("new_products_inserted") or 0)
         updated_count = int(apply_summary.get("existing_products_updated") or 0)
         skipped_count = int(apply_summary.get("existing_products_skipped") or 0)
@@ -19558,11 +19667,13 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             "processed": True,
             "shopify_product_id": product.get("shopify_product_id") or "",
             "shopify_handle": product.get("handle") or "",
+            "status": status,
+            "eligibility_results": decisions,
             "products_checked": 1,
             "new_products_inserted": inserted_count,
             "existing_products_updated": updated_count,
             "existing_products_skipped": skipped_count,
-            "shopify_metafields_pushed": int(mirror_result.get("synced") or 0),
+            "shopify_metafields_pushed": int(apply_summary.get("shopify_metafields_pushed") or 0),
             "shopify_metafields_failed_pending": int(mirror_result.get("skipped") or mirror_result.get("failed") or 0),
             "product_metafield_mirror": mirror_result,
             "errors": errors,
@@ -19596,8 +19707,8 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "\n".join(errors))
         _webhook_log(
             "webhook_product_processing_finished",
-            "completed" if not errors else "processed_with_warnings",
-            source="webhook",
+            status,
+            source="webhook", topic=topic, webhook_id=webhook_id,
             shopify_product_id=product.get("shopify_product_id") or "",
             shopify_handle=product.get("handle") or "",
             inserted=inserted_count,
@@ -19608,14 +19719,19 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
     except Exception as error:
         schema_message = webhook_schema_error_message(error)
         message = schema_message or str(error)
-        _update_webhook_event_status(
-            webhook_id,
-            "failed",
-            error_message=message,
-            processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
-        )
-        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, message)
-        _webhook_log("webhook_product_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
+        # Emit before attempting diagnostics writes: the database itself may be down.
+        _webhook_log("webhook_product_processing_failed", "failed", webhook_id=webhook_id, topic=topic,
+                     shopify_product_id=(payload or {}).get("id"), handle=(payload or {}).get("handle"),
+                     action="error", error_type=type(error).__name__)
+        try:
+            _update_webhook_event_status(
+                webhook_id, "failed", error_message=message,
+                processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, message)
+        except Exception as diagnostic_error:
+            _webhook_log("webhook_product_diagnostics_failed", "failed", webhook_id=webhook_id,
+                         topic=topic, error_type=type(diagnostic_error).__name__)
         raise RuntimeError(message) from error
 
 

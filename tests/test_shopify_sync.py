@@ -3210,7 +3210,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             return_value={"products": [product], "page_count": 1, "complete": True},
         ) as fetch_catalogue, patch.object(
             supabase_backend,
-            "upsert_shopify_products_to_edition_products",
+            "register_shopify_products_for_edition_ops",
             return_value=upsert_result,
         ) as shared_upsert, patch.object(
             supabase_backend,
@@ -3221,8 +3221,6 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         shared_upsert.assert_called_once()
         self.assertEqual(shared_upsert.call_args.args[0], [product])
         self.assertEqual(shared_upsert.call_args.kwargs["source"], "manual_sync")
-        self.assertFalse(shared_upsert.call_args.kwargs["sync_inserted_metafields"])
-        self.assertFalse(shared_upsert.call_args.kwargs["sync_variants"])
         self.assertIsNone(fetch_catalogue.call_args.kwargs["max_products"])
         self.assertEqual(fetch_catalogue.call_args.kwargs["page_size"], 250)
         self.assertEqual(result["new_products_inserted"], 1)
@@ -3514,7 +3512,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "variants": [{"id": 200, "title": "Default", "sku": "NEW-ART", "price": "100.00"}],
         }
 
-        def apply_plan(_cur, actions):
+        def apply_plan(_cur, actions, **kwargs):
             self.assertEqual(actions[0]["action"], "insert")
             self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-wall-art")
             self.assertEqual(actions[0]["fields"]["featured_image_url"], "https://cdn.example/new.jpg")
@@ -3531,7 +3529,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
                 "updated_handles": [],
             }
 
-        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+        with patch.object(supabase_backend.shopify_sync, "fetch_product_by_shopify_id", return_value={
+            **supabase_backend._normalize_shopify_product_create_payload(payload),
+            "vendor": "Sports Cave", "product_type": "Framed Art", "tags": ["Collector Series"],
+            "online_store_url": "https://example.com/art", "_edition_registration_canonical": True,
+        }), patch.object(supabase_backend, "_mirror_pending_registered_product", return_value=False), patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
             supabase_backend,
             "connect",
             return_value=FakeConnection(),
@@ -3606,7 +3608,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "remaining_count": 58,
         }
 
-        def apply_plan(_cur, actions):
+        def apply_plan(_cur, actions, **kwargs):
             self.assertEqual(actions[0]["action"], "skip")
             return {
                 "new_products_inserted": 0,
@@ -3618,7 +3620,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
                 "updated_handles": [],
             }
 
-        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+        with patch.object(supabase_backend.shopify_sync, "fetch_product_by_shopify_id", return_value={
+            **supabase_backend._normalize_shopify_product_create_payload(payload),
+            "vendor": "Sports Cave", "product_type": "Framed Art", "tags": ["Collector Series"],
+            "online_store_url": "https://example.com/art", "_edition_registration_canonical": True,
+        }), patch.object(supabase_backend, "_mirror_pending_registered_product", return_value=False), patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
             supabase_backend,
             "connect",
             return_value=FakeConnection(),
@@ -3678,7 +3684,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertNotIn("sold_count", actions[0]["fields"])
         self.assertNotIn("remaining_count", actions[0]["fields"])
 
-    def test_product_create_webhook_leaves_new_row_pending_configuration(self):
+    def test_product_create_webhook_does_not_use_legacy_bulk_mirror(self):
         class FakeCursor:
             def execute(self, sql, params=None):
                 assert sql == "LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE"
@@ -3719,7 +3725,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "updated_handles": [],
         }
 
-        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+        with patch.object(supabase_backend.shopify_sync, "fetch_product_by_shopify_id", return_value={
+            **supabase_backend._normalize_shopify_product_create_payload(payload),
+            "vendor": "Sports Cave", "product_type": "Framed Art", "tags": ["Collector Series"],
+            "online_store_url": "https://example.com/art", "_edition_registration_canonical": True,
+        }), patch.object(supabase_backend, "_mirror_pending_registered_product", return_value=False), patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
             supabase_backend,
             "connect",
             return_value=FakeConnection(),
@@ -3784,7 +3794,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "title": "New Wall Art",
             "status": "active",
         }
-        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+        with patch.object(supabase_backend.shopify_sync, "fetch_product_by_shopify_id", return_value={
+            **supabase_backend._normalize_shopify_product_create_payload(payload),
+            "vendor": "Sports Cave", "product_type": "Framed Art", "tags": ["Collector Series"],
+            "online_store_url": "https://example.com/art", "_edition_registration_canonical": True,
+        }), patch.object(supabase_backend, "_mirror_pending_registered_product", return_value=False), patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
             supabase_backend,
             "connect",
             return_value=FakeConnection(),
@@ -3844,7 +3858,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "finish_sync_run")
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "ensure_schema")
-    def test_full_reconciliation_leaves_new_product_pending_configuration(
+    def test_full_reconciliation_does_not_use_legacy_bulk_mirror(
         self,
         _ensure_schema,
         _start_sync_run,
@@ -3913,7 +3927,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "errors": ["new-wall-art: Shopify unavailable"],
         }
 
-        with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
+        product.update(vendor="Sports Cave", product_type="Framed Art", tags=["Collector Series"],
+                       online_store_url="https://example.com/art", _edition_registration_canonical=True)
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()), patch.object(
+            supabase_backend, "_mirror_pending_registered_product", return_value=False
+        ):
             result = supabase_backend.reconcile_all_shopify_products_to_edition_ops(config=self.config)
 
         self.assertEqual(result["new_products_inserted"], 1)

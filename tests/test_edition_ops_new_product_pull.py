@@ -80,7 +80,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             },
         ) as fetch, patch.object(
             supabase_backend,
-            "upsert_shopify_products_to_edition_products",
+            "register_shopify_products_for_edition_ops",
             return_value=upsert_result,
         ) as insert, patch.object(
             supabase_backend,
@@ -102,7 +102,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(result["existing_products_skipped"], 1)
         fetch.assert_called_once()
         self.assertEqual(insert.call_args.args[0], [product])
-        self.assertFalse(insert.call_args.kwargs["sync_inserted_metafields"])
+        self.assertEqual(insert.call_args.kwargs["source"], "new_product_pull")
         mirror.assert_not_called()
 
     def test_one_new_product_is_inserted_pending_configuration(self):
@@ -117,7 +117,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(result["new_products_inserted"], 1)
         self.assertEqual(result["shopify_metafields_pushed"], 0)
         self.assertEqual(insert.call_args.args[0][0]["shopify_product_id"], "gid://shopify/Product/2")
-        self.assertFalse(insert.call_args.kwargs["sync_inserted_metafields"])
+        self.assertEqual(insert.call_args.kwargs["source"], "new_product_pull")
         mirror.assert_not_called()
 
     def test_several_new_products_and_same_title_use_distinct_ids(self):
@@ -175,7 +175,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             ],
         ) as fetch, patch.object(
             supabase_backend,
-            "upsert_shopify_products_to_edition_products",
+            "register_shopify_products_for_edition_ops",
             return_value={
                 "new_products_inserted": 60,
                 "existing_products_updated": 0,
@@ -196,7 +196,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(result["shopify_discovery_requests"], 2)
         self.assertEqual(fetch.call_args_list[1].kwargs["after"], "cursor-50")
         self.assertEqual(len(upsert.call_args.args[0]), 60)
-        self.assertFalse(upsert.call_args.kwargs["sync_inserted_metafields"])
+        self.assertEqual(upsert.call_args.kwargs["source"], "new_product_pull")
 
     def test_bounded_scan_resumes_from_saved_cursor(self):
         resumed_product = _shopify_product(
@@ -261,7 +261,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             return_value={"products": [product], "has_next_page": False, "query": "newest"},
         ), patch.object(
             supabase_backend,
-            "upsert_shopify_products_to_edition_products",
+            "register_shopify_products_for_edition_ops",
             side_effect=upserts,
         ) as insert, patch.object(
             supabase_backend,
@@ -357,15 +357,15 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(classified["missing_products"], [])
         self.assertEqual(classified["existing_products_skipped"], 1)
 
-    def test_import_stays_pending_until_user_saves_configuration(self):
+    def test_import_queues_automatic_mirror_without_bulk_mirror(self):
         insertion_source = inspect.getsource(
             supabase_backend._insert_edition_product_from_shopify
         )
-        self.assertIn("'Pending configuration'", insertion_source)
+        self.assertIn("'Pending automatic mirror'", insertion_source)
         pull_source = inspect.getsource(
             supabase_backend.sync_new_shopify_products_to_edition_ops
         )
-        self.assertIn("sync_inserted_metafields=False", pull_source)
+        self.assertIn("register_shopify_products_for_edition_ops(", pull_source)
         self.assertNotIn("sync_product_edition_metafields_for_handles(", pull_source)
 
     def test_existing_edition_counters_and_state_never_enter_write_path(self):
@@ -472,7 +472,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertIn("disabled=not backend or not reconciliation_confirmed", ui_source)
         self.assertNotIn("iter_catalog_pages", normal_pull_source)
         self.assertIn("NEW_PRODUCT_DISCOVERY_MAX_PAGES", normal_pull_source)
-        self.assertIn("sync_inserted_metafields=False", normal_pull_source)
+        self.assertIn("register_shopify_products_for_edition_ops(", normal_pull_source)
         self.assertIn("fetch_edition_ops_active_products", reconciliation_source)
 
     def test_zero_and_one_new_product_paths_complete_quickly_with_mocked_io(self):

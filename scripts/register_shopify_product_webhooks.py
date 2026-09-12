@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -30,6 +31,13 @@ def main(argv=None):
         subscriptions = existing.get("subscriptions") or []
         found = any(shopify_sync._webhook_callback_url(row).rstrip("/") == callback.rstrip("/") for row in subscriptions)
         result = {"topic": f"products/{suffix}", "callback_url": callback, "registered": found, "mode": "apply" if args.apply else "inspect"}
+        # Subscriptions are app-scoped. Run with the OS app's configuration,
+        # rather than interpreting another connector app's empty list as proof.
+        result["visibility"] = "configured_shopify_app_only"
+        result["observed_callbacks"] = []
+        for row in subscriptions:
+            parsed = urlsplit(shopify_sync._webhook_callback_url(row))
+            result["observed_callbacks"].append(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")))
         if args.apply:
             ensured = getattr(shopify_sync, f"ensure_products_{suffix}_webhook_subscription")(callback_url=callback, config=config)
             result["created"] = bool(ensured.get("created"))

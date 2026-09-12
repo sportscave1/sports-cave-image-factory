@@ -444,8 +444,8 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
     except ValueError:
         return Response("Invalid JSON payload.", status_code=400)
 
-    if not isinstance(payload, dict) or not payload.get("id") or not payload.get("handle"):
-        return Response("Product ID and handle are required.", status_code=400)
+    if not isinstance(payload, dict) or not str(payload.get("id") or "").isdigit():
+        return Response("A numeric Shopify product ID is required.", status_code=400)
 
     try:
         import supabase_backend
@@ -485,7 +485,8 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
 
     return {
         "ok": True,
-        "status": "processed" if not (result.get("errors") or []) else "processed_with_warnings",
+        "status": result.get("status") or ("processed" if not (result.get("errors") or []) else "processed_with_warnings"),
+        "eligibility_results": result.get("eligibility_results") or [],
         "source": "webhook",
         "webhook_id": claim.get("webhook_id") or webhook_id,
         "shopify_product_id": result.get("shopify_product_id") or claim.get("shopify_product_id") or "",

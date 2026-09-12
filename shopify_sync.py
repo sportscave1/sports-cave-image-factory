@@ -620,6 +620,10 @@ query SportsCaveProductById($id: ID!) {
         handle
       }
     }
+    editionRegistrationMetafields: metafields(first: 250, namespace: "sports_cave") {
+      pageInfo { hasNextPage }
+      nodes { namespace key type value }
+    }
     metafields(first: 50) {
       nodes {
         namespace
@@ -1023,9 +1027,76 @@ def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=No
     product = data.get("product")
     if not product:
         raise ShopifyAPIError("Shopify product could not be found.")
+    registration_meta = product.get("editionRegistrationMetafields") or {}
+    if (registration_meta.get("pageInfo") or {}).get("hasNextPage"):
+        raise ShopifyAPIError("Edition metadata is incomplete; automatic registration refused.")
     normalized = normalize_product(product, config["store_domain"])
+    by_key = {(m["namespace"], m["key"]): m for m in normalized["metafields"]}
+    by_key.update({(m["namespace"], m["key"]): m for m in registration_meta.get("nodes") or []})
+    normalized["metafields"] = list(by_key.values())
+    normalized["_edition_registration_canonical"] = True
     normalized["api_version"] = served_version or config.get("api_version")
     return normalized
+
+
+def edition_registration_eligibility(product):
+    """Use the documented Product Uploads collector contract (app.py).
+
+    Collections are deliberately not required: automatic collections/publication
+    may lag the ACTIVE mutation. Unknown products fail closed.
+    """
+    if str(product.get("status") or "").upper() != "ACTIVE":
+        return {"eligible": False, "reason": "not_active"}
+    raw_tags = product.get("tags") or []
+    tags = {str(t).strip().casefold() for t in (raw_tags.split(",") if isinstance(raw_tags, str) else raw_tags)}
+    handle = str(product.get("handle") or "").casefold()
+    gid = product.get("shopify_product_id") or ""
+    excluded = {"internal", "private", "hidden", "hidden upsell", "upsell", "test", "test product", "apparel", "certificate", "fulfilment", "fulfillment"}
+    if tags & excluded or handle == str(os.getenv("FRAMED_CERTIFICATE_PRODUCT_HANDLE") or "framed-collector-certificate").casefold() or (
+        os.getenv("FRAMED_CERTIFICATE_PRODUCT_ID") and gid == shopify_gid("Product", os.getenv("FRAMED_CERTIFICATE_PRODUCT_ID"))
+    ):
+        return {"eligible": False, "reason": "internal_or_excluded_product"}
+    if str(product.get("vendor") or "").strip().casefold() != "sports cave":
+        return {"eligible": False, "reason": "not_sports_cave"}
+    if str(product.get("product_type") or "").strip().casefold() != "framed art":
+        return {"eligible": False, "reason": "not_wall_art"}
+    if not tags & {"collector series", "limited edition", "limited edition sports prints"}:
+        return {"eligible": False, "reason": "collector_classification_missing", "retryable": True}
+    if not product.get("online_store_url"):
+        return {"eligible": False, "reason": "publication_pending", "retryable": True}
+    return {"eligible": True, "reason": "published_collector_wall_art"}
+
+
+def edition_registration_history_warning(product):
+    """Mirror evidence may veto NEW initialization, never set ledger counters."""
+    values = {m.get("key"): str(m.get("value") or "").strip().casefold()
+              for m in product.get("metafields") or [] if m.get("namespace") == "sports_cave"}
+    if values.get("edition_enabled") in {"false", "0", "no"}:
+        return "explicitly_disabled_mirror_requires_review"
+    if values.get("edition_archived") in {"true", "1", "yes", "archived", "expired"}:
+        return "historical_closed_mirror_requires_review"
+    status = values.get("edition_status", "").replace(" ", "_").replace("-", "_")
+    if any(word in status for word in ("archiv", "expir", "sold", "complet", "inactive", "disabled", "ended")):
+        return "historical_closed_mirror_requires_review"
+    for key, baseline in (("edition_next_number", 1), ("next_edition_number", 1), ("edition_sold_count", 0), ("edition_sold", 0), ("sold_count", 0), ("editions_sold", 0), ("last_assigned_edition", 0)):
+        if key in values:
+            try:
+                if int(values[key]) > baseline:
+                    return "historical_numbered_mirror_requires_review"
+            except ValueError:
+                return "invalid_edition_mirror_requires_review"
+    if values.get("edition_remaining") == "0" or values.get("remaining_count") == "0" or values.get("is_sold_out") == "true":
+        return "historical_closed_mirror_requires_review"
+    # Partial mirrors can be the only surviving evidence of a manual override.
+    # Veto initialization; never import their numbers into Supabase.
+    for key in ("edition_total", "edition_remaining", "remaining_count"):
+        if key in values:
+            try:
+                if int(values[key]) != 100:
+                    return "nondefault_edition_mirror_requires_review"
+            except ValueError:
+                return "invalid_edition_mirror_requires_review"
+    return ""
 
 
 def update_product_variant_prices(product_id, variant_updates, config=None, request_post=None):
