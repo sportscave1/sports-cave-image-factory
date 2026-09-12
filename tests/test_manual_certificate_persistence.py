@@ -133,9 +133,9 @@ class PersistenceTests(unittest.TestCase):
                 payload = orders_page._read_orders_snapshot()
                 row = orders_page._normalise_row(payload['rows'][0])
             if number:
-                self.assertIn(f'Manual cert #{number:03d}/100', row['edition'])
+                self.assertEqual(f'#{number:03d}/100 · Manual', row['edition'])
             else:
-                self.assertNotIn('Manual cert', row['edition'])
+                self.assertNotIn('Manual', row['edition'])
         self.assertGreaterEqual(len(database.connections), 3)
 
 

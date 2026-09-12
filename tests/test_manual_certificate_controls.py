@@ -28,13 +28,33 @@ class ManualCertificateControlsTests(unittest.TestCase):
 
     def test_manual_display_and_normal_template_number(self):
         row = orders_page._normalise_row(ROW)
-        self.assertEqual(row['edition'], 'Not allocated · Manual cert #100/100')
+        self.assertEqual(row['edition'], '#100/100 · Manual')
         self.assertFalse(row['has_saved_allocation'])
         self.assertEqual(row['assignment_status'], 'Not allocated')
         record = certificate_engine.certificate_record_from_order_row(row)
         self.assertEqual((record['edition_number'], record['edition_total']), (100, 100))
         self.assertEqual(record['edition_order_id'], REF)
         self.assertEqual(certificate_engine.certificate_metafield_record(record)['edition_order_id'], REF)
+
+    def test_no_number_displays_not_allocated_without_changing_error(self):
+        row = orders_page._normalise_row({**ROW, 'edition_order_id': '',
+            'edition_number': None, 'manual_edition_override': False,
+            'assignment_status': 'Allocation error'})
+        self.assertEqual(row['edition'], 'Not allocated')
+        self.assertEqual(row['assignment_status'], 'Allocation error')
+
+    def test_manual_number_search_and_display_leave_input_unchanged(self):
+        original = {**ROW, 'sold_count': 100, 'remaining_count': 0,
+                    'next_edition_number': 101}
+        before = dict(original)
+        rows = orders_page._filter_rows([original], '#100')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['edition'], '#100/100 · Manual')
+        self.assertEqual(original, before)
+        for field in ('sold_count', 'remaining_count', 'next_edition_number'):
+            self.assertEqual(rows[0][field], before[field])
+        self.assertFalse(rows[0]['has_saved_allocation'])
+        self.assertEqual(rows[0]['edition_order_id'], REF)
 
     def test_real_reference_wins_over_stale_manual_flag(self):
         row = orders_page._normalise_row({**ROW, 'edition_order_id': '52', 'edition_number': 52})
@@ -154,6 +174,15 @@ class ManualCertificateControlsTests(unittest.TestCase):
             self.assertIn('duplicate certificate number', ui.warning.call_args.args[0])
             save = next(c for c in ui.button.call_args_list if c.args[0] == 'Save Manual Certificate')
             self.assertEqual(save.kwargs['disabled'], not confirmed)
+
+    def test_selected_manual_row_exposes_edit_action(self):
+        ui = MagicMock()
+        ui.session_state = {'sports_cave_current_user': ACTOR}
+        ui.button.return_value = False
+        with patch.object(orders_page, 'st', ui), patch.object(
+                orders_page, '_manual_edition_eligibility', return_value={'eligible': True}):
+            orders_page._render_manual_edition_entry([ROW], MagicMock())
+        ui.button.assert_called_once_with('Edit Manual Certificate', key='orders-manual-certificate')
 
     def test_ui_action_hidden_for_genuine_allocations(self):
         ui = MagicMock()

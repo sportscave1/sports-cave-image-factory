@@ -2021,7 +2021,7 @@ class EditionOpsUiTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(row["edition"], "Needs edition")
+        self.assertEqual(row["edition"], "Not allocated")
         self.assertEqual(row["variant"], "Missing variant")
         self.assertEqual(row["shipping"], "Missing shipping")
         self.assertEqual(row["certificate"], "Needs certificate")
@@ -3552,7 +3552,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
-        self.assertEqual([row["edition"] for row in rows], ["Needs edition", "Needs edition"])
+        self.assertEqual([row["edition"] for row in rows], ["Not allocated", "Not allocated"])
         self.assertEqual([row["certificate"] for row in rows], ["Needs certificate", "Needs certificate"])
 
     def test_orders_page_marks_unallocated_sold_out_rows_for_review(self):
@@ -3583,7 +3583,7 @@ class EditionOpsUiTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(rows[0]["edition"], "Needs Review - Sold Out")
+        self.assertEqual(rows[0]["edition"], "Not allocated")
         self.assertEqual(rows[0]["certificate"], "Needs Review - Sold Out")
 
     def test_orders_page_restores_certificate_local_paths_from_saved_metafield(self):

@@ -568,7 +568,6 @@ def _allocation_numbers(allocation):
 
 def _normalise_row(row):
     updated = dict(row or {})
-    raw_edition = str(updated.get("edition") or updated.get("assignment_status") or "").strip()
     edition_number = _normalise_edition_number(
         updated.get("edition_number")
         or updated.get("edition")
@@ -600,9 +599,7 @@ def _normalise_row(row):
     updated["edition"] = (
         _format_edition_with_total(edition_number, updated["edition_total"])
         if edition_number
-        else raw_edition
-        if raw_edition in ALLOCATION_BLOCKER_STATUSES and raw_edition not in {"Needs allocation", "Historical backfill required"}
-        else "Needs edition"
+        else "Not allocated"
     )
     updated["has_saved_allocation"] = bool(updated.get("has_saved_allocation"))
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
@@ -638,7 +635,8 @@ def _normalise_row(row):
     updated["assignment_source"] = str(updated.get("assignment_source") or "")
     updated["manual_edition_override"] = bool(updated.get("manual_edition_override"))
     if updated["manual_edition_override"] and updated["edition_order_id"].startswith("manual-edition:"):
-        updated["edition"] = f"Not allocated · Manual cert {_format_edition_with_total(edition_number, updated['edition_total'])}"
+        if edition_number:
+            updated["edition"] = f"{_format_edition_with_total(edition_number, updated['edition_total'])} · Manual"
         updated["has_saved_allocation"] = False
         updated["assignment_status"] = "Not allocated"
 
