@@ -1,0 +1,121 @@
+"""Persistent, certificate-independent creative reference handoff; no Meta mutations."""
+from copy import deepcopy
+from io import BytesIO
+import time
+from urllib.parse import urlparse
+import requests
+from PIL import Image
+import meta_review_store as store
+
+PENDING = 'meta-review-refresh-pending'
+ACTIVE = 'meta-review-refresh-source'
+
+
+def archive_image(url):
+    parsed = urlparse(str(url))
+    host = parsed.hostname or ''
+    if parsed.scheme != 'https' or not any(host.endswith('.'+domain) for domain in ('fbcdn.net','fbsbx.com')):
+        raise ValueError('Select a readable Meta CDN image. Sync again to renew the reference.')
+    deadline = time.monotonic()+25
+    try:
+        with requests.get(url,stream=True,timeout=(5,10),allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise ValueError('Meta image unavailable or expired. Sync again before handing it off.')
+            data=bytearray()
+            for chunk in response.iter_content(65536):
+                data.extend(chunk)
+                if len(data)>8*1024*1024 or time.monotonic()>deadline:
+                    raise ValueError('Winner image exceeds the download size/time limit.')
+        image=Image.open(BytesIO(data))
+        image.verify()
+        mime=Image.MIME.get(image.format,'image/jpeg')
+    except (requests.RequestException,OSError):
+        raise ValueError('Winner image could not be verified. Sync again or select another real image.') from None
+    return store.save_media(bytes(data),mime)
+
+
+def build_package(ad,selections,context,mode):
+    if mode not in ('complete_ad','best_components'):
+        raise ValueError('Unknown refresh mode.')
+    for kind in ('image','primary_text','headline'):
+        item=selections.get(kind)
+        if not item or not item.get('value'):
+            raise ValueError('Select original image, primary text and headline before refreshing.')
+        if mode=='complete_ad' and str(item['ad_id'])!=str(ad['ad_id']):
+            raise ValueError('Complete-ad mode must use assets from the same ad.')
+    return {**deepcopy(context),'mode':mode,'ad_id':ad['ad_id'],'ad_name':ad.get('ad_name'),
+            'creative_id':ad['assets']['creative_id'],'components':deepcopy(selections),
+            'metrics':deepcopy(ad['metrics']),'decision':deepcopy(ad['decision']),
+            'dynamic':ad['assets']['dynamic'],'carousel':ad['assets']['carousel'],
+            'description':next(iter(ad['assets']['description']),{}).get('value',''),
+            'cta':next(iter(ad['assets']['cta']),{}).get('value',''),
+            'destination_url':next(iter(ad['assets']['url']),{}).get('value','')}
+
+
+def queue(package,state,actor='sports_cave_os'):
+    package=deepcopy(package)
+    package['image_sha256']=archive_image(package['components']['image']['value'])
+    package['decision_id']=store.save_selection(package,actor,'meta_review_handoff')
+    state[PENDING]=package
+
+
+def hydrate(state):
+    package=state.get(PENDING)
+    if not package:
+        return False
+    import ads_page
+    state[ads_page.ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY]=package['components']['primary_text']['value']
+    state[ads_page.ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY]=package['components']['headline']['value']
+    mapping=package.get('product_mapping') or {}
+    state[ads_page.ADS_PRODUCT_NAME_KEY]=mapping.get('product_title') or ''
+    state[ads_page.ADS_PRODUCT_SELECTOR_KEY]=mapping.get('product_title') or ''
+    # Unmapped references must not inherit an unrelated previous product/market.
+    state['ads_category']=mapping.get('sport') if mapping.get('sport') in ads_page.CATEGORY_OPTIONS else 'Select category' if 'Select category' in ads_page.CATEGORY_OPTIONS else ads_page.CATEGORY_OPTIONS[0]
+    state['ads_country']='Select country'
+    state[ads_page.ADS_PRODUCT_URL_KEY]=''
+    if package.get('destination_url') and '/products/' in package['destination_url']:
+        state[ads_page.ADS_PRODUCT_URL_KEY]=package['destination_url']
+    if mapping.get('sport') in ads_page.CATEGORY_OPTIONS:
+        state['ads_category']=mapping['sport']
+    market={'AU':'Australia','US':'USA','GB':'UK','CA':'Canada','NZ':'New Zealand'}.get(package.get('market'),package.get('market'))
+    if market in ads_page.COUNTRY_OPTIONS:
+        state['ads_country']=market
+    url=package.get('destination_url','')
+    state['ads_campaign_type']='Carousel' if package.get('carousel') else 'Instant Experience' if '/canvas/' in url or 'canvas_id=' in url else 'Single Image / Video'
+    state[ACTIVE]=deepcopy(package)
+    state.pop(PENDING,None)
+    for key in ('ads-refresh-previous-campaign','ads-refresh-winning-candidate','ads-refresh-applied-winner'):
+        state.pop(key,None)
+    return True
+
+
+def render_source(st):
+    hydrate(st.session_state)
+    source=st.session_state.get(ACTIVE)
+    if not source:
+        return False
+    with st.container(border=True):
+        st.subheader('Winner from Meta Review')
+        st.caption(f"{source.get('campaign_name')} · {source.get('ad_name')} · {source.get('date_range')} · {source['mode'].replace('_',' ')}")
+        st.write(source['decision']['reason'])
+        if not (source.get('product_mapping') or {}).get('product_title'):
+            st.warning('This ad has no saved product mapping. Select the canonical product below before generating refreshes.')
+        if source['mode']=='best_components':
+            st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
+        try:
+            data,mime=store.load_media(source['image_sha256'])
+            if data:
+                st.image(data,width=320)
+                st.download_button('Download original winning image',data,file_name='meta-winning-reference.'+('png' if mime=='image/png' else 'jpg'),mime=mime)
+                st.caption('Permanent original reference. Attach it with the canonical artwork in the existing ChatGPT prompt workflow.')
+            else:
+                st.error('Stored winner image unavailable. Repeat the handoff from Meta Review.')
+        except Exception:
+            st.error('Winner image could not be read from Supabase. Retry when the database is available.')
+        with st.expander('Source evidence'):
+            st.dataframe([{'Metric':k.replace('_',' ').title(),'Value':v} for k,v in source['metrics'].items() if v is not None],hide_index=True)
+            st.caption(f"Ad {source['ad_id']} · Creative {source['creative_id']} · {source['decision']['confidence']} confidence")
+        if st.button('Choose a different winner'):
+            st.session_state.pop(ACTIVE,None)
+            st.rerun()
+    return True

@@ -14121,7 +14121,9 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     if is_creative_refresh:
         st.title("Creative Refresh")
         st.caption("Refine a proven winner while preserving what worked.")
-        _render_refresh_winner_picker()
+        import meta_review_handoff
+        if not meta_review_handoff.render_source(st):
+            _render_refresh_winner_picker()
     else:
         st.title("Ads")
         st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
