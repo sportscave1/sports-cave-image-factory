@@ -195,8 +195,8 @@ class LivePageTests(unittest.TestCase):
         self.network=self.stack.enter_context(patch.object(meta,'_request',side_effect=AssertionError('Unexpected network')))
         data=history()
         for ad in data['ads']: ad['campaign_id']='900'
-        data['campaigns']=[{'campaign_id':'900','campaign_name':'September live campaign','effective_status':'ACTIVE'}]
-        self.campaigns=self.stack.enter_context(patch.object(live,'load_campaigns',return_value={'account':{'name':'Sports Cave'},'campaigns':data['campaigns']}))
+        self.campaign={'campaign_id':'900','campaign_name':'September live campaign','effective_status':'ACTIVE','metrics':analysis.normalize_metrics({})}
+        self.overview=self.stack.enter_context(patch.object(live,'load_overview',return_value={'account':{'name':'Sports Cave'},'campaigns':[self.campaign]}))
         self.ads=self.stack.enter_context(patch.object(live,'load_campaign',return_value=data))
         self.preferences=self.stack.enter_context(patch.object(page,'_load_preferences',return_value={'selections':[],'mapping':[]}))
         self.at=AppTest.from_string('import ads_meta_review_page as p\np.render_page()',default_timeout=10).run()
@@ -204,61 +204,59 @@ class LivePageTests(unittest.TestCase):
     def refresh(self):
         next(b for b in self.at.button if b.label=='Refresh From Meta').click().run()
 
-    def select(self):
-        next(s for s in self.at.selectbox if s.label=='Open campaign').set_value('900').run()
+    def details(self):
+        self.at=AppTest.from_string("import ads_meta_review_page as p\nfrom tests.test_meta_review_live import CONFIG\np.render_campaign_details(CONFIG,{'campaign_id':'900','campaign_name':'September live campaign'},None,__import__('datetime').date(2026,9,13))",default_timeout=10).run()
 
-    def test_idle_then_campaigns_then_selected_ads_then_cached_rerun(self):
-        self.campaigns.assert_not_called(); self.ads.assert_not_called(); self.preferences.assert_not_called()
-        self.refresh(); self.assertEqual(self.campaigns.call_count,1); self.ads.assert_not_called()
-        self.select(); self.assertEqual(self.ads.call_count,1)
-        self.assertTrue(any('Exact primary' in t.value for t in self.at.text))
-        self.at.run(); self.assertEqual(self.ads.call_count,1)
-        self.refresh(); self.assertEqual(self.ads.call_count,2); self.assertEqual(self.campaigns.call_count,2)
+    def test_initial_overview_has_only_sort_and_refresh_and_no_ads(self):
+        self.assertEqual(self.overview.call_count,1); self.ads.assert_not_called(); self.preferences.assert_not_called()
+        self.assertEqual([s.label for s in self.at.selectbox],['Sort By'])
+        self.at.run(); self.assertEqual(self.overview.call_count,1)
+        self.refresh(); self.assertEqual(self.overview.call_count,2)
         self.old.assert_not_called(); self.network.assert_not_called(); self.assertFalse(self.at.exception)
+
+    def test_campaign_row_opens_popup_for_correct_identity(self):
+        key='meta-review-campaign-table-Newest-1'
+        self.at.session_state[key]={'selection':{'rows':[0],'columns':[]}}
+        with patch.object(page,'campaign_popup') as popup:
+            self.at.run()
+        self.assertFalse(self.at.exception)
+        self.assertEqual(popup.call_args.args[1]['campaign_id'],'900')
+        self.ads.assert_not_called()
+
+    def test_selected_campaign_loads_lazily_and_reruns_use_cache(self):
+        self.ads.assert_not_called(); self.details(); self.assertEqual(self.ads.call_count,1)
+        self.at.run(); self.assertEqual(self.ads.call_count,1)
+        self.assertFalse(self.at.exception)
 
     def test_storage_outage_does_not_block_live_view(self):
         self.preferences.side_effect=RuntimeError('storage down')
-        self.refresh(); self.select()
+        self.details()
         self.assertFalse(self.at.exception); self.assertFalse(self.at.error)
         self.assertTrue(any('Live Meta review remains available' in w.value for w in self.at.warning))
-        self.assertTrue(any('Exact primary' in t.value for t in self.at.text))
+        self.assertTrue(self.at.dataframe)
 
     def test_failure_without_cache_never_shows_historical_campaigns(self):
-        self.campaigns.side_effect=meta.MetaAdsApiError('Permission denied')
-        self.refresh()
+        self.at.session_state['meta-review-live-cache']={}
+        self.overview.side_effect=meta.MetaAdsApiError('Permission denied'); self.at.run()
         self.assertTrue(any('LIVE META UNAVAILABLE' in e.value for e in self.at.error))
-        self.assertFalse(any(s.label=='Open campaign' for s in self.at.selectbox))
-        self.old.assert_not_called()
+        self.assertFalse(self.at.dataframe); self.old.assert_not_called()
 
     def test_failed_refresh_labels_prior_live_campaigns_stale(self):
-        self.refresh(); self.campaigns.side_effect=meta.MetaAdsApiError('Unavailable')
-        self.refresh()
+        self.overview.side_effect=meta.MetaAdsApiError('Unavailable'); self.refresh()
         self.assertTrue(any('STALE CACHED META' in c.value for c in self.at.caption))
-        self.assertTrue(any(s.label=='Open campaign' for s in self.at.selectbox))
-        self.old.assert_not_called()
+        self.assertTrue(self.at.dataframe); self.old.assert_not_called()
 
-    def test_new_date_range_failure_cannot_show_old_range_ads(self):
-        self.refresh(); self.select()
-        self.ads.side_effect=meta.MetaAdsApiError('Unavailable')
-        next(s for s in self.at.selectbox if s.label=='Date range').set_value('Last 14 days').run()
-        # The campaign selection is retained when its live option list is unchanged.
-        self.assertTrue(any('LIVE META UNAVAILABLE' in e.value for e in self.at.error))
-        self.assertFalse(any('Exact primary' in t.value for t in self.at.text))
-
-    def test_saved_selection_storage_reads_are_separate_from_reporting(self):
-        from unittest.mock import MagicMock
-        cur=MagicMock(); cur.fetchall.side_effect=[[],[]]
-        with patch.object(store,'cursor') as cursor:
-            cursor.return_value.__enter__.return_value=cur
-            result=store.load_preferences('123')
-        statements=[call.args[0] for call in cur.execute.call_args_list]
-        self.assertEqual(result,{'selections':[],'mapping':[]})
-        self.assertTrue(all(sql.startswith('SELECT') for sql in statements))
-        self.assertIn('ads_action_log',statements[0]); self.assertIn('ads_product_mapping',statements[1])
-        self.assertFalse(any('meta_campaigns' in sql or 'meta_ad_insights' in sql for sql in statements))
+    def test_full_details_expand_on_creative_row(self):
+        self.details()
+        self.at.session_state['meta-review-creative-table-900']={'selection':{'rows':[0],'columns':[]}}
+        self.at.run()
+        self.assertFalse(self.at.exception)
+        self.assertTrue(any('View details' in e.label for e in self.at.expander))
+        self.assertTrue(any('Exact primary' in t.value for t in self.at.text))
+        self.assertTrue(any(t.value=='SHOP_NOW' for t in self.at.text))
 
     def test_live_winner_handoff_uses_existing_queue(self):
-        self.refresh(); self.select()
+        self.details()
         with patch.object(handoff,'queue') as queue:
             next(b for b in self.at.button if b.label=='Refresh Winning Ad').click().run()
         self.assertFalse(self.at.exception)

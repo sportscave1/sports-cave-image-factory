@@ -126,6 +126,31 @@ def filter_campaigns(rows, query='', status='All'):
                  (('ACTIVE', 'PAUSED') if status == 'Active and paused' else (status,)))]
 
 
+def load_overview(config, since, until):
+    """Campaign metadata plus one paginated account-level range report; no ad reads."""
+    from meta_review_analysis import normalize_metrics
+    result = load_campaigns(config, since, until, status='All')
+    fields = ','.join(field for field in INSIGHT_FIELDS.split(',')
+                      if field not in ('ad_id','ad_name','adset_id','adset_name'))
+    rows = Reader(config).pages(config['ad_account_id'] + '/insights', {
+        'fields': fields, 'level': 'campaign', 'use_unified_attribution_setting': 'true',
+        **date_params(since, until)})
+    reports = {}
+    for row in rows:
+        key = str(row.get('campaign_id') or '')
+        if not key:
+            raise ValueError('Meta returned campaign Insights without a campaign identity.')
+        if key in reports and reports[key] != row:
+            raise ValueError('Meta returned conflicting campaign range reports. Refresh again.')
+        reports[key] = row
+    for campaign in result['campaigns']:
+        metrics = normalize_metrics(reports.get(campaign['campaign_id'], {}))
+        # This overview explicitly promises Meta-reported ROAS, not a synthesized ratio.
+        metrics['roas'] = metrics['reported_roas']
+        campaign['metrics'] = metrics
+    return result
+
+
 def load_campaign(config, campaign_id, since, until):
     if not str(campaign_id).isdigit():
         raise ValueError('Select a valid live Meta campaign.')

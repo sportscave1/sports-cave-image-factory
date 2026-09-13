@@ -257,11 +257,11 @@ class PageTests(unittest.TestCase):
             rows=page.build_ads(history(),'cam'); self.assertEqual(rows[0]['assets']['headline'][0]['value'],'Exact headline')
     def test_country_filter_is_targeting(self):
         self.assertEqual(len(page.build_ads(history(),'cam','AU')),2); self.assertEqual(page.build_ads(history(),'cam','US'),[])
-    def test_open_ui_does_not_load_account_or_storage(self):
+    def test_open_ui_loads_overview_without_ads_or_storage(self):
         def app():
             import ads_meta_review_page
             ads_meta_review_page.render_page()
-        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(store,'load_history',side_effect=AssertionError('DB read')),patch.object(client,'_request',side_effect=AssertionError('Meta call')) as request:
+        with patch.object(page.live,'load_overview',return_value={'account':{},'campaigns':[]}),patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(store,'load_history',side_effect=AssertionError('DB read')),patch.object(client,'_request',side_effect=AssertionError('Meta call')) as request:
             at=AppTest.from_function(app,default_timeout=10).run()
         self.assertFalse(at.exception)
         request.assert_not_called()
