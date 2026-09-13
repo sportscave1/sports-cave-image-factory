@@ -374,7 +374,7 @@ def render_page():
     if controls[0].button('Refresh From Meta',disabled=not config.get('configured')):
         live.invalidate(cache,account_scope)
         dismiss_campaign()
-    sort_by=controls[1].selectbox('Sort By',['Newest','ROAS','Sales'])
+    sort_by=controls[1].selectbox('Sort By',tables.SORT_OPTIONS)
     since=None
     until=datetime.now(ZoneInfo('Australia/Sydney')).date()
     if not config.get('configured'):

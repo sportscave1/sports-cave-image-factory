@@ -17,6 +17,23 @@ METRICS = [('Spend','spend'), ('Purchases','purchases'), ('Meta Purchase Value',
 MONEY={'Spend','Meta Purchase Value','CPA','CPC','Link CPC','Out CPC','Cost/LPV','Cost/ATC','Cost/Checkout','CPM'}
 PERCENT={'CTR','Link CTR','Out CTR','LPV %','ATC %','Checkout %','Purchase CVR','Checkout → Purchase'}
 COUNTS={'Purchases','LPV','ATC','Checkout','Impressions','Reach','Clicks','Link clicks','Outbound clicks'}
+SORT_METRICS = {
+    'Best Score': ('score', False), 'ROAS': ('roas', False), 'Sales': ('purchases', False),
+    'Spend': ('spend', False), 'CPA': ('cpa', True), 'CTR': ('click_ctr', False),
+    'ATC': ('add_to_cart', False), 'Checkout': ('checkout', False),
+    'Purchase Value': ('purchase_value', False), 'CPC': ('cpc', True),
+    'Link CTR': ('ctr', False), 'Link CPC': ('cost_per_link_click', True),
+    'Outbound CTR': ('outbound_ctr', False), 'Outbound CPC': ('outbound_cpc', True),
+    'Landing Page Views': ('landing_page_views', False), 'LPV %': ('lpv_rate', False),
+    'Cost / LPV': ('cost_per_lpv', True), 'ATC %': ('atc_rate', False),
+    'Cost / ATC': ('cost_per_atc', True), 'Checkout %': ('checkout_rate', False),
+    'Cost / Checkout': ('cost_per_checkout', True), 'Purchase CVR': ('purchase_cvr', False),
+    'Checkout → Purchase': ('checkout_purchase', False), 'Frequency': ('frequency', True),
+    'CPM': ('cpm', True), 'Impressions': ('impressions', False), 'Reach': ('reach', False),
+    'Clicks': ('clicks', False), 'Link Clicks': ('inline_link_clicks', False),
+    'Outbound Clicks': ('outbound_clicks', False),
+}
+SORT_OPTIONS = ['Newest', *list(SORT_METRICS)[:8], 'Last Sale', *list(SORT_METRICS)[8:]]
 HELP={'LPV %':'Landing Page Views ÷ Link Clicks × 100', 'ATC %':'Add to Carts ÷ Landing Page Views × 100',
       'Checkout %':'Initiate Checkouts ÷ Landing Page Views × 100','Purchase CVR':'Purchases ÷ Landing Page Views × 100',
       'Cost/ATC':'Spend ÷ Add to Carts','Cost/Checkout':'Spend ÷ Initiate Checkouts',
@@ -40,13 +57,24 @@ def started(campaign):
 
 
 def sort_campaigns(campaigns, sort_by='Newest'):
+    # Retain helper aliases used by existing integrations; expose only SORT_OPTIONS.
+    sort_by={'Purchases':'Sales','Highest Score':'Best Score','Highest Spend':'Spend','Highest ROAS':'ROAS'}.get(sort_by,sort_by)
+    if sort_by not in (*SORT_OPTIONS,'Oldest','Lowest Score'):
+        raise ValueError('Unknown campaign sort option.')
     def key(row):
         stamp = started(row)
         newest = stamp.timestamp() if stamp else -math.inf
         if sort_by in ('Newest','Oldest'):
             return ((-newest if sort_by=='Oldest' and stamp else newest), str(row['campaign_id']))
-        metric = analysis.number((row.get('benchmark') or {}).get('score')) if sort_by in ('Lowest Score','Highest Score') else analysis.number((row.get('metrics') or {}).get('spend' if sort_by=='Highest Spend' else 'roas' if sort_by in ('ROAS','Highest ROAS') else 'purchases'))
-        if sort_by=='Lowest Score' and metric is not None: metric=-metric
+        if sort_by=='Last Sale':
+            recency=row.get('recency') or {}
+            # Only structured, validated evidence emitted by the recency helper.
+            timestamp=recency.get('sale_sort_timestamp')
+            group=3 if timestamp is not None else {'older':2,'no_sale':1}.get(recency.get('sale_sort_state'),0)
+            return (group,timestamp if timestamp is not None else newest,newest,str(row['campaign_id']))
+        field,ascending=('score',True) if sort_by=='Lowest Score' else SORT_METRICS[sort_by]
+        metric=analysis.number((row.get('benchmark') or {}).get(field) if field=='score' else (row.get('metrics') or {}).get(field))
+        if ascending and metric is not None: metric=-metric
         return (metric is not None, metric if metric is not None else -math.inf, newest, str(row['campaign_id']))
     return sorted(campaigns, key=key, reverse=True)
 

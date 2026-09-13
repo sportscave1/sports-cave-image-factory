@@ -257,6 +257,20 @@ class LivePageTests(unittest.TestCase):
         self.refresh(); self.assertEqual(self.overview.call_count,2)
         self.old.assert_not_called(); self.network.assert_not_called(); self.assertFalse(self.at.exception)
 
+    def test_expanded_sort_choices_do_not_reload_graph_or_expand_table(self):
+        import meta_review_tables as tables
+        selector=self.at.selectbox[0]
+        self.assertEqual(selector.options,tables.SORT_OPTIONS)
+        self.assertEqual(selector.value,'Newest')
+        calls=self.recency.call_count
+        for option in tables.SORT_OPTIONS:
+            self.at.selectbox[0].select(option).run()
+            self.assertFalse(self.at.exception)
+            self.assertEqual(list(self.at.dataframe[0].value.columns),['Campaign','Status','Spend','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'])
+        self.assertEqual(self.overview.call_count,1)
+        self.assertEqual(self.recency.call_count,calls)
+        self.ads.assert_not_called(); self.network.assert_not_called()
+
     def test_campaign_row_opens_popup_for_correct_identity(self):
         key='meta-review-campaign-table-Newest-1'
         self.at.session_state[key]={'selection':{'rows':[0],'columns':[]}}

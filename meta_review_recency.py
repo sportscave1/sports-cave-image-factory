@@ -55,7 +55,8 @@ def signal(row, evidence, now=None):
         low=max(0,(checked-datetime.fromisoformat(last['end'])).total_seconds()/3600)
         high=max(0,(checked-datetime.fromisoformat(last['start'])).total_seconds()/3600)
         band='GREEN' if high<24 else 'RED' if low>48 else 'AMBER' if low>=24 and high<=48 else 'NEUTRAL'
-        result.update(text=f'≈{int(low)}–{int(high)+1}h ago',band=band)
+        result.update(text=f'≈{int(low)}–{int(high)+1}h ago',band=band,
+                      sale_sort_timestamp=datetime.fromisoformat(last['start']).timestamp(),sale_sort_state='observed')
     else:
         age=None
         if (row.get('metrics') or {}).get('purchases')==0 and row.get('start_time'):
@@ -66,10 +67,10 @@ def signal(row, evidence, now=None):
         window=(checked-datetime.fromisoformat(evidence['window_start'])).total_seconds()/3600
         if age is not None and age>=0:
             band='NEUTRAL' if age<24 else 'AMBER' if age<=48 else 'RED'
-            result.update(text=f'No sale yet · {int(age)}h live' if age<=48 else 'No sale yet · >48h live',band=band)
+            result.update(text=f'No sale yet · {int(age)}h live' if age<=48 else 'No sale yet · >48h live',band=band,sale_sort_state='no_sale')
             if age<24 and status=='ACTIVE': result['action']='LEARNING'
         elif window>48 and ((row.get('metrics') or {}).get('purchases') or 0)>0:
-            result.update(text='>48h · none reported',band='RED')
+            result.update(text='>48h · none reported',band='RED',sale_sort_state='older')
         else: return result
     if status=='ACTIVE':
         if result['band']=='RED': result['action']='STOP CAMPAIGN'
