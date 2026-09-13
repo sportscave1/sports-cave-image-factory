@@ -266,7 +266,7 @@ class LivePageTests(unittest.TestCase):
         for option in tables.SORT_OPTIONS:
             self.at.selectbox[0].select(option).run()
             self.assertFalse(self.at.exception)
-            self.assertEqual(list(self.at.dataframe[0].value.columns),['Campaign','Status','Spend','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'])
+        self.assertEqual(list(self.at.dataframe[0].value.columns),['Campaign','Status','Spend','Sales','ROAS','CPA','CTR','CPC','ATC','Checkout','Last Sale','Action'])
         self.assertEqual(self.overview.call_count,1)
         self.assertEqual(self.recency.call_count,calls)
         self.ads.assert_not_called(); self.network.assert_not_called()

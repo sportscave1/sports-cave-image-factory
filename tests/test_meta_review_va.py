@@ -77,7 +77,8 @@ class LastSaleTests(unittest.TestCase):
 class PresentationTests(unittest.TestCase):
     def test_minimal_columns_and_advanced_nonduplication(self):
         row={'campaign_id':'1','metrics':{'spend':25,'purchases':2,'cpc':.1}}
-        self.assertEqual(list(tables.va_campaign_rows([row])[0]),['Campaign','Status','Spend','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'])
+        self.assertEqual(list(tables.va_campaign_rows([row])[0]),['Campaign','Status','Spend','Sales','ROAS','CPA','CTR','CPC','ATC','Checkout','Last Sale','Action'])
+        self.assertNotIn('CPC',{r['Metric'] for r in tables.advanced_rows(row['metrics'],campaign=True)})
         creative=tables.va_ad_rows([ad()])[0]
         self.assertEqual(list(creative),['Creative','Ad','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'])
         advanced={r['Metric'] for r in tables.advanced_rows(row['metrics'])}

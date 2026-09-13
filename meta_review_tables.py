@@ -64,6 +64,9 @@ def sort_campaigns(campaigns, sort_by='Newest'):
     def key(row):
         stamp = started(row)
         newest = stamp.timestamp() if stamp else -math.inf
+        if sort_by=='Newest':
+            status=row.get('effective_status') or row.get('status') or ''
+            return ({'ACTIVE':3,'PAUSED':2,'ARCHIVED':1}.get(status,0),newest,str(row['campaign_id']))
         if sort_by in ('Newest','Oldest'):
             return ((-newest if sort_by=='Oldest' and stamp else newest), str(row['campaign_id']))
         if sort_by=='Last Sale':
@@ -172,6 +175,7 @@ def selected_row(event, rows):
 
 
 VA_METRICS=[('Spend','spend'),('Sales','purchases'),('ROAS','roas'),('CPA','cpa'),('CTR','click_ctr'),('ATC','add_to_cart'),('Checkout','checkout')]
+VA_CAMPAIGN_METRICS=VA_METRICS[:5]+[('CPC','cpc')]+VA_METRICS[5:]
 MONEY.add('Spend')
 COUNTS.add('Sales')
 
@@ -179,7 +183,7 @@ COUNTS.add('Sales')
 def va_campaign_rows(rows):
     return [{'Campaign':r.get('campaign_name') or r['campaign_id'],
              'Status':r.get('effective_status') or r.get('status') or '—',
-             **{label:(r.get('metrics') or {}).get(key) for label,key in VA_METRICS},
+             **{label:(r.get('metrics') or {}).get(key) for label,key in VA_CAMPAIGN_METRICS},
              'Last Sale':r.get('recency',{}).get('text','Unavailable'),
              'Action':r.get('recency',{}).get('action',(r.get('benchmark') or {}).get('recommendation','NO DATA'))} for r in rows]
 
@@ -194,12 +198,16 @@ def va_ad_rows(rows):
 def va_styled(rows, evidence):
     frame=pd.DataFrame(rows)
     formats={label:'${:,.2f}' if label in MONEY else '{:,.0f}' if label in COUNTS else '{:.2f}%' if label in PERCENT else '{:.2f}'
-             for label,key in VA_METRICS if label in frame}
+             for label,key in VA_CAMPAIGN_METRICS if label in frame}
+    if 'Status' in frame: formats['Status']=lambda value: '● ACTIVE' if value=='ACTIVE' else value
     result=frame.style.format(formats,na_rep='—')
     styles=pd.DataFrame('',index=frame.index,columns=frame.columns)
     palette={'GREEN':'color: #287044','AMBER':'color: #926600','RED':'color: #ae3434','NEUTRAL':'color: #777777'}
     for i,row in enumerate(evidence):
         b=row.get('benchmark') or {}; rec=row.get('recency') or {}
+        if 'Status' in styles:
+            status=row.get('effective_status') or row.get('status')
+            styles.loc[i,'Status']='color: #287044; background-color: #edf5ef; font-weight: 600' if status=='ACTIVE' else 'color: #777777'
         for label,key in [('ROAS','roas'),('CPA','cpa')]:
             if label in styles: styles.loc[i,label]=palette[b.get('cells',{}).get(key,{}).get('band','NEUTRAL')]
         if 'Last Sale' in styles: styles.loc[i,'Last Sale']=palette[rec.get('band','NEUTRAL')]
@@ -209,6 +217,6 @@ def va_styled(rows, evidence):
     return result.apply(lambda _:styles,axis=None)
 
 
-def advanced_rows(metrics):
-    visible={key for _,key in VA_METRICS}
+def advanced_rows(metrics, *, campaign=False):
+    visible={key for _,key in (VA_CAMPAIGN_METRICS if campaign else VA_METRICS)}
     return [{'Metric':label,'Value':metrics.get(key)} for label,key in METRICS if key not in visible]

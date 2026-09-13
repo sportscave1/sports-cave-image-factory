@@ -409,10 +409,11 @@ def render_page():
     event=st.dataframe(tables.va_styled(tables.va_campaign_rows(rows),rows),hide_index=True,width='stretch',placeholder='—',
         height=min(660,40+32*len(rows)),row_height=32,on_select='rerun',selection_mode=['single-row','single-cell'],key=key,
         column_config={'Campaign':st.column_config.TextColumn(width=280,pinned=True),
-            'Status':st.column_config.TextColumn(width=75),'Last Sale':st.column_config.TextColumn(width=155,help='Supplemental Meta conversion-hour report. Approximate hour ranges; unavailable when unsupported.'),
+            **{label:st.column_config.NumberColumn(width=65) for label,_ in tables.VA_CAMPAIGN_METRICS},
+            'Status':st.column_config.TextColumn(width=90),'Last Sale':st.column_config.TextColumn(width=155,help='Supplemental Meta conversion-hour report. Approximate hour ranges; unavailable when unsupported.'),
             'Action':st.column_config.TextColumn(width=150,help='Recommendation only. Never changes Meta status.')})
     with st.expander('Advanced metrics',expanded=False):
-        advanced=[{'Campaign':r.get('campaign_name'),**{x['Metric']:x['Value'] for x in tables.advanced_rows(r.get('metrics') or {})}} for r in rows]
+        advanced=[{'Campaign':r.get('campaign_name'),**{x['Metric']:x['Value'] for x in tables.advanced_rows(r.get('metrics') or {},campaign=True)}} for r in rows]
         st.dataframe(advanced,hide_index=True,placeholder='—',width='stretch')
     selected=tables.selected_row(event,rows)
     if selected:
