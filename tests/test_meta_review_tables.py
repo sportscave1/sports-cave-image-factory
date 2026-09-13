@@ -75,6 +75,10 @@ class CampaignOverviewTests(unittest.TestCase):
             result=live.load_overview(CONFIG,None,date(2026,9,13))
         write.assert_not_called()
         self.assertEqual(len(calls),4)
+        for path, request_params in calls:
+            self.assertNotIn('DELETED',str(request_params))
+            if path.endswith('/campaigns'):
+                self.assertEqual(request_params['effective_status'],'["ACTIVE", "PAUSED", "ARCHIVED"]')
         params=calls[-1][1]
         self.assertEqual(params['level'],'campaign')
         self.assertEqual(params['date_preset'],'maximum')

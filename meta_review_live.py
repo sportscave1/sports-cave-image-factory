@@ -16,6 +16,13 @@ INSIGHT_FIELDS = ('date_start,date_stop,campaign_id,campaign_name,adset_id,adset
                   'actions,action_values,cost_per_action_type,purchase_roas,website_purchase_roas')
 CACHE_TTL = 120
 CACHE_LIMIT = 24
+REPORTABLE_CAMPAIGN_STATUSES = ('ACTIVE', 'PAUSED', 'ARCHIVED')
+
+
+def non_deleted(row):
+    """Defensive exclusion for objects removed while paginated live reads run."""
+    return all(str(row.get(key) or '').upper() != 'DELETED'
+               for key in ('status', 'effective_status', 'configured_status'))
 
 
 def safe_error(error):
@@ -81,7 +88,7 @@ class Reader:
                 raise ValueError('Meta returned an invalid live reporting response.')
             if any(not isinstance(row, dict) for row in payload['data']):
                 raise ValueError('Meta returned an invalid reporting row.')
-            rows.extend(payload['data'])
+            rows.extend(row for row in payload['data'] if non_deleted(row))
             if len(rows) > self.max_pages * 100:
                 raise ValueError('Live Meta result limit reached. Narrow the request.')
             paging = payload.get('paging') or {}
@@ -104,12 +111,19 @@ def date_params(since, until):
 
 
 def load_campaigns(config, since, until, status='Active and paused'):
+    if status in ('All', 'COMPLETED'):
+        statuses = list(REPORTABLE_CAMPAIGN_STATUSES)
+    elif status == 'Active and paused':
+        statuses = ['ACTIVE', 'PAUSED']
+    elif status in REPORTABLE_CAMPAIGN_STATUSES:
+        statuses = [status]
+    else:
+        raise ValueError('Unsupported live campaign status. Use ACTIVE, PAUSED or ARCHIVED.')
     reader = Reader(config)
     account = reader.get(config['ad_account_id'], {'fields': 'account_id,name,currency,timezone_name'})
     if not isinstance(account, dict) or str(account.get('account_id')) != config['ad_account_id'].removeprefix('act_'):
         raise ValueError('Meta returned a different ad account. Check the existing account configuration.')
     params = {'fields': CAMPAIGN_FIELDS, **date_params(since, until)}
-    statuses = ['ACTIVE', 'PAUSED'] if status == 'Active and paused' else ['ACTIVE', 'PAUSED', 'ARCHIVED', 'DELETED'] if status in ('All', 'COMPLETED') else [status]
     params['effective_status'] = json.dumps(statuses)
     if status == 'COMPLETED':
         params['is_completed'] = 'true'
@@ -120,7 +134,7 @@ def load_campaigns(config, since, until, status='Active and paused'):
 
 
 def filter_campaigns(rows, query='', status='All'):
-    return [r for r in rows if query.casefold() in str(r.get('campaign_name') or '').casefold()
+    return [r for r in rows if non_deleted(r) and query.casefold() in str(r.get('campaign_name') or '').casefold()
             and (status in ('All', 'COMPLETED') or
                  (r.get('effective_status') or r.get('status')) in
                  (('ACTIVE', 'PAUSED') if status == 'Active and paused' else (status,)))]

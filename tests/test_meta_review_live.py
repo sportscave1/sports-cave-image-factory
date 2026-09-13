@@ -21,6 +21,47 @@ CAMPAIGN = {'id':'900','name':'September campaign','status':'ACTIVE','effective_
 
 
 class LiveReadTests(unittest.TestCase):
+    def test_all_and_completed_request_only_reportable_statuses(self):
+        for status in ('All', 'COMPLETED', 'ACTIVE', 'PAUSED', 'ARCHIVED', 'Active and paused'):
+            with self.subTest(status=status), patch.object(meta, '_request', side_effect=[
+                {'account_id':'123'}, {'data':[]}]) as request:
+                live.load_campaigns(CONFIG, None, UNTIL, status=status)
+                params=request.call_args.kwargs['params']
+                expected=(['ACTIVE','PAUSED','ARCHIVED'] if status in ('All','COMPLETED') else
+                          ['ACTIVE','PAUSED'] if status=='Active and paused' else [status])
+                self.assertEqual(json.loads(params['effective_status']),expected)
+                self.assertNotIn('DELETED',json.dumps(params))
+
+    def test_unsupported_status_never_reaches_meta(self):
+        for status in ('DELETED','deleted','UNKNOWN'):
+            with self.subTest(status=status), patch.object(meta,'_request') as request:
+                with self.assertRaisesRegex(ValueError,'Unsupported live campaign status'):
+                    live.load_campaigns(CONFIG,None,UNTIL,status=status)
+                request.assert_not_called()
+
+    def test_deleted_rows_excluded_across_pages_without_losing_supported_rows(self):
+        rows=[{**CAMPAIGN,'id':str(i),'status':status,'effective_status':status}
+              for i,status in enumerate(('ACTIVE','PAUSED','ARCHIVED','DELETED'))]
+        responses=[{'account_id':'123'},
+            {'data':rows[:2], 'paging':{'next':'yes','cursors':{'after':'second'}}},
+            {'data':rows[2:]+[{**CAMPAIGN,'id':'5','configured_status':'DELETED'}]}]
+        with patch.object(meta,'_request',side_effect=responses) as request:
+            result=live.load_campaigns(CONFIG,None,UNTIL,status='All')
+        self.assertEqual({r['status'] for r in result['campaigns']},{'ACTIVE','PAUSED','ARCHIVED'})
+        for call in request.call_args_list:
+            self.assertNotIn('DELETED',json.dumps(call.kwargs['params']))
+        self.assertEqual(live.filter_campaigns(rows,status='All'),rows[:3])
+
+    def test_api_errors_are_not_hidden_as_successful_partial_pages(self):
+        for message in ('OAuthException code 190','Permissions error code 200',
+                        'Cannot request deleted objects code 100 subcode 1815001'):
+            with self.subTest(message=message), patch.object(meta,'_request',side_effect=[
+                {'data':[CAMPAIGN],'paging':{'next':'yes','cursors':{'after':'second'}}},
+                meta.MetaAdsApiError(message)]):
+                # An errored page has no safe next cursor: never claim partial data is complete.
+                with self.assertRaises(meta.MetaAdsApiError):
+                    live.Reader(CONFIG).pages('act_123/campaigns',{})
+
     def test_campaign_normalization_pagination_and_date_status_params(self):
         responses = [{'account_id':'123','name':'Sports Cave','currency':'AUD'},
             {'data':[CAMPAIGN], 'paging':{'next':'https://untrusted.example/?access_token=never-follow','cursors':{'after':'cursor2'}}},
