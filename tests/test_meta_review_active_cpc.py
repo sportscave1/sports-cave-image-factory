@@ -37,15 +37,15 @@ class ActiveCpcTests(unittest.TestCase):
                 if path=='act_123/campaigns': return {'data':[{'id':'1','name':'Current','status':'ACTIVE'}]}
                 if params.get('breakdowns'): return {'data':[]}
                 self.assertEqual(path,'act_123/insights')
-                self.assertIn('cpc',params['fields'].split(','))
+                self.assertIn('cost_per_inline_link_click',params['fields'].split(','))
                 self.assertEqual(params['level'],'campaign')
                 self.assertEqual(params['use_unified_attribution_setting'],'true')
-                return {'data':[{'campaign_id':'1','spend':'100','clicks':'2','cpc':value}]}
+                return {'data':[{'campaign_id':'1','spend':'100','clicks':'2','cpc':'99','cost_per_inline_link_click':value}]}
             with self.subTest(value=value),patch.object(meta,'_request',side_effect=response),patch.object(meta,'_post') as write:
                 rows=live.load_overview(CONFIG,date(2026,9,1),date(2026,9,14))['campaigns']
                 rendered=tables.va_styled(tables.va_campaign_rows(rows),rows)
                 self.assertEqual(rendered._display_funcs[(0,7)](rendered.data.iloc[0,7]),expected)
-                self.assertEqual(rows[0]['metrics']['cpc'],None if value is None else float(value))
+                self.assertEqual(rows[0]['metrics']['cost_per_link_click'],None if value is None else float(value))
                 write.assert_not_called()
 
     def test_active_cell_style_and_label_only(self):

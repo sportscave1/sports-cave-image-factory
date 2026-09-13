@@ -161,7 +161,7 @@ def load_overview(config, since, until):
         reports[key] = row
     countries = load_countries(config, config['ad_account_id'], 'campaign', since, until)
     for campaign in result['campaigns']:
-        metrics = benchmarks.graph_metrics(reports.get(campaign['campaign_id'], {}))
+        metrics = benchmarks.graph_metrics(reports.get(campaign['campaign_id'], {}), website=True)
         # This overview explicitly promises Meta-reported ROAS, not a synthesized ratio.
         metrics['roas'] = metrics['reported_roas']
         campaign['metrics'] = metrics

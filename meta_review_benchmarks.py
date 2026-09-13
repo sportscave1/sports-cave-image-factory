@@ -34,16 +34,17 @@ def action(row, source, name, default=None):
     return next((number(x.get('value')) for x in entries if isinstance(x,dict) and x.get('action_type')==name),default)
 
 
-def graph_metrics(row):
+def graph_metrics(row, *, website=False):
     """One aggregate Graph row. Canonical actions only, no alias fallbacks/sums."""
     row=row if isinstance(row,dict) else {}
     has_data=any(number(row.get(k)) is not None for k in ('spend','impressions','reach','clicks'))
     m={k:number(row.get(k)) for k in ('spend','impressions','reach','frequency','clicks','inline_link_clicks','cpc','cpm')}
     m.update(click_ctr=number(row.get('ctr')),ctr=number(row.get('inline_link_click_ctr')),
              cost_per_link_click=number(row.get('cost_per_inline_link_click')))
-    for key,name in [('landing_page_views','landing_page_view'),('add_to_cart','add_to_cart'),('checkout','initiate_checkout'),('purchases','purchase')]:
+    purchase='offsite_conversion.fb_pixel_purchase' if website else 'purchase'
+    for key,name in [('landing_page_views','landing_page_view'),('add_to_cart','offsite_conversion.fb_pixel_add_to_cart' if website else 'add_to_cart'),('checkout','offsite_conversion.fb_pixel_initiate_checkout' if website else 'initiate_checkout'),('purchases',purchase)]:
         m[key]=action(row,'actions',name,0.0 if has_data else None)
-    m['purchase_value']=action(row,'action_values','purchase',0.0 if has_data and m['purchases']==0 else None)
+    m['purchase_value']=action(row,'action_values',purchase,0.0 if has_data and m['purchases']==0 else None)
     m['roas']=action(row,'purchase_roas','omni_purchase')
     if m['roas'] is None: m['roas']=action(row,'purchase_roas','purchase')
     m['reported_roas']=m['roas']
@@ -53,6 +54,9 @@ def graph_metrics(row):
         m[key]=ratio(m[n],m[d],100)
     for key,d in [('cost_per_lpv','landing_page_views'),('cost_per_atc','add_to_cart'),('cost_per_checkout','checkout'),('cpa','purchases')]:
         m[key]=ratio(m['spend'],m[d])
+    if website:
+        reported_cpa=action(row,'cost_per_action_type',purchase)
+        if reported_cpa is not None: m['cpa']=reported_cpa
     m['has_data']=has_data
     return m
 

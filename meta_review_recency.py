@@ -19,7 +19,7 @@ def load(config, identity, level, account_timezone='Australia/Sydney', now=None)
             'use_unified_attribution_setting':'true',**date_params(start,now.astimezone(tz).date())})
         latest={}
         for row in rows:
-            if not (action(row,'actions','purchase',0) or 0)>0: continue
+            if not (action(row,'actions','offsite_conversion.fb_pixel_purchase',0) or 0)>0: continue
             key=str(row.get(level+'_id') or '')
             match=re.fullmatch(r'(\d{2}):00:00 - (\d{2}):59:59',str(row.get(HOURLY) or ''))
             if not key or not match or match[1]!=match[2] or row.get('date_start')!=row.get('date_stop'):

@@ -28,7 +28,7 @@ class CountryReadTests(unittest.TestCase):
                             {identity:value,'country':'CA','spend':'5'},
                             {identity:'unrelated','country':'AU','spend':'100'}]}
         return {'data':[{identity:value,'spend':'25','impressions':'100',
-                        'actions':[{'action_type':'purchase','value':'1'}]}]}
+                        'actions':[{'action_type':'offsite_conversion.fb_pixel_purchase','value':'1'}]}]}
 
     def test_campaign_and_ad_requests_join_only_context_without_double_count(self):
         with patch.object(meta,'_request',side_effect=self.response),patch.object(meta,'_post') as write:

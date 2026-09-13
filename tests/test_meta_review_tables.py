@@ -67,8 +67,8 @@ class CampaignOverviewTests(unittest.TestCase):
             if path=='act_123/insights':
                 if params.get('after'): return {'data':[]}
                 return {'data':[{'campaign_id':'1','spend':'26.55','actions':[
-                    {'action_type':'purchase','value':'2'},{'action_type':'omni_purchase','value':'2'},
-                    {'action_type':'add_to_cart','value':'3'},{'action_type':'omni_add_to_cart','value':'3'}],
+                    {'action_type':'offsite_conversion.fb_pixel_purchase','value':'2'},{'action_type':'omni_purchase','value':'2'},
+                    {'action_type':'offsite_conversion.fb_pixel_add_to_cart','value':'3'},{'action_type':'omni_add_to_cart','value':'3'}],
                     'purchase_roas':[{'action_type':'purchase','value':'4.12'}]}],
                     'paging':{'next':'https://untrusted.example','cursors':{'after':'next-page'}}}
             raise AssertionError('Unexpected ad read '+path)

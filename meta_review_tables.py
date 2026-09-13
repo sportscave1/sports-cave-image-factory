@@ -19,9 +19,9 @@ PERCENT={'CTR','Link CTR','Out CTR','LPV %','ATC %','Checkout %','Purchase CVR',
 COUNTS={'Purchases','LPV','ATC','Checkout','Impressions','Reach','Clicks','Link clicks','Outbound clicks'}
 SORT_METRICS = {
     'Best Score': ('score', False), 'ROAS': ('roas', False), 'Sales': ('purchases', False),
-    'Spend': ('spend', False), 'CPA': ('cpa', True), 'CTR': ('click_ctr', False),
+    'Spend': ('spend', False), 'CPA': ('cpa', True), 'CTR': ('ctr', False),
     'ATC': ('add_to_cart', False), 'Checkout': ('checkout', False),
-    'Purchase Value': ('purchase_value', False), 'CPC': ('cpc', True),
+    'Purchase Value': ('purchase_value', False), 'CPC': ('cost_per_link_click', True),
     'Link CTR': ('ctr', False), 'Link CPC': ('cost_per_link_click', True),
     'Outbound CTR': ('outbound_ctr', False), 'Outbound CPC': ('outbound_cpc', True),
     'Landing Page Views': ('landing_page_views', False), 'LPV %': ('lpv_rate', False),
@@ -174,8 +174,8 @@ def selected_row(event, rows):
     return None
 
 
-VA_METRICS=[('Spend','spend'),('Sales','purchases'),('ROAS','roas'),('CPA','cpa'),('CTR','click_ctr'),('ATC','add_to_cart'),('Checkout','checkout')]
-VA_CAMPAIGN_METRICS=VA_METRICS[:5]+[('CPC','cpc')]+VA_METRICS[5:]
+VA_METRICS=[('Spend','spend'),('Sales','purchases'),('ROAS','roas'),('CPA','cpa'),('CTR','ctr'),('ATC','add_to_cart'),('Checkout','checkout')]
+VA_CAMPAIGN_METRICS=VA_METRICS[:5]+[('CPC','cost_per_link_click')]+VA_METRICS[5:]
 MONEY.add('Spend')
 COUNTS.add('Sales')
 
@@ -219,4 +219,5 @@ def va_styled(rows, evidence):
 
 def advanced_rows(metrics, *, campaign=False):
     visible={key for _,key in (VA_CAMPAIGN_METRICS if campaign else VA_METRICS)}
-    return [{'Metric':label,'Value':metrics.get(key)} for label,key in METRICS if key not in visible]
+    labels={'click_ctr':'CTR (all clicks)','cpc':'CPC (all clicks)'}
+    return [{'Metric':labels.get(key,label),'Value':metrics.get(key)} for label,key in METRICS if key not in visible]

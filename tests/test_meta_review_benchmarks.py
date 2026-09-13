@@ -142,7 +142,7 @@ class ScoringTests(unittest.TestCase):
     def test_campaign_and_child_recommendations_do_not_mask_each_other(self):
         def raw(spend,purchase,roas):
             return {'spend':str(spend),'impressions':'1000','ctr':'6','cpc':'.2','inline_link_clicks':'100',
-                'actions':[{'action_type':'landing_page_view','value':'90'}, {'action_type':'purchase','value':str(purchase)}],
+                'actions':[{'action_type':'landing_page_view','value':'90'}, {'action_type':'offsite_conversion.fb_pixel_purchase','value':str(purchase)}],
                 'purchase_roas':[{'action_type':'omni_purchase','value':str(roas)}]}
         h={'ads':[{'ad_id':'1','campaign_id':'900','creative_id':'c'},{'ad_id':'2','campaign_id':'900','creative_id':'c'}],
            'creatives':[{'creative_id':'c','raw':{'object_story_spec':{'link_data':{'link':'https://facebook.com/canvas/123'}}}}],
@@ -151,7 +151,7 @@ class ScoringTests(unittest.TestCase):
            'country_delivery':[{'ad_id':i,'country':'AU','spend':'1'} for i in ('1','2')]}
         ads=page.build_ads(h,'900')
         self.assertEqual([a['benchmark']['recommendation'] for a in ads],['TOP WINNER','STOP / REPLACE'])
-        campaign=b.evaluate(b.graph_metrics(raw(99,1,4)),'INSTANT EXPERIENCE','AU')
+        campaign=b.evaluate(b.graph_metrics(raw(99,1,4),website=True),'INSTANT EXPERIENCE','AU')
         self.assertEqual(campaign['recommendation'],'KEEP RUNNING')
         self.assertNotEqual(campaign['score'],ads[1]['benchmark']['score'])
 

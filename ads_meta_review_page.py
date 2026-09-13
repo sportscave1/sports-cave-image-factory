@@ -75,7 +75,7 @@ def build_ads(history, campaign_id=None, market='All'):
         if observed:
             raw = observed[-1]
         metrics = analysis.aggregate([analysis.normalize_metrics(r) for r in valid])
-        benchmark_metrics=benchmarks.graph_metrics(valid[0] if len(valid)==1 else {})
+        benchmark_metrics=benchmarks.graph_metrics(valid[0] if len(valid)==1 else {},website='country_delivery' in history)
         if 'country_delivery' in history:
             # Live range reports also supply the unchanged winner framework with
             # canonical Graph values; historical helper callers retain their contract.
@@ -375,8 +375,13 @@ def render_page():
         live.invalidate(cache,account_scope)
         dismiss_campaign()
     sort_by=controls[1].selectbox('Sort By',tables.SORT_OPTIONS)
-    since=None
-    until=datetime.now(ZoneInfo('Australia/Sydney')).date()
+    today=datetime.now(ZoneInfo('Australia/Sydney')).date()
+    period=controls[2].date_input('Reporting period (Australia/Sydney)',
+        value=(today-timedelta(days=1),today),max_value=today,format='DD/MM/YYYY')
+    if len(period)!=2:
+        st.info('Select both the start and end of the reporting period.')
+        return
+    since,until=period
     if not config.get('configured'):
         st.caption('Meta connection unavailable · Configure the existing account connection.')
         st.dataframe([],column_order=['Campaign','Status','Started']+[label for label,_ in tables.METRICS],hide_index=True,width='stretch',placeholder='—')
@@ -389,7 +394,8 @@ def render_page():
     account=(data or {}).get('account',{})
     refreshed=datetime.fromisoformat(entry['refreshed_at']).astimezone(ZoneInfo('Australia/Sydney')).strftime('%d %b %I:%M %p') if entry.get('refreshed_at') else 'not yet refreshed'
     source='STALE CACHED META' if entry['stale'] else 'LIVE META'
-    st.caption(f"{account.get('name') or 'Meta account'} · {'Unavailable' if entry['error'] else 'Connected'} · {source} · Last refreshed {refreshed} · Available Meta history · {account.get('currency') or 'Currency unavailable'}")
+    st.markdown(f"**{source} · {since:%d %b %Y} – {until:%d %b %Y} · {account.get('currency') or 'Currency unavailable'}**")
+    st.caption(f"{account.get('name') or 'Meta account'} · {'Unavailable' if entry['error'] else 'Connected'} · Last refreshed {refreshed} · Account attribution settings")
     if entry['error']: st.error('LIVE META UNAVAILABLE · '+entry['error'])
     if data is None: return
     if not data['campaigns']:
@@ -405,7 +411,7 @@ def render_page():
         st.info('No live campaigns returned.')
         return
     st.caption('Select a campaign row to inspect its creatives and choose a winner.')
-    key=f"meta-review-campaign-table-{sort_by}-{st.session_state.get('meta-review-table-epoch',0)}"
+    key=f"meta-review-campaign-table-{sort_by}-{since}-{until}-{st.session_state.get('meta-review-table-epoch',0)}"
     event=st.dataframe(tables.va_styled(tables.va_campaign_rows(rows),rows),hide_index=True,width='stretch',placeholder='—',
         height=min(660,40+32*len(rows)),row_height=32,on_select='rerun',selection_mode=['single-row','single-cell'],key=key,
         column_config={'Campaign':st.column_config.TextColumn(width=280,pinned=True),

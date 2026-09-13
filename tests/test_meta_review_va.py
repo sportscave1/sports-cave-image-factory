@@ -55,7 +55,7 @@ class LastSaleTests(unittest.TestCase):
 
     def test_hourly_request_canonical_purchase_only_and_timezone(self):
         rows=[{'campaign_id':'1','date_start':'2026-09-13','date_stop':'2026-09-13',sale.HOURLY:'16:00:00 - 16:59:59',
-               'actions':[{'action_type':'purchase','value':'1'},{'action_type':'omni_purchase','value':'99'}]},
+               'actions':[{'action_type':'offsite_conversion.fb_pixel_purchase','value':'1'},{'action_type':'purchase','value':'99'},{'action_type':'omni_purchase','value':'99'}]},
               {'campaign_id':'1','date_start':'2026-09-13','date_stop':'2026-09-13',sale.HOURLY:'20:00:00 - 20:59:59',
                'actions':[{'action_type':'omni_purchase','value':'99'}]}]
         with patch.object(live.Reader,'pages',return_value=rows) as read:
@@ -70,7 +70,7 @@ class LastSaleTests(unittest.TestCase):
     def test_malformed_and_unsupported_hourly_are_unavailable(self):
         with patch.object(live.Reader,'pages',side_effect=meta.MetaAdsApiError('Unsupported breakdown',error_code=100)):
             self.assertFalse(sale.load(CONFIG,'1','ad',now=NOW)['available'])
-        with patch.object(live.Reader,'pages',return_value=[{'ad_id':'1','actions':[{'action_type':'purchase','value':'1'}]}]):
+        with patch.object(live.Reader,'pages',return_value=[{'ad_id':'1','actions':[{'action_type':'offsite_conversion.fb_pixel_purchase','value':'1'}]}]):
             self.assertFalse(sale.load(CONFIG,'1','ad',now=NOW)['available'])
 
 
@@ -82,7 +82,7 @@ class PresentationTests(unittest.TestCase):
         creative=tables.va_ad_rows([ad()])[0]
         self.assertEqual(list(creative),['Creative','Ad','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'])
         advanced={r['Metric'] for r in tables.advanced_rows(row['metrics'])}
-        self.assertIn('CPC',advanced); self.assertNotIn('ROAS',advanced); self.assertNotIn('Spend',advanced)
+        self.assertIn('CPC (all clicks)',advanced); self.assertNotIn('ROAS',advanced); self.assertNotIn('Spend',advanced)
         self.assertNotIn('Purchases',advanced)
 
     def test_details_only_copy_and_advanced_not_duplicate_primary_metrics(self):

@@ -24,7 +24,7 @@ class ExpandedSortTests(unittest.TestCase):
     def test_ctr_and_link_ctr_are_distinct_fields(self):
         rows=[{'campaign_id':'1','metrics':{'click_ctr':9,'ctr':1}},
               {'campaign_id':'2','metrics':{'click_ctr':1,'ctr':9}}]
-        self.assertEqual(tables.sort_campaigns(rows,'CTR')[0]['campaign_id'],'1')
+        self.assertEqual(tables.sort_campaigns(rows,'CTR')[0]['campaign_id'],'2')
         self.assertEqual(tables.sort_campaigns(rows,'Link CTR')[0]['campaign_id'],'2')
 
     def test_last_sale_uses_evidence_not_display_text(self):

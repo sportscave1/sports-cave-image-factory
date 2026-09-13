@@ -272,7 +272,8 @@ class LivePageTests(unittest.TestCase):
         self.ads.assert_not_called(); self.network.assert_not_called()
 
     def test_campaign_row_opens_popup_for_correct_identity(self):
-        key='meta-review-campaign-table-Newest-1'
+        since,until=self.at.date_input[0].value
+        key=f'meta-review-campaign-table-Newest-{since}-{until}-1'
         self.at.session_state[key]={'selection':{'rows':[0],'columns':[]}}
         with patch.object(page,'campaign_popup') as popup:
             self.at.run()
@@ -310,7 +311,7 @@ class LivePageTests(unittest.TestCase):
 
     def test_failed_refresh_labels_prior_live_campaigns_stale(self):
         self.overview.side_effect=meta.MetaAdsApiError('Unavailable'); self.refresh()
-        self.assertTrue(any('STALE CACHED META' in c.value for c in self.at.caption))
+        self.assertTrue(any('STALE CACHED META' in c.value for c in self.at.markdown))
         self.assertTrue(self.at.dataframe); self.old.assert_not_called()
 
     def test_full_details_expand_on_creative_row(self):
