@@ -6,6 +6,7 @@ import json
 import time
 
 import meta_ads_client as meta
+import meta_review_benchmarks as benchmarks
 
 CAMPAIGN_FIELDS = 'id,name,status,effective_status,objective,created_time,updated_time,start_time,stop_time'
 AD_FIELDS = ('id,name,status,effective_status,adset_id,creative{id,name,thumbnail_url,'
@@ -13,7 +14,7 @@ AD_FIELDS = ('id,name,status,effective_status,adset_id,creative{id,name,thumbnai
 INSIGHT_FIELDS = ('date_start,date_stop,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,'
                   'spend,impressions,reach,frequency,clicks,ctr,cpc,cpm,inline_link_clicks,'
                   'inline_link_click_ctr,cost_per_inline_link_click,outbound_clicks,outbound_clicks_ctr,'
-                  'actions,action_values,cost_per_action_type,purchase_roas,website_purchase_roas')
+                  'actions,action_values,cost_per_action_type,purchase_roas,website_purchase_roas,cost_per_outbound_click')
 CACHE_TTL = 120
 CACHE_LIMIT = 24
 REPORTABLE_CAMPAIGN_STATUSES = ('ACTIVE', 'PAUSED', 'ARCHIVED')
@@ -142,7 +143,6 @@ def filter_campaigns(rows, query='', status='All'):
 
 def load_overview(config, since, until):
     """Campaign metadata plus one paginated account-level range report; no ad reads."""
-    from meta_review_analysis import normalize_metrics
     result = load_campaigns(config, since, until, status='All')
     fields = ','.join(field for field in INSIGHT_FIELDS.split(',')
                       if field not in ('ad_id','ad_name','adset_id','adset_name'))
@@ -157,12 +157,23 @@ def load_overview(config, since, until):
         if key in reports and reports[key] != row:
             raise ValueError('Meta returned conflicting campaign range reports. Refresh again.')
         reports[key] = row
+    countries = load_countries(config, config['ad_account_id'], 'campaign', since, until)
     for campaign in result['campaigns']:
-        metrics = normalize_metrics(reports.get(campaign['campaign_id'], {}))
+        metrics = benchmarks.graph_metrics(reports.get(campaign['campaign_id'], {}))
         # This overview explicitly promises Meta-reported ROAS, not a synthesized ratio.
         metrics['roas'] = metrics['reported_roas']
         campaign['metrics'] = metrics
+        campaign['benchmark'] = benchmarks.evaluate(metrics,country=benchmarks.market([
+            r for r in countries if str(r.get('campaign_id'))==campaign['campaign_id']]),
+            currency=result['account'].get('currency','UNKNOWN'))
     return result
+
+
+def load_countries(config, identity, level, since, until):
+    # Separate delivery-only report: never sum broken-down reach/conversions into totals.
+    return Reader(config).pages(str(identity)+'/insights', {
+        'fields': level+'_id,country,spend', 'level':level, 'breakdowns':'country',
+        'use_unified_attribution_setting':'true', **date_params(since,until)})
 
 
 def load_campaign(config, campaign_id, since, until):
@@ -192,6 +203,8 @@ def load_campaign(config, campaign_id, since, until):
         if key in metrics and metrics[key]['raw'] != row:
             raise ValueError('Meta returned conflicting range reports for an ad. Refresh the campaign.')
         metrics[key] = {'ad_id': key, 'date': row.get('date_start') or str(since or until), 'raw': row}
+    country_rows = load_countries(config,campaign_id,'ad',since,until)
     return {'ads': list(ads.values()), 'creatives': list(creatives.values()), 'daily': list(metrics.values()),
         'adsets': [{**r, 'adset_id': str(r['id']), 'adset_name': r.get('name'), 'raw': r} for r in sets if r.get('id')],
+        'country_delivery':country_rows,
         'assets': [], 'observations': [], 'selections': [], 'mapping': [], 'logs': [], 'campaigns': [], 'accounts': []}

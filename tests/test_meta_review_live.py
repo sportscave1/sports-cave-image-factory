@@ -105,14 +105,15 @@ class LiveReadTests(unittest.TestCase):
         creative=copy.deepcopy(CREATIVE)
         creative['object_story_spec']['link_data']['link']='https://www.facebook.com/canvas/123'
         def response(path,params,config):
+            if params.get('breakdowns')=='country': return {'data':[{'ad_id':'1','country':'US','spend':'6.49'}]}
             if path=='900/ads': return {'data':[{'id':'1','name':'IA 1','adset_id':'77','creative':creative}]}
             if path=='900/adsets': return {'data':[{'id':'77','name':'USA set','targeting':{'geo_locations':{'countries':['US']}}}]}
             if path=='900/insights': return {'data':[{'ad_id':'1','spend':'6.49','impressions':'1059','clicks':'42','inline_link_clicks':'22','reach':'900','frequency':'1.176667'}]}
             raise AssertionError(path)
         with patch.object(meta,'_request',side_effect=response) as request,patch.object(meta,'_post') as post:
             result=live.load_campaign(CONFIG,'900',SINCE,UNTIL)
-        self.assertEqual(request.call_count,3); post.assert_not_called()
-        params=request.call_args.kwargs['params']
+        self.assertEqual(request.call_count,4); post.assert_not_called()
+        params=request.call_args_list[2].kwargs['params']
         self.assertEqual(params['use_unified_attribution_setting'],'true')
         self.assertEqual(params['level'],'ad'); self.assertNotIn('time_increment',params)
         self.assertIn('website_purchase_roas',params['fields'])
@@ -275,6 +276,16 @@ class LivePageTests(unittest.TestCase):
         self.assertFalse(self.at.exception); self.assertFalse(self.at.error)
         self.assertTrue(any('Live Meta review remains available' in w.value for w in self.at.warning))
         self.assertTrue(self.at.dataframe)
+
+    def test_preferences_cannot_replace_graph_performance_or_scores(self):
+        self.preferences.return_value={'selections':[],'mapping':[],
+            'daily':[{'ad_id':'evil','raw':{'spend':'999999'}}], 'ads':[], 'country_delivery':[]}
+        self.details()
+        self.assertFalse(self.at.exception)
+        frames=[d.value for d in self.at.dataframe if 'Ad' in d.value.columns]
+        self.assertTrue(frames)
+        self.assertEqual(len(frames[0]),len(self.ads.return_value['ads']))
+        self.assertNotIn(999999,frames[0]['Spend'].tolist())
 
     def test_failure_without_cache_never_shows_historical_campaigns(self):
         self.at.session_state['meta-review-live-cache']={}

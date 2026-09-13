@@ -61,6 +61,7 @@ class CampaignOverviewTests(unittest.TestCase):
         calls=[]
         def response(path,params,config):
             calls.append((path,params))
+            if params.get('breakdowns')=='country': return {'data':[{'campaign_id':'1','country':'AU','spend':'26.55'}]}
             if path=='act_123': return {'account_id':'123','currency':'AUD'}
             if path=='act_123/campaigns': return {'data':[{'id':'1','name':'Current'},{'id':'2','name':'No metrics'}]}
             if path=='act_123/insights':
@@ -74,12 +75,12 @@ class CampaignOverviewTests(unittest.TestCase):
         with patch.object(meta,'_request',side_effect=response),patch.object(meta,'_post') as write:
             result=live.load_overview(CONFIG,None,date(2026,9,13))
         write.assert_not_called()
-        self.assertEqual(len(calls),4)
+        self.assertEqual(len(calls),5)
         for path, request_params in calls:
             self.assertNotIn('DELETED',str(request_params))
             if path.endswith('/campaigns'):
                 self.assertEqual(request_params['effective_status'],'["ACTIVE", "PAUSED", "ARCHIVED"]')
-        params=calls[-1][1]
+        params=calls[-2][1]
         self.assertEqual(params['level'],'campaign')
         self.assertEqual(params['date_preset'],'maximum')
         self.assertEqual(params['use_unified_attribution_setting'],'true')
@@ -91,7 +92,7 @@ class CampaignOverviewTests(unittest.TestCase):
         self.assertIsNone(metrics['2']['roas'])
 
     def test_missing_reported_roas_is_not_synthesized_for_overview(self):
-        with patch.object(live,'load_campaigns',return_value={'campaigns':[{'campaign_id':'1'}]}),patch.object(live.Reader,'pages',return_value=[{'campaign_id':'1','spend':'10','action_values':[{'action_type':'purchase','value':'50'}]}]):
+        with patch.object(live,'load_campaigns',return_value={'account':{'currency':'AUD'},'campaigns':[{'campaign_id':'1'}]}),patch.object(live.Reader,'pages',return_value=[{'campaign_id':'1','spend':'10','action_values':[{'action_type':'purchase','value':'50'}]}]):
             self.assertIsNone(live.load_overview(CONFIG,None,date(2026,9,13))['campaigns'][0]['metrics']['roas'])
 
     def test_conflicting_campaign_summaries_fail_without_double_count(self):
