@@ -7,10 +7,10 @@ from urllib.parse import urlparse
 
 
 ACTION_ALIASES = {
-    'purchases': ('omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase'),
-    'purchase_value': ('omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase'),
-    'add_to_cart': ('omni_add_to_cart', 'add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart'),
-    'checkout': ('omni_initiated_checkout', 'initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout'),
+    'purchases': ('purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase', 'omni_purchase'),
+    'purchase_value': ('purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase', 'omni_purchase'),
+    'add_to_cart': ('add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart', 'onsite_web_add_to_cart', 'omni_add_to_cart'),
+    'checkout': ('initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout', 'onsite_web_initiate_checkout', 'omni_initiated_checkout', 'omni_initiate_checkout'),
     'view_content': ('omni_view_content', 'view_content', 'offsite_conversion.fb_pixel_view_content'),
     'engagement': ('post_engagement',), 'reactions': ('post_reaction', 'like'),
     'comments': ('comment',), 'shares': ('post',), 'saves': ('onsite_conversion.post_save',),
@@ -50,6 +50,11 @@ def normalize_metrics(row):
         out[key] = action(row, key, source)
     # Reported ROAS is usable if value is absent, but never manufacture purchase value.
     out['reported_roas'] = action(row, 'purchases', 'purchase_roas')
+    if out['reported_roas'] is None:
+        out['reported_roas'] = action(row, 'purchases', 'website_purchase_roas')
+    out['_reported_rates'] = {key: number(row.get(field)) for key, field in (
+        ('click_ctr','ctr'), ('ctr','inline_link_click_ctr'), ('cpc','cpc'),
+        ('cost_per_link_click','cost_per_inline_link_click'), ('cpm','cpm'))}
     out['reach'] = number(row.get('reach'))
     out['frequency'] = number(row.get('frequency'))
     return derive(out)
@@ -66,11 +71,16 @@ def derive(out):
     out['roas'] = ratio(out.get('purchase_value'), out.get('spend'))
     if out['roas'] is None:
         out['roas'] = out.get('reported_roas')
+    for key, value in out.get('_reported_rates', {}).items():
+        if value is not None:
+            out[key] = value
     return out
 
 
 def aggregate(rows):
     rows = list(rows)
+    if len(rows) == 1:
+        return derive({**rows[0], 'max_daily_frequency': rows[0].get('frequency')})
     fields = (*BASE_FIELDS, *ACTION_ALIASES)
     out = {key: sum(r[key] for r in rows) if rows and all(r.get(key) is not None for r in rows) else None for key in fields}
     out['reported_roas'] = (sum(r['reported_roas'] * r['spend'] for r in rows) / sum(r['spend'] for r in rows)
@@ -102,6 +112,8 @@ def creative_assets(raw):
     link = spec.get('link_data') or spec.get('video_data') or spec.get('photo_data') or spec.get('template_data') or {}
     link = link if isinstance(link, dict) else {}
     result = {key: [] for key in ('image', 'primary_text', 'headline', 'description', 'cta', 'url')}
+    def items(value):
+        return value if isinstance(value, list) else []
     def add(kind, value, identity='', **extra):
         if kind=='image':
             try:
@@ -121,16 +133,16 @@ def creative_assets(raw):
     add('url', link.get('link') or raw.get('link_url') or (cta_value.get('link') if isinstance(cta_value, dict) else None))
     add('image', link.get('picture') or link.get('image_url') or raw.get('image_url'), link.get('image_hash') or raw.get('image_hash'))
     for kind, field in (('primary_text', 'bodies'), ('headline', 'titles'), ('description', 'descriptions')):
-        for item in feed.get(field) or []:
+        for item in items(feed.get(field)):
             if isinstance(item, dict):
                 add(kind, item.get('text'), item.get('id'))
-    for item in feed.get('images') or []:
+    for item in items(feed.get('images')):
         if isinstance(item, dict):
             add('image', item.get('url'), item.get('hash'))
-    for item in feed.get('videos') or []:
+    for item in items(feed.get('videos')):
         if isinstance(item, dict):
             add('image', item.get('thumbnail_url'), item.get('video_id'), video=True)
-    for item in link.get('child_attachments') or []:
+    for item in items(link.get('child_attachments')):
         if isinstance(item, dict):
             add('image', item.get('picture'), item.get('image_hash'), carousel=True)
             add('headline', item.get('name'))
@@ -138,7 +150,7 @@ def creative_assets(raw):
             add('url', item.get('link'))
     for item in feed.get('call_to_action_types') if isinstance(feed.get('call_to_action_types'),list) else []:
         add('cta', item)
-    for item in feed.get('link_urls') or []:
+    for item in items(feed.get('link_urls')):
         if isinstance(item, dict):
             add('url', item.get('website_url'))
     if not result['image']:
@@ -176,6 +188,11 @@ def analyse(metrics, peers=(), previous=None, rules=None):
     confidence = 'High' if sufficient and purchases >= max(r.high_purchases, r.min_purchases) else 'Medium' if sufficient else 'Low'
     result = {'label': 'INSUFFICIENT DATA', 'confidence': confidence, 'tone': 'amber',
               'reason': 'Missing delivery or purchase evidence. No trustworthy winner can be established.'}
+    if spend and purchases is None and ((m.get('checkout') or 0) > 0 or (m.get('add_to_cart') or 0) > 0):
+        result.update(label='NEEDS MORE SPEND', reason='Early lower-funnel signal: '
+            f"{m.get('add_to_cart') if m.get('add_to_cart') is not None else 'unavailable'} add-to-carts and "
+            f"{m.get('checkout') if m.get('checkout') is not None else 'unavailable'} checkouts. "
+            'Purchases are not reported; needs more spend/data before declaring a winner.')
     if spend is None or not spend or purchases is None:
         return result
     result.update(label='WATCH', reason='Commercial signals are inconclusive. Compare within this campaign and date range.')
@@ -216,6 +233,19 @@ def choose_winner(ads, rules=None):
     eligible = [a for a in ads if a.get('decision', {}).get('label') in ('WINNER — REFRESH THIS', 'SCALE CANDIDATE')]
     return next(iter(sorted(eligible, key=lambda a: (-(a['metrics'].get('purchases') or 0),
         -(a['metrics'].get('roas') or 0), a['metrics'].get('cpa') or math.inf, str(a['ad_id'])))), None)
+
+
+def signal_leaders(ads):
+    """Exploratory signals, never a replacement for purchase/confidence gates."""
+    commercial = [a for a in ads if any((a['metrics'].get(k) or 0) > 0 for k in ('purchases','checkout','add_to_cart'))]
+    lower = max(commercial, key=lambda a: tuple(a['metrics'].get(k) or 0 for k in
+        ('purchases','roas')) + (-(a['metrics'].get('cpa') or math.inf),) +
+        tuple(a['metrics'].get(k) or 0 for k in ('checkout','add_to_cart')), default=None)
+    click_ads = [a for a in ads if (a['metrics'].get('inline_link_clicks') or 0) > 0 and a['metrics'].get('ctr') is not None]
+    click = max(click_ads, key=lambda a: (a['metrics']['ctr'],
+        -(a['metrics'].get('cost_per_link_click') if a['metrics'].get('cost_per_link_click') is not None else math.inf),
+        a['metrics'].get('outbound_clicks') or 0), default=None)
+    return {'commercial': lower, 'click': click}
 
 
 def component_candidates(ads, kind, asset_rows=()):

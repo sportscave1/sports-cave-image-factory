@@ -1,6 +1,7 @@
-"""Stored-history Meta decisions. Page open/import never calls Meta."""
+"""On-demand live Meta review. Saved decisions are optional Supabase context."""
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import streamlit as st
@@ -8,6 +9,7 @@ import meta_ads_client as meta
 import meta_review_analysis as analysis
 import meta_review_store as store
 import meta_review_sync as sync_service
+import meta_review_live as live
 import meta_review_handoff as handoff
 from ads_navigation import CREATIVE_REFRESH_PAGE_KEY, CREATIVE_REFRESH_ROUTE
 
@@ -17,8 +19,8 @@ def object_dict(value):
     return value if isinstance(value,dict) else {}
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_review(account_id, since, until):
-    return include_unavailable_objects(store.load_history(account_id, since, until))
+def _load_preferences(account_id):
+    return store.load_preferences(account_id)
 
 
 def include_unavailable_objects(history):
@@ -94,7 +96,7 @@ def metrics_card(metrics, compact=False):
     if not compact:
         with st.expander('Funnel and more metrics'):
             labels = [('Add to cart','add_to_cart'),('Cost / ATC','cost_per_atc'),('Initiate checkout','checkout'),
-                      ('Cost / checkout','cost_per_checkout'),('Link clicks','inline_link_clicks'),('CPC (all clicks)','cpc'),
+                      ('Cost / checkout','cost_per_checkout'),('Link clicks','inline_link_clicks'),('CTR (all clicks)','click_ctr'),('Outbound clicks','outbound_clicks'),('CPC (all clicks)','cpc'),
                       ('Cost / link click','cost_per_link_click'),('Impressions','impressions'),('Reach (one report only)','reach'),
                       ('Frequency (one report only)','frequency'),('Highest daily frequency','max_daily_frequency'),('CPM','cpm'),
                       ('Engagement','engagement'),('Reactions','reactions'),('Comments','comments'),('Shares','shares'),('Saves','saves'),
@@ -139,6 +141,16 @@ def winner_board(ads, history, context):
         st.write(winner['decision']['reason'])
     else:
         st.warning('INSUFFICIENT DATA for a trustworthy automatic winner. You can explicitly choose a reference below.')
+        leaders = analysis.signal_leaders(ads)
+        lower, click = leaders['commercial'], leaders['click']
+        if lower:
+            st.info(f"Strongest lower-funnel signal: {lower.get('ad_name') or lower['ad_id']} · "
+                f"ATC {fmt(lower['metrics'].get('add_to_cart'))} · Checkout {fmt(lower['metrics'].get('checkout'))}. "
+                'Low confidence; needs more spend/data. This is not an established commercial winner.')
+        if click:
+            st.info(f"Strongest creative/click signal: {click.get('ad_name') or click['ad_id']} · "
+                f"Link CTR {fmt(click['metrics'].get('ctr'), '%')} · Cost/link click {fmt(click['metrics'].get('cost_per_link_click'))}. "
+                'Click strength alone does not prove purchase intent. Needs more spend/data.')
     scope = hashlib.sha256(json.dumps(context, sort_keys=True, default=str).encode()).hexdigest()[:12]
     saved = next((row['context'] for row in history['selections'] if row['action_type']=='meta_review_selection' and row['context'].get('scope')==scope), {})
     ids = [str(a['ad_id']) for a in ads]
@@ -183,7 +195,7 @@ def winner_board(ads, history, context):
     if st.button('Save winner selection'):
         try:
             store.save_selection({**context,'scope':scope,'overall':overall, **{k:v['key'] for k,v in choices.items()}},actor)
-            _load_review.clear()
+            _load_preferences.clear(context['account_id'])
             st.success('Internal winner selection saved to Supabase.')
         except Exception as error: st.error(sync_service.safe_error(error))
     st.caption('Refresh Winning Ad preserves this ad’s reference. Best Components creates an untested mix. Neither action publishes.')
@@ -201,18 +213,31 @@ def winner_board(ads, history, context):
             except Exception as error: st.error(sync_service.safe_error(error))
 
 
+def live_status(entry, label):
+    if entry['error']:
+        st.error('LIVE META UNAVAILABLE · '+entry['error'])
+    if entry.get('refreshed_at'):
+        stamp = datetime.fromisoformat(entry['refreshed_at']).astimezone(ZoneInfo('Australia/Sydney'))
+        source = 'STALE CACHED META' if entry['stale'] else 'LIVE META · brief cache'
+        st.caption(f"{label} · {source} · Refreshed {stamp:%d %b %Y %I:%M:%S %p %Z}")
+
+
 def render_page():
     st.title('Meta Review')
-    st.caption('Stored Meta reporting → creative decisions → Creative Refresh. Live advertising is read-only.')
+    st.caption('Live Meta campaigns, creatives and results → creative decisions → Creative Refresh. Read-only advertising access.')
     config = meta.get_meta_config()  # Environment only; no request.
-    aid = config.get('ad_account_id','').removeprefix('act_')
-    if not aid:
-        st.info('Set META_AD_ACCOUNT_ID to select reporting history. A token is only needed for sync.')
-        return
+    aid = config.get('ad_account_id', '').removeprefix('act_')
+    account_scope = live.scope(config)
+    cache = st.session_state.setdefault('meta-review-live-cache', {})
+    if st.session_state.get('meta-review-live-scope') != account_scope:
+        cache.clear()
+        st.session_state['meta-review-live-scope'] = account_scope
+        st.session_state['meta-review-live-enabled'] = False
+    st.caption('Meta account: '+('Sports Cave · ' if aid=='528975349337773' else '')+(aid or 'Not configured'))
     cols = st.columns(3)
     ranges = ['Last 7 days','Last 14 days','Last 30 days','Last 90 days','Lifetime / available history','Custom']
-    selected_range = cols[0].selectbox('Date range', ranges, index=2)
-    until = date.today()
+    selected_range = cols[0].selectbox('Date range', ranges, index=0)
+    until = datetime.now(ZoneInfo('Australia/Sydney')).date()
     since = None if selected_range.startswith('Lifetime') else until-timedelta(days=int(selected_range.split()[1])-1) if selected_range != 'Custom' else until-timedelta(days=29)
     if selected_range=='Custom':
         since = cols[0].date_input('From', since)
@@ -221,51 +246,53 @@ def render_page():
             st.error('Start date must precede end date.')
             return
     query = cols[1].text_input('Campaign search')
-    status = cols[2].selectbox('Status',['All','ACTIVE','PAUSED','ARCHIVED','DELETED','COMPLETED'])
-    with st.expander('Sync options and decision thresholds'):
-        asset_sync = st.checkbox('Request Meta asset breakdowns',value=True)
-        st.caption('Lifetime requests available Meta history; large accounts may need smaller ranges. Target markets reflect ad-set targeting, not country-attributed revenue.')
+    status = cols[2].selectbox('Status',['Active and paused','All','ACTIVE','PAUSED','ARCHIVED','DELETED','COMPLETED'])
+    with st.expander('Live read options and decision thresholds'):
+        st.caption('Date range and status scope the Meta campaign request. Search filters the complete returned list. Campaign ads and range Insights load only after selection. Cache lifetime: two minutes.')
         st.dataframe([{'Threshold':k.replace('_',' ').title(),'Value':v} for k,v in analysis.Rules.from_env().__dict__.items()],hide_index=True)
-        st.caption('META_REVIEW_* environment settings configure evidence thresholds. Confidence is not a statistical probability. No profit target is assumed when CPA/ROAS targets are unset.')
-    if st.button('Sync Meta', disabled=not config['configured']):
-        with st.status('Syncing Meta reporting…', expanded=True) as progress:
-            try:
-                result = sync_service.sync(since,until,lifetime=since is None,assets=asset_sync,progress=progress.write)
-                _load_review.clear()
-                progress.update(label='Reporting saved to Supabase',state='complete')
-                for warning in result['warnings']: st.warning(warning)
-            except Exception as error:
-                progress.update(label='Sync failed — previous history retained',state='error')
-                st.error(sync_service.safe_error(error))
-    try: history = _load_review(aid,since,until)
-    except Exception as error:
-        st.error(sync_service.safe_error(error))
-        st.caption('Install existing Ads Intelligence migrations and the Meta Review reporting migration before using this page.')
+        st.caption('Confidence is not a statistical probability. No profit target is assumed when CPA/ROAS targets are unset.')
+    if st.button('Refresh From Meta', disabled=not config.get('configured')):
+        live.invalidate(cache, account_scope)
+        st.session_state['meta-review-live-enabled'] = True
+    if not config.get('configured'):
+        st.warning('Connection: unavailable. Configure the existing Meta account connection.')
         return
-    logs = history['logs']
-    success = next((r for r in logs if r['status']=='success'), None)
-    st.caption('Supabase history · Last successful Meta Review sync: '+str(success.get('finished_at') if success else 'Not yet synced'))
-    if success and (success.get('context') or {}).get('warnings'):
-        with st.expander('Stored sync capability notes'):
-            for warning in success['context']['warnings']: st.warning(warning)
-    if logs and logs[0]['status']=='error': st.warning(logs[0].get('error_message') or 'Last sync failed; showing stored history.')
-    if logs and logs[0]['status']=='started': st.warning('The latest sync has no completion record (running or interrupted). Showing only committed reporting history.')
-    campaigns = [r for r in history['campaigns'] if query.casefold() in str(r.get('campaign_name') or '').casefold() and (status=='All' or status in (r.get('status'),r.get('effective_status')) or (status=='COMPLETED' and (r.get('raw') or {}).get('_review_completed')))]
+    if not st.session_state.get('meta-review-live-enabled'):
+        st.caption('Connection: configured, not checked · Last live refresh: not yet refreshed')
+        st.info('Choose Refresh From Meta to load campaigns. No account download runs when this page opens.')
+        return
+    with st.spinner('Reading live campaigns…'):
+        campaign_entry = live.cached_read(cache, (account_scope,'campaigns',since,until,status),
+            lambda: live.load_campaigns(config,since,until,status))
+    live_status(campaign_entry,'Campaign list / last live refresh')
+    st.caption('Connection: '+('unavailable' if campaign_entry['error'] else 'Connected'))
+    if campaign_entry['data'] is None:
+        return
+    account = campaign_entry['data']['account']
+    st.caption(f"{account.get('name') or aid} · {account.get('currency') or 'Currency unavailable'} · {account.get('timezone_name') or 'Timezone unavailable'}")
+    campaigns = live.filter_campaigns(campaign_entry['data']['campaigns'],query,status)
     if not campaigns:
-        st.info('No stored campaigns match. Use Sync Meta to retrieve accessible current and historical campaigns.')
+        st.info('No live Meta campaigns match this date range, status and search.')
         return
-    account = next(iter(history['accounts']), {})
-    st.caption(f"{account.get('name') or aid} · Currency {account.get('currency') or 'unavailable'} · {since or 'Available stored history'} to {until}")
-    summaries=[]
-    campaign_ads=defaultdict(list)
-    for ad in build_ads(history): campaign_ads[str(ad.get('campaign_id'))].append(ad)
-    for campaign in campaigns:
-        metrics=analysis.aggregate([a['metrics'] for a in campaign_ads[str(campaign['campaign_id'])]])
-        summaries.append({'Campaign':campaign.get('campaign_name'),'Status':campaign.get('effective_status') or campaign.get('status'),
-            **{label:fmt(metrics.get(key)) for label,key in [('Spend','spend'),('Purchases','purchases'),('Meta purchase value','purchase_value'),('ROAS','roas'),('CPA','cpa'),('Link CTR','ctr'),('CPC','cpc'),('ATC','add_to_cart'),('Checkout','checkout')]}})
-    st.dataframe(summaries,hide_index=True,use_container_width=True)
-    ids=[r['campaign_id'] for r in campaigns]
-    cid=st.selectbox('Open campaign',ids,format_func=lambda key:next(r.get('campaign_name') or key for r in campaigns if r['campaign_id']==key))
+    ids = [r['campaign_id'] for r in campaigns]
+    cid = st.selectbox('Open campaign',ids,index=None,placeholder='Select a campaign to load its ads',
+        format_func=lambda key:next(r.get('campaign_name') or key for r in campaigns if r['campaign_id']==key))
+    if cid is None:
+        return
+    with st.spinner('Reading selected campaign ads and Insights…'):
+        campaign_data = live.cached_read(cache,(account_scope,'campaign',cid,since,until),
+            lambda: live.load_campaign(config,cid,since,until))
+    live_status(campaign_data,'Selected campaign ads and Insights')
+    if campaign_data['data'] is None:
+        return
+    history = campaign_data['data']
+    history['campaigns'] = campaigns
+    history['accounts'] = [account]
+    try:
+        history.update(_load_preferences(aid))
+    except Exception:
+        st.warning('Saved Sports Cave selections/mapping are unavailable. Live Meta review remains available; saving a selection or handoff requires storage.')
+    all_ads = build_ads(history,cid)
     saved_handoffs=[r for r in history['selections'] if r['action_type']=='meta_review_handoff' and str(r['context'].get('campaign_id'))==str(cid)]
     if saved_handoffs:
         with st.expander('Saved winner handoffs'):
@@ -276,12 +303,11 @@ def render_page():
                 st.session_state['selected_page']=CREATIVE_REFRESH_ROUTE
                 st.query_params['page']=CREATIVE_REFRESH_PAGE_KEY
                 st.rerun()
-    all_ads=campaign_ads[str(cid)]
     markets=sorted({country for a in all_ads for country in a['markets']})
     market=st.selectbox('Target market / country',['All']+markets)
     ads=[ad for ad in all_ads if market=='All' or market in ad['markets']]
     if not ads:
-        st.info('No stored ads for this campaign and market.')
+        st.info('No live ads for this campaign and market.')
         return
     if market!='All':
         peers=[ad['metrics'] for ad in ads]
@@ -290,7 +316,7 @@ def render_page():
             fatigue=analysis.analyse(ad['recent'],peers,ad['previous'])
             if fatigue['label']=='REFRESH CREATIVE': ad['decision']=fatigue
     metrics_card(analysis.aggregate([a['metrics'] for a in ads]),compact=True)
-    st.caption('Creative snapshots show assets observed at sync, not reconstructed historical serving combinations. Expired image URLs need a new explicit sync.')
+    st.caption('Current Meta creatives with ad-level results for the selected range. These results do not prove which dynamic asset combination served. Refresh From Meta renews live image URLs.')
     page=st.number_input('Creative page (12 ads per page)',min_value=1,max_value=max(1,(len(ads)+11)//12),value=1,step=1,key='review-page-'+cid)
     for ad in ads[(page-1)*12:page*12]: ad_card(ad)
     observations=[r for r in history.get('observations',[]) if str(r['ad_id']) in {str(a['ad_id']) for a in ads}]

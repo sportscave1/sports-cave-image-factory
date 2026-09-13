@@ -226,9 +226,12 @@ class PageTests(unittest.TestCase):
     def test_manual_winner_override_persists_and_no_meta_mutation(self):
         def app():
             import ads_meta_review_page
-            ads_meta_review_page.render_page()
+            from tests.test_meta_review import history
+            data=history()
+            data['ads'].append({**data['ads'][0],'ad_id':'2','ad_name':'Chosen by Nathan'})
+            ads_meta_review_page.winner_board(ads_meta_review_page.build_ads(data),data,{'account_id':'123'})
         data=history(); data['ads'].append({**data['ads'][0],'ad_id':'2','ad_name':'Chosen by Nathan'})
-        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(page,'_load_review',return_value=data),patch.object(store,'save_selection',return_value=10) as save,patch.object(client,'_post') as post:
+        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(store,'save_selection',return_value=10) as save,patch.object(client,'_post') as post:
             at=AppTest.from_function(app,default_timeout=10).run()
             next(s for s in at.selectbox if s.label=='Overall winning ad').set_value('2').run()
             next(b for b in at.button if b.label=='Save winner selection').click().run()
@@ -238,8 +241,11 @@ class PageTests(unittest.TestCase):
     def test_click_handoff_navigates_after_saved_reference(self):
         def app():
             import ads_meta_review_page
-            ads_meta_review_page.render_page()
-        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(page,'_load_review',return_value=history()),patch.object(handoff,'queue') as queue:
+            from tests.test_meta_review import history
+            data=history()
+            data['ads'].append({**data['ads'][0],'ad_id':'2','ad_name':'Chosen by Nathan'})
+            ads_meta_review_page.winner_board(ads_meta_review_page.build_ads(data),data,{'account_id':'123'})
+        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(handoff,'queue') as queue:
             at=AppTest.from_function(app,default_timeout=10).run()
             next(b for b in at.button if b.label=='Refresh Winning Ad').click().run()
             self.assertFalse(at.exception)
@@ -251,22 +257,16 @@ class PageTests(unittest.TestCase):
             rows=page.build_ads(history(),'cam'); self.assertEqual(rows[0]['assets']['headline'][0]['value'],'Exact headline')
     def test_country_filter_is_targeting(self):
         self.assertEqual(len(page.build_ads(history(),'cam','AU')),2); self.assertEqual(page.build_ads(history(),'cam','US'),[])
-    def test_open_ui_no_network_and_actual_creative(self):
+    def test_open_ui_does_not_load_account_or_storage(self):
         def app():
             import ads_meta_review_page
             ads_meta_review_page.render_page()
-        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(page,'_load_review',return_value=history()),patch.object(client,'_request',side_effect=AssertionError('Meta call')):
+        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(store,'load_history',side_effect=AssertionError('DB read')),patch.object(client,'_request',side_effect=AssertionError('Meta call')) as request:
             at=AppTest.from_function(app,default_timeout=10).run()
         self.assertFalse(at.exception)
-        self.assertTrue(any('Exact primary' in t.value for t in at.text))
-        self.assertTrue(any(b.label=='Refresh Winning Ad' for b in at.button))
-    def test_database_failure_is_visible_not_spinner(self):
-        def app():
-            import ads_meta_review_page
-            ads_meta_review_page.render_page()
-        with patch.object(client,'get_meta_config',return_value=SyncTests.config),patch.object(page,'_load_review',side_effect=RuntimeError('password=secret')):
-            at=AppTest.from_function(app,default_timeout=10).run()
-        self.assertFalse(at.exception); self.assertTrue(at.error); self.assertNotIn('password',at.error[0].value)
+        request.assert_not_called()
+        self.assertTrue(any(b.label=='Refresh From Meta' for b in at.button))
+        self.assertFalse(any(b.label=='Refresh Winning Ad' for b in at.button))
 
 
 if __name__=='__main__': unittest.main()

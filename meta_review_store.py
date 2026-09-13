@@ -169,6 +169,15 @@ def save_selection(context, actor='sports_cave_os', action='meta_review_selectio
         return cur.fetchone()['id']
 
 
+def load_preferences(account_id):
+    """Optional Sports Cave decisions only; never read campaign/reporting snapshots."""
+    with cursor() as cur:
+        cur.execute("SELECT * FROM ads_action_log WHERE action_type IN ('meta_review_selection','meta_review_handoff') AND context->>'account_id'=%s ORDER BY created_at DESC LIMIT 100", (account_id,))
+        selections = cur.fetchall()
+        cur.execute('SELECT * FROM ads_product_mapping LIMIT 10001')
+        return {'selections': selections, 'mapping': cur.fetchall()}
+
+
 def save_media(data, content_type):
     if not data or len(data) > 8*1024*1024:
         raise ValueError('Winner image is empty or exceeds 8 MiB.')

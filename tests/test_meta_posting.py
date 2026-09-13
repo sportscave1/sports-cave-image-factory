@@ -3793,7 +3793,9 @@ class ReviewAndPersistenceTests(unittest.TestCase):
         source = (ROOT / "ads_meta_review_page.py").read_text(encoding="utf-8")
         self.assertNotIn("MetaPostingService", source)
         self.assertNotIn("_post(", source)
-        self.assertIn("store.load_history", source)
+        self.assertIn("live.load_campaigns", source)
+        self.assertIn("live.load_campaign", source)
+        self.assertNotIn("store.load_history", source)
         self.assertNotIn("fetch_meta_ad_insights_summary", source)
 
     def test_v2_migration_tracks_all_object_ids(self):
