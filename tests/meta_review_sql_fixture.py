@@ -34,4 +34,17 @@ def read_statements():
     return executed
 
 
-if __name__=='__main__': print(json.dumps(read_statements() if '--read' in sys.argv else statements(),default=str))
+def handoff_statements():
+    executed=[]
+    connection=MagicMock()
+    cur=connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cur.fetchone.return_value={'id':1,'context':{}}
+    cur.execute.side_effect=lambda sql,params=():executed.append({'sql':sql,'params':params})
+    with patch.object(store.backend,'connect',return_value=connection):
+        store.save_selection({'account_id':'123','handoff_token':'a'*32,'image_sha256':'digest',
+            'components':{'primary_text':{'value':'Exact primary\n\nNo rewriting'},'headline':{'value':'Exact headline'}}},action='meta_review_handoff')
+        store.load_handoff('a'*32,'act_123')
+    return executed
+
+
+if __name__=='__main__': print(json.dumps(handoff_statements() if '--handoff' in sys.argv else read_statements() if '--read' in sys.argv else statements(),default=str))

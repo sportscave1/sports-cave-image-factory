@@ -141,3 +141,46 @@ def selected_row(event, rows):
     if len(indexes)==1 and isinstance(indexes[0],int) and 0<=indexes[0]<len(rows):
         return rows[indexes[0]]
     return None
+
+
+VA_METRICS=[('Spend','spend'),('Sales','purchases'),('ROAS','roas'),('CPA','cpa'),('CTR','click_ctr'),('ATC','add_to_cart'),('Checkout','checkout')]
+MONEY.add('Spend')
+COUNTS.add('Sales')
+
+
+def va_campaign_rows(rows):
+    return [{'Campaign':r.get('campaign_name') or r['campaign_id'],
+             'Status':r.get('effective_status') or r.get('status') or '—',
+             **{label:(r.get('metrics') or {}).get(key) for label,key in VA_METRICS},
+             'Last Sale':r.get('recency',{}).get('text','Unavailable'),
+             'Action':r.get('recency',{}).get('action',(r.get('benchmark') or {}).get('recommendation','NO DATA'))} for r in rows]
+
+
+def va_ad_rows(rows):
+    return [{'Creative':next(iter(r['assets']['image']),{}).get('value'),'Ad':r.get('ad_name') or r['ad_id'],
+             **{label:r.get('benchmark_metrics',r['metrics']).get(key) for label,key in VA_METRICS if label!='Spend'},
+             'Last Sale':r.get('recency',{}).get('text','Unavailable'),
+             'Action':r.get('recency',{}).get('action',(r.get('benchmark') or {}).get('recommendation','NO DATA'))} for r in rows]
+
+
+def va_styled(rows, evidence):
+    frame=pd.DataFrame(rows)
+    formats={label:'${:,.2f}' if label in MONEY else '{:,.0f}' if label in COUNTS else '{:.2f}%' if label in PERCENT else '{:.2f}'
+             for label,key in VA_METRICS if label in frame}
+    result=frame.style.format(formats,na_rep='—')
+    styles=pd.DataFrame('',index=frame.index,columns=frame.columns)
+    palette={'GREEN':'color: #287044','AMBER':'color: #926600','RED':'color: #ae3434','NEUTRAL':'color: #777777'}
+    for i,row in enumerate(evidence):
+        b=row.get('benchmark') or {}; rec=row.get('recency') or {}
+        for label,key in [('ROAS','roas'),('CPA','cpa')]:
+            if label in styles: styles.loc[i,label]=palette[b.get('cells',{}).get(key,{}).get('band','NEUTRAL')]
+        if 'Last Sale' in styles: styles.loc[i,'Last Sale']=palette[rec.get('band','NEUTRAL')]
+        action=rec.get('action',b.get('recommendation'))
+        band='GREEN' if action in ('TOP WINNER','KEEP RUNNING') else 'RED' if action in ('STOP CAMPAIGN','STOP / REPLACE','REFRESH CREATIVE') else 'NEUTRAL' if action in ('LEARNING','NO DATA','PAUSED','ARCHIVED','HISTORICAL') else 'AMBER'
+        if 'Action' in styles: styles.loc[i,'Action']=palette[band]+'; font-weight: 600'
+    return result.apply(lambda _:styles,axis=None)
+
+
+def advanced_rows(metrics):
+    visible={key for _,key in VA_METRICS}
+    return [{'Metric':label,'Value':metrics.get(key)} for label,key in METRICS if key not in visible]

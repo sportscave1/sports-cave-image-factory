@@ -178,6 +178,18 @@ def load_preferences(account_id):
         return {'selections': selections, 'mapping': cur.fetchall()}
 
 
+def load_handoff(token, account_id):
+    """Opaque link lookup, constrained to the configured account and handoff type."""
+    import re
+    if not re.fullmatch(r'[a-f0-9]{32}',str(token)):
+        raise ValueError('Invalid saved winner reference.')
+    with cursor() as cur:
+        cur.execute("SELECT context FROM ads_action_log WHERE action_type='meta_review_handoff' AND context->>'handoff_token'=%s AND context->>'account_id'=%s ORDER BY created_at DESC LIMIT 1",(token,str(account_id).removeprefix('act_')))
+        row=cur.fetchone()
+    if not row: raise ValueError('Saved winner reference is unavailable for this account.')
+    return row['context']
+
+
 def save_media(data, content_type):
     if not data or len(data) > 8*1024*1024:
         raise ValueError('Winner image is empty or exceeds 8 MiB.')

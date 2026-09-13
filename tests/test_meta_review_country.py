@@ -93,7 +93,7 @@ class CountryReadTests(unittest.TestCase):
             app=AppTest.from_string('import ads_meta_review_page as p\np.render_page()',default_timeout=10).run()
         self.assertFalse(app.exception)
         self.assertFalse(app.error)
-        self.assertEqual(app.dataframe[0].value.iloc[0]['Market'],'UNKNOWN')
+        self.assertNotIn('Market',app.dataframe[0].value.columns)
         self.assertEqual(app.dataframe[0].value.iloc[0]['Spend'],25)
 
     def test_country_pages_preserve_date_attribution_and_fields(self):

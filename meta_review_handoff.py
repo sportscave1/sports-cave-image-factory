@@ -2,6 +2,7 @@
 from copy import deepcopy
 from io import BytesIO
 import time
+import uuid
 from urllib.parse import urlparse
 import requests
 from PIL import Image
@@ -59,6 +60,29 @@ def queue(package,state,actor='sports_cave_os'):
     state[PENDING]=package
 
 
+def queue_link(package, actor='sports_cave_os'):
+    """Existing image archive/action-log path; no browser-session dependency."""
+    from ads_navigation import CREATIVE_REFRESH_PAGE_KEY
+    from urllib.parse import urlencode
+    package=deepcopy(package)
+    package['handoff_token']=uuid.uuid4().hex
+    state={}
+    queue(package,state,actor)
+    return '?'+urlencode({'page':CREATIVE_REFRESH_PAGE_KEY,'handoff_id':package['handoff_token']})
+
+
+def load_link(state, params, config):
+    token=params.get('handoff_id')
+    if not token or state.get('meta-review-loaded-handoff')==token: return False
+    package=store.load_handoff(token,config.get('ad_account_id',''))
+    if not package.get('image_sha256'):
+        raise ValueError('Saved winner has no archived image.')
+    state[PENDING]=deepcopy(package)
+    hydrate(state)
+    state['meta-review-loaded-handoff']=token
+    return True
+
+
 def hydrate(state):
     package=state.get(PENDING)
     if not package:
@@ -90,6 +114,13 @@ def hydrate(state):
 
 
 def render_source(st):
+    if st.query_params.get('handoff_id'):
+        try:
+            import meta_ads_client
+            load_link(st.session_state,st.query_params,meta_ads_client.get_meta_config())
+        except Exception:
+            st.error('Saved winner could not be loaded. Check account access or retry from Meta Review.')
+            return True  # Never present a previous winner as this failed URL's reference.
     hydrate(st.session_state)
     source=st.session_state.get(ACTIVE)
     if not source:

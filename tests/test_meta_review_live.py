@@ -241,6 +241,7 @@ class LivePageTests(unittest.TestCase):
         self.overview=self.stack.enter_context(patch.object(live,'load_overview',return_value={'account':{'name':'Sports Cave'},'campaigns':[self.campaign]}))
         self.ads=self.stack.enter_context(patch.object(live,'load_campaign',return_value=data))
         self.preferences=self.stack.enter_context(patch.object(page,'_load_preferences',return_value={'selections':[],'mapping':[]}))
+        self.recency=self.stack.enter_context(patch.object(page.recency,'load',return_value={'available':False,'latest':{}}))
         self.at=AppTest.from_string('import ads_meta_review_page as p\np.render_page()',default_timeout=10).run()
 
     def refresh(self):
@@ -285,7 +286,7 @@ class LivePageTests(unittest.TestCase):
         frames=[d.value for d in self.at.dataframe if 'Ad' in d.value.columns]
         self.assertTrue(frames)
         self.assertEqual(len(frames[0]),len(self.ads.return_value['ads']))
-        self.assertNotIn(999999,frames[0]['Spend'].tolist())
+        self.assertNotIn(999999,frames[0]['Sales'].tolist())
 
     def test_failure_without_cache_never_shows_historical_campaigns(self):
         self.at.session_state['meta-review-live-cache']={}

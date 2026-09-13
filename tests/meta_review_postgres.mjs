@@ -44,6 +44,17 @@ const dumped=await db.dumpDataDir(); await db.close(); db=new PGlite({loadDataDi
 assert.equal((await db.query("SELECT context->>'image' AS chosen FROM ads_action_log WHERE action_type='meta_review_selection'")).rows[0].chosen,'chosen');
 assert.equal((await db.query('SELECT octet_length(data) AS n FROM meta_review_media')).rows[0].n,3);
 console.log('PASS selection and image persist after database restart');
+const handoffCommands=JSON.parse(execFileSync('.venv/Scripts/python.exe',['-m','tests.meta_review_sql_fixture','--handoff'],{encoding:'utf8'}));
+async function executeCommand(command,params=command.params){let n=0; return db.query(command.sql.replace(/%s/g,()=>'$'+(++n)),params);}
+await executeCommand(handoffCommands.find(c=>c.sql.startsWith('INSERT')));
+const handoffDump=await db.dumpDataDir(); await db.close(); db=new PGlite({loadDataDir:handoffDump});
+const handoffLookup=handoffCommands.find(c=>c.sql.startsWith('SELECT context'));
+const persisted=(await executeCommand(handoffLookup)).rows[0].context;
+assert.equal(persisted.components.primary_text.value,'Exact primary\n\nNo rewriting');
+assert.equal(persisted.components.headline.value,'Exact headline');
+assert.equal(persisted.image_sha256,'digest');
+assert.equal((await executeCommand(handoffLookup,['a'.repeat(32),'other-account'])).rows.length,0);
+console.log('PASS actual durable handoff SQL survives restart and enforces account scope');
 assert.deepEqual((await db.query('SELECT * FROM edition_guard')).rows,[{next_number:101,sold:100,remaining:0}]);
 console.log('PASS unrelated edition state untouched');
 const policies=(await db.query("SELECT relrowsecurity FROM pg_class WHERE relname IN ('meta_review_asset_daily','meta_review_media','meta_review_creative_observations')")).rows;

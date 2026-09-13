@@ -14,6 +14,7 @@ import meta_review_sync as sync_service
 import meta_review_live as live
 import meta_review_tables as tables
 import meta_review_benchmarks as benchmarks
+import meta_review_recency as recency
 import meta_review_handoff as handoff
 from ads_navigation import CREATIVE_REFRESH_PAGE_KEY, CREATIVE_REFRESH_ROUTE
 
@@ -133,20 +134,14 @@ def ad_card(ad):
                 if not ad['assets'][kind]: st.caption('Unavailable')
             if ad['assets']['dynamic'] or ad['assets']['carousel']:
                 st.caption('Multiple original assets/cards. Ad-level results do not prove which served combination won.')
-            metrics_card(ad.get('benchmark_metrics',ad['metrics']))
-        if ad.get('benchmark'):
-            b=ad['benchmark']
-            st.caption(f"{b['recommendation']} · {b['stage']} · {b['format']} · {b['country']}")
-            if b['low_intent']: st.caption('LOW-INTENT TRAFFIC · Mature spend with no add to carts or checkouts.')
-            return
-        decision = ad['decision']
-        message = f"{decision['label']} · {decision['confidence']} confidence — {decision['reason']}"
-        if decision['tone'] == 'green': st.success(message)
-        elif decision['tone'] == 'red': st.error(message)
-        else: st.warning(message)
+        st.caption(f"Ad {ad['ad_id']} · Creative {ad['assets'].get('creative_id') or 'Unavailable'} · Ad set {ad.get('adset_name') or ad.get('adset_id') or 'Unavailable'}")
+        with st.expander('Advanced metrics',expanded=False):
+            st.dataframe(tables.advanced_rows(ad.get('benchmark_metrics',ad['metrics'])),hide_index=True)
 
 
 def winner_board(ads, history, context, compact=False):
+    if compact:
+        return simple_winner(ads,history,context)
     winner = analysis.choose_winner(ads)
     st.markdown('**Sports Cave winner**')
     if winner:
@@ -229,6 +224,49 @@ def winner_board(ads, history, context, compact=False):
             except Exception as error: st.error(sync_service.safe_error(error))
 
 
+def simple_winner(ads,history,context):
+    st.markdown('**SPORTS CAVE WINNER**')
+    winner=analysis.choose_winner(ads)
+    scope=hashlib.sha256(json.dumps(context,sort_keys=True,default=str).encode()).hexdigest()[:12]
+    key='va-winner-'+str(context['campaign_id'])
+    ids=[a['ad_id'] for a in ads]; by_id={a['ad_id']:a for a in ads}
+    saved=next((r['context'].get('overall','Automatic') for r in history['selections'] if r['action_type']=='meta_review_selection' and r['context'].get('scope')==scope),'Automatic')
+    options=['Automatic']+ids
+    if st.session_state.get(key) not in options: st.session_state[key]=saved if saved in options else 'Automatic'
+    chosen=st.selectbox('Winner to use',options,key=key,format_func=lambda value:
+        ('Automatic Best Ad — '+str(winner.get('ad_name') or winner['ad_id']) if winner else 'Automatic Best Ad — Insufficient data') if value=='Automatic' else str(by_id[value].get('ad_name') or value))
+    selected=winner if chosen=='Automatic' else by_id[chosen]
+    complete={}
+    if selected:
+        st.caption('Selected Winner: '+str(selected.get('ad_name') or selected['ad_id']))
+        for kind in ('image','primary_text','headline'):
+            candidates=[c for c in analysis.component_candidates(ads,kind,history['assets']) if str(c['ad_id'])==str(selected['ad_id'])]
+            if len(candidates)==1: complete[kind]=candidates[0]
+            elif candidates:
+                choice=st.selectbox('Choose original '+kind.replace('_',' '),[c['key'] for c in candidates],
+                    format_func=lambda k,items=candidates:next(c['value'][:100] for c in items if c['key']==k),key=key+'-'+selected['ad_id']+'-'+kind)
+                complete[kind]=next(c for c in candidates if c['key']==choice)
+    else: st.caption('Insufficient data. Select an ad explicitly to use it as a reference.')
+    actor=str((st.session_state.get('sports_cave_current_user') or {}).get('id') or 'sports_cave_os')
+    reference_key=scope+'-'+hashlib.sha256(json.dumps({'chosen':chosen,'complete':complete},sort_keys=True,default=str).encode()).hexdigest()[:12]
+    if st.button('APPLY TO CREATIVE REFRESH',type='primary',disabled=not selected or len(complete)!=3,key='va-apply-'+scope):
+        try:
+            b=selected.get('benchmark') or {}
+            mapping=next((m for m in history['mapping'] if str(m['ad_id'])==str(selected['ad_id'])),{})
+            package=handoff.build_package(selected,complete,{**context,'product_mapping':mapping,
+                'market':b.get('country','UNKNOWN'),'format':b.get('format','UNKNOWN'),
+                'recommendation_context':b,'last_sale':selected.get('recency',{})},'complete_ad')
+            with st.spinner('Saving winning image and reference…'):
+                st.session_state['va-handoff-link-'+reference_key]=handoff.queue_link(package,actor)
+        except Exception as error: st.error(sync_service.safe_error(error))
+    url=st.session_state.get('va-handoff-link-'+reference_key)
+    if url:
+        st.link_button('OPEN CREATIVE REFRESH',url,type='primary')
+        st.caption('Opens a new tab with the saved winner. Meta Review stays open.')
+    with st.expander('Advanced winner options',expanded=False):
+        winner_board(ads,history,context,compact=False)
+
+
 def live_status(entry, label):
     if entry['error']:
         st.error('LIVE META UNAVAILABLE · '+entry['error'])
@@ -275,15 +313,19 @@ def render_campaign_details(config, campaign, since, until):
     format=next(iter(formats)) if len(formats)==1 else 'UNKNOWN'
     current=campaign.get('benchmark') or {}
     campaign['benchmark']=benchmarks.evaluate(campaign.get('metrics') or {},format,current.get('country','UNKNOWN'),current.get('currency','UNKNOWN'))
-    st.dataframe(tables.styled([{**tables.metrics_row(campaign.get('metrics') or {}),**tables.score_columns(campaign)}],[campaign]),hide_index=True,placeholder='—',width='stretch',height=72,row_height=30)
-    st.caption('Benchmark context: '+format+' · '+current.get('country','UNKNOWN')+' · Unknown/mixed formats and markets have no format/country cost score. No locked Sports Cave UK cost benchmark yet.')
+    sale_entry=live.cached_read(cache,(live.scope(config),'last-sale-ads',cid),
+        lambda:recency.load(config,cid,'ad',campaign.get('account_timezone','Australia/Sydney')))
+    for ad in ads: ad['recency']=recency.signal({**ad,'metrics':ad.get('benchmark_metrics',ad['metrics'])},sale_entry['data'])
+    summary=tables.va_campaign_rows([campaign])[0]
+    summary={k:summary[k] for k in ('Spend','Sales','ROAS','CPA','Last Sale','Action')}
+    st.dataframe(tables.va_styled([summary],[campaign]),hide_index=True,placeholder='—',width='stretch',height=72,row_height=30)
     # Enrich only this brief live overview cache with already-read format evidence.
     for key,cached in cache.items():
         if key[:2]==(live.scope(config),'overview') and cached.get('data'):
             for item in cached['data'].get('campaigns',[]):
                 if item['campaign_id']==cid: item['benchmark']=campaign['benchmark']
     st.caption('Select a creative row to view its full image, copy and reporting details.')
-    event=st.dataframe(tables.styled(tables.creative_rows(ads),ads),hide_index=True,width='stretch',placeholder='—',
+    event=st.dataframe(tables.va_styled(tables.va_ad_rows(ads),ads),hide_index=True,width='stretch',placeholder='—',
         height=min(390,40+64*len(ads)),row_height=64,on_select='rerun',selection_mode=['single-row','single-cell'],
         key='meta-review-creative-table-'+cid,
         column_config={**{k:st.column_config.Column(help=v) for k,v in tables.HELP.items()},'Creative':st.column_config.ImageColumn(width=76,pinned=True),
@@ -293,6 +335,10 @@ def render_campaign_details(config, campaign, since, until):
             'Result':st.column_config.TextColumn(width=190)})
     selected=tables.selected_row(event,ads)
     if selected:
+        selection_key='va-table-selected-'+cid
+        if st.session_state.get(selection_key)!=selected['ad_id']:
+            st.session_state['va-winner-'+cid]=selected['ad_id']
+            st.session_state[selection_key]=selected['ad_id']
         with st.expander('View details · '+str(selected.get('ad_name') or selected['ad_id']),expanded=True):
             ad_card(selected)
     with st.container(key='meta-review-winner-controls'):
@@ -328,7 +374,7 @@ def render_page():
     if controls[0].button('Refresh From Meta',disabled=not config.get('configured')):
         live.invalidate(cache,account_scope)
         dismiss_campaign()
-    sort_by=controls[1].selectbox('Sort By',['Newest','ROAS','Purchases','Oldest','Lowest Score','Highest Score','Highest Spend'])
+    sort_by=controls[1].selectbox('Sort By',['Newest','ROAS','Sales'])
     since=None
     until=datetime.now(ZoneInfo('Australia/Sydney')).date()
     if not config.get('configured'):
@@ -346,17 +392,28 @@ def render_page():
     st.caption(f"{account.get('name') or 'Meta account'} · {'Unavailable' if entry['error'] else 'Connected'} · {source} · Last refreshed {refreshed} · Available Meta history · {account.get('currency') or 'Currency unavailable'}")
     if entry['error']: st.error('LIVE META UNAVAILABLE · '+entry['error'])
     if data is None: return
+    if not data['campaigns']:
+        st.info('No live campaigns returned.')
+        return
+    sale_entry=live.cached_read(cache,(account_scope,'last-sale-campaigns'),
+        lambda:recency.load(config,config['ad_account_id'],'campaign',account.get('timezone_name') or 'Australia/Sydney'))
+    for row in data['campaigns']:
+        row['recency']=recency.signal(row,sale_entry['data'])
+        row['account_timezone']=account.get('timezone_name') or 'Australia/Sydney'
     rows=tables.sort_campaigns(data['campaigns'],sort_by)
     if not rows:
         st.info('No live campaigns returned.')
         return
     st.caption('Select a campaign row to inspect its creatives and choose a winner.')
-    st.caption('1–3 Poor · 4–6 Watch · 7–9 Excellent · Grey = Learning / No benchmark. Format confirmed on campaign inspection.')
     key=f"meta-review-campaign-table-{sort_by}-{st.session_state.get('meta-review-table-epoch',0)}"
-    event=st.dataframe(tables.styled(tables.campaign_rows(rows),rows),hide_index=True,width='stretch',placeholder='—',
+    event=st.dataframe(tables.va_styled(tables.va_campaign_rows(rows),rows),hide_index=True,width='stretch',placeholder='—',
         height=min(660,40+32*len(rows)),row_height=32,on_select='rerun',selection_mode=['single-row','single-cell'],key=key,
-        column_config={**{k:st.column_config.Column(help=v) for k,v in tables.HELP.items()},'Campaign':st.column_config.TextColumn(width=340,pinned=True),
-            'Status':st.column_config.TextColumn(width=85),'Started':st.column_config.TextColumn(width=100)})
+        column_config={'Campaign':st.column_config.TextColumn(width=280,pinned=True),
+            'Status':st.column_config.TextColumn(width=75),'Last Sale':st.column_config.TextColumn(width=155,help='Supplemental Meta conversion-hour report. Approximate hour ranges; unavailable when unsupported.'),
+            'Action':st.column_config.TextColumn(width=150,help='Recommendation only. Never changes Meta status.')})
+    with st.expander('Advanced metrics',expanded=False):
+        advanced=[{'Campaign':r.get('campaign_name'),**{x['Metric']:x['Value'] for x in tables.advanced_rows(r.get('metrics') or {})}} for r in rows]
+        st.dataframe(advanced,hide_index=True,placeholder='—',width='stretch')
     selected=tables.selected_row(event,rows)
     if selected:
         campaign_popup(config,selected,since,until)
