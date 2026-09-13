@@ -47,4 +47,17 @@ def handoff_statements():
     return executed
 
 
-if __name__=='__main__': print(json.dumps(handoff_statements() if '--handoff' in sys.argv else read_statements() if '--read' in sys.argv else statements(),default=str))
+def product_statements():
+    executed=[]
+    connection=MagicMock()
+    cur=connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cur.fetchone.return_value={'ad_id':'1'}
+    cur.execute.side_effect=lambda sql,params=():executed.append({'sql':sql,'params':params})
+    with patch.object(store.backend,'connect',return_value=connection):
+        store.confirm_product_mapping({'account_id':'123','ad_id':'1','creative_id':'creative',
+            'campaign_id':'cam','handoff_token':'a'*32},
+            {'product_id':'42','product_handle':'canonical-art','product_title':'Canonical Art','category':'NBA'})
+    return executed
+
+
+if __name__=='__main__': print(json.dumps(product_statements() if '--product-confirm' in sys.argv else handoff_statements() if '--handoff' in sys.argv else read_statements() if '--read' in sys.argv else statements(),default=str))

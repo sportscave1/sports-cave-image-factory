@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 import meta_review_store as store
+import meta_review_products as products
 
 PENDING = 'meta-review-refresh-pending'
 ACTIVE = 'meta-review-refresh-source'
@@ -45,6 +46,8 @@ def build_package(ad,selections,context,mode):
         if mode=='complete_ad' and str(item['ad_id'])!=str(ad['ad_id']):
             raise ValueError('Complete-ad mode must use assets from the same ad.')
     return {**deepcopy(context),'mode':mode,'ad_id':ad['ad_id'],'ad_name':ad.get('ad_name'),
+            'adset_id':ad.get('adset_id'),'creative_name':ad.get('creative_name') or ((ad.get('raw') or {}).get('creative') or {}).get('name'),
+            'product_destination_urls':[item['value'] for item in ad['assets']['url']],
             'creative_id':ad['assets']['creative_id'],'components':deepcopy(selections),
             'metrics':deepcopy(ad['metrics']),'decision':deepcopy(ad['decision']),
             'dynamic':ad['assets']['dynamic'],'carousel':ad['assets']['carousel'],
@@ -54,7 +57,7 @@ def build_package(ad,selections,context,mode):
 
 
 def queue(package,state,actor='sports_cave_os'):
-    package=deepcopy(package)
+    package=products.enrich(package)
     package['image_sha256']=archive_image(package['components']['image']['value'])
     package['decision_id']=store.save_selection(package,actor,'meta_review_handoff')
     state[PENDING]=package
@@ -77,7 +80,7 @@ def load_link(state, params, config):
     package=store.load_handoff(token,config.get('ad_account_id',''))
     if not package.get('image_sha256'):
         raise ValueError('Saved winner has no archived image.')
-    state[PENDING]=deepcopy(package)
+    state[PENDING]=products.enrich(package)
     hydrate(state)
     state['meta-review-loaded-handoff']=token
     return True
@@ -91,26 +94,77 @@ def hydrate(state):
     state[ads_page.ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY]=package['components']['primary_text']['value']
     state[ads_page.ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY]=package['components']['headline']['value']
     mapping=package.get('product_mapping') or {}
-    state[ads_page.ADS_PRODUCT_NAME_KEY]=mapping.get('product_title') or ''
-    state[ads_page.ADS_PRODUCT_SELECTOR_KEY]=mapping.get('product_title') or ''
+    hydrate_product(state,mapping)
     # Unmapped references must not inherit an unrelated previous product/market.
     state['ads_category']=mapping.get('sport') if mapping.get('sport') in ads_page.CATEGORY_OPTIONS else 'Select category' if 'Select category' in ads_page.CATEGORY_OPTIONS else ads_page.CATEGORY_OPTIONS[0]
     state['ads_country']='Select country'
-    state[ads_page.ADS_PRODUCT_URL_KEY]=''
-    if package.get('destination_url') and '/products/' in package['destination_url']:
-        state[ads_page.ADS_PRODUCT_URL_KEY]=package['destination_url']
     if mapping.get('sport') in ads_page.CATEGORY_OPTIONS:
         state['ads_category']=mapping['sport']
     market={'AU':'Australia','US':'USA','GB':'UK','CA':'Canada','NZ':'New Zealand'}.get(package.get('market'),package.get('market'))
     if market in ads_page.COUNTRY_OPTIONS:
         state['ads_country']=market
     url=package.get('destination_url','')
-    state['ads_campaign_type']='Carousel' if package.get('carousel') else 'Instant Experience' if '/canvas/' in url or 'canvas_id=' in url else 'Single Image / Video'
+    state['ads_campaign_type']='Instant Experience' if package.get('format')=='INSTANT EXPERIENCE' else 'Carousel' if package.get('format')=='CAROUSEL' or package.get('carousel') else 'Instant Experience' if '/canvas/' in url or 'canvas_id=' in url else 'Single Image / Video'
     state[ACTIVE]=deepcopy(package)
     state.pop(PENDING,None)
     for key in ('ads-refresh-previous-campaign','ads-refresh-winning-candidate','ads-refresh-applied-winner'):
         state.pop(key,None)
     return True
+
+
+def hydrate_product(state,mapping):
+    import ads_page
+    row=mapping.get('canonical_row') or {}
+    identity=ads_page._edition_ops_product_selector_identity(row) if row else mapping.get('product_title','')
+    title=mapping.get('product_title') or ''
+    url=mapping.get('product_url') or ''
+    state[ads_page.ADS_PRODUCT_NAME_KEY]=title
+    state[ads_page.ADS_PRODUCT_SELECTOR_KEY]=identity or None
+    state[ads_page.ADS_PRODUCT_URL_KEY]=url
+    state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY]=identity
+    state[ads_page.ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY]=title
+    state[ads_page.ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY]=url
+    state[ads_page.ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]=False
+    state[ads_page.ADS_PRODUCT_URL_INITIALIZED_KEY]=bool(title)
+    state['ads_category']=mapping.get('category') or mapping.get('sport') or 'Select category'
+
+
+def product_selector_rows(rows,state):
+    source=state.get(ACTIVE) or {}
+    mapping=source.get('product_mapping') or {}
+    canonical=mapping.get('canonical_row')
+    if not canonical: return rows
+    return [canonical if str(r.get('product_handle') or r.get('shopify_handle') or '')==mapping.get('product_handle') else r for r in rows]
+
+
+def rank_product_options(options,records,state):
+    source=state.get(ACTIVE) or {}
+    ranked=[p['product_handle'] for p in (source.get('product_resolution') or {}).get('candidates',[])]
+    def key(identity):
+        row=records[identity]['row']
+        handle=row.get('product_handle') or row.get('shopify_handle')
+        return ranked.index(handle) if handle in ranked else len(ranked)
+    return sorted(options,key=key) if ranked else options
+
+
+def confirm_selected_product(state,row):
+    source=state.get(ACTIVE)
+    if not source or not row: return
+    product=products.canonical(row)
+    if not product: return
+    if product['product_handle']==(source.get('product_mapping') or {}).get('product_handle'):
+        hydrate_product(state,product)
+        return
+    try:
+        actor=str((state.get('sports_cave_current_user') or {}).get('id') or 'sports_cave_os')
+        enriched=store.confirm_product_mapping(source,product,actor)
+        state[ACTIVE]=enriched
+        hydrate_product(state,product)
+        state.pop('meta-review-product-error',None)
+        # Other Meta Review sessions reread on their normal short preference TTL.
+    except Exception as error:
+        state['meta-review-product-error']=str(error) if isinstance(error,ValueError) else 'Product confirmation could not be saved. Retry when mapping storage is available.'
+        hydrate_product(state,source.get('product_mapping') or {})
 
 
 def render_source(st):
@@ -129,8 +183,11 @@ def render_source(st):
         st.subheader('Winner from Meta Review')
         st.caption(f"{source.get('campaign_name')} · {source.get('ad_name')} · {source.get('date_range')} · {source['mode'].replace('_',' ')}")
         st.write(source['decision']['reason'])
-        if not (source.get('product_mapping') or {}).get('product_title'):
-            st.warning('This ad has no saved product mapping. Select the canonical product below before generating refreshes.')
+        if st.session_state.get('meta-review-product-error'): st.warning(st.session_state['meta-review-product-error'])
+        if not (source.get('product_mapping') or {}).get('canonical_row'):
+            st.warning('PRODUCT CONFIRMATION REQUIRED · Select the correct canonical Product name below. Suggested matches appear first; selection saves the mapping.')
+        else:
+            st.caption('Product matched: '+source['product_mapping']['product_title']+' · '+str(source.get('product_match_method') or 'canonical mapping'))
         if source['mode']=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
         try:

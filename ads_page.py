@@ -1641,6 +1641,9 @@ def _on_ads_product_selector_changed(rows):
     )
     st.session_state[ADS_PRODUCT_NAME_KEY] = selection.get("selected_label") or ""
     _synchronise_ads_product_url_state(selection)
+    if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
+        import meta_review_handoff
+        meta_review_handoff.confirm_selected_product(st.session_state,selection.get('row'))
 
 
 def prepare_ads_product_selector_state(rows, *, result=None):
@@ -9072,16 +9075,19 @@ def render_meta_url_parameters_section(section_number):
 
 def render_product_name_input(*, rows=None, result=None):
     rows = list(rows or ())
+    if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
+        import meta_review_handoff
+        rows=meta_review_handoff.product_selector_rows(rows,st.session_state)
     records = build_ads_product_selector_records(rows)
     records_by_identity = {record["identity"]: record for record in records}
     prepare_ads_product_selector_state(rows, result=result)
     if records:
+        options=alphabetize_options(records_by_identity,label=lambda identity: records_by_identity.get(identity,{}).get('label') or identity)
+        if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
+            options=meta_review_handoff.rank_product_options(options,records_by_identity,st.session_state)
         selector_value = st.selectbox(
             "Product name",
-            options=alphabetize_options(
-                records_by_identity,
-                label=lambda identity: records_by_identity.get(identity, {}).get("label") or identity,
-            ),
+            options=options,
             index=None,
             placeholder="Example: Six Laps Ahead",
             accept_new_options=True,

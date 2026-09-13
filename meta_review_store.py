@@ -190,6 +190,61 @@ def load_handoff(token, account_id):
     return row['context']
 
 
+def product_mapping_context(package):
+    with cursor() as cur:
+        cur.execute('SELECT m.*, COALESCE(a.creative_id,t.creative_id) AS creative_id, a.campaign_id, a.adset_id FROM ads_product_mapping m LEFT JOIN meta_ads a ON a.ad_id=m.ad_id LEFT JOIN meta_creative_tags t ON t.ad_id=m.ad_id LIMIT 10001')
+        rows=list(cur.fetchall())
+    if len(rows)>=10001: raise ValueError('Product mapping result is incomplete; review storage limits.')
+    return rows
+
+
+def product_posting_context(package):
+    with cursor() as cur:
+        cur.execute("SELECT to_regclass('public.meta_posting_submissions') AS present")
+        if not cur.fetchone()['present']: return []
+        cur.execute('''SELECT product_id,product_title,product_handle,destination_url,sport,
+            campaign_id,adset_id,meta_ad_id,meta_creative_id,ad_results
+            FROM meta_posting_submissions WHERE meta_ad_id=%s OR meta_creative_id=%s
+            OR campaign_id=%s OR adset_id=%s OR ad_results @> %s::jsonb LIMIT 1001''',
+            (package.get('ad_id') or None,package.get('creative_id') or None,package.get('campaign_id') or None,
+             package.get('adset_id') or None,json.dumps([{'meta_ad_id':package.get('ad_id') or '__none__'}])))
+        rows=list(cur.fetchall())
+    if len(rows)>=1001: raise ValueError('Posting match result is incomplete.')
+    result=[]
+    for row in rows:
+        result.append(row)
+        for ad in row.get('ad_results') or []:
+            if isinstance(ad,dict): result.append({**row,**ad})
+    return result
+
+
+def confirm_product_mapping(package, product, actor='sports_cave_os'):
+    """Confirm only this ad; conflicts never overwrite another canonical handle."""
+    ad_id=str(package.get('ad_id') or '')
+    if not ad_id or not product.get('product_handle'): raise ValueError('A canonical product and ad identity are required.')
+    provenance={k:package.get(k) for k in ('account_id','creative_id','campaign_id','adset_id')}
+    provenance.update(source='meta_review_manual_confirmation',product_id=product.get('product_id'),actor=actor)
+    with cursor(True) as cur:
+        cur.execute('''INSERT INTO ads_product_mapping(ad_id,product_handle,product_title,sport,notes,mapping_status,confirmed_at,confirmed_by)
+            VALUES (%s,%s,%s,%s,%s,'confirmed',now(),%s)
+            ON CONFLICT(ad_id) DO UPDATE SET product_handle=EXCLUDED.product_handle,
+            product_title=EXCLUDED.product_title,sport=EXCLUDED.sport,
+            notes=(EXCLUDED.notes::jsonb || jsonb_build_object('previous_notes',ads_product_mapping.notes))::text,
+            mapping_status='confirmed',confirmed_at=now(),confirmed_by=EXCLUDED.confirmed_by,updated_at=now()
+            WHERE COALESCE(ads_product_mapping.product_handle,'') IN ('',EXCLUDED.product_handle)
+            RETURNING ad_id''',(ad_id,product['product_handle'],product['product_title'],product.get('category',''),json.dumps(provenance),actor))
+        if not cur.fetchone(): raise ValueError('A conflicting exact ad mapping already exists. Correct it explicitly in Product Tagging Review first.')
+        mapping={**product,'product_match_method':'manual confirmation','product_match_confidence':'EXACT'}
+        update={**{k:v for k,v in product.items() if k!='canonical_row'},'product_mapping':mapping,'product_resolution':{'confidence':'EXACT','method':'manual confirmation','candidates':[]},
+                'product_match_method':'manual confirmation','product_match_confidence':'EXACT'}
+        if package.get('handoff_token'):
+            cur.execute("UPDATE ads_action_log SET context=context || %s::jsonb WHERE action_type='meta_review_handoff' AND context->>'handoff_token'=%s AND context->>'account_id'=%s",
+                        (json.dumps(update,default=str),package['handoff_token'],str(package.get('account_id') or '').removeprefix('act_')))
+        cur.execute("INSERT INTO ads_action_log(action_type,status,summary,context,created_by) VALUES ('meta_review_selection','saved','Canonical product confirmed',%s::jsonb,%s)",
+                    (json.dumps({**provenance,'ad_id':ad_id,'product_mapping':mapping},default=str),actor))
+    return {**package,**update}
+
+
 def save_media(data, content_type):
     if not data or len(data) > 8*1024*1024:
         raise ValueError('Winner image is empty or exceeds 8 MiB.')
