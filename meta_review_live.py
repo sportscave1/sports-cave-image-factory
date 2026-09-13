@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import time
 
 import meta_ads_client as meta
@@ -18,6 +19,7 @@ INSIGHT_FIELDS = ('date_start,date_stop,campaign_id,campaign_name,adset_id,adset
 CACHE_TTL = 120
 CACHE_LIMIT = 24
 REPORTABLE_CAMPAIGN_STATUSES = ('ACTIVE', 'PAUSED', 'ARCHIVED')
+LOGGER = logging.getLogger(__name__)
 
 
 def non_deleted(row):
@@ -171,9 +173,23 @@ def load_overview(config, since, until):
 
 def load_countries(config, identity, level, since, until):
     # Separate delivery-only report: never sum broken-down reach/conversions into totals.
-    return Reader(config).pages(str(identity)+'/insights', {
-        'fields': level+'_id,country,spend', 'level':level, 'breakdowns':'country',
-        'use_unified_attribution_setting':'true', **date_params(since,until)})
+    try:
+        return Reader(config).pages(str(identity)+'/insights', {
+            'fields': level+'_id,spend', 'level':level, 'breakdowns':'country',
+            'use_unified_attribution_setting':'true', **date_params(since,until)})
+    except meta.MetaAdsApiError as error:
+        message=str(error).lower()
+        compatibility_error=(str(error.error_code)=='100'
+            and any(word in message for word in ('country','breakdown'))
+            and any(word in message for word in ('not supported','unsupported','not valid','invalid','combination','cannot be combined'))
+            and not any(word in message for word in ('permission','access token','authentication','authorization')))
+        if not compatibility_error:
+            raise
+        # Discard the whole supplemental result, including any successful earlier
+        # pages. Partial country coverage could incorrectly select a single market.
+        LOGGER.warning('Meta Review country breakdown unavailable; market UNKNOWN; primary metrics retained (code=%s, subcode=%s)',
+                       error.error_code,error.error_subcode)
+        return []
 
 
 def load_campaign(config, campaign_id, since, until):

@@ -12,7 +12,12 @@ Account Insights uses `level=campaign`; selected campaign Insights uses `level=a
 Both keep unified attribution and the selected available-history period. Existing
 cursor pagination, limits, error handling and 120-second session cache remain.
 Each aggregate read now has a separate `breakdowns=country` request containing
-only the entity ID, country and spend. Country rows never replace aggregate metrics.
+only the entity ID and spend in `fields`; country is returned by the breakdown,
+never requested as a field. Country rows never replace aggregate metrics.
+Unsupported country/breakdown combinations (Meta code 100) are logged and yield
+UNKNOWN market without blocking primary reporting. Any partially read country
+pages are discarded. Primary failures, authentication, permissions and unrelated
+API errors remain visible.
 
 Aggregate fields: date_start, date_stop, campaign_id/name, adset_id/name, ad_id/name,
 spend, impressions, reach, frequency, clicks, ctr, cpc, cpm, inline_link_clicks,
