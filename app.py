@@ -5621,20 +5621,23 @@ def load_run_metadata(run_dir):
     return metadata
 
 
-def get_product_upload_prompt(metadata, update_existing=False, *, preview=False):
+def get_product_upload_prompt(metadata, update_existing=False, *, preview=False, publication_mode='DRAFT'):
     base_prompt = UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
     return build_product_upload_prompt(
         base_prompt,
         metadata=metadata,
         update_existing=update_existing,
         preview=preview,
+        publication_mode=publication_mode,
     )
 
 
 PRODUCT_UPLOAD_NEW_TYPE = "New product"
+PRODUCT_UPLOAD_LIVE_TYPE = "UPLOAD & PUBLISH LIVE"
 PRODUCT_UPLOAD_EXISTING_TYPE = "Update existing product"
 PRODUCT_UPLOAD_TYPE_OPTIONS = (
     PRODUCT_UPLOAD_NEW_TYPE,
+    PRODUCT_UPLOAD_LIVE_TYPE,
     PRODUCT_UPLOAD_EXISTING_TYPE,
 )
 PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE = (
@@ -6248,15 +6251,26 @@ def apply_product_upload_prompt_updates(
     *,
     update_existing=False,
     preview=False,
+    publication_mode='DRAFT',
 ):
+    if update_existing and publication_mode!='DRAFT':
+        raise ValueError('Existing product updates do not use New Product live publication.')
+    if not update_existing:
+        from product_upload_modes import common_build
+        prompt_text=common_build(prompt_text)
     prompt = apply_product_upload_product_name_update(prompt_text, metadata, preview=preview)
     prompt = apply_product_upload_pricing_update(prompt)
-    return apply_product_upload_media_reliability_patch(
+    from product_collector_copy import apply_rules
+    prompt = apply_rules(apply_product_upload_media_reliability_patch(
         prompt,
         metadata,
         update_existing=update_existing,
         preview=preview,
-    )
+    ))
+    if not update_existing:
+        from product_upload_modes import finalise_prompt
+        prompt=finalise_prompt(prompt,publication_mode)
+    return prompt
 
 
 def product_upload_embedded_sections():
@@ -6282,6 +6296,7 @@ def build_product_upload_prompt(
     metadata=None,
     update_existing=False,
     preview=False,
+    publication_mode='DRAFT',
 ):
     existing_prompt = (
         f"{str(base_prompt or '').strip()}\n\n"
@@ -6292,6 +6307,7 @@ def build_product_upload_prompt(
         metadata,
         update_existing=update_existing,
         preview=preview,
+        publication_mode=publication_mode,
     )
 
 
@@ -9897,15 +9913,19 @@ def product_upload_operation_config(upload_type):
     return {
         "upload_type": selected,
         "update_existing": update_existing,
+        "publication_mode": 'LIVE' if selected==PRODUCT_UPLOAD_LIVE_TYPE else 'DRAFT',
+        "description": ('Create, validate, activate and publish across Sports Cave Markets, channels and collections.'
+            if selected==PRODUCT_UPLOAD_LIVE_TYPE else 'Create and fully configure for manual review. Nothing is published.'
+            if not update_existing else 'Update the verified existing product using its current scope safeguards.'),
         "title": (
             "Update Existing Product Prompt"
             if update_existing
-            else "New Shopify Product Prompt"
+            else "UPLOAD & PUBLISH LIVE" if selected==PRODUCT_UPLOAD_LIVE_TYPE else "UPLOAD TO DRAFT"
         ),
         "key": (
             "update-existing-shopify-product-prompt"
             if update_existing
-            else "new-shopify-product-prompt"
+            else "new-shopify-product-live-prompt" if selected==PRODUCT_UPLOAD_LIVE_TYPE else "new-shopify-product-prompt"
         ),
         "prompt_id": prompt_edit_id(
             "product-upload",
@@ -9918,7 +9938,7 @@ def product_upload_operation_config(upload_type):
         "action_type": (
             "existing_product_update_prompt_generated"
             if update_existing
-            else "new_product_prompt_generated"
+            else "new_product_live_prompt_generated" if selected==PRODUCT_UPLOAD_LIVE_TYPE else "new_product_prompt_generated"
         ),
     }
 
@@ -9976,7 +9996,7 @@ def render_product_uploads_page():
     with st.expander("How to", expanded=False):
         st.markdown(
             "1. Open the exact product folder in Sports Cave Files so its Dropbox path is selected.\n"
-            "2. Copy either the new-product prompt or the update-existing-product prompt.\n"
+            "2. Choose UPLOAD TO DRAFT, UPLOAD & PUBLISH LIVE, or Update existing product.\n"
             "3. Run the prompt with the connected Dropbox and Shopify integrations.\n"
             "4. The media verification, image alt text, SEO meta tags, and final QA checklist instructions are already embedded inside both prompts.\n"
             "\n"
@@ -10011,11 +10031,20 @@ def render_product_uploads_page():
         "Upload type",
         PRODUCT_UPLOAD_TYPE_OPTIONS,
         key="product-upload-upload-type",
+        format_func=lambda value: 'UPLOAD TO DRAFT' if value==PRODUCT_UPLOAD_NEW_TYPE else value,
     )
     product_name_input = st.text_input(
         "Product name",
         key="product-upload-product-name",
     )
+    config = product_upload_operation_config(upload_type)
+    st.caption(config['description'])
+    if config['publication_mode']=='LIVE':
+        confirmed=st.checkbox('I approve live publication of this product after full QA, including product and collection channel availability.',
+            key='product-upload-live-confirm-'+hashlib.sha256(product_name_input.encode()).hexdigest()[:16])
+        if not confirmed or not product_name_input.strip():
+            st.warning('Enter the product name and confirm live publication to generate the Live prompt. No Shopify action runs on this page.')
+            return
     submitted = st.button(
         "Submit",
         type="primary",
@@ -10027,6 +10056,7 @@ def render_product_uploads_page():
         preview_metadata,
         update_existing=config["update_existing"],
         preview=True,
+        publication_mode=config['publication_mode'],
     )
     if submitted:
         try:
@@ -10058,6 +10088,7 @@ def render_product_uploads_page():
             preview_metadata,
             update_existing=config["update_existing"],
             preview=True,
+            publication_mode=config['publication_mode'],
         ),
     )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")

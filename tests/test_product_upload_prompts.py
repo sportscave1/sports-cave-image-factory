@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import app
 import sports_cave_pricing
+from product_collector_copy import apply_rules
+from product_upload_modes import common_build, CORE
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -305,8 +307,8 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                     update_existing=update_existing,
                 )
                 self.assertEqual(
-                    app.remove_product_upload_product_name_block(current_prompt),
-                    legacy_prompt.replace(legacy_pricing, new_pricing),
+                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(current_prompt)),
+                    apply_rules((lambda p: p if update_existing else common_build(p))(legacy_prompt.replace(legacy_pricing, new_pricing))),
                 )
 
     def test_only_change_to_each_generated_prompt_is_the_inserted_patch(self):
@@ -321,13 +323,13 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                     update_existing=update_existing,
                 )
                 self.assertEqual(
-                    app.remove_product_upload_product_name_block(
+                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(
                         app.remove_product_upload_media_reliability_patch(upgraded)
-                    ),
-                    legacy,
+                    )),
+                    apply_rules(legacy if update_existing else common_build(legacy)),
                 )
-                self.assertTrue(upgraded.startswith(app.PRODUCT_UPLOAD_NAME_BLOCK_START))
-                self.assertIn(base_prompt.strip(), upgraded)
+                self.assertTrue(upgraded.startswith(app.PRODUCT_UPLOAD_NAME_BLOCK_START if update_existing else CORE))
+                self.assertIn(apply_rules(base_prompt if update_existing else common_build(base_prompt)).split('SPORTS CAVE COLLECTOR COPY')[0].strip(), upgraded)
                 self.assertEqual(upgraded.count(app.PRODUCT_UPLOAD_MEDIA_PATCH_START), 1)
                 self.assertLess(
                     upgraded.index(app.PRODUCT_UPLOAD_MEDIA_PATCH_START),
@@ -588,7 +590,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
         )
 
         self.assertIn("product-upload-product-name", fake_st.session_state.rendered_widget_keys)
-        self.assertEqual(rendered_prompts[0]["title"], "New Shopify Product Prompt")
+        self.assertEqual(rendered_prompts[0]["title"], "UPLOAD TO DRAFT")
         self.assertIn(
             f"PRODUCT NAME: {app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER}",
             rendered_prompts[0]["prompt_text"],
@@ -626,7 +628,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
             product_name="Switch Test",
         )
 
-        self.assertEqual(new_rendered[0]["title"], "New Shopify Product Prompt")
+        self.assertEqual(new_rendered[0]["title"], "UPLOAD TO DRAFT")
         self.assertEqual(existing_rendered[0]["title"], "Update Existing Product Prompt")
         self.assertIn("SOP 07B", new_rendered[0]["prompt_text"])
         self.assertIn("SOP 07C", existing_rendered[0]["prompt_text"])
@@ -696,7 +698,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
             source.index("def render_product_uploads_page():") :
             source.index("\n\ndef test_google_drive_connection")
         ]
-        self.assertEqual(app.PRODUCT_UPLOAD_TYPE_OPTIONS, ("New product", "Update existing product"))
+        self.assertEqual(app.PRODUCT_UPLOAD_TYPE_OPTIONS, ("New product", "UPLOAD & PUBLISH LIVE", "Update existing product"))
         self.assertIn('"Upload type"', page_source)
         self.assertIn("PRODUCT_UPLOAD_TYPE_OPTIONS", page_source)
         self.assertIn('"Product name"', page_source)
