@@ -110,7 +110,7 @@ Retries must resume the same product; never restart by creating a replacement.''
 
 
 def common_build(prompt):
-    text=str(prompt).strip()
+    text=str(prompt).replace('\r\n','\n').replace('\r','\n').strip()
     text=re.sub(re.escape(START)+r'.*?'+re.escape(END),'',text,flags=re.S).strip()
     text='\n'.join(line for line in text.splitlines() if line not in (CORE,CORE_END)).strip()
     text=re.sub(r'BRUTAL DRAFT RULE\n.*?(?=REQUIRED ASSETS)',

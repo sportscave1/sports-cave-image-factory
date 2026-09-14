@@ -9998,7 +9998,7 @@ def render_product_uploads_page():
             "1. Open the exact product folder in Sports Cave Files so its Dropbox path is selected.\n"
             "2. Choose UPLOAD TO DRAFT, UPLOAD & PUBLISH LIVE, or Update existing product.\n"
             "3. Run the prompt with the connected Dropbox and Shopify integrations.\n"
-            "4. The media verification, image alt text, SEO meta tags, and final QA checklist instructions are already embedded inside both prompts.\n"
+            "4. Media verification, image alt text, SEO and QA are embedded in every prompt. Live mode continues to publication only after staging QA passes.\n"
             "\n"
             "This page stays manual on purpose so it remains fast and lightweight on Render."
         )
