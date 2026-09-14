@@ -17,6 +17,7 @@ import shopify_sync
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Create missing subscriptions; never delete existing ones.")
+    parser.add_argument("--receipts", action="store_true", help="Read existing OS product webhook diagnostics without schema maintenance.")
     args = parser.parse_args(argv)
     base_url = os.getenv("SPORTS_CAVE_WEBHOOK_BASE_URL", "").strip().rstrip("/")
     if not base_url.startswith("https://") or "/webhooks/" in base_url:
@@ -42,6 +43,24 @@ def main(argv=None):
             ensured = getattr(shopify_sync, f"ensure_products_{suffix}_webhook_subscription")(callback_url=callback, config=config)
             result["created"] = bool(ensured.get("created"))
         print(json.dumps(result), flush=True)
+    if args.receipts:
+        import supabase_backend
+        diagnostics = supabase_backend.get_product_sync_diagnostics(ensure_schema_first=False)
+        keys = ("last_webhook_event", "last_product_webhook_timestamp",
+                "last_product_webhook_status", "last_product_webhook_handle",
+                "last_product_webhook_error", "error")
+        print(json.dumps({key: diagnostics.get(key) for key in keys}, default=str), flush=True)
+        if diagnostics.get("supabase_connected"):
+            with supabase_backend.connect() as conn:
+                with conn.cursor() as cur:
+                    for label, statuses in (("latest_success", ["processed", "success"]),
+                                            ("latest_failure", ["failed", "rejected", "error"])):
+                        cur.execute("""SELECT topic, webhook_id, status, received_at, processed_at, error_message
+                            FROM webhook_events
+                            WHERE LOWER(REPLACE(topic, '_', '/')) IN ('products/create', 'products/update')
+                              AND LOWER(status) = ANY(%s)
+                            ORDER BY received_at DESC LIMIT 1""", (statuses,))
+                        print(json.dumps({label: cur.fetchone()}, default=str), flush=True)
     return 0
 
 

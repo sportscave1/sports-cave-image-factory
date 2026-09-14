@@ -3132,7 +3132,7 @@ def sync_product_edition_metafields(product, config=None, request_post=None):
         ) from error
 
 
-def sync_complete_product_edition_metafields(product, config=None, request_post=None):
+def sync_complete_product_edition_metafields(product, config=None, request_post=None, *, verify=False):
     """Mirror all storefront keys in one metafieldsSet mutation.
 
     Shopify userErrors are raised by metafields_set, leaving the database ledger
@@ -3146,6 +3146,17 @@ def sync_complete_product_edition_metafields(product, config=None, request_post=
             raise ShopifyAPIError(
                 f"Shopify confirmed {len(returned)} of {len(inputs)} Edition Ops metafields."
             )
+        if verify:
+            observed = {}
+            for namespace in sorted({item["namespace"] for item in inputs}):
+                readback = fetch_metafields(inputs[0]["ownerId"], namespace=namespace,
+                                           config=config, request_post=request_post)
+                observed.update({(namespace, item["key"]): str(item.get("value"))
+                                 for item in readback.get("metafields") or []})
+            mismatches = [item["key"] for item in inputs
+                          if observed.get((item["namespace"], item["key"])) != str(item["value"])]
+            if mismatches:
+                raise ShopifyAPIError("Edition mirror read-back mismatch: " + ", ".join(mismatches))
         return response
     except ShopifyAPIError as error:
         raise ShopifyAPIError(

@@ -2146,17 +2146,14 @@ def _render_save_changes_button(slot, *, disabled):
 
 def _format_new_product_pull_summary(result):
     result = result or {}
-    added = int(result.get("new_products_inserted") or 0)
-    updated = int(result.get("existing_products_updated") or 0)
-    errors = list(result.get("errors") or [])
-    if errors:
-        return (
-            f"{added} new product(s) added \u00b7 {updated} renamed product(s) updated "
-            f"\u00b7 {len(errors)} issue(s)"
-        )
-    if not added and not updated:
-        return "No new products found."
-    return f"{added} new product(s) added \u00b7 {updated} renamed product(s) updated"
+    return (
+        f"{int(result.get('products_fetched') or 0)} Shopify products checked; "
+        f"{int(result.get('new_products_inserted') or 0)} missing products added; "
+        f"{int(result.get('existing_products_skipped') or 0)} existing products unchanged; "
+        f"{int(result.get('shopify_metafields_pushed') or 0)} mirrors verified; "
+        f"{int(result.get('shopify_metafields_failed_pending') or 0)} mirrors pending retry; "
+        f"{len(result.get('errors') or [])} issue(s) requiring review"
+    )
 
 
 def _render_pull_new_products_button(target, backend):
@@ -2169,14 +2166,18 @@ def _render_pull_new_products_button(target, backend):
         key="edition-ops-pull-new-products",
     ):
         return
+    if _changed_rows(st.session_state.get(EDITOR_ROWS_KEY) or st.session_state.get(ROWS_KEY) or [],
+                     st.session_state.get(ORIGINAL_ROWS_KEY) or []):
+        st.warning("Save or discard unsaved Edition Ops edits before pulling products.")
+        return
     try:
-        with st.spinner("Checking Shopify for new products..."):
-            if not hasattr(backend, "sync_new_shopify_products_to_edition_ops"):
+        with st.spinner("Checking the complete Shopify catalogue for missing products..."):
+            if not hasattr(backend, "reconcile_all_shopify_products_to_edition_ops"):
                 raise ValueError("New-product sync is not available.")
             config = shopify_sync.get_config()
             if not config.get("configured"):
                 raise ValueError("Shopify is not configured.")
-            result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+            result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
             record_activity_log(
                 "shopify_new_products_pulled",
                 "Edition Ops",
@@ -2186,7 +2187,7 @@ def _render_pull_new_products_button(target, backend):
                     "new_products_inserted": int(result.get("new_products_inserted") or 0),
                     "existing_products_updated": int(result.get("existing_products_updated") or 0),
                     "error_count": len(result.get("errors") or []),
-                    "status": "success",
+                    "status": "warning" if result.get("errors") else "success",
                 },
                 event_key=_activity_event_key(
                     "shopify-new-products-pulled",
@@ -2199,12 +2200,14 @@ def _render_pull_new_products_button(target, backend):
             )
             _reload_products_from_supabase()
             st.session_state[NOTICE_KEY] = _format_new_product_pull_summary(result)
+            if result.get("errors"):
+                st.session_state[IMPORT_WARNINGS_KEY] = list(result["errors"])
             st.session_state[NOTICE_LEVEL_KEY] = (
                 "warning" if result.get("errors") else "success"
             )
     except Exception as error:
         st.session_state[NOTICE_KEY] = (
-            f"Pull New Products failed: {error}. The current catalogue is unchanged."
+            f"Pull New Products failed: {error}. Committed ledger rows are retained; retry is safe."
         )
         st.session_state[NOTICE_LEVEL_KEY] = "error"
     st.rerun()

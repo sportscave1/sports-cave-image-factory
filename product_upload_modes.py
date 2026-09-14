@@ -91,6 +91,17 @@ COLLECTION and COLLECTOR SERIES publication for each required enabled channel.
 Use a matrix: Resource | Channel/Market | Required | Observed | Verified/Error.
 Retain the existing media verification table. Retry transient processing failures
 with bounded polling and fresh reads; never report a pending state as success.
+EDITION OPS OPERATIONAL READINESS
+After activation, the existing products/update webhook must register this eligible
+product through the canonical Edition Ops service. Where the execution environment
+supports Edition Ops access, verify this exact Shopify ID has its committed ledger,
+correct active run and verified canonical Shopify edition metafield mirror. Use
+the existing reconciliation service to recover missing registration; never create
+edition defaults, runs or counters independently or reset existing editions.
+If access is unavailable, report EDITION OPS READINESS UNVERIFIED and request the
+operator's Edition Ops Pull New Products reconciliation/read-back. Shopify ACTIVE
+alone is not proof. A pending mirror remains retryable; do not roll back the ledger.
+Do not claim the full workflow is operational until this verification passes.
 Only if EVERY required check passes report PRODUCT PUBLISHED LIVE, product title,
 admin URL, ACTIVE, sport collection, Collector Series, 16 variants, inventory 20,
 continue-selling, applicable active Markets and each verified channel/resource.

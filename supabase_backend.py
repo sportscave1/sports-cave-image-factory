@@ -8007,7 +8007,7 @@ def _mirror_pending_registered_product(product_id, *, config=None):
                 **row, "edition_enabled": enabled, "edition_next_number": next_number,
                 "edition_sold_count": int(row["sold_count"]), "edition_remaining": remaining,
                 "edition_label": row.get("edition_name") or DEFAULT_EDITION_NAME,
-            }, config=config)
+            }, config=config, verify=True)
             cur.execute(
                 """UPDATE edition_products SET metafields_sync_status='Synced',
                    metafields_synced_at=now(), last_metafield_error=''
@@ -8045,6 +8045,11 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
                      source=source, action="error", reason="supabase_registration_failed", error_type=type(error).__name__)
         raise
     result["eligibility_results"] = decisions
+    for decision in decisions:
+        if decision.get("retryable"):
+            result.setdefault("errors", []).append(
+                f"{decision.get('handle')} ({decision.get('shopify_product_id')}): {decision['reason']}"
+            )
     for product in eligible:
         handle = product.get("handle")
         action = "created" if handle in result.get("inserted_handles", []) else "updated_metadata" if handle in result.get("updated_handles", []) else "already_exists"
@@ -8054,7 +8059,13 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
             _webhook_log("edition_product_registration_error", "failed", topic=topic, webhook_id=webhook_id,
                          shopify_product_id=product["shopify_product_id"], handle=handle,
                          action="error", reason="initial_mirror_failed", error_type=type(error).__name__)
-            raise RuntimeError("Initial edition mirror failed; Supabase registration is committed and retryable.") from error
+            if source == "webhook":
+                raise RuntimeError("Initial edition mirror failed; Supabase registration is committed and retryable.") from error
+            result["shopify_metafields_failed_pending"] = int(result.get("shopify_metafields_failed_pending") or 0) + 1
+            result.setdefault("errors", []).append(
+                f"{handle} ({product['shopify_product_id']}): initial mirror pending retry: {error}"
+            )
+            continue
         result["shopify_metafields_pushed"] = int(result.get("shopify_metafields_pushed") or 0) + int(mirrored)
         _webhook_log("edition_product_registered", "processed", topic=topic, webhook_id=webhook_id,
                      shopify_product_id=product["shopify_product_id"], handle=handle, eligible=True,
@@ -8790,6 +8801,7 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
             active_draft_products,
             source="manual_sync",
             config=config,
+            missing_only=True,
         )
         summary.update(
             {
