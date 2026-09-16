@@ -92,6 +92,8 @@ class MemoryDatabase:
                                                  and r.get('metafields_sync_status') == 'Pending automatic mirror'), None))
                 elif compact.startswith('SELECT ep.* FROM edition_products'):
                     assert self.conn.held, 'Identity must be read after serialization'
+                elif compact.startswith('SELECT id, shopify_product_id, shopify_product_gid, shopify_handle, metafields_sync_status FROM edition_products'):
+                    pass
                 elif compact.startswith('SELECT EXISTS'):
                     self.result = {'has_history': bool(db.history)}
                 elif compact.startswith('INSERT INTO shopify_products'):

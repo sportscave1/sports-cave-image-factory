@@ -1040,11 +1040,14 @@ def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=No
 
 
 def edition_registration_eligibility(product):
-    """Use the documented Product Uploads collector contract (app.py).
+    """Sports Cave published Framed Art participates unless explicitly excluded.
 
     Collections are deliberately not required: automatic collections/publication
     may lag the ACTIVE mutation. Unknown products fail closed.
     """
+    if any(not str(product.get(key) or "").strip()
+           for key in ("shopify_product_id", "handle", "status")):
+        return {"eligible": False, "reason": "invalid_canonical_product", "retryable": True}
     if str(product.get("status") or "").upper() != "ACTIVE":
         return {"eligible": False, "reason": "not_active"}
     raw_tags = product.get("tags") or []
@@ -1060,11 +1063,11 @@ def edition_registration_eligibility(product):
         return {"eligible": False, "reason": "not_sports_cave"}
     if str(product.get("product_type") or "").strip().casefold() != "framed art":
         return {"eligible": False, "reason": "not_wall_art"}
-    if not tags & {"collector series", "limited edition", "limited edition sports prints"}:
-        return {"eligible": False, "reason": "collector_classification_missing", "retryable": True}
+    if "edition-exempt" in tags:
+        return {"eligible": False, "reason": "edition_exempt"}
     if not product.get("online_store_url"):
         return {"eligible": False, "reason": "publication_pending", "retryable": True}
-    return {"eligible": True, "reason": "published_collector_wall_art"}
+    return {"eligible": True, "reason": "published_sports_cave_framed_art"}
 
 
 def edition_registration_history_warning(product):

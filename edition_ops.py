@@ -2150,6 +2150,7 @@ def _format_new_product_pull_summary(result):
         f"{int(result.get('products_fetched') or 0)} Shopify products checked; "
         f"{int(result.get('new_products_inserted') or 0)} missing products added; "
         f"{int(result.get('existing_products_skipped') or 0)} existing products unchanged; "
+        f"{int(result.get('products_excluded') or 0)} excluded; "
         f"{int(result.get('shopify_metafields_pushed') or 0)} mirrors verified; "
         f"{int(result.get('shopify_metafields_failed_pending') or 0)} mirrors pending retry; "
         f"{len(result.get('errors') or [])} issue(s) requiring review"
@@ -2400,8 +2401,10 @@ def render_page():
                 st.caption(f"Duration: {int(load_diagnostic.get('duration_ms') or 0)} ms")
 
     warnings = st.session_state.get(IMPORT_WARNINGS_KEY) or []
-    for warning in warnings:
-        st.warning(warning)
+    if warnings:
+        with st.expander(f"{len(warnings)} items require review", expanded=False):
+            for warning in warnings:
+                st.write(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
     top_cols = st.columns([4, 1]) if hasattr(st, "columns") else [None, None]

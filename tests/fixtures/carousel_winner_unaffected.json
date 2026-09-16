@@ -1,0 +1,262 @@
+[
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "0323b226d0895b8a5d9ca427a798a418777776b87652a54340332394de8ea762"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "cf45ef9ac19fc6d392b8d737738020ac2e4da631763f1b068d029eb4093dd52f"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "ac4e121e25dda30e368eaccc7eb2377eda862f63c2246e767a4a559a91723c83"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "2eb6cac9403c8e534e04082d746a8a3b9cbe0c4cc100096da461155beaa06ea1"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Baseball",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "2479710938c041ca26105931cb6f02f19ed65b2a23dfe6f2cfa35129187003dd"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Baseball",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "9e87aa8b917b47cd4919c7a4b2a97dd59a91fbf2d83ffe712217aaf71a085162"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Baseball",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "bbf298043b5b565e240fef5ae4cc27f253500ba37304676a0a7a5350987d9503"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Baseball",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "98f39c318bf2cf515ecf653b499e11f6548fb7955a93143e7e3b5ad9b9dea497"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "NBA",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "16d220d2913f08b110162eb67d2d911c6e12428c209df17c46bbb73c62dfef7a"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "NBA",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "f5f5e10a1a5bebcb8c3cf0011f392009fb4fc7752e808b85307d84e8413264ed"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "NBA",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "6616b52e0b13964f92f830083535325bbc83d183caf0f2945314ab967863cbc4"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "NBA",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "f39f4d7a3a47a42e2558c72d6571c6d3f0fb65a25cf4b5fd8db1a9b4524e28b0"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "063c0b251165ac517cbacc997024745d2cf61c568cabff664b35ac6586c2e9e7"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "669481e1aaf4a67c3f0e2310d7553bdbe1b8c71412016cbea96db42b46b72952"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "ee20170bdac122a89ffcd6d0405305a43edeb558ab38c1d090518942bfacd5f2"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "85a242f58ff751b009a66529c9adfd64ef192176998d34bb7e33fa06414aa263"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Football",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "8aa13b74d3eded3c1622df62236c6683c2a5fe882d6cdf662c0bff63940692ea"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Football",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector"
+    },
+    "sha256": "6aeb71d043c1a241703bc8e1b063d27211df449dcd1b374e7633c9cacd094a47"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Football",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "ae620af97aebf55b2a42e11a59b9694d94147589547ab23674fc40c74c848cb1"
+  },
+  {
+    "kwargs": {
+      "product_name": "Collector Regression",
+      "category": "Football",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "fixed-regression",
+      "product_url": "https://example.com/products/collector",
+      "creative_refresh_context": {
+        "winning_primary_text": "Proven collector copy",
+        "winning_headline": "Proven headline"
+      }
+    },
+    "sha256": "fb83319111676603f7eb614aa82f3c3afe744791c4d861c3f287b06d471bb418"
+  }
+]

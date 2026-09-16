@@ -33,3 +33,15 @@ Only the Live finalisation prompt now requires exact-ID Edition Ops/run/mirror v
 
 ## Validation
 288 focused Edition Ops, activation, webhook, Shopify sync, recovery and product-upload tests ran: 254 passed, 34 skipped. Stateful SQL doubles exercise the real registration planner/write/run paths, but are not production PostgreSQL integration tests. Python compilation and git diff --check passed. No migration is required.
+
+
+## Final eligibility cleanup
+The mandatory modern-tag gate was a second discovery defect: it rejected valid legacy Framed Art and reclassified existing ledgers. The shared rule is now ACTIVE + Online Store publication + Sports Cave vendor + Framed Art, subject to all existing explicit exclusions. Collector Series / Limited Edition tags and collection membership are not prerequisites. A single optional `edition-exempt` tag explicitly opts a missing product out; it does not change an existing ledger.
+
+Full reconciliation bulk-loads stable Shopify identities before classifying or refetching candidates. Internal database row IDs are never treated as Shopify IDs. Existing identities are counted unchanged and skipped. Only an existing Pending automatic mirror marker retains the established committed-ledger retry path. The write transaction still rechecks identity/history under its original lock, including races after the bulk read.
+
+Explicit exclusions (internal/private/hidden/upsell/test/apparel/certificate/fulfilment and configured certificate identities), wrong vendor, non-Framed Art and Draft are quiet exclusions. Missing/uncertain publication or an invalid canonical response remains actionable. The summary separates excluded products; details appear in a collapsed review expander. The canonical new-row/run defaults and allocator are unchanged.
+
+Regression fixtures cover 180 existing untagged products plus three missing untagged products: 180 unchanged, three inserted/mirrored, zero review errors; a repeated run inserts/mirrors nothing. Existing sold and archived rows and orphan-history guards remain tested. Products/create and products/update use the same updated rule; a no-tag Draft to Active canonical refetch registers correctly.
+
+After an approved deployment, run one normal Pull New Products reconciliation. No live run, tag edits or production inspection were performed here. No migration is required.

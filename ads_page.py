@@ -18,6 +18,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import ads_posting_handoff as posting_handoff
 import ads_refresh_winners
+import ads_ie_visual_systems as ie_visuals
+import ads_carousel_winner as carousel_winner
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 
 from activity_log import record_activity_log
@@ -130,7 +132,7 @@ CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
 ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
-ADS_CAROUSEL_DETAIL_CONTRACT_VERSION = "CAROUSEL HERO AND EDITION DETAIL V1"
+ADS_CAROUSEL_DETAIL_CONTRACT_VERSION = "CAROUSEL WINNER AND FOUR ENVIRONMENTS V2"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
@@ -146,7 +148,8 @@ CREATIVE_REFRESH_WINNER_CONTEXT_VERSION = "SPORTS CAVE CREATIVE REFRESH WINNER C
 THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION = "SPORTS CAVE THREE-ENVIRONMENT DIVERSITY V1"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V8 PREMIUM ROOM V4 DIFFERENT HOMES"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V9 THREE VISUAL SYSTEMS"
+ADS_INSTANT_EXPERIENCE_WIRING_VERSION = "IE THREE-FORMAT WIRING V1"
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = 6
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = 28
 INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_WORDS = 12
@@ -2972,7 +2975,7 @@ def build_carousel_card_camera_distance_lock(index, *, category="", workflow_mod
         return """CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:
 Use a medium or medium-close lifestyle composition, not a distant wide-angle room shot. The complete framed artwork should generally occupy approximately 45-65% of the useful square composition. The product must remain instantly recognizable and readable when viewed as a small Facebook carousel card on a phone. Show enough of the room to create variety, context, ownership appeal and atmosphere, but do not place the frame far away, at the end of a large room or as a small background decoration. Never use an extreme wide shot, excessive empty space or oversized furniture that visually reduces the product. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        return build_carousel_card_five_edition_detail_lock()
+        return carousel_winner.CARD_FIVE
     return """CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:
 Finish with a dramatic product-led scarcity image using a close or medium-close composition. Keep the framed edition prominent even when the card focuses on scarcity, edition details or a different environment. The framed edition must remain one of the largest elements in the composition and must not become secondary to scarcity messaging, furniture, architecture or atmosphere. Make the existing edition badge, plaque or numbered-edition detail visible when it exists in the supplied product, but never invent, replace or modify an edition number. Do not zoom out significantly farther than Cards 2-4. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
 
@@ -3016,6 +3019,8 @@ def build_carousel_image_prompt_schema(
     category="",
     selected_country="",
     workflow_mode=ADS_WORKFLOW_MODE_NEW,
+    resolved_scene=None,
+    variation_token="",
 ):
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
@@ -3043,7 +3048,7 @@ def build_carousel_image_prompt_schema(
     )
     creative_direction = f"Use the exact Card {index} headline, description and supplementary creative direction generated earlier in this campaign to shape one concrete scene. Do not render the Meta headline or description inside the image unless the approved card concept explicitly requires on-image text. The creative-direction line is additional context only and must never replace or shorten this complete prompt."
     scene_description = "Describe the concrete room or wall, wall colour and material, camera position, lens character, lighting direction, furniture context and emotional atmosphere in full. Do not return a summary, shorthand variation, shared base prompt, list of changes or reference to instructions elsewhere."
-    if index in {1, 5} and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+    if index == 1 and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
         square_lock = square_lock.replace("Compose the entire room, framed product", "Compose the wall, framed product")
         product_dominance_lock = product_dominance_lock.replace(
             "Use varied rooms, wall colours, camera positions and viewing angles without creating distant product shots.",
@@ -3076,6 +3081,32 @@ Analyze the uploaded Sports Cave product image and previous images for the same 
         else:
             required_purposes[5] = "Truthful scarcity through a physical magnifying glass over the genuine numbered-edition detail."
             creative_direction = "Use Card 5's copy only to understand its verified collector purpose. The physical magnifying glass over actual edition detail is the authoritative visual. Do not render any headline, description, campaign offer, urgency text or extra overlay inside this image."
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        if resolved_scene is None:
+            resolved_scene = resolve_carousel_visual_scenes(
+                product_name, category, selected_country, variation_token=variation_token,
+                campaign_moment=campaign_moment,
+            )[index - 1]
+        required_purposes.update({
+            2: "Supported fan identity and relevant memory or present-day connection.",
+            3: "A defining verified product hook distinct from Card 1.",
+            4: "For The Cave ownership in a Premium Man Cave / Sports Cave.",
+            5: "Authentic scarcity in the fourth distinct premium lifestyle room.",
+        })
+        scene_description = carousel_winner.scene_block(resolved_scene, variation_token)
+        if index == 1:
+            camera_distance_lock = camera_distance_lock.replace(
+                carousel_nostalgic_wall_treatment(category),
+                f"Resolved close-up wall: {resolved_scene['wall_family']}. Use restrained low saturation, no team-colour branding and no saturated wall. Match the actual artwork palette, brightness, mood, era, market and unchanged frame colour.",
+            )
+        sequential_variation_lock = sequential_variation_lock.replace(
+            "Vary naturally between perspectives such as a subtle left three-quarter angle, right three-quarter angle, straight-on view, slightly higher or lower camera position, or a different off-centre placement. These are examples only; choose the most realistic premium composition for each card.",
+            "Use this card's single resolved camera family and artwork placement, coordinated with the other resolved cards.",
+        )
+        variation_lock += "\nPreserve this card's resolved room family; Card 4 must always remain Premium Man Cave / Sports Cave. If prior images repeat a scene, vary architecture, furniture arrangement, placement and lighting within the assigned family, then print one resolved scene. Keep Cards 2–5 distinct. Never expose tokens or fingerprints as ad text."
+        frame_and_glass_rules = frame_and_glass_rules.replace("The black frame must appear", "The supplied frame must appear").replace("realistic black timber or frame depth", "realistic source frame depth; black timber only when the source uses it")
+        photorealism_lock = photorealism_lock.replace("convincing timber depth", "convincing depth in the exact source frame material")
+        sport_country_adaptation = sport_country_adaptation.replace(" unless an existing approved creative direction explicitly requires an extremely subtle one", "")
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=selected_country,
@@ -3127,6 +3158,17 @@ Card-specific visual purpose: {required_purposes[index]}
 {final_check}"""
 
 
+def resolve_carousel_visual_scenes(product_name, category, country, *, variation_token="", product_metadata=None, campaign_moment=None):
+    metadata = dict(product_metadata or {})
+    sport = _normalise_option_label(re.sub(r"[\W_]+", " ", str(metadata.get("product_sport") or category or "").casefold()))
+    sport = CAROUSEL_WALL_SPORT_ALIASES.get(sport, sport)
+    return carousel_winner.resolve_room_set(
+        product_name=_clean_product_name(product_name), sport=sport, market=country,
+        variation_token=variation_token, metadata=metadata,
+        campaign_context=normalize_campaign_moment(campaign_moment),
+    )
+
+
 def build_carousel_visual_output_requirements(
     template_key,
     campaign_moment=None,
@@ -3135,8 +3177,14 @@ def build_carousel_visual_output_requirements(
     category="",
     selected_country="",
     workflow_mode=ADS_WORKFLOW_MODE_NEW,
+    product_metadata=None,
+    variation_token="",
 ):
     roles = get_carousel_visual_roles(template_key)
+    scenes = resolve_carousel_visual_scenes(
+        product_name, category, selected_country, variation_token=variation_token,
+        product_metadata=product_metadata, campaign_moment=campaign_moment,
+    ) if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW else None
     schema = []
     for index, role in enumerate(roles, start=1):
         schema.append(
@@ -3148,16 +3196,21 @@ def build_carousel_visual_output_requirements(
                 category=category,
                 selected_country=selected_country,
                 workflow_mode=workflow_mode,
+                resolved_scene=scenes[index - 1] if scenes else None,
+                variation_token=variation_token,
             )
         )
     schema_text = "\n".join(schema).rstrip()
     detail_rules = ""
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        detail_rules = """CARD 1 AND CARD 5 SCENE LIMITS:
-Card 1 must use its resolved sport-nostalgic wall tone and mandatory slight angle. Card 5 must use its magnifying-glass edition-detail concept on a clean wall with no decor or furniture. Generic room variety, sporting atmosphere, campaign context or supplementary creative direction must not override either card's specific scene limits. Keep Cards 2–4's existing lifestyle roles unchanged. Lens magnification on Card 5 is a physical optical view of the unchanged printed source, never an edit to the protected artwork or frame. Repeat the relevant shared master realism/product-lock protections and these card-specific limits in the final standalone prompts.
+        detail_rules = """CAROUSEL RESOLVED ROOM SET — MANDATORY:
+Card 1 remains the premium close-up wall hero, 65-80% useful composition, complete outside frame, no furniture or lifestyle room. Use its resolved low-saturation wall tone and slight product-photography angle.
+Cards 2–5 are FOUR different premium lifestyle environments, 45-65% useful composition. Card 4 always uses Premium Man Cave / Sports Cave. No repeated room family or principal architecture; vary furniture, camera, wall and lighting/time combinations. Include both lighter and darker walls. At most one additional strongly sport-specific setting is selected from verified sport, never guessed team identity. Each scene must plausibly belong to a different fan/property. Product suitability wins over arbitrary colour matching.
+Card 5 is the fourth lifestyle room with a collector/scarcity purpose. Keep genuine edition details readable through composition and light, never alter or magnify printed pixels. No added image scarcity text or detail prop.
+Resolve all five fingerprints before final output. Keep the resolved scene fields in each standalone prompt and coordinate creative direction with the same scene. Preserve LAST-IMAGE VARIATION LOCK; use prior visible images to avoid repeating the same architecture/furniture/light combination while keeping Card 4 a cave. Do not print unresolved choices or internal tokens on the image.
 
 """
-    return f"""CAROUSEL VISUAL STORY REQUIREMENTS
+    prompt = f"""CAROUSEL VISUAL STORY REQUIREMENTS
 
 After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
 
@@ -3223,6 +3276,15 @@ Every image prompt must be fully standalone. Repeat the complete product-lock, f
 {schema_text}
 
 Return exactly these five image-prompt entries and no sixth prompt."""
+
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        prompt = prompt.replace("- Card 2: the verified moment, era or legacy.", "- Card 2: supported fan identity with memory or present-day connection.")
+        prompt = prompt.replace("- Card 3: an emotional collector hook.", "- Card 3: a defining verified product hook distinct from Card 1.")
+        prompt = prompt.replace("- Card 4: fan ownership and how the framed edition commands the wall.", "- Card 4: For The Cave ownership in the mandatory Sports Cave environment.")
+        prompt = prompt.replace("Cards 2-4 as product-dominant medium or medium-close lifestyle images, and Card 5 as a close, dramatic scarcity image.", "Cards 2–5 as four distinct product-dominant lifestyle images, with a stronger medium-close collector presentation for Card 5.")
+        prompt = prompt.replace("- Card 5: scarcity, limited edition and no second run, using only verified claims and edition details.", "- Card 5: authentic verified scarcity in the fourth distinct lifestyle room; never imply no second run without verification.")
+    return prompt
+
 
 
 INSTANT_EXPERIENCE_REFERENCE_IMAGE_INSTRUCTION = (
@@ -3690,12 +3752,12 @@ Every copy option must:
 - keep the CTA field separate from the long description copy
 - preserve exact user-provided wording character-for-character when supplied
 
-The three V4 routes are:
-- Premium Scarcity — Right Angle
-- Premium Scarcity — Straight On
-- Premium Scarcity — Left Angle
+The three visual formats are:
+- Premium Scarcity — Smart Hybrid
+- Private Gallery
+- The Cave
 
-All three routes share the same on-image headline and CTA system. Description 1 for every route must use CTA field Claim Your Edition so the copy table and image CTA remain aligned, but the long description text must follow its archetype ending.
+Description 1 for every route must use CTA field Claim Your Edition. Image wording follows the individual visual family; long description text follows its archetype ending.
 
 Never invent history, achievements, product facts, athlete names, teams, rivalries, edition limits, remaining quantities, sales velocity, certificates, offers, delivery claims, discounts, restocks or availability.
 
@@ -3738,16 +3800,16 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
     }:
         route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
 
-- All three Instant Experience image routes use one consistent on-image CTA: CLAIM YOUR EDITION.
-- Description 1 for every route must use CTA field Claim Your Edition so the copy table and image CTA remain aligned.
+- Smart Hybrid uses on-image CTA CLAIM YOUR EDITION. Private Gallery and The Cave have no on-image CTA.
+- Description 1 for every route must use CTA field Claim Your Edition; only Smart Hybrid repeats this CTA on the image.
 - Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
 - Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
     else:
         route_rules = """COPY-SET APPLICATION
 
-- Generate only Premium Scarcity Right Angle, Premium Scarcity Straight On and Premium Scarcity Left Angle.
-- The three routes share one CTA and scarcity headline system while varying camera, room profile, wall colour, cues and FOMO supporting line.
-- Description 1 uses Claim Your Edition so its image wording and CTA field agree.
+- Generate only Premium Scarcity Smart Hybrid, Private Gallery and The Cave.
+- Preserve the copy-table CTA contract; the three image formats have independent layouts and on-image wording.
+- Description 1 uses Claim Your Edition; each image format retains its own wording.
 - Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
     return f"{shared_rules}\n\n{route_rules}"
 
@@ -3963,8 +4025,8 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
 - any footer wording approaches or crosses the 64–72 px safe margins
 - Australia or another country changes the established country-invariant Instant Experience footer template
-- the three routes use the same camera angle, identical wall colour, identical cue or effectively identical room composition
-- the left route is merely a mirrored version of the right route
+- the three visual families are indistinguishable at thumbnail size
+- any route mirrors the artwork
 - the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
 - the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
 
@@ -3980,12 +4042,12 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
     {
         "concept_id": "premium_scarcity_right",
         "route_key": "premium_scarcity_right",
-        "group_heading": "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
+        "group_heading": "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Premium Scarcity — Right Angle",
+        "route": "Premium Scarcity — Smart Hybrid",
         "supporting_label": "Slight right-angle product photograph",
-        "copy_row": "Premium Scarcity — Right Angle Copy Variation 1",
-        "purpose": "Create a premium scarcity hero from a slight right-angle residential product photograph while preserving the exact supplied framed artwork.",
+        "copy_row": "Premium Scarcity — Smart Hybrid Copy Variation 1",
+        "purpose": "Create a Premium Scarcity Smart Hybrid hero with product-aware room, wall and camera variation while preserving the supplied artwork.",
         "camera_role": "right",
         "camera_side": "camera 4-6 degrees to the viewer's right of centre, looking back naturally toward the product",
         "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's right of centre. Look back naturally toward the product. Show a restrained amount of the frame's right-hand timber return and mounting depth. Keep verticals straight. Preserve the product's proportions. No fisheye effect, dramatic perspective or noticeably larger artwork side. The angle must look like a genuine room photograph, not a stylised product render.",
@@ -4010,12 +4072,12 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
     {
         "concept_id": "premium_scarcity_front",
         "route_key": "premium_scarcity_front",
-        "group_heading": "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
+        "group_heading": "GROUP 2 — PRIVATE GALLERY",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Premium Scarcity — Straight On",
+        "route": "Private Gallery",
         "supporting_label": "Straight-on product photograph",
-        "copy_row": "Premium Scarcity — Straight On Copy Variation 1",
-        "purpose": "Create the clearest and most direct scarcity hero from a predominantly straight-on residential product photograph.",
+        "copy_row": "Private Gallery Copy Variation 1",
+        "purpose": "Display sports history like collectible art in a sophisticated private gallery.",
         "camera_role": "front",
         "camera_side": "predominantly straight-on camera with maximum 0-2 degree natural offset",
         "camera_instruction": "Use a predominantly straight-on view with a maximum natural offset of 0-2 degrees. Keep the complete product geometrically balanced. Avoid artificial showroom symmetry by placing the room cue primarily toward one outer edge. This must be the clearest and most direct scarcity hero of the three.",
@@ -4040,12 +4102,12 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
     {
         "concept_id": "premium_scarcity_left",
         "route_key": "premium_scarcity_left",
-        "group_heading": "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
+        "group_heading": "GROUP 3 — THE CAVE",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Premium Scarcity — Left Angle",
+        "route": "The Cave",
         "supporting_label": "Slight left-angle product photograph",
-        "copy_row": "Premium Scarcity — Left Angle Copy Variation 1",
-        "purpose": "Create a complementary scarcity hero from a slight left-angle residential product photograph without mirroring the right-angle route.",
+        "copy_row": "The Cave Copy Variation 1",
+        "purpose": "Create a real premium fan sanctuary with left room photography and a full-height flat right graphic column.",
         "camera_role": "left",
         "camera_side": "camera 4-6 degrees to the viewer's left of centre, looking back naturally toward the product",
         "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's left of centre. Look back naturally toward the product. Show a restrained amount of the frame's left-hand timber return and mounting depth. Keep verticals straight. Preserve the product's original dimensions and proportions. The angle must complement Route 1 without appearing artificially mirrored.",
@@ -5024,7 +5086,6 @@ def resolve_standard_instant_experience_visuals(
     )
     rng = random.Random(seed)
     weights = _instant_experience_room_weights(context)
-    preferred_key = _preferred_room_profile_key(context)
     palette = INSTANT_EXPERIENCE_WALL_PALETTES_V4[_wall_palette_key(context)]
     primary_cues = list(INSTANT_EXPERIENCE_PRIMARY_CUES_V4)
     secondary_cues = list(INSTANT_EXPERIENCE_SECONDARY_CUES_V4)
@@ -5033,9 +5094,9 @@ def resolve_standard_instant_experience_visuals(
     resolved = []
     for index, route in enumerate(INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4):
         visual = dict(route)
-        profile_key = preferred_key if index == 0 else _weighted_room_profile_key(weights, rng)
+        profile_key = _weighted_room_profile_key(weights, rng)
         profile = INSTANT_EXPERIENCE_ROOM_PROFILES_V4[profile_key]
-        wall_material, wall_colour = palette[index % len(palette)]
+        wall_material, wall_colour = rng.choice(palette)
         primary_cue = primary_cues[index % len(primary_cues)]
         secondary_cue = secondary_cues[index % len(secondary_cues)]
         if context["product_sport"] == "safe universal fallback" and index == 0:
@@ -5066,6 +5127,7 @@ def resolve_standard_instant_experience_visuals(
                 **overlay_copy,
             }
         )
+        ie_visuals.resolve_visual_system(visual, index, context, variation_token)
         resolved.append(visual)
     sibling_summaries = [
         {
@@ -5102,6 +5164,8 @@ def validate_instant_experience_set_differentiation(visuals=None):
     visuals = tuple(visuals or INSTANT_EXPERIENCE_STANDARD_VISUALS)
     for index, first in enumerate(visuals):
         for second in visuals[index + 1 :]:
+            if first.get("visual_family") and second.get("visual_family") and first["visual_family"] != second["visual_family"] and first["composition"] != second["composition"]:
+                continue
             difference_count = _instant_experience_pairwise_difference_count(
                 first,
                 second,
@@ -5222,17 +5286,12 @@ Resolved sibling fingerprints supplied for comparison:
 {chr(10).join(sibling_lines)}
 
 Within one three-image package:
-- Every route keeps the same exact product, Sports Cave identity, upper room scene, fixed bottom 21–23% opaque footer, product dominance, black timber frame, realistic glazing and one CTA.
-- The three routes must differ in camera angle, room profile, wall colour, environmental cue, furniture crop and natural light direction or intensity.
-- Never use the same exact wall colour twice.
-- Never use the same primary environmental cue twice.
-- Never use the same furniture arrangement twice.
-- Never reuse an identical room composition.
-- Never simply mirror the right route to create the left route.
-- Do not repeat a broad room category across the three images. If an automatically resolved sibling profile is too similar, reinterpret it as a genuinely different residential room and property while preserving the route's commercial purpose.
-- Use exactly one primary cue and no more than one secondary cue.
-
-{build_three_environment_diversity_rules()}
+- Preserve the same immutable product and shared realism in three distinct visual formats.
+- Smart Hybrid alone uses the fixed bottom 21–23% footer and its resolved headline/supporting line/CTA.
+- Private Gallery uses small branding, FOR THE ROOM THAT REMEMBERS. and verified scarcity, with no CTA or scarcity footer.
+- The Cave uses the left room and full-height right graphic column, THE CAVE STARTS HERE., and an empty cabinet.
+- Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
+- Use one primary cue and no more than one secondary cue; respect each format's furniture restrictions.
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -5249,7 +5308,10 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "sub_angle": visual["copy_row"],
         "hook_family": visual["purpose"],
         "cover_layout": visual["composition"],
-        "urgency_placement": "fixed opaque footer across bottom 21–23%",
+        "visual_family": visual.get("visual_family", "premium_scarcity_smart_hybrid"),
+        "creative_variation_token": visual.get("creative_variation_token", ""),
+        "campaign_line": visual.get("headline_text", ""),
+        "urgency_placement": visual["overlay_position"],
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
         "room_profile": visual.get("room_profile", visual["room_type"]),
@@ -5322,7 +5384,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size. They must differ in camera angle, room profile, wall colour/material, primary cue, secondary cue, furniture crop, lighting/time of day and FOMO supporting line while preserving the same premium Sports Cave campaign.
+Resolve three covers that visibly differ at thumbnail size: Smart Hybrid footer, Private Gallery editorial signature, The Cave right column. Use product-aware camera, wall, furniture and lighting variation within each family.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5343,7 +5405,7 @@ def build_instant_experience_canonical_prompt_v4(
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
     shared_realism_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
-    ie_quality_contract = build_instant_experience_image_quality_contract(visual)
+    ie_quality_contract = build_instant_experience_image_quality_contract(visual) if visual.get("visual_family") == "premium_scarcity_smart_hybrid" else ""
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=country,
@@ -5359,6 +5421,14 @@ def build_instant_experience_canonical_prompt_v4(
         category=category,
     )
     resolved_json = json.dumps(fingerprint, ensure_ascii=False, indent=2)
+    if visual.get("visual_family") in {"private_gallery", "the_cave"}:
+        return ie_visuals.render_editorial_prompt(
+            visual, product_name=product_name, category=category, country=country,
+            product_url=product_url, metadata=resolved_json, shared_rules=shared_realism_rules,
+            core_rules=SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
+            adaptation=build_sport_country_visual_adaptation(category, country),
+            campaign_context=campaign_moment_visual_block,
+        )
     scarcity_note = (
         "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
         if visual.get("scarcity_verified")
@@ -5373,7 +5443,9 @@ Copy this prompt into a fresh image-generation conversation with the exact uploa
 
 Do not generate the image automatically from this Ads-planning response.
 
-SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4
+SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID
+
+{ie_visuals.camera_wall_rules(visual)}
 
 PRODUCT AND VERIFIED METADATA
 
@@ -5431,9 +5503,9 @@ Composition is locked:
 - The supplied framed product is the largest and most important visual element.
 
 The three-image package must produce:
-1. Slight right-angle product photograph.
-2. Straight-on product photograph.
-3. Slight left-angle product photograph.
+1. Premium Scarcity Smart Hybrid with its fixed bottom footer.
+2. Private Gallery with FOR THE ROOM THAT REMEMBERS.
+3. The Cave with a full-height right graphic column.
 
 This route must deliver only its assigned camera role: {visual["route"]}.
 
@@ -5533,7 +5605,7 @@ HEADLINE: {visual.get("headline_text")}
 SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
-Use the headline and CTA consistently across the package. The supporting line is route-specific and must be the resolved line above.
+Use these resolved words only for Smart Hybrid. Private Gallery and The Cave use their own visual wording and layouts.
 
 Typography:
 - Headline: premium Sports Cave editorial serif, warm ivory.
@@ -5564,7 +5636,7 @@ AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
 
 FINAL ROUTE CHECK
 
-- Right, front and left camera directions are distinct across the package.
+- The three visual families are distinct at thumbnail size; each resolves one suitable camera.
 - This route uses its exact camera role and is not a mirrored duplicate of another route.
 - Wall colour and cues differ from the other routes.
 - Room variation remains subtle and product-led.
@@ -6195,7 +6267,7 @@ def build_instant_experience_visual_output_requirements(
     )
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-Return exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Right Angle, Premium Scarcity — Straight On, then Premium Scarcity — Left Angle.
+Return exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Smart Hybrid, Private Gallery, then The Cave.
 
 Do not output a fourth prompt.
 Do not output one shared prompt with variations.
@@ -6206,7 +6278,7 @@ Do not generate images.
 
 Each standalone prompt must contain the shared Sports Cave product/realism lock exactly once and remain fully copyable into a fresh ChatGPT conversation.
 
-The three covers must visibly differ in camera angle, room profile, wall colour/material, environmental cue, furniture crop, light direction or intensity and FOMO supporting line while preserving one premium Sports Cave campaign.
+The three covers must visibly differ by visual family, layout and campaign signature, with product-aware camera and wall variation.
 
 {build_standard_instant_experience_freshness_block(
     product_name=product_name,
@@ -6235,10 +6307,10 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
-- Premium Scarcity — Right Angle uses the slight right-angle camera role and its route FOMO line when edition-limit data is verified.
-- Premium Scarcity — Straight On uses the straight-on camera role and its route FOMO line when edition-limit data is verified.
-- Premium Scarcity — Left Angle uses the slight left-angle camera role and its route FOMO line when edition-limit data is verified.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, the country-invariant fixed 21–23% opaque footer, deterministic on-image wording and no automatic image generation.
+- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
+- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
+- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 21–23% opaque footer for Smart Hybrid only), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -6424,7 +6496,7 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
     elif campaign_type == "Instant Experience":
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include exactly one easy-to-copy "
-            "grouped package for Premium Scarcity Right Angle, Premium Scarcity Straight On and Premium Scarcity Left Angle. Each group must contain one complete standalone "
+            "grouped package for Premium Scarcity Smart Hybrid, Private Gallery and The Cave. Each group must contain one complete standalone "
             "cover image prompt followed by a three-row Markdown table for Description Key, Description Label, Description Copy, Headline and CTA. The response "
             "must contain nine total ad-copy combinations and one shared Instant Experience setup block after the groups. "
             "Do not include Meta link-description fields, Meta Ad Description fields, "
@@ -6444,9 +6516,9 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+2. GROUP 2 — PRIVATE GALLERY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+3. GROUP 3 — THE CAVE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
 4. Exactly nine complete ad-copy combinations total using the ordered description keys legacy_standard, framed_greatness and choose_a_side.
 5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
@@ -6469,7 +6541,7 @@ No separate Meta link-description or Meta Ad Description field is allowed."""
     approval_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         completion_instruction = (
-            "After GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
+            "After GROUP 3 — THE CAVE and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
             "Do not ask which cover to generate and do not ask a follow-up generation question."
         )
     else:
@@ -6479,7 +6551,7 @@ No separate Meta link-description or Meta Ad Description field is allowed."""
             f'"{approval_question}"'
         )
     direct_instruction_examples = (
-        '"generate the image now", "generate the Premium Scarcity Right Angle cover" or "generate the Premium Scarcity Left Angle cover"'
+        '"generate the image now", "generate the Premium Scarcity Smart Hybrid cover" or "generate The Cave cover"'
         if campaign_type == "Instant Experience"
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
@@ -6529,6 +6601,8 @@ def build_campaign_visual_output_contract(
             category=category,
             selected_country=country,
             workflow_mode=workflow_mode,
+            product_metadata=product_metadata,
+            variation_token=variation_token,
         )
     elif campaign_type == "Instant Experience":
         campaign_requirements = build_instant_experience_visual_output_requirements(
@@ -6555,8 +6629,8 @@ def build_campaign_visual_output_contract(
     ).removesuffix(f"; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}").replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
-            "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, "
-            "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE, then one shared INSTANT EXPERIENCE SETUP block. "
+            "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — SMART HYBRID, "
+            "GROUP 2 — PRIVATE GALLERY, GROUP 3 — THE CAVE, then one shared INSTANT EXPERIENCE SETUP block. "
             "Each group must contain one standalone image-generation prompt followed by three matching "
             "Description Copy, Headline and CTA rows in the ordered keys legacy_standard, framed_greatness and choose_a_side. Preserve every setup instruction, destination rule and URL parameter. "
             "Do not add Meta link-description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
@@ -6610,8 +6684,8 @@ def build_campaign_visual_output_contract(
         final_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         final_response_termination = (
-            "Only after GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, "
-            "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE "
+            "Only after GROUP 1 — PREMIUM SCARCITY — SMART HYBRID, GROUP 2 — PRIVATE GALLERY, "
+            "GROUP 3 — THE CAVE "
             "and the shared INSTANT EXPERIENCE SETUP block have been printed, stop. "
             "Do not ask a follow-up question and do not generate images."
         )
@@ -7176,9 +7250,9 @@ This block strengthens the standard Instant Experience grouped route output only
 
 {build_instant_experience_creative_cta_rules()}
 
-STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY
+STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY
 
-- Return exactly three grouped routes: GROUP 1 - PREMIUM SCARCITY - RIGHT ANGLE, GROUP 2 - PREMIUM SCARCITY - STRAIGHT ON and GROUP 3 - PREMIUM SCARCITY - LEFT ANGLE.
+- Return exactly three grouped routes: GROUP 1 - PREMIUM SCARCITY - SMART HYBRID, GROUP 2 - PRIVATE GALLERY and GROUP 3 - THE CAVE.
 - Each route must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
 - Each route table must contain exactly three completed description rows in this order: legacy_standard, framed_greatness, choose_a_side.
 - Each row must contain one complete Description Copy, one Headline and one CTA.
@@ -7186,23 +7260,23 @@ STANDARD INSTANT EXPERIENCE PREMIUM ROOM V4 COPY DIVERSITY
 - No separate Meta link-description or Meta Ad Description field is allowed.
 - No row may be placeholder copy.
 - The same three product-aware Description Copy values must be associated with all three image routes; do not rewrite the long description merely because the camera angle changes.
-- All three routes share the same premium Sports Cave scarcity headline system and CTA while using different camera angles, room details, environmental cues and supporting FOMO lines.
-- Route 1 must resolve the Slight Right Angle cover with the supporting FOMO line: Once they're claimed, this edition retires forever.
-- Route 2 must resolve the Straight On cover with the supporting FOMO line: When the final one is claimed, it's gone for good.
-- Route 3 must resolve the Slight Left Angle cover with the supporting FOMO line: Released once. When they're gone, they stay gone.
+- Preserve the copy-table CTA contract; the three image formats have independent layouts and on-image wording.
+- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
+- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
+- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
 - No duplicated headline.
 - Every CTA must be one approved direct edition-acquisition CTA. Description 1 in each route must use CTA field Claim Your Edition.
-- All three routes must remain scarcity-first while using the same ordered product-aware description archetypes and materially different image scene compositions.
+- The three distinct visual formats keep the same ordered product-aware description archetypes.
 - Description 1 must follow Legacy Standard.
 - Description 2 must follow Framed Greatness.
 - Description 3 must follow Choose a Side.
-- The on-image headline must be ONLY {{verified edition limit}} WILL EVER EXIST only when the edition limit is verified by supplied product data or an approved claim path.
-- When the verified limit is 100, the headline must resolve exactly to ONLY 100 WILL EVER EXIST.
+- The Smart Hybrid on-image headline must be ONLY {{verified edition limit}} WILL EVER EXIST only when the edition limit is verified by supplied product data or an approved claim path.
+- For Smart Hybrid only, when the verified limit is 100, the headline must resolve exactly to ONLY 100 WILL EVER EXIST. Private Gallery and The Cave use their own signatures and LIMITED TO 100.
 - If a verified edition limit is unavailable, use the existing safe evidence-gated fallback instead of inventing a quantity or finality claim.
 - A supplied offer may be used only when exact, fact-safe and permitted by the existing campaign contract; never let it replace the edition scarcity.
 - Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
 - Use natural selected-country English.
-- Generate the three description variants once from product context, then reuse the same ordered description set for the right, front and left route tables. Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other routes. Do not expose this working order or change the approved response order."""
+- Generate the three description variants once from product context, then reuse the same ordered description set for the three visual slot tables. Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other routes. Do not expose this working order or change the approved response order."""
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -7473,6 +7547,40 @@ def apply_creative_refresh_winner_context(prompt, context=None):
     return f"{build_creative_refresh_winner_context(context)}\n\n{prompt.lstrip()}"
 
 
+def apply_carousel_winner_copy(prompt, product_name, category, product_metadata=None):
+    """Replace the reusable legacy copy fragments only for new Carousel campaigns."""
+    metadata = dict(product_metadata or {})
+    limit = _positive_int_or_none(metadata.get("edition_limit")) or _verified_edition_limit_from_text(product_name)
+    limited = bool(limit) or _metadata_bool(metadata, "is_limited_edition", "limited_edition") is True or bool(re.search(r"\blimited edition\b", product_name, re.I))
+    numbered = _metadata_bool(metadata, "is_numbered", "numbered", "numbered_edition") is True
+    replacements = {
+        build_carousel_story_and_specificity_rules(category): carousel_winner.winner_story(category) + "\n\n" + build_category_specific_carousel_cues(category),
+        build_carousel_high_conversion_quality_rules(): carousel_winner.WINNER_QUALITY + "\n\nCONNECTED COPY QUALITY" + build_carousel_high_conversion_quality_rules().split("CONNECTED COPY QUALITY", 1)[1],
+    }
+    for old, new in replacements.items():
+        prompt = prompt.replace(old, new)
+    prompt = prompt.replace("3. Motorsport nostalgia.", "3. Relevant fan recognition or memory.")
+    prompt = prompt.replace("Card 2 communicates display desire in a product-relevant ownership setting.", "Card 2 communicates supported fan identity and relevant memory or current connection.")
+    prompt = prompt.replace("Card 3 communicates premium collector appeal without repeating Card 2.", "Card 3 uses a defining product-specific hook distinct from Card 1.")
+    prompt = prompt.replace("Card 4 communicates verified emotional meaning without repeating names from Card 1.", "Card 4 uses For The Cave and a verified product-specific cue in a Sports Cave room.")
+    prompt = prompt.replace("No meaningful word is repeated across the ten card lines unless unavoidable for clarity.", "No headline or description duplicates another; identity words may recur naturally in a supported fan phrase.")
+    prompt = prompt.replace("Product names appear only on Card 1 and the edition number appears only on Card 5.", "Card 1 identifies the product, Card 2 may use a supported fan identity, and the edition quantity appears only on Card 5.")
+    prompt = prompt.replace("- Card 3: focus on emotional fan identity.", "- Card 3: use a defining verified product hook distinct from Card 1.")
+    prompt = prompt.replace("- Card 4: show ownership on a wall, cave, home bar, office or sports room.", "- Card 4: always show Premium Man Cave / Sports Cave ownership with For The Cave.")
+    prompt = prompt.replace("- Card 5: make the limited edition feel final.", "- Card 5: communicate authentic scarcity only when verified; use the fourth distinct lifestyle room.")
+    prompt = prompt.replace("- Card 2 must create display desire in a product-relevant ownership setting.", "- Card 2 must use supported fan identity with relevant memory or a current connection.")
+    prompt = prompt.replace("- Card 3 must communicate premium collector appeal suited to the category.", "- Card 3 must use a defining verified product hook distinct from Card 1.")
+    prompt = prompt.replace("- Card 4 must distil the verified emotional meaning, memory or fan connection without repeating names from Card 1.", "- Card 4 defaults to For The Cave and always uses a Premium Man Cave / Sports Cave environment.")
+    prompt = prompt.replace("- Card 5 must make scarcity feel final and collector-led.", "- Card 5 closes with only verified scarcity, never unverified retirement or no-reprint claims.")
+    prompt = prompt.replace("- Across all ten card lines, do not repeat any meaningful word. Treat singular and plural forms as the same word.", "- Avoid repetitive wording; never duplicate a whole headline or description.")
+    prompt = prompt.replace("- Use athlete, team, event or product names only once, normally on Card 1.", "- Card 2 may reuse a verified identity in a natural fan phrase; Card 3 must add a different product anchor.")
+    prompt = prompt.replace("- Do not repeat legend, legacy, icon, collector, edition, wall, made, pride, greatness or similar keywords across multiple cards.", "- Prefer varied wording while retaining the approved Limited Edition and For The Cave winner defaults.")
+    prompt = prompt.replace("- Card 2 uses a desirable ownership setting.", "- Card 2 uses a distinct fan environment supporting recognition or memory.")
+    prompt = prompt.replace("- Card 4 uses an emotional lifestyle, memory or legacy presentation.", "- Card 4 uses the mandatory Premium Man Cave / Sports Cave ownership presentation.")
+    preferred = carousel_winner.preferred_copy(product_name, metadata, limit, limited, numbered)
+    return prompt + "\n\nVERIFIED CAROUSEL COPY PREFERENCES\n" + json.dumps(preferred, ensure_ascii=False) + "\nThese are supported preferred card fields, not a replacement output schema. Resolve null fields from supplied facts or a safe non-claiming alternative. Keep the existing visible five-card format and five Primary Text variations. Verify every field against the 17-character limit before returning it. Numbering verified: " + str(numbered) + ". Never add worldwide or world wide to an edition-limit label."
+
+
 def compose_final_ads_prompt(
     prompt,
     *,
@@ -7511,6 +7619,8 @@ def compose_final_ads_prompt(
         campaign_type=campaign_type,
     )
     prompt = apply_meta_url_parameters_guidance(prompt)
+    if campaign_type == "Carousel" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        prompt = apply_carousel_winner_copy(prompt, product_name, category, product_metadata)
     if product_name:
         prompt = apply_campaign_visual_output_contract(
             prompt,
@@ -8571,15 +8681,15 @@ OBJECTIVE
 
 Create one standard Meta Instant Experience package grouped into three clear routes:
 
-1. PREMIUM SCARCITY — RIGHT ANGLE
-2. PREMIUM SCARCITY — STRAIGHT ON
-3. PREMIUM SCARCITY — LEFT ANGLE
+1. PREMIUM SCARCITY — SMART HYBRID
+2. PRIVATE GALLERY
+3. THE CAVE
 
 Return exactly these sections in this order:
 
-1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE
-2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON
-3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE
+1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID
+2. GROUP 2 — PRIVATE GALLERY
+3. GROUP 3 — THE CAVE
 4. INSTANT EXPERIENCE SETUP
 
 Do not output five global copy variations.
@@ -8613,30 +8723,30 @@ Table rules:
 - Escape any vertical-bar characters that would break the Markdown table.
 - Preserve paragraph breaks inside each Description Copy cell where the platform supports multiline cells, or use visible line breaks that can be pasted into the matching description field.
 - Never leave placeholders such as Description copy option 2, Headline option 3, Shop Now repeated, Add copy here, Complete copy or To be generated in the returned answer.
-- Description 1 in each route supplies copy aligned with that route's exact on-image CTA field.
+- Description 1 in each route retains the approved copy-table CTA field.
 - Descriptions 2 and 3 are alternative product-aware description options for testing with the same route image.
-- The three Description Copy values must be the same ordered product-aware set in every route table.
+- The three Description Copy values must be the same ordered product-aware set in every route table. Image prompts must never copy a geographic edition-scope suffix from description copy.
 - Do not put the full Description Copy on any image.
 
 ROUTE-SPECIFIC COPY RULES
 
-PREMIUM SCARCITY — RIGHT ANGLE:
-- Purpose: convert through a slight right-angle product photograph, a premium collector-home setting and verified scarcity when available.
-- Camera-supporting line: Once they're claimed, this edition retires forever.
+PREMIUM SCARCITY — SMART HYBRID:
+- Purpose: premium collector-home photography with a product-aware camera and verified scarcity.
+- Image wording follows the resolved visual format, independently of the description table.
 - Use the route FOMO line only when a verified finite edition limit exists.
 - When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
 - Description 1 must use CTA field Claim Your Edition.
 
-PREMIUM SCARCITY — STRAIGHT ON:
-- Purpose: deliver the clearest direct scarcity hero, using the most balanced and readable front-facing product photograph.
-- Camera-supporting line: When the final one is claimed, it's gone for good.
+PRIVATE GALLERY:
+- Purpose: present sports history like collectible art in a private gallery.
+- Image wording follows the resolved visual format, independently of the description table.
 - Use the route FOMO line only when a verified finite edition limit exists.
 - When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
 - Description 1 must use CTA field Claim Your Edition.
 
-PREMIUM SCARCITY — LEFT ANGLE:
-- Purpose: complete the package with a complementary left-angle product photograph that is not a mirrored duplicate of the right-angle route.
-- Camera-supporting line: Released once. When they're gone, they stay gone.
+THE CAVE:
+- Purpose: a real premium fan sanctuary with a full-height flat right advertising column.
+- Image wording follows the resolved visual format, independently of the description table.
 - Use the route FOMO line only when a verified finite edition limit exists.
 - When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
 - Description 1 must use CTA field Claim Your Edition.
@@ -8675,10 +8785,10 @@ FINAL COPY CHECK
 - The output contains exactly nine complete ad-copy combinations.
 - No separate Meta link-description or Meta Ad Description field is present.
 - No placeholder copy remains.
-- All three groups are premium scarcity-led routes with distinct camera roles, room variables and supporting FOMO lines.
-- Premium Scarcity — Right Angle uses the slight right-angle camera role.
-- Premium Scarcity — Straight On uses the clear straight-on camera role.
-- Premium Scarcity — Left Angle uses the slight left-angle camera role and is not a mirror of the right route.
+- The three distinct visual formats keep the same ordered product-aware description archetypes.
+- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
+- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
+- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
 - Every creative CTA belongs to the approved direct edition-acquisition family.
 - Description 1 for all three routes uses Claim Your Edition.
 - The ordered description keys are legacy_standard, framed_greatness and choose_a_side in every route.
@@ -9395,11 +9505,45 @@ def ads_prompt_contract_version_for_campaign(
             f"{ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION}; "
             f"{ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION}"
         )
+    if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        version += f"; {ADS_INSTANT_EXPERIENCE_WIRING_VERSION}"
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
         if campaign_type == "Instant Experience":
             version += "; WINNER REFINEMENT SINGLE COPY V1"
     return version
+
+
+def _instant_experience_visual_contract_is_current(prompt):
+    """Validate cached New Ads prompt content as well as its declared version.
+
+    Historical route keys and recent fingerprints remain valid data. Only
+    controlling legacy headings/instructions are rejected.
+    """
+    required = (
+        "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
+        "GROUP 2 — PRIVATE GALLERY",
+        "GROUP 3 — THE CAVE",
+        "SPORTS CAVE — PRIVATE GALLERY META AD SYSTEM V1",
+        "SPORTS CAVE — THE CAVE META AD SYSTEM V1",
+        "FOR THE ROOM THAT REMEMBERS.",
+        "THE CAVE\nSTARTS\nHERE.",
+    )
+    if not all(marker in prompt for marker in required):
+        return False
+    footer_marker = SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]
+    if prompt.count(footer_marker) != 1:
+        return False
+    if "SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4" in prompt:
+        return False
+    return not re.search(
+        r"^(?:GROUP [123]\s*[—-]\s*PREMIUM SCARCITY\s*[—-]\s*(?:RIGHT ANGLE|STRAIGHT ON|LEFT ANGLE)"
+        r"|[123]\.\s*(?:PREMIUM SCARCITY\s*[—-]\s*(?:RIGHT ANGLE|STRAIGHT ON|LEFT ANGLE)"
+        r"|(?:Slight right-angle|Straight-on|Slight left-angle) product photograph\.)"
+        r"|Return exactly three complete grouped Instant Experience routes[^\n]*Right Angle"
+        r"|[^\n]*grouped package for Premium Scarcity Right Angle)",
+        prompt, re.MULTILINE | re.IGNORECASE,
+    )
 
 
 def ensure_current_ads_result_prompt(result):
@@ -9410,7 +9554,9 @@ def ensure_current_ads_result_prompt(result):
         result.get("campaign_type"),
         workflow_mode=workflow_mode,
     )
-    if result.get("prompt_contract_version") == expected_version:
+    is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
+    content_current = not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"]))
+    if result.get("prompt_contract_version") == expected_version and content_current:
         return result
     old_master_prompt = str(result.get("master_prompt") or "")
     old_generated_output = str(result.get("generated_ad_output") or "")

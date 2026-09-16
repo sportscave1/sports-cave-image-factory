@@ -49,19 +49,16 @@ def resolve_visual_system(visual, index, context, variation_token):
 
 
 def camera_wall_rules(visual):
-    cameras = GALLERY_CAMERAS if visual["visual_family"] == "private_gallery" else CAMERAS
     return f"""SMART CAMERA / ROOM / WALL RESOLUTION
 CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']}
 Use the token only for creative freshness; never display it or internal metadata on the image.
-Permissible camera families at planning time: {'; '.join(cameras)}.
 Selected camera: {visual['camera_side']}.
-Resolve exactly ONE camera before printing the final standalone prompt; omit the alternatives from that final prompt. A three-quarter view is permitted only while product readability remains excellent.
-Analyse the actual attached product, SPORT, MARKET, title, palette, brightness, frame colour, emotional mood, era/nostalgia and campaign context. The actual product wins over sport tendencies.
-Use the resolved scene below as the product-aware starting selection. If the uploaded artwork requires better contrast or frame separation, resolve ONE suitable wall and room before returning the standalone prompt. Never leave alternatives unresolved.
-For Smart Hybrid, base the room on premium neutral living, heritage collector study or refined masculine collector lounge; an understated home office, premium media room or quiet collector den is also suitable. Match seamless greige stone render, warm stone mineral plaster, soft taupe limewash, warm charcoal, graphite, restrained warm grey or muted stone to the product.
-Private Gallery uses charcoal mineral plaster, smoked graphite limewash, taupe Venetian plaster, aged stone, chocolate mineral, restrained concrete, olive-charcoal or cream/stone gallery plaster; architectural timber stays outside the artwork area.
-The Cave uses warm charcoal, graphite mineral, bronze-brown limewash, dark taupe, aged stone-charcoal, chocolate mineral, warm grey concrete-like plaster or dark olive-charcoal.
-Choose one primary environmental cue and at most one secondary cue. Keep The Cave cabinet completely empty.
+Resolve exactly ONE camera: use the selected value above, not a menu of alternatives. A three-quarter view is permitted only while product readability remains excellent. Never mirror artwork.
+Resolved room: {visual['room_profile']}.
+Resolved wall: {visual['wall_colour']}.
+Resolved material treatment: {visual['room_materials']}.
+Analyse the actual attached product, SPORT, MARKET, title, palette, brightness, frame colour, emotional mood, era/nostalgia and campaign context. The actual product wins over sport tendencies. Preserve the one resolved scene and ensure the unchanged frame separates clearly from its wall.
+Use the resolved primary cue and no more than one secondary cue. Do not borrow the layout or advertising wording from another visual family.
 Avoid identical wall/camera combinations across recent fingerprints and this package where suitable; product matching wins. Vary only visual interpretation, never product identity, branding, edition limits or verified facts.
 {SCARCITY_RULE}"""
 
@@ -72,9 +69,13 @@ def render_editorial_prompt(visual, *, product_name, category, country, product_
     layout = ("""SPORTS HISTORY DISPLAYED LIKE COLLECTIBLE ART.
 Artwork dominates a sophisticated private collector/gallery environment with minimal premium furniture, deliberate gallery lighting, genuine frame depth and premium clear acrylic/glazing.
 No Premium Scarcity fixed bottom footer. Small SPORTS CAVE branding; flat editorial typography in clear negative space.
-Signature on two lines: FOR THE ROOM / THAT REMEMBERS.
+Signature: FOR THE ROOM THAT REMEMBERS.
+Set the signature on two lines:
+FOR THE ROOM
+THAT REMEMBERS.
 No fake CTA, sale banner, discount graphics, obvious sports props or generic man-cave clutter.""" if gallery else """A REAL PREMIUM FAN SANCTUARY.
 LEFT VISUAL: 66–68% width, premium realistic room with dominant framed product.
+Use a full-height right graphic column.
 RIGHT GRAPHIC COLUMN: 32–34% width, full height, flush top, flush bottom and flush right; flat matte near-black 2D advertising design. No wall texture, perspective, room shadows or physical plaque effect. No bottom footer.
 Exact hierarchy: SPORTS CAVE, then THE CAVE / STARTS / HERE., then the resolved scarcity line, then COLLECTOR SERIES.
 White / warm ivory headline, never gold. Restrained antique-gold accent rules only. Premium vintage/editorial/collector typography.
@@ -84,7 +85,7 @@ CABINET TOP MUST BE COMPLETELY EMPTY. No generated filler: no books, bowls, plan
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
 Do not generate the image automatically from this Ads-planning response.
-SPORTS CAVE — {visual['route'].upper()} META AD SYSTEM
+SPORTS CAVE — {visual['route'].upper()} META AD SYSTEM V1
 PRODUCT AND VERIFIED METADATA
 Product name: {product_name}
 Sport/category: {category}

@@ -30,7 +30,7 @@ class CarouselDetailPromptTests(unittest.TestCase):
                     "ONE rigid rectangular physical object only", "distort typography or faces",
                     "change the artwork crop", "all four outer frame edges",
                     "exact compositing source", "never mirror or recolour",
-                    "Required nostalgic wall tone:", "matte plaster or painted-wall finish", "low saturation",
+                    "Resolved close-up wall:", "low saturation",
                     f"Selected sport: {category}", "Selected Sports Cave product: Collector Detail Test",
                 ):
                     self.assertIn(instruction, card)
@@ -66,43 +66,28 @@ class CarouselDetailPromptTests(unittest.TestCase):
     def test_resolved_tone_reaches_final_card_and_survives_missing_mockups_foundation(self):
         for category in ("Cricket", "Basketball", "Unmapped sport"):
             card = carousel_prompt_card_sections(visual_contract(final_prompt(category)))[1]
-            self.assertIn(ads_page.carousel_nostalgic_wall_treatment(category), card)
+            self.assertIn("Resolved close-up wall:", card)
+            self.assertNotIn("Required nostalgic wall tone:", card)
         with mock.patch.object(ads_page.image_factory, "get_close_up_wall_prompt_foundation", return_value=""):
             card = carousel_prompt_card_sections(visual_contract(final_prompt()))[1]
-            self.assertIn("pavilion green", card)
+            self.assertIn("Resolved close-up wall:", card)
             self.assertIn("5–12 degree off-axis", card)
 
-    def test_final_card_five_has_genuine_numbered_detail_and_physical_magnifier(self):
+    def test_final_card_five_is_lifestyle_scarcity_with_immutable_edition_details(self):
         card = carousel_prompt_card_sections(visual_contract(final_prompt()))[5]
         for instruction in (
-            "premium photorealistic magnifying glass detail shot",
-            "ACTUALLY visible", "prioritise the NUMBERED EDITION PLATE",
-            "bottom centre", "actual visible location, never an assumed position",
-            "clear glass lens, premium metal rim, realistic handle",
-            "optical magnification/refraction ONLY inside the physical lens",
-            "unchanged printed product", "No distortion or artificial blur outside the magnifying glass",
-            "Do not excessively enlarge text", "genuine transparent artwork glazing AND a clear magnifying-glass lens",
-            "must NEVER conceal the edition information", "realistic mitred joins",
-            "correct aspect ratio", "ONE rigid rectangular physical object",
-            "soft natural directional light", "contact shadows", "ambient occlusion",
-            "No random props except the magnifying glass", "No room decor", "No furniture", "No people",
-            "No neon signs", "No extra wall art", "No added text",
-            "No excessive HDR, bloom, glow, fisheye distortion, fake blur",
+            "fourth distinct premium lifestyle room", "45-65%", "complete outer frame visible",
+            "genuine edition plate/badge readable", "Never alter or magnify printed pixels",
+            "invent an edition number", "FRAME AND GLASS REALISM", "real glass over the artwork",
+            "contact shadows", "ambient occlusion", "No on-image Meta headline",
             "Selected sport: Cricket", "Selected Sports Cave product: Collector Detail Test",
         ):
             self.assertIn(instruction, card)
-        for prohibition in (
-            "Do not create fake text.", "Do not create a fake edition number.", "Do not change the edition number.",
-            "Do not invent scarcity information.", "Do not add new badges.", "Do not add new logos.",
-            "Do not add extra text overlays.", "Do not add watermarks.",
-        ):
-            self.assertIn(prohibition, card)
-        self.assertIn("If no genuine edition detail is visible/readable", card)
-        self.assertIn("immutable physical reference", card)
-        self.assertIn("Preserve every athlete, face, body", card)
-        self.assertIn("font, colour, border, crop, layout", card)
-        self.assertIn("frame colour, material, thickness, geometry and proportions", card)
-        self.assertNotIn("unless the approved card concept explicitly requires on-image text", card)
+        self.assertNotIn("magnifying glass", card)
+        self.assertNotIn("two glass surfaces", card.lower())
+        self.assertNotIn("No furniture", card)
+        # The explicit historical utility remains available outside the default workflow.
+        self.assertIn("physical magnifying glass", ads_page.build_carousel_card_five_edition_detail_lock())
 
     def test_final_master_retains_shared_realism_once_and_five_ordered_slots(self):
         prompt = visual_contract(final_prompt())
@@ -111,8 +96,8 @@ class CarouselDetailPromptTests(unittest.TestCase):
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
         self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
         self.assertIn("every limited-edition badge, plaque, collector badge, numbered detail and edition plate", prompt)
-        self.assertIn("Card 1 must use its resolved sport-nostalgic wall tone", prompt)
-        self.assertIn("Generic room variety, sporting atmosphere, campaign context", prompt)
+        self.assertIn("Card 1 remains the premium close-up wall hero", prompt)
+        self.assertIn("Cards 2–5 are FOUR different premium lifestyle environments", prompt)
         self.assertNotIn("magnifying glass detail shot", sections[1])
         for index in (2, 3, 4):
             self.assertNotIn("Required nostalgic wall tone:", sections[index])
@@ -145,13 +130,13 @@ class CarouselDetailPromptTests(unittest.TestCase):
         self.assertEqual(refreshed["context_key"], result["context_key"])
         self.assertEqual(refreshed["generated_ad_output"], "Previously completed copy")
         self.assertIn(ads_page.ADS_CAROUSEL_DETAIL_CONTRACT_VERSION, refreshed["master_prompt"])
-        self.assertIn("magnifying glass", refreshed["master_prompt"])
+        self.assertIn("CAROUSEL RESOLVED ROOM SET", refreshed["master_prompt"])
         self.assertIs(ads_page.ensure_current_ads_result_prompt(refreshed), refreshed)
         for campaign, mode in (("Instant Experience", "new"), ("Carousel", "creative_refresh"), ("Instant Experience", "creative_refresh")):
             self.assertNotIn(ads_page.ADS_CAROUSEL_DETAIL_CONTRACT_VERSION,
                              ads_page.ads_prompt_contract_version_for_campaign(campaign, workflow_mode=mode))
 
-    def test_cards_two_to_four_preserve_existing_prompts_across_all_categories_and_markets(self):
+    def test_new_rooms_are_scoped_out_of_creative_refresh_across_categories_and_markets(self):
         winner = {"winning_primary_text": "Existing winner", "winning_headline": "Existing headline"}
         for category in ads_page.CATEGORY_OPTIONS[1:]:
             for country in ads_page.COUNTRY_OPTIONS[1:]:
@@ -159,14 +144,15 @@ class CarouselDetailPromptTests(unittest.TestCase):
                 unchanged = carousel_prompt_card_sections(visual_contract(final_prompt(category, country, creative_refresh_context=winner)))
                 for index in (2, 3, 4):
                     with self.subTest(category=category, country=country, card=index):
-                        self.assertEqual(current[index], unchanged[index])
+                        self.assertIn("RESOLVED CAROUSEL SCENE", current[index])
+                        self.assertNotIn("RESOLVED CAROUSEL SCENE", unchanged[index])
 
     def test_visual_contract_upgrade_replaces_old_version_once(self):
         kwargs = dict(product_name="Collector Detail Test", category="Cricket", country="Australia", campaign_type="Carousel")
         legacy = ads_page.build_campaign_visual_output_contract(**kwargs, workflow_mode="creative_refresh")
         upgraded = ads_page.apply_campaign_visual_output_contract(legacy, **kwargs)
         self.assertIn(ads_page.ADS_CAROUSEL_DETAIL_CONTRACT_VERSION, upgraded)
-        self.assertIn("magnifying glass detail shot", upgraded)
+        self.assertIn("fourth distinct premium lifestyle room", upgraded)
         self.assertEqual(upgraded.count("MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"), 1)
         self.assertIs(ads_page.apply_campaign_visual_output_contract(upgraded, **kwargs), upgraded)
 

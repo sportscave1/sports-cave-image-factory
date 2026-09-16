@@ -42,11 +42,11 @@ class ActivationTests(unittest.TestCase):
         return backend.process_product_create_webhook(payload or {"id": 987}, "event-987", topic, claim_event=False)
 
     def test_draft_update_then_active_uses_current_state(self):
-        self.fetch.return_value = collector(status="DRAFT", online_store_url="")
+        self.fetch.return_value = collector(status="DRAFT", online_store_url="", tags=[])
         self.webhook({"id": 987, "status": "active"})
         self.assertEqual(self.db.rows, [])
         self.mirror.assert_not_called()
-        self.fetch.return_value = collector()
+        self.fetch.return_value = collector(tags=[])
         self.webhook({"id": 987, "status": "draft"})
         self.assertEqual(self.db.rows[0]["next_edition_number"], 1)
         self.mirror.assert_called_once()
@@ -94,12 +94,8 @@ class ActivationTests(unittest.TestCase):
         self.webhook()
         self.assertEqual(len(self.db.rows), 1)
 
-    def test_missing_collector_classification_retries_without_guessing(self):
+    def test_missing_collector_tags_registers_after_active_refetch(self):
         self.fetch.return_value = collector(tags=[])
-        with self.assertRaisesRegex(RuntimeError, "collector_classification_missing"):
-            self.webhook()
-        self.assertEqual(self.db.rows, [])
-        self.fetch.return_value = collector()
         self.webhook()
         self.assertEqual(len(self.db.rows), 1)
 

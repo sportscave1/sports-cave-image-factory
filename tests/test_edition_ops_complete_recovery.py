@@ -21,7 +21,7 @@ class CompleteRecoveryTests(unittest.TestCase):
             self.stack.enter_context(patch.object(backend, name))
         self.product = collector(shopify_product_id='gid://shopify/Product/10452302823731',
             handle='last-to-first-larry-perkins-russell-ingall-wall-art',
-            created_at='2026-09-12T03:54:10Z', updated_at='2026-09-14T00:03:48Z')
+            created_at='2026-09-12T03:54:10Z', updated_at='2026-09-14T00:03:48Z', tags=[])
         self.fetch = self.stack.enter_context(patch.object(shopify_sync, 'fetch_edition_ops_active_products',
             return_value={'products': [self.product], 'page_count': 1}))
         self.stack.enter_context(patch.object(shopify_sync, 'fetch_product_by_shopify_id', return_value=self.product))
@@ -94,6 +94,51 @@ class CompleteRecoveryTests(unittest.TestCase):
         summary = edition_ops._format_new_product_pull_summary(result)
         self.assertIn('1 issue(s) requiring review', summary)
         self.assertNotIn('No new products found', summary)
+
+    def test_180_existing_legacy_and_three_missing_untagged_products(self):
+        products = [collector(shopify_product_id=f'gid://shopify/Product/{i}',
+                    handle=f'art-{i}', title=f'Art {i}', tags=[],
+                    _edition_registration_canonical=True) for i in range(1, 184)]
+        self.fetch.return_value = {'products': products[:180], 'page_count': 4}
+        self.pull()
+        for row in self.db.rows:
+            row.update(next_edition_number=53, sold_count=52, remaining_count=48)
+        before = deepcopy(self.db.rows)
+        self.mirror.reset_mock()
+        self.fetch.return_value = {'products': products, 'page_count': 4}
+        with patch.object(shopify_sync, 'edition_registration_eligibility', wraps=shopify_sync.edition_registration_eligibility) as classify, patch.object(
+            shopify_sync, 'fetch_product_by_shopify_id', side_effect=AssertionError('Existing products must not refetch')):
+            result = self.pull()
+        self.assertEqual(classify.call_count, 3)
+        self.assertEqual(result['existing_products_skipped'], 180)
+        self.assertEqual(result['new_products_inserted'], 3)
+        self.assertEqual(result['shopify_metafields_pushed'], 3)
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(before, self.db.rows[:180])
+        self.assertEqual(len(self.db.runs), 183)
+        again = self.pull()
+        self.assertEqual(again['existing_products_skipped'], 183)
+        self.assertEqual(again['new_products_inserted'], 0)
+        self.assertEqual(self.mirror.call_count, 3)
+
+    def test_legacy_tags_are_optional(self):
+        self.product['tags'] = ['Bathurst', 'Motorsport', 'Larry Perkins']
+        result = self.pull()
+        self.assertEqual(result['new_products_inserted'], 1)
+        self.assertEqual(result['errors'], [])
+
+    def test_exclusions_are_not_review_failures(self):
+        cases = [{'tags': [tag]} for tag in ('internal','private','test','certificate','fulfilment','upsell','apparel','edition-exempt')]
+        cases += [{'vendor': 'Other'}, {'product_type': 'Shirt'}, {'status': 'DRAFT'}]
+        original = deepcopy(self.product)
+        for changes in cases:
+            with self.subTest(changes=changes):
+                self.product.clear()
+                self.product.update({**original, **changes})
+                result = self.pull()
+                self.assertEqual(result['products_excluded'], 1)
+                self.assertEqual(result['errors'], [])
+                self.assertEqual(self.db.rows, [])
 
     def test_initial_mirror_requires_fresh_matching_readback(self):
         # Exercise the actual helper rather than the registration-boundary mock.

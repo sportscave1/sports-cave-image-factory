@@ -8022,7 +8022,35 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
     """Canonical registration for manual discovery, webhooks and safe recovery."""
     eligible = []
     decisions = []
+    existing_index = {}
+    existing_count = 0
+    pending = []
+    if missing_only:
+        # Read once, before new-product classification. The insertion transaction
+        # still repeats locked identity/history checks to protect concurrent events.
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, shopify_product_id, shopify_product_gid, shopify_handle, metafields_sync_status FROM edition_products")
+                for row in cur.fetchall():
+                    for identity in _shopify_product_identity_candidates({
+                        "shopify_product_id": row.get("shopify_product_id"),
+                        "shopify_product_gid": row.get("shopify_product_gid"),
+                    }):
+                        if identity in existing_index and existing_index[identity]["id"] != row["id"]:
+                            raise RuntimeError(f"Conflicting Edition Ops identity: {identity}")
+                        existing_index[identity] = row
     for candidate in products or []:
+        matches = {existing_index[key]["id"]: existing_index[key]
+                   for key in _shopify_product_identity_candidates(candidate) if key in existing_index}
+        if len(matches) > 1:
+            raise RuntimeError("Conflicting stable product identities; reconciliation requires review.")
+        existing = next(iter(matches.values()), None)
+        if existing:
+            existing_count += 1
+            if existing.get("metafields_sync_status") == "Pending automatic mirror":
+                pending.append({"shopify_product_id": existing.get("shopify_product_gid") or existing["shopify_product_id"],
+                                "handle": existing.get("shopify_handle")})
+            continue
         product_id = candidate.get("shopify_product_id") or candidate.get("id")
         product = candidate if candidate.get("_edition_registration_canonical") else shopify_sync.fetch_product_by_shopify_id(product_id, config=config)
         decision = shopify_sync.edition_registration_eligibility(product)
@@ -8045,12 +8073,14 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
                      source=source, action="error", reason="supabase_registration_failed", error_type=type(error).__name__)
         raise
     result["eligibility_results"] = decisions
+    result["existing_products_skipped"] = int(result.get("existing_products_skipped") or 0) + existing_count
+    result["products_excluded"] = sum(not d["eligible"] and not d.get("retryable") for d in decisions)
     for decision in decisions:
         if decision.get("retryable"):
             result.setdefault("errors", []).append(
                 f"{decision.get('handle')} ({decision.get('shopify_product_id')}): {decision['reason']}"
             )
-    for product in eligible:
+    for product in eligible + pending:
         handle = product.get("handle")
         action = "created" if handle in result.get("inserted_handles", []) else "updated_metadata" if handle in result.get("updated_handles", []) else "already_exists"
         try:
@@ -8812,6 +8842,7 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
                 "shopify_metafields_pushed": upsert_summary.get("shopify_metafields_pushed", 0),
                 "shopify_metafields_failed_pending": upsert_summary.get("shopify_metafields_failed_pending", 0),
                 "variant_sync_errors": upsert_summary.get("variant_sync_errors", []),
+                "products_excluded": upsert_summary.get("products_excluded", 0),
             }
         )
         summary["errors"].extend(upsert_summary.get("errors", []))

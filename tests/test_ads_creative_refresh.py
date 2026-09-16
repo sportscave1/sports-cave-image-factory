@@ -835,38 +835,27 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         self.assertNotIn(ads_page.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION, new_ads_prompt)
         self.assertIn("Return exactly three complete grouped Instant Experience routes", new_ads_prompt)
         self.assertEqual(
-            new_ads_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
-            3,
+            new_ads_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"),
+            1,
         )
         self.assertEqual(
             refresh_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
             0,
         )
 
-    def test_shared_ie_prompt_requires_three_different_homes_not_camera_only(self):
+    def test_shared_ie_prompt_requires_three_distinct_visual_formats(self):
         prompt = ads_page.build_ads_prompt(
-            "Purple Reign",
-            "NBA",
-            "USA",
-            "Instant Experience",
-            product_url="https://sportscave.com.au/products/purple-reign",
+            "Purple Reign", "NBA", "USA", "Instant Experience",
             variation_token="fixed-diversity-test",
         )
-        self.assertEqual(
-            prompt.count(ads_page.THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION),
-            3,
-        )
         for wording in (
-            "three camera angles inside the same house",
-            "genuinely different customer's home",
-            "Changing only the camera angle does not count as a different environment",
-            "Changing only the wall colour does not count as enough variation",
-            "must not believe the photographs were taken inside the same property",
-            "The HOUSE changes.",
-            "The ROOM changes.",
-            "The ENVIRONMENT changes.",
+            "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
+            "GROUP 2 — PRIVATE GALLERY", "GROUP 3 — THE CAVE",
+            "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column",
+            "CABINET TOP MUST BE COMPLETELY EMPTY",
         ):
             self.assertIn(wording, prompt)
+        self.assertEqual(prompt.count(ads_page.build_instant_experience_fixed_opaque_footer_rules()), 1)
 
     def test_creative_refresh_winner_block_is_internal_context_not_a_review_response(self):
         context = {
