@@ -6257,7 +6257,8 @@ def apply_product_upload_prompt_updates(
         raise ValueError('Existing product updates do not use New Product live publication.')
     if not update_existing:
         from product_upload_modes import common_build
-        prompt_text=common_build(prompt_text)
+        from product_upload_collections import strip_rules as strip_collection_rules
+        prompt_text=strip_collection_rules(common_build(prompt_text))
     prompt = apply_product_upload_product_name_update(prompt_text, metadata, preview=preview)
     prompt = apply_product_upload_pricing_update(prompt)
     from product_collector_copy import apply_rules
@@ -6268,7 +6269,9 @@ def apply_product_upload_prompt_updates(
         preview=preview,
     ))
     if not update_existing:
+        from product_upload_collections import apply_rules as apply_collection_rules
         from product_upload_modes import finalise_prompt
+        prompt=apply_collection_rules(prompt,metadata)
         prompt=finalise_prompt(prompt,publication_mode)
     return prompt
 
@@ -9999,6 +10002,7 @@ def render_product_uploads_page():
             "2. Choose UPLOAD TO DRAFT, UPLOAD & PUBLISH LIVE, or Update existing product.\n"
             "3. Run the prompt with the connected Dropbox and Shopify integrations.\n"
             "4. Media verification, image alt text, SEO and QA are embedded in every prompt. Live mode continues to publication only after staging QA passes.\n"
+            "5. The connected assistant reviews all relevant collections in a compact table before upload, then verifies every assignment.\n"
             "\n"
             "This page stays manual on purpose so it remains fast and lightweight on Render."
         )

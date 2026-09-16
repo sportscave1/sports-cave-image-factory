@@ -163,7 +163,7 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         ):
             self.assertIn(f"Route key: {route_key}", prompt)
         self.assertEqual(
-            grouped.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"),
+            grouped.count("\nAD COPY\n"),
             3,
         )
         self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 3)

@@ -8,7 +8,7 @@
       "variation_token": "fixed-regression",
       "product_url": "https://example.com/products/collector"
     },
-    "sha256": "0323b226d0895b8a5d9ca427a798a418777776b87652a54340332394de8ea762"
+    "sha256": "b30b4ebf76ba661ca615c09b2b613d485d6bdafba00eb04bf22849ee8068b8b1"
   },
   {
     "kwargs": {
@@ -60,7 +60,7 @@
       "variation_token": "fixed-regression",
       "product_url": "https://example.com/products/collector"
     },
-    "sha256": "2479710938c041ca26105931cb6f02f19ed65b2a23dfe6f2cfa35129187003dd"
+    "sha256": "77fc3b565d8b4712ae9d8f42ec7f4c3b8ac533b9a49b369e95d31c386e990517"
   },
   {
     "kwargs": {
@@ -112,7 +112,7 @@
       "variation_token": "fixed-regression",
       "product_url": "https://example.com/products/collector"
     },
-    "sha256": "16d220d2913f08b110162eb67d2d911c6e12428c209df17c46bbb73c62dfef7a"
+    "sha256": "daa6b86bf3ee2b8db7407e47d3f58c86eeb02cb2384daa32f8a56c7a768f697a"
   },
   {
     "kwargs": {
@@ -164,7 +164,7 @@
       "variation_token": "fixed-regression",
       "product_url": "https://example.com/products/collector"
     },
-    "sha256": "063c0b251165ac517cbacc997024745d2cf61c568cabff664b35ac6586c2e9e7"
+    "sha256": "209e8f6f7a5b2cb53e961377813e12f48eb39ff1b689bdcbabf81da8f39876b5"
   },
   {
     "kwargs": {
@@ -216,7 +216,7 @@
       "variation_token": "fixed-regression",
       "product_url": "https://example.com/products/collector"
     },
-    "sha256": "8aa13b74d3eded3c1622df62236c6683c2a5fe882d6cdf662c0bff63940692ea"
+    "sha256": "8ce4f851247b5ea3797f7711f2ad0ccc158677828f969b766c7ad3615a89a733"
   },
   {
     "kwargs": {

@@ -1035,7 +1035,7 @@ def _batch_from_ads_copy_rows(clean_rows, source_headers):
     }
 
 
-def _batch_from_canonical_ads_copy(parsed, concepts):
+def _batch_from_canonical_ads_copy(parsed, concepts, *, output_mode=""):
     ads = []
     rows = []
     for ad_number, concept in enumerate(tuple(concepts or ()), start=1):
@@ -1069,7 +1069,7 @@ def _batch_from_canonical_ads_copy(parsed, concepts):
                 {
                     "schema_version": ADS_COPY_SCHEMA_VERSION,
                     "campaign_type": ADS_COPY_CAMPAIGN_TYPE,
-                    "output_mode": "winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions",
+                    "output_mode": output_mode or ("winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions"),
                     "route_key": route_key,
                     "route_label": route_label,
                     **variation,
@@ -1100,7 +1100,7 @@ def _batch_from_canonical_ads_copy(parsed, concepts):
         "country": "",
         "sport_category": "",
         "campaign_type": "Instant Experience",
-        "output_mode": "winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions",
+        "output_mode": output_mode or ("winner_refinement" if len(tuple((parsed or {}).get(route_key) or ())) == 1 else "standard_three_descriptions"),
         "ads": tuple(ads),
         "rows": tuple(rows),
     }
@@ -1137,6 +1137,9 @@ def parse_ads_import_csv(
         batch["source_schema_kind"] = "posting"
         batch["source_headers"] = tuple(headers)
         return batch
+    if ADS_COPY_REQUIRED_HEADERS.issubset(header_set) and rows and all(row.get("output_mode") == "three_visual_copy_v2" for row in rows):
+        return parse_posting_import_csv(data, allowed_countries=allowed_countries,
+                                       allowed_sports=allowed_sports, allowed_campaign_types=allowed_campaign_types)
     if ADS_COPY_REQUIRED_HEADERS.issubset(header_set):
         clean_rows = validate_ads_copy_rows(rows, require_copy=require_copy)
         return _batch_from_ads_copy_rows(clean_rows, headers)
@@ -1203,9 +1206,14 @@ def parse_posting_import_csv(
         except ads_page.InstantExperienceCopyCSVError as error:
             raise PostingImportCSVError(str(error)) from error
         _allowed("Instant Experience", allowed_campaign_types, label="Campaign type")
+        # Read the already-validated mode from its column, never from freeform copy.
+        first_row = next(csv.DictReader(io.StringIO(bytes(data).decode("utf-8-sig"))))
+        file_mode = next((value for key, value in first_row.items() if _normalise_header(key) == "output_mode"), "")
+        copy_v2 = file_mode == ads_page.ie_copy.OUTPUT_MODE
         return _batch_from_canonical_ads_copy(
             parsed,
-            ads_page.INSTANT_EXPERIENCE_CONCEPTS,
+            ads_page._ie_concepts_for_result({"campaign_type": "Instant Experience"}) if copy_v2 else ads_page.INSTANT_EXPERIENCE_CONCEPTS,
+            output_mode=ads_page.ie_copy.OUTPUT_MODE if copy_v2 else "",
         )
     batch = parse_ads_import_csv(
         data,

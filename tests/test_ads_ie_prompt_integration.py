@@ -39,7 +39,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
                     "Premium Scarcity Left Angle", "SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"):
             self.assertNotIn(old, text)
         grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", 1)[1]
-        groups = re.findall(r"^GROUP ([123]) — ([^\n]+)\n\nIMAGE GENERATION PROMPT\n(.*?)\nCOPY VARIATIONS\n", grouped, re.M | re.S)
+        groups = re.findall(r"^GROUP ([123]) — ([^\n]+)\n\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", grouped, re.M | re.S)
         self.assertEqual([(n, label) for n, label, _ in groups], [
             ("1", "PREMIUM SCARCITY — SMART HYBRID"), ("2", "PRIVATE GALLERY"), ("3", "THE CAVE")])
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
@@ -63,9 +63,8 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assertIn("full-height right graphic column", cave)
         self.assertIn("CABINET TOP MUST BE COMPLETELY EMPTY", cave)
         self.assertIn(f"LIMITED TO {limit}", cave)
-        self.assertEqual(grouped.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
-        for key in ("legacy_standard", "framed_greatness", "choose_a_side"):
-            self.assertEqual(grouped.count(f"| {key} |"), 3)
+        self.assertEqual(grouped.count("\nAD COPY\n"), 3)
+        self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, text)
 
     def test_public_ads_result_entry_point_emits_three_formats(self):

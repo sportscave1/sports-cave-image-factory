@@ -8,26 +8,40 @@ from product_collector_copy import apply_rules, RULES, START, END
 CASES=[
     ('NBA single player','Nikola Jokic','The Joker','Verified subject; patience and control; no specific game identified.',
      'Nikola Jokic — The Joker Wall Art',
-     '<p><strong>Calm under pressure.</strong></p><p>Traffic everywhere. Jokić never rushed.</p><p>For Denver fans, that patience and control are the whole point. A reminder that the smartest player in the room never needed to be the loudest.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>Calm under pressure.</strong></p><p>Traffic everywhere. Jokić never rushed.</p><p>For Denver fans, that patience and control are the whole point. A reminder that the smartest player in the room never needed to be the loudest.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
     ('NBA historical achievement','Wilt Chamberlain','100 Point Game','Verified research: 2 March 1962; 100 points.',
      'Wilt Chamberlain — 100 Point Game Wall Art',
-     '<p><strong>One night. One hundred.</strong></p><p>On 2 March 1962, Wilt Chamberlain scored 100 points.</p><p>Some numbers need no explanation. For the fans who know this one, it is a whole conversation—and a piece of basketball history worth keeping close.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>One night. One hundred.</strong></p><p>On 2 March 1962, Wilt Chamberlain scored 100 points.</p><p>Some numbers need no explanation. For the fans who know this one, it is a whole conversation—and a piece of basketball history worth keeping close.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
     ('Australian motorsport','Casey Stoner','Crowned at Home','Verified research: Phillip Island, 2011; championship secured on home soil.',
      'Casey Stoner — Crowned at Home Wall Art',
-     '<p><strong>Champion. On home soil.</strong></p><p>Phillip Island, 2011. Casey Stoner secured the world championship in front of Australia.</p><p>Winning was one thing. Watching him do it at home meant something else. For the fans who still feel that pride when they hear his name.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>Champion. On home soil.</strong></p><p>Phillip Island, 2011. Casey Stoner secured the world championship in front of Australia.</p><p>Winning was one thing. Watching him do it at home meant something else. For the fans who still feel that pride when they hear his name.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
     ('Motorsport duo','Larry Perkins & Russell Ingall','Last to First','Approved design name; a recovery through the field. No verified year, venue or margin supplied.',
      'Larry Perkins & Russell Ingall — Last to First Wall Art',
-     '<p><strong>Never count them out.</strong></p><p>Larry Perkins and Russell Ingall. A reminder of why you keep watching when a race turns against you.</p><p>For the fans who back their drivers through the setbacks, not just the celebrations. The fight back is what stays with you.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>Never count them out.</strong></p><p>Larry Perkins and Russell Ingall. A reminder of why you keep watching when a race turns against you.</p><p>For the fans who back their drivers through the setbacks, not just the celebrations. The fight back is what stays with you.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
     ('Football','Lionel Messi','A Different Rhythm','Verified subject and football category; no specific match or award supplied.',
      'Lionel Messi — A Different Rhythm Wall Art',
-     '<p><strong>The game felt different.</strong></p><p>Watching Messi was never just about waiting for the score.</p><p>It was the anticipation every time the ball reached him. For the fans who stopped talking, leaned forward and refused to look away. Keep that feeling close.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>The game felt different.</strong></p><p>Watching Messi was never just about waiting for the score.</p><p>It was the anticipation every time the ball reached him. For the fans who stopped talking, leaned forward and refused to look away. Keep that feeling close.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
     ('Cricket','Shane Warne','The Art of Spin','Verified spin bowler; no specific delivery, venue or statistic supplied.',
      'Shane Warne — The Art of Spin Wall Art',
-     '<p><strong>Every ball held a question.</strong></p><p>With Warne, waiting for the next delivery was part of the pleasure.</p><p>For the cricket fans who loved the contest before the result—the patience, the doubt, the possibility of a wicket. That anticipation belongs in the memory.</p><p>Limited to 100 worldwide.</p>'),
+     '<p><strong>Every ball held a question.</strong></p><p>With Warne, waiting for the next delivery was part of the pleasure.</p><p>For the cricket fans who loved the contest before the result—the patience, the doubt, the possibility of a wicket. That anticipation belongs in the memory.</p><p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'),
 ]
 
 
 class CollectorCopyTests(unittest.TestCase):
+    def test_required_ending_in_actual_export_and_preview_with_exceptions(self):
+        ending = '<p>Limited to 100 worldwide.</p>\n<p>Real fans remember this. Own the moment.</p>'
+        for mode in ('DRAFT', 'LIVE'):
+            for preview in (False, True):
+                prompt = app.get_product_upload_prompt({'product_name': 'Verified Product'},
+                    publication_mode=mode, preview=preview)
+                self.assertIn(ending, prompt)
+                self.assertIn('an explicitly non-limited product omits the scarcity paragraph', prompt)
+                self.assertIn('a verified different edition limit uses\nthat limit', prompt)
+                self.assertIn('For unknown edition facts, omit scarcity', prompt)
+                self.assertIn('other text after "Own the moment."', prompt)
+                self.assertNotIn('Do not replace them with another universal ending', prompt)
+                self.assertNotIn('campaign slogans belong elsewhere', prompt)
+
     def test_both_actual_builders_share_rules_and_research(self):
         for kind,subject,design,research,title,html in CASES:
             for update in (False,True):
@@ -54,7 +68,7 @@ class CollectorCopyTests(unittest.TestCase):
                 text=re.sub('<[^>]+>',' ',html)
                 self.assertLessEqual(len(text.split()),70)
                 self.assertTrue(html.startswith('<p><strong>'))
-                self.assertIn('Limited to 100 worldwide.',text)
+                self.assertTrue(html.endswith('<p>Limited to 100 worldwide.</p><p>Real fans remember this. Own the moment.</p>'))
                 for banned in ['artwork captures','more than wall art','real fans do not','perfect for','must-have']:
                     self.assertNotIn(banned,text.lower())
 

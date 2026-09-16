@@ -46,7 +46,7 @@ class ModeTests(unittest.TestCase):
 
     def test_failure_and_retry_contracts_are_explicit(self):
         text=self.prompt('LIVE')
-        for requirement in ('classification, media, variants, prices','either collection publication','Markets',
+        for requirement in ('classification, media, variants, prices','any selected collection publication','Markets',
                             'ONLY this newly created product to DRAFT','DRAFT FALLBACK UNVERIFIED',
                             'never roll back\nshared collection publications','never increment by 20',
                             'never create a\nduplicate','perform only missing work'):

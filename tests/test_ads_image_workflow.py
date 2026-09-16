@@ -740,26 +740,14 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 "01-premium-scarcity-right/ad-copy.txt",
                 "01-premium-scarcity-right/01-legacy-standard/primary-text.txt",
                 "01-premium-scarcity-right/01-legacy-standard/headline.txt",
-                "01-premium-scarcity-right/02-framed-greatness/primary-text.txt",
-                "01-premium-scarcity-right/02-framed-greatness/headline.txt",
-                "01-premium-scarcity-right/03-choose-a-side/primary-text.txt",
-                "01-premium-scarcity-right/03-choose-a-side/headline.txt",
                 "02-premium-scarcity-front/premium_scarcity_front_cover_original.jpg",
                 "02-premium-scarcity-front/ad-copy.txt",
                 "02-premium-scarcity-front/01-legacy-standard/primary-text.txt",
                 "02-premium-scarcity-front/01-legacy-standard/headline.txt",
-                "02-premium-scarcity-front/02-framed-greatness/primary-text.txt",
-                "02-premium-scarcity-front/02-framed-greatness/headline.txt",
-                "02-premium-scarcity-front/03-choose-a-side/primary-text.txt",
-                "02-premium-scarcity-front/03-choose-a-side/headline.txt",
                 "03-premium-scarcity-left/premium_scarcity_left_cover_original.jpg",
                 "03-premium-scarcity-left/ad-copy.txt",
                 "03-premium-scarcity-left/01-legacy-standard/primary-text.txt",
                 "03-premium-scarcity-left/01-legacy-standard/headline.txt",
-                "03-premium-scarcity-left/02-framed-greatness/primary-text.txt",
-                "03-premium-scarcity-left/02-framed-greatness/headline.txt",
-                "03-premium-scarcity-left/03-choose-a-side/primary-text.txt",
-                "03-premium-scarcity-left/03-choose-a-side/headline.txt",
                 ads_page._instant_experience_current_copy_csv_filename(result),
             ],
         )
@@ -880,7 +868,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             self.assertEqual(details["content_type"], "image/jpeg")
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_instant_experience_ad_copy_exports_three_variations_per_concept(
+    def test_instant_experience_ad_copy_exports_one_selected_set_per_concept(
         self,
         upload_batch,
         _metadata,
@@ -933,7 +921,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE", notes_text)
         self.assertIn("ROUTE:\r\nPremium Scarcity", notes_text)
         self.assertIn(
-            "Description 1 — Legacy Standard\r\n\r\nDESCRIPTION KEY:\r\n"
+            "Ad Copy\r\n\r\nDESCRIPTION KEY:\r\n"
             "legacy_standard\r\n\r\nDESCRIPTION COPY:\r\n"
             "Opening line\r\n\r\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing. "
             "Claim your edition.",
@@ -941,7 +929,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         )
         self.assertIn("HEADLINE:\r\nRemember The Kid", notes_text)
         self.assertIn("CTA:\r\nClaim Your Edition", notes_text)
-        self.assertIn("Description 3 — Choose a Side", notes_text)
+        self.assertNotIn("Description 3 — Choose a Side", notes_text)
         self.assertNotIn("VARIATION 4", notes_text)
         self.assertNotIn("DESCRIPTIONS", notes_text)
         self.assertNotIn("CAROUSEL CARDS / AD SETUP", notes_text)
@@ -1011,8 +999,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
             [
-                (1, 25, "Premium Scarcity — Right Angle Cover"),
-                (1, 25, "Premium Scarcity — Right Angle Cover"),
+                (1, 13, "Premium Scarcity — Right Angle Cover"),
+                (1, 13, "Premium Scarcity — Right Angle Cover"),
             ],
         )
 

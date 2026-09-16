@@ -39,12 +39,13 @@ media, variants, memberships or publication records. Do not reset any edition da
 
 1. CLASSIFY AND RESOLVE COLLECTIONS
 Resolve the verified Sports Cave sport from supplied research/current product data,
-not an invented category. Discover its established customer-facing sport collection
-and the existing Collector Series; use stable IDs. No duplicate collections.
+not an invented category. Follow the shared NEW PRODUCT MULTI-COLLECTION POLICY:
+evaluate the full catalogue and resolve ALL relevant collections to stable IDs,
+including the SPORT COLLECTION and COLLECTOR SERIES. No duplicate collections.
 If sport or collection identity is ambiguous, leave Draft and report the problem.
-Add membership in both, preserving other legitimate memberships. For automated
-collections, satisfy the established rules safely and verify actual membership;
-never rewrite a collection's rules to force inclusion.
+Apply every selected manual ID, preserving other legitimate memberships. For
+automated collections, evaluate established rules and verify actual membership;
+never rewrite rules or product facts to force inclusion or manually add to smart collections.
 
 2. INVENTORY — LIVE MODE ONLY
 Discover the normal Sports Cave fulfilment location; if ambiguous, stop in Draft.
@@ -70,8 +71,8 @@ An enabled required channel that cannot be verified is a blocker, not a silent s
 Only after all prior checks pass: change this product from DRAFT to ACTIVE.
 Ensure this product's availability in each discovered applicable active Market.
 Publish this PRODUCT to every discovered enabled required channel publication.
-Separately verify/publish the SPORT COLLECTION to every enabled required channel.
-Separately verify/publish COLLECTOR SERIES to every enabled required channel.
+Separately verify/publish EACH selected collection to every enabled required channel,
+including SPORT COLLECTION and COLLECTOR SERIES; never stop at the first two.
 Reuse existing memberships/publications and repair only missing ones. Never remove
 legitimate shared collection publications or change unrelated collection contents.
 Use supported publishable operations for each resource, inspect every userError,
@@ -82,12 +83,12 @@ not prove downstream Meta Product Set synchronisation. Report any downstream
 catalogue/collection eligibility or propagation issue separately, without editing ads.
 
 5. FRESH FINAL READ-BACK — SUCCESS GATE
-Do not trust mutation responses. Read this exact product and both collection IDs
+Do not trust mutation responses. Read this exact product and ALL selected collection IDs
 again, paginate variants/media/publications, and verify current Market availability.
-Verify ACTIVE, verified sport, correct sport collection and Collector Series,
+Verify ACTIVE, verified sport, all selected collection memberships,
 all 16 quantities = 20 at the selected location, tracking where supported, and
 CONTINUE. Verify all common build QA again. Independently verify PRODUCT, SPORT
-COLLECTION and COLLECTOR SERIES publication for each required enabled channel.
+COLLECTION, COLLECTOR SERIES and every other selected collection publication for each required enabled channel.
 Use a matrix: Resource | Channel/Market | Required | Observed | Verified/Error.
 Retain the existing media verification table. Retry transient processing failures
 with bounded polling and fresh reads; never report a pending state as success.
@@ -103,12 +104,12 @@ operator's Edition Ops Pull New Products reconciliation/read-back. Shopify ACTIV
 alone is not proof. A pending mirror remains retryable; do not roll back the ledger.
 Do not claim the full workflow is operational until this verification passes.
 Only if EVERY required check passes report PRODUCT PUBLISHED LIVE, product title,
-admin URL, ACTIVE, sport collection, Collector Series, 16 variants, inventory 20,
+admin URL, ACTIVE, ALL selected collections, 16 variants, inventory 20,
 continue-selling, applicable active Markets and each verified channel/resource.
 
 6. FAILURE / PARTIAL-LIVE RECOVERY — APPLIES TO EVERY STEP
 On any critical failure (including classification, media, variants, prices,
-inventory, status, memberships, Markets, either collection publication, product
+inventory, status, memberships, Markets, any selected collection publication, product
 publication or final read-back), do not report Live success. Attempt to restore
 ONLY this newly created product to DRAFT and verify it by a fresh read. Where
 needed, unpublish only this operation's product publications; never roll back

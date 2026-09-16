@@ -7,6 +7,7 @@ import app
 import sports_cave_pricing
 from product_collector_copy import apply_rules
 from product_upload_modes import common_build, CORE
+from product_upload_collections import apply_rules as apply_collection_rules
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -308,7 +309,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(current_prompt)),
-                    apply_rules((lambda p: p if update_existing else common_build(p))(legacy_prompt.replace(legacy_pricing, new_pricing))),
+                    (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules((lambda p: p if update_existing else common_build(p))(legacy_prompt.replace(legacy_pricing, new_pricing)))),
                 )
 
     def test_only_change_to_each_generated_prompt_is_the_inserted_patch(self):
@@ -326,7 +327,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                     (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(
                         app.remove_product_upload_media_reliability_patch(upgraded)
                     )),
-                    apply_rules(legacy if update_existing else common_build(legacy)),
+                    (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules(legacy if update_existing else common_build(legacy))),
                 )
                 self.assertTrue(upgraded.startswith(app.PRODUCT_UPLOAD_NAME_BLOCK_START if update_existing else CORE))
                 self.assertIn(apply_rules(base_prompt if update_existing else common_build(base_prompt)).split('SPORTS CAVE COLLECTOR COPY')[0].strip(), upgraded)

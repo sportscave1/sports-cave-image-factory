@@ -34,7 +34,7 @@ reach a minimum. Use 3–4 compact mobile-friendly blocks, one central idea:
 2. The moment: 1–2 short sentences about one supported memory, achievement,
    defining characteristic or rivalry. Emotion before product explanation.
 3. Usually one fan-identity sentence: what owning this means to THIS fan.
-4. One short collector close where appropriate, using confirmed scarcity only.
+4. The required collector ending below, using confirmed scarcity only.
 Combine blocks when that reads better. Use <p> and <strong> for the opening hook;
 <em> only where useful. No extra headings, bullet lists, tables, CSS or divs.
 Short sentences, meaningful fragments, pride, nostalgia and specificity. Do not
@@ -46,8 +46,22 @@ Never use these stock phrases in generated product descriptions:
 "More than wall art", "Perfect for the cave, office, home bar", "Perfect for any",
 "A must-have for", "Elevate your space", "Transform your", "The ultimate",
 "Real fans do not just remember this moment — they own it."
-Do not replace them with another universal ending. Generate a moment-specific
-close; campaign slogans belong elsewhere. Do not copy examples mechanically.
+REQUIRED DESCRIPTION ENDING
+For normal Sports Cave limited-100 worldwide products, end with exactly these
+two separate paragraphs (the standard worldwide wording is approved here):
+<p>Limited to 100 worldwide.</p>
+<p>Real fans remember this. Own the moment.</p>
+Plain text: Limited to 100 worldwide.
+
+Real fans remember this. Own the moment.
+Preserve the product-specific history, moment, athlete/team/race meaning,
+collector appeal and any existing sizing/frame information BEFORE this ending.
+Do not replace the ending with generic copy or "Secure yours." Do not add any
+sales copy, specifications or other text after "Own the moment."
+Explicit exceptions take precedence: a verified different edition limit uses
+that limit; an explicitly non-limited product omits the scarcity paragraph.
+For unknown edition facts, omit scarcity and flag it for review; never invent 100.
+The final brand paragraph remains exactly the same in each case.
 
 FACTS AND SCARCITY
 Use only supplied design/product research and verified product information.
@@ -58,17 +72,17 @@ truthful fan connection or omit the claim. A supplied uncertain claim stays unce
 Use the authoritative confirmed edition limit, never an assumed default of 100.
 "Limited to N worldwide" is allowed only if both N and that worldwide run policy
 are confirmed. Never invent remaining counts or claim no reprints/closed forever
-without confirmed policy. Omit scarcity when edition facts are unavailable; a
-short product-specific emotional close is enough. Never imply a closed run is open.
+without confirmed policy. Omit scarcity when edition facts are unavailable.
+Never imply a closed run is open. Preserve explicit edition exceptions.
 
 INTERNAL QUALITY PASS — revise before returning; do not print this reasoning
 Title: subject first? em dash? Wall Art suffix? strong design name? natural aloud?
 No colon, repeated subject or keyword stuffing?
 Description: around 70 words or less unless genuinely justified? strong hook?
 One central idea? fan emotion/memory? no visual narration, banned phrases, room
-lists or universal ending? every fact supported and scarcity authentic?
+lists? required ending last, with no text after it? every fact supported and scarcity authentic?
 Does a passionate fan care, and does it sound individually written for THIS work?
-Remove any sentence whose removal strengthens the copy. Revise failures before
+Remove any optional sentence whose removal strengthens the copy; keep the required ending. Revise failures before
 returning the existing output schema. Leave separate SEO generation intact.
 END SPORTS CAVE COLLECTOR COPY'''
 

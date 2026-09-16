@@ -127,6 +127,8 @@ def primary_ads(batch):
 
 def ads_result(*, workflow_mode=ads_page.ADS_WORKFLOW_MODE_NEW):
     return {
+        # Keep the nine-row compatibility fixtures; CopyV2Tests covers new three-row files.
+        "_legacy_ie_csv": workflow_mode == ads_page.ADS_WORKFLOW_MODE_NEW,
         "context_key": f"posting-csv-{workflow_mode}",
         "workflow_mode": workflow_mode,
         "campaign_type": "Instant Experience",

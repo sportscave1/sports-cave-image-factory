@@ -77,9 +77,8 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         grouped = ads_page.build_standard_instant_experience_group_output_contract(
             product_name="Collector Cricket Print", category="Cricket", country="Australia")
         self.assertEqual(grouped.count("\nIMAGE GENERATION PROMPT\n"), 3)
-        self.assertEqual(grouped.count("\nCOPY VARIATIONS\n"), 3)
-        for key in ("legacy_standard", "framed_greatness", "choose_a_side"):
-            self.assertEqual(grouped.count(f"| {key} |"), 3)
+        self.assertEqual(grouped.count("\nAD COPY\n"), 3)
+        self.assertNotIn("COPY VARIATIONS", grouped)
         master = ads_page.build_ads_prompt("Collector Cricket Print", "Cricket", "Australia", "Instant Experience")
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, master)
         self.assertIn("Catalogue product headline field uses: product.name", master)
