@@ -114,6 +114,8 @@ def square_image_bytes(image_format, color=(46, 76, 112)):
 def instant_experience_csv_result(output_mode=None):
     result = {
         "context_key": "instant-experience-csv-test",
+        # Historical CSV fixtures remain nine-row; new active UI is tested separately.
+        "_legacy_ie_csv": True,
         "product_name": "Senna’s Legacy — Collector Edition",
         "product_url": "https://www.sportscaveshop.com/products/sennas-legacy-collector-edition",
         "country": "Australia",
@@ -687,12 +689,12 @@ class AdsPageTests(unittest.TestCase):
             "premium_scarcity_left",
         ):
             self.assertIn(f"Route key: {route_key}", prompt)
-        self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
-        self.assertIn("legacy_standard", prompt)
-        self.assertIn("framed_greatness", prompt)
-        self.assertIn("choose_a_side", prompt)
-        self.assertIn("Every group table must contain exactly three completed rows in the fixed description order.", prompt)
-        self.assertIn("Across all groups, output exactly nine complete ad-copy combinations.", prompt)
+        self.assertIn("AD COPY", prompt)
+        self.assertIn("Legacy Standard", prompt)
+        self.assertIn("Framed Greatness", prompt)
+        self.assertIn("Choose-a-Side", prompt)
+        self.assertIn("Exactly three completed copy combinations total, one per visual.", prompt)
+        self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
         self.assertEqual(prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"), 1)
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
@@ -715,16 +717,16 @@ class AdsPageTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/the-titans",
         )
 
-        self.assertIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", prompt)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
         self.assertIn("Smart Hybrid uses one product-aware camera", prompt)
         self.assertIn("Private Gallery uses FOR THE ROOM THAT REMEMBERS.", prompt)
         self.assertIn("The Cave uses THE CAVE STARTS HERE.", prompt)
-        self.assertIn("Every CTA must be one approved direct edition-acquisition CTA.", prompt)
-        self.assertIn("Description 1 for all three routes uses Claim Your Edition.", prompt)
+        self.assertIn("One approved CTA per ad, no alternatives.", prompt)
+        self.assertIn("CTA exactly Claim Your Edition.", prompt)
         self.assertIn("ballpark memory", prompt)
         self.assertIn("generations", prompt)
         self.assertIn("swing and legacy", prompt)
-        self.assertIn("Use natural selected-country English.", prompt)
+        self.assertIn("Other markets retain existing localisation.", prompt)
 
     def test_baseball_instant_experience_approved_claims_are_injected_through_claim_helper(self):
         prompt = ads_page.build_ads_prompt(
@@ -745,7 +747,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("These claim lines are supplied through the approved Baseball Instant Experience claim path.", prompt)
         self.assertIn("Do not replace Made in the USA with another manufacturing country", prompt)
         self.assertIn("Do not identify or guess a person", prompt)
-        self.assertIn("Never invent history, achievements, product facts", prompt)
+        self.assertIn("Never invent remaining stock", prompt)
 
     def test_baseball_instant_experience_setup_uses_required_meta_instructions(self):
         prompt = ads_page.build_ads_prompt(
@@ -817,8 +819,8 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("Route key: premium_scarcity_right", prompt)
                 self.assertIn("Route key: premium_scarcity_front", prompt)
                 self.assertIn("Route key: premium_scarcity_left", prompt)
-                self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
-                self.assertIn("COPY VARIATIONS", prompt)
+                self.assertIn("AD COPY", prompt)
+                self.assertIn("AD COPY", prompt)
                 self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                 self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
@@ -895,7 +897,7 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("Route key: premium_scarcity_right", prompt)
                         self.assertIn("Route key: premium_scarcity_front", prompt)
                         self.assertIn("Route key: premium_scarcity_left", prompt)
-                        self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
+                        self.assertIn("AD COPY", prompt)
                         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
                         self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
@@ -1100,7 +1102,7 @@ class AdsPageTests(unittest.TestCase):
         )
         self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", instant_prompt)
         self.assertNotIn("HIGH-CONVERSION CAROUSEL QUALITY", instant_prompt)
-        self.assertIn("4 to 6 words max.", instant_prompt)
+        self.assertIn("normally 4–6", instant_prompt)
 
     def test_carousel_winner_examples_fit_limit_without_changing_other_campaigns(self):
         for category, angle in ads_page.CATEGORY_WINNER_ANGLES.items():
@@ -1221,11 +1223,11 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Use the product title and supplied artwork as the factual source of truth.", carousel_prompt)
 
         self.assertEqual(instant_prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", instant_prompt)
-        self.assertIn("Each route table must contain exactly three completed description rows", instant_prompt)
-        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", instant_prompt)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", instant_prompt)
+        self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", instant_prompt)
+        self.assertIn("Return exactly THREE active ad-copy combinations total.", instant_prompt)
         self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", instant_prompt)
-        self.assertIn("The three distinct visual formats keep the same ordered product-aware description archetypes", instant_prompt)
+        self.assertIn("Three different opening sentences and emotional propositions", instant_prompt)
 
         self.assertNotIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, single_prompt)
 
@@ -1360,9 +1362,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", once)
+        self.assertNotIn("INSTANT EXPERIENCE COPY V2", once)
         self.assertIn(
-            "STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY",
+            "INSTANT EXPERIENCE COPY V2",
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -1379,10 +1381,10 @@ class AdsPageTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/ohtani-50-50",
         )
 
-        self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", prompt)
-        self.assertIn("Each route table must contain exactly three completed description rows", prompt)
-        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", prompt)
+        self.assertEqual(prompt.count("ONE PERSONALISED COPY SET PER VISUAL"), 1)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", prompt)
+        self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
         self.assertIn("No row may be placeholder copy.", prompt)
         self.assertNotIn("PRIMARY TEXT VARIATIONS\n\nVariation 1:", prompt)
         self.assertNotIn("Return one final primary text only.", prompt)
@@ -2059,7 +2061,7 @@ PRIMARY TEXT VARIATIONS
                 "shopify_product_id": "product-123",
                 "product_title": "Six Laps Ahead",
                 "product_handle": "six-laps-ahead",
-                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+                "online_store_url": "https://www.sportscaveshop.com/products/six-laps-ahead",
             }
         ]
 
@@ -2105,7 +2107,7 @@ PRIMARY TEXT VARIATIONS
             {
                 "shopify_product_id": "product-123",
                 "product_title": "Six Laps Ahead",
-                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+                "online_store_url": "https://www.sportscaveshop.com/products/six-laps-ahead",
             }
         ]
 
@@ -2180,7 +2182,7 @@ PRIMARY TEXT VARIATIONS
                 "product_id": "product-123",
                 "product_title": "Six Laps Ahead",
                 "shopify_handle": "six-laps-ahead",
-                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+                "online_store_url": "https://www.sportscaveshop.com/products/six-laps-ahead",
             }
         ]
         session_state = {}
@@ -2191,7 +2193,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(state["product_id"], "product-123")
         self.assertEqual(
             session_state[ads_page.ADS_PRODUCT_URL_KEY],
-            "https://sportscave.com.au/products/six-laps-ahead",
+            "https://www.sportscaveshop.com/products/six-laps-ahead",
         )
         self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "id::product-123")
         self.assertEqual(state["message"], "")
@@ -2201,32 +2203,32 @@ PRIMARY TEXT VARIATIONS
             {
                 "product_id": "product-123",
                 "product_title": "Six Laps Ahead",
-                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+                "online_store_url": "https://www.sportscaveshop.com/products/six-laps-ahead",
             },
             {
                 "product_id": "product-456",
                 "product_title": "Bathurst Winner",
-                "online_store_url": "https://sportscave.com.au/products/bathurst-winner",
+                "online_store_url": "https://www.sportscaveshop.com/products/bathurst-winner",
             },
         ]
         session_state = {}
 
         with patch.object(ads_page.st, "session_state", session_state):
             ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
-            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://sportscave.com.au/products/manual-campaign-url"
+            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://www.sportscaveshop.com/products/manual-campaign-url"
             ads_page._on_ads_product_url_changed()
             ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
 
             self.assertEqual(
                 session_state[ads_page.ADS_PRODUCT_URL_KEY],
-                "https://sportscave.com.au/products/manual-campaign-url",
+                "https://www.sportscaveshop.com/products/manual-campaign-url",
             )
 
             ads_page.prepare_ads_product_url_state("Bathurst Winner", rows=rows)
 
         self.assertEqual(
             session_state[ads_page.ADS_PRODUCT_URL_KEY],
-            "https://sportscave.com.au/products/bathurst-winner",
+            "https://www.sportscaveshop.com/products/bathurst-winner",
         )
         self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "id::product-456")
 
@@ -2239,7 +2241,7 @@ PRIMARY TEXT VARIATIONS
             }
         ]
         session_state = {
-            ads_page.ADS_PRODUCT_URL_KEY: "https://sportscave.com.au/products/manual-url",
+            ads_page.ADS_PRODUCT_URL_KEY: "https://www.sportscaveshop.com/products/manual-url",
             ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY: "previous-product",
         }
 
@@ -2249,7 +2251,7 @@ PRIMARY TEXT VARIATIONS
             self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_KEY], "")
             self.assertEqual(state["message"], ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE)
 
-            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://sportscave.com.au/products/manual-url"
+            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://www.sportscaveshop.com/products/manual-url"
             session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = "product-empty"
             ads_page.prepare_ads_product_url_state("", rows=rows)
 
@@ -2261,18 +2263,18 @@ PRIMARY TEXT VARIATIONS
             {
                 "product_id": "product-123",
                 "product_title": "Six Laps Ahead",
-                "online_store_url": "https://sportscave.com.au/products/edition-ops-url",
+                "online_store_url": "https://www.sportscaveshop.com/products/edition-ops-url",
             },
             {
                 "product_id": "product-456",
                 "product_title": "Bathurst Winner",
-                "online_store_url": "https://sportscave.com.au/products/bathurst-winner",
+                "online_store_url": "https://www.sportscaveshop.com/products/bathurst-winner",
             },
         ]
         result = {
             "product_id": "product-123",
             "product_name": "Six Laps Ahead",
-            "product_url": "https://sportscave.com.au/products/saved-draft-url",
+            "product_url": "https://www.sportscaveshop.com/products/saved-draft-url",
         }
         session_state = {}
 
@@ -2281,14 +2283,14 @@ PRIMARY TEXT VARIATIONS
 
             self.assertEqual(
                 session_state[ads_page.ADS_PRODUCT_URL_KEY],
-                "https://sportscave.com.au/products/edition-ops-url",
+                "https://www.sportscaveshop.com/products/edition-ops-url",
             )
 
             ads_page.prepare_ads_product_url_state("Bathurst Winner", result=result, rows=rows)
 
         self.assertEqual(
             session_state[ads_page.ADS_PRODUCT_URL_KEY],
-            "https://sportscave.com.au/products/bathurst-winner",
+            "https://www.sportscaveshop.com/products/bathurst-winner",
         )
 
     def test_duplicate_ads_product_names_resolve_url_through_stable_record(self):
@@ -2297,13 +2299,13 @@ PRIMARY TEXT VARIATIONS
                 "product_id": "product-a",
                 "product_title": "Untitled Product",
                 "shopify_handle": "legends-never-die",
-                "online_store_url": "https://sportscave.com.au/products/legends-never-die",
+                "online_store_url": "https://www.sportscaveshop.com/products/legends-never-die",
             },
             {
                 "product_id": "product-b",
                 "product_title": "Untitled Product",
                 "shopify_handle": "goat-debate-wall-art",
-                "online_store_url": "https://sportscave.com.au/products/goat-debate-wall-art",
+                "online_store_url": "https://www.sportscaveshop.com/products/goat-debate-wall-art",
             },
         ]
 
@@ -2316,7 +2318,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(selection["record_key"], "product-b")
         self.assertEqual(
             selection["product_url"],
-            "https://sportscave.com.au/products/goat-debate-wall-art",
+            "https://www.sportscaveshop.com/products/goat-debate-wall-art",
         )
 
     def test_stable_product_id_resolves_ambiguous_display_name(self):
@@ -2325,13 +2327,13 @@ PRIMARY TEXT VARIATIONS
                 "product_id": "product-a",
                 "product_title": "Untitled Product",
                 "shopify_handle": "legends-never-die",
-                "online_store_url": "https://sportscave.com.au/products/legends-never-die",
+                "online_store_url": "https://www.sportscaveshop.com/products/legends-never-die",
             },
             {
                 "product_id": "product-b",
                 "product_title": "Untitled Product",
                 "shopify_handle": "goat-debate-wall-art",
-                "online_store_url": "https://sportscave.com.au/products/goat-debate-wall-art",
+                "online_store_url": "https://www.sportscaveshop.com/products/goat-debate-wall-art",
             },
         ]
 
@@ -2349,18 +2351,18 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(resolved["product_id"], "product-b")
         self.assertEqual(
             resolved["product_url"],
-            "https://sportscave.com.au/products/goat-debate-wall-art",
+            "https://www.sportscaveshop.com/products/goat-debate-wall-art",
         )
 
     def test_legacy_exact_name_matching_handles_punctuation_without_fuzzy_collisions(self):
         rows = [
             {
                 "product_title": "Driver’s Legacy – 1998",
-                "online_store_url": "https://sportscave.com.au/products/drivers-legacy-1998",
+                "online_store_url": "https://www.sportscaveshop.com/products/drivers-legacy-1998",
             },
             {
                 "product_title": "Driver’s Legacy – 1998 Revisited",
-                "online_store_url": "https://sportscave.com.au/products/drivers-legacy-revisited",
+                "online_store_url": "https://www.sportscaveshop.com/products/drivers-legacy-revisited",
             },
         ]
 
@@ -2375,7 +2377,7 @@ PRIMARY TEXT VARIATIONS
 
         self.assertEqual(
             selection["product_url"],
-            "https://sportscave.com.au/products/drivers-legacy-1998",
+            "https://www.sportscaveshop.com/products/drivers-legacy-1998",
         )
         self.assertIsNone(similar_name["row"])
 
@@ -2384,7 +2386,7 @@ PRIMARY TEXT VARIATIONS
             {
                 "product_id": "product-a",
                 "product_title": "Known Product",
-                "online_store_url": "https://sportscave.com.au/products/known-product",
+                "online_store_url": "https://www.sportscaveshop.com/products/known-product",
             }
         ]
         session_state = {}
@@ -2392,7 +2394,7 @@ PRIMARY TEXT VARIATIONS
         with patch.object(ads_page.st, "session_state", session_state):
             ads_page.prepare_ads_product_url_state("Known Product", rows=rows)
             session_state[ads_page.ADS_PRODUCT_URL_KEY] = (
-                "https://sportscave.com.au/products/manual-campaign-url"
+                "https://www.sportscaveshop.com/products/manual-campaign-url"
             )
             state = ads_page.prepare_ads_product_url_state("Unknown Product", rows=rows)
 
@@ -2400,7 +2402,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(state["message"], ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE)
 
     def test_product_url_flows_to_ads_and_instant_experience_destination_output(self):
-        product_url = "https://sportscave.com.au/products/six-laps-ahead"
+        product_url = "https://www.sportscaveshop.com/products/six-laps-ahead"
         prompt = ads_page.build_ads_prompt(
             "Six Laps Ahead",
             "Motorsport",
@@ -2437,13 +2439,13 @@ PRIMARY TEXT VARIATIONS
                 "product_id": "product-a",
                 "product_title": "Product A",
                 "shopify_handle": "product-a",
-                "online_store_url": "https://sportscave.com.au/products/product-a",
+                "online_store_url": "https://www.sportscaveshop.com/products/product-a",
             },
             {
                 "product_id": "product-b",
                 "product_title": "Product B",
                 "shopify_handle": "product-b",
-                "online_store_url": "https://sportscave.com.au/products/product-b",
+                "online_store_url": "https://www.sportscaveshop.com/products/product-b",
             },
         ]
         app_test = run_ads_page_with_product_rows(rows)
@@ -2459,10 +2461,10 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertEqual(
             product_url.value,
-            "https://sportscave.com.au/products/product-a",
+            "https://www.sportscaveshop.com/products/product-a",
         )
 
-        product_url.set_value("https://sportscave.com.au/products/product-a-campaign")
+        product_url.set_value("https://www.sportscaveshop.com/products/product-a-campaign")
         app_test.run(timeout=20)
         select_option(app_test, "Category", "Motorsport")
         product_url = next(
@@ -2472,7 +2474,7 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertEqual(
             product_url.value,
-            "https://sportscave.com.au/products/product-a-campaign",
+            "https://www.sportscaveshop.com/products/product-a-campaign",
         )
 
         product_url.set_value("")
@@ -2499,7 +2501,7 @@ PRIMARY TEXT VARIATIONS
                 for text_input in app_test.text_input
                 if text_input.label == "Product page URL *"
             ).value,
-            "https://sportscave.com.au/products/product-b",
+            "https://www.sportscaveshop.com/products/product-b",
         )
 
         product_selector = next(
@@ -2527,7 +2529,7 @@ PRIMARY TEXT VARIATIONS
                 "product_id": "product-a",
                 "product_title": "Product A",
                 "shopify_handle": "product-a",
-                "online_store_url": "https://sportscave.com.au/products/product-a",
+                "online_store_url": "https://www.sportscaveshop.com/products/product-a",
             }
         ]
         app_test = run_ads_page_with_product_rows(
@@ -2539,7 +2541,7 @@ PRIMARY TEXT VARIATIONS
                 ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY: "id::product-a",
                 ads_page.ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY: "Product A",
                 ads_page.ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY: (
-                    "https://sportscave.com.au/products/product-a"
+                    "https://www.sportscaveshop.com/products/product-a"
                 ),
             },
         )
@@ -2551,7 +2553,7 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertEqual(
             product_url.value,
-            "https://sportscave.com.au/products/product-a",
+            "https://www.sportscaveshop.com/products/product-a",
         )
         self.assertTrue(
             app_test.session_state[ads_page.ADS_PRODUCT_URL_INITIALIZED_KEY]
@@ -2587,7 +2589,7 @@ PRIMARY TEXT VARIATIONS
             ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE,
             [caption.value for caption in app_test.caption],
         )
-        product_url.set_value("https://sportscave.com.au/products/manual-destination")
+        product_url.set_value("https://www.sportscaveshop.com/products/manual-destination")
         app_test.run(timeout=20)
         self.assertEqual(
             next(
@@ -2595,7 +2597,7 @@ PRIMARY TEXT VARIATIONS
                 for text_input in app_test.text_input
                 if text_input.label == "Product page URL *"
             ).value,
-            "https://sportscave.com.au/products/manual-destination",
+            "https://www.sportscaveshop.com/products/manual-destination",
         )
         self.assertEqual(len(app_test.exception), 0)
 
@@ -3710,12 +3712,12 @@ PRIMARY TEXT VARIATIONS
         )
         contract = visual_contract(prompt)
 
-        self.assertIn("INSTANT EXPERIENCE DESCRIPTION COPY SYSTEM V1", prompt)
-        self.assertIn("Generate the long advertising description copy once", prompt)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn("ONE PERSONALISED COPY SET PER VISUAL", prompt)
         self.assertIn("PRODUCT-AWARE DESCRIPTION SYSTEM", prompt)
-        self.assertEqual(contract.count("| 1 | legacy_standard | Description 1"), 3)
-        self.assertEqual(contract.count("| 2 | framed_greatness | Description 2"), 3)
-        self.assertEqual(contract.count("| 3 | choose_a_side | Description 3"), 3)
+        self.assertEqual(contract.count("\nAD COPY\n"), 3)
+        self.assertIn("Secure Your Edition", contract)
+        self.assertIn("Own This Edition", contract)
         self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", contract)
         allowed_macro_scrubbed = re.sub(
             r"\{\{(?:(?:campaign|ad|adset)\.name|placement)\}\}",
@@ -3983,15 +3985,15 @@ PRIMARY TEXT VARIATIONS
         note_labels = [text_area.label for text_area in app_test.text_area]
         self.assertEqual(
             [label for label in note_labels if label == "Description"],
-            ["Description"] * 9,
+            ["Description"] * 3,
         )
         self.assertEqual(
             [label for label in note_labels if label == "Headline"],
-            ["Headline"] * 9,
+            ["Headline"] * 3,
         )
         self.assertEqual(
             [label for label in note_labels if label == "CTA"],
-            ["CTA"] * 9,
+            ["CTA"] * 3,
         )
         self.assertNotIn("Call to Action 1", note_labels)
         self.assertNotIn("Descriptions", note_labels)
@@ -4703,19 +4705,19 @@ PRIMARY TEXT VARIATIONS
             for text_area in app_test.text_area
             if text_area.label == "CTA"
         ]
-        self.assertEqual(len(primary_values), 9)
+        self.assertEqual(len(primary_values), 3)
         self.assertEqual(primary_values[0], expected["premium_scarcity_right"][0]["primary_text"])
-        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][2]["primary_text"])
-        self.assertEqual(headline_values[4], expected["premium_scarcity_front"][1]["headline"])
-        self.assertEqual(cta_values[8], expected["premium_scarcity_left"][2]["cta"])
+        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][0]["primary_text"])
+        self.assertEqual(headline_values[1], expected["premium_scarcity_front"][0]["headline"])
+        self.assertEqual(cta_values[2], expected["premium_scarcity_left"][0]["cta"])
         self.assertTrue(
             all(
                 any(
                     f"{concept['display_name']}: " in caption.value
-                    and "3 of 3 description options complete" in caption.value
+                    and "Copy complete" in caption.value
                     for caption in app_test.caption
                 )
-                for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+                for concept in ads_page._ie_concepts_for_result({"campaign_type": "Instant Experience"})
             )
         )
         self.assertEqual(len(app_test.exception), 0)
@@ -5125,7 +5127,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Made in the USA.", prompt)
         self.assertIn("Rated 4.9 / 5 by thousands of collectors.", prompt)
         self.assertIn("These claim lines are supplied through the approved Baseball Instant Experience claim path.", prompt)
-        self.assertIn("Never invent history, achievements, product facts", prompt)
+        self.assertIn("Never invent remaining stock", prompt)
 
     def test_baseball_instant_experience_uses_master_cover_prompt_and_claim_path(self):
         prompt = ads_page.build_ads_prompt(
@@ -5155,11 +5157,11 @@ PRIMARY TEXT VARIATIONS
             product_url="https://sportscave.com.au/products/ohtani-50-50",
         )
 
-        self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", prompt)
-        self.assertIn("Each route table must contain exactly three completed description rows", prompt)
-        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", prompt)
-        self.assertGreaterEqual(prompt.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
+        self.assertEqual(prompt.count("ONE PERSONALISED COPY SET PER VISUAL"), 1)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", prompt)
+        self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
+        self.assertGreaterEqual(prompt.count("AD COPY"), 3)
         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
 
     def test_every_ads_prompt_requires_text_first_no_automatic_image_generation(self):
@@ -5205,7 +5207,7 @@ PRIMARY TEXT VARIATIONS
                     self.assertIn("Route key: premium_scarcity_right", prompt)
                     self.assertIn("Route key: premium_scarcity_front", prompt)
                     self.assertIn("Route key: premium_scarcity_left", prompt)
-                    self.assertIn("| Description | Description Key | Description Label | Description Copy | Headline | CTA |", prompt)
+                    self.assertIn("AD COPY", prompt)
                     self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
 
     def test_football_instant_experience_works_for_every_supported_country(self):
@@ -5317,9 +5319,9 @@ PRIMARY TEXT VARIATIONS
         marker = ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
         contract = visual_contract(prompt)
 
-        self.assertEqual(prompt.count(marker), 2)
+        self.assertEqual(prompt.count(marker), 1)
         self.assertEqual(contract.count(marker), 1)
-        self.assertIn("Description 1 in all three routes must use CTA field Claim Your Edition.", prompt)
+        self.assertIn("Selected Meta copy uses Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery and Own This Edition for The Cave.", prompt)
         self.assertIn("The native Meta/Instant Experience platform button remains Shop Now.", prompt)
         self.assertIn("ADS INSTANT EXPERIENCE COPY V7", prompt)
 
@@ -5604,7 +5606,7 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertIn("PREMIUM SCARCITY", contract)
-        self.assertIn("Exactly nine complete ad-copy combinations total", contract)
+        self.assertIn("Exactly three complete ad-copy combinations total", contract)
         self.assertIn("Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.", contract)
         self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", contract)
         self.assertNotIn("6. Description lines.", contract)
@@ -5618,11 +5620,11 @@ PRIMARY TEXT VARIATIONS
             variation_token="scarcity-emotion-balance",
         )
 
-        self.assertIn("The three distinct visual formats keep the same ordered product-aware description archetypes", prompt)
+        self.assertIn("Three different opening sentences and emotional propositions", prompt)
         self.assertIn("Smart Hybrid uses one product-aware camera", prompt)
         self.assertIn("Private Gallery uses FOR THE ROOM THAT REMEMBERS.", prompt)
         self.assertIn("The Cave uses THE CAVE STARTS HERE.", prompt)
-        self.assertIn("Never invent history, achievements, product facts", prompt)
+        self.assertIn("Never invent remaining stock", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_instant_experience_v2_image_contract_strengthens_source_and_room_physics(self):
@@ -5738,7 +5740,7 @@ PRIMARY TEXT VARIATIONS
 
     def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
         for campaign_type, expected in (
-            ("Instant Experience", "one complete standalone cover image prompt followed by a three-row Markdown table"),
+            ("Instant Experience", "one complete standalone cover image prompt followed by one AD COPY block"),
             ("Single Image / Video", "one complete, separately copyable, production-ready creative prompt"),
         ):
             with self.subTest(campaign_type=campaign_type):
@@ -5818,9 +5820,9 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", once)
+        self.assertNotIn("INSTANT EXPERIENCE COPY V2", once)
         self.assertIn(
-            "STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY",
+            "INSTANT EXPERIENCE COPY V2",
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -5845,9 +5847,9 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, carousel)
-        self.assertIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, instant)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", instant)
         self.assertIn("PRIMARY-TEXT ANGLE BALANCE", carousel)
-        self.assertIn("STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY", instant)
+        self.assertIn("INSTANT EXPERIENCE COPY V2", instant)
 
     def test_staccato_and_framed_greatness_rules_are_reusable_and_fact_safe(self):
         rules = ads_page.build_shared_meta_winner_copy_upgrade()
@@ -5887,7 +5889,7 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertEqual(
-            prompt.count(ads_page.SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2.splitlines()[0]),
+            prompt.count("ONE PERSONALISED COPY SET PER VISUAL"),
             1,
         )
         for marker in image_markers:
@@ -5905,7 +5907,7 @@ PRIMARY TEXT VARIATIONS
         )
         for expected in restored_effects:
             self.assertEqual(contract.count(expected), 1 if expected in ("glass is missing, unrealistic", "mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing", "premium professional interior photography") else 3, expected)
-        self.assertEqual(contract.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
+        self.assertEqual(contract.count("\nAD COPY\n"), 3)
         self.assertIn("ADS INSTANT EXPERIENCE STANDARD V9 THREE VISUAL SYSTEMS", contract)
 
     def test_instant_experience_route_wording_and_typography_are_route_specific(self):
@@ -6042,11 +6044,11 @@ PRIMARY TEXT VARIATIONS
             for text_area in app_test.text_area
             if text_area.label == "CTA"
         ]
-        self.assertEqual(len(primary_values), 9)
+        self.assertEqual(len(primary_values), 3)
         self.assertEqual(primary_values[0], expected["premium_scarcity_right"][0]["primary_text"])
-        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][2]["primary_text"])
-        self.assertEqual(headline_values[4], expected["premium_scarcity_front"][1]["headline"])
-        self.assertEqual(cta_values[8], expected["premium_scarcity_left"][2]["cta"])
+        self.assertEqual(primary_values[-1], expected["premium_scarcity_left"][0]["primary_text"])
+        self.assertEqual(headline_values[1], expected["premium_scarcity_front"][0]["headline"])
+        self.assertEqual(cta_values[2], expected["premium_scarcity_left"][0]["cta"])
         self.assertEqual(len(app_test.exception), 0)
 
     def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):

@@ -1,3 +1,4 @@
+import ads_ie_copy as ie_copy
 import csv
 import hashlib
 import html
@@ -555,7 +556,7 @@ INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = len(INSTANT_EXPERIENCE_DESCRIPTION_VAR
 INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
 INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "2"
 INSTANT_EXPERIENCE_COPY_CSV_IMPORT_RUNTIME_VERSION = (
-    "2026-09-02-ads-page-index-contract-v4"
+    "2026-09-16-ie-copy-v2"
 )
 INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE = "instant_experience"
 INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_descriptions"
@@ -596,7 +597,7 @@ INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS = {
 INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
     "If a Sports Cave Instant Experience copy CSV template is attached in this conversation, "
     "transfer the matching Description Copy into the primary_text column and complete every "
-    "headline and cta cell for all three routes and all three description options. Match rows "
+    "headline and cta cell for the single active row in each of three routes. Match rows "
     "by route_key, variation and description_key. Preserve all headers, schema fields, row "
     "identities and route/option identity values exactly. Return the completed CSV as a "
     "downloadable .csv file. Do not place image-prompt wording inside the copy columns."
@@ -1153,8 +1154,8 @@ def _edition_ops_product_id_from_row(row):
 def _edition_ops_product_page_url_from_row(row):
     return canonical_shopify_product_url_from_row(
         row,
-        allow_handle_fallback=False,
-        require_sports_cave_store=False,
+        allow_handle_fallback=True,
+        require_sports_cave_store=True,
     )
 
 
@@ -1951,12 +1952,12 @@ def build_campaign_moment_copy_relevance_block(
 The selected moment may influence headlines and call-to-action button-label choices only when it improves relevance, sounds natural and does not replace the product identity or scarcity message across the entire set.
 
 For Instant Experience campaigns:
-- Preserve exactly three ordered description options per route.
-- Preserve exactly three Headlines per route.
-- Preserve exactly three Call To Action button-label options per route.
+- Preserve exactly one selected Description per route.
+- Preserve exactly one Headline per route.
+- Preserve exactly one approved CTA per route.
 - Do not create or request Meta link-description or Meta Ad Description fields.
 - Do not force the event into every option.
-- Use the Campaign Moment only when it safely improves one of the three product-aware description archetypes.
+- Use the Campaign Moment only when it safely improves the selected product-aware copy angle.
 - Even when Campaign-led is selected, retain product identity and edition scarcity across the set.
 - Use valid Instant Experience creative CTA labels in the CTA field rather than sentence-style buttons."""
     else:
@@ -3786,7 +3787,7 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
 
 - Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
 - The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
-- For the V4 Premium Scarcity room system, Description 1 in all three routes must use CTA field Claim Your Edition.
+- Selected Meta copy uses Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery and Own This Edition for The Cave.
 - The long description text does not have to end with the CTA field; it must end according to its description archetype.
 - Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
 - The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
@@ -3801,7 +3802,7 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
         route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
 
 - Smart Hybrid uses on-image CTA CLAIM YOUR EDITION. Private Gallery and The Cave have no on-image CTA.
-- Description 1 for every route must use CTA field Claim Your Edition; only Smart Hybrid repeats this CTA on the image.
+- Each route has one selected Meta CTA; only Smart Hybrid repeats CLAIM YOUR EDITION on the image.
 - Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
 - Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
     else:
@@ -5747,7 +5748,7 @@ def build_standard_instant_experience_group_output_contract(
 
 {image_prompt}
 
-{build_instant_experience_copy_variation_table_contract(visual["route"])}"""
+{ie_copy.ad_copy(visual["route"])}"""
         )
     return "\n\n".join(group_sections)
 
@@ -6306,7 +6307,7 @@ GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME
 FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
-- Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
+- Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
 - Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
 - Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
 - The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
@@ -6497,8 +6498,8 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include exactly one easy-to-copy "
             "grouped package for Premium Scarcity Smart Hybrid, Private Gallery and The Cave. Each group must contain one complete standalone "
-            "cover image prompt followed by a three-row Markdown table for Description Key, Description Label, Description Copy, Headline and CTA. The response "
-            "must contain nine total ad-copy combinations and one shared Instant Experience setup block after the groups. "
+            "cover image prompt followed by one AD COPY block containing Description, Headline and CTA. The response "
+            "must contain three total ad-copy combinations and one shared Instant Experience setup block after the groups. "
             "Do not include Meta link-description fields, Meta Ad Description fields, "
             "Campaign Strategy essays, route-selection packages, rejected alternatives or follow-up generation questions."
         )
@@ -6516,10 +6517,10 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-2. GROUP 2 — PRIVATE GALLERY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-3. GROUP 3 — THE CAVE with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-4. Exactly nine complete ad-copy combinations total using the ordered description keys legacy_standard, framed_greatness and choose_a_side.
+        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+2. GROUP 2 — PRIVATE GALLERY with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+3. GROUP 3 — THE CAVE with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+4. Exactly three complete ad-copy combinations total, one personalised winner per visual.
 5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
 
@@ -6631,8 +6632,8 @@ def build_campaign_visual_output_contract(
         copy_schema_preservation = (
             "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — SMART HYBRID, "
             "GROUP 2 — PRIVATE GALLERY, GROUP 3 — THE CAVE, then one shared INSTANT EXPERIENCE SETUP block. "
-            "Each group must contain one standalone image-generation prompt followed by three matching "
-            "Description Copy, Headline and CTA rows in the ordered keys legacy_standard, framed_greatness and choose_a_side. Preserve every setup instruction, destination rule and URL parameter. "
+            "Each group must contain one standalone image-generation prompt followed by one personalised "
+            "Description, Headline and CTA. Preserve every setup instruction, destination rule and URL parameter. "
             "Do not add Meta link-description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
             f"{INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION}"
         )
@@ -6652,7 +6653,7 @@ def build_campaign_visual_output_contract(
     if campaign_type == "Instant Experience":
         visual_section_intro = (
             "Use the campaign-specific grouped route section below as the single final Instant Experience output. "
-            "It already contains the standalone image-generation prompt and three matching ordered description rows for each route. "
+            "It already contains the standalone image-generation prompt and one AD COPY block for each route. "
             "Do not output a separate duplicate copy package before or after it."
         )
         final_output_instruction = (
@@ -7242,41 +7243,7 @@ Before returning the campaign, privately compare several product-specific candid
 
 def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
     if campaign_type == "Instant Experience":
-        return f"""{META_WINNER_COPY_BLOCK_VERSION}
-
-This block strengthens the standard Instant Experience grouped route output only. Preserve the approved output order, three route groups, three ordered description options per route, Headline and CTA columns, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
-
-{SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2}
-
-{build_instant_experience_creative_cta_rules()}
-
-STANDARD INSTANT EXPERIENCE THREE-FORMAT COPY DIVERSITY
-
-- Return exactly three grouped routes: GROUP 1 - PREMIUM SCARCITY - SMART HYBRID, GROUP 2 - PRIVATE GALLERY and GROUP 3 - THE CAVE.
-- Each route must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
-- Each route table must contain exactly three completed description rows in this order: legacy_standard, framed_greatness, choose_a_side.
-- Each row must contain one complete Description Copy, one Headline and one CTA.
-- The full response must contain exactly nine complete ad-copy combinations.
-- No separate Meta link-description or Meta Ad Description field is allowed.
-- No row may be placeholder copy.
-- The same three product-aware Description Copy values must be associated with all three image routes; do not rewrite the long description merely because the camera angle changes.
-- Preserve the copy-table CTA contract; the three image formats have independent layouts and on-image wording.
-- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
-- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
-- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
-- No duplicated headline.
-- Every CTA must be one approved direct edition-acquisition CTA. Description 1 in each route must use CTA field Claim Your Edition.
-- The three distinct visual formats keep the same ordered product-aware description archetypes.
-- Description 1 must follow Legacy Standard.
-- Description 2 must follow Framed Greatness.
-- Description 3 must follow Choose a Side.
-- The Smart Hybrid on-image headline must be ONLY {{verified edition limit}} WILL EVER EXIST only when the edition limit is verified by supplied product data or an approved claim path.
-- For Smart Hybrid only, when the verified limit is 100, the headline must resolve exactly to ONLY 100 WILL EVER EXIST. Private Gallery and The Cave use their own signatures and LIMITED TO 100.
-- If a verified edition limit is unavailable, use the existing safe evidence-gated fallback instead of inventing a quantity or finality claim.
-- A supplied offer may be used only when exact, fact-safe and permitted by the existing campaign contract; never let it replace the edition scarcity.
-- Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
-- Use natural selected-country English.
-- Generate the three description variants once from product context, then reuse the same ordered description set for the three visual slot tables. Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other routes. Do not expose this working order or change the approved response order."""
+        return f"{META_WINNER_COPY_BLOCK_VERSION}\nINSTANT EXPERIENCE COPY V2: three distinct visual groups, one final AD COPY block per group. Preserve product truth, setup and the approved route CTAs."
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -7377,24 +7344,66 @@ def normalize_creative_refresh_context(context=None):
     }
 
 
+def _is_ie_copy_v2(value):
+    return ((value or {}).get("campaign_type") == "Instant Experience"
+            and (value or {}).get("workflow_mode") != ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+            and not (value or {}).get("_legacy_ie_csv"))
+
+
 def _refresh_copy_count(value):
-    return 1 if (
+    return 1 if _is_ie_copy_v2(value) or (
         (value or {}).get("campaign_type") == "Instant Experience"
         and (value or {}).get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
     ) else INSTANT_EXPERIENCE_COPY_VARIATION_COUNT
 
 
+def _ie_concepts_for_result(result):
+    if not _is_ie_copy_v2(result):
+        return INSTANT_EXPERIENCE_CONCEPTS
+    return tuple({**c, "display_name": ie_copy.ROUTES[c["id"]][0],
+                  "supporting_label": ie_copy.ROUTES[c["id"]][1]} for c in INSTANT_EXPERIENCE_CONCEPTS)
+
+
+def _ie_default_cta(result, concept_id):
+    return ie_copy.ROUTES[concept_id][3] if _is_ie_copy_v2(result) else INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept_id, "")
+
+
+def _record_ie_copy_history(result, concept_notes):
+    if not _is_ie_copy_v2(result):
+        return
+    entries = []
+    cues_by_key = {cue.get("route_key"): cue for cue in result.get("instant_experience_fingerprints", [])}
+    for key, rows in concept_notes.items():
+        row = rows[0] if rows else {}
+        if not all(str(row.get(field) or "").strip() for field in ("primary_text", "headline", "cta")):
+            continue
+        first = re.split(r"[.!?]\s|\n", str(row["primary_text"]).strip(), maxsplit=1)[0]
+        entries.append({**cues_by_key.get(key, {}), "visual_family": ie_copy.ROUTES[key][2],
+                        "market": result.get("country"), "sport": result.get("category"),
+                        "first_sentence_normalized": " ".join(first.casefold().split()),
+                        "headline": " ".join(str(row["headline"]).casefold().split())})
+    update_recent_instant_experience_fingerprints(entries)
+
+
 def _configure_refresh_copy(result, workflow):
+    if (result or {}).get("_legacy_ie_csv"):
+        workflow["_legacy_ie_csv"] = True
+        return
+    workflow.pop("_legacy_ie_csv", None)
     if _refresh_copy_count(result) != 1:
         return
-    workflow["workflow_mode"] = ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    if _is_ie_copy_v2(result):
+        original = (workflow.get("ad_notes") or {}).get("instant_experience_concepts")
+        if original and any(len(rows) > 1 for rows in original.values()):
+            workflow.setdefault("legacy_instant_experience_copy", original)
+    workflow["workflow_mode"] = result.get("workflow_mode", ADS_WORKFLOW_MODE_NEW)
     workflow["campaign_type"] = "Instant Experience"
     notes = dict(workflow.get("ad_notes") or {})
     notes["instant_experience_concepts"] = _instant_experience_concept_copy_notes_from_workflow(workflow)
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         pair = notes["instant_experience_concepts"][concept["id"]][0]
         if not pair.get("cta"):
-            pair["cta"] = INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept["id"], "")
+            pair["cta"] = _ie_default_cta(result, concept["id"])
     workflow["ad_notes"] = notes
     # Retire old widget options in this editing context only. Saved historical
     # files and immutable saved-package snapshots are never rewritten.
@@ -7600,17 +7609,18 @@ def compose_final_ads_prompt(
 ):
     if not prompt:
         return prompt
-    prompt = apply_campaign_copy_rule_blocks(
-        prompt,
-        campaign_type,
-        include_primary_text_variations=include_primary_text_variations,
-        category=category,
-    )
-    prompt = apply_shared_meta_winner_copy_upgrade(
-        prompt,
-        campaign_type,
-        instant_experience_settings,
-    )
+    if campaign_type != "Instant Experience":
+        prompt = apply_campaign_copy_rule_blocks(
+            prompt,
+            campaign_type,
+            include_primary_text_variations=include_primary_text_variations,
+            category=category,
+        )
+        prompt = apply_shared_meta_winner_copy_upgrade(
+            prompt,
+            campaign_type,
+            instant_experience_settings,
+        )
     prompt = apply_country_language_guidance(prompt, country)
     prompt = apply_campaign_moment_copy_relevance_layer(
         prompt,
@@ -7637,6 +7647,10 @@ def compose_final_ads_prompt(
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
             workflow_mode=workflow_mode,
         )
+    if campaign_type == "Instant Experience":
+        prompt += "\n\nCOPY FATIGUE CONTEXT\n" + json.dumps(
+            [item for item in (recent_instant_experience_fingerprints or []) if item.get("market") == country and item.get("sport") == category], ensure_ascii=False)
+        prompt += "\nAvoid repeating these recent copy hooks, headlines and opening sentences where appropriate; product truth wins."
     return prompt
 
 
@@ -8577,6 +8591,7 @@ def build_standard_instant_experience_prompt(
     campaign_moment=None,
     product_metadata=None,
     variation_token="",
+    recent_fingerprints=None,
 ):
     product_name = _clean_product_name(product_name)
     product_url = _clean_product_url(product_url)
@@ -8669,7 +8684,7 @@ PRODUCT-AWARE ROOM AND SCARCITY METADATA
 
 PRODUCT-AWARE DESCRIPTION SYSTEM
 
-{build_instant_experience_description_generation_prompt(description_context)}
+{ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
 
 PROMOTION OR OFFER
 
@@ -8708,57 +8723,18 @@ IMAGE GENERATION PROMPT
 
 [one complete standalone image-generation prompt for this route]
 
-COPY VARIATIONS
+AD COPY
 
-| Description | Description Key | Description Label | Description Copy | Headline | CTA |
-| ----------- | --------------- | ----------------- | ---------------- | -------- | --- |
-| 1 | legacy_standard | Description 1 — Legacy Standard | Complete Legacy Standard description copy | Complete headline | Complete CTA |
-| 2 | framed_greatness | Description 2 — Framed Greatness | Complete Framed Greatness description copy | Complete headline | Complete CTA |
-| 3 | choose_a_side | Description 3 — Choose a Side | Complete Choose a Side description copy | Complete headline | Complete CTA |
+Description:
+[one final personalised description]
 
-Every group table must contain exactly three completed rows in the fixed description order. Across all groups, output exactly nine complete ad-copy combinations.
+Headline:
+[one final complementary headline]
 
-Table rules:
-- Keep each table cell on one line so Nathan can copy and paste into the matching route section in the app.
-- Escape any vertical-bar characters that would break the Markdown table.
-- Preserve paragraph breaks inside each Description Copy cell where the platform supports multiline cells, or use visible line breaks that can be pasted into the matching description field.
-- Never leave placeholders such as Description copy option 2, Headline option 3, Shop Now repeated, Add copy here, Complete copy or To be generated in the returned answer.
-- Description 1 in each route retains the approved copy-table CTA field.
-- Descriptions 2 and 3 are alternative product-aware description options for testing with the same route image.
-- The three Description Copy values must be the same ordered product-aware set in every route table. Image prompts must never copy a geographic edition-scope suffix from description copy.
-- Do not put the full Description Copy on any image.
+CTA:
+[the route's approved CTA]
 
-ROUTE-SPECIFIC COPY RULES
-
-PREMIUM SCARCITY — SMART HYBRID:
-- Purpose: premium collector-home photography with a product-aware camera and verified scarcity.
-- Image wording follows the resolved visual format, independently of the description table.
-- Use the route FOMO line only when a verified finite edition limit exists.
-- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
-- Description 1 must use CTA field Claim Your Edition.
-
-PRIVATE GALLERY:
-- Purpose: present sports history like collectible art in a private gallery.
-- Image wording follows the resolved visual format, independently of the description table.
-- Use the route FOMO line only when a verified finite edition limit exists.
-- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
-- Description 1 must use CTA field Claim Your Edition.
-
-THE CAVE:
-- Purpose: a real premium fan sanctuary with a full-height flat right advertising column.
-- Image wording follows the resolved visual format, independently of the description table.
-- Use the route FOMO line only when a verified finite edition limit exists.
-- When no verified edition limit exists, use non-numeric collector-release wording and do not imply retirement or final stock.
-- Description 1 must use CTA field Claim Your Edition.
-
-COPY FIELD FORMAT RULES
-
-- Every Description Copy must follow its assigned archetype structure and preserve intentional blank lines.
-- Every Headline must contain no more than 4-6 words. 4 to 6 words max.
-- Every CTA must use one exact approved direct edition-acquisition phrase from the central contract.
-- Every CTA must pass the central Instant Experience creative CTA contract.
-- Keep the fixed Meta/Instant Experience button as: Shop Now.
-- Preserve the current Headline and CTA columns and all existing row counts. The long copy column is the Instant Experience Description Copy, stored internally as the existing primary_text field for compatibility.
+Exactly three completed copy combinations total, one per visual. Preserve blank lines in descriptions. Never return placeholders. Use Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery, Own This Edition for The Cave. The Description is stored as primary_text for compatibility.
 
 INSTANT EXPERIENCE SETUP
 
@@ -8780,20 +8756,7 @@ The setup block must include:
 
 FINAL COPY CHECK
 
-- The output contains exactly three grouped route sections.
-- Each route contains one image-generation prompt and one three-row description table.
-- The output contains exactly nine complete ad-copy combinations.
-- No separate Meta link-description or Meta Ad Description field is present.
-- No placeholder copy remains.
-- The three distinct visual formats keep the same ordered product-aware description archetypes.
-- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
-- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
-- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
-- Every creative CTA belongs to the approved direct edition-acquisition family.
-- Description 1 for all three routes uses Claim Your Edition.
-- The ordered description keys are legacy_standard, framed_greatness and choose_a_side in every route.
-- Promotion or Offer has been preserved exactly when used.
-- Product URL and UTM parameters remain exact."""
+Exactly three grouped routes, each with one unchanged image prompt and one AD COPY block containing Description, Headline and CTA. Three distinct, product-specific descriptions and complementary headlines. Use only verified claims. Preserve offer, setup, product URL and UTM parameters exactly."""
 
 
 def build_generic_instant_experience_prompt(
@@ -9129,6 +9092,7 @@ def build_ads_prompt(
             campaign_moment=campaign_moment,
             product_metadata=product_metadata,
             variation_token=variation_token,
+            recent_fingerprints=recent_instant_experience_fingerprints,
         )
     elif template_key == "motorsport_carousel":
         prompt = build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
@@ -9431,6 +9395,12 @@ def build_ads_result_record(
         if campaign_type == "Instant Experience" and not clean_creative_refresh_context
         else []
     )
+    if instant_experience_fingerprints:
+        copy_cues = ie_copy.cues(clean_product_name, category, country, clean_variation_token,
+            resolve_instant_experience_description_context(clean_product_name, category, product_metadata=clean_product_metadata),
+            recent_instant_experience_fingerprints or [])
+        for fingerprint, cue in zip(instant_experience_fingerprints, copy_cues):
+            fingerprint.update(cue)
     master_prompt = build_ads_prompt(
         clean_product_name,
         category,
@@ -9506,7 +9476,7 @@ def ads_prompt_contract_version_for_campaign(
             f"{ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION}"
         )
     if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
-        version += f"; {ADS_INSTANT_EXPERIENCE_WIRING_VERSION}"
+        version += f"; {ADS_INSTANT_EXPERIENCE_WIRING_VERSION}; {ie_copy.VERSION}"
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
         if campaign_type == "Instant Experience":
@@ -9521,6 +9491,7 @@ def _instant_experience_visual_contract_is_current(prompt):
     controlling legacy headings/instructions are rejected.
     """
     required = (
+        ie_copy.VERSION,
         "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
         "GROUP 2 — PRIVATE GALLERY",
         "GROUP 3 — THE CAVE",
@@ -10789,6 +10760,7 @@ def _instant_experience_copy_variation_error(
     *,
     concept_id="",
     variation_number=0,
+    copy_v2=False,
 ):
     variation = variation or {}
     expected_variant = _instant_experience_description_variant(variation_number)
@@ -10811,7 +10783,7 @@ def _instant_experience_copy_variation_error(
         return f"CTA must be exactly one of: {allowed}."
 
     expected_primary_image_cta = INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept_id)
-    if variation_number == 1 and expected_primary_image_cta and cta != expected_primary_image_cta:
+    if not copy_v2 and variation_number == 1 and expected_primary_image_cta and cta != expected_primary_image_cta:
         concept = next(
             (item for item in INSTANT_EXPERIENCE_CONCEPTS if item["id"] == concept_id),
             None,
@@ -10837,6 +10809,8 @@ def _instant_experience_copy_widget_key(
 
 
 def _instant_experience_copy_csv_output_mode(result):
+    if _is_ie_copy_v2(result):
+        return ie_copy.OUTPUT_MODE
     if _refresh_copy_count(result) == 1:
         return "winner_refinement"
     settings = (
@@ -10913,7 +10887,7 @@ def build_instant_experience_copy_csv(
         concept_notes = (
             {
                 concept["id"]: _blank_instant_experience_variations()
-                for concept in INSTANT_EXPERIENCE_CONCEPTS
+                for concept in _ie_concepts_for_result(result)
             }
             if blank
             else _instant_experience_copy_notes_with_widget_state(result, workflow or {})
@@ -10926,7 +10900,7 @@ def build_instant_experience_copy_csv(
     )
     writer.writeheader()
     output_mode = _instant_experience_copy_csv_output_mode(result)
-    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+    for concept in _ie_concepts_for_result(result):
         variations = _normalise_instant_experience_variations(
             concept_notes.get(concept["id"])
         )
@@ -10953,7 +10927,7 @@ def build_instant_experience_copy_csv(
                         else _preserve_multiline_text(variation.get("headline"))
                     ),
                     "cta": (
-                        (INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept["id"], "") if _refresh_copy_count(result) == 1 else "")
+                        (_ie_default_cta(result, concept["id"]) if _refresh_copy_count(result) == 1 else "")
                         if blank
                         else _preserve_multiline_text(variation.get("cta"))
                     ),
@@ -10975,7 +10949,7 @@ def _instant_experience_copy_csv_expected_rows(result):
             "description_key": _instant_experience_description_variant(variation_number)["key"],
             "description_label": _instant_experience_description_variant(variation_number)["label"],
         }
-        for concept in INSTANT_EXPERIENCE_CONCEPTS
+        for concept in _ie_concepts_for_result(result)
         for variation_number in range(1, _refresh_copy_count(result) + 1)
     ]
 
@@ -10989,6 +10963,7 @@ def _normalise_ads_copy_csv_header(value):
 
 
 def parse_instant_experience_copy_csv(data, result):
+    requested_refresh = (result or {}).get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
     source_bytes = bytes(data or b"")
     if not source_bytes:
         raise InstantExperienceCopyCSVError(
@@ -11085,13 +11060,20 @@ def parse_instant_experience_copy_csv(data, result):
             "The copy CSV could not be read. Check its quoting and line breaks."
         ) from error
 
-    if (result or {}).get("allow_refresh_mode") and rows and all(row.get("output_mode") == "winner_refinement" for row in rows):
+    if rows and all(row.get("output_mode") == ie_copy.OUTPUT_MODE for row in rows):
+        result = {**result, "campaign_type": "Instant Experience", "workflow_mode": ADS_WORKFLOW_MODE_NEW}
+        result.pop("_legacy_ie_csv", None)
+    elif rows and all(row.get("output_mode") == "winner_refinement" for row in rows):
+        if not ((result or {}).get("allow_refresh_mode") or (result or {}).get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH):
+            raise InstantExperienceCopyCSVError("Winner refinement CSV requires Creative Refresh.")
         result = {**result, "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH}
-    if _refresh_copy_count(result) == 1 and len(rows) == 9 and all(row.get("output_mode") != "winner_refinement" for row in rows):
-        legacy_result = {**result, "workflow_mode": ADS_WORKFLOW_MODE_NEW}
-        legacy_result.pop("allow_refresh_mode", None)
-        legacy = parse_instant_experience_copy_csv(data, legacy_result)
-        return {key: variations[:1] for key, variations in legacy.items()}
+    elif len(rows) == 9:
+        result = {**result, "_legacy_ie_csv": True, "workflow_mode": ADS_WORKFLOW_MODE_NEW}
+        result.pop("allow_refresh_mode", None)
+        legacy_mode = rows[0].get("output_mode", "")
+        if legacy_mode in {"standard_three_descriptions", "smart_3_pack", "one_selected_route", "classic_collector"}:
+            result.pop("instant_experience_settings", None)
+            result["output_mode"] = legacy_mode
     expected_rows = {
         (row["route_key"], int(row["variation"])): row
         for row in _instant_experience_copy_csv_expected_rows(result)
@@ -11168,6 +11150,7 @@ def parse_instant_experience_copy_csv(data, result):
             variation,
             concept_id=route_key,
             variation_number=variation_number,
+            copy_v2=_is_ie_copy_v2(result),
         )
         if validation_error:
             raise InstantExperienceCopyCSVError(
@@ -11182,12 +11165,16 @@ def parse_instant_experience_copy_csv(data, result):
         raise InstantExperienceCopyCSVError(
             f"Missing required route {route_key} variation {variation_number}."
         )
-    return parsed
+    return {key: rows[:1] for key, rows in parsed.items()} if requested_refresh else parsed
 
 
 def apply_instant_experience_copy_csv(result, workflow, data):
-    _configure_refresh_copy(result, workflow)
     parsed = parse_instant_experience_copy_csv(data, result)
+    _configure_refresh_copy(result, workflow)
+    if _refresh_copy_count(result) == 1:
+        if any(len(rows) > 1 for rows in parsed.values()):
+            workflow["legacy_instant_experience_copy"] = parsed
+        parsed = {key: rows[:1] for key, rows in parsed.items()}
     context_key = str((result or {}).get("context_key") or "")
     widget_updates = {}
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
@@ -11210,6 +11197,7 @@ def apply_instant_experience_copy_csv(result, workflow, data):
     notes = dict((workflow or {}).get("ad_notes") or {})
     notes["instant_experience_concepts"] = parsed
     workflow["ad_notes"] = notes
+    _record_ie_copy_history(result, parsed)
     return {
         "concept_notes": parsed,
         "variation_count": len(INSTANT_EXPERIENCE_CONCEPTS)
@@ -11361,11 +11349,13 @@ def _instant_experience_variation_complete(
     *,
     concept_id="",
     variation_number=0,
+    copy_v2=False,
 ):
     return not _instant_experience_copy_variation_error(
         variation,
         concept_id=concept_id,
         variation_number=variation_number,
+        copy_v2=copy_v2,
     )
 
 
@@ -11378,6 +11368,7 @@ def _instant_experience_concept_complete_count(workflow, concept_id):
             variation,
             concept_id=concept_id,
             variation_number=variation_number,
+            copy_v2=_is_ie_copy_v2(workflow),
         )
     )
 
@@ -11389,6 +11380,7 @@ def instant_experience_copy_complete(workflow):
             variation,
             concept_id=concept["id"],
             variation_number=variation_number,
+            copy_v2=_is_ie_copy_v2(workflow),
         )
         for concept in INSTANT_EXPERIENCE_CONCEPTS
         for variation_number, variation in enumerate(
@@ -11408,14 +11400,14 @@ def _instant_experience_concept_ad_copy_text(result, workflow, concept):
         str(result.get("product_name") or ""),
         "",
         "ROUTE:",
-        str(concept.get("display_name") or ""),
+        ie_copy.ROUTES[concept["id"]][0] if _is_ie_copy_v2(result) else str(concept.get("display_name") or ""),
         "",
     ]
     for index, variation in enumerate(variations, start=1):
         variant = _instant_experience_description_variant(index)
         lines.extend(
             [
-                variant["label"],
+                "Ad Copy" if _is_ie_copy_v2(result) else variant["label"],
                 "",
                 "DESCRIPTION KEY:",
                 variant["key"],
@@ -11486,7 +11478,7 @@ def build_ad_variation_text_items(
 def _instant_experience_copy_export_lines(workflow):
     notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     lines = ["INSTANT EXPERIENCE AD COPY", ""]
-    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+    for concept in _ie_concepts_for_result(workflow):
         lines.extend(
             [
                 f"{concept['display_name'].upper()} — {concept['supporting_label']}",
@@ -11497,7 +11489,7 @@ def _instant_experience_copy_export_lines(workflow):
             variant = _instant_experience_description_variant(index)
             lines.extend(
                 [
-                    variant["label"],
+                    "Ad Copy" if _is_ie_copy_v2(workflow) else variant["label"],
                     "DESCRIPTION KEY:",
                     variant["key"],
                     "DESCRIPTION COPY:",
@@ -11710,7 +11702,7 @@ def _instant_experience_image_ready_count(workflow):
 def _instant_experience_status_rows(workflow):
     rows = []
     slots = workflow.get("slots") or {}
-    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+    for concept in _ie_concepts_for_result(workflow):
         slot = _instant_experience_slot_for_concept(concept)
         slot_data = slots.get(slot.get("id")) or {}
         rows.append(
@@ -11731,6 +11723,7 @@ def _instant_experience_status_rows(workflow):
 def instant_experience_package_ready(result, workflow):
     if not _is_instant_experience_result(result):
         return False
+    _configure_refresh_copy(result, workflow)
     return _instant_experience_image_ready_count(workflow) == len(INSTANT_EXPERIENCE_CONCEPTS) and instant_experience_copy_complete(workflow)
 
 
@@ -12263,13 +12256,13 @@ def _render_instant_experience_concepts(result, workflow):
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     _render_instant_experience_copy_csv_control(result, workflow)
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
-    st.caption("Upload one cover and one matching Primary Text / Headline pair per creative." if _refresh_copy_count(result) == 1 else "Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
+    st.caption("Upload one cover and one Description, Headline and CTA per visual." if _is_ie_copy_v2(result) else "Upload one cover and one matching Primary Text / Headline pair per creative." if _refresh_copy_count(result) == 1 else "Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
 
-    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+    for concept in _ie_concepts_for_result(result):
         concept_id = concept["id"]
         slot = slot_by_concept.get(concept_id) or {}
         heading = f"{concept['display_name'].upper()} — {concept['supporting_label']}"
-        if _refresh_copy_count(result) == 1:
+        if not _is_ie_copy_v2(result) and _refresh_copy_count(result) == 1:
             heading = f"REFRESH CREATIVE {concept['position']} — WINNER REFINEMENT"
         with st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
             st.markdown(f"**{heading}**")
@@ -12356,7 +12349,7 @@ def _render_instant_experience_concepts(result, workflow):
                         variations[index - 1],
                         index,
                     )
-                    st.markdown("**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
+                    st.markdown("**Ad Copy**" if _is_ie_copy_v2(result) else "**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
                     field_columns = st.columns([2, 1, 1])
                     for field_column, (field_key, field_label) in zip(
                         field_columns,
@@ -12370,7 +12363,7 @@ def _render_instant_experience_concepts(result, workflow):
                                 index,
                             )
                             widget_args = {
-                                "placeholder": (
+                                "placeholder": field_label if _is_ie_copy_v2(result) else (
                                     f"Description option {index}"
                                     if field_key == "primary_text"
                                     else f"Headline option {index}"
@@ -12384,7 +12377,7 @@ def _render_instant_experience_concepts(result, workflow):
                                 widget_args["value"] = _preserve_multiline_text(
                                     variation.get(field_key)
                                 )
-                            variation[field_key] = st.text_area(("Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
+                            variation[field_key] = st.text_area(("Description" if _is_ie_copy_v2(result) and field_key == "primary_text" else "Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
                             if field_key == "primary_text":
                                 render_prompt_copy_button(
                                     _preserve_multiline_text(variation[field_key]),
@@ -12401,21 +12394,21 @@ def _render_instant_experience_concepts(result, workflow):
                         variation,
                         concept_id=concept_id,
                         variation_number=variation_number,
+                        copy_v2=_is_ie_copy_v2(result),
                     )
                 )
                 image_ready = bool(
                     ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("valid")
                     and ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data")
                 )
-                st.caption(
-                    f"{concept['display_name']}: "
-                    f"{'Image ready' if image_ready else 'Image needed'} · "
-                    f"{complete_count} of {_refresh_copy_count(result)} copy pairs complete"
-                )
+                copy_status = ("Copy complete" if complete_count else "Copy needed") if _is_ie_copy_v2(result) else f"{complete_count} of {_refresh_copy_count(result)} copy pairs complete"
+                st.caption(f"{concept['display_name']}: {'Image ready' if image_ready else 'Image needed'} • {copy_status}")
+
 
     notes = dict(workflow.get("ad_notes") or {})
     notes["instant_experience_concepts"] = concept_notes
     workflow["ad_notes"] = notes
+    _record_ie_copy_history(result, concept_notes)
     st.session_state[_ads_image_state_key()] = workflow
 
 
@@ -13200,11 +13193,8 @@ def _render_instant_experience_package_save(result, workflow):
     st.caption(f"{ready_count} of {required_count} images ready.")
     for row in _instant_experience_status_rows(workflow):
         concept = row["concept"]
-        st.caption(
-            f"{concept['display_name']}: "
-            f"{'Image ready' if row['image_ready'] else 'Image needed'} · "
-            f"{row['copy_complete_count']} of {_refresh_copy_count(result)} copy pairs complete"
-        )
+        copy_status = ("Copy complete" if row['copy_complete_count'] else "Copy needed") if _is_ie_copy_v2(result) else f"{row['copy_complete_count']} of {_refresh_copy_count(result)} copy pairs complete"
+        st.caption(f"{concept['display_name']}: {'Image ready' if row['image_ready'] else 'Image needed'} • {copy_status}")
 
     package_ready = instant_experience_package_ready(result, workflow)
     package_signature = ""
