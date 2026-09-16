@@ -32,7 +32,7 @@ class WinnerRefinementTests(unittest.TestCase):
     def test_legacy_normalization_does_not_rewrite_saved_source(self):
         result, workflow = completed_ad("Instant Experience", "creative_refresh")
         original = copy.deepcopy(workflow)
-        legacy_result = {**result, "workflow_mode": "new_ads"}
+        legacy_result = {**result, "workflow_mode": "new_ads", "_legacy_ie_csv": True}
         with patch.object(ads.st, "session_state", {}):
             old_csv = ads.build_instant_experience_copy_csv(legacy_result, copy.deepcopy(workflow))
             state = {ads._instant_experience_copy_widget_key(result["context_key"], ads.INSTANT_EXPERIENCE_CONCEPTS[0]["id"], "primary_text", 2): "stale option"}

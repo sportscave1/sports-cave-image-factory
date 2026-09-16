@@ -1,3 +1,4 @@
+import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
 import csv
 import hashlib
@@ -7436,6 +7437,8 @@ Winning Headline:
 
 Return THREE refreshed creatives, in the existing permanent slot order below. Every creative must preserve the winner's advertising angle, emotional hook, copy rhythm, customer motivation, visual language, message hierarchy, urgency and scarcity style. Make only a small improvement: cleaner wording, opening line, clarity, crop, hierarchy or subtle scene refinement. Keep the winning room style and composition; do not force different homes or unrelated strategies. Never invent claims, reviews, discounts or scarcity quantities.
 
+{ie_legacy_description.build_description_style_rules()}
+
 For EACH creative return exactly ONE Primary Text / Description and ONE Headline, plus ONE standalone image-generation brief. No alternative copy options. Preserve intentional paragraphs. Use the one existing stable CTA in its CSV row.
 Each brief must repeat the product lock: use the exact canonical artwork and frame, preserving identity, proportions, colour and every product detail. Never reconstruct artwork from the winning advertisement. Preserve the winning presentation with a modest composition refinement. Produce a premium photorealistic 1024 x 1024 square cover, with mobile-readable hierarchy and no clipping. Do not generate images until explicitly requested.
 
@@ -9480,7 +9483,7 @@ def ads_prompt_contract_version_for_campaign(
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
         if campaign_type == "Instant Experience":
-            version += "; WINNER REFINEMENT SINGLE COPY V1"
+            version += f"; WINNER REFINEMENT SINGLE COPY V1; {ie_legacy_description.VERSION}"
     return version
 
 
