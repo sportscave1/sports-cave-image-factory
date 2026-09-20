@@ -696,7 +696,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Exactly three completed copy combinations total, one per visual.", prompt)
         self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
-        self.assertEqual(prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"), 1)
+        self.assertEqual(prompt.count("IE PREMIUM SCARCITY THREE ROOMS V2"), 3)
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
         self.assertNotIn("Return one final primary text only.", prompt)
@@ -717,16 +717,16 @@ class AdsPageTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/the-titans",
         )
 
-        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
-        self.assertIn("Smart Hybrid uses one product-aware camera", prompt)
-        self.assertIn("Private Gallery uses FOR THE ROOM THAT REMEMBERS.", prompt)
-        self.assertIn("The Cave uses THE CAVE STARTS HERE.", prompt)
+        self.assertIn(ads_page.ie_copy.VERSION, prompt)
+        self.assertIn("Image 1 uses RIGHT-angle Room 1 collector lounge", prompt)
+        self.assertIn("Image 2 uses CENTRE / straight-on Room 2 home office", prompt)
+        self.assertIn("Image 3 uses LEFT-angle Room 3 collector den", prompt)
         self.assertIn("One approved CTA per ad, no alternatives.", prompt)
-        self.assertIn("CTA exactly Claim Your Edition.", prompt)
+        self.assertIn("CTA: Claim Your Edition", prompt)
         self.assertIn("ballpark memory", prompt)
         self.assertIn("generations", prompt)
         self.assertIn("swing and legacy", prompt)
-        self.assertIn("Other markets retain existing localisation.", prompt)
+        self.assertIn("Use natural local vocabulary without changing the three frameworks", prompt)
 
     def test_baseball_instant_experience_approved_claims_are_injected_through_claim_helper(self):
         prompt = ads_page.build_ads_prompt(
@@ -822,10 +822,10 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("AD COPY", prompt)
                 self.assertIn("AD COPY", prompt)
                 self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
+                self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
-                self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
-                self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
+                self.assertIn("Upper photographed residential room scene: approximately 72–76%", prompt)
+                self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", prompt)
                 self.assertIn("META URL PARAMETERS", prompt)
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
@@ -899,9 +899,9 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("Route key: premium_scarcity_left", prompt)
                         self.assertIn("AD COPY", prompt)
                         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
-                        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
-                        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
+                        self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
+                        self.assertIn("Upper photographed residential room scene: approximately 72–76%", prompt)
+                        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", prompt)
                         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
@@ -925,9 +925,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
         self.assertIn("Route key: premium_scarcity_left", prompt)
-        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
-        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
-        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
+        self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 72–76%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", prompt)
         self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
@@ -1223,7 +1223,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Use the product title and supplied artwork as the factual source of truth.", carousel_prompt)
 
         self.assertEqual(instant_prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("INSTANT EXPERIENCE COPY V2", instant_prompt)
+        self.assertIn(ads_page.ie_copy.VERSION, instant_prompt)
         self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", instant_prompt)
         self.assertIn("Return exactly THREE active ad-copy combinations total.", instant_prompt)
         self.assertIn("No separate Meta link-description or Meta Ad Description field is allowed.", instant_prompt)
@@ -1362,9 +1362,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("INSTANT EXPERIENCE COPY V2", once)
+        self.assertNotIn(ads_page.ie_copy.VERSION, once)
         self.assertIn(
-            "INSTANT EXPERIENCE COPY V2",
+            ads_page.ie_copy.VERSION,
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -1382,7 +1382,7 @@ class AdsPageTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.count("ONE PERSONALISED COPY SET PER VISUAL"), 1)
-        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn(ads_page.ie_copy.VERSION, prompt)
         self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", prompt)
         self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
         self.assertIn("No row may be placeholder copy.", prompt)
@@ -3377,16 +3377,16 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT", contract)
         self.assertIn("COPY ONE ROUTE AT A TIME", contract)
         self.assertIn("Return exactly three complete grouped Instant Experience routes", contract)
-        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", contract)
-        self.assertEqual(contract.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"), 1)
-        self.assertEqual(contract.count("MANDATORY SEAMLESS WALL SYSTEM"), 1)
-        self.assertEqual(contract.count("Upper photographed residential room scene: approximately 77–79%"), 1)
-        self.assertEqual(contract.count("Fixed opaque black footer: approximately the bottom 21–23%"), 1)
+        self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", contract)
+        self.assertEqual(contract.count("IE PREMIUM SCARCITY THREE ROOMS V2"), 3)
+        self.assertEqual(contract.count("MANDATORY SEAMLESS WALL SYSTEM"), 3)
+        self.assertEqual(contract.count("Upper photographed residential room scene: approximately 72–76%"), 3)
+        self.assertEqual(contract.count("Fixed opaque black footer: approximately the bottom 24–28%"), 3)
         self.assertEqual(contract.count("Selected camera:"), 3)
         self.assertNotIn("Permissible camera families", contract)
-        self.assertIn("Once they're claimed, this edition retires forever.", contract)
-        self.assertIn("FOR THE ROOM THAT REMEMBERS.", contract)
-        self.assertIn("THE CAVE\nSTARTS\nHERE.", contract)
+        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
+        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
+        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
         self.assertIn("ONLY 100 WILL EVER EXIST", contract)
         self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
         self.assertIn("horizontal wall lines", contract)
@@ -3432,7 +3432,7 @@ PRIMARY TEXT VARIATIONS
 
         self.assertEqual(historic[0]["product_era"], "historic")
         self.assertIn(historic[0]["room_profile_key"], ads_page.INSTANT_EXPERIENCE_ROOM_PROFILES_V4)
-        self.assertEqual(historic[0]["room_materials"], ads_page.INSTANT_EXPERIENCE_ROOM_PROFILES_V4[historic[0]["room_profile_key"]]["materials"])
+        self.assertIn("warm taupe textured plaster", historic[0]["room_materials"])
         self.assertIn(modern[0]["room_profile_key"], ads_page.INSTANT_EXPERIENCE_ROOM_PROFILES_V4)
         self.assertEqual(modern[0]["product_era"], "modern")
         self.assertEqual(missing[0]["product_sport"], "safe universal fallback")
@@ -3440,9 +3440,9 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(missing[0]["headline_text"], "SPORTS CAVE COLLECTOR")
         self.assertEqual(missing[0]["edition_limit_used"], "not verified")
         self.assertEqual(missing[0]["room_profile_key"], "collector_lounge")
-        self.assertEqual(missing[0]["wall_colour"], "warm taupe seamless mineral-plaster wall")
-        self.assertEqual(missing[0]["primary_cue"], "partial doorway")
-        self.assertEqual(missing[0]["secondary_cue"], "cropped dark leather chair")
+        self.assertEqual(missing[0]["wall_colour"], "warm taupe textured plaster")
+        self.assertEqual(missing[0]["primary_cue"], "dark walnut console at left")
+        self.assertEqual(missing[0]["secondary_cue"], "cropped cognac leather sofa at right")
         for visuals in (historic, modern, missing):
             self.assertEqual(
                 [visual["route_key"] for visual in visuals],
@@ -3455,7 +3455,7 @@ PRIMARY TEXT VARIATIONS
             self.assertEqual(len({visual["wall_colour"] for visual in visuals}), 3)
             self.assertEqual(len({visual["primary_cue"] for visual in visuals}), 3)
 
-    def test_instant_experience_v4_seeded_room_refresh_changes_allowed_details(self):
+    def test_instant_experience_camera_and_room_roles_remain_locked_across_seeds(self):
         common = {
             "product_name": "Current Modern Basketball Energy Only 100 Will Ever Exist",
             "category": "Basketball",
@@ -3479,11 +3479,11 @@ PRIMARY TEXT VARIATIONS
             [visual["route_key"] for visual in first],
             [visual["route_key"] for visual in second],
         )
-        self.assertNotEqual(
+        self.assertEqual(
             [(visual["primary_cue"], visual["secondary_cue"], visual["room_profile_key"]) for visual in first],
             [(visual["primary_cue"], visual["secondary_cue"], visual["room_profile_key"]) for visual in second],
         )
-        self.assertNotEqual(
+        self.assertEqual(
             [visual["camera_role"] for visual in first],
             [visual["camera_role"] for visual in second],
         )
@@ -3712,7 +3712,7 @@ PRIMARY TEXT VARIATIONS
         )
         contract = visual_contract(prompt)
 
-        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn(ads_page.ie_copy.VERSION, prompt)
         self.assertIn("ONE PERSONALISED COPY SET PER VISUAL", prompt)
         self.assertIn("PRODUCT-AWARE DESCRIPTION SYSTEM", prompt)
         self.assertEqual(contract.count("\nAD COPY\n"), 3)
@@ -3738,11 +3738,9 @@ PRIMARY TEXT VARIATIONS
             variation_token="description-image-separation",
         )
 
-        self.assertEqual(visual_prompts.count("- Headline: ONLY 100 WILL EVER EXIST"), 1)
-        self.assertEqual(visual_prompts.count("- CTA: CLAIM YOUR EDITION"), 1)
-        self.assertIn("Once they're claimed, this edition retires forever.", visual_prompts)
-        self.assertIn("FOR THE ROOM THAT REMEMBERS.", visual_prompts)
-        self.assertIn("THE CAVE\nSTARTS\nHERE.", visual_prompts)
+        self.assertEqual(visual_prompts.count("- Headline: ONLY 100 WILL EVER EXIST"), 3)
+        self.assertEqual(visual_prompts.count("- CTA: CLAIM YOUR EDITION"), 3)
+        self.assertIn("Once they’re claimed, this edition retires forever.", visual_prompts)
         self.assertNotIn("This isn't wall art.", visual_prompts)
         self.assertNotIn("Greatness doesn't fade. It gets framed.", visual_prompts)
         self.assertNotIn("No middle ground.", visual_prompts)
@@ -4917,7 +4915,7 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_instant_experience_package_exports_jpegs_and_keeps_historical_text_without_posting_schema(self):
+    def test_instant_experience_package_exports_flat_pngs_and_keeps_historical_text_without_posting_schema(self):
         result = instant_experience_csv_result()
         notes = instant_experience_csv_notes()
         slots = {}
@@ -4975,22 +4973,25 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             [item["filename"] for item in image_items],
             [
-                "premium_scarcity_right_cover_original.jpg",
-                "premium_scarcity_front_cover_original.jpg",
-                "premium_scarcity_left_cover_original.jpg",
+                "01-premium-scarcity-right.png",
+                "02-premium-scarcity-front.png",
+                "03-premium-scarcity-left.png",
             ],
         )
-        self.assertFalse(any(item["filename"].endswith(".png") for item in image_items))
+        self.assertTrue(all(item["filename"].endswith(".png") for item in image_items))
+        self.assertTrue(all("/" not in path for path in paths))
+        self.assertIn("notes.txt", paths)
+        self.assertIn("ad_copy.csv", paths)
         for image_item in image_items:
-            self.assertEqual(image_item["content_type"], "image/jpeg")
-            self.assertTrue(image_item["data"].startswith(b"\xff\xd8\xff"))
+            self.assertEqual(image_item["content_type"], "image/png")
+            self.assertTrue(image_item["data"].startswith(b"\x89PNG\r\n\x1a\n"))
             with Image.open(io.BytesIO(image_item["data"])) as exported:
                 exported.load()
-                self.assertEqual(exported.format, "JPEG")
+                self.assertEqual(exported.format, "PNG")
                 self.assertEqual(exported.mode, "RGB")
                 self.assertEqual(exported.size, (96, 96))
         for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
-            self.assertIn(f"{concept['folder']}/ad-copy.txt", paths)
+            self.assertIn(f"{concept['folder']}-ad-copy.txt", paths)
             for variation_number in range(
                 1,
                 ads_page.INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1,
@@ -4999,15 +5000,15 @@ PRIMARY TEXT VARIATIONS
                     variation_number
                 )
                 variation_folder = (
-                    f"{concept['folder']}/{variation_number:02d}-"
+                    f"{concept['folder']}--{variation_number:02d}-"
                     f"{variant['key'].replace('_', '-')}"
                 )
                 self.assertIn(
-                    f"{variation_folder}/{ads_page.ADS_PRIMARY_TEXT_FILENAME}",
+                    f"{variation_folder}--{ads_page.ADS_PRIMARY_TEXT_FILENAME}",
                     paths,
                 )
                 self.assertIn(
-                    f"{variation_folder}/{ads_page.ADS_HEADLINE_FILENAME}",
+                    f"{variation_folder}--{ads_page.ADS_HEADLINE_FILENAME}",
                     paths,
                 )
 
@@ -5078,9 +5079,9 @@ PRIMARY TEXT VARIATIONS
             "premium_scarcity_left",
         ):
             self.assertIn(f"Route key: {route_key}", prompt)
-        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
-        self.assertIn("Upper photographed residential room scene: approximately 77–79%", prompt)
-        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
+        self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 72–76%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
         self.assertNotIn("FRAMED GREATNESS SCARCITY HYBRID", prompt)
         self.assertNotIn("PURE LIMITED-RELEASE SCARCITY", prompt)
@@ -5143,7 +5144,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
         self.assertIn("ONLY 100 WILL EVER EXIST", contract)
-        self.assertEqual(contract.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"), 1)
+        self.assertEqual(contract.count("IE PREMIUM SCARCITY THREE ROOMS V2"), 3)
         self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Mockups ZIP", prompt)
         self.assertNotIn("Social Media Reels", prompt)
@@ -5158,7 +5159,7 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertEqual(prompt.count("ONE PERSONALISED COPY SET PER VISUAL"), 1)
-        self.assertIn("INSTANT EXPERIENCE COPY V2", prompt)
+        self.assertIn(ads_page.ie_copy.VERSION, prompt)
         self.assertIn("Each group contains AD COPY with one Description, one Headline and one CTA.", prompt)
         self.assertIn("Return exactly THREE active ad-copy combinations total.", prompt)
         self.assertGreaterEqual(prompt.count("AD COPY"), 3)
@@ -5203,7 +5204,7 @@ PRIMARY TEXT VARIATIONS
                     self.assertIn(f"Market: {country}", prompt)
                     self.assertIn("META URL PARAMETERS", prompt)
                     self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
-                    self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
+                    self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
                     self.assertIn("Route key: premium_scarcity_right", prompt)
                     self.assertIn("Route key: premium_scarcity_front", prompt)
                     self.assertIn("Route key: premium_scarcity_left", prompt)
@@ -5230,7 +5231,7 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
                 self.assertIn(f"Market: {country}", prompt)
                 self.assertIn(expected_terms[country], prompt)
-                self.assertIn("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID", prompt)
+                self.assertIn("IE PREMIUM SCARCITY THREE ROOMS V2", prompt)
                 self.assertIn("Route key: premium_scarcity_right", prompt)
                 self.assertIn("Route key: premium_scarcity_front", prompt)
                 self.assertIn("Route key: premium_scarcity_left", prompt)
@@ -5241,7 +5242,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
         self.assertIn("Route key: premium_scarcity_left", prompt)
-        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", prompt)
         self.assertIn("MANDATORY SEAMLESS WALL SYSTEM", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
@@ -5319,9 +5320,9 @@ PRIMARY TEXT VARIATIONS
         marker = ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
         contract = visual_contract(prompt)
 
-        self.assertEqual(prompt.count(marker), 1)
-        self.assertEqual(contract.count(marker), 1)
-        self.assertIn("Selected Meta copy uses Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery and Own This Edition for The Cave.", prompt)
+        self.assertEqual(prompt.count(marker), 3)
+        self.assertEqual(contract.count(marker), 3)
+        self.assertIn("Selected Meta copy uses Claim Your Edition for Right Angle, Secure Your Edition for Premium Scarcity — Straight On and Own This Edition for Premium Scarcity — Left Angle.", prompt)
         self.assertIn("The native Meta/Instant Experience platform button remains Shop Now.", prompt)
         self.assertIn("ADS INSTANT EXPERIENCE COPY V7", prompt)
 
@@ -5398,7 +5399,7 @@ PRIMARY TEXT VARIATIONS
             workflow,
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
-        self.assertEqual(filename, "premium_scarcity_right_cover_original.jpg")
+        self.assertEqual(filename, "01-premium-scarcity-right.png")
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertIn(slot_id, workflow["slots"])
@@ -5621,9 +5622,9 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertIn("Three different opening sentences and emotional propositions", prompt)
-        self.assertIn("Smart Hybrid uses one product-aware camera", prompt)
-        self.assertIn("Private Gallery uses FOR THE ROOM THAT REMEMBERS.", prompt)
-        self.assertIn("The Cave uses THE CAVE STARTS HERE.", prompt)
+        self.assertIn("Image 1 uses RIGHT-angle Room 1 collector lounge", prompt)
+        self.assertIn("Image 2 uses CENTRE / straight-on Room 2 home office", prompt)
+        self.assertIn("Image 3 uses LEFT-angle Room 3 collector den", prompt)
         self.assertIn("Never invent remaining stock", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
 
@@ -5667,8 +5668,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Sport/category: AFL", contract)
         self.assertIn("Country/market: Australia", contract)
         self.assertIn("1024 x 1024", contract)
-        self.assertIn("Upper photographed residential room scene: approximately 77–79%", contract)
-        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", contract)
+        self.assertIn("Upper photographed residential room scene: approximately 72–76%", contract)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", contract)
         self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Social Media Reels", contract)
         self.assertNotIn("Six Laps Ahead", contract)
@@ -5787,7 +5788,7 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
         self.assertIn("Route key: premium_scarcity_right", refreshed["master_prompt"])
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V9 THREE VISUAL SYSTEMS", refreshed["master_prompt"])
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS", refreshed["master_prompt"])
         self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
 
     def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
@@ -5820,9 +5821,9 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("INSTANT EXPERIENCE COPY V2", once)
+        self.assertNotIn(ads_page.ie_copy.VERSION, once)
         self.assertIn(
-            "INSTANT EXPERIENCE COPY V2",
+            ads_page.ie_copy.VERSION,
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -5847,9 +5848,9 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, carousel)
-        self.assertIn("INSTANT EXPERIENCE COPY V2", instant)
+        self.assertIn(ads_page.ie_copy.VERSION, instant)
         self.assertIn("PRIMARY-TEXT ANGLE BALANCE", carousel)
-        self.assertIn("INSTANT EXPERIENCE COPY V2", instant)
+        self.assertIn(ads_page.ie_copy.VERSION, instant)
 
     def test_staccato_and_framed_greatness_rules_are_reusable_and_fact_safe(self):
         rules = ads_page.build_shared_meta_winner_copy_upgrade()
@@ -5893,7 +5894,7 @@ PRIMARY TEXT VARIATIONS
             1,
         )
         for marker in image_markers:
-            self.assertEqual(contract.count(marker), 3 if marker in (ads_page.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0], SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER) else 1, marker)
+            self.assertEqual(contract.count(marker), 3, marker)
         restored_effects = (
             "clear gallery-style glass that is always visible",
             "approximately 8-15% of the glass at approximately 3-6% opacity",
@@ -5906,9 +5907,9 @@ PRIMARY TEXT VARIATIONS
             "premium professional interior photography",
         )
         for expected in restored_effects:
-            self.assertEqual(contract.count(expected), 1 if expected in ("glass is missing, unrealistic", "mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing", "premium professional interior photography") else 3, expected)
+            self.assertEqual(contract.count(expected), 3, expected)
         self.assertEqual(contract.count("\nAD COPY\n"), 3)
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V9 THREE VISUAL SYSTEMS", contract)
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS", contract)
 
     def test_instant_experience_route_wording_and_typography_are_route_specific(self):
         prompt = ads_page.build_ads_prompt(
@@ -5931,22 +5932,18 @@ PRIMARY TEXT VARIATIONS
         ]
 
         expected = (
-            ("premium_scarcity_right", "Once they're claimed, this edition retires forever."),
-            ("premium_scarcity_front", "FOR THE ROOM THAT REMEMBERS."),
-            ("premium_scarcity_left", "THE CAVE\nSTARTS\nHERE."),
+            ("premium_scarcity_right", "Once they’re claimed, this edition retires forever."),
+            ("premium_scarcity_front", "Once they’re claimed, this edition retires forever."),
+            ("premium_scarcity_left", "Once they’re claimed, this edition retires forever."),
         )
         for section, (route_key, fomo) in zip(sections, expected):
             self.assertIn(f"Route key: {route_key}", section)
             self.assertIn(fomo, section)
-            if route_key == "premium_scarcity_right":
-                self.assertIn("ONLY 100 WILL EVER EXIST", section)
-                self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
-                self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
-                self.assertIn("Never place Primary Text on the image.", section)
-            else:
-                self.assertIn("LIMITED TO 100", section)
-                self.assertIn("Never place description copy or a CTA on this image.", section)
-                self.assertNotIn("LIMITED TO 100 WORLDWIDE", section)
+            self.assertIn("ONLY 100 WILL EVER EXIST", section)
+            self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
+            self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
+            self.assertIn("Never place Primary Text on the image.", section)
+            self.assertNotIn("LIMITED TO 100 WORLDWIDE", section)
 
     def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):
         prompt = ads_page.build_ads_prompt(
@@ -5961,12 +5958,12 @@ PRIMARY TEXT VARIATIONS
         left_start = contract.index("Route key: premium_scarcity_front")
         front_prompt = contract[front_start:left_start]
 
-        self.assertIn("Upper photographed residential room scene: approximately 77–79%", front_prompt)
-        self.assertIn("Fixed opaque black footer: approximately the bottom 21–23%", front_prompt)
+        self.assertIn("Upper photographed residential room scene: approximately 72–76%", front_prompt)
+        self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", front_prompt)
         self.assertIn("one 1-pixel muted-gold boundary line", front_prompt)
         self.assertIn("approximately 82-88% of the canvas", front_prompt)
         self.assertIn("ONLY 100 WILL EVER EXIST", front_prompt)
-        self.assertIn("Once they're claimed, this edition retires forever.", front_prompt)
+        self.assertIn("Once they’re claimed, this edition retires forever.", front_prompt)
         self.assertIn("CLAIM YOUR EDITION", front_prompt)
         self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", front_prompt)
         self.assertIn("FRAME REALISM:", front_prompt)

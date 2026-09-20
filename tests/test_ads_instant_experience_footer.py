@@ -34,18 +34,18 @@ def route_sections(prompt):
 
 
 class InstantExperienceFooterRegressionTests(unittest.TestCase):
-    def test_only_smart_hybrid_contains_fixed_footer_contract(self):
+    def test_all_three_contain_fixed_footer_contract(self):
         prompt = instant_experience_prompt()
         marker = ads_page.SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]
-        self.assertEqual(prompt.count(marker), 1)
+        self.assertEqual(prompt.count(marker), 3)
         for index, section in enumerate(route_sections(prompt)):
-            self.assertEqual(section.count(marker), 1 if index == 0 else 0)
+            self.assertEqual(section.count(marker), 1)
 
     def test_footer_is_fixed_opaque_full_width_and_bottom_anchored(self):
         contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
         for wording in (
             "span the complete image width from the left edge to the right edge",
-            "occupy approximately the bottom 21–23% of the canvas",
+            "occupy approximately the bottom 24–28% of the canvas",
             "anchored flush to the bottom edge",
             "perfectly straight, hard top edge",
             "be fully opaque",
@@ -77,10 +77,10 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
         australia = instant_experience_prompt("Australia")
         usa = instant_experience_prompt("USA")
-        self.assertEqual(australia.count(footer), 1)
-        self.assertEqual(usa.count(footer), 1)
+        self.assertEqual(australia.count(footer), 3)
+        self.assertEqual(usa.count(footer), 3)
         for country in ("Australia", "USA", "UK", "Canada", "New Zealand"):
-            self.assertEqual(instant_experience_prompt(country).count(footer), 1)
+            self.assertEqual(instant_experience_prompt(country).count(footer), 3)
         self.assertIn("Never create separate Australian layout behaviour", footer)
 
     def test_headline_validator_accepts_control_and_rejects_warne_regression(self):

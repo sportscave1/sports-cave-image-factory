@@ -1,0 +1,65 @@
+{
+  "images": [
+    {
+      "kwargs": {
+        "product_name": "Michael Jordan",
+        "category": "NBA",
+        "country": "Australia",
+        "product_metadata": {
+          "edition_limit": 100
+        },
+        "variation_token": "locked-copy-scope"
+      },
+      "sha256": "05fbf5ef3dfb34db610e56720a1d1ecaa79572bd6123049f23d2171bdc36d00c"
+    },
+    {
+      "kwargs": {
+        "product_name": "Jerry Rice",
+        "category": "NFL",
+        "country": "Australia",
+        "product_metadata": {
+          "edition_limit": 100
+        },
+        "variation_token": "locked-copy-scope"
+      },
+      "sha256": "de2a3641c53897a95bf4bde0f9b33ba320691c1d55b13f3ef4a9ebda3c55a02f"
+    },
+    {
+      "kwargs": {
+        "product_name": "Shane Warne",
+        "category": "Cricket",
+        "country": "Australia",
+        "product_metadata": {
+          "edition_limit": 100
+        },
+        "variation_token": "locked-copy-scope"
+      },
+      "sha256": "5378281dbf986e4c045c92acb1ddcff293726dc5f36f2f7f8b810c3325bfab73"
+    },
+    {
+      "kwargs": {
+        "product_name": "Peter Brock Six Laps Ahead",
+        "category": "Motorsport",
+        "country": "Australia",
+        "product_metadata": {
+          "edition_limit": 100
+        },
+        "variation_token": "locked-copy-scope"
+      },
+      "sha256": "dd3005d99d794539611c42edaea80549e7d85d4930710a76d0d3af2badaf5e9d"
+    }
+  ],
+  "refresh": {
+    "kwargs": {
+      "product_name": "Michael Jordan",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "creative_refresh_context": {
+        "winning_primary_text": "The night Chicago believed.",
+        "winning_headline": "Own the memory"
+      }
+    },
+    "sha256": "e7b62f5492714c3dc2615344f9e8bc187af6daf744148bcf9498960055dc2960"
+  }
+}

@@ -1,13 +1,16 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
-import hashlib
-import random
 
 
-FAMILIES = ("premium_scarcity_smart_hybrid", "private_gallery", "the_cave")
-CAMERAS = ("STRAIGHT, 0–2° natural offset", "SLIGHT RIGHT, 4–7° right of centre",
-           "SLIGHT LEFT, 4–7° left of centre", "SUBTLE THREE-QUARTER, 7–10° right of centre")
-GALLERY_CAMERAS = ("STRAIGHT GALLERY, 0–2°", "VIEWER RIGHT, 4–8°",
-                   "VIEWER LEFT, 4–8°", "SLIGHT EDITORIAL THREE-QUARTER, 8–12° right of centre")
+VERSION = "IE PREMIUM SCARCITY THREE ROOMS V2"
+FAMILIES = ("premium_scarcity",) * 3
+ROOMS = (
+    ("collector_lounge", "premium collector lounge / refined living area", "warm taupe textured plaster", "dark walnut console at left", "cropped cognac leather sofa at right", "deep window reveal at outer left", "warm soft daylight from the left with restrained amber ambient fill"),
+    ("heritage_study", "refined private home office", "smoked bronze seamless mineral plaster", "slim warm oak desk below the frame", "single upholstered desk chair crop", "balanced recessed alcove at the outer edge", "soft frontal window fill with a warm shaded desk lamp"),
+    ("modern_man_cave", "premium games room / architectural collector den", "dark chocolate seamless stone plaster", "low asymmetric smoked-timber credenza at right", "restrained leather club chair crop at left", "deep room corner at outer right", "soft daylight from the right with low warm indirect architectural light"),
+)
+CAMERAS = ("RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+           "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+           "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on")
 SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: When writing a limited-edition label use LIMITED TO {verified limit} or LIMITED EDITION '
                  'when approved. Never append worldwide, world wide, globally, or any geographic '
                  'scope to an edition claim, even when source metadata or description copy uses it. '
@@ -16,109 +19,34 @@ SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: When writing a limited-edition labe
 
 def resolve_visual_system(visual, index, context, variation_token):
     """Extend the existing resolved product context, never resolve commercial facts here."""
-    seed = hashlib.sha256(f"{visual['resolved_seed']}:{variation_token}:{visual['route_key']}".encode()).digest()
-    rng = random.Random(int.from_bytes(seed[:8], "big"))
-    camera = rng.choice(GALLERY_CAMERAS if index == 1 else CAMERAS)
-    visual.update(visual_family=FAMILIES[index], camera_role=camera.split(',')[0],
-                  camera_side=camera, camera_instruction=f"Use {camera}. Keep readability excellent, verticals straight and the complete frame rigid. Never mirror artwork.",
-                  creative_variation_token=variation_token or "standard")
-    if index == 0:
-        return
-    heritage = context.get("product_era") == "historic" or context.get("artwork_mood") == "heritage"
-    walls = (("warm taupe Venetian plaster", "aged warm stone plaster", "warm cream/stone gallery plaster")
-             if heritage else ("deep charcoal mineral plaster", "smoked graphite limewash", "restrained architectural concrete"))
-    if index == 2:
-        walls = (("muted bronze-brown limewash", "warm dark taupe plaster", "dark chocolate mineral")
-                 if heritage else ("deep warm charcoal plaster", "graphite mineral plaster", "restrained warm grey concrete-like plaster"))
-    wall = rng.choice(walls)
-    limit = context.get("edition_limit")
-    scarcity = f"LIMITED TO {limit}" if limit else "LIMITED COLLECTOR RELEASE"
-    visual.update(wall_colour=wall, wall_material=wall, wall_finish=wall,
-                  room_profile="sophisticated private collector gallery" if index == 1 else "real premium fan sanctuary",
-                  room_type="private gallery" if index == 1 else "premium collector den",
-                  room_materials="restrained dark timber and quiet mineral plaster",
-                  primary_cue="minimal low gallery cabinet" if index == 1 else "low credenza with completely empty cabinet top",
-                  secondary_cue="none", architectural_cue="quiet seamless collector wall",
-                  lighting="one gallery picture light with restrained natural ambient fill",
-                  shot_distance="dominant complete framed artwork within the photographic zone",
-                  overlay_position="small flat editorial branding in negative space" if index == 1 else "full-height flat right graphic column, 32–34% width",
-                  product_position="dominant gallery wall artwork" if index == 1 else "dominant in the left 66–68% photographic zone",
-                  composition="1024 x 1024 private-gallery photograph, no scarcity footer" if index == 1 else "1024 x 1024, left 66–68% room, right 32–34% graphic column",
-                  headline_text="FOR THE ROOM THAT REMEMBERS." if index == 1 else "THE CAVE\nSTARTS\nHERE.",
-                  supporting_line=scarcity, cta_text="", typography_mode=FAMILIES[index])
+    room_key, room, wall, primary, secondary, architecture, lighting = ROOMS[index]
+    camera = CAMERAS[index]
+    visual.update(visual_family=FAMILIES[index], camera_role=("RIGHT", "FRONT", "LEFT")[index],
+                  camera_side=camera, camera_instruction=camera + ". Keep verticals straight and complete frame rigid. Never mirror artwork.",
+                  creative_variation_token=variation_token or "standard", room_profile_key=room_key,
+                  room_profile=f"Room {index + 1}: {room}", room_type=room,
+                  wall_colour=wall, wall_material=wall, wall_finish=wall,
+                  room_materials=wall + "; " + primary + "; " + secondary,
+                  primary_cue=primary, secondary_cue=secondary, architectural_cue=architecture,
+                  lighting=lighting, time_of_day="warm late-afternoon interior",
+                  overlay_position="fixed opaque full-width black/gold footer across bottom 24–28%",
+                  product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
+                  composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque promotional banner")
+    if context.get("edition_limit"):
+        visual.update(supporting_line="Once they’re claimed, this edition retires forever.",
+                      fomo_line="Once they’re claimed, this edition retires forever.")
 
 
 def camera_wall_rules(visual):
-    return f"""SMART CAMERA / ROOM / WALL RESOLUTION
+    return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
 CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']}
 Use the token only for creative freshness; never display it or internal metadata on the image.
 Selected camera: {visual['camera_side']}.
-Resolve exactly ONE camera: use the selected value above, not a menu of alternatives. A three-quarter view is permitted only while product readability remains excellent. Never mirror artwork.
+Resolve exactly ONE camera: use the selected value above, not a menu of alternatives. Keep the assigned right / centre / left camera role. Never mirror artwork.
 Resolved room: {visual['room_profile']}.
 Resolved wall: {visual['wall_colour']}.
 Resolved material treatment: {visual['room_materials']}.
 Analyse the actual attached product, SPORT, MARKET, title, palette, brightness, frame colour, emotional mood, era/nostalgia and campaign context. The actual product wins over sport tendencies. Preserve the one resolved scene and ensure the unchanged frame separates clearly from its wall.
-Use the resolved primary cue and no more than one secondary cue. Do not borrow the layout or advertising wording from another visual family.
-Avoid identical wall/camera combinations across recent fingerprints and this package where suitable; product matching wins. Vary only visual interpretation, never product identity, branding, edition limits or verified facts.
+Use the resolved primary cue and no more than one secondary cue. All three images share the same black/gold bottom banner.
+Avoid identical wall/camera combinations across recent fingerprints and this package without changing the assigned camera side; product fidelity wins. Vary only visual interpretation, never product identity, branding, edition limits or verified facts.
 {SCARCITY_RULE}"""
-
-
-def render_editorial_prompt(visual, *, product_name, category, country, product_url,
-                            metadata, shared_rules, core_rules, adaptation, campaign_context):
-    gallery = visual["visual_family"] == "private_gallery"
-    layout = ("""SPORTS HISTORY DISPLAYED LIKE COLLECTIBLE ART.
-Artwork dominates a sophisticated private collector/gallery environment with minimal premium furniture, deliberate gallery lighting, genuine frame depth and premium clear acrylic/glazing.
-No Premium Scarcity fixed bottom footer. Small SPORTS CAVE branding; flat editorial typography in clear negative space.
-Signature: FOR THE ROOM THAT REMEMBERS.
-Set the signature on two lines:
-FOR THE ROOM
-THAT REMEMBERS.
-No fake CTA, sale banner, discount graphics, obvious sports props or generic man-cave clutter.""" if gallery else """A REAL PREMIUM FAN SANCTUARY.
-LEFT VISUAL: 66–68% width, premium realistic room with dominant framed product.
-Use a full-height right graphic column.
-RIGHT GRAPHIC COLUMN: 32–34% width, full height, flush top, flush bottom and flush right; flat matte near-black 2D advertising design. No wall texture, perspective, room shadows or physical plaque effect. No bottom footer.
-Exact hierarchy: SPORTS CAVE, then THE CAVE / STARTS / HERE., then the resolved scarcity line, then COLLECTOR SERIES.
-White / warm ivory headline, never gold. Restrained antique-gold accent rules only. Premium vintage/editorial/collector typography.
-Room core: framed product, premium collector wall, one gallery picture light, low cabinet / credenza. An optional small partial leather-chair crop is the only extra furniture cue.
-CABINET TOP MUST BE COMPLETELY EMPTY. No generated filler: no books, bowls, plants, alcohol, mugs, sports objects, clocks, trophies, helmets, jerseys or decorative clutter.""")
-    return f"""IMAGE GENERATION PROMPT
-
-Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
-Do not generate the image automatically from this Ads-planning response.
-SPORTS CAVE — {visual['route'].upper()} META AD SYSTEM V1
-PRODUCT AND VERIFIED METADATA
-Product name: {product_name}
-Sport/category: {category}
-Country/market: {country}
-Destination URL for ad setup only: {product_url}
-Route key: {visual['route_key']}
-Product era/mood classification: {visual['product_era']} / {visual['artwork_mood']}
-Edition limit used: {visual['edition_limit_used']}
-Edition limit source: {visual['edition_limit_source']}
-
-{camera_wall_rules(visual)}
-RESOLVED ROUTE VARIABLES
-Camera: {visual['camera_side']}
-Room: {visual['room_profile']}
-Wall: {visual['wall_colour']}
-Furniture: {visual['primary_cue']}
-Secondary cue: {visual['secondary_cue']}
-Lighting: {visual['lighting']}
-{layout}
-Only permitted advertising wording:
-SPORTS CAVE
-{visual['headline_text']}
-{visual['supporting_line']}
-{'COLLECTOR SERIES' if not gallery else ''}
-Never place description copy or a CTA on this image. Add text as a deterministic flat post-production layer with real fonts. Keep safe margins and readable type at a 256 x 256 preview.
-Resolved prompt metadata (never visible ad text):
-{metadata}
-{core_rules}
-AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
-{shared_rules}
-{adaptation}
-{campaign_context}
-FINAL REJECTION GATE
-Correct or regenerate if artwork, frame, faces, words, numbers, signatures, badges, logos, composition or edition plate changes; if artwork is mirrored; if frame depth, clear glazing, physical contact/secondary/lower frame shadows or mounting gap is missing; if lighting/reflections disagree; if the room looks AI-generated or cluttered; if typography is misspelled, duplicated, unreadable or outside its layout; if unverified scarcity is invented; or if any other visual family's footer or campaign text appears.
-Require a true square, exactly 1024 x 1024 pixels, sRGB. If native output differs, resize the approved square deterministically; never stretch a non-square image. Check product fidelity, photographic realism, mobile readability and this format's layout before delivery. Do not print scores or reasoning.
-"""

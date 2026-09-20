@@ -22,38 +22,28 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         visuals = self.visuals()
         self.assertEqual([v["concept_id"] for v in visuals], [c["id"] for c in INSTANT_EXPERIENCE_CONCEPTS])
         self.assertEqual([v["visual_family"] for v in visuals],
-                         ["premium_scarcity_smart_hybrid", "private_gallery", "the_cave"])
+                         ["premium_scarcity"] * 3)
         self.assertEqual([v["group_heading"] for v in visuals], [
-            "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID", "GROUP 2 — PRIVATE GALLERY", "GROUP 3 — THE CAVE"])
+            "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE", "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON", "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE"])
 
-    def test_distinct_layouts_and_wording(self):
-        hybrid, gallery, cave = self.prompts({"edition_limit": 100})
-        footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        self.assertIn(footer, hybrid)
-        for prompt in (gallery, cave):
-            self.assertNotIn(footer, prompt)
-            self.assertIn("LIMITED TO 100\n", prompt)
-            self.assertNotIn("LIMITED TO 100 WORLDWIDE", prompt.upper())
-            self.assertNotIn("LIMITED TO 100 WORLD WIDE", prompt.upper())
-        self.assertIn("FOR THE ROOM THAT REMEMBERS.", gallery)
-        self.assertIn("THE CAVE\nSTARTS\nHERE.", cave)
-        self.assertIn("RIGHT GRAPHIC COLUMN: 32–34%", cave)
-        self.assertIn("CABINET TOP MUST BE COMPLETELY EMPTY", cave)
-        self.assertIn("No wall texture, perspective, room shadows or physical plaque effect", cave)
+    def test_shared_banner_and_three_different_rooms(self):
+        visuals = self.visuals(metadata={"edition_limit": 100})
+        for field in ("room_profile", "wall_colour", "primary_cue", "secondary_cue", "architectural_cue", "lighting"):
+            self.assertEqual(len({v[field] for v in visuals}), 3)
+        for i, prompt in enumerate(self.prompts({"edition_limit":100})):
+            for required in ("ONLY 100 WILL EVER EXIST", "Once they’re claimed, this edition retires forever.",
+                             "CLAIM YOUR EDITION", "24–28%", "72–76%", "Never mirror artwork"):
+                self.assertIn(required, prompt)
+            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
 
-    def test_unknown_edition_is_non_numeric(self):
-        for visual in self.visuals()[1:]:
-            self.assertEqual(visual["supporting_line"], "LIMITED COLLECTOR RELEASE")
-        for visual in self.visuals(metadata={"edition_limit": 250})[1:]:
-            self.assertEqual(visual["supporting_line"], "LIMITED TO 250")
+    def test_unknown_and_other_limits_remain_truthful(self):
+        self.assertTrue(all(v['headline_text']=='SPORTS CAVE COLLECTOR' for v in self.visuals()))
+        self.assertTrue(all(v['headline_text']=='ONLY 250 WILL EVER EXIST' for v in self.visuals(metadata={'edition_limit':250})))
 
-    def test_token_determinism_variation_and_factual_stability(self):
+    def test_fixed_camera_roles_and_determinism(self):
         self.assertEqual(self.visuals(), self.visuals())
-        packs = [self.visuals(str(n), {"edition_limit": 100}) for n in range(32)]
-        for slot in range(3):
-            self.assertGreater(len({p[slot]["camera_side"] for p in packs}), 2)
-            self.assertGreater(len({p[slot]["wall_colour"] for p in packs}), 1)
-            self.assertTrue(all(p[slot]["edition_limit_used"] == "100" for p in packs))
+        for token in ('one', 'two'):
+            self.assertEqual([v['camera_role'] for v in self.visuals(token)], ['RIGHT','FRONT','LEFT'])
 
     def test_all_prompts_keep_realism_and_smart_product_selection(self):
         for prompt in self.prompts():

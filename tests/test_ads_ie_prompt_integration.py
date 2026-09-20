@@ -32,37 +32,23 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         )
 
     def assert_three_formats(self, text, limit=100):
-        for old in ("PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON",
-                    "PREMIUM SCARCITY — LEFT ANGLE", "Premium Scarcity — Right Angle",
-                    "Premium Scarcity — Straight On", "Premium Scarcity — Left Angle",
-                    "Premium Scarcity Right Angle", "Premium Scarcity Straight On",
-                    "Premium Scarcity Left Angle", "SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"):
+        for old in ("PRIVATE GALLERY", "SMART HYBRID", "GROUP 3 — THE CAVE", "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column"):
             self.assertNotIn(old, text)
         grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", 1)[1]
         groups = re.findall(r"^GROUP ([123]) — ([^\n]+)\n\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", grouped, re.M | re.S)
-        self.assertEqual([(n, label) for n, label, _ in groups], [
-            ("1", "PREMIUM SCARCITY — SMART HYBRID"), ("2", "PRIVATE GALLERY"), ("3", "THE CAVE")])
+        self.assertEqual([label for _, label, _ in groups], [
+            "PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON", "PREMIUM SCARCITY — LEFT ANGLE"])
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        self.assertEqual(text.count(footer), 1)
-        self.assertIn(footer, groups[0][2])
-        self.assertIn("Selected camera:", groups[0][2])
-        for _, _, image_prompt in groups:
-            self.assertNotIn("Permissible camera families", image_prompt)
-            self.assertIn("CREATIVE_VARIATION_TOKEN:", image_prompt)
-        for _, _, image_prompt in groups[1:]:
-            for forbidden in (footer, "fixed opaque footer across the bottom 21–23%",
-                              "FIXED BLACK FOOTER", "ONLY 100 WILL EVER EXIST", "CLAIM YOUR EDITION"):
-                self.assertNotIn(forbidden, image_prompt)
-            self.assertNotRegex(image_prompt, r"(?i)LIMITED TO \d+ (?:WORLDWIDE|WORLD WIDE)")
-        gallery, cave = groups[1][2], groups[2][2]
-        self.assertIn("SPORTS CAVE — PRIVATE GALLERY META AD SYSTEM V1", gallery)
-        self.assertIn("FOR THE ROOM THAT REMEMBERS.", gallery)
-        self.assertIn("FOR THE ROOM\nTHAT REMEMBERS.", gallery)
-        self.assertIn("SPORTS CAVE — THE CAVE META AD SYSTEM V1", cave)
-        self.assertIn("THE CAVE\nSTARTS\nHERE.", cave)
-        self.assertIn("full-height right graphic column", cave)
-        self.assertIn("CABINET TOP MUST BE COMPLETELY EMPTY", cave)
-        self.assertIn(f"LIMITED TO {limit}", cave)
+        self.assertEqual(text.count(footer), 3)
+        for i, (_, _, prompt) in enumerate(groups):
+            self.assertIn(footer, prompt)
+            self.assertIn(f"ONLY {limit} WILL EVER EXIST", prompt)
+            self.assertIn("Once they’re claimed, this edition retires forever.", prompt)
+            self.assertIn("CLAIM YOUR EDITION", prompt)
+            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+            self.assertIn(f"Room {i+1}", prompt)
+            self.assertIn("PRODUCT LOCK — ABSOLUTE", prompt)
+            self.assertNotRegex(prompt, r"(?i)LIMITED TO \d+ (?:WORLDWIDE|WORLD WIDE)")
         self.assertEqual(grouped.count("\nAD COPY\n"), 3)
         self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, text)
@@ -72,7 +58,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assert_three_formats(result["master_prompt"])
         self.assertEqual(result["master_prompt"], result["generated_ad_output"])
         self.assertEqual([f["visual_family"] for f in result["instant_experience_fingerprints"]],
-                         ["premium_scarcity_smart_hybrid", "private_gallery", "the_cave"])
+                         ["premium_scarcity"] * 3)
 
     def test_baseball_and_generic_public_builders_use_same_contract(self):
         for category in ("Baseball", "Motorsport", "Other"):
@@ -112,7 +98,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
 
     def test_partial_current_prompt_with_late_legacy_override_is_refreshed(self):
         current = self.record()
-        stale = {**current, "master_prompt": current["master_prompt"] + "\nReturn exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Right Angle, Premium Scarcity — Straight On, then Premium Scarcity — Left Angle."}
+        stale = {**current, "master_prompt": current["master_prompt"] + "\nOverride: Private Gallery with FOR THE ROOM THAT REMEMBERS. and full-height right graphic column."}
         self.assert_three_formats(ads_page.ensure_current_ads_result_prompt(stale)["master_prompt"])
 
     def test_submit_and_cached_rerun_deliver_correct_master_to_copy_button(self):

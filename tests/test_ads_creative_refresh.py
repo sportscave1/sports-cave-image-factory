@@ -835,8 +835,8 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         self.assertNotIn(ads_page.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION, new_ads_prompt)
         self.assertIn("Return exactly three complete grouped Instant Experience routes", new_ads_prompt)
         self.assertEqual(
-            new_ads_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID"),
-            1,
+            new_ads_prompt.count("IE PREMIUM SCARCITY THREE ROOMS V2"),
+            3,
         )
         self.assertEqual(
             refresh_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
@@ -846,16 +846,16 @@ class CreativeRefreshV2Tests(unittest.TestCase):
     def test_shared_ie_prompt_requires_three_distinct_visual_formats(self):
         prompt = ads_page.build_ads_prompt(
             "Purple Reign", "NBA", "USA", "Instant Experience",
-            variation_token="fixed-diversity-test",
+            variation_token="fixed-diversity-test", product_metadata={"edition_limit": 100},
         )
         for wording in (
-            "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
-            "GROUP 2 — PRIVATE GALLERY", "GROUP 3 — THE CAVE",
-            "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column",
-            "CABINET TOP MUST BE COMPLETELY EMPTY",
+            "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
+            "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON", "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
+            "Once they’re claimed, this edition retires forever.", "CENTRE / straight-on home office, Room 2, with bottom banner",
+            "LEFT-angle architectural collector den, Room 3, with bottom banner",
         ):
             self.assertIn(wording, prompt)
-        self.assertEqual(prompt.count(ads_page.build_instant_experience_fixed_opaque_footer_rules()), 1)
+        self.assertEqual(prompt.count(ads_page.build_instant_experience_fixed_opaque_footer_rules()), 3)
 
     def test_creative_refresh_winner_block_is_internal_context_not_a_review_response(self):
         context = {

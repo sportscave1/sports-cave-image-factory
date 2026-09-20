@@ -1,9 +1,6 @@
-import hashlib
 import csv
 import io
-import json
 import unittest
-from pathlib import Path
 
 import ads_page as ads
 import ads_ie_copy as copy
@@ -31,7 +28,7 @@ class CopyV2Tests(unittest.TestCase):
             with self.subTest(name=name):
                 r = self.record(name, sport, market, product_metadata=metadata)
                 text = r["master_prompt"]
-                for marker in (copy.VERSION, name, "OPTIONAL MICRO-RESEARCH", "2–4 focused searches", "Empty ATHLETE_NAMES", "35–65 words", "product truth", "identity, belonging", "Current Australian athletes", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
+                for marker in (copy.VERSION, name, "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "Empty ATHLETE_NAMES", "product truth", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
                     self.assertIn(marker, text)
                 for stale in ("exactly nine", "three-row", "Description 1", "Description 2", "Description 3", "COPY VARIATIONS"):
                     self.assertNotIn(stale, text)
@@ -39,36 +36,28 @@ class CopyV2Tests(unittest.TestCase):
                 self.assertEqual(grouped.count("\nAD COPY\n"), 3)
                 for cta in ("Claim Your Edition", "Secure Your Edition", "Own This Edition"):
                     self.assertIn("CTA:\n" + cta, grouped)
-                self.assertNotIn("Limited to 100 worldwide.", text)
+                self.assertIn("Limited to 100 worldwide.", text)
                 if not metadata:
                     self.assertNotIn("LIMITED TO 100", grouped)
                     visuals = ads.resolve_standard_instant_experience_visuals(product_name=name, category=sport, product_metadata=metadata, variation_token="copy-v2")
                     self.assertTrue(all(v["edition_limit_used"] != "100" for v in visuals))
 
-    def test_seed_is_deterministic_diverse_and_rivalry_gated(self):
-        args = ("Single Athlete", "Baseball", "USA", "seed", {})
-        self.assertEqual(copy.cues(*args), copy.cues(*args))
-        results = [copy.cues("Single Athlete", "Baseball", "USA", str(i), {}) for i in range(30)]
-        self.assertGreater(len({r[0]["opening_hook_family"] for r in results}), 1)
-        self.assertGreater(len({r[0]["headline_family"] for r in results}), 1)
-        self.assertNotIn("rivalry_challenge", str(results))
-        rival = [copy.cues("A v B", "Football", "UK", str(i), {"RELATIONSHIP_TYPE": "rivalry"}) for i in range(30)]
-        self.assertIn("rivalry_challenge", str(rival))
-        previous = copy.cues(*args)
-        fresh = copy.cues(*args, recent=previous)
-        self.assertTrue(all(a["opening_hook_family"] != b["opening_hook_family"] for a, b in zip(previous, fresh)))
-        current = [copy.cues("Current Athlete", "Cricket", "Australia", str(i), {"ERA": "current"}) for i in range(30)]
-        self.assertNotIn("era_memory", str(current))
-        self.assertNotIn("remembered_moment", str(current))
+    def test_styles_remain_fixed_across_products_tokens_and_history(self):
+        for sport in ("NBA", "NFL", "Cricket", "Motorsport", "Other"):
+            for token in ("first", "second"):
+                result = copy.cues("Collector Subject", sport, "USA", token, {})
+                self.assertEqual([c["opening_hook_family"] for c in result],
+                                 ["legacy_standard", "framed_greatness", "choose_a_side"])
+                self.assertEqual(result, copy.cues("Collector Subject", sport, "USA", token, {}, recent=result))
 
-    def test_visual_bytes_unchanged_except_selected_copy_cta_metadata(self):
-        cases = json.loads((Path(__file__).parent / "fixtures/ie_copy_v2_visual_baseline.json").read_text(encoding="utf8"))
-        for case in cases:
-            expected = case["sha256"]
-            # Only these stale Meta-copy instructions change inside the Smart Hybrid prompt.
-            actual = ads.build_standard_instant_experience_visual_prompts(**case["kwargs"])
-            original = actual.replace("- Selected Meta copy uses Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery and Own This Edition for The Cave.", "- For the V4 Premium Scarcity room system, Description 1 in all three routes must use CTA field Claim Your Edition.").replace("- Each route has one selected Meta CTA; only Smart Hybrid repeats CLAIM YOUR EDITION on the image.", "- Description 1 for every route must use CTA field Claim Your Edition; only Smart Hybrid repeats this CTA on the image.")
-            self.assertEqual(hashlib.sha256(original.encode()).hexdigest(), expected)
+    def test_copy_history_accepts_old_and_current_visual_identities(self):
+        args = ("Single Athlete", "Baseball", "USA", "seed", {})
+        current = copy.cues(*args)
+        legacy = [{**row, "visual_family": row["copy_family"]} for row in current]
+        for row in legacy:
+            row.pop("copy_family")
+        self.assertEqual(copy.cues(*args, recent=current), copy.cues(*args, recent=legacy))
+        self.assertEqual([row["visual_family"] for row in current], ["premium_scarcity"] * 3)
 
     def test_three_row_export_import_and_posting_hydration(self):
         r = self.record()
@@ -126,9 +115,9 @@ class CopyV2Tests(unittest.TestCase):
         self.assertEqual([x.label for x in fields].count("Headline"), 3)
         self.assertEqual([x.label for x in fields].count("CTA"), 3)
         text = "\n".join(x.value for x in list(app.markdown) + list(app.caption))
-        for value in ("PREMIUM SCARCITY — SMART HYBRID", "PRIVATE GALLERY", "THE CAVE"):
+        for value in ("PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON", "PREMIUM SCARCITY — LEFT ANGLE"):
             self.assertIn(value, text)
-        for stale in ("RIGHT ANGLE", "STRAIGHT ON", "LEFT ANGLE", "Description 1", "0 of 3 copy pairs"):
+        for stale in ("SMART HYBRID", "PRIVATE GALLERY", "GROUP 3 — THE CAVE", "Description 1", "0 of 3 copy pairs"):
             self.assertNotIn(stale, text)
         self.assertEqual([x.value for x in fields if x.label == "CTA"], [v[3] for v in copy.ROUTES.values()])
         result = dict(app.session_state[ads.ADS_RESULT_STATE_KEY])

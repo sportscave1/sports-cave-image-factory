@@ -150,7 +150,7 @@ CREATIVE_REFRESH_WINNER_CONTEXT_VERSION = "SPORTS CAVE CREATIVE REFRESH WINNER C
 THREE_ENVIRONMENT_DIVERSITY_BLOCK_VERSION = "SPORTS CAVE THREE-ENVIRONMENT DIVERSITY V1"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V9 THREE VISUAL SYSTEMS"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS"
 ADS_INSTANT_EXPERIENCE_WIRING_VERSION = "IE THREE-FORMAT WIRING V1"
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = 6
 INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = 28
@@ -913,7 +913,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "on_image_message_type": "Exact three-line bottom scarcity strip.",
         "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
-        "cover_composition": "Full-width upper lifestyle/product image region approximately 77-79% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 21-23%.",
+        "cover_composition": "Full-width upper lifestyle/product image region approximately 72-76% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 24-28%.",
         "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
         "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
         "room_family": "Current premium collector-room control.",
@@ -3332,8 +3332,8 @@ APPROVED COMPOSITION
 
 Use a stacked full-width square composition with two precisely separated sections:
 
-Upper lifestyle/product image region: approximately 77-79% of the square canvas.
-Fixed black footer: approximately 21-23% of the square canvas.
+Upper lifestyle/product image region: approximately 72-76% of the square canvas.
+Fixed black footer: approximately 24-28% of the square canvas.
 
 Do not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.
 Do not allow the bottom strip to overpower the product.
@@ -3508,7 +3508,7 @@ Avoid:
 
 FIXED BLACK FOOTER
 
-Add an integrated collector-grade full-width matte-black footer across the bottom 21-23% of the square canvas.
+Add an integrated collector-grade full-width matte-black footer across the bottom 24-28% of the square canvas.
 
 The strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.
 
@@ -3755,9 +3755,9 @@ Every copy option must:
 - preserve exact user-provided wording character-for-character when supplied
 
 The three visual formats are:
-- Premium Scarcity — Smart Hybrid
-- Private Gallery
-- The Cave
+- Premium Scarcity — Right Angle
+- Premium Scarcity — Straight On
+- Premium Scarcity — Left Angle
 
 Description 1 for every route must use CTA field Claim Your Edition. Image wording follows the individual visual family; long description text follows its archetype ending.
 
@@ -3788,7 +3788,7 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
 
 - Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
 - The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
-- Selected Meta copy uses Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery and Own This Edition for The Cave.
+- Selected Meta copy uses Claim Your Edition for Right Angle, Secure Your Edition for Premium Scarcity — Straight On and Own This Edition for Premium Scarcity — Left Angle.
 - The long description text does not have to end with the CTA field; it must end according to its description archetype.
 - Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
 - The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
@@ -3802,16 +3802,16 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
     }:
         route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
 
-- Smart Hybrid uses on-image CTA CLAIM YOUR EDITION. Private Gallery and The Cave have no on-image CTA.
-- Each route has one selected Meta CTA; only Smart Hybrid repeats CLAIM YOUR EDITION on the image.
+- All three images use the on-image CTA CLAIM YOUR EDITION.
+- Each route keeps its selected Meta CTA; all three images display CLAIM YOUR EDITION.
 - Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
 - Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
     else:
         route_rules = """COPY-SET APPLICATION
 
-- Generate only Premium Scarcity Smart Hybrid, Private Gallery and The Cave.
-- Preserve the copy-table CTA contract; the three image formats have independent layouts and on-image wording.
-- Description 1 uses Claim Your Edition; each image format retains its own wording.
+- Generate only Premium Scarcity Right Angle, Premium Scarcity — Straight On and Premium Scarcity — Left Angle.
+- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout and on-image wording.
+- Description 1 uses Claim Your Edition; all three images retain the shared banner wording.
 - Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
     return f"{shared_rules}\n\n{route_rules}"
 
@@ -3823,7 +3823,7 @@ Create one solid rectangular black footer panel anchored flush to the bottom edg
 
 The panel must:
 - span the complete image width from the left edge to the right edge
-- occupy approximately the bottom 21–23% of the canvas
+- occupy approximately the bottom 24–28% of the canvas
 - begin at one precise horizontal boundary
 - have a perfectly straight, hard top edge
 - be fully opaque
@@ -4021,13 +4021,13 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
 - the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
 - the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
-- the fixed black footer falls outside approximately 21–23% of the canvas height
+- the fixed black footer falls outside approximately 24–28% of the canvas height
 - the on-image headline exceeds six words or 28 characters, wraps, is squeezed, is stretched or is abnormally reduced
 - the supporting line exceeds 12 words or 70 characters, wraps or becomes too small
 - the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
 - any footer wording approaches or crosses the 64–72 px safe margins
 - Australia or another country changes the established country-invariant Instant Experience footer template
-- the three visual families are indistinguishable at thumbnail size
+- the three room scenes are indistinguishable at thumbnail size
 - any route mirrors the artwork
 - the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
 - the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
@@ -4044,16 +4044,16 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
     {
         "concept_id": "premium_scarcity_right",
         "route_key": "premium_scarcity_right",
-        "group_heading": "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
+        "group_heading": "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Premium Scarcity — Smart Hybrid",
+        "route": "Premium Scarcity — Right Angle",
         "supporting_label": "Slight right-angle product photograph",
-        "copy_row": "Premium Scarcity — Smart Hybrid Copy Variation 1",
-        "purpose": "Create a Premium Scarcity Smart Hybrid hero with product-aware room, wall and camera variation while preserving the supplied artwork.",
+        "copy_row": "Premium Scarcity — Right Angle Copy Variation 1",
+        "purpose": "Create RIGHT-angle Room 1 in a warm premium collector lounge while preserving the supplied artwork.",
         "camera_role": "right",
         "camera_side": "camera 4-6 degrees to the viewer's right of centre, looking back naturally toward the product",
         "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's right of centre. Look back naturally toward the product. Show a restrained amount of the frame's right-hand timber return and mounting depth. Keep verticals straight. Preserve the product's proportions. No fisheye effect, dramatic perspective or noticeably larger artwork side. The angle must look like a genuine room photograph, not a stylised product render.",
-        "fomo_line": "Once they're claimed, this edition retires forever.",
+        "fomo_line": "Once they’re claimed, this edition retires forever.",
         "default_room_profile": "refined masculine collector lounge",
         "room_type": "refined masculine collector lounge",
         "wall_colour": "warm mushroom mineral plaster",
@@ -4065,25 +4065,25 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft side daylight from camera-left with restrained ambient fill",
         "time_of_day": "quiet late morning",
-        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
-        "product_position": "dominant and centred in the upper 77–79% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
+        "product_position": "dominant and centred in the upper 72–76% room scene",
         "architectural_cue": "architectural doorway near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
         "typography_mode": "premium_room_panel",
     },
     {
         "concept_id": "premium_scarcity_front",
         "route_key": "premium_scarcity_front",
-        "group_heading": "GROUP 2 — PRIVATE GALLERY",
+        "group_heading": "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Private Gallery",
+        "route": "Premium Scarcity — Straight On",
         "supporting_label": "Straight-on product photograph",
-        "copy_row": "Private Gallery Copy Variation 1",
-        "purpose": "Display sports history like collectible art in a sophisticated private gallery.",
+        "copy_row": "Premium Scarcity — Straight On Copy Variation 1",
+        "purpose": "Create CENTRE / straight-on Room 2 in a refined home office with the shared bottom banner.",
         "camera_role": "front",
         "camera_side": "predominantly straight-on camera with maximum 0-2 degree natural offset",
         "camera_instruction": "Use a predominantly straight-on view with a maximum natural offset of 0-2 degrees. Keep the complete product geometrically balanced. Avoid artificial showroom symmetry by placing the room cue primarily toward one outer edge. This must be the clearest and most direct scarcity hero of the three.",
-        "fomo_line": "When the final one is claimed, it's gone for good.",
+        "fomo_line": "Once they’re claimed, this edition retires forever.",
         "default_room_profile": "refined masculine collector lounge",
         "room_type": "refined masculine collector lounge",
         "wall_colour": "refined warm taupe matte plaster",
@@ -4095,25 +4095,25 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "75mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with slightly brighter room falloff",
         "time_of_day": "clean midday daylight",
-        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
-        "product_position": "dominant and centred in the upper 77–79% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
+        "product_position": "dominant and centred in the upper 72–76% room scene",
         "architectural_cue": "partial bookcase near one outer edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
         "typography_mode": "premium_room_panel",
     },
     {
         "concept_id": "premium_scarcity_left",
         "route_key": "premium_scarcity_left",
-        "group_heading": "GROUP 3 — THE CAVE",
+        "group_heading": "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "The Cave",
+        "route": "Premium Scarcity — Left Angle",
         "supporting_label": "Slight left-angle product photograph",
-        "copy_row": "The Cave Copy Variation 1",
-        "purpose": "Create a real premium fan sanctuary with left room photography and a full-height flat right graphic column.",
+        "copy_row": "Premium Scarcity — Left Angle Copy Variation 1",
+        "purpose": "Create LEFT-angle Room 3 in a premium architectural collector den with the shared bottom banner.",
         "camera_role": "left",
         "camera_side": "camera 4-6 degrees to the viewer's left of centre, looking back naturally toward the product",
         "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's left of centre. Look back naturally toward the product. Show a restrained amount of the frame's left-hand timber return and mounting depth. Keep verticals straight. Preserve the product's original dimensions and proportions. The angle must complement Route 1 without appearing artificially mirrored.",
-        "fomo_line": "Released once. When they're gone, they stay gone.",
+        "fomo_line": "Once they’re claimed, this edition retires forever.",
         "default_room_profile": "refined masculine collector lounge",
         "room_type": "refined masculine collector lounge",
         "wall_colour": "soft greige limewash",
@@ -4125,10 +4125,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with quieter peripheral furniture",
         "time_of_day": "soft afternoon daylight",
-        "overlay_position": "fixed opaque footer across the bottom 21–23% only",
-        "product_position": "dominant and centred in the upper 77–79% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
+        "product_position": "dominant and centred in the upper 72–76% room scene",
         "architectural_cue": "window edge with natural curtains near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 77–79%, fixed opaque black footer approximately 21–23%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
         "typography_mode": "premium_room_panel",
     },
 )
@@ -5288,10 +5288,10 @@ Resolved sibling fingerprints supplied for comparison:
 {chr(10).join(sibling_lines)}
 
 Within one three-image package:
-- Preserve the same immutable product and shared realism in three distinct visual formats.
-- Smart Hybrid alone uses the fixed bottom 21–23% footer and its resolved headline/supporting line/CTA.
-- Private Gallery uses small branding, FOR THE ROOM THAT REMEMBERS. and verified scarcity, with no CTA or scarcity footer.
-- The Cave uses the left room and full-height right graphic column, THE CAVE STARTS HERE., and an empty cabinet.
+- Preserve the same immutable product and shared realism in three distinct premium rooms.
+- Image 1 uses RIGHT-angle Room 1 collector lounge with the fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 home office with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 collector den with the same fixed bottom 24–28% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
 - Use one primary cue and no more than one secondary cue; respect each format's furniture restrictions.
 
@@ -5386,7 +5386,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size: Smart Hybrid footer, Private Gallery editorial signature, The Cave right column. Use product-aware camera, wall, furniture and lighting variation within each family.
+Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 collector lounge, CENTRE Room 2 home office, LEFT-angle Room 3 collector den. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5407,7 +5407,7 @@ def build_instant_experience_canonical_prompt_v4(
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
     shared_realism_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
-    ie_quality_contract = build_instant_experience_image_quality_contract(visual) if visual.get("visual_family") == "premium_scarcity_smart_hybrid" else ""
+    ie_quality_contract = build_instant_experience_image_quality_contract(visual)
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=country,
@@ -5423,14 +5423,6 @@ def build_instant_experience_canonical_prompt_v4(
         category=category,
     )
     resolved_json = json.dumps(fingerprint, ensure_ascii=False, indent=2)
-    if visual.get("visual_family") in {"private_gallery", "the_cave"}:
-        return ie_visuals.render_editorial_prompt(
-            visual, product_name=product_name, category=category, country=country,
-            product_url=product_url, metadata=resolved_json, shared_rules=shared_realism_rules,
-            core_rules=SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
-            adaptation=build_sport_country_visual_adaptation(category, country),
-            campaign_context=campaign_moment_visual_block,
-        )
     scarcity_note = (
         "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
         if visual.get("scarcity_verified")
@@ -5445,7 +5437,7 @@ Copy this prompt into a fresh image-generation conversation with the exact uploa
 
 Do not generate the image automatically from this Ads-planning response.
 
-SPORTS CAVE INSTANT EXPERIENCE PREMIUM SCARCITY SMART HYBRID
+IE PREMIUM SCARCITY THREE ROOMS V2
 
 {ie_visuals.camera_wall_rules(visual)}
 
@@ -5497,17 +5489,17 @@ The final image must be:
 - clear and readable at a 256 x 256 preview
 
 Composition is locked:
-- Upper photographed residential room scene: approximately 77–79% of the canvas.
-- Fixed opaque black footer: approximately the bottom 21–23% of the canvas.
+- Upper photographed residential room scene: approximately 72–76% of the canvas.
+- Fixed opaque black footer: approximately the bottom 24–28% of the canvas.
 - Framed product width: approximately 82-88% of the canvas.
 - Complete frame visible with no cropped outer frame edges.
 - Safe margins: 64-72 pixels.
 - The supplied framed product is the largest and most important visual element.
 
 The three-image package must produce:
-1. Premium Scarcity Smart Hybrid with its fixed bottom footer.
-2. Private Gallery with FOR THE ROOM THAT REMEMBERS.
-3. The Cave with a full-height right graphic column.
+1. RIGHT-angle collector lounge, Room 1, with bottom banner.
+2. CENTRE / straight-on home office, Room 2, with bottom banner.
+3. LEFT-angle architectural collector den, Room 3, with bottom banner.
 
 This route must deliver only its assigned camera role: {visual["route"]}.
 
@@ -5583,7 +5575,7 @@ Glass:
 
 LIGHTING
 
-Use one physically consistent source of soft daylight with restrained interior ambient light.
+Use one physically consistent source of soft daylight with restrained warm ambient fill. Resolved room lighting: {visual['lighting']}. Keep one coherent key-light direction.
 - Approximate temperature: 4000-4700K.
 - Match lighting across wall, furniture, frame and glass.
 - Use realistic falloff.
@@ -5607,7 +5599,7 @@ HEADLINE: {visual.get("headline_text")}
 SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
-Use these resolved words only for Smart Hybrid. Private Gallery and The Cave use their own visual wording and layouts.
+Use the identical resolved banner wording on ALL THREE images. Never paraphrase it.
 
 Typography:
 - Headline: premium Sports Cave editorial serif, warm ivory.
@@ -5638,12 +5630,12 @@ AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
 
 FINAL ROUTE CHECK
 
-- The three visual families are distinct at thumbnail size; each resolves one suitable camera.
+- The three rooms are distinct at thumbnail size; each uses its assigned right / centre / left camera.
 - This route uses its exact camera role and is not a mirrored duplicate of another route.
 - Wall colour and cues differ from the other routes.
 - Room variation remains subtle and product-led.
 - The room never becomes a themed sports bar.
-- The fixed black footer remains within approximately 21–23% of the canvas height.
+- The fixed black footer remains within approximately 24–28% of the canvas height.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
 
@@ -6007,8 +5999,8 @@ Use these exact cover lines:
 {overlay_lines}
 
 Cover:
-- Full-width upper lifestyle/product image region across approximately 77-79% of the square canvas.
-- Fixed full-width opaque matte-black footer across the bottom approximately 21-23% of the square canvas.
+- Full-width upper lifestyle/product image region across approximately 72-76% of the square canvas.
+- Fixed full-width opaque matte-black footer across the bottom approximately 24-28% of the square canvas.
 - Thin restrained metallic-gold divider across the top edge of the black strip.
 - No left/right split, no right sidebar and no vertical scarcity panel.
 - Current black-and-gold visual treatment.
@@ -6269,7 +6261,7 @@ def build_instant_experience_visual_output_requirements(
     )
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-Return exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Smart Hybrid, Private Gallery, then The Cave.
+Return exactly three complete grouped Instant Experience routes in the standard order: Premium Scarcity — Right Angle, Premium Scarcity — Straight On, then Premium Scarcity — Left Angle.
 
 Do not output a fourth prompt.
 Do not output one shared prompt with variations.
@@ -6309,10 +6301,10 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
-- Smart Hybrid uses one product-aware camera and the established fixed bottom footer.
-- Private Gallery uses FOR THE ROOM THAT REMEMBERS., verified scarcity and no image CTA or footer.
-- The Cave uses THE CAVE STARTS HERE., verified scarcity, an empty cabinet and the flat full-height right column.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 21–23% opaque footer for Smart Hybrid only), deterministic on-image wording and no automatic image generation.
+- Image 1 uses RIGHT-angle Room 1 collector lounge with the fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 home office with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 collector den with the same fixed bottom 24–28% black/gold banner.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 24–28% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -6498,7 +6490,7 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
     elif campaign_type == "Instant Experience":
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include exactly one easy-to-copy "
-            "grouped package for Premium Scarcity Smart Hybrid, Private Gallery and The Cave. Each group must contain one complete standalone "
+            "grouped package for Premium Scarcity Right Angle, Premium Scarcity — Straight On and Premium Scarcity — Left Angle. Each group must contain one complete standalone "
             "cover image prompt followed by one AD COPY block containing Description, Headline and CTA. The response "
             "must contain three total ad-copy combinations and one shared Instant Experience setup block after the groups. "
             "Do not include Meta link-description fields, Meta Ad Description fields, "
@@ -6518,9 +6510,9 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
-2. GROUP 2 — PRIVATE GALLERY with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
-3. GROUP 3 — THE CAVE with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+        ad_package_items = """1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
+3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE with one IMAGE GENERATION PROMPT and one AD COPY block containing one Description, one Headline and one CTA.
 4. Exactly three complete ad-copy combinations total, one personalised winner per visual.
 5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
@@ -6543,7 +6535,7 @@ No separate Meta link-description or Meta Ad Description field is allowed."""
     approval_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         completion_instruction = (
-            "After GROUP 3 — THE CAVE and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
+            "After GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
             "Do not ask which cover to generate and do not ask a follow-up generation question."
         )
     else:
@@ -6553,7 +6545,7 @@ No separate Meta link-description or Meta Ad Description field is allowed."""
             f'"{approval_question}"'
         )
     direct_instruction_examples = (
-        '"generate the image now", "generate the Premium Scarcity Smart Hybrid cover" or "generate The Cave cover"'
+        '"generate the image now", "generate the Premium Scarcity Right Angle cover" or "generate Premium Scarcity — Left Angle cover"'
         if campaign_type == "Instant Experience"
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
@@ -6631,8 +6623,8 @@ def build_campaign_visual_output_contract(
     ).removesuffix(f"; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}").replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
-            "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — SMART HYBRID, "
-            "GROUP 2 — PRIVATE GALLERY, GROUP 3 — THE CAVE, then one shared INSTANT EXPERIENCE SETUP block. "
+            "Return the finished standard Instant Experience output in this order: GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, "
+            "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE, then one shared INSTANT EXPERIENCE SETUP block. "
             "Each group must contain one standalone image-generation prompt followed by one personalised "
             "Description, Headline and CTA. Preserve every setup instruction, destination rule and URL parameter. "
             "Do not add Meta link-description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
@@ -6686,8 +6678,8 @@ def build_campaign_visual_output_contract(
         final_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         final_response_termination = (
-            "Only after GROUP 1 — PREMIUM SCARCITY — SMART HYBRID, GROUP 2 — PRIVATE GALLERY, "
-            "GROUP 3 — THE CAVE "
+            "Only after GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE, GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON, "
+            "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE "
             "and the shared INSTANT EXPERIENCE SETUP block have been printed, stop. "
             "Do not ask a follow-up question and do not generate images."
         )
@@ -7244,7 +7236,7 @@ Before returning the campaign, privately compare several product-specific candid
 
 def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
     if campaign_type == "Instant Experience":
-        return f"{META_WINNER_COPY_BLOCK_VERSION}\nINSTANT EXPERIENCE COPY V2: three distinct visual groups, one final AD COPY block per group. Preserve product truth, setup and the approved route CTAs."
+        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in locked order legacy_standard, framed_greatness, choose_a_side; one final AD COPY block per group. Preserve the defining hooks, product truth, setup and approved route CTAs."
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -7379,7 +7371,7 @@ def _record_ie_copy_history(result, concept_notes):
         if not all(str(row.get(field) or "").strip() for field in ("primary_text", "headline", "cta")):
             continue
         first = re.split(r"[.!?]\s|\n", str(row["primary_text"]).strip(), maxsplit=1)[0]
-        entries.append({**cues_by_key.get(key, {}), "visual_family": ie_copy.ROUTES[key][2],
+        entries.append({**cues_by_key.get(key, {}), "visual_family": "premium_scarcity", "copy_family": ie_copy.ROUTES[key][2],
                         "market": result.get("country"), "sport": result.get("category"),
                         "first_sentence_normalized": " ".join(first.casefold().split()),
                         "headline": " ".join(str(row["headline"]).casefold().split())})
@@ -7653,7 +7645,7 @@ def compose_final_ads_prompt(
     if campaign_type == "Instant Experience":
         prompt += "\n\nCOPY FATIGUE CONTEXT\n" + json.dumps(
             [item for item in (recent_instant_experience_fingerprints or []) if item.get("market") == country and item.get("sport") == category], ensure_ascii=False)
-        prompt += "\nAvoid repeating these recent copy hooks, headlines and opening sentences where appropriate; product truth wins."
+        prompt += "\nVary product-specific supporting lines and headlines where appropriate; keep all three locked legacy copy frameworks and defining hooks unchanged. Product truth wins."
     return prompt
 
 
@@ -8699,15 +8691,15 @@ OBJECTIVE
 
 Create one standard Meta Instant Experience package grouped into three clear routes:
 
-1. PREMIUM SCARCITY — SMART HYBRID
-2. PRIVATE GALLERY
-3. THE CAVE
+1. PREMIUM SCARCITY — RIGHT ANGLE
+2. PREMIUM SCARCITY — STRAIGHT ON
+3. PREMIUM SCARCITY — LEFT ANGLE
 
 Return exactly these sections in this order:
 
-1. GROUP 1 — PREMIUM SCARCITY — SMART HYBRID
-2. GROUP 2 — PRIVATE GALLERY
-3. GROUP 3 — THE CAVE
+1. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE
+2. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON
+3. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE
 4. INSTANT EXPERIENCE SETUP
 
 Do not output five global copy variations.
@@ -8737,7 +8729,7 @@ Headline:
 CTA:
 [the route's approved CTA]
 
-Exactly three completed copy combinations total, one per visual. Preserve blank lines in descriptions. Never return placeholders. Use Claim Your Edition for Smart Hybrid, Secure Your Edition for Private Gallery, Own This Edition for The Cave. The Description is stored as primary_text for compatibility.
+Exactly three completed copy combinations total, one per visual. Preserve blank lines in descriptions. Never return placeholders. Use Claim Your Edition for Right Angle, Secure Your Edition for Premium Scarcity — Straight On, Own This Edition for Left Angle. The Description is stored as primary_text for compatibility.
 
 INSTANT EXPERIENCE SETUP
 
@@ -9488,36 +9480,14 @@ def ads_prompt_contract_version_for_campaign(
 
 
 def _instant_experience_visual_contract_is_current(prompt):
-    """Validate cached New Ads prompt content as well as its declared version.
-
-    Historical route keys and recent fingerprints remain valid data. Only
-    controlling legacy headings/instructions are rejected.
-    """
-    required = (
-        ie_copy.VERSION,
-        "GROUP 1 — PREMIUM SCARCITY — SMART HYBRID",
-        "GROUP 2 — PRIVATE GALLERY",
-        "GROUP 3 — THE CAVE",
-        "SPORTS CAVE — PRIVATE GALLERY META AD SYSTEM V1",
-        "SPORTS CAVE — THE CAVE META AD SYSTEM V1",
-        "FOR THE ROOM THAT REMEMBERS.",
-        "THE CAVE\nSTARTS\nHERE.",
-    )
-    if not all(marker in prompt for marker in required):
-        return False
-    footer_marker = SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]
-    if prompt.count(footer_marker) != 1:
-        return False
-    if "SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4" in prompt:
-        return False
-    return not re.search(
-        r"^(?:GROUP [123]\s*[—-]\s*PREMIUM SCARCITY\s*[—-]\s*(?:RIGHT ANGLE|STRAIGHT ON|LEFT ANGLE)"
-        r"|[123]\.\s*(?:PREMIUM SCARCITY\s*[—-]\s*(?:RIGHT ANGLE|STRAIGHT ON|LEFT ANGLE)"
-        r"|(?:Slight right-angle|Straight-on|Slight left-angle) product photograph\.)"
-        r"|Return exactly three complete grouped Instant Experience routes[^\n]*Right Angle"
-        r"|[^\n]*grouped package for Premium Scarcity Right Angle)",
-        prompt, re.MULTILINE | re.IGNORECASE,
-    )
+    required = (ie_copy.VERSION, ie_visuals.VERSION,
+                "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
+                "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
+                "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE")
+    return (all(marker in prompt for marker in required)
+            and prompt.count(SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]) == 3
+            and "FOR THE ROOM THAT REMEMBERS." not in prompt
+            and "full-height right graphic column" not in prompt)
 
 
 def ensure_current_ads_result_prompt(result):
@@ -9870,16 +9840,8 @@ def ads_images_ready(result, workflow=None):
 
 def _meta_output_filename(result, workflow, slot):
     if _is_instant_experience_result(result):
-        saved_slot = (workflow.get("slots") or {}).get(slot.get("id")) or {}
-        return ads_image_workflow.build_instant_experience_original_filename(
-            slot,
-            saved_slot.get("original_name"),
-            saved_slot.get("source_format") or saved_slot.get("output_format"),
-            force_jpeg=(
-                normalize_ads_workflow_mode(result.get("workflow_mode"))
-                == ADS_WORKFLOW_MODE_NEW
-            ),
-        )
+        concept = next(c for c in INSTANT_EXPERIENCE_CONCEPTS if c["slot_id"] == slot["id"])
+        return f"{concept['folder']}.png"
     filename = ads_image_workflow.build_meta_image_filename(
         result["product_name"],
         result["campaign_type"],
@@ -9893,20 +9855,14 @@ def _meta_output_filename(result, workflow, slot):
 
 
 def _instant_experience_export_image_details(result, slot_data):
-    if normalize_ads_workflow_mode(result.get("workflow_mode")) != ADS_WORKFLOW_MODE_NEW:
-        return slot_data
     image_data = slot_data.get("data") or b""
-    source_hash = slot_data.get("source_hash") or ads_image_workflow.source_image_signature(
-        image_data
-    )
-    cached_jpeg = slot_data.get("new_ads_package_jpeg") or {}
-    if cached_jpeg.get("source_hash") != source_hash:
-        cached_jpeg = ads_image_workflow.prepare_new_ads_package_jpeg(
-            image_data,
-            original_name=slot_data.get("original_name"),
-        )
-        slot_data["new_ads_package_jpeg"] = cached_jpeg
-    return cached_jpeg
+    source_hash = ads_image_workflow.source_image_signature(image_data)
+    cached = slot_data.get("ie_package_png") or {}
+    if cached.get("source_hash") != source_hash:
+        cached = ads_image_workflow.prepare_instant_experience_package_png(
+            image_data, original_name=slot_data.get("original_name"))
+        slot_data["ie_package_png"] = cached
+    return cached
 
 
 def _ads_export_date_compact(workflow):
@@ -9939,7 +9895,7 @@ def build_ads_export_folder_name(result, workflow):
 
 
 def build_ads_notes_filename(result, workflow):
-    return ADS_COPY_FILENAME
+    return "notes.txt" if _is_instant_experience_result(result) else ADS_COPY_FILENAME
 
 
 def _ads_export_folder_path(destination, result, workflow):
@@ -11249,11 +11205,7 @@ def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file)
 
 
 def _instant_experience_current_copy_csv_filename(result):
-    product_name = ads_image_workflow.sanitize_product_filename(
-        (result or {}).get("product_name"),
-        max_length=90,
-    )
-    return f"Sports Cave - {product_name} - Instant Experience Copy.csv"
+    return "ad_copy.csv"
 
 
 def _normalise_instant_experience_variations(raw_variations):
@@ -11739,7 +11691,6 @@ def _instant_experience_package_items(result, workflow):
         )
     slots = workflow.get("slots") or {}
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
-    export_new_ads_jpeg = workflow_mode == ADS_WORKFLOW_MODE_NEW
     items = []
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
         slot = _instant_experience_slot_for_concept(concept)
@@ -11750,14 +11701,9 @@ def _instant_experience_package_items(result, workflow):
         copy_bytes = copy_text.encode("utf-8")
         image_details = _instant_experience_export_image_details(result, slot_data)
         image_data = image_details["data"]
-        image_filename = ads_image_workflow.build_instant_experience_original_filename(
-            concept,
-            slot_data.get("original_name"),
-            slot_data.get("source_format") or slot_data.get("output_format"),
-            force_jpeg=export_new_ads_jpeg,
-        )
-        image_relative_path = f"{concept['folder']}/{image_filename}"
-        copy_relative_path = f"{concept['folder']}/ad-copy.txt"
+        image_filename = f"{concept['folder']}.png"
+        image_relative_path = image_filename
+        copy_relative_path = f"{concept['folder']}-ad-copy.txt"
         items.append(
             {
                 "kind": "image",
@@ -11795,7 +11741,7 @@ def _instant_experience_package_items(result, workflow):
                 "concept": concept["display_name"],
                 "label": f"{concept['display_name']} ad copy",
                 "relative_path": copy_relative_path,
-                "filename": "ad-copy.txt",
+                "filename": copy_relative_path,
                 "data": copy_bytes,
                 "size": len(copy_bytes),
                 "copy_variation_count": _refresh_copy_count(result),
@@ -11845,6 +11791,23 @@ def _instant_experience_package_items(result, workflow):
             ),
         }
     )
+    image_manifest = {
+        item["slot_id"]: {"filename": item["filename"], "status": "included"}
+        for item in items if item.get("kind") == "image"
+    }
+    notes_text = build_ads_setup_notes_text(result, workflow, image_outcomes=image_manifest)
+    notes_text += "\r\nCreative layout\r\n"
+    for index, camera in enumerate(("Right angle", "Centre / straight-on", "Left angle"), 1):
+        notes_text += f"Image {index}: {camera}; Room {index}; black/gold bottom banner.\r\n"
+    notes_data = notes_text.encode("utf-8")
+    items.append({"kind": "text", "slot_id": "_ad_setup_notes", "label": "Ad setup notes",
+                  "relative_path": "notes.txt", "filename": "notes.txt", "data": notes_data,
+                  "size": len(notes_data), "content_type": "text/plain", "asset_type": "meta_ads_notes"})
+    # Keep every required copy/metadata file, with collision-free names at root.
+    for item in items:
+        flat_name = item["relative_path"].replace("/", "--")
+        item["relative_path"] = flat_name
+        item["filename"] = flat_name
     return items
 
 

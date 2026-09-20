@@ -457,6 +457,28 @@ def srgb_profile_bytes():
     return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
 
+def prepare_instant_experience_package_png(data, *, original_name=""):
+    """Export the full-resolution approved IE cover as PNG without resizing."""
+    source_bytes = bytes(data or b"")
+    details = _source_image_details(source_bytes, original_name=original_name)
+    with Image.open(io.BytesIO(source_bytes)) as source:
+        source.load()
+        oriented = ImageOps.exif_transpose(source)
+        flattened = _flatten_transparency(oriented)
+        converted = _convert_to_srgb(flattened)
+        try:
+            output = io.BytesIO()
+            converted.save(output, format="PNG", icc_profile=srgb_profile_bytes())
+            payload = output.getvalue()
+            return {**details, "data": payload, "output_format": "PNG",
+                    "output_width": converted.width, "output_height": converted.height,
+                    "output_size": len(payload), "content_type": "image/png"}
+        finally:
+            for image in (converted, flattened, oriented):
+                if image is not source:
+                    image.close()
+
+
 def prepare_new_ads_package_jpeg(data, *, original_name=""):
     """Return a full-resolution JPEG for a New Ads package without resizing or cropping."""
 
