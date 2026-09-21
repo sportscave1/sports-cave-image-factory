@@ -3810,8 +3810,8 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
         route_rules = """COPY-SET APPLICATION
 
 - Generate only Premium Scarcity Right Angle, Premium Scarcity — Straight On and Premium Scarcity — Left Angle.
-- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout and on-image wording.
-- Description 1 uses Claim Your Edition; all three images retain the shared banner wording.
+- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout with a different assigned support line per image.
+- Description 1 uses Claim Your Edition; each image retains its assigned supporting wording.
 - Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
     return f"{shared_rules}\n\n{route_rules}"
 
@@ -3998,7 +3998,7 @@ MANDATORY FINAL CORRECTION AND 10/10 QUALITY GATE
 Inspect and correct the composed image before returning it. Reject and regenerate or correct the result when:
 - the artwork or frame changed, looks regenerated or loses any outside frame edge
 - the frame is warped, incorrectly proportioned, missing black timber depth or not rigid
-- the product misses the required approximately 82-88% canvas width or complete-frame visibility
+- the product misses its assigned route-specific canvas width or complete-frame visibility
 - the room does not match every resolved scene variable or looks like generic AI staging
 - architecture, furniture, lighting direction, shadows or reflections are physically inconsistent
 - glass is missing, unrealistic, crosses onto the frame or wall, or hides artwork details
@@ -4010,7 +4010,7 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
 - the on-image CTA is not exactly CLAIM YOUR EDITION
 - a CTA field is outside the approved direct edition-acquisition family
-- another route's Headline, CTA or supporting wording appears
+- another route's supporting wording appears; the shared headline and CLAIM YOUR EDITION CTA are allowed
 - typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as a deterministic flat post-production layer inside the fixed footer
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
 - essential wording is not immediately readable in an approximately 256 x 256 preview
@@ -5129,7 +5129,7 @@ def resolve_standard_instant_experience_visuals(
                 **overlay_copy,
             }
         )
-        ie_visuals.resolve_visual_system(visual, index, context, variation_token)
+        ie_visuals.resolve_visual_system(visual, index, {**context, "product_metadata": product_metadata or {}}, variation_token)
         resolved.append(visual)
     sibling_summaries = [
         {
@@ -5289,11 +5289,11 @@ Resolved sibling fingerprints supplied for comparison:
 
 Within one three-image package:
 - Preserve the same immutable product and shared realism in three distinct premium rooms.
-- Image 1 uses RIGHT-angle Room 1 collector lounge with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 home office with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 collector den with the same fixed bottom 24–28% black/gold banner.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 man cave / office / den with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 bar / lounge with the same fixed bottom 24–28% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
-- Use one primary cue and no more than one secondary cue; respect each format's furniture restrictions.
+- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned supporting line.
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -5313,6 +5313,8 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "visual_family": visual.get("visual_family", "premium_scarcity_smart_hybrid"),
         "creative_variation_token": visual.get("creative_variation_token", ""),
         "campaign_line": visual.get("headline_text", ""),
+        "fan_archetype": visual.get("fan_archetype", ""),
+        "room_atmosphere": visual.get("atmosphere", ""),
         "urgency_placement": visual["overlay_position"],
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
@@ -5386,7 +5388,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 collector lounge, CENTRE Room 2 home office, LEFT-angle Room 3 collector den. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
+Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 man cave / office / den, LEFT-angle Room 3 bar / lounge. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5437,7 +5439,7 @@ Copy this prompt into a fresh image-generation conversation with the exact uploa
 
 Do not generate the image automatically from this Ads-planning response.
 
-IE PREMIUM SCARCITY THREE ROOMS V2
+{ie_visuals.VERSION}
 
 {ie_visuals.camera_wall_rules(visual)}
 
@@ -5491,15 +5493,15 @@ The final image must be:
 Composition is locked:
 - Upper photographed residential room scene: approximately 72–76% of the canvas.
 - Fixed opaque black footer: approximately the bottom 24–28% of the canvas.
-- Framed product width: approximately 82-88% of the canvas.
+- Framed product width: approximately {visual["product_width"]} of the canvas.
 - Complete frame visible with no cropped outer frame edges.
 - Safe margins: 64-72 pixels.
 - The supplied framed product is the largest and most important visual element.
 
 The three-image package must produce:
-1. RIGHT-angle collector lounge, Room 1, with bottom banner.
-2. CENTRE / straight-on home office, Room 2, with bottom banner.
-3. LEFT-angle architectural collector den, Room 3, with bottom banner.
+1. RIGHT-angle hallway / gallery, Room 1, with bottom banner.
+2. CENTRE / straight-on man cave / office / den, Room 2, with bottom banner.
+3. LEFT-angle bar / lounge, Room 3, with bottom banner.
 
 This route must deliver only its assigned camera role: {visual["route"]}.
 
@@ -5529,7 +5531,7 @@ Room direction:
 - Primary cue: {visual["primary_cue"]}
 - Secondary cue: {visual["secondary_cue"]}
 
-Use exactly one primary cue and no more than one secondary cue. Do not add team flags, jerseys, additional athlete pictures, readable televisions, sport-specific logos, neon signs, alcohol displays, pool tables, excessive trophies or memorabilia.
+Use the assigned furniture arrangement and restrained secondary styling cluster. A private drinks cabinet or bar shelf is allowed for Room 3; avoid branded bottle displays. Do not add team flags, jerseys, additional athlete pictures, readable televisions, sport-specific logos, neon signs, pool tables, excessive trophies or memorabilia.
 
 MANDATORY SEAMLESS WALL SYSTEM
 
@@ -5540,7 +5542,7 @@ Resolved wall colour for this route: {visual["wall_colour"]}.
 
 Include extremely subtle natural microtexture, gentle organic tonal variation, realistic light falloff, soft brightness variation and approximately 2-4% visible mottling. No obvious repeated pattern.
 
-Never generate horizontal wall lines, vertical wall lines, tile lines, grout, stone-slab divisions, concrete formwork divisions, panel joins, timber slats, decorative panels, geometric grooves, repeated seams, wainscoting, moulding behind the artwork, brick outlines, wallpaper stripes, rectangular wall sections, artificial shadow bands, lines passing behind the frame, commercial hotel-lobby walls, office walls or property-showroom walls.
+Never generate horizontal wall lines, vertical wall lines, tile lines, grout, stone-slab divisions, concrete formwork divisions, panel joins, timber slats, decorative panels, geometric grooves, repeated seams, wainscoting, moulding behind the artwork, brick outlines, wallpaper stripes, rectangular wall sections, artificial shadow bands, lines passing behind the frame, commercial hotel-lobby walls, corporate office walls or property-showroom walls.
 
 A genuine doorway, window edge or room corner is allowed only near the outer part of the scene. It must follow correct perspective and must not pass behind or visually divide the framed product. Reject an otherwise strong generation if an unexplained line appears anywhere on the wall.
 
@@ -5599,7 +5601,7 @@ HEADLINE: {visual.get("headline_text")}
 SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
-Use the identical resolved banner wording on ALL THREE images. Never paraphrase it.
+Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Only the headline, CTA and banner styling may be shared. Never copy description text onto the image.
 
 Typography:
 - Headline: premium Sports Cave editorial serif, warm ivory.
@@ -5633,7 +5635,7 @@ FINAL ROUTE CHECK
 - The three rooms are distinct at thumbnail size; each uses its assigned right / centre / left camera.
 - This route uses its exact camera role and is not a mirrored duplicate of another route.
 - Wall colour and cues differ from the other routes.
-- Room variation remains subtle and product-led.
+- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
 - The room never becomes a themed sports bar.
 - The fixed black footer remains within approximately 24–28% of the canvas height.
 - No unresolved placeholders remain.
@@ -6301,9 +6303,9 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
-- Image 1 uses RIGHT-angle Room 1 collector lounge with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 home office with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 collector den with the same fixed bottom 24–28% black/gold banner.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 man cave / office / den with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 bar / lounge with the same fixed bottom 24–28% black/gold banner.
 - Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 24–28% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 

@@ -28,13 +28,29 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_shared_banner_and_three_different_rooms(self):
         visuals = self.visuals(metadata={"edition_limit": 100})
-        for field in ("room_profile", "wall_colour", "primary_cue", "secondary_cue", "architectural_cue", "lighting"):
+        for field in ("room_profile", "wall_colour", "primary_cue", "secondary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
             self.assertEqual(len({v[field] for v in visuals}), 3)
         for i, prompt in enumerate(self.prompts({"edition_limit":100})):
-            for required in ("ONLY 100 WILL EVER EXIST", "Once they’re claimed, this edition retires forever.",
+            for required in ("ONLY 100 WILL EVER EXIST", ads_page.ie_visuals.SUPPORT_LINES[i],
                              "CLAIM YOUR EDITION", "24–28%", "72–76%", "Never mirror artwork"):
                 self.assertIn(required, prompt)
             self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+
+    def test_fan_style_is_product_aware_and_preserves_room_assignments(self):
+        styles = {}
+        for sport in ("Motorsport", "NBA", "NFL", "Baseball", "Cricket", "Horse Racing"):
+            rows = ads_page.resolve_standard_instant_experience_visuals(
+                product_name="Collector Subject", category=sport, product_metadata={"edition_limit":100})
+            self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "office_den", "bar_lounge"])
+            self.assertEqual([r["supporting_line"] for r in rows], list(ads_page.ie_visuals.SUPPORT_LINES))
+            styles[sport] = [r["room_materials"] for r in rows]
+        self.assertEqual(len({tuple(v) for v in styles.values()}), 6)
+        for era, expected in (("historic", "timeless heritage"), ("modern", "sharper contemporary")):
+            rows = ads_page.resolve_standard_instant_experience_visuals(
+                product_name=f"{era} Team Collector Subject", category="NBA",
+                product_metadata={"edition_limit":100, "team_names":["Supplied Team"]})
+            self.assertTrue(all(expected in r["atmosphere"] for r in rows))
+            self.assertTrue(all("proud supporter" in r["atmosphere"] for r in rows))
 
     def test_unknown_and_other_limits_remain_truthful(self):
         self.assertTrue(all(v['headline_text']=='SPORTS CAVE COLLECTOR' for v in self.visuals()))

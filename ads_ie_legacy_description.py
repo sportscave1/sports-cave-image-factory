@@ -70,7 +70,7 @@ NEW_AD_TEMPLATES = (
     """[SUBJECT / ATHLETE / TEAM].
 [DEFINING MOMENT / PRODUCT IDENTITY].
 [SHORT EMOTIONAL OR SPORT-SPECIFIC LINE].
-Made for {sport} collectors.
+Made for collectors.
 
 This isn't wall art.
 It's a statement of {identity} identity.

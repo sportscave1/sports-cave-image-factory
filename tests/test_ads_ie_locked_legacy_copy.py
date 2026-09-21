@@ -23,7 +23,8 @@ class LockedLegacyCopyTests(unittest.TestCase):
                 result = ads.build_ads_result_record(product, sport, "Australia", "Instant Experience",
                                                      product_metadata={"edition_limit": 100})
                 prompt = result["master_prompt"]
-                self.assertIn(f"Made for {word} collectors.", prompt)
+                self.assertIn("Made for collectors.", prompt)
+                self.assertNotIn(f"Made for {word} collectors.", prompt)
                 for key in legacy.NEW_AD_STYLE_KEYS:
                     self.assertIn(key, prompt)
                 for line in ("This isn't wall art.", "Greatness doesn't fade.\nIt gets framed.",
@@ -57,7 +58,7 @@ class LockedLegacyCopyTests(unittest.TestCase):
         self.assertEqual(legacy.new_ad_sport_language("NBA", {"ARTWORK_TYPE": "Team"}),
                          ("basketball", "club", "team"))
 
-    def test_image_prompts_and_creative_refresh_are_byte_identical_to_start_of_task(self):
+    def test_current_image_prompts_and_unchanged_creative_refresh(self):
         baseline = json.loads((Path(__file__).parent / "fixtures/ie_locked_copy_scope_baseline.json").read_text())
         for case in baseline["images"]:
             actual = ads.build_standard_instant_experience_visual_prompts(**case["kwargs"])

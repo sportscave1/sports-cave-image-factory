@@ -43,7 +43,9 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         for i, (_, _, prompt) in enumerate(groups):
             self.assertIn(footer, prompt)
             self.assertIn(f"ONLY {limit} WILL EVER EXIST", prompt)
-            self.assertIn("Once they’re claimed, this edition retires forever.", prompt)
+            self.assertIn("SUPPORTING LINE: " + ads_page.ie_visuals.SUPPORT_LINES[i], prompt)
+            self.assertIn(("hallway / gallery", "man cave / home office / collector den", "bar / lounge")[i], prompt)
+            self.assertIn("VARIANT PRECEDENCE — MANDATORY", prompt)
             self.assertIn("CLAIM YOUR EDITION", prompt)
             self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
             self.assertIn(f"Room {i+1}", prompt)
@@ -51,6 +53,8 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
             self.assertNotRegex(prompt, r"(?i)LIMITED TO \d+ (?:WORLDWIDE|WORLD WIDE)")
         self.assertEqual(grouped.count("\nAD COPY\n"), 3)
         self.assertNotIn("COPY VARIATIONS", grouped)
+        self.assertNotRegex(text.casefold(), r"\b(?:motorsport|basketball|football|cricket|baseball|sports|racing) collectors\b")
+        self.assertNotIn("identical resolved banner wording", text)
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, text)
 
     def test_public_ads_result_entry_point_emits_three_formats(self):
