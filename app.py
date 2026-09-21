@@ -6253,6 +6253,8 @@ def apply_product_upload_prompt_updates(
     preview=False,
     publication_mode='DRAFT',
 ):
+    from product_title_rules import strip_rules as strip_title_rules
+    prompt_text = strip_title_rules(prompt_text)
     if update_existing and publication_mode!='DRAFT':
         raise ValueError('Existing product updates do not use New Product live publication.')
     if not update_existing:
@@ -6273,7 +6275,8 @@ def apply_product_upload_prompt_updates(
         from product_upload_modes import finalise_prompt
         prompt=apply_collection_rules(prompt,metadata)
         prompt=finalise_prompt(prompt,publication_mode)
-    return prompt
+    from product_title_rules import apply_rules as apply_title_rules
+    return apply_title_rules(prompt, metadata, preview=preview)
 
 
 def product_upload_embedded_sections():
@@ -10041,6 +10044,20 @@ def render_product_uploads_page():
         "Product name",
         key="product-upload-product-name",
     )
+    from product_title_rules import title_state, LIVE_COUNTER_SCRIPT
+    proposed_title = st.text_input(
+        "Customer-facing Product Title", key="product-upload-customer-title",
+        help="Optional: enter or paste a proposed title. Target 35–55 characters; maximum 60. Leave blank for the connected assistant to generate and validate it. Existing titles stay unchanged unless you request an edit.",
+    )
+    title_check = title_state(proposed_title)
+    counter = f"{title_check['count']} / 60"
+    if title_check["severity"] == "error":
+        st.session_state.pop("product-upload-submitted-prompt", None)
+        st.error(counter + " — Rewrite the title before creating or publishing. Do not truncate it.")
+    elif title_check["severity"] == "warning":
+        st.warning(counter + " — Near the title limit.")
+    st.markdown(f'<div id="sports-cave-product-title-counter" aria-live="polite">{counter}</div>', unsafe_allow_html=True)
+    get_components_module().html(LIVE_COUNTER_SCRIPT, height=0)
     config = product_upload_operation_config(upload_type)
     st.caption(config['description'])
     if config['publication_mode']=='LIVE':
@@ -10053,9 +10070,13 @@ def render_product_uploads_page():
         "Submit",
         type="primary",
         use_container_width=True,
+        disabled=not title_check["valid"],
     )
+    if not title_check["valid"]:
+        st.session_state.pop("product-upload-submitted-prompt", None)
+        return
     config = product_upload_operation_config(upload_type)
-    preview_metadata = {**source_metadata, "product_name": product_name_input}
+    preview_metadata = {**source_metadata, "product_name": product_name_input, "customer_facing_title": proposed_title}
     default_prompt = get_product_upload_prompt(
         preview_metadata,
         update_existing=config["update_existing"],
@@ -10065,7 +10086,7 @@ def render_product_uploads_page():
     if submitted:
         try:
             product_name = validate_product_upload_product_name(product_name_input)
-            selected_metadata = {**source_metadata, "product_name": product_name}
+            selected_metadata = {**source_metadata, "product_name": product_name, "customer_facing_title": proposed_title}
         except ValueError as error:
             st.warning(str(error))
         else:

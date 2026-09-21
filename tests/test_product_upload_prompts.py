@@ -1,3 +1,4 @@
+from product_title_rules import strip_rules as strip_title_rules
 import hashlib
 from pathlib import Path
 import unittest
@@ -115,11 +116,14 @@ class ProductUploadFakeStreamlit:
     def text_input(self, label, *, key, **kwargs):
         self.session_state.mark_widget_rendered(key)
         self.widgets.append(("text_input", label, key))
-        return self.product_name
+        return self.session_state.get(key, "") if label == "Customer-facing Product Title" else self.product_name
 
     def button(self, label, **kwargs):
         self.widgets.append(("button", label))
         return self.submitted
+
+    def error(self, message):
+        self.warnings.append(str(message))
 
     def warning(self, message):
         self.warnings.append(str(message))
@@ -308,7 +312,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                     update_existing=update_existing,
                 )
                 self.assertEqual(
-                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(current_prompt)),
+                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(strip_title_rules(current_prompt))),
                     (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules((lambda p: p if update_existing else common_build(p))(legacy_prompt.replace(legacy_pricing, new_pricing)))),
                 )
 
@@ -325,7 +329,7 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(
-                        app.remove_product_upload_media_reliability_patch(upgraded)
+                        app.remove_product_upload_media_reliability_patch(strip_title_rules(upgraded))
                     )),
                     (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules(legacy if update_existing else common_build(legacy))),
                 )

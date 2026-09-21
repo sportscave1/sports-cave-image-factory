@@ -14,9 +14,9 @@ changes/full standardisation; Media Update Mode still preserves both. This block
 does not authorise any extra Shopify changes or alter publishing/edition policies.
 
 TITLE
-Default: [ATHLETE / SUBJECT] — [DESIGN TITLE] Wall Art
-Two subjects: [SUBJECT 1] & [SUBJECT 2] — [DESIGN TITLE] Wall Art
-Subject first, one EM DASH (—), Wall Art at the end. Never use a colon separator,
+Default: [ATHLETE / SUBJECT] — [SHORT DESIGN HOOK]
+Two subjects: [SUBJECT 1] vs [SUBJECT 2] — [SHORT HOOK]
+Subject first, one EM DASH (—). Wall Art is optional within the 60-character limit. Never use a colon separator,
 or remove the separator to form an awkward SEO phrase. No pipes, brackets, quotes
 or unnecessary punctuation. Use verified name spelling and accents from supplied
 research. Do not repeat the subject inside the design name. Do not automatically
