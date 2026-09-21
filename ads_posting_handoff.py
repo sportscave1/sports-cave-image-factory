@@ -45,6 +45,8 @@ def content_hash(value):
 
 
 def build_saved_package(*, result, source_signature, source_copy, copy_csv, assets, files, folder):
+    if str(result.get("platform") or "meta").lower() != "meta":
+        raise SavedPackageError("Only Meta campaigns can enter Meta Posting.")
     ad_type = result.get("campaign_type")
     if ad_type not in {"Carousel", "Instant Experience"}:
         raise SavedPackageError("This ad type is not supported by POST NOW.")
@@ -83,6 +85,7 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
         raise SavedPackageError(f"Saved copy cannot be loaded into Posting: {error}") from error
     package = deepcopy({
         "version": VERSION,
+        "platform": "meta",
         "package_id": str(uuid4()),
         "source": "Creative Refresh" if result.get("workflow_mode") == "creative_refresh" else "New Ads",
         "ad_type": ad_type,
@@ -104,6 +107,8 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
 def validate_saved_package(package):
     if not isinstance(package, dict) or package.get("version") != VERSION:
         raise SavedPackageError("The saved package is missing or has an unsupported version. Save it again.")
+    if str(package.get("platform") or "meta").lower() != "meta" or str((package.get("batch") or {}).get("platform") or "meta").lower() != "meta":
+        raise SavedPackageError("Only Meta campaigns can enter Meta Posting.")
     if package.get("ad_type") not in {"Carousel", "Instant Experience"}:
         raise SavedPackageError("The saved package has an unsupported ad type.")
     if not package.get("folder") or not package.get("package_id") or not package.get("copy_csv"):

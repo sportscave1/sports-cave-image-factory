@@ -22,6 +22,7 @@ import ads_posting_handoff as posting_handoff
 import ads_refresh_winners
 import ads_ie_visual_systems as ie_visuals
 import ads_carousel_winner as carousel_winner
+import ads_google_demand_gen as google_ads
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 
 from activity_log import record_activity_log
@@ -9412,6 +9413,7 @@ def build_ads_result_record(
         creative_refresh_context=clean_creative_refresh_context,
     )
     result = {
+        "platform": "meta",
         "context_key": ads_result_context_key(
             clean_product_id,
             clean_product_name,
@@ -9494,6 +9496,8 @@ def _instant_experience_visual_contract_is_current(prompt):
 
 def ensure_current_ads_result_prompt(result):
     if not isinstance(result, dict) or not result.get("master_prompt"):
+        return result
+    if google_ads.platform_for(result) == "google":
         return result
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
     expected_version = ads_prompt_contract_version_for_campaign(
@@ -9781,6 +9785,12 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
                 "output_size": original_details["source_size"],
                 "preview_error": preview_error,
             }
+        elif _uses_new_ads_jpeg(result):
+            processed = ads_image_workflow.prepare_new_ads_package_jpeg(
+                source_bytes, original_name=uploaded_file.name)
+            if processed["output_width"] != processed["output_height"]:
+                raise ads_image_workflow.AdsImageValidationError(
+                    "Upload a square image; Sports Cave OS will not crop the artwork automatically.")
         else:
             processed = ads_image_workflow.optimize_meta_image(
                 source_bytes,
@@ -9840,10 +9850,17 @@ def ads_images_ready(result, workflow=None):
     return bool(slot_specs) and all((slots.get(slot["id"]) or {}).get("valid") for slot in slot_specs)
 
 
+def _uses_new_ads_jpeg(result):
+    return (normalize_ads_workflow_mode(result.get("workflow_mode")) == ADS_WORKFLOW_MODE_NEW
+            and result.get("campaign_type") != ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE
+            and result.get("source") != "Creative Refresh")
+
+
 def _meta_output_filename(result, workflow, slot):
     if _is_instant_experience_result(result):
         concept = next(c for c in INSTANT_EXPERIENCE_CONCEPTS if c["slot_id"] == slot["id"])
-        return f"{concept['folder']}.png"
+        extension = "jpg" if _uses_new_ads_jpeg(result) else "png"
+        return f"{concept['folder']}.{extension}"
     filename = ads_image_workflow.build_meta_image_filename(
         result["product_name"],
         result["campaign_type"],
@@ -9851,7 +9868,7 @@ def _meta_output_filename(result, workflow, slot):
         iso_date=workflow["export_date"],
     )
     saved_slot = (workflow.get("slots") or {}).get(slot.get("id")) or {}
-    if saved_slot.get("output_format") == "PNG":
+    if saved_slot.get("output_format") == "PNG" and not _uses_new_ads_jpeg(result):
         return re.sub(r"\.jpg$", ".png", filename)
     return filename
 
@@ -9859,11 +9876,14 @@ def _meta_output_filename(result, workflow, slot):
 def _instant_experience_export_image_details(result, slot_data):
     image_data = slot_data.get("data") or b""
     source_hash = ads_image_workflow.source_image_signature(image_data)
-    cached = slot_data.get("ie_package_png") or {}
+    new_ads = _uses_new_ads_jpeg(result)
+    cache_key = "new_ads_package_jpeg" if new_ads else "ie_package_png"
+    cached = slot_data.get(cache_key) or {}
     if cached.get("source_hash") != source_hash:
-        cached = ads_image_workflow.prepare_instant_experience_package_png(
+        converter = ads_image_workflow.prepare_new_ads_package_jpeg if new_ads else ads_image_workflow.prepare_instant_experience_package_png
+        cached = converter(
             image_data, original_name=slot_data.get("original_name"))
-        slot_data["ie_package_png"] = cached
+        slot_data[cache_key] = cached
     return cached
 
 
@@ -11703,7 +11723,7 @@ def _instant_experience_package_items(result, workflow):
         copy_bytes = copy_text.encode("utf-8")
         image_details = _instant_experience_export_image_details(result, slot_data)
         image_data = image_details["data"]
-        image_filename = f"{concept['folder']}.png"
+        image_filename = _meta_output_filename(result, workflow, slot)
         image_relative_path = image_filename
         copy_relative_path = f"{concept['folder']}-ad-copy.txt"
         items.append(
@@ -12799,6 +12819,11 @@ def _restore_saved_carousel_posting_package(result, workflow):
 
 
 def _render_saved_ad_post_now(result, workflow, *, source_matches=True):
+    if google_ads.platform_for(result) != "meta":
+        st.button("Post Now", disabled=True, help=google_ads.POSTING_HELP,
+                  key=f"google-post-disabled::{result['context_key']}")
+        st.caption(google_ads.POSTING_HELP)
+        return
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
     if not package and source_matches and result.get("campaign_type") == "Carousel":
         _restore_saved_carousel_posting_package(result, workflow)
@@ -12832,6 +12857,8 @@ def save_ads_images_to_dropbox(
     *,
     progress_callback=None,
 ):
+    if google_ads.platform_for(result) == "google":
+        return google_ads.save_campaign(access_token, root_path, destination, result, workflow)
     # Invalidate the prior receipt before attempting any upload, including retries.
     workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
     workflow.pop("posting_package_error", None)
@@ -12862,6 +12889,16 @@ def save_ads_images_to_dropbox(
             workflow,
             progress_callback=progress_callback,
         )
+    if _uses_new_ads_jpeg(result):
+        # Enforce JPG for new saves, including a historical PNG opened for a new save.
+        # Keep originals readable in the workflow; no historical files are rewritten.
+        for slot_data in (workflow.get("slots") or {}).values():
+            if slot_data.get("valid") and slot_data.get("data") and not slot_data.get("new_ads_jpeg_ready"):
+                converted = ads_image_workflow.prepare_new_ads_package_jpeg(
+                    slot_data["data"], original_name=slot_data.get("original_name", ""))
+                slot_data.update({key: value for key, value in converted.items()
+                                  if key.startswith("output_") or key in {"data", "content_type"}})
+                slot_data["new_ads_jpeg_ready"] = True
     slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
     valid_slot_ids = {slot["id"] for slot in _ads_image_valid_slots(result, workflow)}
     outcomes = dict(workflow.get("outcomes") or {})
@@ -14030,6 +14067,10 @@ def _render_final_ad_review(result):
 
 
 def render_supported_result(result, *, source_matches=True):
+    if google_ads.platform_for(result) == "google":
+        import ads_google_ui
+        ads_google_ui.render_result(result, source_matches=source_matches)
+        return
     product_name = result["product_name"]
     category = result["category"]
     country = result["country"]
@@ -14102,10 +14143,12 @@ def render_supported_result(result, *, source_matches=True):
 
 
 def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
+    import ads_google_ui
     workflow_mode = normalize_ads_workflow_mode(workflow_mode)
     st.session_state[ADS_ACTIVE_WORKFLOW_MODE_KEY] = workflow_mode
     result_state_key = _ads_result_state_key(workflow_mode)
     is_creative_refresh = workflow_mode == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    is_google = False
     st.markdown(
         """
         <style>
@@ -14236,10 +14279,23 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             _render_refresh_winner_picker()
     else:
         st.title("Ads")
-        st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
+        saved_platform = google_ads.platform_for(st.session_state.get(result_state_key))
+        if ads_google_ui.PLATFORM_KEY not in st.session_state:
+            st.session_state[ads_google_ui.PLATFORM_KEY] = saved_platform.title()
+        platform = st.selectbox("Platform", ["Meta", "Google"], key=ads_google_ui.PLATFORM_KEY,
+                                on_change=ads_google_ui.platform_changed)
+        is_google = platform == "Google"
+        if is_google:
+            result_state_key = google_ads.RESULT_KEY
+            ads_google_ui.beta()
+            st.caption("Build Google Demand Gen ad instructions from approved Sports Cave winner patterns.")
+        else:
+            st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
 
     with st.expander("How to use", expanded=False):
-        if is_creative_refresh:
+        if is_google:
+            ads_google_ui.how_to()
+        elif is_creative_refresh:
             st.markdown(
                 "1. Enter the same product, sport, country, campaign type and optional Campaign Moment used by New Ads.\n"
                 "2. Paste the winning primary text and headline, then select Submit.\n"
@@ -14270,6 +14326,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
 
     product_rows = load_edition_ops_product_rows()
+    if is_google:
+        ads_google_ui.apply_pending(product_rows)
+        result = st.session_state.get(result_state_key)
+        ads_google_ui.render_reopen()
     product_name, product_selection = render_product_name_input(
         rows=product_rows,
         result=result,
@@ -14282,9 +14342,11 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     with campaign_col:
         campaign_type = st.selectbox(
             "Campaign type",
-            CAMPAIGN_TYPE_OPTIONS,
-            key="ads_campaign_type",
+            ["Demand Gen"] if is_google else CAMPAIGN_TYPE_OPTIONS,
+            key="ads_google_campaign_type" if is_google else "ads_campaign_type",
         )
+        if is_google:
+            campaign_type = "demand_gen"
     product_url_state = prepare_ads_product_url_state(
         product_name,
         result=result,
@@ -14329,6 +14391,36 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         type="primary",
         use_container_width=True,
     )
+
+    if is_google:
+        if submitted:
+            metadata = google_ads.product_metadata(product_selection, category)
+            matches = isinstance(result, dict) and all((
+                result.get("product_name") == _clean_product_name(product_name),
+                result.get("product_url") == _clean_product_url(product_url),
+                result.get("category") == category, result.get("country") == country,
+                result.get("campaign_moment") == normalize_campaign_moment(campaign_moment, selected_country=country),
+                result.get("product_metadata") == metadata,
+            ))
+            try:
+                if not matches:
+                    result = google_ads.build_result(product_name, category, country, product_url,
+                        product_id=product_url_state.get("product_id") or "", campaign_moment=campaign_moment,
+                        product_metadata=metadata)
+                    st.session_state[result_state_key] = result
+                    st.session_state[google_ads.WORKFLOW_KEY] = google_ads.new_workflow(result)
+            except google_ads.GoogleCampaignError as error:
+                st.error(str(error))
+        result = st.session_state.get(result_state_key)
+        if isinstance(result, dict):
+            source_matches = all((
+                _clean_product_name(product_name) == result.get("product_name"),
+                _clean_product_url(product_url) == result.get("product_url"),
+                category == result.get("category"), country == result.get("country"),
+                normalize_campaign_moment(campaign_moment, selected_country=country) == result.get("campaign_moment"),
+            ))
+            ads_google_ui.render_result(result, product_rows=product_rows, source_matches=source_matches)
+        return
 
     if submitted:
         validation_message = validate_ads_inputs(

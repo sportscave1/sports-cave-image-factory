@@ -1,0 +1,1309 @@
+SPORTS CAVE — GOOGLE DEMAND GEN STANDARD WORKFLOW V1
+IMAGE + PRODUCTS — NINE-ASSET SYSTEM
+
+PRODUCT
+
+Product name:
+{{PRODUCT_NAME}}
+
+Category:
+{{CATEGORY}}
+
+Market:
+{{COUNTRY}}
+
+Campaign type:
+Google Demand Gen — Image + Products
+
+Destination guidance:
+Use this exact selected product page URL wherever a destination URL is required:
+
+{{PRODUCT_URL}}
+
+Campaign Moment:
+{{CAMPAIGN_MOMENT}}
+
+Promotion / Offer:
+{{PROMOTION_OR_OFFER}}
+
+Verified edition limit:
+{{EDITION_LIMIT}}
+
+Scarcity verified:
+{{SCARCITY_VERIFIED}}
+
+
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached product image and COMPLETE supplied product title before writing.
+
+Use the supplied product identity and verified metadata.
+
+Never identify or guess:
+- athlete
+- club
+- team
+- event
+- year
+- venue
+- championship
+- victory
+- record
+- rivalry
+- vehicle
+- manufacturing origin
+- licensing
+- remaining stock
+
+solely from appearance.
+
+Country localisation may adjust wording, spelling, terminology, architecture and audience language.
+
+Country must never invent facts.
+
+
+==================================================
+OBJECTIVE
+==================================================
+
+Create ONE complete Google Demand Gen Image + Products campaign package.
+
+The response must contain:
+
+1. Google Demand Gen setup
+2. Cold prospecting audience / Custom Search Segment
+3. Exactly FIVE Google Headlines
+4. Exactly FIVE Google Descriptions
+5. Business Name
+6. CTA
+7. Exactly NINE standalone image-generation prompts
+8. Final Google setup instructions
+
+DO NOT GENERATE IMAGES in the first response.
+
+The nine prompts will later be generated separately.
+
+
+==================================================
+GOOGLE CAMPAIGN DEFAULTS
+==================================================
+
+Campaign objective:
+Purchases
+
+Bidding:
+Maximise Conversions
+
+Conversion goal:
+Purchase
+
+Product Feed:
+ON
+
+Default product strategy:
+SINGLE PRODUCT
+
+Use only the selected Sports Cave artwork and its legitimate Merchant Center size / frame variants.
+
+Do not attach unrelated Sports Cave artworks unless the user explicitly requests a collection campaign.
+
+Final URL:
+{{PRODUCT_URL}}
+
+Business Name:
+Sports Cave
+
+CTA:
+Shop Now
+
+Channels:
+All Google channels
+
+Google Display Network:
+OFF for this initial controlled test
+
+Location:
+{{COUNTRY}}
+
+Location setting:
+Presence — people in or regularly in the included location
+
+Do not use Presence or Interest for the initial test.
+
+Devices:
+All eligible devices
+
+Schedule:
+All day
+
+Optimised Targeting:
+ON
+
+Hard demographic restriction:
+OFF
+
+Customer acquisition adjustment:
+OFF
+
+Target CPA:
+OFF unless explicitly supplied
+
+View-through conversion optimisation:
+OFF for initial clean testing
+
+
+==================================================
+SPORTS CAVE WINNER RULES
+==================================================
+
+Every customer-facing line should feel:
+
+- human
+- sports-fan driven
+- emotional
+- premium
+- collector-led
+- direct
+- concise
+
+Use the strongest truthful emotional territory for the actual product:
+
+identity
+memory
+nostalgia
+legacy
+rivalry
+pride
+pressure
+greatness
+era
+moment
+collector ownership
+belonging
+
+ONLY where supported.
+
+Use verified scarcity naturally.
+
+If verified edition limit exists, use it confidently.
+
+Do not invent:
+
+remaining quantity
+near sell-out
+countdown
+restock
+no reprint
+retirement
+numbered status
+certificate
+discount
+sale
+reviews
+shipping
+delivery
+manufacturing origin
+achievement
+record
+championship
+rivalry
+
+unless supplied and verified.
+
+Avoid generic AI copy such as:
+
+elevate your space
+transform your room
+ultimate tribute
+perfect addition
+must-have
+upgrade your décor
+
+No emojis.
+
+No corporate filler.
+
+
+==================================================
+FACTUAL WORDING GATE
+==================================================
+
+Validate every:
+
+Headline
+Description
+search term
+supporting line
+image prompt
+audience signal
+
+against:
+
+{{PRODUCT_NAME}}
+{{CATEGORY}}
+{{COUNTRY}}
+{{CAMPAIGN_MOMENT}}
+{{ATHLETE_NAMES}}
+{{TEAM_NAMES}}
+{{SIDE_A}}
+{{SIDE_B}}
+{{FEATURED_MOMENT}}
+{{RELATIONSHIP_TYPE}}
+{{ARTWORK_TYPE}}
+{{EDITION_LIMIT}}
+{{SCARCITY_VERIFIED}}
+
+Two names do not automatically mean rivalry.
+
+A sports image does not automatically prove a victory or championship.
+
+Never invent history.
+
+If uncertain, use truthful fan identity and collector ownership language instead.
+
+
+==================================================
+GOOGLE COLD AUDIENCE
+==================================================
+
+Create ONE strong cold-prospecting audience signal.
+
+Audience naming pattern:
+
+[COUNTRY CODE] | [PRODUCT / SUBJECT] | Search Intent | Cold
+
+Create a Custom Segment based primarily on Google search activity.
+
+Return exactly 12–20 high-intent searches.
+
+Build them from VERIFIED combinations of:
+
+subject / athlete
+team
+sport
+event
+venue
+era
+moment
+vehicle
+rivalry
+wall art
+framed art
+memorabilia
+limited edition
+collector
+poster
+man cave
+gift
+
+Do not stuff irrelevant generic terms.
+
+Do NOT automatically add giant generic affinity audiences.
+
+Your Data:
+blank
+
+Lookalike:
+blank for this first controlled test
+
+Broad Interests:
+blank unless genuinely required
+
+Optimised Targeting:
+ON
+
+
+==================================================
+DEMOGRAPHIC SIGNAL
+==================================================
+
+Return a suggested demographic starting signal only when justified by the product.
+
+Do not hard-lock age or gender.
+
+Keep Unknown available.
+
+Gift buyers must remain reachable.
+
+Optimised Targeting remains ON.
+
+If no strong demographic reason exists:
+
+recommend All Demographics.
+
+
+==================================================
+GOOGLE COPY ASSET SYSTEM
+==================================================
+
+IMPORTANT:
+
+Google may combine ANY Headline with ANY Description and ANY uploaded image.
+
+Therefore every text asset must work independently.
+
+Before final output silently test all 25 possible Headline × Description combinations.
+
+Every combination must:
+
+make grammatical sense
+remain factually accurate
+sound natural
+feel product-specific
+match Sports Cave
+avoid contradictory scarcity wording
+
+
+==================================================
+HEADLINES
+==================================================
+
+Return EXACTLY 5.
+
+Maximum:
+40 characters each.
+
+HEADLINE 1 — PRODUCT IDENTITY
+
+The strongest concise identification of the product / subject / moment.
+
+HEADLINE 2 — EMOTION / NOSTALGIA
+
+Trigger the relevant fan feeling where factually supported.
+
+HEADLINE 3 — COLLECTOR SCARCITY
+
+Use verified scarcity without discount-store language.
+
+HEADLINE 4 — FAN IDENTITY / OWNERSHIP
+
+Make the piece feel like it belongs in a real fan’s collection.
+
+HEADLINE 5 — ALTERNATIVE STOP-SCROLL HOOK
+
+A genuinely different hook from Headlines 1–4.
+
+At least one headline must be 30 characters or fewer.
+
+Do not pad weak headlines merely to use all 40 characters.
+
+Never output:
+
+Sportscaveshop.com
+Unframed Wall Art
+
+as primary creative headlines unless somehow essential to product truth.
+
+
+==================================================
+DESCRIPTIONS
+==================================================
+
+Return EXACTLY 5.
+
+Maximum:
+90 characters each.
+
+DESCRIPTION 1 — PRODUCT + EMOTION
+
+DESCRIPTION 2 — VERIFIED SCARCITY
+
+DESCRIPTION 3 — FAN IDENTITY
+
+DESCRIPTION 4 — PREMIUM COLLECTOR VALUE
+
+DESCRIPTION 5 — OWNERSHIP / ACTION
+
+At least 3 descriptions should naturally sit around 60–90 characters where possible.
+
+Do not repeat the exact on-image footer copy.
+
+Google copy should add context and emotional meaning.
+
+
+==================================================
+BUSINESS AND CTA
+==================================================
+
+Business Name:
+Sports Cave
+
+CTA:
+Shop Now
+
+
+==================================================
+GOOGLE IMAGE SYSTEM
+==================================================
+
+Create exactly THREE creative concepts.
+
+These concepts must be recognisably different at thumbnail size.
+
+
+CONCEPT 1
+PREMIUM SCARCITY — RIGHT ANGLE
+
+Room:
+premium residential hallway / gallery corridor
+
+Camera:
+camera positioned to the RIGHT of the artwork looking diagonally toward it
+
+Never mirror artwork.
+
+Product:
+large and dominant
+
+Visual purpose:
+editorial collector-home context
+
+
+CONCEPT 2
+PREMIUM SCARCITY — STRAIGHT ON
+
+Room:
+premium man cave / home office / collector den
+
+Camera:
+directly facing the frame
+
+Product:
+central dominant hero
+
+Visual purpose:
+clearest product-first creative in the package
+
+
+CONCEPT 3
+PREMIUM SCARCITY — LEFT ANGLE
+
+Room:
+private home bar / lounge / entertaining corner
+
+Camera:
+camera positioned to the LEFT looking diagonally toward the artwork
+
+Never mirror artwork.
+
+Visual purpose:
+more atmospheric collector lifestyle scene
+
+
+==================================================
+EXACT NINE-ASSET MATRIX
+==================================================
+
+GROUP 1 — RIGHT ANGLE
+
+IMAGE 1A
+SQUARE
+1200 × 1200
+1:1
+
+IMAGE 1B
+LANDSCAPE
+1200 × 628
+1.91:1
+
+IMAGE 1C
+VERTICAL
+960 × 1200
+4:5
+
+
+GROUP 2 — STRAIGHT ON
+
+IMAGE 2A
+SQUARE
+1200 × 1200
+1:1
+
+IMAGE 2B
+LANDSCAPE
+1200 × 628
+1.91:1
+
+IMAGE 2C
+VERTICAL
+960 × 1200
+4:5
+
+
+GROUP 3 — LEFT ANGLE
+
+IMAGE 3A
+SQUARE
+1200 × 1200
+1:1
+
+IMAGE 3B
+LANDSCAPE
+1200 × 628
+1.91:1
+
+IMAGE 3C
+VERTICAL
+960 × 1200
+4:5
+
+
+Never simply crop one master image to create another ratio.
+
+Each asset must be COMPOSED NATIVELY for its final dimensions.
+
+Within one route:
+
+room identity remains consistent
+camera identity remains consistent
+product identity remains identical
+
+but:
+
+framing
+negative space
+furniture positioning
+product scale
+footer height
+architecture visible
+
+must be adapted to the final aspect ratio.
+
+
+==================================================
+SQUARE COMPOSITION
+==================================================
+
+1200 × 1200
+
+Room:
+approximately upper 72–76%
+
+Footer:
+approximately bottom 24–28%
+
+Product:
+large, dominant
+
+Enough room context must remain to identify the environment.
+
+All four outer frame edges visible.
+
+
+==================================================
+LANDSCAPE COMPOSITION
+==================================================
+
+1200 × 628
+
+Do NOT crop the square.
+
+Recompose horizontally.
+
+Room:
+approximately upper 68–72%
+
+Footer:
+approximately bottom 28–32%
+
+Use extra lateral room context.
+
+Product must remain immediately visible and dominant.
+
+Do not make the product small just because the canvas is wide.
+
+Move furniture toward outer edges.
+
+All four outer frame edges visible.
+
+
+==================================================
+VERTICAL COMPOSITION
+==================================================
+
+960 × 1200
+
+Do NOT vertically crop the square.
+
+Recompose vertically.
+
+Room:
+approximately upper 77–80%
+
+Footer:
+approximately bottom 20–23%
+
+Move framed product slightly higher.
+
+Increase product prominence.
+
+Reduce unnecessary side furniture.
+
+Maintain enough real-room context.
+
+All four outer frame edges visible.
+
+
+==================================================
+SPORTS CAVE FOOTER
+==================================================
+
+Use the approved Sports Cave premium scarcity footer on all nine images.
+
+Footer:
+
+fully opaque
+full width
+flush to bottom edge
+straight hard top boundary
+premium near-black
+
+Foundation:
+#0B0B0D
+
+Warm white:
+#F5F2EA
+
+Premium gold:
+#D4A54C
+
+Muted secondary:
+#A6A19A
+
+Add one thin restrained gold separator across the top boundary.
+
+Never use:
+
+transparent overlay
+gradient fade
+vignette
+curved panel
+floating text
+glowing box
+cheap sale styling
+
+
+==================================================
+ON-IMAGE HEADLINE
+==================================================
+
+If {{SCARCITY_VERIFIED}} is true and {{EDITION_LIMIT}} exists:
+
+ONLY {{EDITION_LIMIT}} WILL EVER EXIST
+
+Otherwise:
+
+LIMITED COLLECTOR EDITION
+
+Keep it:
+
+one line
+maximum six words
+large
+readable at small Google preview size
+
+When a verified number appears, the number may use #D4A54C.
+
+
+==================================================
+THREE SUPPORTING LINES
+==================================================
+
+Create exactly THREE supporting lines:
+
+one for Right Angle
+one for Straight On
+one for Left Angle
+
+The same concept uses the same support line in all three of its aspect ratios.
+
+Right Angle:
+scarcity / ownership
+
+Straight On:
+serious collector identity
+
+Left Angle:
+fan identity / belonging
+
+Each support line:
+
+one line
+maximum 12 words
+maximum 70 characters
+
+Never invent:
+
+retirement
+no reprint
+remaining stock
+last chance
+almost gone
+
+
+==================================================
+ON-IMAGE CTA
+==================================================
+
+All nine images:
+
+CLAIM YOUR EDITION
+
+One line.
+
+Do not add:
+
+price
+discount
+sale percentage
+arrow
+second CTA
+fake button stack
+
+
+==================================================
+PRODUCT / ARTWORK LOCK — ABSOLUTE
+==================================================
+
+Treat the uploaded Sports Cave product as one immutable source asset.
+
+Preserve exactly:
+
+every subject
+face
+body
+vehicle
+uniform
+equipment
+background
+artwork text
+letters
+numbers
+logos
+signatures
+titles
+subtitles
+badge
+plaque
+border
+colours
+contrast
+crop
+layout
+frame colour
+frame depth
+frame proportions
+
+Never:
+
+redraw
+recreate
+repair
+repaint
+recolour
+reinterpret
+mirror
+stretch
+squash
+warp
+bend
+blur
+crop outer frame edges
+invent text
+invent logos
+invent signatures
+alter edition details
+
+Use original product pixels wherever technically possible.
+
+Natural perspective may affect the entire framed product only as one rigid rectangular object.
+
+
+==================================================
+FRAME REALISM
+==================================================
+
+Require:
+
+straight complete frame
+sharp corners
+real timber depth
+consistent thickness
+correct perspective
+realistic wall mounting
+approximately 6–10 mm wall separation
+narrow contact shadow
+soft secondary wall shadow
+slightly stronger lower shadow
+real ambient occlusion
+
+Never allow:
+
+floating frame
+digital sticker
+uniform fake drop shadow
+warped frame
+
+
+==================================================
+GLASS REALISM
+==================================================
+
+Require real transparent gallery glazing.
+
+Use:
+
+subtle partial room reflections
+very restrained opacity
+reflection direction matching the room lights
+
+Reflection must stop at inner frame edge.
+
+Never let glare cover:
+
+faces
+vehicles
+words
+signatures
+badges
+plaques
+important product details
+
+
+==================================================
+PHOTOREALISM
+==================================================
+
+Final result must look like real premium interior photography.
+
+Never:
+
+AI art
+CGI
+3D render
+plastic furniture
+impossible room geometry
+fake HDR
+over-sharpening
+excessive orange/teal
+bloom
+duplicated objects
+warped furniture
+random generated luxury clutter
+
+Use:
+
+physically possible architecture
+natural texture
+real plaster
+real timber
+real fabric
+real glass
+coherent light
+coherent shadows
+correct scale
+
+The room supports the product.
+
+Sports Cave is selling the framed edition, not the room.
+
+
+==================================================
+ANTI-GENERIC SPORT ROOM
+==================================================
+
+Do not automatically add:
+
+flags
+jerseys
+helmets
+trophies
+sports balls
+toy cars
+neon signs
+extra sports posters
+fake memorabilia
+team logos
+giant TV screens
+scoreboards
+
+Communicate sport through:
+
+product
+materials
+architecture
+lighting
+mood
+colour
+energy
+
+
+==================================================
+CATEGORY ADAPTATION
+==================================================
+
+Selected category:
+
+{{CATEGORY}}
+
+Use the existing Sports Cave category context to adapt:
+
+fan archetype
+emotional territory
+room relevance
+copy vocabulary
+search terms
+
+but preserve the 3-route / 9-format Google system.
+
+The actual product always wins over generic sport tendencies.
+
+
+==================================================
+COUNTRY LOCALISATION
+==================================================
+
+Selected country:
+
+{{COUNTRY}}
+
+Use natural spelling, sports terminology and retail wording for that country.
+
+Do not force slang.
+
+Do not invent local facts.
+
+Country never changes:
+
+product
+edition quantity
+footer system
+Google sizes
+brand colours
+factual truth
+
+
+==================================================
+GOOGLE TRACKING
+==================================================
+
+Recommended Final URL suffix:
+
+utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_id={campaignid}
+
+No leading question mark.
+
+Tracking Template:
+leave blank unless an external tracking provider is supplied.
+
+Ad Group URL options:
+leave blank.
+
+
+==================================================
+OUTPUT EXACTLY IN THIS ORDER
+==================================================
+
+
+1. GOOGLE DEMAND GEN SETUP
+
+Campaign Name:
+[...]
+
+Ad Group Name:
+[...]
+
+Ad Name:
+[...]
+
+Campaign Goal:
+Purchases
+
+Bidding:
+Maximise Conversions
+
+Product Feed:
+[...]
+
+Channels:
+All Google channels
+
+Display Network:
+Off
+
+Final URL:
+{{PRODUCT_URL}}
+
+Business Name:
+Sports Cave
+
+CTA:
+Shop Now
+
+Optimised Targeting:
+On
+
+Audience Name:
+[...]
+
+Custom Search Segment:
+[12–20 terms]
+
+Demographic Signal:
+[...]
+
+Final URL Suffix:
+[...]
+
+
+2. GOOGLE COPY ASSET POOL
+
+HEADLINE 1:
+[...]
+Character count: [...]
+
+HEADLINE 2:
+[...]
+Character count: [...]
+
+HEADLINE 3:
+[...]
+Character count: [...]
+
+HEADLINE 4:
+[...]
+Character count: [...]
+
+HEADLINE 5:
+[...]
+Character count: [...]
+
+DESCRIPTION 1:
+[...]
+Character count: [...]
+
+DESCRIPTION 2:
+[...]
+Character count: [...]
+
+DESCRIPTION 3:
+[...]
+Character count: [...]
+
+DESCRIPTION 4:
+[...]
+Character count: [...]
+
+DESCRIPTION 5:
+[...]
+Character count: [...]
+
+Business Name:
+Sports Cave
+
+CTA:
+Shop Now
+
+
+3. GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE
+
+IMAGE 1A — SQUARE 1200 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 1B — LANDSCAPE 1200 × 628
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 1C — VERTICAL 960 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+4. GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON
+
+IMAGE 2A — SQUARE 1200 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 2B — LANDSCAPE 1200 × 628
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 2C — VERTICAL 960 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+5. GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE
+
+IMAGE 3A — SQUARE 1200 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 3B — LANDSCAPE 1200 × 628
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+IMAGE 3C — VERTICAL 960 × 1200
+
+IMAGE GENERATION PROMPT
+
+[one COMPLETE standalone prompt]
+
+
+6. GOOGLE DEMAND GEN FINAL SETUP
+
+State:
+
+- Upload all 9 images into ONE Google Demand Gen Image + Products ad.
+- 3 Square assets.
+- 3 Landscape assets.
+- 3 Vertical assets.
+- Use all 5 Headlines as one shared Google asset pool.
+- Use all 5 Descriptions as one shared Google asset pool.
+- Do not tie one Headline to one image.
+- Business Name = Sports Cave.
+- CTA = Shop Now.
+- Final URL = exact selected product page.
+- Product feed = exact selected product and its valid variants.
+- Google Display Network remains OFF for the initial controlled test.
+- Inspect YouTube, Discover and Gmail previews before launch.
+- Do not automatically generate Google video.
+- Do not add unrelated products.
+
+
+IF A SPORTS CAVE GOOGLE DEMAND GEN CSV TEMPLATE IS ATTACHED:
+
+- Fill the existing Google CSV template completely using the finished campaign package.
+- Preserve the template headers exactly.
+- Preserve the row count and schema exactly.
+- Do not add columns.
+- Do not remove columns.
+- Do not rename columns.
+- Do not reorder columns unless the original template already requires it.
+- Do not put explanatory text inside CSV cells.
+- Do not place Markdown inside CSV cells.
+- Use plain text values.
+- Store the 12–20 Custom Search Segment terms in custom_search_terms separated by semicolons.
+- Put each of the five Google Headlines into headline_1 through headline_5.
+- Put each of the five Google Descriptions into description_1 through description_5.
+- Put each complete standalone image-generation prompt into its exact matching prompt column.
+- Do not place image filenames into the image columns unless an actual generated image filename is already supplied.
+- Leave image-path cells blank when the images have not yet been generated.
+- Return the completed CSV as a downloadable .csv file.
+
+The completed CSV must match the text campaign package exactly.
+
+The five Headlines and five Descriptions are a SHARED Google asset pool.
+
+Do not create separate copy per image.
+
+The nine image prompts ARE slot-specific.
+
+==================================================
+TEXT-FIRST GATE
+==================================================
+
+FIRST RESPONSE = TEXT ONLY.
+
+Do not invoke image generation.
+
+Print all 9 complete image prompts.
+
+Each one must be independently usable in a brand-new ChatGPT conversation with the exact product image attached.
+
+Never write:
+
+same as above
+same room as image 1
+use previous prompt
+refer to earlier prompt
+
+Every image prompt is standalone.
+
+After the Google setup, copy pool, all nine prompts and final setup are returned:
+
+STOP.
+
+Do not ask what image to generate.
+
+Wait for explicit generation instruction.
+
+
+==================================================
+FINAL QUALITY GATE
+==================================================
+
+Silently confirm before returning:
+
+exactly 9 image prompts
+3 square
+3 landscape
+3 vertical
+
+3 clearly different room concepts
+
+same route identity remains recognisable across its 3 ratios
+
+non-square assets are natively composed, not crops
+
+exact product unchanged
+
+all four frame edges visible
+
+correct dimensions stated
+
+real frame
+real glass
+real mounting
+realistic room
+realistic lighting
+
+opaque Sports Cave footer
+
+footer recomposed for each ratio
+
+exactly 5 Headlines
+every Headline <= 40 characters
+
+at least one Headline <= 30 characters
+
+exactly 5 Descriptions
+every Description <= 90 characters
+
+all 25 headline-description combinations make sense
+
+Business Name = Sports Cave
+CTA = Shop Now
+
+no invented sports facts
+no fake scarcity
+no fake promotion
+no generic AI advertising language
+
+market language matches {{COUNTRY}}
+
+package is ready for Google Demand Gen.

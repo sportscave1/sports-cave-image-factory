@@ -491,27 +491,11 @@ def prepare_new_ads_package_jpeg(data, *, original_name=""):
     try:
         source = Image.open(io.BytesIO(source_bytes))
         source.load()
-        orientation = source.getexif().get(274, 1)
-        if (
-            details["source_format"] == "JPEG"
-            and source.mode == "RGB"
-            and orientation in (None, 1)
-        ):
-            return {
-                **details,
-                "output_format": "JPEG",
-                "output_mode": "RGB",
-                "output_width": source.width,
-                "output_height": source.height,
-                "output_size": len(source_bytes),
-                "content_type": "image/jpeg",
-                "reencoded": False,
-                "data": source_bytes,
-            }
-
         oriented = ImageOps.exif_transpose(source)
         oriented.load()
         flattened = _flatten_transparency(oriented)
+        if oriented.info.get("icc_profile"):
+            flattened.info["icc_profile"] = oriented.info["icc_profile"]
         converted = _convert_to_srgb(flattened)
         output = io.BytesIO()
         converted.save(

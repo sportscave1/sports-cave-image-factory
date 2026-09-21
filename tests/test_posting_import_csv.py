@@ -416,15 +416,15 @@ class PostingImportContractTests(unittest.TestCase):
         self.assertNotIn(POSTING_IMPORT_FILENAME, item_by_path)
         self.assertEqual(sum(item["kind"] == "image" for item in items), 3)
         self.assertEqual(
-            sum(item["filename"] == "ad-copy.txt" for item in items),
+            sum(item["filename"].endswith("-ad-copy.txt") for item in items),
             3,
         )
         self.assertEqual(
-            sum(item["filename"] == "primary-text.txt" for item in items),
+            sum(item["filename"].endswith("--primary-text.txt") for item in items),
             9,
         )
         self.assertEqual(
-            sum(item["filename"] == "headline.txt" for item in items),
+            sum(item["filename"].endswith("--headline.txt") for item in items),
             9,
         )
         self.assertEqual(
@@ -450,13 +450,13 @@ class PostingImportContractTests(unittest.TestCase):
         self.assertEqual(len(stored_rows), 9)
         self.assertEqual(
             item_by_path[
-                "01-premium-scarcity-right/01-legacy-standard/primary-text.txt"
+                "01-premium-scarcity-right--01-legacy-standard--primary-text.txt"
             ]["data"],
             posting_ads()[0]["primary_text"].encode("utf-8"),
         )
         self.assertEqual(
             item_by_path[
-                "01-premium-scarcity-right/01-legacy-standard/headline.txt"
+                "01-premium-scarcity-right--01-legacy-standard--headline.txt"
             ]["data"],
             posting_ads()[0]["headline"].encode("utf-8"),
         )

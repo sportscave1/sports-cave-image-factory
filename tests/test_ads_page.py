@@ -404,15 +404,15 @@ class AdsPageTests(unittest.TestCase):
             ads_page.CATEGORY_OPTIONS,
             [
                 "Select category",
-                "NBA",
-                "Motorsport",
-                "Football",
-                "Cricket",
-                "Golf",
-                "Horse Racing",
                 "Baseball",
                 "Combat",
+                "Cricket",
+                "Football",
+                "Golf",
+                "Horse Racing",
                 "Ice Hockey",
+                "Motorsport",
+                "NBA",
                 "NFL",
                 "Rugby Union",
                 "Tennis",
@@ -421,7 +421,7 @@ class AdsPageTests(unittest.TestCase):
         )
         self.assertEqual(
             ads_page.COUNTRY_OPTIONS,
-            ["Select country", "Australia", "USA", "UK", "Canada", "New Zealand"],
+            ["Select country", "Australia", "Canada", "New Zealand", "UK", "USA"],
         )
         self.assertEqual(
             ads_page.CAMPAIGN_TYPE_OPTIONS,
@@ -611,9 +611,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Use the supplied product name as the source of identity.", prompt)
         self.assertIn("Do not invent race results", prompt)
         self.assertIn("PRODUCT SPECIFICITY TEST", prompt)
-        self.assertIn("At least four of the five card pairs must include a product-specific anchor", prompt)
-        self.assertIn("Silently create several possible headline and description options", prompt)
-        self.assertIn("could this card be copied unchanged onto an unrelated sports artwork?", prompt)
+        self.assertIn("select different supported identity anchors across Cards 1–4", prompt)
+        self.assertIn("WHO/WHAT → FAN RECOGNITION → DEFINING HOOK → CAVE OWNERSHIP → AUTHENTIC SCARCITY", prompt)
+        self.assertIn("Product facts win when supplied details are sparse", prompt)
 
     def test_carousel_card_rules_prohibit_commas_and_full_stops(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
@@ -2568,7 +2568,7 @@ PRIMARY TEXT VARIATIONS
             {
                 "product_id": "product-empty",
                 "product_title": "No URL Product",
-                "shopify_handle": "no-url-product",
+                "shopify_handle": "",
                 "online_store_url": "",
             }
         ]
@@ -4915,7 +4915,7 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_instant_experience_package_exports_flat_pngs_and_keeps_historical_text_without_posting_schema(self):
+    def test_instant_experience_package_exports_flat_jpegs_and_keeps_historical_text_without_posting_schema(self):
         result = instant_experience_csv_result()
         notes = instant_experience_csv_notes()
         slots = {}
@@ -4973,21 +4973,21 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             [item["filename"] for item in image_items],
             [
-                "01-premium-scarcity-right.png",
-                "02-premium-scarcity-front.png",
-                "03-premium-scarcity-left.png",
+                "01-premium-scarcity-right.jpg",
+                "02-premium-scarcity-front.jpg",
+                "03-premium-scarcity-left.jpg",
             ],
         )
-        self.assertTrue(all(item["filename"].endswith(".png") for item in image_items))
+        self.assertTrue(all(item["filename"].endswith(".jpg") for item in image_items))
         self.assertTrue(all("/" not in path for path in paths))
         self.assertIn("notes.txt", paths)
         self.assertIn("ad_copy.csv", paths)
         for image_item in image_items:
-            self.assertEqual(image_item["content_type"], "image/png")
-            self.assertTrue(image_item["data"].startswith(b"\x89PNG\r\n\x1a\n"))
+            self.assertEqual(image_item["content_type"], "image/jpeg")
+            self.assertTrue(image_item["data"].startswith(b"\xff\xd8\xff"))
             with Image.open(io.BytesIO(image_item["data"])) as exported:
                 exported.load()
-                self.assertEqual(exported.format, "PNG")
+                self.assertEqual(exported.format, "JPEG")
                 self.assertEqual(exported.mode, "RGB")
                 self.assertEqual(exported.size, (96, 96))
         for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
@@ -5399,7 +5399,7 @@ PRIMARY TEXT VARIATIONS
             workflow,
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
-        self.assertEqual(filename, "01-premium-scarcity-right.png")
+        self.assertEqual(filename, "01-premium-scarcity-right.jpg")
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertIn(slot_id, workflow["slots"])

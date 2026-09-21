@@ -582,6 +582,8 @@ def match_posting_import_product(batch, product_records):
 
 
 def apply_posting_import_to_state(batch, product_records, *, state=None):
+    if str((batch or {}).get("platform") or "meta").lower() != "meta":
+        raise PostingImportCSVError("Only Meta campaigns can enter Meta Posting.")
     state = st.session_state if state is None else state
     if str((batch or {}).get("source_schema_kind") or "") == "carousel":
         cards = tuple(dict(row or {}) for row in (batch or {}).get("cards") or ())

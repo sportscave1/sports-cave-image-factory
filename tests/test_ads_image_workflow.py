@@ -217,7 +217,7 @@ class AdsImageProcessingTests(unittest.TestCase):
             self.assertEqual(output.size, (321, 321))
             self.assertTrue(output.info.get("progressive") or output.info.get("progression"))
 
-    def test_new_ads_package_keeps_existing_rgb_jpeg_bytes(self):
+    def test_new_ads_package_converts_existing_rgb_jpeg_to_quality_95_srgb(self):
         source = image_bytes("JPEG", size=(257, 257), color=(54, 76, 98))
 
         result = ads_image_workflow.prepare_new_ads_package_jpeg(
@@ -225,8 +225,8 @@ class AdsImageProcessingTests(unittest.TestCase):
             original_name="route-cover.jpeg",
         )
 
-        self.assertEqual(result["data"], source)
-        self.assertFalse(result["reencoded"])
+        self.assertNotEqual(result["data"], source)
+        self.assertTrue(result["reencoded"])
         self.assertEqual(result["content_type"], "image/jpeg")
         with Image.open(io.BytesIO(result["data"])) as output:
             self.assertEqual(output.format, "JPEG")
@@ -736,15 +736,15 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [item["relative_path"] for item in upload_batch.call_args.args[2]],
             [
-                "01-premium-scarcity-right.png",
+                "01-premium-scarcity-right.jpg",
                 "01-premium-scarcity-right-ad-copy.txt",
                 "01-premium-scarcity-right--01-legacy-standard--primary-text.txt",
                 "01-premium-scarcity-right--01-legacy-standard--headline.txt",
-                "02-premium-scarcity-front.png",
+                "02-premium-scarcity-front.jpg",
                 "02-premium-scarcity-front-ad-copy.txt",
                 "02-premium-scarcity-front--01-legacy-standard--primary-text.txt",
                 "02-premium-scarcity-front--01-legacy-standard--headline.txt",
-                "03-premium-scarcity-left.png",
+                "03-premium-scarcity-left.jpg",
                 "03-premium-scarcity-left-ad-copy.txt",
                 "03-premium-scarcity-left--01-legacy-standard--primary-text.txt",
                 "03-premium-scarcity-left--01-legacy-standard--headline.txt",
@@ -788,7 +788,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             self.assertEqual(len(archive.namelist()), len(set(archive.namelist())))
             self.assertIn("ad_copy.csv", archive.namelist())
             notes = archive.read("notes.txt").decode("utf-8")
-            for filename in ("01-premium-scarcity-right.png", "02-premium-scarcity-front.png", "03-premium-scarcity-left.png"):
+            for filename in ("01-premium-scarcity-right.jpg", "02-premium-scarcity-front.jpg", "03-premium-scarcity-left.jpg"):
                 self.assertIn(filename, notes)
             self.assertIn("Centre / straight-on; Room 2; black/gold bottom banner", notes)
             info_by_path = {info.filename: info for info in archive.infolist()}
@@ -849,17 +849,17 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             text_items,
         )
 
-    def test_new_ads_package_png_is_cached_and_accepted_by_posting_upload(self):
+    def test_new_ads_package_jpeg_is_cached_and_accepted_by_posting_upload(self):
         result, workflow = self.build_result_and_workflow("Instant Experience")
 
         with patch(
-            "ads_page.ads_image_workflow.prepare_instant_experience_package_png",
-            wraps=ads_image_workflow.prepare_instant_experience_package_png,
-        ) as prepare_png:
+            "ads_page.ads_image_workflow.prepare_new_ads_package_jpeg",
+            wraps=ads_image_workflow.prepare_new_ads_package_jpeg,
+        ) as prepare_jpeg:
             first_items = ads_page._instant_experience_package_items(result, workflow)
             second_items = ads_page._instant_experience_package_items(result, workflow)
 
-        self.assertEqual(prepare_png.call_count, 3)
+        self.assertEqual(prepare_jpeg.call_count, 3)
         first_images = [item for item in first_items if item.get("kind") == "image"]
         second_images = [item for item in second_items if item.get("kind") == "image"]
         self.assertEqual(
@@ -871,8 +871,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 image_item["data"],
                 original_name=image_item["filename"],
             )
-            self.assertEqual(details["source_format"], "PNG")
-            self.assertEqual(details["content_type"], "image/png")
+            self.assertEqual(details["source_format"], "JPEG")
+            self.assertEqual(details["content_type"], "image/jpeg")
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
     def test_instant_experience_ad_copy_exports_one_selected_set_per_concept(
@@ -944,7 +944,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_instant_experience_individual_items_export_real_png_cover_bytes(
+    def test_instant_experience_individual_items_export_real_jpeg_cover_bytes(
         self,
         upload_batch,
         _metadata,
@@ -988,14 +988,14 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             item
             for item in upload_batch.call_args.args[2]
             if item["relative_path"]
-            == "01-premium-scarcity-right.png"
+            == "01-premium-scarcity-right.jpg"
         )
-        self.assertTrue(right_item["data"].startswith(b"\x89PNG\r\n\x1a\n"))
-        self.assertEqual(right_item["content_type"], "image/png")
-        self.assertEqual(right_item["output_format"], "PNG")
+        self.assertTrue(right_item["data"].startswith(b"\xff\xd8\xff"))
+        self.assertEqual(right_item["content_type"], "image/jpeg")
+        self.assertEqual(right_item["output_format"], "JPEG")
         with Image.open(io.BytesIO(right_item["data"])) as output:
             output.load()
-            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.format, "JPEG")
             self.assertEqual(output.mode, "RGB")
             self.assertEqual(output.size, (96, 96))
         self.assertEqual(outcomes["instant-experience-premium-scarcity-right"]["status"], "saved")
@@ -1052,9 +1052,9 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             filenames,
             [
-                "01-premium-scarcity-right.png",
-                "02-premium-scarcity-front.png",
-                "03-premium-scarcity-left.png",
+                "01-premium-scarcity-right.jpg",
+                "02-premium-scarcity-front.jpg",
+                "03-premium-scarcity-left.jpg",
             ],
         )
         self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
@@ -1074,7 +1074,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             failures = []
             for item in items:
                 filename = item["relative_path"]
-                if filename == "02-premium-scarcity-front.png":
+                if filename == "02-premium-scarcity-front.jpg":
                     failures.append({"relative_path": filename, "error": "rate limited"})
                 else:
                     successes.append(
