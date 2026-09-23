@@ -5815,7 +5815,7 @@ PRODUCT_UPLOAD_AUD_PRICING = {
         ("Framed XL", "A$339", "A$449", "A$110", "24%"),
         ("Framed Large", "A$269", "A$349", "A$80", "23%"),
         ("Framed Medium", "A$209", "A$269", "A$60", "22%"),
-        ("Framed Small", "A$159", "A$209", "A$50", "24%"),
+        ("Framed Small", "A$169", "A$209", "A$40", "19%"),
     ),
     "unframed": (
         ("Unframed XL", "A$159", "A$209", "A$50", "24%"),
@@ -5828,6 +5828,9 @@ PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"
 PRODUCT_UPLOAD_PRICE_BLOCK_END = (
     "These rules do not authorise live publishing or live Shopify price updates."
 )
+PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
+
+Authorised exception for every Sports Cave product: set only the Australian Small Black, Oak and White framed variants to Price A$169.00 and Compare-at price / RRP A$209.00. This exception overrides the price-preservation rules below, including post-update checks and restoration; preserve every other variant and international market price."""
 
 
 def product_upload_price_ladder_prompt_text():
@@ -5878,6 +5881,29 @@ def _product_upload_price_block_bounds(prompt_text):
 def apply_product_upload_pricing_update(prompt_text):
     prompt = str(prompt_text or "")
     pricing_block = product_upload_price_ladder_prompt_text()
+    # Saved prompts can also contain pricing tables outside the central block.
+    small_framed_line = next(
+        line for line in pricing_block.splitlines() if line.startswith("- Framed Small:")
+    )
+    prompt = re.sub(
+        r"(?m)^- Framed Small: Selling price A\$159 \| RRP / compare-at price A\$209 \| Saving A\$50 \| Approx\. discount 24%",
+        lambda match: small_framed_line,
+        prompt,
+    )
+    prompt = re.sub(
+        r"(Black, Oak,? and White framed variants:\r?\n)(.*?)(?=\r?\nUnframed variants:)",
+        lambda match: match[1] + re.sub(
+            r"(?m)^(S[ \t]+[—–-][ \t]+Price[ \t]+\$)159(?=\.00[ \t]*/[ \t]*Compare-at price[ \t]+\$209\.00)",
+            lambda price: price[1] + "169",
+            match[2],
+        ),
+        prompt,
+        flags=re.DOTALL,
+    )
+    prompt = prompt.replace(
+        "EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION",
+        PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION,
+    )
     if pricing_block in prompt:
         return prompt
 

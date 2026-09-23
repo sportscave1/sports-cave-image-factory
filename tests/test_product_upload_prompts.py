@@ -1,6 +1,7 @@
 from product_title_rules import strip_rules as strip_title_rules
 import hashlib
 from pathlib import Path
+import re
 import unittest
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ EXPECTED_FRAMED_PRICING_LINES = (
     "- Framed XL: Selling price A$339 | RRP / compare-at price A$449 | Saving A$110 | Approx. discount 24%",
     "- Framed Large: Selling price A$269 | RRP / compare-at price A$349 | Saving A$80 | Approx. discount 23%",
     "- Framed Medium: Selling price A$209 | RRP / compare-at price A$269 | Saving A$60 | Approx. discount 22%",
-    "- Framed Small: Selling price A$159 | RRP / compare-at price A$209 | Saving A$50 | Approx. discount 24%",
+    "- Framed Small: Selling price A$169 | RRP / compare-at price A$209 | Saving A$40 | Approx. discount 19%",
 )
 EXPECTED_UNFRAMED_PRICING_LINES = (
     "- Unframed XL: Selling price A$159 | RRP / compare-at price A$209 | Saving A$50 | Approx. discount 24%",
@@ -233,6 +234,120 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
             with self.subTest(prompt_start=prompt[:40]):
                 for legacy_line in LEGACY_PRICING_LINES:
                     self.assertNotIn(legacy_line, prompt)
+
+    def test_saved_small_framed_price_is_upgraded_in_every_upload_mode(self):
+        old_line = (
+            "- Framed Small: Selling price A$159 | RRP / compare-at price A$209 | "
+            "Saving A$50 | Approx. discount 24%"
+        )
+        new_line = EXPECTED_FRAMED_PRICING_LINES[-1]
+        for product_name in ("Football Legends", "Basketball Champions", "Custom Wall Art"):
+            metadata = {**source_context(), "product_name": product_name}
+            for update_existing, publication_mode in ((False, "DRAFT"), (False, "LIVE"), (True, "DRAFT")):
+                with self.subTest(product=product_name, existing=update_existing, mode=publication_mode):
+                    current = app.get_product_upload_prompt(
+                        metadata,
+                        update_existing=update_existing,
+                        publication_mode=publication_mode,
+                    )
+                    saved = current.replace(new_line, old_line)
+                    self.assertIn(old_line, saved)
+                    upgraded = app.apply_product_upload_prompt_updates(
+                        saved,
+                        metadata,
+                        update_existing=update_existing,
+                        publication_mode=publication_mode,
+                    )
+                    # Only the Small Framed pricing row changes, including in saved overrides.
+                    self.assertEqual(upgraded, current)
+                    self.assertNotIn(old_line, upgraded)
+                    self.assertEqual(upgraded.count(new_line), 1)
+
+    def test_new_product_pricing_payload_matches_all_three_small_framed_variants(self):
+        # Uploads emits a prompt, not a direct create request. Materialize its
+        # price instructions into a representative 16-variant creation payload.
+        for mode in ("DRAFT", "LIVE"):
+            with self.subTest(mode=mode):
+                prompt = app.get_product_upload_prompt(source_context(), publication_mode=mode)
+                prices = {
+                    (group, size): {
+                        "price": sports_cave_pricing.normalize_money(price),
+                        "compare_at_price": sports_cave_pricing.normalize_money(rrp),
+                    }
+                    for group, size, price, rrp in re.findall(
+                        r"^- (Framed|Unframed) (XL|Large|Medium|Small): "
+                        r"Selling price A\$([\d.]+) \| RRP / compare-at price A\$([\d.]+)",
+                        prompt,
+                        re.MULTILINE,
+                    )
+                }
+                self.assertEqual(len(prices), 8)
+                payload = {"product": {
+                    "title": source_context()["product_name"],
+                    "variants": [
+                        {
+                            "option1": frame,
+                            "option2": size,
+                            **prices[("Unframed" if frame == "Unframed" else "Framed", label)],
+                        }
+                        for frame in ("Black", "Oak", "White", "Unframed")
+                        for size, label in (("XL", "XL"), ("L", "Large"), ("M", "Medium"), ("S", "Small"))
+                    ],
+                }}
+                self.assertEqual(len(payload["product"]["variants"]), 16)
+                self.assertEqual(
+                    [item for item in payload["product"]["variants"]
+                     if item["option2"] == "S" and item["option1"] != "Unframed"],
+                    [
+                        {"option1": frame, "option2": "S", "price": "169.00", "compare_at_price": "209.00"}
+                        for frame in ("Black", "Oak", "White")
+                    ],
+                )
+                self.assertEqual(prices[("Framed", "Small")],
+                                 sports_cave_pricing.SPORTS_CAVE_AU_PRICE_LADDER["framed"]["S"])
+
+    def test_saved_supplemental_pricing_tables_are_updated_in_all_three_modes(self):
+        appendix = """NEW PRODUCT CREATION — EXACT AUD PRICES
+Black, Oak and White framed variants:
+
+XL — Price $339.00 / Compare-at price $449.00
+L — Price $269.00 / Compare-at price $349.00
+M — Price $209.00 / Compare-at price $269.00
+S — Price $159.00 / Compare-at price $209.00
+
+Unframed variants:
+
+XL — Price $159.00 / Compare-at price $209.00
+L — Price $119.00 / Compare-at price $159.00
+M — Price $85.00 / Compare-at price $109.00
+S — Price $55.00 / Compare-at price $69.00
+
+EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION
+Preserve every other price and product field.
+"""
+        expected_appendix = appendix.replace(
+            "S — Price $159.00", "S — Price $169.00"
+        ).replace(
+            "EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION",
+            app.PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION,
+        )
+        for existing, mode in ((False, "DRAFT"), (False, "LIVE"), (True, "DRAFT")):
+            with self.subTest(existing=existing, mode=mode):
+                current = app.get_product_upload_prompt(
+                    source_context(), update_existing=existing, publication_mode=mode,
+                )
+                saved = current + "\n\n" + appendix
+                updated = app.apply_product_upload_pricing_update(saved)
+                self.assertEqual(updated, current + "\n\n" + expected_appendix)
+                self.assertEqual(app.apply_product_upload_pricing_update(updated), updated)
+                rendered = app.apply_product_upload_prompt_updates(
+                    saved, source_context(), update_existing=existing, publication_mode=mode,
+                )
+                self.assertNotIn("S — Price $159.00", rendered)
+                self.assertIn("S — Price $169.00 / Compare-at price $209.00", rendered)
+                self.assertIn("XL — Price $159.00 / Compare-at price $209.00", rendered)
+                self.assertIn("L — Price $119.00 / Compare-at price $159.00", rendered)
+                self.assertIn(app.PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION, rendered)
 
     def test_saved_override_pricing_is_replaced_without_changing_custom_text(self):
         legacy_pricing = sports_cave_pricing.price_ladder_prompt_text()

@@ -1,3 +1,4 @@
+from copy import deepcopy
 import unittest
 
 import shopify_sync
@@ -61,6 +62,66 @@ class SportsCavePricingTests(unittest.TestCase):
             self.assertEqual(expected["price_group"], "framed")
             self.assertEqual(expected["price"], "249.00")
             self.assertEqual(expected["compare_at_price"], "329.00")
+
+    def test_small_framed_rrp_is_209_for_all_three_colours(self):
+        for frame in ("Black", "Oak", "White"):
+            with self.subTest(frame=frame):
+                expected = sports_cave_pricing.expected_price_for_variant(
+                    variant(f"{frame} / S - 21 × 30 cm", "159.00", "209.00")
+                )
+                self.assertEqual(expected["price"], "169.00")
+                self.assertEqual(expected["compare_at_price"], "209.00")
+
+    def test_existing_product_payload_updates_only_three_small_framed_prices(self):
+        product = standard_product()
+        for item in product["variants"]:
+            expected = sports_cave_pricing.expected_price_for_variant(item)
+            item.update(price=expected["price"], compare_at_price=expected["compare_at_price"])
+            if expected["price_group"] == "framed" and expected["size"] == "S":
+                item.update(price="159.00", compare_at_price="209.00")
+        original = deepcopy(product)
+        summary = sports_cave_pricing.analyze_product_price_updates(product)
+        self.assertEqual(summary["skipped_product_reason"], "")
+        self.assertEqual(summary["already_correct"], 13)
+        self.assertEqual(len(summary["needs_update"]), 3)
+        self.assertEqual({item["frame"] for item in summary["needs_update"]}, {"Black", "Oak", "White"})
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            payload = kwargs["json"]
+            requests_seen.append(payload)
+            return FakeResponse({"data": {"productVariantsBulkUpdate": {
+                "productVariants": payload["variables"]["variants"],
+                "userErrors": [],
+            }}})
+
+        result = shopify_sync.update_product_variant_prices(
+            product["shopify_product_id"],
+            summary["needs_update"],
+            config={
+                "store_domain": "sports-cave.myshopify.com",
+                "access_token": "test-token",
+                "client_id": "",
+                "client_secret": "",
+                "api_version": "2026-04",
+                "configured": True,
+            },
+            request_post=fake_post,
+        )
+        self.assertEqual(result["updated"], 3)
+        self.assertEqual(len(requests_seen), 1)
+        self.assertEqual(requests_seen[0]["variables"], {
+            "productId": product["shopify_product_id"],
+            "variants": [
+                {
+                    "id": f"gid://shopify/ProductVariant/{frame}-S",
+                    "price": "169.00",
+                    "compareAtPrice": "209.00",
+                }
+                for frame in ("Black", "Oak", "White")
+            ],
+        })
+        self.assertEqual(product, original)
 
     def test_unframed_maps_to_unframed(self):
         expected = sports_cave_pricing.expected_price_for_variant(variant("Unframed / M"))

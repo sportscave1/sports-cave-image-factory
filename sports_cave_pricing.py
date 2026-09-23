@@ -7,7 +7,7 @@ SPORTS_CAVE_AU_PRICE_LADDER = {
         "XL": {"price": "329.00", "compare_at_price": "429.00"},
         "L": {"price": "249.00", "compare_at_price": "329.00"},
         "M": {"price": "199.00", "compare_at_price": "259.00"},
-        "S": {"price": "149.00", "compare_at_price": "199.00"},
+        "S": {"price": "169.00", "compare_at_price": "209.00"},
     },
     "unframed": {
         "XL": {"price": "149.00", "compare_at_price": "199.00"},
