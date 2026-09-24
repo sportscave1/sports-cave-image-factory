@@ -110,7 +110,7 @@ class DesignStudioHeroDominanceContractTests(unittest.TestCase):
         self.assertIn("invent missing limbs", contract)
         self.assertIn("combine a face from one source with a body from another", contract)
 
-    def test_generation_requires_visible_asset_validation_before_artwork(self):
+    def test_generation_validates_assets_internally_before_artwork(self):
         prompt = design_studio_styles.build_generation_prompt(
             "rivalry_faceoff",
             "Peter Brock vs Allan Moffat",
@@ -126,7 +126,7 @@ class DesignStudioHeroDominanceContractTests(unittest.TestCase):
         )
 
         self.assertIn("VISIBLE PRE-GENERATION ASSET VALIDATION", prompt)
-        self.assertIn("one concise PASS/REPLACE line per selected hero asset", prompt)
+        self.assertIn("quickly validate each selected hero asset internally", prompt)
         self.assertIn("landscape 4:3 Sports Cave border", prompt)
         self.assertIn("Build the background around the available hero crop", prompt)
         self.assertIn("Do not shrink principals", prompt)

@@ -93,7 +93,8 @@ class DesignStudioTypeContractTests(unittest.TestCase):
                 )
                 self.assertEqual(bundle["errors"], [])
                 self.assertTrue(bundle["research"].startswith(f"SELECTED DESIGN TYPE: {label}"))
-                self.assertTrue(bundle["generation"].startswith(f"SELECTED DESIGN TYPE: {label}"))
+                self.assertTrue(bundle["generation"].startswith("FINAL OUTPUT MODE: GENERATE ARTWORK"))
+                self.assertIn(f"SELECTED DESIGN TYPE: {label}", bundle["generation"])
                 for stage in ("research", "find_images", "generation", "signature_placement", "review"):
                     self.assertIn(f"SELECTED DESIGN TYPE: {label}", bundle[stage])
                     if stage != "find_images":

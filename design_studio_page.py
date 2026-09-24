@@ -3556,10 +3556,15 @@ def build_design_studio_image_generation_prompt(prompt_text: str, *, design_cont
         prompt = "\n\n".join(
             (prompt, design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT)
         )
-    return append_sports_cave_image_realism_rules(
+    if design_context:
+        prompt = "\n\n".join((
+            build_final_artwork_asset_context(prompt_text, design_context=design_context),
+            prompt,
+        ))
+    return design_studio_styles.finalize_generation_handoff(append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=False,
-    )
+    ))
 
 
 def _task_or_placeholder(task_text: str) -> str:
@@ -3691,7 +3696,7 @@ def build_design_generation_prompt(task_text: str, *, design_context=None) -> st
         task_text,
         design_context=design_context,
     )
-    return "\n\n".join(
+    return design_studio_styles.finalize_generation_handoff("\n\n".join(
         section
         for section in (
             prompt,
@@ -3701,7 +3706,7 @@ def build_design_generation_prompt(task_text: str, *, design_context=None) -> st
             asset_context,
         )
         if str(section or "").strip()
-    )
+    ))
 
 
 def _design_studio_prompt_id(key: str) -> str:

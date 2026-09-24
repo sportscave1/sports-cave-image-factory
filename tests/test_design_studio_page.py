@@ -208,7 +208,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("Never redraw, regenerate, face-swap, re-pose", prompt)
         self.assertIn("Every named principal in the asset/name mapping below", prompt)
         self.assertIn("Never type, generate, rewrite, redraw or imitate a signature.", prompt)
-        self.assertIn("make the missing signature explicit", prompt)
+        self.assertIn("If a verified signature is unavailable, omit it and generate the artwork", prompt)
         self.assertIn("Never invent, redraw, retype or approximate the plaque", prompt)
         self.assertIn("thin border fully inside the 4:3 landscape canvas", prompt)
         self.assertIn("Do not add generated players, recognisable crowd figures", prompt)
@@ -230,7 +230,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
         marker = design_studio_page.SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER
 
-        self.assertTrue(prompt.startswith(marker))
+        self.assertTrue(prompt.startswith("FINAL OUTPUT MODE: GENERATE ARTWORK"))
         self.assertEqual(prompt.count(marker), 1)
         self.assertLess(prompt.index(marker), prompt.index("TASK:\nBathurst Brock tribute"))
         self.assertNotIn(design_studio_page.DESIGN_STUDIO_SUBJECT_PRESERVATION_MARKER, prompt)
@@ -644,7 +644,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
                 self.assertIn(key, design_studio_page.DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS)
                 prompt = design_studio_page.build_design_studio_image_generation_prompt(default_prompt)
 
-                self.assertTrue(prompt.startswith(marker))
+                self.assertTrue(prompt.startswith("FINAL OUTPUT MODE: GENERATE ARTWORK"))
                 self.assertEqual(prompt.count(marker), 1)
                 self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_HERO_DOMINANCE_MARKER), 1)
                 self.assertEqual(prompt.count(design_studio_page.DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER), 1)

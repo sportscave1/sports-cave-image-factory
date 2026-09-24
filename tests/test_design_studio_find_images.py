@@ -50,16 +50,16 @@ class ShortFindImagesTests(unittest.TestCase):
                 assert_short_find_images(self, prompt)
                 self.assertNotIn("FULL RESEARCH RESPONSE", prompt)
 
-    def test_research_generation_and_other_stages_are_byte_for_byte_unchanged(self):
+    def test_research_signature_and_review_are_byte_for_byte_unchanged(self):
         for case in BASELINE["styles"]:
-            for stage, method in (("research", "research"), ("generation", "generation"), ("signature_placement", "signature_placement"), ("review", "harsh_review")):
+            for stage, method in (("research", "research"), ("signature_placement", "signature_placement"), ("review", "harsh_review")):
                 with self.subTest(style=case["style"], stage=stage):
                     args = [case["style"], case["task"], case["details"]]
                     if stage != "research":
                         args.append(case["assets"])
                     output = getattr(styles, f"build_{method}_prompt")(*args)
                     self.assertEqual(hashlib.sha256(output.encode()).hexdigest(), case["hashes"][stage])
-        for stage in ("research", "generation"):
+        for stage in ("research",):
             output = getattr(page, f"build_design_{stage}_prompt")(BASELINE["legacy"]["task"])
             self.assertEqual(hashlib.sha256(output.encode()).hexdigest(), BASELINE["legacy"]["hashes"][stage])
 

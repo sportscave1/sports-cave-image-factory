@@ -173,7 +173,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                     "rivalry_faceoff": 20000,
                     "legends_jersey_display": 22000,
                 }.get(slug, 15000)
-                self.assertLess(len(prompt), max_length)
+                self.assertLess(len(prompt), max_length + len(design_studio_styles.FINAL_GENERATION_EXECUTION_CONTRACT))
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
 
