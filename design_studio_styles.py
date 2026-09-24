@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from types import MappingProxyType
 import re
 
@@ -134,19 +135,14 @@ Never redraw or regenerate a face, face-swap, change an expression, re-pose a pe
 """.strip()
 
 
-FIND_IMAGES_INLINE_RESULT_CONTRACT = """
-INLINE IMAGE RESULT CONTRACT - FIND IMAGES IS NOT COMPLETE WITHOUT VISIBLE PHOTOGRAPHS
+COMMON_FIND_IMAGES_PROMPT = (
+    Path(__file__).resolve().parent
+    / "design_studio_prompts"
+    / "SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt"
+).read_text(encoding="utf-8").strip()
 
-Use the platform's dedicated image-search capability, not a regular web-search link list. Display every selected candidate as an actual tool-native image-result card or supported inline image preview in the chat response. A source URL, markdown link, filename or text description by itself is not an image result. Do not use screenshots of search-result pages.
-
-If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate that can be displayed. Never declare Find Images complete when the response contains only links or broken previews. Keep the original source page as secondary attribution, not the primary result.
-
-Keep each principal in a separate labelled image group. Return no more than the three strongest final-use photographs per principal, no more than one relevant venue or shared-moment image, and exactly one clearest verified signature candidate per named human principal, placed last.
-
-Every selected photograph card must state: principal name; Primary or Backup mapping; Hero, Secondary or Background role; supported use mode as visible_cutout, visible_whole_photo or reference_only; original source as a secondary source-page attribution link; available resolution; estimated useful resolution after the proposed crop; and one concise reason the authentic crop, camera angle, expression, uniform and era support the selected design type. Preserve asset_id, supported role, subject mapping and use_mode in the image card metadata or concise alt text so later stages can reference the exact asset. Do not turn that metadata into an essay or expose a raw URL as the primary output.
-
-The final selected photographs must remain present as actual tool-native image cards or supported inline previews and must be supplied to Generation as actual image inputs. A webpage link or source-page URL alone is not a usable generation asset. If the platform cannot carry an approved image forward as an image input, mark it REPLACE and find a renderable authentic alternative.
-""".strip()
+# Compatibility names share the same short source; no extra contracts are appended.
+FIND_IMAGES_INLINE_RESULT_CONTRACT = COMMON_FIND_IMAGES_PROMPT
 
 
 GENERATION_ASSET_VALIDATION_CONTRACT = """
@@ -309,34 +305,9 @@ Return one concise handoff in this order:
 Return one recommendation, not a concept menu or multiple visible title options.
 """.strip()
 
-RIVALRY_FACE_OFF_FIND_IMAGES_RULES = """
-This stricter Rivalry Face-Off search contract overrides the general allowance for a shared moment, venue or background reference.
+RIVALRY_FACE_OFF_FIND_IMAGES_RULES = 'Find strong individual photographs of both principals from the appropriate era.'
 
-Search only for:
-1. Clear final-use photographs of Principal One.
-2. Clear final-use photographs of Principal Two.
-3. Exactly one verified signature candidate for each principal.
-
-Return only two separately labelled principal groups. In each group show the three strongest compatible final-use photographs, followed by that principal's one clearest verified signature candidate last. Use very short captions. Do not return stadiums, venues, crowds, shared moments, trophies, backgrounds, team logos, supporting players, vehicles, decorative textures, unrelated action photographs or extra reference assets. Do not pad a group with an unsuitable or unverified image; state the shortfall when three compliant candidates genuinely cannot be found.
-
-Prioritise large sharp recognisable faces, visible eyes, authentic skin texture, serious or competitive expressions, head-and-shoulders or upper-torso crops, natural profile or three-quarter angles, correct team and era, minimal obstruction, high useful resolution and official or major editorial sources. Select the photographs as a compatible pair: comparable sharpness and crop depth, similar facial scale, approximately aligned eye lines, equal visual importance and natural inward tension where the real photographs support it.
-
-Reject distant or full-body images, wide running/action shots, small or obstructed faces, subjects strongly facing away, exaggerated celebrations, low-resolution or compressed files, AI athletes, illustrations, paintings, trading cards, posters, merchandise, screenshots, intrusive watermarks, wrong-team or wrong-era sources, duplicate crops and any photograph requiring facial reconstruction, invented anatomy or fact-reversing mirroring. Never manufacture eye contact by rotating, regenerating or reconstructing a principal.
-""".strip()
-
-RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES = """
-SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
-
-Use the recommended rivalry hook and close-portrait brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for the two named principals and their verified signatures only.
-
-INLINE IMAGE RESULT CONTRACT - FIND IMAGES IS NOT COMPLETE WITHOUT VISIBLE PHOTOGRAPHS
-
-Use the platform's dedicated image-search capability, not a regular web-search link list. Display every selected candidate as an actual tool-native image-result card or supported inline image preview. A source URL, markdown link, filename or text description by itself is not an image result. Do not use screenshots of search-result pages.
-
-If a candidate cannot render inline or its preview is broken, replace it with the next suitable authentic candidate. Keep the original source page as secondary attribution. Each short candidate label must include the actual image preview; principal name; Primary or Backup mapping; Rival One or Rival Two hero role; visible_cutout use mode; source; available resolution; estimated useful resolution after the intended crop; and why its crop, natural angle, expression, uniform and era support this specific face-off. Preserve asset_id, supported role and subject mapping in metadata or concise alt text. Follow the exact two-group candidate and signature limits in the style photo targets below; return no separate supporting-asset group.
-
-Carry the selected pair forward as actual image inputs for Generation. A link alone is not an approved face-off source. Replace any candidate that cannot remain visibly attached or supplied as an image input.
-""".strip()
+RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES = COMMON_FIND_IMAGES_PROMPT
 
 RIVALRY_FACE_OFF_GENERATION_RULES = f"""
 {RIVALRY_FACE_OFF_CORE_PRINCIPLES_MARKER}
@@ -431,28 +402,9 @@ Choose one original collector-story direction suited to the winning moment, not 
 Another athlete is a principal only when essential to understanding the historic moment. The locked athlete must otherwise own the artwork. Recommend a concise event-specific 2-5 word headline direction without inventing a quote or falling back to generic words such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY unless the phrase has a recognised athlete-specific meaning. Specify one authentic signature requirement only when a verified source is available.
 """.strip()
 
-ULTIMATE_MOMENT_FIND_IMAGES_BASE_RULES = f"""
-SPORTS CAVE DESIGN STUDIO V2 - ULTIMATE MOMENT FIND IMAGES
+ULTIMATE_MOMENT_FIND_IMAGES_BASE_RULES = COMMON_FIND_IMAGES_PROMPT
 
-{ULTIMATE_MOMENT_CONTRACT_VERSION}
-
-Use the exact ULTIMATE MOMENT LOCK in the immediately preceding Research response. Do not redo the concept, weaken the moment or silently substitute a different event, date, opponent, season, uniform, venue, celebration or generic athlete portrait.
-
-Use dedicated image search for the locked event. Adapt focused searches to the sport, including: "[ATHLETE] [EXACT EVENT] [DATE] [OPPONENT]"; "[ATHLETE] [EXACT PLAY / RECORD / CELEBRATION]"; "[ATHLETE] [VENUE] [YEAR] high resolution"; "[ATHLETE] immediately after [MOMENT] celebration"; and "[EVENT] stadium scoreboard crowd".
-
-Search three visual roles:
-1. PRIMARY HERO - the strongest genuine photograph from the exact moment, with clear identity, emotion/action, authentic uniform/equipment, useful crop, strong silhouette and sufficient subject size and resolution for Shopify-thumbnail and print readability.
-2. SECONDARY MOMENT IMAGE - optional and only when another authentic frame or angle from the same event materially improves the story. Do not automatically add an opponent or second superstar.
-3. ENVIRONMENT / STORY SUPPORT - authentic same-event venue, crowd, scoreboard, trophy, goal, car, court, field, track, lights or architecture. If exact-event support is unavailable, use only clearly labelled era-appropriate reference that cannot misrepresent another event as the real one.
-
-Display only the strongest usable candidates as tool-native image cards or supported inline previews with source attribution. Links, filenames, descriptions or broken previews alone are not results. After the candidates, return a concise MOMENT LOCK CONFIRMATION that repeats the locked event and maps the approved Primary Hero, optional Secondary Moment Image, Environment/Story Support and verified Signature asset. State any unresolved authenticity risk. These exact approved mappings are the handoff to Generation.
-""".strip()
-
-ULTIMATE_MOMENT_FIND_IMAGES_RULES = """
-Reject random portraits, generic season photography, unrelated celebrations, wrong dates/seasons/uniforms/equipment/cars/liveries/venues, tiny or distant figures, awkward crops, unrecognisable athletes, low-resolution or compressed files, intrusive watermarks, AI images, illustrations, posters, trading cards and any source requiring regenerated anatomy, pose, uniform or identity. Reject a visually convenient source when it is not evidence of the locked moment. If the strongest source is unsuitable, search again rather than asking Generation to repair it.
-
-Rank candidates by exact-moment truth first, then athlete recognition, emotion/action, useful crop and resolution, photographic authenticity and collector-art potential. Photography convenience cannot overrule the career significance established by Research.
-""".strip()
+ULTIMATE_MOMENT_FIND_IMAGES_RULES = 'Prioritise genuine photographs from the exact locked moment/event; include that moment in Best primary image as the MOMENT LOCK CONFIRMATION.'
 
 ULTIMATE_MOMENT_GENERATION_RULES = f"""
 {ULTIMATE_MOMENT_CONTRACT_VERSION}
@@ -522,29 +474,9 @@ Verify exactly two task principals. For each principal verify the full printed n
 Return one concise JERSEY SOURCE REQUIREMENTS handoff containing: the two verified full names; exact display surnames and jersey numbers; correct team/country, sport, era, uniform and equipment for each; mandatory rear or rear-three-quarter body direction; surname/number visibility requirements; useful crop and minimum resolution; authenticity risks to reject; the shared dark historical sporting environment; one verified signature requirement per principal; and exact search phrases for rear, rear-three-quarter and verified-signature sources. Do not propose an alternative headline, face-off, action montage, split location or Purple Reign treatment. These verified requirements feed Find Images and may not be silently reinterpreted.
 """.strip()
 
-LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES = f"""
-SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
+LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES = COMMON_FIND_IMAGES_PROMPT
 
-{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
-
-Use the verified names, jersey-display surnames, numbers, teams/countries, eras and uniform requirements from the immediately preceding Research response. Do not redo the concept and do not search for general inspiration. Find genuine final-use photographs that can reproduce the approved rear-facing {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE} series.
-
-Use the platform's dedicated image-search capability. Display each selected candidate as an actual tool-native image-result card or supported inline preview, with the source page as secondary attribution. A link, filename or description without a visible image is not a result. Replace broken previews. Never use screenshots of search results.
-
-Return exactly two labelled principal groups. For each principal, return no more than the three strongest genuine rear or restrained rear-three-quarter final-use photographs, followed by exactly one clearest verified signature candidate. For each photograph show: actual preview; principal name; Primary rear source or Backup rear source rank; Hero role; visible_cutout use mode; why the crop, natural angle and genuine rear silhouette suit this display; visible surname; visible number; correct team/country, sport, era, uniform and equipment; available resolution; estimated useful resolution after the intended crop; source as secondary attribution; supported role; subject mapping; and any authenticity risk. Do not return a background carousel, poster references, trading cards, signed memorabilia or existing artwork.
-
-After both groups, score every viable two-photo combination and recommend one strongest PAIR. Pair scoring must cover matching rear orientation, crop and body scale where authentic sources permit; camera height; perspective; lighting; comparable visual importance; clear authentic surnames and numbers; complete heads, shoulders and arms; and ability to fit the locked landscape 4:3 layout. Authenticity outranks perfect symmetry. A strong individual image must lose if it creates an unusable pair, but never choose a less authentic jersey merely for a cleaner background or manufactured symmetry.
-
-Finish with JERSEY SOURCE LOCK. Map Principal One and Principal Two to their exact approved image cards/assets, verified surname, number, team/country, era, uniform, role and use mode; then map each verified signature. State that these exact photographs are immutable final-use assets and must be supplied to Generation as actual image inputs, not webpage links alone. If no compatible authentic pair exists or a selected image cannot be carried forward as an image input, state that clearly and stop; never compensate by inventing a pose, uniform, surname, number, body or face.
-""".strip()
-
-LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES = """
-For each principal rank the three strongest genuine photographs using, in order: rear-facing or restrained rear-three-quarter orientation; authentic surname and number clearly visible; strong upper-body scale dominated by shoulders and jersey; high-resolution editorial or licensed-quality source; natural stadium, arena, field entrance or game setting; head, shoulders, arms, jersey name and number uncropped; compatibility with the other principal's camera height, angle, scale, crop, lighting and perspective; correct team/country, era, uniform, number and equipment; and useful resolution of 2000 px or more preferred, 1200 px minimum unless no better authentic source exists.
-
-Use focused intent such as "[athlete] jersey back high resolution", "[athlete] from behind jersey number", "[athlete] rear view stadium", "[athlete] walking onto field back jersey" and "[athlete] rear three quarter authentic game photo".
-
-Reject front-facing portraits, face-offs, dramatic action, front photographs that would need synthetic rotation, mirrored poses, distant full-body players, direct-to-camera poses, hidden surnames or numbers, wrong teams/numbers/eras/uniforms/equipment, AI images, illustrations, trading cards, posters, existing artwork, intrusive watermarks, signed memorabilia, thumbnails and any source requiring reconstruction of the athlete, pose, anatomy, neck, shoulders, head/helmet/hair, jersey fabric, name or number. Reject one-front/one-rear pairings, incompatible crops and any pairing resembling Purple Reign. If either approved source cannot authenticate the real jersey, search again.
-""".strip()
+LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_RULES = 'Find genuine rear-jersey photographs of both principals with compatible angles and the correct era, surnames and numbers.'
 
 LEGENDS_JERSEY_DISPLAY_GENERATION_RULES = f"""
 {LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
@@ -687,9 +619,7 @@ _STYLES = (
         """
 Choose one verified memory that supporters from the era would recognise without explanation: a farewell, embrace, candid expression, lap of honour, restrained celebration or culturally important personal moment. Verify its date, venue, uniform, equipment, participants and emotional context. Explain why this memory creates affection and belonging rather than achievement or championship spectacle. The source brief must ask for genuine period photography whose expression, crop and available surroundings already carry that feeling without mirroring, re-posing or reconstructed anatomy.
 """,
-        """
-Search for genuine period photographs from the selected memory, not modern portraits or generic career highlights. Return the strongest emotionally specific hero candidates first, then only materially different authentic backups, one correct venue or era reference and one verified signature last. Prefer candid expression, human gesture, correct period uniform and enough original environment to preserve the memory. Reject modern re-enactments, colourised inventions, wrong-era kit, generic action and sources that require invented limbs or scenery.
-""",
+        'Prioritise genuine period photographs from the locked memory.',
         """
 Make the finished piece feel like an authentic memory from its era. Use one dominant genuine period photograph, or two authentic principals only when the verified shared memory requires both. Preserve period grain, uniforms, equipment, venue colour and age character. Use restrained archival typography, warm but truthful grading, stadium shadow, gentle haze and dark edges. Do not duplicate the athlete or any other subject, modernise the image, turn it into a generic digital montage, add fantasy lighting or manufacture a crowd. The emotion must come from the photographed memory rather than effects or an old date pasted onto a modern graphic.
 """,
@@ -708,9 +638,7 @@ Make the finished piece feel like an authentic memory from its era. Use one domi
         """
 Select one verified driver-and-car story, then lock the driver, season, race, team, exact chassis/model, race number, sponsors, suit, helmet, wheels, body shape, livery, circuit and result as one historically matched set. Explain whether the commercial hero is the car, the driver, or their relationship. Specify compatible genuine camera angles and scale without fabricating a shared pose or mixing seasons.
 """,
-        """
-Return separate visible groups for the driver in the correct suit and helmet era, the exact car and livery from useful authentic angles, and one restrained circuit/event reference, followed by one verified driver signature. Record enough resolution to read sponsor marks, race number, wheel and body details after cropping. Reject replicas, tribute liveries, later demonstrations, model cars, wrong-season suits, mismatched helmets and any source that would require the vehicle or driver to be regenerated.
-""",
+        'Prioritise accurate driver, car/livery and event-era photographs.',
         """
 Create a historically exact driver-and-machine portrait using one authentic driver source and one authentic photograph of the verified car from the same verified season, race, team and livery. The car may be the largest visual object, with the driver providing human authority; neither should look pasted into an impossible shared moment. Preserve sponsor typography, race number, bodywork, wheels, helmet and suit. Use restrained pit-lane, garage, circuit or mountain-road atmosphere appropriate to the event. Never modernise, reliver, mirror or regenerate the car, and never pair a driver from one season with another season's machine.
 """,
@@ -730,9 +658,7 @@ Create a historically exact driver-and-machine portrait using one authentic driv
         """
 Define one clear emotional idea for one verified athlete, then verify the exact kit, season and equipment supporting it. Choose one authentic pose with a clean silhouette and recognisable face that can dominate without additional narrative imagery. Specify the negative-space plan, one restrained title and the minimum supporting colour; reject concepts that need statistics, duplicate portraits, trophy collages or background storytelling.
 """,
-        """
-Return clean, high-resolution, cutout-friendly hero candidates with strong silhouettes and sufficient useful crop resolution. A backup must provide a genuinely different usable crop, not another decorative pose. Include only the factual kit/equipment reference required and one verified signature last. Do not return stadium panoramas, trophy montages, crowd scenes, stat cards, extra athletes or photography that cannot stand confidently against negative space.
-""",
+        'Prioritise one exceptionally strong hero portrait/action photograph.',
         """
 Use one dominant authentic subject, one disciplined focal idea, genuine negative space, limited typography and a tightly controlled palette. Default to one source photograph; a second photograph of the same athlete is exceptional and must strengthen the same idea without becoming a collage, with maximum two visible figures of that same person. Use flat or subtly textured black/charcoal, restrained team colour and a small gold collector accent. Avoid unnecessary statistics, duplicate portraits, large effects, detailed stadiums, crowds, trophy collages, extra players and decorative filler.
 """,
@@ -752,9 +678,7 @@ Use one dominant authentic subject, one disciplined focal idea, genuine negative
         """
 Classify the verified story before directing the artwork. If it is a championship or title victory, lock the exact trophy, competition, season, winning event, date, venue, uniform and genuine victory moment. If it is a record, award, milestone or career accomplishment, lock the exact award or evidential object, statistic, date, equipment and defining photograph without pretending it was a title. Choose one mode and explain why fans would collect that specific proof of greatness. Mark hypothetical concepts internally and never present them as history.
 """,
-        """
-For championship mode, prioritise genuine trophy lifts, podiums, title celebrations and the exact championship-winning aftermath, followed by the correct trophy and restrained venue/title cues. For achievement mode, prioritise the real award, record-setting action, milestone equipment, verified statistic/date evidence and defining photograph. Return only sources from the correct event and era, then one verified signature last. Reject ordinary portraits labelled Champion, unrelated celebration, substitute trophies and generic award imagery.
-""",
+        'Prioritise genuine photographs of the locked achievement and correct trophy.',
         """
 Build the hierarchy around visible proof of the verified accomplishment. Championship mode must use an authentic trophy lift, podium or directly relevant title celebration with strong upward victorious energy, accurate trophy, season, venue and confetti cues when supported. Achievement mode must centre the correct award, record, statistic, date, equipment or defining photograph and communicate authority without falsely implying a championship. Use one distinct athlete; a second real photograph may show only that athlete and only when essential. Never turn an ordinary portrait into a champion with typography or use unrelated celebration imagery. Never invent a future or hypothetical achievement as fact.
 """,
@@ -774,9 +698,7 @@ Build the hierarchy around visible proof of the verified accomplishment. Champio
         """
 Identify one definitive original archival photograph and verify its event, date, venue, participants, result, uniform/equipment/vehicle details, photographer or holding archive where available and largest credible scan. Define exactly which physical defects may be repaired and which grain, tonal character, crop and historical marks must remain. Do not propose a modern re-enactment, synthetic colourisation or a collage of later photographs.
 """,
-        """
-Return the definitive authentic archival photograph and largest credible scan first, identifying whether each candidate is the same negative, a materially different original frame or merely a derivative crop. Add another photograph only when it is a genuinely stronger final option, then concise historical verification and a verified signature only when appropriate. Reject modern re-enactments, AI-upscaled hallucinations, colourised derivatives presented as originals, merchandise scans and car/people composites.
-""",
+        'Prioritise the strongest original archival photograph or scan from the locked event.',
         """
 Treat the selected archival frame as the artwork's historical object, not raw material for a modern scene. Use the whole photograph wherever possible. Preserve authentic film grain, age, contrast, edge character and period atmosphere. Correct only verified dust, fading, tonal imbalance and local print damage conservatively. Use restrained archival typography and mounting treatment. Never rebuild faces, hands, uniforms, cars, crowds, track details or missing scenery; never smooth grain into AI detail; never colourise unless explicitly requested. Incidental people already in the source may remain but must not become newly composed heroes.
 """,
@@ -794,9 +716,7 @@ Treat the selected archival frame as the artwork's historical object, not raw ma
         """
 Inspect the existing approved artwork as an immutable master and restate the one exact requested correction. Verify only the replacement fact or asset required for that local change, including spelling, number, signature identity, plaque or date where applicable. Define a precise edit mask/region and explicit non-target list. Do not research unrelated redesign directions or propose a visual refresh.
 """,
-        """
-Skip Find Images by default. If the requested edit genuinely requires a replacement photograph, signature, plaque or factual asset, return only that exact verified replacement as a visible image result with its mapping and allowed local use. Do not return inspiration, alternative layouts, new heroes, backgrounds or general style references.
-""",
+        'Skip Find Images by default unless Research requires a replacement; find only that exact replacement asset.',
         """
 Treat the uploaded completed design as the immutable edit target. Change only the requested element, applying the exact replacement only inside the smallest possible local region. Preserve every unrequested subject, face, expression, pose, layout, title, typography, signature, border, plaque, colour, crop, shadow and texture pixel-for-pixel. Do not enhance, modernise or regenerate the artwork for a local edit. Add no people. If a legacy design already contains more than two people, preserve them and warn rather than silently removing anyone.
 """,
@@ -1539,19 +1459,7 @@ Return this concise handoff:
 For rivalry or group designs, choose photographs that can coexist naturally in one restrained composition and match the intended eras.
 """.strip()
 
-COMMON_FIND_IMAGES_RULES = """
-SPORTS CAVE DESIGN STUDIO V2 - FIND IMAGES
-
-Use the recommended moment and type-specific crop brief from the immediately preceding Research response. Do not repeat or redo the research. Run one focused image-search pass for authentic photography that can produce the selected design type's intended composition without mirroring, re-posing, changed eye-lines or reconstructed anatomy.
-
-Return only the three strongest final-use photographs per principal, no more than one relevant shared-moment or venue image, and exactly one clearest verified signature candidate per named human principal last. Keep principals in separate labelled image groups. Use very short labels.
-
-Rank final-use candidates in this order: facial recognisability; emotional strength; crop suitability; authenticity; correct era, team, uniform and number; useful resolution after cropping; clean separation from other people; premium collector-art potential. A famous historical moment does not outrank a photograph that produces a stronger recognisable hero.
-
-Prefer authentic official, team, league, photographer or major editorial photographs. Reject AI-generated or AI-reconstructed people, artwork, posters, trading cards, products, existing composites, screenshots, thumbnails, intrusive watermarks, wrong eras, wrong teams, wrong uniforms, wrong jersey numbers, duplicate crops, blurry or compressed files, obstructed athletes, distant crowd shots, small full-body figures and sources that would require invented anatomy, uniforms or faces. A signature must be one verified authentic asset, never typed, invented or guessed. If unavailable, mark unavailable.
-
-The visible response should be almost entirely images: no essay, long source commentary or repeated warnings.
-""".strip()
+COMMON_FIND_IMAGES_RULES = COMMON_FIND_IMAGES_PROMPT
 
 COMMON_GENERATION_RULES = """
 SPORTS CAVE COLLECTOR DESIGN CONTRACT - MANDATORY
@@ -1657,43 +1565,49 @@ def build_research_prompt(style_slug, task_text, details=None):
     )
 
 
+def build_find_images_context(task_text, details=None):
+    """Carry only explicit task fields; the preceding Research remains authoritative."""
+    details = dict(details or {})
+    lines = []
+    task = " ".join(str(task_text or "").split())
+    if task:
+        lines.append(f"TASK: {task}")
+    subjects = principal_subjects(details, task_text)
+    if subjects:
+        lines.append(f"PRINCIPAL SUBJECTS: {'; '.join(subjects)}")
+    for key, label in (
+        ("sport", "SPORT"), ("team_country", "TEAM / COUNTRY"),
+        ("season_era", "SEASON / ERA"), ("event_moment", "EVENT / MOMENT"),
+        ("venue_location", "VENUE"), ("uniform_equipment_livery", "UNIFORM / EQUIPMENT / LIVERY"),
+        ("special_instructions", "AUTHENTICITY / TASK CONSTRAINTS"),
+    ):
+        value = " ".join(str(details.get(key) or "").split())
+        if value:
+            lines.append(f"{label}: {value}")
+    return "\n".join(lines)
+
+
+def build_shared_find_images_prompt(task_text, details=None, *, style=None):
+    context = build_find_images_context(task_text, details)
+    sections = [COMMON_FIND_IMAGES_PROMPT]
+    if style:
+        sections.append(f"SELECTED DESIGN TYPE: {style.label}\n{style.find_images_rules}")
+    sport_context = f"{task_text} {context}"
+    if re.search(r"\b(horse|horses|jockey|equestrian|winx|black caviar)\b", sport_context, re.I):
+        sections.append("Ensure each horse/rider is correctly identified; use genuine separate photographs and do not substitute one horse for another.")
+    elif select_sport_adapter((details or {}).get("sport"), task_text, style.slug if style else "") == "motorsport":
+        if not style or style.slug != "motorsport_driver_car":
+            sections.append("Prioritise accurate driver, car/livery and event-era photographs.")
+    if context:
+        sections.append("COMPACT RESEARCH CONTEXT — defer to the approved Research above\n" + context)
+    return "\n\n".join(sections)
+
+
 def build_find_images_prompt(style_slug, task_text, details=None):
     style = get_design_style(style_slug)
     if style is None:
         return STYLE_REQUIRED_LABEL
-    subjects = _principal_subjects_for_prompt(details, task_text)
-    adapter = select_sport_adapter((details or {}).get("sport"), task_text, style.slug)
-    roles = ", ".join(style.required_image_roles)
-    optional = ", ".join(style.optional_image_roles) or "none"
-    if style.slug == "ultimate_moment":
-        base_rules = (
-            ULTIMATE_MOMENT_FIND_IMAGES_BASE_RULES,
-            FIND_IMAGES_INLINE_RESULT_CONTRACT,
-        )
-    elif style.slug == "rivalry_faceoff":
-        base_rules = (RIVALRY_FACE_OFF_INLINE_IMAGE_RESULT_RULES,)
-    elif style.slug == "legends_jersey_display":
-        base_rules = (LEGENDS_JERSEY_DISPLAY_FIND_IMAGES_BASE_RULES,)
-    else:
-        base_rules = (COMMON_FIND_IMAGES_RULES, FIND_IMAGES_INLINE_RESULT_CONTRACT)
-    if style.slug == "ultimate_moment":
-        source_contract = ULTIMATE_MOMENT_SOURCE_AUTHENTICITY_LOCK
-    elif style.slug == "legends_jersey_display":
-        source_contract = LEGENDS_JERSEY_DISPLAY_SOURCE_AUTHENTICITY_LOCK
-    else:
-        source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
-    return "\n\n".join(
-        (_selected_design_type_block(style),
-            *base_rules,
-            _design_type_contract_block(style),
-            AUTHENTIC_SOURCE_ASSET_LOCK,
-            source_contract,
-            _style_task_variables(style, task_text, details, subjects),
-            f"STYLE PHOTO TARGETS - {style.label}\n{style.find_images_rules}",
-            f"IMAGE ROLE CONTRACT\nRequired: {roles}. Optional: {optional}. Assign one supported role and use mode to every selected asset.",
-            _adapter_block(adapter),
-        )
-    )
+    return build_shared_find_images_prompt(task_text, details, style=style)
 
 
 def build_generation_prompt(style_slug, task_text, details=None, selected_assets=None):

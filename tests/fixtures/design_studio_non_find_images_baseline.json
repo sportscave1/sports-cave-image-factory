@@ -1,0 +1,366 @@
+{
+  "styles": [
+    {
+      "style": "ultimate_moment",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-ultimate_moment-1",
+          "role": "exact_moment_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-ultimate_moment-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "7730f7912861ccfcd3353d564099bb829ff9ba586021facb265fb4a82979c21d",
+        "generation": "821b55e5daf9b9f479e6c29d8a18cd9b1688c8723616ff3e6f5a4086533c21cf",
+        "signature_placement": "689eb725eb7137193f06202498f32bde312125b26ea2538c06860d2c836d8462",
+        "review": "37d7cc6970533e695fff126a7a6b271a901e65af367fcd6ef6f6aafe5f6b5c02"
+      },
+      "old_find_words": 1162,
+      "old_find_characters": 8247
+    },
+    {
+      "style": "rivalry_faceoff",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform",
+        "principal_subject_two": "Jordan Example"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-rivalry_faceoff-1",
+          "role": "rival_one_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-rivalry_faceoff-2",
+          "role": "rival_two_photo",
+          "subject_name": "Jordan Example"
+        },
+        {
+          "asset_id": "signature-rivalry_faceoff-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-rivalry_faceoff-two",
+          "role": "signature_asset",
+          "subject_name": "Jordan Example"
+        }
+      ],
+      "hashes": {
+        "research": "fcdd06a7ab8dcaad5cf9f5b9ef62fb47ef2098b4f1f66f94cec8b9843c4d73f3",
+        "generation": "d00585797a9d7c76e0de5c6d71911c1460891476c5dfbf6de8955cd63edec5ff",
+        "signature_placement": "9057392bca4a3ffea15b7bff421385281e2cb83ef58e95bea6e79b27e0a87133",
+        "review": "e76ae194fc5bd8fbc6e29dbc26e5f18050f52d6665d4d3bd2bda98a9df56ad09"
+      },
+      "old_find_words": 1289,
+      "old_find_characters": 9090
+    },
+    {
+      "style": "legends_jersey_display",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform",
+        "principal_subject_two": "Jordan Example"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-legends_jersey_display-1",
+          "role": "rear_jersey_one",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-legends_jersey_display-2",
+          "role": "rear_jersey_two",
+          "subject_name": "Jordan Example"
+        },
+        {
+          "asset_id": "asset-legends_jersey_display-3",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-legends_jersey_display-4",
+          "role": "collector_badge_asset",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-legends_jersey_display-5",
+          "role": "plaque_asset",
+          "subject_name": ""
+        },
+        {
+          "asset_id": "signature-legends_jersey_display-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-legends_jersey_display-two",
+          "role": "signature_asset",
+          "subject_name": "Jordan Example"
+        }
+      ],
+      "hashes": {
+        "research": "c3b87f2a32aae152739722f0c05adc2aa6b8a8f2258c2841e0b74a87e84c2709",
+        "generation": "a3d3986661af976629e07baf40764936644fb0b6f17500ac4551a06894ac209b",
+        "signature_placement": "40ee2135d5f19ef203a1568c9241aa1835f6ff5968a0f745e6e40d4f574cdd6a",
+        "review": "e04e2aa96faccc0fa6c86cd222e72f68d230213c672c5b2681b3e5262751893b"
+      },
+      "old_find_words": 1308,
+      "old_find_characters": 9567
+    },
+    {
+      "style": "nostalgic_tribute",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-nostalgic_tribute-1",
+          "role": "hero_exact_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-nostalgic_tribute-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "317567c1b30d1667c59a91ddb34ba56a8f27c0709eda84e3c51b34eb9f74f516",
+        "generation": "06a807f912a4de1f393b2f02fc442b12c8b14cc3767a431fde61f23017972ff3",
+        "signature_placement": "7336260722c1d31aa2fbf01256e14cc630676433ebf79b3dc489455059fdb493",
+        "review": "c09dc8a72c1899601d8333414aa62c58c8550ebf03bc8da624bc8c93378e7fd0"
+      },
+      "old_find_words": 1347,
+      "old_find_characters": 9430
+    },
+    {
+      "style": "motorsport_driver_car",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-motorsport_driver_car-1",
+          "role": "driver_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-motorsport_driver_car-2",
+          "role": "vehicle_exact_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-motorsport_driver_car-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "9e33d75ef514c2418805b7a447d171e593034f11d9b482408d70990fcb025fc5",
+        "generation": "09186433d07e050795e29609be2d599f5e5a1a714fdd9a0928dd1b3058fc97ac",
+        "signature_placement": "b738182fad0c00bf19fa5d18be784e4906799309791a463a6972ce08dfaf57db",
+        "review": "a8e4fe213d1145e149ab018bb27971bb431aed6e9a50bc753f7d89264bf67055"
+      },
+      "old_find_words": 1362,
+      "old_find_characters": 9496
+    },
+    {
+      "style": "minimalist_hero",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-minimalist_hero-1",
+          "role": "hero_exact_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-minimalist_hero-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "0cdce76f0e8178b76f6b6d826df0f3d1282ade12a4da1b1ef75f7da738ece06b",
+        "generation": "5c965dfb6685fcf57b96e5f2055ce28ca0fee29e80e71dad88d41b885e6f5201",
+        "signature_placement": "211d08dc22e7e785e290af1af1df2fb1bcfdf4c0dc790f5a0299ee1a18cbeb40",
+        "review": "caf62110dbf366d6d5967c0393ec77af19eebb43847ff340b3ee8119a3e4f523"
+      },
+      "old_find_words": 1325,
+      "old_find_characters": 9331
+    },
+    {
+      "style": "championship_achievement",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-championship_achievement-1",
+          "role": "hero_exact_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "asset-championship_achievement-2",
+          "role": "trophy_exact_photo",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-championship_achievement-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "6df43bc32776725476fef9fdb9da8876d35115189190a9c154af6ef9d8170e74",
+        "generation": "1a55a728d7612a544d2bb41065b382c310f31bbba5efd63f6de1035c6ebde86b",
+        "signature_placement": "89909f7e9de5a3053c9ae121759811278c06c7335509adf599bd7d7cabd79c46",
+        "review": "9a821e0a2135729965023836021f1e3ea9993c2004b30d5415a7359d0156c5da"
+      },
+      "old_find_words": 1353,
+      "old_find_characters": 9605
+    },
+    {
+      "style": "vintage_restoration",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "Alex Example",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-vintage_restoration-1",
+          "role": "archival_restoration_source",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-vintage_restoration-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "bcbe8212876759496a49c2e8b5a25d1a51ab97c1b0aaddd7b985fc2962994cc1",
+        "generation": "798fc4639f7361072fe5e4ea548926e67f23d351c9cf2f7e561aee7d2e6fa0bb",
+        "signature_placement": "d375a706d5f222209f9b349159ee8f19047a15e9323dad7adfdbdbf0dc2dbefa",
+        "review": "18ae953389bffa4cfdba20a79183a3522389b9daf0d7266d8dedfd37cfbff9d5"
+      },
+      "old_find_words": 1328,
+      "old_find_characters": 9372
+    },
+    {
+      "style": "update_existing",
+      "task": "Create the verified Sports Cave artwork.",
+      "details": {
+        "design_title": "Verified collector concept",
+        "sport": "Cricket",
+        "principal_subject_one": "",
+        "team_country": "Australia",
+        "season_era": "1999",
+        "event_moment": "Verified final moment",
+        "venue_location": "Melbourne",
+        "uniform_equipment_livery": "Verified match uniform"
+      },
+      "assets": [
+        {
+          "asset_id": "asset-update_existing-1",
+          "role": "existing_artwork_target",
+          "subject_name": "Alex Example"
+        },
+        {
+          "asset_id": "signature-update_existing-one",
+          "role": "signature_asset",
+          "subject_name": "Alex Example"
+        }
+      ],
+      "hashes": {
+        "research": "eed141e121d3fb79362aeeb570b956d99f5b8a0e367c454886a22fa882c02902",
+        "generation": "16e59c7acbc2539834e0f45c089df2f2906df94236c7e156c146dac34e055e0f",
+        "signature_placement": "b871474b30cb33756b6989d385b7cd88338bd7f3eeb491cec0a14ecb7031f06a",
+        "review": "e1480d6884421d540ffdeb9e3fd3de4778302b5d9b2e4294f22159ecfff013e6"
+      },
+      "old_find_words": 1309,
+      "old_find_characters": 9106
+    }
+  ],
+  "legacy": {
+    "task": "Michael Jordan final shot collector artwork",
+    "hashes": {
+      "research": "3c88958ea5ccb65eb15759dbca4b6ecb9e80e3b60ef2369640ae468221c21b6d",
+      "generation": "356e83f1b846b41e6e5a670cebcc911ef8cd79bd7070b7a5985f1adfad2f6802"
+    },
+    "old_find_words": 1349,
+    "old_find_characters": 9237
+  }
+}

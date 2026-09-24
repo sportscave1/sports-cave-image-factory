@@ -1,4 +1,5 @@
 import unittest
+from tests.test_design_studio_find_images import assert_short_find_images
 
 import design_studio_page
 import design_studio_styles
@@ -67,22 +68,16 @@ class RivalryFaceOffCorePrinciplesTests(unittest.TestCase):
         self.assertIn("PRINCIPAL TWO: Kobe Bryant", prompt)
         self.assertIn("RIVALRY STORY: Two generations compared Respect mixed", prompt)
 
-    def test_find_images_returns_only_portraits_and_one_signature_per_principal(self):
+    def test_find_images_requests_both_principals_without_extra_signature_searches(self):
         prompt = design_studio_styles.build_find_images_prompt(
             "rivalry_faceoff",
             "Create a Jordan and Bryant rivalry face-off",
             DETAILS,
         )
-        style_section = prompt.split("STYLE PHOTO TARGETS - Rivalry Face-Off", 1)[1]
-
-        self.assertIn("overrides the general allowance for a shared moment", style_section)
-        self.assertIn("three strongest compatible final-use photographs", style_section)
-        self.assertIn("one clearest verified signature candidate last", style_section)
-        self.assertIn("Do not return stadiums, venues, crowds, shared moments", style_section)
-        self.assertIn("Never manufacture eye contact", style_section)
-        self.assertIn("Required: rival_one_photo, rival_two_photo. Optional: signature_asset", prompt)
-        self.assertNotIn("Optional: vehicle_exact_photo", prompt)
-        self.assertNotIn("Optional: venue_reference", prompt)
+        assert_short_find_images(self, prompt)
+        self.assertIn("individual photographs of both principals", prompt)
+        self.assertIn("Michael Jordan; Kobe Bryant", prompt)
+        self.assertNotIn("SIGNATURES", prompt)
 
     def test_generation_uses_benchmark_without_reskinning_it(self):
         prompt = design_studio_styles.build_generation_prompt(

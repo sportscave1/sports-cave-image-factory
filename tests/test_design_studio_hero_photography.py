@@ -1,5 +1,6 @@
 import inspect
 import unittest
+from tests.test_design_studio_find_images import assert_short_find_images
 
 import design_studio_page
 import design_studio_styles
@@ -15,16 +16,11 @@ class DesignStudioInlineImageContractTests(unittest.TestCase):
                 "principal_subject_one": "Michael Jordan",
             },
         )
+        assert_short_find_images(self, prompt)
+        self.assertIn("image-search/carousel capability", prompt)
+        self.assertIn("sources belong behind the images", prompt)
 
-        self.assertIn("dedicated image-search capability", prompt)
-        self.assertIn("actual tool-native image-result card", prompt)
-        self.assertIn("A source URL, markdown link, filename or text description by itself is not an image result", prompt)
-        self.assertIn("replace it with the next suitable authentic candidate", prompt)
-        self.assertIn("source-page attribution link", prompt)
-        self.assertIn("asset_id", prompt)
-        self.assertIn("use_mode", prompt)
-
-    def test_rivalry_principal_and_signature_result_limits_remain_exact(self):
+    def test_rivalry_search_is_short_and_keeps_both_principals(self):
         prompt = design_studio_styles.build_find_images_prompt(
             "rivalry_faceoff",
             "Peter Brock vs Allan Moffat",
@@ -34,14 +30,10 @@ class DesignStudioInlineImageContractTests(unittest.TestCase):
                 "principal_subject_two": "Allan Moffat",
             },
         )
-
-        self.assertIn("exact two-group candidate and signature limits", prompt)
-        self.assertIn("three strongest compatible final-use photographs", prompt)
-        self.assertIn("one clearest verified signature candidate last", prompt)
-        self.assertIn("Do not return stadiums, venues, crowds, shared moments", prompt)
-        self.assertIn("Required: rival_one_photo, rival_two_photo. Optional: signature_asset", prompt)
-        self.assertNotIn("no more than one relevant venue or shared-moment image", prompt)
-        self.assertNotIn("Optional: venue_reference", prompt)
+        assert_short_find_images(self, prompt)
+        self.assertIn("individual photographs of both principals", prompt)
+        self.assertIn("Peter Brock; Allan Moffat", prompt)
+        self.assertNotIn("SIGNATURES", prompt)
 
     def test_legacy_find_images_builder_carries_the_same_inline_contract(self):
         prompt = design_studio_page.build_design_image_carousel_prompt(
@@ -49,14 +41,9 @@ class DesignStudioInlineImageContractTests(unittest.TestCase):
             "Use the 1998 Finals moment.",
             design_context={"principal_subject_one": "Michael Jordan"},
         )
-
-        self.assertEqual(
-            prompt.count(design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT_MARKER),
-            1,
-        )
-        self.assertEqual(prompt.count("INLINE IMAGE RESULT CONTRACT"), 1)
-        self.assertIn("actual tool-native image-result card", prompt)
-        self.assertIn("RESEARCH BRIEF: Use the 1998 Finals moment.", prompt)
+        assert_short_find_images(self, prompt)
+        self.assertNotIn(design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT_MARKER, prompt)
+        self.assertNotIn("RESEARCH BRIEF:", prompt)
 
 
 class DesignStudioHeroDominanceContractTests(unittest.TestCase):
@@ -72,7 +59,7 @@ class DesignStudioHeroDominanceContractTests(unittest.TestCase):
         for style, task, details in cases:
             bundle = design_studio_styles.build_prompt_bundle(style, task, details)
             with self.subTest(style=style):
-                for stage in ("research", "find_images", "generation", "review"):
+                for stage in ("research", "generation", "review"):
                     self.assertEqual(
                         bundle[stage].count(
                             design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT_MARKER
@@ -105,18 +92,15 @@ class DesignStudioHeroDominanceContractTests(unittest.TestCase):
         self.assertIn("small background ghost", contract)
         self.assertIn("fully inside the Sports Cave border", contract)
 
-    def test_distant_full_body_and_low_resolution_sources_are_rejected(self):
+    def test_photo_quality_priorities_remain_concise(self):
         prompt = design_studio_styles.build_find_images_prompt(
             "nostalgic_tribute",
             "Historical low-resolution tribute",
             {"sport": "Cricket", "principal_subject_one": "Shane Warne"},
         )
-
-        self.assertIn("distant crowd shots", prompt)
-        self.assertIn("full-body sources that cannot support a strong close crop", prompt)
-        self.assertIn("at least 1200 pixels on the useful crop axis", prompt)
-        self.assertIn("2000 pixels or more is ideal", prompt)
-        self.assertIn("Judge resolution on the intended crop", prompt)
+        assert_short_find_images(self, prompt)
+        self.assertIn("good resolution and useful composition", prompt)
+        self.assertIn("genuine period photographs from the locked memory", prompt)
 
     def test_immutable_source_and_no_reconstruction_rules_remain(self):
         contract = design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT

@@ -1,6 +1,7 @@
 import inspect
 from pathlib import Path
 import unittest
+from tests.test_design_studio_find_images import assert_short_find_images
 
 import design_studio_page
 import design_studio_styles
@@ -306,21 +307,10 @@ class UltimateMomentLockedContractTests(unittest.TestCase):
 
     def test_find_images_searches_the_locked_event_and_returns_role_mappings(self):
         prompt = self.bundle()["find_images"]
-        for phrase in (
-            "[ATHLETE] [EXACT EVENT] [DATE] [OPPONENT]",
-            "PRIMARY HERO",
-            "SECONDARY MOMENT IMAGE",
-            "ENVIRONMENT / STORY SUPPORT",
-            "MOMENT LOCK CONFIRMATION",
-            "exact approved mappings are the handoff to Generation",
-            "Reject random portraits",
-            "search again rather than asking Generation to repair it",
-        ):
-            self.assertIn(phrase, prompt)
-        self.assertNotIn(
-            "A famous historical moment does not outrank a photograph",
-            prompt,
-        )
+        assert_short_find_images(self, prompt)
+        self.assertIn("exact locked moment/event", prompt)
+        self.assertIn("MOMENT LOCK CONFIRMATION", prompt)
+        self.assertIn("1998 NBA Finals Game 6 winning shot", prompt)
 
     def test_generation_uses_exact_sources_and_does_not_default_to_rivalry(self):
         prompt = self.bundle()["generation"]
@@ -376,7 +366,7 @@ class UltimateMomentLockedContractTests(unittest.TestCase):
             ),
         )
         for prompt in prompts:
-            self.assertIn(design_studio_styles.ULTIMATE_MOMENT_CONTRACT_VERSION, prompt)
+            self.assertIn("Ultimate Moment", prompt)
             self.assertIn("1998 NBA Finals Game 6 winning shot", prompt)
 
 
@@ -431,7 +421,7 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
     def test_fixed_title_and_principal_subtitle_override_creative_task_title(self):
         bundle = self.bundle()
         self.assertEqual(bundle["errors"], [])
-        for stage in ("research", "find_images", "generation", "signature_placement", "review"):
+        for stage in ("research", "generation", "signature_placement", "review"):
             with self.subTest(stage=stage):
                 self.assertIn("LEGENDS NEVER DIE", bundle[stage])
                 self.assertIn("ARTWORK SUBTITLE: OHTANI VS JUDGE", bundle[stage])
@@ -445,16 +435,10 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
 
     def test_find_images_ranks_compatible_rear_pairs_not_individual_action_photos(self):
         prompt = self.bundle()["find_images"]
-        self.assertIn("three strongest genuine rear", prompt)
-        self.assertIn("[athlete] jersey back high resolution", prompt)
-        self.assertIn("recommend one strongest PAIR", prompt)
-        self.assertIn("matching rear orientation, crop and body scale", prompt)
-        self.assertIn("2000 px or more preferred, 1200 px minimum", prompt)
-        self.assertIn("Reject front-facing portraits, face-offs, dramatic action", prompt)
-        self.assertIn("never compensate by inventing a pose, uniform, surname, number, body or face", prompt)
-        self.assertIn("Primary rear source or Backup rear source", prompt)
-        self.assertIn("JERSEY SOURCE LOCK", prompt)
-        self.assertIn("Authenticity outranks perfect symmetry", prompt)
+        assert_short_find_images(self, prompt)
+        self.assertIn("rear-jersey photographs of both principals with compatible angles", prompt)
+        self.assertIn("correct era, surnames and numbers", prompt)
+        self.assertIn("Ohtani #17; Judge #99", prompt)
 
     def test_generation_has_exact_source_signature_badge_and_plaque_mappings(self):
         prompt = self.bundle()["generation"]
@@ -569,6 +553,10 @@ class LegendsJerseyDisplayLockedContractTests(unittest.TestCase):
             ),
         )
         for prompt in prompts:
+            self.assertIn("Legends Jersey Display", prompt)
+            self.assertIn("Shohei Ohtani", prompt)
+            self.assertIn("Aaron Judge", prompt)
+        for prompt in (prompts[0], prompts[2]):
             self.assertIn(design_studio_styles.LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION, prompt)
             self.assertIn("LEGENDS NEVER DIE", prompt)
 
@@ -681,13 +669,8 @@ class DesignStudioImageContractTests(unittest.TestCase):
             "Create Michael Jordan collector artwork",
             STYLE_DETAILS["minimalist_hero"],
         )
-        fixed_body = prompt.split("TASK VARIABLES", 1)[0]
-
-        self.assertLessEqual(len(fixed_body), 9000)
-        self.assertIn("immediately preceding Research response", fixed_body)
-        self.assertIn("Do not repeat or redo the research", fixed_body)
-        self.assertIn("three strongest final-use photographs per principal", fixed_body)
-        self.assertIn("exactly one clearest verified signature candidate", fixed_body)
+        assert_short_find_images(self, prompt)
+        self.assertIn("one exceptionally strong hero portrait/action photograph", prompt)
 
     def test_signature_placement_appears_immediately_after_generation(self):
         bundle = design_studio_styles.build_prompt_bundle(
@@ -872,7 +855,7 @@ class DesignStudioV2PageContractTests(unittest.TestCase):
 
         for key, value in details.items():
             self.assertEqual(loaded[key], value)
-        for prompt_name in ("research", "find_images", "generation", "review"):
+        for prompt_name in ("research", "generation", "review"):
             for value in details.values():
                 self.assertIn(value, prompts[prompt_name])
 

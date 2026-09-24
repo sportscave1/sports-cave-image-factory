@@ -1,29 +1,18 @@
-SPORTS CAVE DESIGN STUDIO - HIGH-QUALITY REFERENCE IMAGE SEARCH V2
+SPORTS CAVE DESIGN STUDIO V2 — FIND IMAGES
 
-Use the recommended moment and crop brief from the immediately preceding Research response. Do not repeat or redo research. Run one focused search with the platform's dedicated image-search capability, not a regular web-search link list.
+Use the approved Research result immediately above as the authority.
+Do not redo the research or change the selected person, people, moment, event, year/era, team, vehicle, horse or concept. Preserve the Research lock and authenticity constraints.
 
-Display every selected photograph as an actual tool-native image-result card or supported inline image preview. A source URL, markdown link, filename or description by itself is not an image result. Keep the original source page only as secondary attribution. Do not use screenshots of search-result pages. Replace any candidate that cannot render inline or has a broken preview; Find Images is not complete while it contains only links or broken images.
+Use image search immediately to find the strongest REAL photographs matching that research.
+Prioritise clear identity, correct event/era/uniform/vehicle, strong emotion or action, good resolution and useful composition for the artwork.
 
-Return only the three strongest final-use photographs per principal; no more than one shared moment, venue or background image; exactly one clearest verified signature candidate per named human principal, last.
+Use ChatGPT's image-search/carousel capability when available. DISPLAY approximately 4–6 of the strongest images directly in this ChatGPT conversation as an IMAGE CAROUSEL, before any commentary. Show fewer if fewer genuine matches are available.
 
-Search for close and medium-close authentic photography that supports a chest-up, waist-up or tight three-quarter final crop. Rank by facial recognisability, emotional strength, crop suitability, authenticity, correct era/team/uniform/number, useful resolution after cropping, clean separation and collector-art potential. A famous moment does not outrank a photograph that creates a stronger recognisable hero.
+After the carousel, briefly identify:
+Best primary image: Image [number]
+Best supporting image: Image [number, if useful]
 
-Prefer sharp official, team, league, photographer or major editorial photography. Prefer at least 1200 pixels on the useful crop axis; 2000 pixels or more is ideal. Reject AI imagery, artwork, posters, products, cards, reconstructed people, existing composites, screenshots, thumbnails, intrusive watermarks, wrong-era subjects, wrong uniforms or numbers, duplicate crops, distant crowd shots, obstructed athletes, blurry files and full-body photographs that cannot support a strong close crop. Do not use signed memorabilia as a hero photo or choose a source that would require invented anatomy, uniform or facial detail.
+Keep image numbers, source URLs/references and subject mapping with the images for Generation. Retain any asset_id, role and use_mode in image metadata, not a visible technical report; carry selected photographs forward as actual image inputs.
 
-Keep principals in separate labelled image groups. Each candidate may show only the actual image preview, principal name, one short role label such as "Primary hero - chest-up", source and available resolution, and a source-page attribution link. Preserve asset_id, supported role, subject mapping and use_mode in concise image metadata or alt text.
-
-For signatures: one verified authentic asset per human principal, mapped to the correct full name. Prefer isolated on transparent, white or plain background. If none can be verified, mark unavailable. Never fabricate, imitate, redraw or typeset a signature.
-
-Visible response: almost entirely images. No essay, long source commentary or repeated warnings.
-
-TASK VARIABLES - INSERT BELOW THIS LINE
-
-[DESIGN TITLE]
-[RESEARCH BRIEF]
-[PRINCIPAL SUBJECTS]
-[SPORT]
-[TEAM / COUNTRY]
-[SEASON / ERA]
-[EVENT / MOMENT]
-[VENUE / LOCATION]
-[CORRECT UNIFORM / EQUIPMENT DETAILS]
+Keep the response short; sources belong behind the images, not in a long URL list. If image display is unavailable, say so briefly rather than claiming a text list is a carousel.
+Do not generate the artwork yet.

@@ -1,5 +1,6 @@
 import hashlib
 import unittest
+from tests.test_design_studio_find_images import assert_short_find_images
 from difflib import SequenceMatcher
 
 import design_studio_styles
@@ -95,7 +96,8 @@ class DesignStudioTypeContractTests(unittest.TestCase):
                 self.assertTrue(bundle["generation"].startswith(f"SELECTED DESIGN TYPE: {label}"))
                 for stage in ("research", "find_images", "generation", "signature_placement", "review"):
                     self.assertIn(f"SELECTED DESIGN TYPE: {label}", bundle[stage])
-                    self.assertIn(unique_marker, bundle[stage])
+                    if stage != "find_images":
+                        self.assertIn(unique_marker, bundle[stage])
 
     def test_type_contracts_and_assembled_generation_prompts_are_materially_distinct(self):
         contracts = design_studio_styles.STYLE_TYPE_CONTRACTS
@@ -133,20 +135,11 @@ class DesignStudioTypeContractTests(unittest.TestCase):
                 self.assertIn("VERIFIED SIGNATURE CONTRACT - NO GENERATION OR APPROXIMATION", prompt)
                 self.assertIn("SIGNATURE UNAVAILABLE", prompt)
 
-    def test_find_images_requires_visible_cards_complete_metadata_and_real_image_inputs(self):
+    def test_find_images_requires_carousel_and_compact_asset_handoff(self):
         for slug in EXPECTED_TYPES:
             with self.subTest(style=slug):
-                prompt = design_studio_styles.build_find_images_prompt(
-                    slug,
-                    "Find the exact approved sources.",
-                    details_for(slug),
-                )
-                self.assertIn("actual tool-native image-result card or supported inline", prompt)
-                self.assertIn("available resolution", prompt)
-                self.assertIn("estimated useful resolution", prompt)
-                self.assertIn("use mode", prompt.casefold())
-                self.assertIn("actual image inputs", prompt)
-                self.assertNotIn("a plain webpage link is a completed result", prompt.casefold())
+                prompt = design_studio_styles.build_find_images_prompt(slug, "Find the exact approved sources.", details_for(slug))
+                assert_short_find_images(self, prompt)
 
     def test_signature_placement_is_verified_locked_and_type_specific(self):
         prompts = {}
@@ -212,7 +205,7 @@ class DesignStudioTypeContractTests(unittest.TestCase):
             ["errors", "research", "find_images", "generation", "signature_placement", "review"],
         )
         for stage in ("research", "find_images", "generation", "signature_placement", "review"):
-            self.assertIn("TASK VARIABLES", bundle[stage])
+            self.assertIn("COMPACT RESEARCH CONTEXT" if stage == "find_images" else "TASK VARIABLES", bundle[stage])
             self.assertIn("SPORT: Cricket", bundle[stage])
             self.assertIn("PRINCIPAL SUBJECTS: Alex Example", bundle[stage])
 

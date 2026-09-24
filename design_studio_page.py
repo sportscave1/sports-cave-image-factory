@@ -3288,88 +3288,28 @@ def _format_find_images_context_value(value, fallback: str) -> str:
     return text if text else fallback
 
 
+def _compact_find_images_details(design_context=None):
+    aliases = {
+        "principal_subject_one": ("principal_subject_one",),
+        "principal_subject_two": ("principal_subject_two",),
+        "principal_subjects": ("principal_subjects", "named_principals", "people"),
+        "sport": ("sport", "sport_name"),
+        "team_country": ("team_country", "team", "club", "country", "nation"),
+        "season_era": ("season_era", "season", "era", "year"),
+        "event_moment": ("event_moment", "event", "moment", "match", "race"),
+        "venue_location": ("venue_location", "venue", "location", "stadium", "circuit"),
+        "uniform_equipment_livery": ("uniform_equipment_livery", "uniform_equipment_details", "uniform", "kit", "equipment", "livery"),
+        "special_instructions": ("special_instructions", "authenticity_constraints"),
+    }
+    return {key: _find_design_context_value(design_context, names) for key, names in aliases.items()}
+
+
 def build_high_quality_image_search_context(
-    task_text: str,
-    research_answer: str,
-    *,
-    design_context=None,
+    task_text: str, research_answer: str, *, design_context=None,
 ) -> str:
-    subject_detection_text = "\n".join(
-        value
-        for value in (str(task_text or "").strip(), str(research_answer or "").strip())
-        if value
+    return design_studio_styles.build_find_images_context(
+        task_text, _compact_find_images_details(design_context),
     )
-    records = signature_subject_records_from_context(
-        design_context,
-        fallback_text=subject_detection_text,
-    )
-    task = _task_or_placeholder(task_text)
-    unavailable = "Use the verified task, research brief and visible chat context."
-    variable_specs = (
-        ("SPORT", ("sport", "sport_name")),
-        ("TEAM / COUNTRY", ("team_country", "team", "club", "country", "nation")),
-        ("SEASON / ERA", ("season_era", "season", "era", "year")),
-        ("EVENT / MOMENT", ("event_moment", "event", "moment", "match", "race")),
-        ("VENUE / LOCATION", ("venue_location", "venue", "location", "stadium", "circuit")),
-        (
-            "CORRECT UNIFORM / EQUIPMENT DETAILS",
-            ("uniform_equipment_details", "uniform", "kit", "equipment", "livery"),
-        ),
-    )
-    title = _find_design_context_value(
-        design_context,
-        ("design_title", "title", "task", "task_text"),
-    ) or task
-    research = str(research_answer or "").strip() or (
-        "Use the verified research brief already present above in this chat."
-    )
-    subject_names = [record["name"] for record in records]
-    principal_subjects = "; ".join(subject_names) if subject_names else (
-        "No named principal human subject detected. Use the verified non-human principal subject from the task and research."
-    )
-
-    lines = [
-        "TASK-SPECIFIC VARIABLES AND RESEARCH CONTEXT",
-        "",
-        f"DESIGN TITLE: {_format_find_images_context_value(title, task)}",
-        f"RESEARCH BRIEF: {research}",
-        f"PRINCIPAL SUBJECTS: {principal_subjects}",
-    ]
-    for label, keys in variable_specs:
-        lines.append(
-            f"{label}: {_format_find_images_context_value(_find_design_context_value(design_context, keys), unavailable)}"
-        )
-    lines.append(
-        "OUTPUT IMAGE CAPACITY OR INTERFACE LIMITS: Follow the compact V2 limit: three final-use photographs per principal, no more than one shared reference, and one verified signature candidate per human principal."
-    )
-
-    lines.extend(["", "REQUIRED SEARCH AND CAROUSEL EXECUTION PLAN", ""])
-    if subject_names:
-        for index, name in enumerate(subject_names, start=1):
-            lines.append(
-                f"{index}. PLAYER - {name}: return only the three strongest final-use photographs for this principal."
-            )
-        lines.append(
-            f"{len(subject_names) + 1}. DESIGN REFERENCES: return no more than one shared moment, venue, background, trophy, equipment or historical-detail reference."
-        )
-        lines.append(
-            f"{len(subject_names) + 2}. SIGNATURES: return exactly {len(subject_names)} signature asset(s), one for each distinct principal person, as the final carousel."
-        )
-        lines.extend(["", "EXACT SIGNATURE ASSET MAPPING"])
-        for name in subject_names:
-            lines.append(
-                f"* {name} -> authentic signature image; role: signature_asset; "
-                f"subject_name: {name}; signature_slot_limit: 1"
-            )
-    else:
-        lines.extend(
-            [
-                "1. DESIGN REFERENCES: return only the relevant subject, venue, vehicle, equipment and historical-reference carousel(s).",
-                "2. Omit PLAYER and SIGNATURES carousels unless the verified research or visible chat context establishes a named principal human subject.",
-                "Do not request an irrelevant signature for a vehicle-only, venue-only, trophy-only, jersey-only or team-only design.",
-            ]
-        )
-    return "\n".join(lines)
 
 
 def build_signature_image_search_context(task_text: str, *, design_context=None) -> str:
@@ -3723,29 +3663,16 @@ def build_design_research_prompt(task_text: str, *, design_context=None) -> str:
 
 
 def build_design_image_carousel_prompt(task_text: str, research_answer: str, *, design_context=None) -> str:
+    # Research is already in the chat. Never duplicate its full response here.
     locked_prompt = _locked_target_v2_prompt_from_context(
-        "find_images",
-        task_text,
-        design_context,
+        "find_images", task_text, design_context,
     )
     if locked_prompt:
         return locked_prompt
-    prompt = _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
-    image_search_sections = [
-        design_studio_styles.FIND_IMAGES_INLINE_RESULT_CONTRACT,
-        design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT,
-        _clean_prompt(SPORTS_CAVE_HIGH_QUALITY_IMAGE_SEARCH_RULES_V2),
-        build_high_quality_image_search_context(
-            task_text,
-            research_answer,
-            design_context=design_context,
-        ),
-    ]
-    return "\n\n".join(
-        section
-        for section in (prompt, *image_search_sections)
-        if str(section or "").strip()
-    )
+    details = _compact_find_images_details(design_context)
+    style_slug = _find_design_context_value(design_context, ("design_style",))
+    style = design_studio_styles.get_design_style(style_slug)
+    return design_studio_styles.build_shared_find_images_prompt(task_text, details, style=style)
 
 
 def build_design_generation_prompt(task_text: str, *, design_context=None) -> str:
@@ -4369,7 +4296,7 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
     )
     _render_v2_prompt_card(
         "Find Images Prompt",
-        "Retrieve only authentic final-use assets required by this style.",
+        "Find the best real reference images from the approved research.",
         prompts["find_images"],
         f"{task_identity}::{selected_style}::find-images",
     )
