@@ -5820,8 +5820,8 @@ PRODUCT_UPLOAD_AUD_PRICING = {
     "unframed": (
         ("Unframed XL", "A$159", "A$209", "A$50", "24%"),
         ("Unframed Large", "A$119", "A$159", "A$40", "25%"),
-        ("Unframed Medium", "A$85", "A$109", "A$24", "22%"),
-        ("Unframed Small", "A$55", "A$69", "A$14", "20%"),
+        ("Unframed Medium", "A$89", "A$109", "A$20", "18%"),
+        ("Unframed Small", "A$69", "A$79", "A$10", "13%"),
     ),
 }
 PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"

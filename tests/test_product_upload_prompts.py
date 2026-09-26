@@ -24,8 +24,8 @@ EXPECTED_FRAMED_PRICING_LINES = (
 EXPECTED_UNFRAMED_PRICING_LINES = (
     "- Unframed XL: Selling price A$159 | RRP / compare-at price A$209 | Saving A$50 | Approx. discount 24%",
     "- Unframed Large: Selling price A$119 | RRP / compare-at price A$159 | Saving A$40 | Approx. discount 25%",
-    "- Unframed Medium: Selling price A$85 | RRP / compare-at price A$109 | Saving A$24 | Approx. discount 22%",
-    "- Unframed Small: Selling price A$55 | RRP / compare-at price A$69 | Saving A$14 | Approx. discount 20%",
+    "- Unframed Medium: Selling price A$89 | RRP / compare-at price A$109 | Saving A$20 | Approx. discount 18%",
+    "- Unframed Small: Selling price A$69 | RRP / compare-at price A$79 | Saving A$10 | Approx. discount 13%",
 )
 LEGACY_PRICING_LINES = (
     "- XL: Selling price $349 AUD | RRP / compare-at price $449 AUD | Saving $100 AUD | Approx. discount 22%",
@@ -319,8 +319,8 @@ Unframed variants:
 
 XL — Price $159.00 / Compare-at price $209.00
 L — Price $119.00 / Compare-at price $159.00
-M — Price $85.00 / Compare-at price $109.00
-S — Price $55.00 / Compare-at price $69.00
+M — Price $89.00 / Compare-at price $109.00
+S — Price $69.00 / Compare-at price $79.00
 
 EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION
 Preserve every other price and product field.
