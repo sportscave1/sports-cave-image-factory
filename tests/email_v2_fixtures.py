@@ -49,6 +49,9 @@ class MailboxFixture:
         return [deepcopy(m) for m in self.messages if m["folder"] == folder and
                 any(i in [m["message_id"], *m["references"], *m["in_reply_to"]] for i in identifiers)][:limit]
 
+    def related_headers_many(self, folders, identifiers, limit=100):
+        return [message for folder in folders for message in self.related_headers(folder, identifiers, limit)]
+
     def read_message(self, message):
         self.calls.append(("body", message["uid"]))
         return {"text": "Hi Sports Cave,\n\nMy frame arrived with a damaged corner. Could you please help me arrange a replacement?\n\nThank you,\nJohn\n\nOn Sunday, Sports Cave wrote:\n> Your order is on its way.",

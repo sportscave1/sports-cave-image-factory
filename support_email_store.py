@@ -163,7 +163,7 @@ def save_workflow(mailbox, thread_key, *, actor, support_status, assigned_user_i
 
 
 def load_email_settings(mailbox, user_id):
-    from support_email_compose import default_settings
+    from support_email_compose import default_settings, normalized_signatures
     settings = default_settings()
     with cursor() as cur:
         cur.execute("SELECT sender_name,signatures,folder_mapping,sent_policy FROM customer_support_email_settings WHERE mailbox=%s",
@@ -174,11 +174,12 @@ def load_email_settings(mailbox, user_id):
         cur.execute("SELECT signature_key FROM customer_support_email_preferences WHERE mailbox=%s AND user_id=%s",
                     (mailbox.casefold(), str(user_id)))
         pref = cur.fetchone()
+    settings["signatures"] = normalized_signatures(settings.get("signatures"))
     return settings, (pref or {}).get("signature_key")
 
 
 def save_email_settings(mailbox, *, actor, sender_name, signatures, folder_mapping, sent_policy, discovered_names):
-    from support_email_compose import sanitize_html, html_to_text
+    from support_email_compose import normalized_signatures
     if not os_accounts.is_admin(actor) or not os_accounts.can_access_page(actor, "Email"):
         raise SupportStorageError("Only an OS administrator can change mailbox settings.")
     sender_name = str(sender_name).strip()
@@ -192,14 +193,8 @@ def save_email_settings(mailbox, *, actor, sender_name, signatures, folder_mappi
         raise SupportStorageError("Map folders from the discovered mailbox list.")
     if len(set(mapping.values())) != len(mapping):
         raise SupportStorageError("Each mailbox role must use a different folder.")
-    clean = {}
-    for key in ("company", "nathan", "reina"):
-        markup = str(signatures.get(key, {}).get("html", ""))
-        if len(markup) > 8000:
-            raise SupportStorageError("Each signature must be 8,000 characters or fewer.")
-        markup = sanitize_html(markup)
-        clean[key] = {"label": {"company": "Company default", "nathan": "Nathan", "reina": "Reina"}[key],
-                      "html": markup, "text": html_to_text(markup)}
+    clean = normalized_signatures({key: {"version": 2, "html": value.get("html", "")}
+                                  for key, value in signatures.items() if key in {"company", "nathan", "reina"}})
     with cursor(True) as cur:
         cur.execute("""INSERT INTO customer_support_email_settings (mailbox,sender_name,signatures,folder_mapping,sent_policy)
             VALUES (%s,%s,%s::jsonb,%s::jsonb,%s) ON CONFLICT(mailbox) DO UPDATE SET sender_name=EXCLUDED.sender_name,

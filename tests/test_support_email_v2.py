@@ -151,11 +151,13 @@ class ComposeTests(unittest.TestCase):
         d.update(bcc="hidden@example.test", html="<p>My response</p>")
         compose.add_attachment(d, compose.make_attachment("proof.txt", b"proof"))
         parsed = compose.edit_mailbox_draft(self.mime(d, as_draft=True)["bytes"], MAILBOX, header())
-        self.assertEqual(parsed["signature"], "none")
+        self.assertEqual(parsed["signature"], "company")
         self.assertEqual(parsed["bcc"], "hidden@example.test")
         self.assertEqual(parsed["in_reply_to"], "<one@example.test>")
         self.assertEqual(parsed["attachments"][0]["data"], b"proof")
-        self.assertEqual(parsed["html"].count("Kind regards"), 1)
+        self.assertEqual(parsed["html"].count("Kind regards"), 0)
+        rebuilt = BytesParser(policy=policy.default).parsebytes(self.mime(parsed)["bytes"])
+        self.assertEqual(rebuilt.get_body(preferencelist=("html",)).get_content().count("Kind regards"), 1)
 
 
 class SMTPTests(unittest.TestCase):

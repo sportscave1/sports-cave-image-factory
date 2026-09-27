@@ -14,7 +14,8 @@ from support_email_provider import ImapProvider, MailboxError, folder_roles
 from support_email_logic import build_threads, cached_read, match_orders, order_numbers, workflow_for_thread
 from support_email_compose import (ComposeError, default_settings, selected_signature, new_draft, build_mime,
     sanitize_html, readable_html, split_quote, attachment_from_upload, add_attachment, make_attachment,
-    edit_mailbox_draft, safe_url)
+    edit_mailbox_draft, safe_url, sanitize_signature)
+from support_email_signatures import logo_data_uri
 from support_email_smtp import SMTPProvider, SEND_REGISTRY, reconcile_sent
 import support_email_store as store
 from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT, THREAD_BYTES, ordered_folders
@@ -547,7 +548,7 @@ class Workspace:
         signature_source = tuple((key, value.get("label", key), value.get("html", ""))
                                  for key, value in settings["signatures"].items() if key in {"company", "nathan", "reina"})
         if s.get("signature_source") != signature_source:
-            s["signature_model"] = {key: {"label": label, "html": sanitize_html(markup)} for key, label, markup in signature_source}
+            s["signature_model"] = {key: {"label": label, "html": sanitize_signature(markup)} for key, label, markup in signature_source}
             s["signature_source"] = signature_source
         signatures = s["signature_model"]
         return {"mailbox": self.config.address, "configured": self.config.configured,
@@ -558,6 +559,7 @@ class Workspace:
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
             "view": s["view"], "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
+            "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "download": s.get("download"), "settings": {"sender_name": settings["sender_name"], "sent_policy": settings["sent_policy"],
             "folder_mapping": settings["folder_mapping"], "signatures": signatures}, "settings_available": s.get("settings_available", False),

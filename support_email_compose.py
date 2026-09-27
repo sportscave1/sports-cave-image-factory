@@ -1,5 +1,6 @@
-"""Safe human-authored MIME, signatures and compose/reply/forward models. No I/O."""
+"""Safe human-authored MIME, signatures and compose/reply/forward models. No network I/O."""
 import base64
+from copy import deepcopy
 from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
@@ -7,11 +8,14 @@ from email.parser import BytesParser
 from email.utils import format_datetime, formataddr, getaddresses
 from html import escape
 from html.parser import HTMLParser
+from functools import lru_cache
 import mimetypes
 import re
 from urllib.parse import urlparse
 import uuid
 
+import os_accounts
+import support_email_signatures as branding
 from support_email_provider import html_to_text, message_ids, addresses
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -94,6 +98,88 @@ def sanitize_html(value):
     return parser.finish()
 
 
+class _SignatureHTML(_SafeHTML):
+    """Extra email-layout markup only for administrator-authored signatures."""
+    tags = _SafeHTML.tags | {"table", "tbody", "tr", "td", "img"}
+    style_keys = {"width", "max-width", "height", "padding", "margin", "font-family", "font-size",
+                  "font-weight", "line-height", "letter-spacing", "color", "background-color",
+                  "border", "border-top", "border-right", "border-collapse", "text-decoration", "display"}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.blocked or self.hidden or tag not in self.tags:
+            return super().handle_starttag(tag, attrs)
+        values, clean = dict(attrs), {}
+        if tag == "img":
+            if values.get("src") != "cid:" + branding.LOGO_CID:
+                return  # No arbitrary image, remote resource or tracking pixel.
+            self.out.append(f'<img src="cid:{branding.LOGO_CID}" alt="Sports Cave" width="56" height="56" style="display:block;width:56px;height:56px;border:0;">')
+            return
+        if tag == "a":
+            url = safe_url(values.get("href"))
+            if url:
+                clean.update(href=url, target="_blank", rel="noopener noreferrer")
+        for name in ("width", "cellpadding", "cellspacing", "border", "colspan"):
+            if re.fullmatch(r"\d{1,3}", values.get(name, "")) and int(values[name]) <= 540:
+                clean[name] = values[name]
+        if tag == "table":
+            clean["role"] = "presentation"
+        if values.get("valign") in {"top", "middle", "bottom"}:
+            clean["valign"] = values["valign"]
+        styles = []
+        for declaration in values.get("style", "").split(";"):
+            name, _, value = declaration.partition(":")
+            name, value = name.strip().lower(), value.strip()
+            if name in self.style_keys and re.fullmatch(r"[#A-Za-z0-9 .,%'\-]+", value):
+                styles.append(f"{name}:{value}")
+        if styles:
+            clean["style"] = ";".join(styles) + ";"
+        attrs = "".join(f' {k}="{escape(v, quote=True)}"' for k, v in clean.items())
+        self.out.append(f"<{tag}{attrs}>")
+        if tag != "br":
+            self.stack.append(tag)
+
+
+def sanitize_signature(value):
+    value = str(value or "")
+    if len(value) > 64000:
+        raise ComposeError("Each signature must be 8,000 characters or fewer.")
+    if "data:image/png;base64," in value:
+        value = value.replace(branding.logo_data_uri(), "cid:" + branding.LOGO_CID)
+    if len(value) > 8000:
+        raise ComposeError("Each signature must be 8,000 characters or fewer.")
+    parser = _SignatureHTML()
+    parser.feed(value)
+    return parser.finish()
+
+
+@lru_cache(maxsize=1)
+def _signature_defaults():
+    profiles = branding.defaults()
+    for value in profiles.values():
+        value["html"] = sanitize_signature(value["html"])
+    return profiles
+
+
+def normalized_signatures(saved=None):
+    """Upgrade old personal defaults in memory; preserve custom Company Default and v2 edits."""
+    profiles = deepcopy(_signature_defaults())
+    if not saved:
+        return profiles
+    for key, original in profiles.items():
+        previous = (saved or {}).get(key, {})
+        legacy_company = "<p>Kind regards,<br><strong>Sports Cave</strong><br>Limited Edition Sports Wall Art</p>"
+        use_saved = previous.get("version") == 2 or (key == "company" and previous.get("html") not in (None, legacy_company))
+        markup = sanitize_signature(previous.get("html", "")) if use_saved else original["html"]
+        same_text = " ".join(html_to_text(markup).split()) == " ".join(html_to_text(original["html"]).split())
+        profiles[key] = {**original, "html": markup,
+                         "text": original["text"] if same_text else html_to_text(markup)}
+    return profiles
+
+
+def signature_preview(markup):
+    return sanitize_signature(markup).replace("cid:" + branding.LOGO_CID, branding.logo_data_uri())
+
+
 def plain_html(value):
     return "<p>" + escape(str(value)).replace("\n", "<br>") + "</p>"
 
@@ -170,20 +256,19 @@ def reply_recipients(header, mailbox, *, reply_all=False):
 
 
 def default_settings():
-    signatures = {}
-    for key, name, role in (("company", "Sports Cave", "Limited Edition Sports Wall Art"),
-                            ("nathan", "Nathan", "Sports Cave"), ("reina", "Reina", "Customer Support · Sports Cave")):
-        signatures[key] = {"label": {"company": "Company default", "nathan": "Nathan", "reina": "Reina"}[key],
-                           "html": f"<p>Kind regards,<br><strong>{name}</strong><br>{role}</p>"}
-        signatures[key]["text"] = html_to_text(signatures[key]["html"])
-    return {"sender_name": "Sports Cave", "signatures": signatures, "folder_mapping": {}, "sent_policy": "verify"}
+    return {"sender_name": "Sports Cave", "signatures": normalized_signatures(), "folder_mapping": {}, "sent_policy": "verify"}
 
 
 def selected_signature(settings, user, preference=None):
     if preference in SIGNATURE_KEYS:
         return preference
-    name = str(user.get("username") or user.get("display_name") or "").casefold().split(" ")[0]
-    return name if name in ("nathan", "reina") else "company"
+    # Nathan explicitly requested role defaults; the existing UUID-bound preference overrides them.
+    if user.get("id") and os_accounts.account_is_active(user):
+        if os_accounts.is_admin(user):
+            return "nathan"
+        if user.get("role") == os_accounts.ROLE_WORKER:
+            return "reina"  # Customer-facing profile: Maria. OS identity is unchanged.
+    return "company"
 
 
 def new_draft(mailbox, *, mode="new", header=None, text="", signature="company"):
@@ -249,12 +334,15 @@ def build_mime(draft, mailbox, sender_name, signatures, *, as_draft=False):
     except (ValueError, KeyError):
         raise ComposeError("This compose session is invalid. Open a new draft.") from None
     message_id = f"<sc.{operation}{'.draft.' + str(draft['revision']) if as_draft else ''}@{mailbox.split('@')[-1]}>"
-    html = sanitize_html(draft.get("html", ""))
-    signature = signatures.get(draft.get("signature"), {})
-    if signature:
-        html += sanitize_html(signature.get("html", ""))
+    body_html = sanitize_html(draft.get("html", ""))
+    signature_key = draft.get("signature") if draft.get("signature") in SIGNATURE_KEYS else "none"
+    signature = normalized_signatures(signatures).get(signature_key, {})
+    html = body_html + "<!-- sc-signature:start -->" + signature.get("html", "") + "<!-- sc-signature:end -->"
+    plain_parts = [html_to_text(body_html), signature.get("text", "")]
     if draft.get("include_quote"):
-        html += sanitize_html(draft.get("quote_html", ""))
+        quote = sanitize_html(draft.get("quote_html", ""))
+        html += "<!-- sc-quote:start -->" + quote + "<!-- sc-quote:end -->"
+        plain_parts.append(html_to_text(quote))
     msg = EmailMessage(policy=policy.SMTP)
     msg["Message-ID"] = message_id
     msg["Date"] = format_datetime(datetime.now(timezone.utc))
@@ -272,8 +360,14 @@ def build_mime(draft, mailbox, sender_name, signatures, *, as_draft=False):
             msg["References"] = " ".join(refs[-30:])
     if as_draft:
         msg["X-Sports-Cave-Draft-ID"] = str(uuid.UUID(draft["id"]))
-    msg.set_content(html_to_text(html))
+        msg["X-Sports-Cave-Compose-Version"] = "2"
+        msg["X-Sports-Cave-Signature"] = "maria" if signature_key == "reina" else signature_key
+        msg["X-Sports-Cave-Compose-Mode"] = draft.get("mode", "new")
+    msg.set_content("\n\n".join(part.strip() for part in plain_parts if part.strip()))
     msg.add_alternative(html, subtype="html")
+    if "cid:" + branding.LOGO_CID in signature.get("html", ""):
+        msg.get_payload()[-1].add_related(branding.logo_bytes(), maintype="image", subtype="png",
+            cid=f"<{branding.LOGO_CID}>", disposition="inline", filename="sports-cave-logo.png")
     total = 0
     for attachment in draft["attachments"]:
         total += len(attachment["data"])
@@ -299,13 +393,39 @@ def edit_mailbox_draft(raw, mailbox, reference):
     if body:
         text = body.get_content()
         draft["html"] = sanitize_html(text) if body.get_content_type() == "text/html" else plain_html(text)
+        if body.get_content_type() == "text/html" and message.get("X-Sports-Cave-Draft-ID"):
+            managed = re.fullmatch(r"(.*?)<!-- sc-signature:start -->(.*?)<!-- sc-signature:end -->(?:<!-- sc-quote:start -->(.*?)<!-- sc-quote:end -->)?\s*", text, re.S)
+            key = str(message.get("X-Sports-Cave-Signature", "none"))
+            key = "reina" if key == "maria" else key
+            if managed and message.get("X-Sports-Cave-Compose-Version") == "2" and key in SIGNATURE_KEYS:
+                draft.update(html=sanitize_html(managed[1]), signature=key,
+                             quote_html=sanitize_html(managed[3] or ""), include_quote=managed[3] is not None)
+                if message.get("X-Sports-Cave-Compose-Mode") in {"new", "reply", "reply_all", "forward"}:
+                    draft["mode"] = message["X-Sports-Cave-Compose-Mode"]
+            elif not managed:
+                _restore_legacy_signature(draft, text)
     draft["in_reply_to"] = next(iter(message_ids(message.get("In-Reply-To"))), "")
     draft["references"] = list(message_ids(message.get("References")))
-    if draft["in_reply_to"]:
+    if draft["in_reply_to"] and draft["mode"] not in {"reply", "reply_all"}:
         draft["mode"] = "reply"
     for part in message.walk():
+        if (part.get("Content-ID") == f"<{branding.LOGO_CID}>" and part.get_content_type() == "image/png"
+                and part.get_payload(decode=True) == branding.logo_bytes()):
+            continue  # The managed signature reattaches one logo, never an ordinary file attachment.
         if part.get_content_disposition() == "attachment" or part.get_filename():
             if part.is_multipart():
                 raise ComposeError("This draft contains an attached message. Edit it in your existing mail client.")
             add_attachment(draft, make_attachment(part.get_filename() or "attachment", part.get_payload(decode=True) or b""))
     return draft
+
+
+def _restore_legacy_signature(draft, markup):
+    """Only recognize exact V2-generated signature suffixes in OS-authored drafts."""
+    for key, name, role in (("nathan", "Nathan", "Sports Cave"), ("reina", "Reina", "Customer Support · Sports Cave"),
+                            ("company", "Sports Cave", "Limited Edition Sports Wall Art")):
+        old = f"<p>Kind regards,<br><strong>{name}</strong><br>{role}</p>"
+        match = re.fullmatch(r"(.*?)" + re.escape(old) + r"\s*(<blockquote>.*</blockquote>)?\s*", markup, re.S)
+        if match:
+            draft.update(html=sanitize_html(match[1]), signature=key,
+                         quote_html=sanitize_html(match[2] or ""), include_quote=bool(match[2]))
+            return
