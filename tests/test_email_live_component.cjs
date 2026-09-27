@@ -23,13 +23,23 @@ assert.equal(ctx.target(node).message_key,'other-message');checks++;
 assert.equal(ctx.model.active_message,'selected');checks++;
 assert.equal(ctx.target({closest(selector){return selector==='[data-folder]'?{dataset:{folder:'Archive'}}:null;}}).folder,'Archive');checks++;
 // Execute actual liveTick: busy/hidden/menu and repeated reruns cannot issue more polls.
-let polls=0,now=30000;
-const live={Date:{now:()=>now},lastLiveCheck:0,busy:false,menu:null,document:{hidden:false},model:{configured:true},emit(action){assert.equal(action,'live_check');polls++;}};
+let polls=0,now=60000;
+const live={Date:{now:()=>now},pendingSignal:'',lastLiveCheck:0,busy:false,menu:null,document:{hidden:false},model:{configured:true},emit(action){assert.equal(action,'live_check');polls++;}};
 vm.createContext(live);
 vm.runInContext(source.slice(source.indexOf('function liveTick('),source.indexOf('// Only standalone'))+';this.tick=liveTick;',live);
 live.tick();live.tick();assert.equal(polls,1);checks++;
-now=60000;live.busy=true;live.tick();live.busy=false;live.menu={};live.tick();live.menu=null;live.document.hidden=true;live.tick();assert.equal(polls,1);checks++;
+now=120000;live.busy=true;live.tick();live.busy=false;live.menu={};live.tick();live.menu=null;live.document.hidden=true;live.tick();assert.equal(polls,1);checks++;
 live.document.hidden=false;live.tick();assert.equal(polls,2);checks++;
+// Mount race: a fallback created before the shell appears must relinquish ownership.
+const timers=new Map(),lifecycle={},parent={};let timerId=0;
+const timerContext={window:{parent,addEventListener(type,fn){lifecycle[type]=fn;}},liveTick(){},
+  setInterval(fn){timers.set(++timerId,fn);return timerId;},clearInterval(id){timers.delete(id);}};
+vm.createContext(timerContext);
+vm.runInContext(source.slice(source.indexOf('// Only standalone'),source.indexOf('let sentTimer=')),timerContext);
+assert.equal(timers.size,1);checks++;
+parent.SportsCaveTopBar={};[...timers.values()][0]();assert.equal(timers.size,0);checks++;
+lifecycle.pagehide();assert.equal(timers.size,0);checks++;
+assert.equal((source.match(/setInterval\(/g)||[]).length,1);checks++;
 // The shell keeps one scheduler while preserving the original Orders interval.
 assert.match(shell,/ORDER_STATUS_REFRESH_MS = 60000/);checks++;
 assert.match(shell,/EMAIL_HEARTBEAT_MS = 30000/);checks++;

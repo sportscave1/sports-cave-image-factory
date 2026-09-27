@@ -8,7 +8,7 @@ const node={querySelector:()=>scroll,classList:{toggle(){}},scrollTop:0};
 const ctx={model:{configured:true,mailbox:'fixture',view:'mail',folder:'INBOX',threads:[],messages:[],settings:{},roles:{}},
  root:{querySelector(s){return s==='.reading'?pane:s==='.reading button:disabled'?{}:node;},querySelectorAll:()=>[],classList:{remove(){}}},
  readingStamp:'',selectionControlsDisabled:false,listStamp:'',folderStamp:'',toolbarStamp:'',
- busy:false,pending:'',pendingAction:'',queued:null,localDraft:null,collapsed:false,mobileReading:false,
+ busy:false,pending:'',pendingSignal:'',seenSignal:'',signalRetryTimer:null,pendingAction:'',queued:null,localDraft:null,collapsed:false,mobileReading:false,
  downloaded:'',focusSearch:false,historyTimer:null,views:{clear(){},put(){},get:()=>null},viewKey:()=>'',submitted:new Set(),
  window:{parent:{}},snapshot(){},inboxUnread(){},scheduleSentCheck(){},locked:()=>false,
  messages:()=>'<article><button disabled>Unavailable action</button><p>Fixture</p></article>',

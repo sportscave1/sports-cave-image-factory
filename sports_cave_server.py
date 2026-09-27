@@ -13,6 +13,8 @@ import google_seo
 from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
 import run_migrations
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
+from support_email_events import EVENTS_PATH, email_events
+from support_email_idle import IdleLifecycle
 
 
 routes = [
@@ -26,6 +28,7 @@ routes = [
     )
 ]
 routes.extend(app_branding.public_branding_routes())
+routes.append(Route(EVENTS_PATH, email_events, methods=['GET']))
 
 
 MAIN_HEALTH_PATHS = frozenset({"/_stcore/health", "/healthz"})
@@ -72,7 +75,7 @@ class _GoogleOAuthAccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
 streamlit_app = App("app.py", routes=routes)
 app = ConstantTimeHealthMiddleware(
-    app_branding.InitialDocumentBrandingMiddleware(streamlit_app)
+    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(streamlit_app))
 )
 
 

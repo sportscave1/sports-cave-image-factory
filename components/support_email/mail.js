@@ -42,7 +42,17 @@
   const views=createViewCache();
   const submitted=new Set();
   let lastLiveCheck=Date.now(), menu=null, menuTarget=null, focusSearch=false;
+  let pendingSignal='', seenSignal='';
+  let signalAttempts=0, signalRetryTimer=null;
+  function signalTick(version){
+    if(typeof version!=='string'||!version||version.length>128||version===seenSignal)return;
+    pendingSignal=version;
+    if(busy||menu||document.hidden||!model.configured)return;
+    seenSignal=version;pendingSignal='';signalAttempts=0;
+    emit('live_check',{signal_version:version});
+  }
   function liveTick(){
+    if(pendingSignal){signalTick(pendingSignal);return;}
     if(busy||menu||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
     lastLiveCheck=Date.now();emit('live_check');
   }
@@ -239,6 +249,16 @@
     // by repainting only their pane after the server acknowledges the selected reference.
     if(selectionControlsDisabled&&!locked(model)&&model.view==='mail')paintReading(true);
     wire();fit();
+    if(pendingSignal&&!busy)setTimeout(()=>signalTick(pendingSignal),0);
+    clearTimeout(signalRetryTimer);
+    if(seenSignal&&model.idle_version!==seenSignal&&signalAttempts<3&&!busy){
+      const version=seenSignal;
+      signalRetryTimer=setTimeout(()=>{
+        if(!busy&&!menu&&!document.hidden&&seenSignal===version){
+          signalAttempts++;emit('live_check',{signal_version:version});
+        }
+      },1500);
+    }
     if(focusSearch&&!busy){focusSearch=false;$('search')?.focus();}
     if(model.download && model.download.id!==downloaded){
       downloaded=model.download.id;
@@ -318,7 +338,7 @@
     const message=model.messages.find(m=>m.key===(key||model.active_message));
     return message?{kind:'message',message_key:message.key,unread:message.unread,starred:message.starred,folder:message.folder}:null;
   }
-  function closeMenu(){menu?.remove();menu=null;menuTarget=null;}
+  function closeMenu(){menu?.remove();menu=null;menuTarget=null;if(pendingSignal)setTimeout(()=>signalTick(pendingSignal),0);}
   function showMenu(target,x,y,items=null,heading=''){
     closeMenu();if(!target||(busy&&!['resolve_thread','live_check'].includes(pendingAction)))return;
     menuTarget=target;menu=document.createElement('div');menu.className='mail-context';menu.setAttribute('role','menu');menu.setAttribute('aria-label',target.kind==='folder'?'Folder actions':'Message actions');
@@ -375,12 +395,13 @@
       if($('send-status'))$('send-status').innerHTML=sendStatus(model);
       return;
     }
-    if(['sc:email-unread','sc:email-tick'].includes(event.data?.type)){
+    if(['sc:email-unread','sc:email-tick','sc:email-change'].includes(event.data?.type)){
       // The OS header runs in a sibling Streamlit srcdoc iframe, not the parent realm.
       let trusted=event.source===window.parent;
       try{trusted=trusted||[...window.parent.document.querySelectorAll('iframe')].some(f=>f.contentWindow===event.source&&f.dataset.scTopBar==='true');}catch(_){}
       if(!trusted)return;
       if(event.data.type==='sc:email-unread')inboxUnread(event.data);
+      else if(event.data.type==='sc:email-change')signalTick(event.data.version);
       else liveTick();
       return;
     }
@@ -388,5 +409,7 @@
     if(event.data.type==='streamlit:render')render(event.data.args.model);
   });
   window.addEventListener('resize',fit);try{window.parent.addEventListener('resize',fit);new ResizeObserver(fit).observe(window.frameElement);}catch(_){}
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&pendingSignal)signalTick(pendingSignal);});
+  window.addEventListener('pagehide',()=>clearTimeout(signalRetryTimer));
   post('streamlit:componentReady',{apiVersion:1});fit();
 })();

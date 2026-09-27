@@ -11,6 +11,10 @@ if '--serve' in sys.argv:
     from streamlit.web.server.starlette import App
     import top_bar_api
     from tests.fixtures import email_notification_runtime as fixture
+    from tests.fixtures.email_idle_runtime import watcher
+    from support_email_idle import IdleLifecycle
+    from support_email_events import EVENTS_PATH, event_stream
+    from starlette.responses import StreamingResponse
 
     async def status(request):return JSONResponse({'ok':True,**fixture.status()})
     async def orders(request):return JSONResponse({'ok':True,'action_required_count':7,'badge_label':'7','notification':{}})
@@ -23,10 +27,13 @@ if '--serve' in sys.argv:
     async def search(request):return JSONResponse({'ok':True,'results':top_bar_api.build_search_index({
         'allowed_routes':[page['route'] for page in top_bar_api.os_accounts.PAGE_REGISTRY],
         'can_view_activity':True})})
+    async def email_events_fixture(request):
+        return StreamingResponse(event_stream(request),media_type='text/event-stream')
     routes=[Route(top_bar_api.EMAIL_STATUS_PATH,status),Route(top_bar_api.ORDER_STATUS_PATH,orders),
             Route(top_bar_api.NOTIFICATIONS_PATH,events),Route(top_bar_api.DAILY_PLANNER_STATUS_PATH,empty),
             Route(top_bar_api.REPAIR_REQUESTS_PATH,empty),Route(top_bar_api.SEARCH_INDEX_PATH,search)]
-    uvicorn.run(App(str(Path(__file__).resolve()),routes=routes),host='127.0.0.1',port=8504)
+    routes.append(Route(EVENTS_PATH,email_events_fixture))
+    uvicorn.run(IdleLifecycle(App(str(Path(__file__).resolve()),routes=routes),watcher),host='127.0.0.1',port=8504)
 else:
     from unittest.mock import patch
     import streamlit as st
@@ -39,6 +46,7 @@ else:
     from support_email_workspace import Workspace
     import top_bar
     import base64
+    import time
     from tests.email_v2_fixtures import CONFIG,USER,WORKER,fixture_smtp
     from tests.fixtures import email_notification_runtime as fixture
 
@@ -56,6 +64,12 @@ else:
             fixture.arrive()
         if st.button('Simulate Thunderbird read + flag'):
             fixture.other_client()
+        if st.button('Timeout next live check'):
+            fixture.MAILBOX_FIXTURE.fail_next_check = True
+        if st.button('Simulate two-minute outage'):
+            fixture.MAILBOX_FIXTURE.outage_until = time.monotonic() + 120
+        if st.button('Recover fixture server'):
+            fixture.MAILBOX_FIXTURE.outage_until = 0
     logo=Path(__file__).resolve().parents[2]/'assets/sports-cave-os-app-icon.webp'
     logo_src='data:image/webp;base64,'+base64.b64encode(logo.read_bytes()).decode('ascii')
     config=top_bar.top_bar_config(user,logo_src=logo_src,current_route=names.get(route,'Dashboard'))

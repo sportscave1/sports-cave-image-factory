@@ -1,0 +1,32 @@
+// Exercise actual push-selection logic; no browser timers or network are required.
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync('components/support_email/mail.js','utf8');
+const sent=[];
+const ctx={pendingSignal:'',seenSignal:'',signalAttempts:0,busy:false,menu:null,document:{hidden:false},
+ model:{configured:true},emit:(action,value)=>sent.push({action,value})};
+vm.createContext(ctx);
+vm.runInContext(source.slice(source.indexOf('function signalTick('),source.indexOf('function liveTick(')),ctx);
+ctx.signalTick('one');ctx.signalTick('one');
+assert.equal(sent.length,1);assert.equal(sent[0].value.signal_version,'one');
+ctx.busy=true;ctx.signalTick('two');ctx.signalTick('three');assert.equal(sent.length,1);
+ctx.busy=false;ctx.signalTick(ctx.pendingSignal);assert.equal(sent.length,2);
+assert.equal(sent[1].value.signal_version,'three');
+ctx.document.hidden=true;ctx.signalTick('four');assert.equal(sent.length,2);
+ctx.document.hidden=false;ctx.signalTick(ctx.pendingSignal);assert.equal(sent.length,3);
+ctx.signalTick({untrusted:true});assert.equal(sent.length,3);
+const deferred=[];
+ctx.setTimeout=fn=>deferred.push(fn);
+vm.runInContext(source.slice(source.indexOf('function closeMenu('),source.indexOf('function showMenu(')),ctx);
+ctx.menu={remove(){}};ctx.signalTick('after-menu');assert.equal(sent.length,3);
+ctx.closeMenu();assert.equal(deferred.length,1);deferred.shift()();
+assert.equal(sent.length,4);assert.equal(sent[3].value.signal_version,'after-menu');
+assert.match(source,/signalAttempts<3/);assert.match(source,/1500/);
+assert.match(source,/snapshot\(\); \/\/ Keep edits made/);
+assert.match(source,/sc:email-change/);
+const shell=fs.readFileSync('components/sports_cave_top_bar/index.html','utf8');
+assert.match(shell,/emailEventsController\?\.abort\(\)/);
+assert.match(shell,/signal: controller.signal/);
+assert.match(shell,/emailEventsController\) return/);
+assert.match(shell,/Authorization: `Bearer \$\{state.config.authToken/);
+assert.doesNotMatch(shell,/emailEventsUrl.*(?:\?token|authToken=)/);
+console.log('IDLE push coalescing, busy/hidden preservation, retry bound and SSE lifecycle checks passed.');

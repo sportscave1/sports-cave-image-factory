@@ -1600,6 +1600,49 @@
       }
     };
     let emailStatusPending = false;
+    let emailEventsController = null, emailEventVersion = '', emailEventsRetry = 1000;
+    const startEmailEvents = async () => {
+      if (state.destroyed || !state.config.emailEnabled || !state.config.emailEventsUrl || emailEventsController) return;
+      const controller = new AbortController();
+      emailEventsController = controller;
+      try {
+        // fetch streaming supports the existing Bearer token without putting it in a URL.
+        const response = await parentWindow.fetch(state.config.emailEventsUrl, {
+          headers: {Authorization: `Bearer ${state.config.authToken || ""}`},
+          signal: controller.signal, cache: 'no-store', credentials: 'same-origin'
+        });
+        if (!response.ok || !response.body) throw new Error('Mailbox events unavailable');
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        let buffer = '';
+        emailEventsRetry = 1000;
+        while (!state.destroyed) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream:true});
+          if (buffer.length > 16384) throw new Error('Invalid mailbox event');
+          let end;
+          while ((end = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+            const data = block.split('\n').find(line => line.startsWith('data: '));
+            if (!data) continue;
+            const event = JSON.parse(data.slice(6));
+            if (!event.version || event.version === emailEventVersion) continue;
+            emailEventVersion = event.version;
+            applyEmailStatus({unread_count:event.unseen, checked_at:event.checked_at});
+            doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
+              frame.contentWindow?.postMessage({type:'sc:email-change', version:event.version}, parentWindow.location.origin));
+            // Existing durable cursor/notification loader handles the new UID once.
+            void refreshEmailStatus();
+          }
+        }
+      } catch (_error) {
+        emailEventsRetry = Math.min(60000, emailEventsRetry * 2);
+      } finally {
+        controller.abort();
+        if (emailEventsController === controller) emailEventsController = null;
+        if (!state.destroyed) later(startEmailEvents, emailEventsRetry);
+      }
+    };
     const refreshEmailStatus = async () => {
       if (!state.config.emailEnabled || !state.config.emailStatusUrl || emailStatusPending) return;
       emailStatusPending = true;
@@ -2905,6 +2948,7 @@
           }, 1000));
         }
         root.dataset.installStage = "ready";
+        void startEmailEvents();
       },
       beginNavigation(routeKey = "", label = "", sourceElement = null) {
         return beginNavigation(routeKey, label, sourceElement);
@@ -2951,6 +2995,7 @@
       },
       destroy({preserveDom = false} = {}) {
         state.destroyed = true;
+        emailEventsController?.abort();
         state.plannerDataRefreshPending = false;
         listenerController.abort();
         if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);

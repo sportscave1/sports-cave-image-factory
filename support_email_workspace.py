@@ -261,10 +261,16 @@ class Workspace:
                 flags.add(flag) if enabled else flags.discard(flag)
                 row.update(flags=tuple(sorted(flags)), unread="\\Seen" not in flags)
 
-    def live_check(self):
-        """The existing shell heartbeat invokes this; selections/reruns do not."""
+    def live_check(self, signal_version=None):
+        """Heartbeat or validated push invokes this; selections/reruns do not."""
         now = time.monotonic()
-        if now < self.state.get("load_retry_at", 0) or now - self.state.get("live_checked_at", 0) < LIVE_INTERVAL:
+        pushed = False
+        if signal_version and signal_version != self.state.get('idle_version'):
+            from support_email_idle import HUB
+            signal = HUB.snapshot()
+            pushed = (signal.get('version') == signal_version and signal.get('mailbox') == self.config.address.casefold()
+                      and time.time() - signal.get('checked_at', 0) < 120)
+        if now < self.state.get("load_retry_at", 0) or (not pushed and now - self.state.get("live_checked_at", 0) < LIVE_INTERVAL):
             return
         self.state["live_checked_at"] = now  # Failures are bounded too.
         if not self.state.get("loaded") or self.state.get("error"):
@@ -310,6 +316,8 @@ class Workspace:
                 "refreshed_at": datetime.fromtimestamp(delta["checked_at"], timezone.utc)}
             s["refreshed_at"] = s["snapshot"]["refreshed_at"]
             s["live_error"] = ""
+            if pushed:
+                s['idle_version'] = signal_version
             s.update(load_failures=0, load_retry_at=0)
             if changed:
                 s["threads"] = sorted(build_threads(rows, self.config.address), key=lambda t: t["last_activity"], reverse=True)
@@ -452,7 +460,7 @@ class Workspace:
             self._sync_draft(event.get("draft"))
             action = event.get("action")
             if action == "live_check":
-                self.live_check()
+                self.live_check(event.get('signal_version'))
             elif action in {"refresh_folder", "search_folder", "mark_folder_read"}:
                 self.folder_action(action, event.get("folder"), confirmed=event.get("confirmed") is True)
             elif action in {"refresh", "folder", "search", "load_more"}:
@@ -823,6 +831,7 @@ class Workspace:
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
             "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
             "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],
+            "idle_version": s.get("idle_version", ""),
             "refreshed": formatted_date(s.get("refreshed_at"), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),

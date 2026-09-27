@@ -125,6 +125,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "repairCurrentSection": repair_section_for_route(current_route),
         "orderStatusUrl": "/api/os/top-bar/order-status",
         "emailStatusUrl": "/api/os/top-bar/email-status",
+        "emailEventsUrl": "/api/os/top-bar/email-events",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
         "dailyPlannerTimerScope": planner_timer_scope,
