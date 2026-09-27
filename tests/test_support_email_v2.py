@@ -438,9 +438,10 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(self.w.model()["messages"][1]["expanded"])
         self.assertEqual(self.state['active_message'],reference_key(original))
 
-    def test_failure_hides_stale_inbox_and_preserves_compose(self):
+    def test_failure_labels_cached_inbox_and_preserves_compose(self):
         d=self.compose();self.imap.fail=True;self.event("refresh")
-        self.assertEqual(self.w.model()["threads"],[])
+        self.assertTrue(self.w.model()["threads"])
+        self.assertIn("last successful", self.w.model()["live_error"])
         self.assertEqual(self.state["draft"]["id"],d["id"])
         self.assertNotIn("fixture-secret",json.dumps(self.w.model()))
 

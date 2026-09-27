@@ -1,5 +1,6 @@
 """Event-driven mailbox controller; only explicit actions send or change mail."""
 import base64
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import hashlib
 import logging
@@ -22,7 +23,7 @@ from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT
 
 LOGGER = logging.getLogger(__name__)
 FOLDER_TTL = 300
-LIVE_INTERVAL = 25  # Coalesce the shell's 30-second ticks despite scheduling jitter.
+LIVE_INTERVAL = 55  # The existing 30-second shell heartbeat yields one check/minute.
 
 
 def reference_key(header):
@@ -72,6 +73,23 @@ class Workspace:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
     def load(self, *, force=False, previews=True):
+        if not force and time.monotonic() < self.state.get("load_retry_at", 0):
+            return
+        refresh = getattr(self.imap, "interactive_refresh", None)
+        with refresh() if force and refresh else nullcontext():
+            self._load(force=force, previews=previews)
+
+    def _unavailable(self, message):
+        s = self.state
+        s["load_failures"] = min(4, s.get("load_failures", 0) + 1)
+        s["load_retry_at"] = time.monotonic() + min(120, 15 * 2 ** (s["load_failures"] - 1))
+        same_view = s.get("snapshot_view") == (s.get("folder"), s["query"], s["field"])
+        if s.get("snapshot") and same_view:
+            s.update(error="", live_error="Connection interrupted · Reconnecting… Showing last successful mailbox view.")
+        else:
+            s["error"] = message
+
+    def _load(self, *, force=False, previews=True):
         if not self.config.configured:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
@@ -79,9 +97,7 @@ class Workspace:
             from support_email_notifications import invalidate
             invalidate()
             self.cache.clear()
-            self.state.pop("folder_cache", None)
             self.state.pop("folder_failure", None)
-            self.resolved_threads.clear()
             self.state["history_pending"] = False
         if "settings_available" not in self.state or force:
             try:
@@ -89,10 +105,10 @@ class Workspace:
                 self.state.update(settings=settings, preference=preference, settings_available=True)
             except Exception:
                 self.state["settings_available"] = False
-        folders = self.state.get("folder_cache")
+        folders = None if force else self.state.get("folder_cache")
         failure = self.state.get("folder_failure", {})
         if failure.get("expires", 0) > time.monotonic():
-            self.state.update(error=failure["error"], threads=[])
+            self._unavailable(failure["error"])
             return
         if not folders or folders["expires"] <= time.monotonic():
             folders = cached_read({}, "folders", self.imap.discover_folders)
@@ -104,16 +120,15 @@ class Workspace:
                 if isinstance(inbox.get("unread"), int):
                     self.state["inbox_status"] = {"unread_count": inbox["unread"], "checked_at": time.time()}
         if folders["error"]:
-            self.state.pop("folder_cache", None)
             # Throttle failed reruns separately; never cache an empty successful mailbox.
-            self.state["folder_failure"] = {"error": folders["error"], "expires": time.monotonic() + 5}
-            self.state.update(error=folders["error"], threads=[])
+            self._unavailable(folders["error"])
+            self.state["folder_failure"] = {"error": folders["error"], "expires": self.state["load_retry_at"]}
             return
         self.state["folders"] = folders["data"]["folders"]
         self.state["capabilities"] = list(folders["data"]["capabilities"])
         names = [f["name"] for f in self.state["folders"]]
         if not names:
-            self.state.update(error="No selectable mailbox folders were returned.", threads=[])
+            self._unavailable("No selectable mailbox folders were returned.")
             return
         if self.state.get("folder") not in names:
             self.state["folder"] = self.roles.get("inbox", names[0])
@@ -121,12 +136,15 @@ class Workspace:
         entry = cached_read(self.cache, key, lambda: self.imap.list_headers(self.state["limit"], self.state["folder"],
                             query=self.state["query"], field=self.state["field"], previews=previews))
         if entry["error"]:
-            self.state.update(error=entry["error"], threads=[])
+            self.cache.pop(key, None)  # Retry timing belongs to backoff, never a failed data cache.
+            self._unavailable(entry["error"])
             return
         snapshot = entry["data"]
         signature = (key, entry["refreshed_at"])
         changed = self.state.get("snapshot_signature") != signature
-        self.state.update(error="", live_error="", refreshed_at=entry["refreshed_at"], snapshot=snapshot)
+        self.state.update(error="", live_error="", load_failures=0, load_retry_at=0,
+                          snapshot_view=(self.state["folder"], self.state["query"], self.state["field"]),
+                          refreshed_at=entry["refreshed_at"], snapshot=snapshot)
         if changed:
             self.state["mailbox_version"] += 1
             self.state["snapshot_signature"] = signature
@@ -246,11 +264,11 @@ class Workspace:
     def live_check(self):
         """The existing shell heartbeat invokes this; selections/reruns do not."""
         now = time.monotonic()
-        if now - self.state.get("live_checked_at", 0) < LIVE_INTERVAL:
+        if now < self.state.get("load_retry_at", 0) or now - self.state.get("live_checked_at", 0) < LIVE_INTERVAL:
             return
         self.state["live_checked_at"] = now  # Failures are bounded too.
         if not self.state.get("loaded") or self.state.get("error"):
-            self.load(force=True, previews=False)
+            self.load(previews=False)
             return
         try:
             s = self.state
@@ -289,9 +307,10 @@ class Workspace:
             s["snapshot"] = {**old, "messages": rows, "uidvalidity": delta["uidvalidity"], "live_uid": delta["live_uid"],
                 "total": delta["total"], "matched": matched,
                 "has_more": (matched if s["query"] else delta["total"]) > len(rows),
-                "refreshed_at": datetime.now(timezone.utc)}
+                "refreshed_at": datetime.fromtimestamp(delta["checked_at"], timezone.utc)}
             s["refreshed_at"] = s["snapshot"]["refreshed_at"]
             s["live_error"] = ""
+            s.update(load_failures=0, load_retry_at=0)
             if changed:
                 s["threads"] = sorted(build_threads(rows, self.config.address), key=lambda t: t["last_activity"], reverse=True)
                 s["thread_index"] = {t["thread_key"]: t for t in s["threads"]}
@@ -307,8 +326,10 @@ class Workspace:
                 self._refresh_rows(membership_changed=membership_changed)
                 s["history_pending"] = False  # Polling never launches history searches.
         except Exception as error:
+            if isinstance(error, MailboxError) and error.code == "busy":
+                return  # A skipped/coalesced poll says nothing about connection health.
             LOGGER.info("Email live check unavailable (%s)", type(error).__name__)
-            self.state["live_error"] = "Live updates paused. Retrying automatically."
+            self._unavailable("Mailbox is temporarily unavailable. Reconnecting automatically.")
 
     def folder_action(self, action, folder, *, confirmed=False):
         if folder not in {f["name"] for f in self.state.get("folders", [])}:

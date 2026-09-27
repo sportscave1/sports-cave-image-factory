@@ -1,5 +1,5 @@
 """Live IMAP adapter. Reads are non-mutating; writes require explicit method calls."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, ExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email import policy
@@ -17,8 +17,10 @@ import re
 import socket
 import ssl
 import time
+import errno
 from typing import Protocol
 from urllib.parse import urlsplit
+from support_email_runtime import RUNTIME, Deferred, operation
 
 
 LOGGER = logging.getLogger(__name__)
@@ -46,26 +48,45 @@ FAILURES = {
     "select": "Mailbox folder could not be opened. Retry connection.",
     "temporary": SAFE_ERROR,
     "operation": SAFE_ERROR,
+    "status": "Mailbox status check failed. Retrying automatically.",
+    "refused": SAFE_ERROR, "network": SAFE_ERROR, "reset": SAFE_ERROR,
+    "bye": SAFE_ERROR, "limit": SAFE_ERROR, "protocol": SAFE_ERROR,
+    "deferred": "Connection interrupted. Reconnecting automatically.",
+    "busy": "Mailbox is busy. Try again shortly.",
 }
 
 
 def _failure(error, stage):
-    if isinstance(error, TimeoutError):
+    if isinstance(error, Deferred):
+        code = "deferred"
+    elif isinstance(error, TimeoutError):
         code = "timeout"
+    elif isinstance(error, (ssl.SSLEOFError, ssl.SSLZeroReturnError)):
+        code = "reset"
     elif isinstance(error, ssl.SSLError):
         code = "tls"
     elif isinstance(error, socket.gaierror):
         code = "dns"
-    elif isinstance(error, (imaplib.IMAP4.abort, OSError, EOFError)):
+    elif isinstance(error, imaplib.IMAP4.error) and re.search(r"too many|connection limit|rate.?limit|maximum.*connections", str(error), re.I):
+        code = "limit"
+    elif isinstance(error, imaplib.IMAP4.abort):
+        code = "bye"
+    elif isinstance(error, ConnectionRefusedError):
+        code = "refused"
+    elif isinstance(error, (ConnectionResetError, BrokenPipeError, EOFError)):
+        code = "reset"
+    elif isinstance(error, OSError) and error.errno in {errno.ENETUNREACH, errno.EHOSTUNREACH}:
+        code = "network"
+    elif isinstance(error, OSError):
         code = "temporary"
     elif isinstance(error, imaplib.IMAP4.error) and stage == "authentication":
         code = "authentication"
-    elif stage in {"folders", "select"}:
+    elif stage in {"folders", "select", "status"}:
         code = stage
     else:
-        code = "operation"
+        code = "protocol"
     return MailboxError(FAILURES[code], code=code,
-                        retryable=code in {"timeout", "dns", "temporary"})
+                        retryable=code in {"timeout", "dns", "temporary", "refused", "network", "reset", "bye"})
 
 
 def _retry_read(method):
@@ -74,11 +95,12 @@ def _retry_read(method):
     def read(self, *args, **kwargs):
         for attempt in range(2):
             try:
-                return method(self, *args, **kwargs)
+                with operation(force=True) if attempt else nullcontext():
+                    return method(self, *args, **kwargs)
             except MailboxError as error:
                 if attempt or not error.retryable:
                     raise
-                LOGGER.info("Support email retrying read (%s)", error.code)
+                LOGGER.info("email_imap_retry code=%s", error.code)
     return read
 
 
@@ -424,21 +446,72 @@ def search_criteria(query, field="TEXT", since=None, before=None):
     return criteria
 
 
+_SSL_CLASS = imaplib.IMAP4_SSL
+
+
+def _close_resources(connection):
+    for attr in ("_file", "file", "sock"):
+        resource = vars(connection).get(attr)
+        if resource is not None:
+            try:
+                resource.close()
+            except Exception:
+                pass
+
+
+class _ManagedSSL(_SSL_CLASS):
+    """Also release partially constructed sockets on TLS/greeting failure."""
+    def __init__(self, *args, **kwargs):
+        try:
+            super().__init__(*args, **kwargs)
+        except BaseException:
+            _close_resources(self)
+            raise
+
+
 class ImapProvider:
-    def __init__(self, configuration, *, connection_factory=None):
+    def __init__(self, configuration, *, connection_factory=None, runtime=None, background=False):
         self.configuration = configuration
-        self.connection_factory = connection_factory or imaplib.IMAP4_SSL
+        self.connection_factory = connection_factory or (_ManagedSSL if imaplib.IMAP4_SSL is _SSL_CLASS else imaplib.IMAP4_SSL)
+        # Injected transports are isolated by default; load tests explicitly share a runtime.
+        self.runtime = runtime if runtime is not None else (RUNTIME if connection_factory is None else None)
+        self.background = background
+
+    @contextmanager
+    def interactive_refresh(self):
+        if self.runtime:
+            self.runtime.invalidate(self.configuration.scope)
+        with operation(force=True):
+            yield
 
     @contextmanager
     def _connection(self, folder="INBOX", expected_validity=None, *, write=False):
+        cfg = self.configuration
+        gate = self.runtime.connection(cfg.scope, timeout=cfg.timeout, background=self.background) if self.runtime else nullcontext()
+        try:
+            with gate:
+                with self._wire_connection(folder, expected_validity, write=write) as connection:
+                    yield connection
+        except Deferred as error:
+            code = "deferred" if error.reason == "backoff" else "busy"
+            raise MailboxError(FAILURES[code], code=code) from None
+        finally:
+            if write and self.runtime:
+                # Invalidates snapshots, including in-flight poll results; never sockets.
+                self.runtime.invalidate(cfg.scope)
+
+    @contextmanager
+    def _wire_connection(self, folder="INBOX", expected_validity=None, *, write=False):
         conn = None
         stage = "configuration"
+        started = time.monotonic()
         try:
             cfg = self.configuration
             if not cfg.configured:
                 raise MailboxError(FAILURES[stage], code=stage)
             argument = folder_argument(folder) if folder is not None else None
             stage = "connect"
+            LOGGER.debug("email_imap_check_started")
             conn = self.connection_factory(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=cfg.timeout)
             conn.debug = 0
             stage = "authentication"
@@ -455,29 +528,43 @@ class ImapProvider:
                 raise MailboxError("Mailbox identifiers changed. Refresh Inbox before opening this message.")
             stage = "operation"
             yield conn, count, uidvalidity
+            LOGGER.debug("email_imap_check_success duration_ms=%d", (time.monotonic() - started) * 1000)
         except MailboxError:
             raise
         except Exception as error:
             # Never log provider response text, arguments, repr, tracebacks or credentials.
             failure = _failure(error, stage)
-            LOGGER.warning("Support email IMAP failed (stage=%s code=%s type=%s)", stage, failure.code, type(error).__name__)
+            LOGGER.warning("email_imap_check_failure stage=%s code=%s type=%s errno=%s winerror=%s duration_ms=%d",
+                stage, failure.code, type(error).__name__,
+                getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
+                getattr(error, "winerror", None) if isinstance(getattr(error, "winerror", None), int) else None,
+                (time.monotonic() - started) * 1000)
             raise failure from None
         finally:
             if conn is not None:
                 try:
                     conn.logout()  # Never CLOSE/EXPUNGE, even after a write.
                 except Exception:
+                    pass
+                finally:
+                    # logout can time out or be interrupted. shutdown only closes the
+                    # transport; unlike IMAP CLOSE it never expunges mailbox messages.
                     try:
                         conn.shutdown()
                     except Exception:
                         pass
+                    finally:
+                        _close_resources(conn)
 
     @staticmethod
     def _ok(response, *, stage="operation"):
         status, data = response
         if status != "OK":
-            LOGGER.warning("Support email IMAP command rejected (stage=%s)", stage)
-            raise MailboxError(FAILURES[stage], code=stage, retryable=stage == "folders")
+            # Classify known server responses but never print their text.
+            limited = bool(re.search(r"too many|connection limit|rate.?limit|maximum.*connections", str(data), re.I))
+            code = "limit" if limited else "bye" if status == "BYE" else stage
+            LOGGER.warning("email_imap_check_failure stage=%s code=%s", stage, code)
+            raise MailboxError(FAILURES[code], code=code, retryable=code == "folders")
         return data
 
     def _list_folders(self, conn):
@@ -499,17 +586,36 @@ class ImapProvider:
                     "uidvalidity": validity}
 
     def _inbox_status(self, conn):
-        raw = self._ok(conn.status('"INBOX"', "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)"))
+        return self._folder_status("INBOX", lambda: conn)
+
+    def _folder_status(self, folder, connection):
+        scope = self.configuration.scope
+        key = ("status", folder)
+        cached = self.runtime.get(scope, key) if self.runtime else None
+        if cached is not None:
+            return cached
+        generation = self.runtime.generation(scope) if self.runtime else 0
+        try:
+            raw = self._ok(connection().status(folder_argument(folder), "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)"), stage="status")
+        except MailboxError:
+            raise
+        except Exception as error:
+            failure = _failure(error, "status")
+            LOGGER.warning("email_imap_check_failure stage=status code=%s type=%s", failure.code, type(error).__name__)
+            raise failure from None
         values = dict(re.findall(rb"\b(UNSEEN|MESSAGES|UIDNEXT|UIDVALIDITY) (\d+)",
                                 b" ".join(v for v in raw if isinstance(v, bytes))))
         if len(values) != 4 or int(values[b"UIDNEXT"]) < 1 or int(values[b"UIDVALIDITY"]) < 1:
             raise MailboxError(SAFE_ERROR)
-        return {key.decode().lower(): int(value) for key, value in values.items()}
+        status = {key.decode().lower(): int(value) for key, value in values.items()}
+        if self.runtime:
+            self.runtime.put(scope, key, status, generation)
+        return status
 
     def get_unread_count(self):
         """Dedicated lightweight count; no SELECT, headers, MIME or attachments."""
-        with self._connection(None) as (conn, _, __):
-            return self._inbox_status(conn)["unseen"]
+        with ExitStack() as stack:
+            return self._folder_status("INBOX", lambda: stack.enter_context(self._connection(None))[0])["unseen"]
 
     def notification_snapshot(self, cursor=None):
         """One bounded operation: STATUS, then at most 50 new header-only UIDs.
@@ -517,8 +623,14 @@ class ImapProvider:
         BODY.PEEK[HEADER.FIELDS] is IMAP's header fetch syntax; no message body
         section, preview, structure or attachment is requested here.
         """
-        with self._connection(None) as (conn, _, __):
-            status = self._inbox_status(conn)
+        with ExitStack() as stack:
+            conn = None
+            def connection():
+                nonlocal conn
+                if conn is None:
+                    conn = stack.enter_context(self._connection(None))[0]
+                return conn
+            status = self._folder_status("INBOX", connection)
             validity = str(status["uidvalidity"])
             previous = cursor or {}
             high = status["uidnext"] - 1
@@ -526,6 +638,7 @@ class ImapProvider:
             if str(previous.get("uidvalidity")) == validity:
                 low = int(previous.get("last_uid", 0)) + 1
                 if low <= high:
+                    conn = connection()
                     high = min(high, low + 49)
                     self._ok(conn.select('"INBOX"', readonly=True))
                     _, selected = conn.response("UIDVALIDITY")
@@ -633,15 +746,25 @@ class ImapProvider:
                     "live_uid": max(baseline, max((int(m["uid"]) for m in rows), default=0)),
                     "refreshed_at": datetime.now(timezone.utc), "has_more": matched > limit}
 
-    @_retry_read
     def live_changes(self, folder, snapshot, *, limit=50, query="", field="TEXT"):
+        # Different sessions share immutable deltas, never a connection or selection.
+        key = ("live", folder, str(snapshot.get("uidvalidity")), snapshot.get("live_uid"), limit, query, field,
+               tuple(sorted({str(m["uid"]) for m in [*snapshot.get("messages", [])[:1000],
+                   *snapshot.get("visible_messages", [])[:100]] if m["folder"] == folder})))
+        loader = lambda: self._live_changes(folder, snapshot, limit=limit, query=query, field=field)
+        try:
+            return self.runtime.check(self.configuration.scope, key, loader) if self.runtime else loader()
+        except Deferred as error:
+            code = "deferred" if error.reason == "backoff" else "busy"
+            raise MailboxError(FAILURES[code], code=code) from None
+
+    def _live_changes(self, folder, snapshot, *, limit=50, query="", field="TEXT"):
         """Bounded current-view sync: counters, loaded UID flags and new headers only."""
         limit = min(max(int(limit), 1), 1000)
         with self._connection(folder) as (conn, count, validity):
-            raw = self._ok(conn.status(folder_argument(folder), "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)"))
-            values = dict(re.findall(rb"\b(UNSEEN|MESSAGES|UIDNEXT|UIDVALIDITY) (\d+)",
-                                    b" ".join(v for v in raw if isinstance(v, bytes))))
-            if len(values) != 4 or values[b"UIDVALIDITY"].decode() != validity or int(values[b"UIDNEXT"]) < 1:
+            status = self._folder_status(folder, lambda: conn)
+            values = {key.upper().encode(): str(value).encode() for key, value in status.items()}
+            if str(status["uidvalidity"]) != validity:
                 raise MailboxError("Mailbox changed during the live check. Refresh to reconnect.")
             # Include a bounded opened thread/notification target outside the list page.
             known = list({m["uid"]: m for m in [*snapshot.get("messages", [])[:1000],

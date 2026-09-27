@@ -70,9 +70,12 @@ class LiveProviderTests(unittest.TestCase):
         for forbidden in ('BODY.PEEK[]','BODY.PEEK[1]','BODYSTRUCTURE'):
             self.assertNotIn(forbidden,str(self.wire.calls))
 
-    def test_live_stale_socket_retries_once_with_isolated_connection(self):
+    def test_live_stale_socket_defers_retry_to_next_bounded_check(self):
         bad = LiveWire();bad.status = Mock(side_effect=imaplib.IMAP4.abort('fixture-secret'))
         self.factory.side_effect = [bad,self.wire]
+        with self.assertRaises(provider.MailboxError):
+            self.adapter.live_changes('INBOX', {'messages':[], 'uidvalidity':'500'})
+        self.assertEqual(self.factory.call_count,1)
         result = self.adapter.live_changes('INBOX', {'messages':[], 'uidvalidity':'500'})
         self.assertEqual(result['unread'], 2)
         self.assertEqual(self.factory.call_count,2)
@@ -159,8 +162,10 @@ class LiveWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.imap.calls,[])
         self.assertEqual(len(self.state['processed']),recorded)
         self.imap.fail=True;self.tick()
-        self.assertIn('paused',self.state['live_error'])
-        self.imap.fail=False;self.tick();self.assertEqual(self.state['live_error'],'')
+        self.assertIn('Reconnecting',self.state['live_error'])
+        self.imap.fail=False;self.tick();self.assertTrue(self.state['live_error'])
+        self.state['load_retry_at']=0
+        self.tick();self.assertEqual(self.state['live_error'],'')
 
     def test_only_visible_message_marks_read_and_reopen_does_not_store_again(self):
         before=self.w.model()['inbox_status']['unread_count']

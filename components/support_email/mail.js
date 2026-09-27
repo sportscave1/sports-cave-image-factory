@@ -38,16 +38,21 @@
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
+  let selectionControlsDisabled=false;
   const views=createViewCache();
   const submitted=new Set();
   let lastLiveCheck=Date.now(), menu=null, menuTarget=null, focusSearch=false;
   function liveTick(){
-    if(busy||menu||document.hidden||!model.configured||Date.now()-lastLiveCheck<25000)return;
+    if(busy||menu||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
     lastLiveCheck=Date.now();emit('live_check');
   }
   // Only standalone fixtures/embeds need a timer; the OS supplies its existing heartbeat.
   let standaloneTimer=null;
-  try{if(!window.parent.SportsCaveTopBar)standaloneTimer=setInterval(liveTick,30000);}catch(_){}
+  try{if(!window.parent.SportsCaveTopBar)standaloneTimer=setInterval(()=>{
+    // The shell may finish mounting after this iframe. Relinquish fallback ownership.
+    if(window.parent.SportsCaveTopBar){clearInterval(standaloneTimer);standaloneTimer=null;return;}
+    liveTick();
+  },30000);}catch(_){}
   window.addEventListener('pagehide',()=>clearInterval(standaloneTimer));
   let sentTimer=null;
   function scheduleSentCheck(){
@@ -92,7 +97,7 @@
     if(action==='open_thread'){
       const hit=views.get(viewKey(model,values.thread_key));
       model={...model,view:'mail',selected:values.thread_key,messages:hit?.messages||[],active_message:hit?.active_message};
-      paintReading(true,true);
+      if(hit)paintReading(true,true);
       if(!hit){
         const t=model.threads.find(t=>t.key===values.thread_key);
         root.querySelector('.reading').innerHTML=`<div class="subject-header"><h2>${esc(t?.subject||'')}</h2><div class="customer">${esc(t?.customer||'')}</div><small>${esc(t?.email||'')}</small></div><div class="message-loading" role="status">Loading message…</div>`;
@@ -111,6 +116,7 @@
     root.querySelector('.workspace').classList.toggle('show-reading',mobileReading);
     // Cached content can paint instantly; writes wait until the server validates this selection.
     root.querySelectorAll('.reading button').forEach(e=>e.disabled=true);
+    selectionControlsDisabled=true;
   }
   function freeze(){
     root.querySelectorAll('button,input,select,textarea').forEach(e=>e.disabled=true);
@@ -140,7 +146,7 @@
   }
   function conversations() {
     const folder=(model.folders||[]).find(f=>f.name===model.folder);
-    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(model))}</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<div class="conversation-wrap"><button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button><button class="row-more" data-action="message_menu" data-key="${esc(t.key)}" aria-label="More actions for ${esc(t.subject)}">⋯</button></div>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more&&!model.error?button('Load 50 more','load_more'): '<span class="muted">'+(model.error?'Mailbox unavailable':model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
+    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(model))}</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<div class="conversation-wrap"><button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button><button class="row-more" data-action="message_menu" data-key="${esc(t.key)}" aria-label="More actions for ${esc(t.subject)}">⋯</button></div>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more&&!model.error?button('Load 50 more','load_more'): '<span class="muted">'+(model.error?'Mailbox unavailable':model.live_error?'Cached mailbox · last successful view':model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
   }
   const names=people=>(people||[]).map(p=>p.name?`${p.name} <${p.email}>`:p.email).join(', ');
   function messages() {
@@ -184,6 +190,7 @@
       pane.innerHTML=model.view==='compose'?composer():model.view==='settings'?settings():model.view==='context'?contextPanel():messages();
       const scroll=pane.querySelector('.reading-scroll,.compose-scroll,.panel-scroll');if(scroll)scroll.scrollTop=top;
       readingStamp=stamp;
+      selectionControlsDisabled=false;
     }
   }
   function render(next) {
@@ -221,16 +228,16 @@
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
       toolbarStamp=toolbarKey;
     }
-    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||model.live_error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.error?'Connection error':model.live_error?'Reconnecting':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
+    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||model.live_error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.error?'Connection error':model.live_error?'Connection interrupted · Reconnecting…':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
-    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,model.limit]);
+    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit]);
     if(wasFrozen||listKey!==listStamp){const node=root.querySelector('.listpane'),top=node.querySelector('.conversations')?.scrollTop||0;node.outerHTML=conversations();root.querySelector('.conversations').scrollTop=oldFolder===model.folder&&oldQuery===model.query?top:0;listStamp=listKey;}
     root.querySelector('.workspace').className=`workspace ${collapsed?'collapsed':''} ${mobileReading?'show-reading':''}`;
     markSelection();if(!(liveUpdate&&model.view==='compose'))paintReading(wasFrozen,selectionChanged);
     // Selection-only reads never freeze folder/list/toolbar nodes. Re-enable selected-message controls
     // by repainting only their pane after the server acknowledges the selected reference.
-    if(root.querySelector('.reading button:disabled')&&!locked(model)&&model.view==='mail')paintReading(true);
+    if(selectionControlsDisabled&&!locked(model)&&model.view==='mail')paintReading(true);
     wire();fit();
     if(focusSearch&&!busy){focusSearch=false;$('search')?.focus();}
     if(model.download && model.download.id!==downloaded){

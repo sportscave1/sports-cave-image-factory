@@ -138,9 +138,10 @@ class FolderFailureRecoveryTests(unittest.TestCase):
     def test_failure_not_cached_as_empty_and_refresh_recovers(self):
         with patch.object(self.imap, "discover_folders", side_effect=provider.MailboxError("Folder listing failed. Retry connection.")):
             self.w.load(force=True)
-        self.assertEqual(self.state["error"], "Folder listing failed. Retry connection.")
-        self.assertNotIn("folder_cache", list(self.state))
-        self.assertEqual(self.w.model()["threads"], [])
+        self.assertEqual(self.state["error"], "")
+        self.assertIn("last successful", self.state["live_error"])
+        self.assertIn("folder_cache", self.state)
+        self.assertTrue(self.w.model()["threads"])
         self.w.load(force=True)
         self.assertEqual(self.state["error"], "")
         self.assertTrue(self.state["folders"] and self.state["threads"])
@@ -151,7 +152,7 @@ class FolderFailureRecoveryTests(unittest.TestCase):
             for _ in range(4):
                 self.w.load()
             self.assertEqual(discover.call_count, 1)
-            self.assertNotIn("folder_cache", list(self.state))
+            self.assertTrue(self.state["folder_cache"]["data"]["folders"])
 
 
 if __name__ == "__main__":

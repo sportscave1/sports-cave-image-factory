@@ -99,12 +99,12 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.db.states[notifications.state_key(MAILBOX)]['last_uid'],100)
         self.assertEqual([c[0] for c in self.wire.calls],['LOGIN','STATUS','LOGOUT'])
     def test_new_uid_exactly_once_after_restart(self):
-        self.poll();self.wire.arrive(101);self.poll(1031)
+        self.poll();self.wire.arrive(101);self.poll(1061)
         self.assertEqual(len(self.db.events),1)
         notifications._CACHE.update(scope=None,expires=0,value={})
-        self.poll(1062);self.assertEqual(len(self.db.events),1)
+        self.poll(1122);self.assertEqual(len(self.db.events),1)
     def test_multiple_arrivals_minimal_fields_and_no_content(self):
-        self.poll();self.wire.arrive(101);self.wire.arrive(102);self.poll(1031)
+        self.poll();self.wire.arrive(101);self.wire.arrive(102);self.poll(1061)
         self.assertEqual(len(self.db.events),2)
         fetch=[c for c in self.wire.calls if c[0]=='FETCH']
         self.assertEqual(fetch,[('FETCH','101:102','(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])')])
@@ -112,27 +112,44 @@ class NotificationTests(unittest.TestCase):
         for forbidden in ('BODYSTRUCTURE','BODY.PEEK[]','BODY.PEEK[TEXT]','attachment','password'):
             self.assertNotIn(forbidden,str(self.db.events)+str(self.wire.calls))
     def test_uidvalidity_reset_baselines_without_history(self):
-        self.poll();self.wire.validity='600';self.wire.arrive(101);self.poll(1031)
+        self.poll();self.wire.validity='600';self.wire.arrive(101);self.poll(1061)
         self.assertEqual(self.db.events,[])
-        self.wire.arrive(102);self.poll(1062);self.assertEqual(len(self.db.events),1)
+        self.wire.arrive(102);self.poll(1122);self.assertEqual(len(self.db.events),1)
     def test_catchup_is_bounded_and_does_not_skip_next_window(self):
         self.poll()
         for uid in range(101,164):self.wire.arrive(uid)
-        self.poll(1031);self.assertEqual(len(self.db.events),50)
-        self.poll(1062);self.assertEqual(len(self.db.events),63)
+        self.poll(1061);self.assertEqual(len(self.db.events),50)
+        self.poll(1122);self.assertEqual(len(self.db.events),63)
     def test_ttl_avoids_reconnecting_on_streamlit_reruns(self):
         self.poll();before=list(self.wire.calls)
-        for now in range(1001,1030):self.poll(now)
+        for now in range(1001,1060):self.poll(now)
         self.assertEqual(self.wire.calls,before)
     def test_durable_ttl_coalesces_a_second_process(self):
         self.poll();self.wire.calls.clear()
         self.assertEqual(self.store.poll(self.adapter,now=1001)['unread_count'],3)
         self.assertEqual(self.wire.calls,[])
+    def test_shared_status_cache_preserves_durable_new_mail_deduplication(self):
+        from support_email_runtime import MailboxRuntime
+        moment = [1000]
+        self.adapter.runtime = MailboxRuntime(lambda: moment[0])
+        self.adapter.background = True
+        self.poll()
+        self.wire.arrive(101);moment[0] = 1061
+        self.assertEqual(self.adapter.get_unread_count(), self.wire.unseen)
+        self.wire.calls.clear()
+        self.poll(1061)
+        self.assertEqual(len(self.db.events), 1)
+        self.assertNotIn('STATUS', [c[0] for c in self.wire.calls])
+        notifications._CACHE.update(scope=None, expires=0, value={})
+        self.adapter.runtime = MailboxRuntime(lambda: moment[0])  # Process restart.
+        moment[0] = 1122
+        self.poll(1122)
+        self.assertEqual(len(self.db.events), 1)
     def test_transaction_rollback_prevents_lost_events(self):
         self.store.poll(self.adapter,now=1000);self.wire.arrive(101);self.db.fail_state_write=True
-        with self.assertRaises(RuntimeError):self.store.poll(self.adapter,now=1031)
+        with self.assertRaises(RuntimeError):self.store.poll(self.adapter,now=1061)
         self.assertEqual(self.db.events,[])
-        self.db.fail_state_write=False;self.store.poll(self.adapter,now=1032)
+        self.db.fail_state_write=False;self.store.poll(self.adapter,now=1062)
         self.assertEqual(len(self.db.events),1)
     def test_busy_mailbox_lock_never_duplicates_or_blocks(self):
         self.db.lock_available=False
@@ -144,17 +161,17 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.poll(1002)['unread_count'],3)
     def test_imap_failure_is_quiet_bounded_and_not_fake_zero(self):
         self.poll();self.wire.fail=True;self.wire.calls.clear()
-        with self.assertLogs(level='WARNING') as logs:result=self.poll(1031)
+        with self.assertLogs(level='WARNING') as logs:result=self.poll(1061)
         self.assertEqual(result['unread_count'],3);self.assertFalse(result['available'])
         self.assertNotIn('fixture-secret',str(logs.output)+str(result))
         self.assertEqual(sum(c[0]=='LOGIN' for c in self.wire.calls),1)
-        self.poll(1032);self.assertEqual(sum(c[0]=='LOGIN' for c in self.wire.calls),1)
-        self.assertIsNone(self.poll(1152)['unread_count'])
+        self.poll(1062);self.assertEqual(sum(c[0]=='LOGIN' for c in self.wire.calls),1)
+        self.assertIsNone(self.poll(1182)['unread_count'])
     def test_missing_storage_can_show_count_but_never_announces_old_mail(self):
         with patch.object(self.store,'poll',side_effect=RuntimeError('DB unavailable')):
             self.assertEqual(self.poll()['unread_count'],3)
         self.assertEqual(self.db.events,[])
-        self.poll(1031);self.assertEqual(self.db.events,[])
+        self.poll(1061);self.assertEqual(self.db.events,[])
     def test_unconfigured_does_not_connect(self):
         result=notifications.status(configuration=provider.Configuration(),provider=self.adapter)
         self.assertIsNone(result['unread_count']);self.assertEqual(self.wire.calls,[])
@@ -164,7 +181,7 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(set(data),{'mailbox','folder','uidvalidity','uid','message_id','sender_name','sender_email','subject','received_at'})
         self.assertNotIn('private',str(data));self.assertNotIn('binary',str(data))
     def test_bell_permission_and_exact_target_with_no_actor_guessing(self):
-        self.poll();self.wire.arrive(101);self.poll(1031)
+        self.poll();self.wire.arrive(101);self.poll(1061)
         for who in ('nathan','reina'):
             result=top_bar_api.build_notifications({'sub':who,'allowed_routes':['Email']},activity_rows=self.db.events)
             self.assertEqual(len(result),1);self.assertEqual(result[0]['title'],'New email')
@@ -178,7 +195,7 @@ class NotificationTests(unittest.TestCase):
     def test_notification_poll_has_no_order_or_workspace_dependency(self):
         with (patch('support_email_store.load_orders',side_effect=AssertionError('orders forbidden')),
               patch('support_email_workspace.Workspace.load',side_effect=AssertionError('workspace forbidden'))):
-            self.poll();self.wire.arrive(101);self.poll(1031)
+            self.poll();self.wire.arrive(101);self.poll(1061)
     def test_target_exact_uid_safe_missing_and_message_id_fallback(self):
         self.wire.arrive(101)
         self.assertEqual(self.adapter.notification_target('500','101')['uid'],'101')
