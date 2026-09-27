@@ -1,53 +1,31 @@
-"""Sparse, server-only VA bonus tracking; catalogue/orders remain their own truth."""
+"""Server-only editable design tracker with manual orders and protected bonuses."""
 from datetime import date, datetime
 from uuid import UUID
 
-
 START_AT = "2026-09-01 00:00:00 Australia/Sydney"
-
-# Match immutable product IDs, never titles. Include orders awaiting allocation.
-# Invalid allocations, test orders and cancelled orders cannot qualify a bonus.
-FIRST_ORDER_SQL = """
-SELECT order_id, order_name, order_at FROM (
-    SELECT o.shopify_order_id AS order_id,
-           COALESCE(NULLIF(o.order_name,''), NULLIF(o.shopify_order_name,''),
-                    NULLIF(o.order_number,''), o.shopify_order_id) AS order_name,
-           COALESCE(o.created_at,o.processed_at) AS order_at
-    FROM shopify_order_lines l JOIN shopify_orders o
-      ON o.shopify_order_id=l.shopify_order_id
-    WHERE l.shopify_product_id IN (NULLIF(p.shopify_product_gid,''),NULLIF(p.shopify_product_id,''),
-          NULLIF(regexp_replace(p.shopify_product_id,'^gid://shopify/Product/',''),''))
-      AND l.quantity > 0 AND o.cancelled_at IS NULL
-      AND COALESCE(o.raw_json->>'test',o.raw->>'test','false') <> 'true'
-    UNION ALL
-    SELECT COALESCE(NULLIF(e.shopify_order_id,''),NULLIF(e.external_order_id,'')),
-           COALESCE(NULLIF(e.shopify_order_name,''),NULLIF(e.external_order_id,'')),
-           COALESCE(o.created_at,e.purchase_date,e.assigned_at)
-    FROM edition_orders e LEFT JOIN shopify_orders o
-      ON o.shopify_order_id=e.shopify_order_id
-    WHERE (e.shopify_product_gid=NULLIF(p.shopify_product_gid,'')
-           OR e.shopify_product_id IN (NULLIF(p.shopify_product_gid,''),NULLIF(p.shopify_product_id,''),
-              NULLIF(regexp_replace(p.shopify_product_id,'^gid://shopify/Product/',''),'')))
-      AND e.allocation_valid IS DISTINCT FROM false
-      AND o.cancelled_at IS NULL
-      AND COALESCE(o.raw_json->>'test',o.raw->>'test','false') <> 'true'
-) orders
-WHERE order_id IS NOT NULL AND order_name IS NOT NULL
-ORDER BY order_at NULLS LAST, order_id
-LIMIT 1
-"""
-
-LIST_SQL = """
-SELECT p.id AS edition_product_id,p.product_title,
-       COALESCE(t.paid_order_name,f.order_name,'') AS first_order,
-       COALESCE(t.paid_order_id,f.order_id,'') AS first_order_id,
-       COALESCE(t.designed_by,'') AS designed_by,t.bonus_paid_on,
-       COALESCE(t.version,0) AS version
+EDITABLE_FIELDS = ("product_title", "date_created", "first_order", "designed_by", "bonus_paid_on")
+ROW_COLUMNS = "id,edition_product_id,product_title,date_created,first_order,designed_by,bonus_paid_on,version"
+DISCOVER_SQL = """
+INSERT INTO edition_design_tracking (edition_product_id,product_title,date_created,first_order,created_at)
+SELECT p.id,p.product_title,(p.created_at AT TIME ZONE 'Australia/Sydney')::date,'',p.created_at
 FROM edition_products p
-LEFT JOIN edition_design_tracking t ON t.edition_product_id=p.id
-LEFT JOIN LATERAL (""" + FIRST_ORDER_SQL + """) f ON true
 WHERE p.created_at >= %s::timestamptz
-ORDER BY p.created_at DESC,p.id DESC
+  AND NOT EXISTS (SELECT 1 FROM edition_design_tracking t
+                  WHERE t.edition_product_id=p.id AND t.product_title IS NOT NULL
+                    AND t.date_created IS NOT NULL AND t.first_order IS NOT NULL)
+ON CONFLICT (edition_product_id) DO UPDATE SET
+    product_title=COALESCE(edition_design_tracking.product_title,excluded.product_title),
+    date_created=COALESCE(edition_design_tracking.date_created,excluded.date_created),
+    first_order=COALESCE(edition_design_tracking.first_order,'')
+WHERE edition_design_tracking.product_title IS NULL
+   OR edition_design_tracking.date_created IS NULL OR edition_design_tracking.first_order IS NULL
+"""
+LIST_SQL = """
+SELECT t.id,t.edition_product_id,COALESCE(t.product_title,p.product_title,'') AS product_title,
+       COALESCE(t.date_created,(p.created_at AT TIME ZONE 'Australia/Sydney')::date) AS date_created,
+       COALESCE(t.first_order,'') AS first_order,t.designed_by,t.bonus_paid_on,t.version
+FROM edition_design_tracking t LEFT JOIN edition_products p ON p.id=t.edition_product_id
+ORDER BY t.created_at DESC,t.id
 """
 
 
@@ -55,33 +33,42 @@ class TrackingConflict(ValueError):
     pass
 
 
-def _paid_date(value):
+def _date(value, label):
     if value in (None, ""):
         return None
     if isinstance(value, datetime):
-        value = value.date()
+        return value.date()
     if isinstance(value, date):
         return value
     try:
         return date.fromisoformat(str(value))
     except ValueError:
-        raise ValueError("Bonus must be a valid paid date or left blank.") from None
+        raise ValueError(f"{label} must be a valid date.") from None
+
+
+def _value(field, value):
+    if field in ("date_created", "bonus_paid_on"):
+        return _date(value, "Date created" if field == "date_created" else "Bonus")
+    return str(value or "").strip()
+
+
+def _row(row):
+    result = {key: row[key] for key in ("id", "edition_product_id", *EDITABLE_FIELDS, "version")}
+    result["id"] = str(result["id"])
+    return result
 
 
 def editor_changes(originals, edited):
-    """Only editable fields travel back; row identity comes from the saved snapshot."""
+    """Editable patches only; identities and prior values come from server state."""
     if len(originals) != len(edited):
-        raise ValueError("Refresh the tracker before saving.")
+        raise ValueError("Use Add product to add a row. Existing rows cannot be deleted.")
     changes = []
     for old, new in zip(originals, edited):
-        designer = str(new.get("designed_by") or "").strip()
-        paid = _paid_date(new.get("bonus_paid_on"))
-        if designer != old["designed_by"] or paid != _paid_date(old.get("bonus_paid_on")):
-            changes.append({
-                "edition_product_id": old["edition_product_id"],
-                "version": old["version"], "designed_by": designer,
-                "bonus_paid_on": paid, "first_order_id": old["first_order_id"],
-            })
+        values = {key: _value(key, new.get(key)) for key in EDITABLE_FIELDS
+                  if _value(key, new.get(key)) != _value(key, old.get(key))}
+        if values:
+            changes.append({"id": old["id"], "values": values,
+                            "original": {key: old.get(key) for key in values}})
     return changes
 
 
@@ -93,7 +80,6 @@ class Store:
 
     @staticmethod
     def _authorize(conn, actor):
-        # Identity is passed by the authenticated server session, never editor data.
         try:
             actor_id = str(UUID(str((actor or {}).get("id") or "")))
         except ValueError:
@@ -118,65 +104,83 @@ class Store:
     def list_rows(self, actor):
         with self.connect() as conn:
             self._authorize(conn, actor)
-            return conn.execute(LIST_SQL, (START_AT,)).fetchall()
+            # Webhooks have no human identity: never credit the person viewing a row.
+            conn.execute(DISCOVER_SQL, (START_AT,))
+            return [_row(row) for row in conn.execute(LIST_SQL).fetchall()]
+
+    def create(self, actor, *, row_id, product_title, date_created):
+        row_id = str(UUID(str(row_id)))
+        title = str(product_title or "").strip()
+        created = _date(date_created, "Date created")
+        if not title or len(title) > 500 or created is None:
+            raise ValueError("Enter a product name (up to 500 characters) and Date created.")
+        with self.connect() as conn:
+            actor_id, _ = self._authorize(conn, actor)
+            creator = conn.execute("SELECT display_name,username FROM os_users WHERE id=%s", (actor_id,)).fetchone()
+            designer = str(creator.get("display_name") or creator.get("username") or "").strip()[:120]
+            # Stable request ID makes retry after a lost response safe.
+            conn.execute("""
+                INSERT INTO edition_design_tracking
+                    (id,product_title,date_created,first_order,designed_by,added_by,updated_by)
+                VALUES (%s,%s,%s,'',%s,%s,%s) ON CONFLICT (id) DO NOTHING
+            """, (row_id,title,created,designer,actor_id,actor_id))
+            row = conn.execute("SELECT " + ROW_COLUMNS + " FROM edition_design_tracking WHERE id=%s AND added_by=%s",
+                               (row_id,actor_id)).fetchone()
+            if not row:
+                raise TrackingConflict("This add-product request has already been used. Refresh and try again.")
+            return _row(row)
 
     def save(self, actor, changes):
         if not changes:
-            return 0
-        if len({int(c["edition_product_id"]) for c in changes}) != len(changes):
-            raise ValueError("Duplicate product rows. Refresh before saving.")
+            return []
+        if len({str(c["id"]) for c in changes}) != len(changes):
+            raise ValueError("Duplicate rows. Refresh before saving.")
         with self.connect() as conn:
             actor_id, admin = self._authorize(conn, actor)
-            for change in sorted(changes, key=lambda c: int(c["edition_product_id"])):
-                self._save_row(conn, actor_id, admin, change)
-        return len(changes)
+            # Stable lock order and one atomic transaction for a multi-cell paste.
+            return [self._save_row(conn,actor_id,admin,c) for c in sorted(changes,key=lambda c:str(c["id"]))]
 
     @staticmethod
     def _save_row(conn, actor_id, admin, change):
-        product_id = int(change["edition_product_id"])
-        designer = str(change.get("designed_by") or "").strip()
-        if len(designer) > 120:
-            raise ValueError("Designed by must be 120 characters or fewer.")
-        paid = _paid_date(change.get("bonus_paid_on"))
-        # Lock the parent too: two first-time edits must not race to insert a row.
-        product = conn.execute("""
-            SELECT id FROM edition_products WHERE id=%s AND created_at >= %s::timestamptz
-            FOR UPDATE
-        """, (product_id, START_AT)).fetchone()
-        if not product:
-            raise ValueError("This product is outside the design tracking period.")
-        old = conn.execute("SELECT * FROM edition_design_tracking WHERE edition_product_id=%s FOR UPDATE",
-                           (product_id,)).fetchone() or {}
-        if int(change["version"]) != int(old.get("version",0)):
-            raise TrackingConflict("Someone updated this design. Refresh and reapply your changes.")
-        bonus_changed = paid != old.get("bonus_paid_on")
-        if bonus_changed and not admin:
-            raise PermissionError("Only an admin can change the Bonus paid date.")
-        order_id, order_name = old.get("paid_order_id"), old.get("paid_order_name")
-        paid_by = old.get("bonus_paid_by")
-        if bonus_changed:
-            paid_by = actor_id if paid else None
-            if paid:
-                if not order_id:
-                    first = conn.execute("SELECT f.* FROM edition_products p CROSS JOIN LATERAL ("
-                                         + FIRST_ORDER_SQL + ") f WHERE p.id=%s", (product_id,)).fetchone()
-                    if not first:
-                        raise ValueError("A recorded first order is required before marking a bonus paid.")
-                    order_id, order_name = first["order_id"], first["order_name"]
-                if str(change.get("first_order_id") or "") != str(order_id):
-                    raise TrackingConflict("The first order changed. Refresh before marking the bonus paid.")
-            else:
-                order_id = order_name = None
-        if designer == old.get("designed_by", "") and not bonus_changed:
-            return
-        conn.execute("""
-            INSERT INTO edition_design_tracking
-              (edition_product_id,designed_by,bonus_paid_on,paid_order_id,paid_order_name,
-               bonus_paid_by,updated_by,version)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,1)
-            ON CONFLICT (edition_product_id) DO UPDATE SET
-              designed_by=excluded.designed_by,bonus_paid_on=excluded.bonus_paid_on,
-              paid_order_id=excluded.paid_order_id,paid_order_name=excluded.paid_order_name,
-              bonus_paid_by=excluded.bonus_paid_by,updated_by=excluded.updated_by,
-              version=edition_design_tracking.version+1,updated_at=now()
-        """, (product_id,designer,paid,order_id,order_name,paid_by,actor_id))
+        row_id = str(UUID(str(change["id"])))
+        values = change.get("values") or {}
+        if set(values) - set(EDITABLE_FIELDS):
+            raise ValueError("Only spreadsheet fields can be changed.")
+        old = conn.execute("SELECT * FROM edition_design_tracking WHERE id=%s FOR UPDATE", (row_id,)).fetchone()
+        if not old:
+            raise TrackingConflict("This design could not be found. Your edits have been kept.")
+        merged = dict(old)
+        changed = {}
+        for field, value in values.items():
+            value = _value(field, value)
+            current = _value(field, old.get(field))
+            if value == current:
+                continue
+            if field == "bonus_paid_on" and not admin:
+                raise PermissionError("Only an admin can change the Bonus paid date.")
+            if current != _value(field, change["original"].get(field)):
+                raise TrackingConflict("Someone changed the same cell. Your draft is kept; reload saved values before replacing it.")
+            changed[field] = value
+            merged[field] = value
+        if not changed:
+            return _row(old)
+        if not merged.get("product_title") or len(merged["product_title"]) > 500:
+            raise ValueError("Product must contain 1–500 characters.")
+        if merged.get("date_created") is None:
+            raise ValueError("Date created is required.")
+        if len(merged.get("designed_by") or "") > 120 or len(merged.get("first_order") or "") > 120:
+            raise ValueError("Designed by and First order must be 120 characters or fewer.")
+        if "bonus_paid_on" in changed:
+            paid = merged["bonus_paid_on"]
+            if paid and not merged.get("first_order"):
+                raise ValueError("Enter First order before marking its bonus paid.")
+            # Non-bonus edits preserve the historical payment receipt unchanged.
+            changed.update(paid_order_id=("manual:" + merged["first_order"]) if paid else None,
+                           paid_order_name=merged["first_order"] if paid else None,
+                           bonus_paid_by=actor_id if paid else None)
+        # Columns come only from the allowlist and the fixed receipt keys above.
+        setters = ",".join(key + "=%s" for key in changed)
+        result = conn.execute("UPDATE edition_design_tracking SET " + setters +
+            ",updated_by=%s,updated_at=now(),version=version+1 WHERE id=%s RETURNING " + ROW_COLUMNS,
+            (*changed.values(),actor_id,row_id)).fetchone()
+        return _row(result)

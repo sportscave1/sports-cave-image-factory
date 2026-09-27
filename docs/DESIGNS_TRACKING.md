@@ -1,47 +1,57 @@
 # Edition Ops designs tracking
 
-At the bottom of Edition Ops, open **Designs tracking**. The table includes
-all Edition Ops products created from 1 September 2026 (Sydney time) onward.
-New products appear on reopening the panel or selecting **Refresh designs**.
+Open **Designs tracking** at the bottom of Edition Ops.
 
-- **Product** and **First order** are read-only, matched by immutable product IDs.
-- Staff with Edition Ops access can enter **Designed by**.
-- Only an active admin can enter or clear **Bonus**, a date recording when the
-  first-sale bonus was paid. Both manual fields start blank.
-- Press **Save design tracking** to persist edits. Refreshing or closing the
-  panel discards unsaved edits. Conflicting saves ask the user to refresh.
+- Edit Product, Date created, First order and Designed by directly in the grid.
+  Editing Product changes the tracker label only; it does not rename Shopify products.
+- Paste cells or use Enter/Tab to commit edits. Changes save automatically, without
+  a separate Save click. Only admins may edit the Bonus paid date.
+- **Add product** creates a saved tracker row, sets Date created to today in Sydney
+  by default, and fills Designed by from the signed-in account's persisted name.
+- Products created in Edition Ops from 1 September 2026 onward are also discovered
+  when the tracker loads. A webhook has no OS account identity, so automatic
+  imports leave Designed by blank instead of crediting whoever opens the tracker.
+- First order is fully manual. Existing first orders were preserved once during
+  migration. Subsequent order sync never fills or replaces the cell. Clearing it
+  stays cleared.
+- Date created initially uses the product's Edition Ops creation date (Sydney).
+  Manual rows use the date entered on Add product. Both are editable.
+- The existing bonus dates and payment receipts are retained. Staff edits to other
+  cells cannot change Bonus or its historical receipt. To mark a new bonus paid,
+  the admin enters a date after a First order has been entered; that order does not
+  need to exist in Shopify. The payment receipt records the order as entered.
+- Existing rows cannot be deleted through the table. Refresh discovers new rows,
+  and normal reruns refresh after 60 seconds when there are no unsaved drafts.
 
-The first order is the earliest non-test, non-cancelled recorded order from
-Shopify order lines or valid edition allocations, across the product's full
-recorded history. An order need not already have an edition allocation to
-appear. Cancelled/test Shopify orders and invalid edition allocations are
-excluded. Data freshness follows the existing order sync; the tracker does
-not call Shopify or start a new sync job.
+## Persistence and concurrency
 
-Saving a paid date verifies the displayed first order against current stored
-orders, then retains its ID and name with the payment receipt. That displayed
-order remains fixed while paid, even if historical orders are later imported.
-Clearing the paid date also clears that receipt and returns to the current
-first-order lookup. Editing a designer preserves the payment receipt.
+All rows live in the original `edition_design_tracking` table. The spreadsheet
+upgrade adds a UUID row key, optional unique Edition Ops product link, editable
+title/date/order and creator ID. No order payloads or customer data are copied.
+The old product-ID unique key keeps the prior app compatible during deployment.
 
-Storage is one sparse row per manually edited product in
-`edition_design_tracking`, with a primary key preventing duplicate bonuses
-per product. No catalogue copies, order payloads, customer data, periodic
-snapshots or background jobs are added. Reads happen only while the panel is
-opened/refreshed, with a stable per-session editing snapshot. An index on the
-existing allocation ledger's product GID avoids repeated ledger scans.
+Saves contain only edited fields. Short transactions lock rows in stable ID order.
+Edits to different cells merge; edits to the same changed cell are rejected without
+overwriting another user's data. Multi-cell pastes commit atomically. Repeated
+save requests and Add product retries are idempotent.
 
-The table has RLS enabled and no client grants/policies. Only the trusted
-server database connection accesses it. Every backend read/write rechecks
-the persisted OS account, session version and Edition Ops permission; bonus
-changes additionally require the persisted admin role. Product-row locks and
-version checks prevent first-insert races and lost updates; batches commit
-atomically. Only the current editor and bonus author are retained, rather
-than a growing audit history.
+The browser session retains a failed-save draft when collapsing, navigating, or
+requesting Refresh. **Retry saving** retries it; **Discard unsaved edits and reload**
+explicitly discards only the draft. A failed save is visibly marked unsaved:
+only successful saves are durable across a browser/session restart. A different
+login never inherits another account's draft.
 
-Migration: `migrations/20260927221221_edition_design_tracking.sql`, included
-in the SHA-reviewed startup migration manifest. No Render topology changes.
+Authorization rechecks the stored OS account, session version and Edition Ops
+permission for each backend read/write. Bonus changes require the database's
+admin role. RLS remains enabled and public/client grants are revoked.
 
-Tests: `python -m unittest tests.test_design_tracking -q` includes real
-Streamlit editor submission/reload tests and backend permission, stale-write,
-payment-order association and transaction rollback checks.
+## Migration and verification
+
+- Base: `20260927221221_edition_design_tracking.sql`.
+- Upgrade: `20260927223857_edition_design_tracking_spreadsheet.sql`.
+- Both are included in the SHA-reviewed deployment manifest.
+- The upgrade keeps all existing rows and receipts in place and snapshots the
+  existing displayed orders exactly once. It is safe to replay without replacing
+  edited values.
+- Run `python -m unittest tests.test_design_tracking -q` for permission, concurrency,
+  idempotency, real Streamlit autosave/reload, Add product and failed-draft tests.
