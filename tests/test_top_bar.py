@@ -364,7 +364,7 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn("accountsRouteKey", source)
         self.assertIn("navigateDocument", source)
         self.assertIn('link.target = "_self"', source)
-        self.assertIn('event.key.toLocaleLowerCase() === "k"', source)
+        self.assertIn('event.key.toLowerCase() === "k"', source)
         self.assertIn("event.ctrlKey || event.metaKey", source)
         self.assertIn('event.key === "Escape"', source)
         self.assertIn('event.key === "ArrowDown"', source)
@@ -378,7 +378,8 @@ class TopBarComponentTests(unittest.TestCase):
     def test_notifications_and_search_load_lazily_once_in_browser(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
 
-        focus_index = source.index('searchInput.addEventListener("focus"')
+        click_index = source.index('searchInput.addEventListener("click"')
+        self.assertNotIn('searchInput.addEventListener("focus"', source)
         search_load_index = source.index("const loadSearchIndex")
         notification_click_index = source.index(
             'notificationsButton.addEventListener("click"'
@@ -386,7 +387,7 @@ class TopBarComponentTests(unittest.TestCase):
         notification_load_index = source.index(
             "const loadNotifications",
         )
-        self.assertLess(search_load_index, focus_index)
+        self.assertLess(search_load_index, click_index)
         self.assertLess(notification_load_index, notification_click_index)
         self.assertIn("if (state.searchIndex)", source)
         self.assertIn("if (!state.notifications)", source)

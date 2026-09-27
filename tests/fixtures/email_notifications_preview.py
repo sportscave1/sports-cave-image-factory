@@ -20,9 +20,12 @@ if '--serve' in sys.argv:
         return JSONResponse({'ok':True,'notifications':top_bar_api.build_notifications(
             {'sub':'fixture','allowed_routes':['Dashboard','Orders','Email'],'can_view_activity':True,'can_view_all_activity':True},activity_rows=rows)})
     async def empty(request):return JSONResponse({'ok':True,'timer':{},'items':[],'results':[]})
+    async def search(request):return JSONResponse({'ok':True,'results':[
+        {'title':name,'subtitle':'Local fixture page','group':'Pages','route_key':key,'keywords':[]}
+        for key,name in [('dashboard','Dashboard'),('orders','Orders'),('email','Email')]]})
     routes=[Route(top_bar_api.EMAIL_STATUS_PATH,status),Route(top_bar_api.ORDER_STATUS_PATH,orders),
             Route(top_bar_api.NOTIFICATIONS_PATH,events),Route(top_bar_api.DAILY_PLANNER_STATUS_PATH,empty),
-            Route(top_bar_api.REPAIR_REQUESTS_PATH,empty),Route(top_bar_api.SEARCH_INDEX_PATH,empty)]
+            Route(top_bar_api.REPAIR_REQUESTS_PATH,empty),Route(top_bar_api.SEARCH_INDEX_PATH,search)]
     uvicorn.run(App(str(Path(__file__).resolve()),routes=routes),host='127.0.0.1',port=8504)
 else:
     from unittest.mock import patch
