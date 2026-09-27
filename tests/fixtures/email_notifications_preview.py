@@ -20,9 +20,9 @@ if '--serve' in sys.argv:
         return JSONResponse({'ok':True,'notifications':top_bar_api.build_notifications(
             {'sub':'fixture','allowed_routes':['Dashboard','Orders','Email'],'can_view_activity':True,'can_view_all_activity':True},activity_rows=rows)})
     async def empty(request):return JSONResponse({'ok':True,'timer':{},'items':[],'results':[]})
-    async def search(request):return JSONResponse({'ok':True,'results':[
-        {'title':name,'subtitle':'Local fixture page','group':'Pages','route_key':key,'keywords':[]}
-        for key,name in [('dashboard','Dashboard'),('orders','Orders'),('email','Email')]]})
+    async def search(request):return JSONResponse({'ok':True,'results':top_bar_api.build_search_index({
+        'allowed_routes':[page['route'] for page in top_bar_api.os_accounts.PAGE_REGISTRY],
+        'can_view_activity':True})})
     routes=[Route(top_bar_api.EMAIL_STATUS_PATH,status),Route(top_bar_api.ORDER_STATUS_PATH,orders),
             Route(top_bar_api.NOTIFICATIONS_PATH,events),Route(top_bar_api.DAILY_PLANNER_STATUS_PATH,empty),
             Route(top_bar_api.REPAIR_REQUESTS_PATH,empty),Route(top_bar_api.SEARCH_INDEX_PATH,search)]
@@ -45,9 +45,9 @@ else:
     st.set_page_config(page_title='Email notifications · local mock OS',layout='wide',initial_sidebar_state='expanded')
     route=st.query_params.get('page','dashboard')
     user=WORKER if st.query_params.get('account')=='staff' else USER
-    names={'dashboard':'Dashboard','orders':'Orders','email':'Email'}
+    names={page['key']:page['route'] for page in top_bar.os_accounts.PAGE_REGISTRY}
     with st.sidebar:
-        for key,label in names.items():
+        for key,label in [('dashboard','Dashboard'),('orders','Orders'),('email','Email')]:
             with st.container(key='sidebar-row-'+key):
                 if st.button(label,key='nav-'+key,use_container_width=True):
                     st.query_params['page']=key;st.rerun()

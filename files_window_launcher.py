@@ -6,7 +6,6 @@ import html
 import json
 import logging
 from pathlib import Path
-from threading import Lock
 from urllib.parse import quote
 
 
@@ -16,10 +15,6 @@ COMPONENT_KEY = "files-window-launcher"
 COMPONENT_DIR = Path(__file__).resolve().parent / "components" / COMPONENT_NAME
 COMPONENT_ENTRYPOINT = COMPONENT_DIR / "index.html"
 FILES_WINDOW_NAME = "sports-cave-files-window"
-
-_REGISTRATION_LOCK = Lock()
-_COMPONENT = None
-
 
 def validate_component_assets() -> Path:
     """Return the packaged component directory or fail before mounting it."""
@@ -32,19 +27,18 @@ def validate_component_assets() -> Path:
 
 
 def get_component(components_module):
-    """Declare the component once per process, outside the rerun-executed app module."""
+    """Register against the active runtime on every mount, using bundled assets.
 
-    global _COMPONENT
-    if _COMPONENT is not None:
-        return _COMPONENT
-    with _REGISTRATION_LOCK:
-        if _COMPONENT is None:
-            component_dir = validate_component_assets()
-            _COMPONENT = components_module.declare_component(
-                COMPONENT_NAME,
-                path=str(component_dir),
-            )
-    return _COMPONENT
+    Streamlit only registers declarations made inside a ScriptRunContext. A
+    process-cached declaration created earlier can render an iframe whose name
+    is absent from the serving registry. Re-declaration is cheap and idempotent;
+    Streamlit's registry replaces the same name and owns its locking.
+    """
+    component_dir = validate_component_assets()
+    return components_module.declare_component(
+        COMPONENT_NAME,
+        path=str(component_dir),
+    )
 
 
 def fallback_link_html(*, label="Files", href="/files-window"):
