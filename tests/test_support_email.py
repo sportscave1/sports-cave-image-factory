@@ -1,4 +1,4 @@
-"""Email V1 contract tests. All IMAP/database traffic is mocked; no real credentials."""
+"""Shared Email read/parsing/workflow contract tests. All IMAP/database traffic is mocked; no real credentials."""
 from contextlib import contextmanager, ExitStack
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -263,12 +263,12 @@ class ProviderTests(unittest.TestCase):
         adapter, _, _ = self.adapter(structure=PLAIN.replace(b'"UTF-8"', b'"X-UNKNOWN"'))
         self.assertEqual(adapter.read_message(header())["text"], "Hello José")
 
-    def test_no_smtp_resend_or_mutation_api(self):
+    def test_imap_provider_has_no_smtp_resend_or_permanent_deletion(self):
         source = inspect.getsource(provider)
         tree = ast.parse(source)
         calls = {n.func.attr.lower() for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                  and isinstance(n.func.value, ast.Name) and n.func.value.id == "conn"}
-        self.assertFalse(calls.intersection({"store", "copy", "append", "expunge", "close", "move", "sendmail", "send_message"}))
+        self.assertFalse(calls.intersection({"expunge", "close", "sendmail", "send_message"}))
         self.assertNotIn("smtplib", source)
         self.assertNotIn("email_service", inspect.getsource(page))
 
@@ -434,106 +434,51 @@ class StorageTests(unittest.TestCase):
 
 class PageTests(unittest.TestCase):
     def setUp(self):
+        from tests.email_v2_fixtures import MailboxFixture
+        import support_email_workspace as workspace
+        import support_email_smtp as smtp
+        from support_email_compose import default_settings
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.imap = self.stack.enter_context(patch.object(provider.imaplib, "IMAP4_SSL", side_effect=AssertionError("Real mailbox forbidden")))
+        self.stack.enter_context(patch.object(smtp.smtplib, "SMTP_SSL", side_effect=AssertionError("Real SMTP forbidden")))
         self.stack.enter_context(patch.object(page, "load_configuration", return_value=CONFIG))
-        self.fake = Mock()
-        self.stack.enter_context(patch.object(page, "ImapProvider", return_value=self.fake))
-        self.fake.list_headers.return_value = {"messages": [header()], "total": 75, "has_more": True,
-                                                "refreshed_at": datetime.now(timezone.utc), "uidvalidity": "500"}
-        self.fake.test_connection.return_value = {"count": 75, "folders": ["INBOX", "INBOX.Sent Items"]}
-        self.stack.enter_context(patch.object(store, "load_metadata", return_value={}))
-        self.stack.enter_context(patch.object(store, "load_assignees", return_value=[USER, WORKER]))
-        self.stack.enter_context(patch.object(store, "load_orders", return_value=[order()]))
-        self.audit = self.stack.enter_context(patch.object(store, "audit"))
+        self.stack.enter_context(patch.object(page, "load_smtp_configuration", return_value=smtp.SMTPConfiguration()))
+        fixture = MailboxFixture()
+        self.fake = Mock(wraps=fixture)
+        self.stack.enter_context(patch.object(workspace, "ImapProvider", return_value=self.fake))
+        self.component = Mock(return_value=None)
+        self.stack.enter_context(patch.object(page, "get_component", return_value=self.component))
+        self.stack.enter_context(patch.object(store, "load_email_settings", return_value=(default_settings(), None)))
+        self.stack.enter_context(patch.object(store, "audit"))
 
     def app(self, user=USER):
         return AppTest.from_string(f"import support_email_page\nsupport_email_page.render_page({user!r})").run()
 
-    def test_page_load_refresh_test_connection_and_load_more(self):
+    def test_desktop_page_initial_load_has_model_without_body_fetch(self):
         app = self.app()
         self.assertFalse(app.exception)
-        self.fake.list_headers.assert_called_once_with(50)
+        self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
         self.fake.read_message.assert_not_called()
-        app.button[0].click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(self.fake.list_headers.call_count, 2)
-        self.audit.assert_called_once()
-        app.button[1].click().run()
-        self.fake.test_connection.assert_called_once()
-        next(b for b in app.button if b.label == "Load More").click().run()
-        self.fake.list_headers.assert_called_with(100)
-        self.imap.assert_not_called()
-
-    def test_search_rerun_uses_cache(self):
-        app = self.app()
-        app.text_input[0].set_value("SC1234").run()
-        self.assertFalse(app.exception)
-        self.assertEqual(self.fake.list_headers.call_count, 1)
-        self.assertEqual(len(app.dataframe[0].value), 1)
+        model = self.component.call_args.kwargs["model"]
+        self.assertEqual(len(model["threads"]), 50)
+        self.assertEqual(model["messages"], [])
+        self.assertNotIn(CONFIG.password, str(model))
 
     def test_not_configured_and_not_authorized_do_not_connect(self):
         with patch.object(page, "load_configuration", return_value=provider.Configuration()):
             app = self.app()
             self.assertFalse(app.exception)
-            self.assertIn("Not configured", app.caption[0].value)
+            self.assertFalse(self.component.call_args.kwargs["model"]["configured"])
             self.fake.list_headers.assert_not_called()
-        app = self.app({**WORKER, "page_permissions": []})
+        self.app({**WORKER, "page_permissions": []})
         self.fake.list_headers.assert_not_called()
 
     def test_database_failure_does_not_block_inbox(self):
-        with patch.object(store, "load_metadata", side_effect=RuntimeError("db failure")), patch.object(store, "load_orders", side_effect=RuntimeError("db failure")):
+        with patch.object(store, "load_email_settings", side_effect=RuntimeError("db failure")):
             app = self.app()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.dataframe[0].value), 1)
-
-    def test_mailbox_failure_hides_old_inbox_and_does_not_crash(self):
-        app = self.app()
-        self.fake.list_headers.side_effect = provider.MailboxError(provider.SAFE_ERROR)
-        app.button[0].click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(len(app.dataframe), 0)
-        self.assertIn("connection failed", app.warning[0].value)
-        self.assertNotIn(CONFIG.password, str(app))
-
-    def test_conversation_message_attachment_and_workflow_form(self):
-        self.fake.read_message.return_value = {"text": "My frame arrived damaged", "warnings": [],
-            "attachments": [{"section": "2", "filename": "damage.jpg", "content_type": "image/jpeg", "encoded_size": 8}]}
-        self.fake.read_attachment.return_value = {"data": b"fixture-image", "filename": "damage.jpg"}
-        script = '''import streamlit as st
-import support_email_page as page
-from tests.test_support_email import USER, WORKER, CONFIG, MAILBOX, header, order
-from support_email_logic import build_threads, match_orders
-thread = build_threads([header()], MAILBOX)[0]
-page._conversation(thread, match_orders(thread, [order()]), {}, [USER, WORKER], True,
-    page.ImapProvider(CONFIG), CONFIG, USER, st.session_state.setdefault('fixture_cache', {}))
-'''
-        app = AppTest.from_string(script).run()
-        self.assertFalse(app.exception)
-        self.fake.read_message.assert_called_once()
-        self.fake.read_attachment.assert_not_called()
-        next(b for b in app.button if b.label == "Retrieve attachment").click().run()
-        self.assertFalse(app.exception)
-        self.fake.read_attachment.assert_called_once()
-        self.assertEqual(len(app.get("download_button")), 1)
-        app.selectbox[0].select("Waiting on Sports Cave")
-        app.selectbox[1].select(WORKER["id"])
-        app.text_area[0].set_value("Replacement approved by Nathan.")
-        with patch.object(store, "save_workflow", return_value={}) as save:
-            next(b for b in app.button if b.label == "Save workflow").click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(save.call_args.kwargs["support_status"], "Waiting on Sports Cave")
-        self.assertEqual(save.call_args.kwargs["assigned_user_id"], WORKER["id"])
-        self.assertNotIn("My frame arrived damaged", str(save.call_args))
-        self.assertNotIn("fixture-image", str(save.call_args))
-
-    def test_test_connection_failure_hides_inbox(self):
-        app = self.app()
-        self.fake.test_connection.side_effect = provider.MailboxError(provider.SAFE_ERROR)
-        app.button[1].click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(len(app.dataframe), 0)
+        self.assertEqual(len(self.component.call_args.kwargs["model"]["threads"]), 50)
 
     def test_changed_navigation_epoch_rereads_real_provider(self):
         app = self.app()
@@ -558,7 +503,7 @@ page._conversation(thread, match_orders(thread, [order()]), {}, [USER, WORKER], 
                 self.assertEqual(app.session_state["current_page"], route)
                 if route != "Email":
                     self.fake.list_headers.assert_not_called()
-            self.fake.list_headers.assert_called_once_with(50)
+            self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
         self.imap.assert_not_called()
 
     def test_module_imports_are_lazy_and_unrelated_routes_do_not_connect(self):

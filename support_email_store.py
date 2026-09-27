@@ -1,10 +1,12 @@
 """Optional workflow metadata and read-only access to existing synced orders.
 
-No method accepts a customer message, message body, HTML or attachment bytes.
+No method accepts a customer message, message body or attachment bytes.
+The settings API accepts administrator-authored signature HTML only.
 Schema provisioning is an explicit migration, never a page-render side effect.
 """
 from contextlib import contextmanager
 import logging
+import json
 import re
 
 import os_accounts
@@ -101,6 +103,19 @@ def audit(action, thread_key="", *, actor=""):
         "support_assignment_changed": "Conversation assigned",
         "support_note_changed": "Internal support note updated",
         "support_approval_changed": "Support approval requirement changed",
+        "email_sent": "Email accepted by the mail server",
+        "email_reply_sent": "Reply accepted by the mail server",
+        "email_forward_sent": "Forward accepted by the mail server",
+        "email_archived": "Email moved to Archive",
+        "email_trashed": "Email moved to Trash",
+        "email_junked": "Email moved to Junk",
+        "email_copied": "Email copied; original retained",
+        "email_mark_read": "Email marked read",
+        "email_mark_unread": "Email marked unread",
+        "email_flag_changed": "Email flag changed",
+        "email_draft_saved": "Draft saved in the real mailbox",
+        "email_draft_discarded": "Draft moved to Trash",
+        "email_settings_updated": "Email settings updated",
     }
     if action not in descriptions:
         return
@@ -120,6 +135,8 @@ def save_workflow(mailbox, thread_key, *, actor, support_status, assigned_user_i
     if assigned_user_id and str(assigned_user_id) not in {str(u["id"]) for u in load_assignees()}:
         raise SupportStorageError("Choose an active OS account with Email access.")
     previous = previous or {}
+    if previous.get("needs_approval") and not needs_approval and not os_accounts.is_admin(actor):
+        raise SupportStorageError("Only Nathan or another OS administrator can clear an approval requirement.")
     with cursor(True) as cur:
         cur.execute("""INSERT INTO customer_support_threads
             (mailbox,thread_key,support_status,assigned_user_id,internal_notes,needs_approval,last_handled_by,last_handled_at)
@@ -143,3 +160,59 @@ def save_workflow(mailbox, thread_key, *, actor, support_status, assigned_user_i
         if str(previous.get(field) or "") != str(value or ""):
             audit(action, thread_key, actor=os_accounts.safe_account_label(actor))
     return dict(saved)
+
+
+def load_email_settings(mailbox, user_id):
+    from support_email_compose import default_settings
+    settings = default_settings()
+    with cursor() as cur:
+        cur.execute("SELECT sender_name,signatures,folder_mapping,sent_policy FROM customer_support_email_settings WHERE mailbox=%s",
+                    (mailbox.casefold(),))
+        row = cur.fetchone()
+        if row:
+            settings.update(dict(row))
+        cur.execute("SELECT signature_key FROM customer_support_email_preferences WHERE mailbox=%s AND user_id=%s",
+                    (mailbox.casefold(), str(user_id)))
+        pref = cur.fetchone()
+    return settings, (pref or {}).get("signature_key")
+
+
+def save_email_settings(mailbox, *, actor, sender_name, signatures, folder_mapping, sent_policy, discovered_names):
+    from support_email_compose import sanitize_html, html_to_text
+    if not os_accounts.is_admin(actor) or not os_accounts.can_access_page(actor, "Email"):
+        raise SupportStorageError("Only an OS administrator can change mailbox settings.")
+    sender_name = str(sender_name).strip()
+    if not sender_name or len(sender_name) > 120 or any(c in sender_name for c in "\r\n\x00"):
+        raise SupportStorageError("Use a valid sender display name.")
+    if sent_policy not in {"verify", "server", "append"}:
+        raise SupportStorageError("Invalid Sent storage policy.")
+    mapping = {role: str(name) for role, name in dict(folder_mapping).items()
+               if role in {"sent", "drafts", "archive", "junk", "trash"} and name}
+    if any(name not in discovered_names or name.casefold() == "inbox" for name in mapping.values()):
+        raise SupportStorageError("Map folders from the discovered mailbox list.")
+    if len(set(mapping.values())) != len(mapping):
+        raise SupportStorageError("Each mailbox role must use a different folder.")
+    clean = {}
+    for key in ("company", "nathan", "reina"):
+        markup = str(signatures.get(key, {}).get("html", ""))
+        if len(markup) > 8000:
+            raise SupportStorageError("Each signature must be 8,000 characters or fewer.")
+        markup = sanitize_html(markup)
+        clean[key] = {"label": {"company": "Company default", "nathan": "Nathan", "reina": "Reina"}[key],
+                      "html": markup, "text": html_to_text(markup)}
+    with cursor(True) as cur:
+        cur.execute("""INSERT INTO customer_support_email_settings (mailbox,sender_name,signatures,folder_mapping,sent_policy)
+            VALUES (%s,%s,%s::jsonb,%s::jsonb,%s) ON CONFLICT(mailbox) DO UPDATE SET sender_name=EXCLUDED.sender_name,
+            signatures=EXCLUDED.signatures,folder_mapping=EXCLUDED.folder_mapping,sent_policy=EXCLUDED.sent_policy,updated_at=now()""",
+            (mailbox.casefold(), sender_name, json.dumps(clean), json.dumps(mapping), sent_policy))
+    audit("email_settings_updated", actor=os_accounts.safe_account_label(actor))
+
+
+def save_email_preference(mailbox, *, actor, signature_key):
+    from support_email_compose import SIGNATURE_KEYS
+    if not os_accounts.can_access_page(actor, "Email") or signature_key not in SIGNATURE_KEYS:
+        raise SupportStorageError("Invalid Email preference.")
+    with cursor(True) as cur:
+        cur.execute("""INSERT INTO customer_support_email_preferences(mailbox,user_id,signature_key) VALUES (%s,%s,%s)
+            ON CONFLICT(mailbox,user_id) DO UPDATE SET signature_key=EXCLUDED.signature_key,updated_at=now()""",
+            (mailbox.casefold(), str(actor["id"]), signature_key))
