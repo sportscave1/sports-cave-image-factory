@@ -671,44 +671,10 @@ def _account_results(rows, claims):
 
 
 def build_search_index(claims, sources=None):
-    """Build a permission-scoped index from explicitly allowlisted safe fields."""
-    sources = dict(sources or {})
-    allowed = set(claims.get("allowed_routes") or ())
-    results = _page_results(claims)
-    if "Dashboard" in allowed:
-        results.extend(_task_results(sources.get("tasks")))
-    if "Product Uploads" in allowed:
-        product_route_key = "products" if "Products" in allowed else "product_uploads"
-        results.extend(
-            _product_results(
-                sources.get("products"),
-                route_key=product_route_key,
-            )
-        )
-    if "Orders" in allowed:
-        results.extend(_order_results(sources.get("orders")))
-    if any(route in allowed for route in seo_navigation.SEO_ROUTES):
-        results.extend(_seo_results(sources.get("seo")))
-    if "Accounts & Access" in allowed:
-        results.extend(_account_results(sources.get("accounts"), claims))
-    unique = []
-    seen = set()
-    for result in results:
-        if not result:
-            continue
-        serialised = json.dumps(result, ensure_ascii=False).casefold()
-        if any(term in serialised for term in _SENSITIVE_TERMS):
-            continue
-        key = (
-            result["group"].casefold(),
-            result["title"].casefold(),
-            result["route_key"].casefold(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(result)
-    return unique
+    """Compatibility endpoint for the same static app index embedded in the shell."""
+    from app_search import build_app_index
+    return build_app_index(claims.get("allowed_routes") or (),
+                           can_view_activity=claims.get("can_view_activity", False))
 
 
 def _route_key_for_area(area):
@@ -890,8 +856,7 @@ async def top_bar_search_index(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    sources = await run_in_threadpool(load_search_sources, claims)
-    index = await run_in_threadpool(build_search_index, claims, sources)
+    index = build_search_index(claims)
     return _json({"ok": True, "results": index})
 
 

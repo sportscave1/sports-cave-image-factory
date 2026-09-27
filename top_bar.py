@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import os_accounts
+from app_search import build_app_index
 import top_bar_security
 from daily_planner import PLANNER_WINDOW_PATH
 
@@ -117,6 +118,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "navigationRouteLabels": navigation_route_labels,
         "accountsRouteKey": "accounts_access",
         "searchUrl": "/api/os/top-bar/search-index",
+        "searchIndex": build_app_index(allowed_routes, can_view_activity=os_accounts.can_view_activity_log(user)),
         "notificationsUrl": "/api/os/top-bar/notifications",
         "repairRequestsUrl": "/api/os/top-bar/repair-requests",
         "repairSections": repair_sections_for_user(user),

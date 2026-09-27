@@ -98,7 +98,7 @@ class TopBarSearchTests(unittest.TestCase):
         self.assertTrue(expected.issubset(page_titles))
         self.assertIn("Activity Log", page_titles)
 
-    def test_search_projects_safe_metadata_and_never_exposes_secrets(self):
+    def test_app_search_excludes_dynamic_entities_and_their_secrets(self):
         claims = admin_claims()
         sources = {
             "tasks": [
@@ -164,11 +164,11 @@ class TopBarSearchTests(unittest.TestCase):
         results = top_bar_api.build_search_index(claims, sources)
         serialised = json.dumps(results, ensure_ascii=False).casefold()
 
-        self.assertIn("ayrton senna", serialised)
-        self.assertIn("senna monaco collector print", serialised)
-        self.assertIn("example directory", serialised)
-        self.assertIn("great motorsport rivalries", serialised)
-        self.assertIn("operations worker", serialised)
+        self.assertNotIn("ayrton senna", serialised)
+        self.assertNotIn("senna monaco collector print", serialised)
+        self.assertNotIn("example directory", serialised)
+        self.assertNotIn("great motorsport rivalries", serialised)
+        self.assertNotIn("operations worker", serialised)
         for forbidden in (
             "private@example.test",
             "contact@example.test",
@@ -375,12 +375,12 @@ class TopBarComponentTests(unittest.TestCase):
         for theme in ("System", "Light", "Dark"):
             self.assertIn(f'"{theme}"', source)
 
-    def test_notifications_and_search_load_lazily_once_in_browser(self):
+    def test_search_is_embedded_and_notifications_remain_lazy(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
 
         click_index = source.index('searchInput.addEventListener("click"')
         self.assertNotIn('searchInput.addEventListener("focus"', source)
-        search_load_index = source.index("const loadSearchIndex")
+        search_load_index = source.index("const prepareSearchIndex")
         notification_click_index = source.index(
             'notificationsButton.addEventListener("click"'
         )
@@ -389,7 +389,8 @@ class TopBarComponentTests(unittest.TestCase):
         )
         self.assertLess(search_load_index, click_index)
         self.assertLess(notification_load_index, notification_click_index)
-        self.assertIn("if (state.searchIndex)", source)
+        self.assertIn("prepareSearchIndex(state.config.searchIndex)", source)
+        self.assertNotIn("requestJson(state.config.searchUrl)", source)
         self.assertIn("if (!state.notifications)", source)
         self.assertNotIn("st.rerun", source)
 

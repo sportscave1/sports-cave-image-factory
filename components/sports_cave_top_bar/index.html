@@ -456,7 +456,7 @@
     .sc-os-topbar-panel[hidden] { display: none !important; }
     #sc-os-search-results {
       left: 24px;
-      max-height: min(460px, calc(100dvh - var(--sc-topbar-height) - 24px));
+      max-height: min(392px, calc(100dvh - var(--sc-topbar-height) - 24px));
       overflow-y: auto;
       right: 24px;
     }
@@ -927,7 +927,6 @@
     const state = {
       config: {},
       searchIndex: null,
-      searchPromise: null,
       notifications: null,
       repairItems: [],
       repairIsAdmin: false,
@@ -1446,6 +1445,10 @@
     };
     const navigate = (result) => {
       if (!result || !result.route_key) return;
+      closePanels(false);
+      searchInput.value = "";
+      state.visibleResults = [];
+      state.highlighted = -1;
       navigateDocument(
         routeUrl(result.route_key, result.query, result.group !== "Pages"),
       );
@@ -1482,8 +1485,8 @@
       if (alreadyOpen) return false;
       state.activePanel = name;
       if (name === "search") {
-        searchPanel.hidden = false;
-        setExpanded(searchInput, true);
+        searchPanel.hidden = true;
+        setExpanded(searchInput, false);
         setExpanded(mobileSearchButton, true);
         if (mobileViewport()) doc.body.classList.add("sc-mobile-search-open");
       } else if (name === "notifications") {
@@ -2084,56 +2087,57 @@
         }, {capture: true, signal: listenerController.signal});
       }
     };
-    const loadSearchIndex = async () => {
-      if (state.searchIndex) return state.searchIndex;
-      if (!state.searchPromise) {
-        state.searchPromise = requestJson(state.config.searchUrl)
-          .then((payload) => {
-            state.searchIndex = Array.isArray(payload.results) ? payload.results : [];
-            return state.searchIndex;
-          })
-          .catch(() => {
-            state.searchIndex = [];
-            return state.searchIndex;
-          });
+    const normalise = (value) => String(value || "").toLowerCase().trim().replace(/[-_–—]+/g, " ").replace(/\s+/g, " ").trim();
+    const editDistance = (a, b) => {
+      const rows = Array.from({length:a.length+1}, () => Array(b.length+1).fill(0));
+      for (let i=0;i<=a.length;i++) rows[i][0]=i;
+      for (let j=0;j<=b.length;j++) rows[0][j]=j;
+      for (let i=1;i<=a.length;i++) for (let j=1;j<=b.length;j++) {
+        rows[i][j]=Math.min(rows[i-1][j]+1,rows[i][j-1]+1,rows[i-1][j-1]+(a[i-1]!==b[j-1]));
+        if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1]) rows[i][j]=Math.min(rows[i][j],rows[i-2][j-2]+1);
       }
-      return state.searchPromise;
+      return rows[a.length][b.length];
     };
-    const normalise = (value) => String(value || "").toLocaleLowerCase().trim();
+    const prepareSearchIndex = (rows) => (rows || []).map((row, order) => ({...row, order,
+      normalizedTitle:normalise(row.title), normalizedAliases:(row.aliases || []).map(normalise),
+      normalizedKeywords:(row.keywords || []).map(normalise)}));
     const scoreResult = (result, query) => {
-      const title = normalise(result.title);
-      const subtitle = normalise(result.subtitle);
-      const keywords = (result.keywords || []).map(normalise).join(" ");
-      if (!query) return result.group === "Pages" ? 0 : 20;
+      const title = result.normalizedTitle, aliases = result.normalizedAliases;
       if (title === query) return 0;
-      if (title.startsWith(query)) return 2;
-      if (title.includes(query)) return 5;
-      if (subtitle.includes(query)) return 9;
-      if (keywords.includes(query)) return 12;
-      return Number.POSITIVE_INFINITY;
+      if (aliases.includes(query)) return 100;
+      if (title.startsWith(query)) return 200;
+      if (aliases.some(alias => alias.startsWith(query))) return 300;
+      if (title.includes(query)) return 400;
+      if ([...aliases,...result.normalizedKeywords].some(word => word.includes(query))) return 500;
+      if(query.length<4 || query.length>64) return Infinity;
+      const limit=query.length>=7?2:1;
+      const distance=Math.min(...[title,...aliases].filter(word=>Math.abs(word.length-query.length)<=limit)
+        .map(word=>editDistance(word,query)));
+      return distance<=limit?600+distance:Infinity;
+    };
+    const rankSearchResults = (index, value) => {
+      const query=normalise(value).slice(0,120);
+      if(!query) return [];
+      return index.map(result=>({result,score:scoreResult(result,query)}))
+        .filter(entry=>Number.isFinite(entry.score))
+        .sort((a,b)=>a.score-b.score || (a.result.priority||0)-(b.result.priority||0) || a.result.order-b.result.order)
+        .slice(0,8).map(entry=>entry.result);
     };
     const renderSearchResults = () => {
       const query = normalise(searchInput.value);
-      const ranked = (state.searchIndex || [])
-        .map((result, order) => ({result, order, score: scoreResult(result, query)}))
-        .filter((entry) => Number.isFinite(entry.score))
-        .sort((a, b) => a.score - b.score || a.order - b.order)
-        .slice(0, 10)
-        .map((entry) => entry.result);
+      const ranked = rankSearchResults(state.searchIndex || [],query);
       state.visibleResults = ranked;
-      state.highlighted = ranked.length ? Math.min(Math.max(state.highlighted, 0), ranked.length - 1) : -1;
+      state.highlighted = ranked.length ? 0 : -1;
+      searchPanel.hidden = !query;
+      setExpanded(searchInput, Boolean(query));
+      if (!query) { searchPanel.innerHTML = ""; return; }
       if (!ranked.length) {
-        searchPanel.innerHTML = '<div class="sc-os-topbar-state">No results found</div>';
+        searchPanel.innerHTML = `<div class="sc-os-topbar-state">No results for “${escapeHtml(searchInput.value.slice(0,120))}”</div>`;
         return;
       }
-      let currentGroup = "";
-      searchPanel.innerHTML = ranked.map((result, index) => {
-        const heading = result.group !== currentGroup
-          ? `<div class="sc-os-result-group">${escapeHtml(result.group)}</div>`
-          : "";
-        currentGroup = result.group;
-        return `${heading}<button type="button" class="sc-os-topbar-result" role="option" aria-selected="${index === state.highlighted}" data-index="${index}"><span class="sc-os-result-copy"><span class="sc-os-result-title">${escapeHtml(result.title)}</span><span class="sc-os-result-subtitle">${escapeHtml(result.subtitle || result.group)}</span></span><span class="sc-os-result-chevron">${icon("chevron")}</span></button>`;
-      }).join("");
+      searchPanel.innerHTML = ranked.map((result, index) =>
+        `<button type="button" class="sc-os-topbar-result" role="option" aria-selected="${index === state.highlighted}" data-index="${index}"><span class="sc-os-result-chevron">${icon(result.icon || "chevron")}</span><span class="sc-os-result-copy"><span class="sc-os-result-title">${escapeHtml(result.title)}</span><span class="sc-os-result-subtitle">${escapeHtml(result.subtitle || result.kind)}</span></span></button>`
+      ).join("");
       searchPanel.querySelectorAll(".sc-os-topbar-result").forEach((button) => {
         button.addEventListener("click", () => navigate(ranked[Number(button.dataset.index)]));
         button.addEventListener("mousemove", () => {
@@ -2450,11 +2454,11 @@
         repairsPanel.querySelector("#sc-os-repair-section")?.focus({preventScroll: true});
       }
     };
-    const openSearch = async () => {
-      openPanel("search");
-      searchPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
-      await loadSearchIndex();
-      if (state.activePanel === "search") renderSearchResults();
+    const openSearch = ({clear = false} = {}) => {
+      if (clear) searchInput.value = "";
+      if (state.activePanel !== "search") openPanel("search");
+      searchInput.focus({preventScroll:true});
+      renderSearchResults();
     };
     const renderNotifications = (items) => {
       notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
@@ -2596,13 +2600,9 @@
     searchInput.addEventListener("click", () => {
       if (state.activePanel !== "search") openSearch();
     }, listenerOptions);
-    mobileSearchButton?.addEventListener("click", async () => {
+    mobileSearchButton?.addEventListener("click", () => {
       closeMobileNavigation();
-      if (!openPanel("search")) return;
-      searchPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
-      searchInput.focus({preventScroll: true});
-      await loadSearchIndex();
-      if (state.activePanel === "search") renderSearchResults();
+      openSearch({clear:true});
     }, listenerOptions);
     refreshButton.addEventListener("click", () => {
       try { parentWindow.sessionStorage.removeItem(statusCacheKey("email")); } catch (_error) {}
@@ -2684,8 +2684,7 @@
           && !(event.key === "Escape" && root.contains(target))) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.repeat && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchInput.focus({preventScroll: true});
-        if (state.activePanel !== "search") openSearch();
+        openSearch({clear:true});
       } else if (event.key === "Escape" && state.activePanel) {
         event.preventDefault();
         closePanels(true);
@@ -2695,7 +2694,14 @@
       }
     }, listenerOptions);
     doc.addEventListener("pointerdown", (event) => {
-      if (state.activePanel && !root.contains(event.target)) closePanels(false);
+      if (state.activePanel === "search") {
+        const path=event.composedPath?.() || [event.target];
+        if (!path.includes(searchInput) && !path.includes(searchPanel) && !searchPanel.contains(event.target)) closePanels(false);
+      } else if (state.activePanel && !root.contains(event.target)) closePanels(false);
+    }, listenerOptions);
+    // Focus entering an embedded component does not emit pointerdown in this document.
+    parentWindow.addEventListener("blur", () => {
+      if (state.activePanel === "search") closePanels(false);
     }, listenerOptions);
     doc.addEventListener("click", (event) => {
       const seoViewButton = event.target.closest?.(
@@ -2770,6 +2776,10 @@
         }, parentWindow.location.origin);
       } catch (_error) {}
     }, listenerOptions);
+    // The shell DOM survives Streamlit reruns; the controller's open state does
+    // not. Never retain a visible search panel with no live dismissal state.
+    searchPanel.hidden = true;
+    setExpanded(searchInput, false);
     updateSidebarWidth();
     later(updateSidebarWidth, 250);
     later(updateSidebarWidth, 1000);
@@ -2781,6 +2791,7 @@
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
         state.config = {...nextConfig};
+        state.searchIndex = prepareSearchIndex(state.config.searchIndex);
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
         if (
@@ -2801,8 +2812,7 @@
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
         scheduleTopBarGreeting();
         if (revisionChanged) {
-          state.searchIndex = null;
-          state.searchPromise = null;
+
           state.notifications = null;
           state.shownPlannerEvents.clear();
           state.terminalPlannerTimerIds.clear();
