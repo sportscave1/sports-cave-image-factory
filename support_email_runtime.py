@@ -48,13 +48,33 @@ class MailboxRuntime:
             # Configuration rotation cannot grow state indefinitely.
             if len(self.states) >= 16:
                 self.states.popitem(last=False)
-            self.states[scope] = {"failures": 0, "retry_at": 0, "generation": 0, "background_starts": deque()}
+            self.states[scope] = {"failures": 0, "retry_at": 0, "generation": 0, "background_starts": deque(),
+                                  "last_success_at": None, "last_failure_at": None,
+                                  "failure_stage": None, "watcher_state": "unavailable", "fallback_state": "ready"}
         self.states.move_to_end(scope)
         return self.states[scope]
 
     def generation(self, scope):
         with self.condition:
             return self._state(scope)["generation"]
+
+    def watcher(self, scope, state):
+        # Watcher health is diagnostic only: it never opens the foreground circuit.
+        if state not in {"healthy", "reconnecting", "unavailable"}:
+            raise ValueError("Invalid watcher state")
+        with self.condition:
+            self._state(scope)["watcher_state"] = state
+
+    def health(self, scope):
+        with self.condition:
+            state = self._state(scope)
+            if state["failures"]:
+                health = "RECONNECTING" if state["last_success_at"] is not None else "UNAVAILABLE"
+            else:
+                health = "HEALTHY" if state["watcher_state"] == "healthy" else "DEGRADED"
+            return {"state": health, "consecutive_failures": state["failures"],
+                    **{k: state[k] for k in ("last_success_at", "last_failure_at", "failure_stage",
+                                            "watcher_state", "fallback_state")}}
 
     def invalidate(self, scope):
         with self.condition:
@@ -113,7 +133,7 @@ class MailboxRuntime:
                 raise Deferred("Connection interrupted. Reconnecting automatically.", reason="backoff")
             if background:
                 # Reserve capacity for clicks; background checks never queue sockets.
-                if self.active >= 2 or self.background_active or self.foreground_waiting:
+                if self.active >= 1 or self.background_active or self.foreground_waiting:
                     raise Deferred("Mailbox check deferred for an active operation.")
                 starts = state["background_starts"]
                 while starts and starts[0] <= self.clock() - 60:
@@ -124,8 +144,8 @@ class MailboxRuntime:
             else:
                 self.foreground_waiting += 1
                 try:
-                    if not self.condition.wait_for(lambda: self.active < 2, timeout=timeout):
-                        raise Deferred("Mailbox is busy. Try again shortly.")
+                    if not self.condition.wait_for(lambda: self.active < 1, timeout=timeout):
+                        raise Deferred("Mailbox is busy. Try again shortly.", reason="connection_budget_timeout")
                 finally:
                     self.foreground_waiting -= 1
             self.active += 1
@@ -140,12 +160,14 @@ class MailboxRuntime:
                 with self.condition:
                     state = self._state(scope)
                     state["failures"] = min(4, state["failures"] + 1)
+                    state.update(last_failure_at=time.time(), failure_stage=getattr(error, "stage", "operation"),
+                                 fallback_state="backoff")
                     state["retry_at"] = self.clock() + min(120, 15 * 2 ** (state["failures"] - 1))
                     self.invalidate(scope)
             raise
         else:
             with self.condition:
-                self._state(scope).update(failures=0, retry_at=0)
+                self._state(scope).update(failures=0, retry_at=0, last_success_at=time.time(), fallback_state="ready")
         finally:
             with self.condition:
                 self.active -= 1

@@ -33,9 +33,10 @@ HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFEREN
 class MailboxError(RuntimeError):
     """Only constant, safe messages may cross the provider boundary."""
 
-    def __init__(self, message, *, code="operation", retryable=False):
+    def __init__(self, message, *, code="operation", retryable=False, stage="operation"):
         super().__init__(message)
         self.code, self.retryable = code, retryable
+        self.stage = stage
 
 
 FAILURES = {
@@ -57,6 +58,7 @@ FAILURES = {
 
 
 def _failure(error, stage):
+    stage = getattr(error, "email_stage", stage)
     if isinstance(error, Deferred):
         code = "deferred"
     elif isinstance(error, TimeoutError):
@@ -85,7 +87,7 @@ def _failure(error, stage):
         code = stage
     else:
         code = "protocol"
-    return MailboxError(FAILURES[code], code=code,
+    return MailboxError(FAILURES[code], code=code, stage=stage,
                         retryable=code in {"timeout", "dns", "temporary", "refused", "network", "reset", "bye"})
 
 
@@ -461,6 +463,10 @@ def _close_resources(connection):
 
 class _ManagedSSL(_SSL_CLASS):
     """Also release partially constructed sockets on TLS/greeting failure."""
+    def _create_socket(self, timeout):
+        from support_email_transport import connect_tls
+        return connect_tls(self.host, self.port, timeout, self.ssl_context)
+
     def __init__(self, *args, **kwargs):
         try:
             super().__init__(*args, **kwargs)
@@ -493,6 +499,7 @@ class ImapProvider:
                 with self._wire_connection(folder, expected_validity, write=write) as connection:
                     yield connection
         except Deferred as error:
+            LOGGER.info("email_imap_deferred stage=acquire code=%s", error.reason)
             code = "deferred" if error.reason == "backoff" else "busy"
             raise MailboxError(FAILURES[code], code=code) from None
         finally:
@@ -535,7 +542,7 @@ class ImapProvider:
             # Never log provider response text, arguments, repr, tracebacks or credentials.
             failure = _failure(error, stage)
             LOGGER.warning("email_imap_check_failure stage=%s code=%s type=%s errno=%s winerror=%s duration_ms=%d",
-                stage, failure.code, type(error).__name__,
+                failure.stage, failure.code, type(error).__name__,
                 getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
                 getattr(error, "winerror", None) if isinstance(getattr(error, "winerror", None), int) else None,
                 (time.monotonic() - started) * 1000)
@@ -564,7 +571,7 @@ class ImapProvider:
             limited = bool(re.search(r"too many|connection limit|rate.?limit|maximum.*connections", str(data), re.I))
             code = "limit" if limited else "bye" if status == "BYE" else stage
             LOGGER.warning("email_imap_check_failure stage=%s code=%s", stage, code)
-            raise MailboxError(FAILURES[code], code=code, retryable=code == "folders")
+            raise MailboxError(FAILURES[code], code=code, stage=stage, retryable=code == "folders")
         return data
 
     def _list_folders(self, conn):

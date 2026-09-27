@@ -11,7 +11,8 @@ import time
 import uuid
 
 from support_email_idle_store import SignalStore
-from support_email_provider import load_configuration, _ManagedSSL
+from support_email_provider import load_configuration, _ManagedSSL, _failure
+from support_email_runtime import RUNTIME
 
 LOGGER = logging.getLogger(__name__)
 RENEW_IDLE_SECONDS = 20 * 60
@@ -98,6 +99,7 @@ class MailboxWatcher:
         self.deadline = 0
         self.renew_at = 0
         self.failures = 0
+        self.stage = "lease"
 
     def start(self):
         with self.start_lock:
@@ -123,29 +125,37 @@ class MailboxWatcher:
         return self.clock() < self.deadline
 
     def check_lease(self):
+        previous_stage, self.stage = self.stage, "lease"
         if self.clock() >= self.deadline:
             raise RuntimeError('Mailbox lease deadline passed')
         if self.clock() >= self.renew_at and not self.lease():
             raise RuntimeError('Mailbox watcher ownership lost')
+        self.stage = previous_stage
 
     def watch(self):
         client = None
         try:
             self.check_lease()
+            self.stage = "connect"
             client = self.factory(self.cfg)
             self.check_lease()
+            self.stage = "authentication"
             client.login(self.cfg.address, self.cfg.password)
             self.check_lease()
+            self.stage = "capability"
             if not idle_supported(client):
                 LOGGER.info('email_idle_unsupported polling_fallback=true')
                 return False
+            self.stage = "select"
             client.select_folder('INBOX', readonly=True)
             self.check_lease()
             self.publish(client)  # STATUS baseline only; notification cursor is untouched.
             LOGGER.info('email_idle_connected supported=true')
+            RUNTIME.watcher(self.cfg.scope, "healthy")
             healthy_since = self.clock()
             while not self.stop.is_set():
                 self.check_lease()
+                self.stage = "idle"
                 client.idle()
                 until = self.clock() + RENEW_IDLE_SECONDS
                 changed = False
@@ -159,15 +169,18 @@ class MailboxWatcher:
                     if any(any(token in event for token in (b'EXISTS', b'EXPUNGE', b'FETCH', b'RECENT')) for event in events):
                         changed = True
                         break
+                self.stage = "idle_done"
                 client.idle_done()
                 if self.stop.is_set():
                     break
                 self.check_lease()
                 if not changed:
+                    self.stage = "noop"
                     client.noop()
                 self.publish(client)  # Flag changes also change the version when counts do not.
             return True
         finally:
+            RUNTIME.watcher(self.cfg.scope, "unavailable")
             if client is not None:
                 # On error/lease loss close the transport directly: do not spend the
                 # takeover safety margin waiting for DONE or LOGOUT on a broken socket.
@@ -178,8 +191,10 @@ class MailboxWatcher:
 
     def publish(self, client):
         self.check_lease()
+        self.stage = "status"
         status = mailbox_status(client)
         self.check_lease()
+        self.stage = "signal"
         value = self.store.publish(self.cfg.address, self.owner, status, str(uuid.uuid4()))
         self.hub.accept(value)
 
@@ -188,6 +203,7 @@ class MailboxWatcher:
             held = False
             wait = 15
             try:
+                self.stage = "lease"
                 held = self.lease(initial=True)
                 if held:
                     supported = self.watch()
@@ -201,9 +217,13 @@ class MailboxWatcher:
                         self.stop.wait(1)
                     wait = 0
             except Exception as error:
+                RUNTIME.watcher(self.cfg.scope, "reconnecting")
                 self.failures = min(4, self.failures + 1)
                 wait = min(120, 15 * 2 ** (self.failures - 1))
-                LOGGER.warning('email_idle_reconnect type=%s delay=%d', type(error).__name__, wait)
+                failure = _failure(error, self.stage)
+                LOGGER.warning('email_idle_reconnect stage=%s code=%s type=%s errno=%s delay=%d',
+                               failure.stage, failure.code, type(error).__name__,
+                               getattr(error, 'errno', None) if isinstance(getattr(error, 'errno', None), int) else None, wait)
             finally:
                 if held:
                     try:
@@ -230,7 +250,12 @@ class IdleLifecycle:
 
         async def lifecycle_send(message):
             if message['type'] == 'lifespan.startup.complete' and self.watcher is None:
-                self.watcher = self.factory() if self.factory else MailboxWatcher(load_configuration())
-                self.watcher.start()
+                try:
+                    self.watcher = self.factory() if self.factory else MailboxWatcher(load_configuration())
+                    self.watcher.start()
+                except Exception as error:
+                    # IDLE is optional; resource/thread initialization cannot prevent
+                    # an otherwise healthy web server from serving polling/manual mail.
+                    LOGGER.warning('email_idle_start_failure type=%s polling_fallback=true', type(error).__name__)
             await send(message)
         await self.app(scope, lifecycle_receive, lifecycle_send)

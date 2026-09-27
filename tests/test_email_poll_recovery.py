@@ -166,7 +166,7 @@ class PollRecoveryTests(unittest.TestCase):
             _ManagedSSL()
         for resource in resources:resource.close.assert_called_once()
 
-    def test_background_admission_reserves_foreground_capacity(self):
+    def test_background_admission_queues_foreground_with_one_short_lived_slot(self):
         runtime = MailboxRuntime()
         entered, release = threading.Event(), threading.Event()
         def background():
@@ -178,8 +178,11 @@ class PollRecoveryTests(unittest.TestCase):
             try:
                 with self.assertRaises(Deferred):
                     with runtime.connection(CONFIG.scope, background=True):pass
+                timer = threading.Timer(.05, release.set)
+                timer.start()
                 with runtime.connection(CONFIG.scope):
-                    self.assertEqual(runtime.active, 2)
+                    self.assertEqual(runtime.active, 1)
+                timer.join()
             finally:release.set()
             future.result(3)
         self.assertEqual(runtime.active, 0)
