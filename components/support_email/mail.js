@@ -4,6 +4,15 @@
   const size = n => Number(n) >= 1048576 ? (Number(n)/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(Number(n)/1024))+' KB';
   const safeLink = value => {try {const u=new URL(value); return ['https:','http:','mailto:'].includes(u.protocol) && !u.username && !u.password ? u.href : '';} catch (_) {return '';}};
   const locked = m => ['accepted','unknown','in_progress'].includes((m.send_result || {}).status) || m.draft_pending;
+  const mailboxCount = m => m.error ? 'Mailbox unavailable' : (m.query ? 'Search · ' : '') + (m.threads || []).length + ' conversations';
+  function sendStatus(m) {
+    const status=m.send_result?.status, progress=m.send_progress||{};
+    if(status==='accepted') return '<div class="send-success">✓ Sent</div><div class="'+(m.sent_result?.status==='present'?'send-success':'send-pending')+'">'+(m.sent_result?.status==='present'?'✓ Sent copy available':'● Sent copy pending')+'</div>';
+    if(status==='unknown') return '<div class="send-uncertain">⚠ Send status uncertain</div><small>Do not resend yet.</small>';
+    if(status==='rejected') return '<div class="send-failed">✕ Not sent</div><small>Could not send this email.</small>';
+    if(status==='in_progress') return `<div>${esc(progress.label||'Validating message…')} <span aria-hidden="true">${Math.min(75,progress.percent||5)}%</span></div><progress aria-label="Send stages completed" max="100" value="${Math.min(75,progress.percent||5)}"></progress>`;
+    return '';
+  }
   function createViewCache(limit=20,byteLimit=8*1024*1024){
     const entries=new Map();let bytes=0;
     const remove=key=>{const old=entries.get(key);if(old){bytes-=old.size;entries.delete(key);}};
@@ -18,12 +27,19 @@
     if(!active?.expanded)return null;
     return {active_message:active.key,messages:messages.map(m=>({...m,expanded:m.key===active.key&&m.expanded}))};
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,createViewCache,threadView}; return;}
+  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,sendStatus,createViewCache,threadView}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
   const views=createViewCache();
   const submitted=new Set();
+  let sentTimer=null;
+  function scheduleSentCheck(){
+    clearTimeout(sentTimer);
+    if(model.send_result?.status!=='accepted'||model.sent_result?.status==='present'||model.sent_checks>=3||model.view!=='compose'||busy)return;
+    sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:model.draft?.operation_id}),[6000,12000,24000][model.sent_checks||0]);
+  }
+  window.addEventListener('pagehide',()=>clearTimeout(sentTimer));
   const post=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
   const $=id=>document.getElementById(id);
   const button=(label,action,data='',disabled=false,klass='')=>`<button type="button" class="${klass}" data-action="${action}" ${data} ${disabled?'disabled':''}>${label}</button>`;
@@ -36,18 +52,19 @@
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
     if (busy) {
-      if(selecting || ['open_thread','open_message','resolve_thread'].includes(pendingAction)){
+      if(selecting || ['open_thread','open_message','resolve_thread','auto_check_sent'].includes(pendingAction)){
         queued={action,values};
         if(selecting) optimistic(action,values);
       }
       return;
     }
     const draft=snapshot();
+    if(action==='send'){model.send_result={status:'in_progress'};model.sent_result={};model.send_progress={percent:5,label:'Validating message…'};if($('send-status'))$('send-status').innerHTML=sendStatus(model);}
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
-    else if(action!=='resolve_thread'){root.classList.add('busy');freeze();}
-    if (!selecting && action!=='resolve_thread' && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
+    else if(!['resolve_thread','auto_check_sent'].includes(action)){root.classList.add('busy');freeze();}
+    if (!selecting && !['resolve_thread','auto_check_sent'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
   const viewKey=(m,key)=>JSON.stringify([m.mailbox,m.mailbox_version,key]);
@@ -107,7 +124,7 @@
   }
   function conversations() {
     const folder=(model.folders||[]).find(f=>f.name===model.folder);
-    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${model.query?'Search · ':''}${(model.threads||[]).length} conversations</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more?button('Load 50 more','load_more'): '<span class="muted">'+(model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
+    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(model))}</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more&&!model.error?button('Load 50 more','load_more'): '<span class="muted">'+(model.error?'Mailbox unavailable':model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
   }
   const names=people=>(people||[]).map(p=>p.name?`${p.name} <${p.email}>`:p.email).join(', ');
   function messages() {
@@ -117,7 +134,7 @@
     return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Star / unstar"')}${button('Junk','junk','',!model.roles.junk)}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span><small>${esc(m.time)}</small></div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div></button>${m.expanded?`<div class="message-body">${m.html}</div>${m.quote?`<details><summary>Show quoted text</summary><div class="quote">${m.quote}</div></details>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="Download directly from mailbox"`)).join('')}</div>`:''}</article>`).join('')}</div></div>`;
   }
   function formatBar(target='editor') {
-    return `<div class="format-bar" data-editor="${target}">${[['B','bold'],['I','italic'],['U','underline'],['↗ Link','createLink'],['• List','insertUnorderedList'],['1. List','insertOrderedList']].map(([label,cmd])=>`<button type="button" data-command="${cmd}" title="${cmd}">${label}</button>`).join('')}</div>`;
+    return `<div class="format-bar" data-editor="${target}">${[['B','bold'],['I','italic'],['U','underline'],['↗ Link','createLink'],['• List','insertUnorderedList'],['1. List','insertOrderedList']].map(([label,cmd])=>`<button type="button" data-command="${cmd}" title="${cmd}" ${target==='editor'&&locked(model)?'disabled':''}>${label}</button>`).join('')}</div>`;
   }
   function signaturePreview(key) {
     return (model.settings.signatures[key]?.html||'').replaceAll('cid:sports-cave-signature-logo@sportscaveshop.com',model.signature_logo||'');
@@ -129,7 +146,7 @@
     if (!model.draft) return messages();
     const draft={...model.draft,...(localDraft?.id===model.draft.id?localDraft:{})}, lock=locked(model), status=model.send_result?.status;
     const forwarded=draft.mode==='forward'?(model.messages||[]).flatMap(m=>m.attachments.map(a=>({...a,message_key:m.key}))):[];
-    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${button('Close · Esc','close_composer','','','plain')}</div>${status?`<div class="delivery">${esc(model.send_result.notice)} ${['accepted','unknown'].includes(status)?button('Check Sent','check_sent'):status==='rejected'?button('Prepare again','retry_rejected'):''}</div>`:''}<div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div class="row wrap">${button('Send','send','title="Ctrl+Enter"',lock||status==='rejected'||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
+    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${button('Close · Esc','close_composer','','','plain')}</div><div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true">${sendStatus(model)}</div>${['accepted','unknown'].includes(status)&&model.sent_result?.status!=='present'?button('Check Sent copy','check_sent'):status==='rejected'?button('Try again','retry_rejected'):''}<div class="row wrap">${status==='accepted'?button('Close','close_composer','','','primary'):button('Send','send','title="Ctrl+Enter"',lock||status==='rejected'||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
   }
   function settings() {
     const s=model.settings;
@@ -144,7 +161,7 @@
     return `<section class="panel"><div class="panel-head"><strong>Customer / Order</strong>${button('Close','close_panel','','','plain')}</div><div class="panel-scroll"><h3>${esc(c.label||'No order matched')}</h3>${(c.candidates||[]).map(v=>'<p class="context-item">'+esc(v.name)+' · '+esc(v.date)+'</p>').join('')}${o?`<div class="context-item"><strong>${esc(o.name)}</strong><br>${esc(o.date)}<br>Fulfilment: ${esc(o.fulfilment)}</div>${o.lines.map(l=>`<div class="context-item">${esc(l.product_title)}<br><small>${esc(l.variant_title)}</small></div>`).join('')}${o.editions.map(e=>`<div class="context-item">Edition ${esc(e.edition_number)} / ${esc(e.edition_total)}<br>Certificate: ${esc(e.certificate_status||'Not recorded')}<br>${external('Open Edition',appURL(o.edition_url))}</div>`).join('')}<div class="section stack">${external('Open Shopify order',o.shopify_url)}${external('Open Sports Cave order',appURL(o.os_url))}${o.tracking.map(u=>external('Open tracking',u)).join('')}</div>${o.previous.length?'<div class="section"><div class="label">Previous orders</div>'+o.previous.map(p=>'<p class="context-item">'+esc(p.name)+' · '+esc(p.date)+'</p>').join('')+'</div>':''}`:''}<div class="section stack"><div class="label">Internal support workflow</div>${c.workflow_available&&!w.conflict?`<label>Status<select id="workflow-status">${['Needs Reply','Waiting on Customer','Waiting on Sports Cave','Resolved'].map(s=>`<option ${w.support_status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Assigned<select id="workflow-assigned"><option value="">Unassigned</option>${c.assignees.map(a=>`<option value="${esc(a.id)}" ${w.assigned_user_id===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label><label>Internal notes<textarea id="workflow-notes" maxlength="8000">${esc(w.internal_notes||'')}</textarea></label><label class="checkbox"><input id="workflow-approval" type="checkbox" ${w.needs_approval?'checked':''}>Requires Nathan's approval</label><small>Internal only. Notes are never included in email.</small>${button('Save workflow','workflow')}`:'<small>Workflow metadata is unavailable or conflicting. Mail remains in the live mailbox.</small>'}</div></div></section>`;
   }
   function paintReading(force=false,reset=false){
-    const stamp=JSON.stringify([model.selected,model.view,model.active_message,model.messages,model.error,model.draft,model.send_result,model.draft_pending,model.context,model.settings,model.settings_available,model.signature_preference]);
+    const stamp=JSON.stringify([model.selected,model.view,model.active_message,model.messages,model.error,model.draft,model.send_result,model.sent_result,model.send_progress,model.draft_pending,model.context,model.settings,model.settings_available,model.signature_preference]);
     const pane=root.querySelector('.reading');if(!pane)return;
     if(force||stamp!==readingStamp){
       const old=pane.querySelector('.reading-scroll,.compose-scroll,.panel-scroll');const top=reset?0:old?.scrollTop||0;
@@ -156,11 +173,12 @@
   function render(next) {
     // The fragment first receives the old model before processing its event. Ignore that echo.
     if(pending&&next.ack!==pending)return;
-    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread'].includes(pendingAction);
+    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
     if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
     model=next;
+
     try {
       window.parent.SportsCaveTopBar?.mailboxUnreadChanged?.(model.inbox_status||{});
       inboxUnread(window.parent.SportsCaveTopBar?.emailUnreadStatus?.());
@@ -177,6 +195,7 @@
     }
     if(queued){const action=queued;queued=null;emit(action.action,action.values);return;}
     root.classList.remove('busy');
+    scheduleSentCheck();
     if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div class="statusbar"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
     const toolbarKey=JSON.stringify([model.configured,model.query,model.field]);
     if(wasFrozen||toolbarKey!==toolbarStamp){
@@ -267,6 +286,16 @@
     if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&model.view==='mail'&&model.active_message){if(e.key.toLowerCase()==='r')compose('reply');if(e.key.toLowerCase()==='f')compose('forward');}
   });
   window.addEventListener('message',event=>{
+    if(event.data?.type==='sc:send-progress'){
+      // Streamlit's srcdoc bridge can report a null origin. Validate the exact
+      // sibling window and its operation marker, not arbitrary postMessages.
+      let bridge;try{bridge=[...window.parent.document.querySelectorAll('iframe')].find(f=>f.contentWindow===event.source);}catch(_){return;}
+      if(!bridge||bridge.dataset.scSendProgress!==model.draft?.operation_id||event.data.operation_id!==model.draft?.operation_id||pendingAction!=='send')return;
+      model.send_progress={percent:event.data.percent,label:event.data.label};
+      if(event.data.percent===100){model.send_result={status:'accepted'};model.sent_result={status:'pending'};}
+      if($('send-status'))$('send-status').innerHTML=sendStatus(model);
+      return;
+    }
     if(event.source!==window.parent)return;
     if(event.data.type==='streamlit:render')render(event.data.args.model);
     if(event.data.type==='sc:email-unread')inboxUnread(event.data);

@@ -245,7 +245,7 @@ class ProviderTests(unittest.TestCase):
 
     def test_timeout_and_no_response_are_safe(self):
         factory = Mock(side_effect=TimeoutError("fixture-password"))
-        with self.assertRaisesRegex(provider.MailboxError, "connection failed"):
+        with self.assertRaisesRegex(provider.MailboxError, "timed out"):
             provider.ImapProvider(CONFIG, connection_factory=factory).test_connection()
         adapter, server, _ = self.adapter()
         server.select = Mock(return_value=("NO", [b"fixture-password"]))

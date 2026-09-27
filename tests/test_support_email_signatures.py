@@ -111,7 +111,8 @@ class SignatureTests(unittest.TestCase):
 
     def test_reply_reply_all_forward_signature_above_history(self):
         for mode in ('reply', 'reply_all', 'forward'):
-            msg = self.mime(self.draft('reina', mode))
+            draft = self.draft('reina', mode); draft['include_quote'] = True
+            msg = self.mime(draft)
             html = msg.get_body(('html',)).get_content()
             self.assertLess(html.index('Thanks for getting in touch'), html.index('Kind regards'))
             self.assertLess(html.index('Kind regards'), html.index('Prior customer message'))
@@ -119,7 +120,7 @@ class SignatureTests(unittest.TestCase):
             self.assertLess(plain.index('Maria'), plain.index('Prior customer message'))
 
     def test_managed_draft_repeated_roundtrip_and_switch_preserves_body_quote_and_files(self):
-        d = self.draft('reina', 'reply_all'); compose.add_attachment(d, compose.make_attachment('proof.txt', b'proof'))
+        d = self.draft('reina', 'reply_all'); d['include_quote'] = True; compose.add_attachment(d, compose.make_attachment('proof.txt', b'proof'))
         for _ in range(3):
             msg = self.mime(d, as_draft=True)
             d = compose.edit_mailbox_draft(msg.as_bytes(), MAILBOX, header())

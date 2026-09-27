@@ -94,6 +94,9 @@ def _render_workspace(user):
             state["notification_target"] = identity
             workspace.open_notification(target)
         event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
+        if event and event.get("action") == "send":
+            from support_email_progress import progress_callback
+            workspace.progress = progress_callback(st.empty(), event.get("operation_id"))
         if event and workspace.handle(event):
             rerun_email()
     except Exception as error:

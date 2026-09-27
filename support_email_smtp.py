@@ -13,6 +13,15 @@ from support_email_provider import MailboxError
 LOGGER = logging.getLogger(__name__)
 
 
+def report_progress(callback, percent, label):
+    """Display-only hooks must never change a delivery outcome or trigger a retry."""
+    if callback:
+        try:
+            callback(percent, label)
+        except Exception:
+            LOGGER.warning("Email progress display unavailable")
+
+
 @dataclass(frozen=True)
 class SMTPConfiguration:
     host: str = "ventraip.email"
@@ -44,16 +53,18 @@ class SMTPProvider:
         self.configuration = configuration
         self.connection_factory = connection_factory or smtplib.SMTP_SSL
 
-    def submit(self, mime, *, mailbox):
+    def submit(self, mime, *, mailbox, progress=None):
         cfg, conn, data_started = self.configuration, None, False
         if not cfg.configured or cfg.address.casefold() != mailbox.casefold():
             return {"status": "rejected", "notice": "SMTP is not configured for this mailbox."}
         try:
+            report_progress(progress, 45, "Connecting securely…")
             conn = self.connection_factory(cfg.host, cfg.port, context=ssl.create_default_context(), timeout=cfg.timeout)
             conn.set_debuglevel(0)
             code, _ = conn.ehlo()
             if code != 250:
                 raise smtplib.SMTPException("EHLO rejected")
+            report_progress(progress, 60, "Authenticating mail server…")
             conn.login(cfg.address, cfg.password)
             maximum = str(getattr(conn, "esmtp_features", {}).get("size", ""))
             if maximum.isdigit() and len(mime["bytes"]) > int(maximum):
@@ -71,8 +82,10 @@ class SMTPProvider:
                 conn.rset()
                 return {"status": "rejected", "notice": "A recipient was rejected. Nothing was sent; check the addresses."}
             data_started = True
+            report_progress(progress, 75, "Sending email…")
             code, _ = conn.data(mime["bytes"])
             if code == 250:
+                report_progress(progress, 100, "Sent")
                 return {"status": "accepted", "notice": "Mail server accepted the email."}
             return {"status": "rejected", "notice": "Mail server rejected the message. Nothing was accepted."}
         except smtplib.SMTPDataError:
@@ -98,7 +111,7 @@ class SendRegistry:
     def __init__(self):
         self.lock, self.receipts = Lock(), {}
 
-    def submit(self, operation_id, mailbox, mime, provider):
+    def submit(self, operation_id, mailbox, mime, provider, *, progress=None):
         operation_id = str(uuid.UUID(operation_id))
         key = (mailbox.casefold(), operation_id)
         fingerprint = hashlib.sha256(mime["bytes"]).hexdigest()
@@ -110,12 +123,19 @@ class SendRegistry:
             self.receipts[key] = {"status": "in_progress", "notice": "Sending…", "message_id": mime["message_id"],
                                   "fingerprint": fingerprint}
         # A rerun or simultaneous click sees the claim and cannot submit again.
+        def update_progress(percent, label):
+            if percent == 100:
+                # SMTP DATA acceptance is known before QUIT or Sent-folder I/O.
+                with self.lock:
+                    self.receipts[key].update(status="accepted", notice="Sent")
+            report_progress(progress, percent, label)
         try:
-            result = provider.submit(mime, mailbox=mailbox)
+            result = provider.submit(mime, mailbox=mailbox, **({"progress": update_progress} if progress else {}))
         except BaseException:
             # Interruption cannot prove that SMTP did not accept DATA.
             with self.lock:
-                self.receipts[key].update(status="unknown", notice="Send interrupted. Check Sent before taking further action.")
+                if self.receipts[key]["status"] != "accepted":
+                    self.receipts[key].update(status="unknown", notice="Send interrupted. Check Sent before taking further action.")
             raise
         with self.lock:
             self.receipts[key].update(result)

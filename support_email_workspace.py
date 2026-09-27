@@ -16,7 +16,7 @@ from support_email_compose import (ComposeError, default_settings, selected_sign
     sanitize_html, readable_html, split_quote, attachment_from_upload, add_attachment, make_attachment,
     edit_mailbox_draft, safe_url, sanitize_signature)
 from support_email_signatures import logo_data_uri
-from support_email_smtp import SMTPProvider, SEND_REGISTRY, reconcile_sent
+from support_email_smtp import SMTPProvider, SEND_REGISTRY, reconcile_sent, report_progress
 import support_email_store as store
 from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT, THREAD_BYTES, ordered_folders
 
@@ -42,10 +42,11 @@ def formatted_date(value, user):
 
 
 class Workspace:
-    def __init__(self, state, user, imap_config, smtp_config, *, imap=None, smtp=None, registry=None):
+    def __init__(self, state, user, imap_config, smtp_config, *, imap=None, smtp=None, registry=None, progress=None):
         self.state, self.user, self.config, self.smtp_config = state, user, imap_config, smtp_config
         self.imap, self.smtp = imap or ImapProvider(imap_config), smtp or SMTPProvider(smtp_config)
         self.registry = registry or SEND_REGISTRY
+        self.progress = progress
         for key, default in {"cache": {}, "processed": set(), "limit": 50, "query": "", "field": "TEXT",
                              "settings": default_settings(), "expanded": set(), "notice": "", "view": "mail",
                              "mailbox_version": 0, "history_pending": False}.items():
@@ -78,6 +79,7 @@ class Workspace:
             invalidate()
             self.cache.clear()
             self.state.pop("folder_cache", None)
+            self.state.pop("folder_failure", None)
             self.resolved_threads.clear()
             self.state["history_pending"] = False
         if "settings_available" not in self.state or force:
@@ -87,16 +89,24 @@ class Workspace:
             except Exception:
                 self.state["settings_available"] = False
         folders = self.state.get("folder_cache")
+        failure = self.state.get("folder_failure", {})
+        if failure.get("expires", 0) > time.monotonic():
+            self.state.update(error=failure["error"], threads=[])
+            return
         if not folders or folders["expires"] <= time.monotonic():
             folders = cached_read({}, "folders", self.imap.discover_folders)
-            folders["expires"] = time.monotonic() + (FOLDER_TTL if not folders["error"] else 20)
-            self.state["folder_cache"] = folders
             if not folders["error"]:
+                folders["expires"] = time.monotonic() + FOLDER_TTL
+                self.state["folder_cache"] = folders
+                self.state.pop("folder_failure", None)
                 inbox = next((f for f in folders["data"]["folders"] if f["name"].upper() == "INBOX"), {})
                 if isinstance(inbox.get("unread"), int):
                     self.state["inbox_status"] = {"unread_count": inbox["unread"], "checked_at": time.time()}
         if folders["error"]:
-            self.state.update(error="Could not load folders. Check the mailbox connection.", threads=[])
+            self.state.pop("folder_cache", None)
+            # Throttle failed reruns separately; never cache an empty successful mailbox.
+            self.state["folder_failure"] = {"error": folders["error"], "expires": time.monotonic() + 5}
+            self.state.update(error=folders["error"], threads=[])
             return
         self.state["folders"] = folders["data"]["folders"]
         self.state["capabilities"] = list(folders["data"]["capabilities"])
@@ -110,7 +120,7 @@ class Workspace:
         entry = cached_read(self.cache, key, lambda: self.imap.list_headers(self.state["limit"], self.state["folder"],
                             query=self.state["query"], field=self.state["field"], previews=True))
         if entry["error"]:
-            self.state.update(error="Could not load folder. Refresh to reconnect.", threads=[])
+            self.state.update(error=entry["error"], threads=[])
             return
         snapshot = entry["data"]
         signature = (key, entry["refreshed_at"])
@@ -324,7 +334,7 @@ class Workspace:
                 if mode != "new":
                     thread = self._thread()
                     self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
-                self.state.update(view="compose", send_result={}, draft_pending=None)
+                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None)
             elif action in {"attach", "remove_attachment", "forward_attachment"}:
                 draft = self._editable_draft()
                 if action == "attach":
@@ -347,6 +357,8 @@ class Workspace:
                 self.state["send_result"] = {}
             elif action == "check_sent":
                 self.check_sent()
+            elif action == "auto_check_sent":
+                self.check_sent(automatic=True, operation_id=event.get("operation_id"))
             elif action == "save_draft":
                 self.save_draft()
             elif action == "edit_draft":
@@ -356,7 +368,7 @@ class Workspace:
                 self.state["draft"] = edit_mailbox_draft(self.imap.read_draft(message), self.config.address, message)
                 thread = self._thread()
                 self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
-                self.state.update(view="compose", send_result={}, draft_pending=None)
+                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None)
             elif action == "discard_draft":
                 draft = self._editable_draft()
                 if draft and draft.get("mailbox_ref"):
@@ -423,6 +435,14 @@ class Workspace:
         if section not in {a["section"] for a in self._body(header)["attachments"]}:
             raise MailboxError("Attachment is not available in this message.")
 
+    def _send_progress(self, percent, label):
+        self.state["send_progress"] = {"percent": percent, "label": label}
+        if percent == 100:
+            self.state["send_result"] = {"status": "accepted", "notice": "Sent",
+                                          "message_id": self.state["outgoing_mime"]["message_id"]}
+            self.state["sent_result"] = {"status": "pending"}
+        report_progress(self.progress, percent, label)
+
     def send(self, operation_id):
         draft = self.state.get("draft")
         if not draft or operation_id != draft["operation_id"]:
@@ -444,12 +464,16 @@ class Workspace:
                 workflow = {}
             if (workflow.get("needs_approval") or workflow.get("conflict")) and not os_accounts.is_admin(self.user):
                 raise ComposeError("This conversation requires Nathan's approval. Save a mailbox draft for review.")
+        self._send_progress(15, "Preparing email…")
         mime = build_mime(draft, self.config.address, self.state["settings"]["sender_name"], self.state["settings"]["signatures"])
         self.state["outgoing_mime"] = mime
         self.state["send_result"] = {"status": "in_progress", "notice": "Sending…"}
-        result = self.registry.submit(operation_id, self.config.address, mime, self.smtp)
-        self.state["send_result"], self.state["notice"] = result, result["notice"]
+        result = self.registry.submit(operation_id, self.config.address, mime, self.smtp, progress=self._send_progress)
+        self.state["send_result"], self.state["notice"] = result, ""
         if result["status"] == "accepted":
+            self.state["sent_result"] = {"status": "pending"}
+            self.state["sent_checks"] = 0
+            self._send_progress(100, "Sent")
             action = "email_reply_sent" if draft["mode"] in {"reply", "reply_all"} else "email_forward_sent" if draft["mode"] == "forward" else "email_sent"
             self.audit(action, mime["message_id"])
             self.state["sent_receipt"] = {}
@@ -462,15 +486,24 @@ class Workspace:
                     self.state["notice"] += " The saved draft remains in Drafts; do not send it again."
             self._mailbox_changed()
 
-    def check_sent(self):
+    def check_sent(self, *, automatic=False, operation_id=None):
         mime = self.state.get("outgoing_mime")
         if not mime:
             return
         result = self.state.get("send_result", {})
+        if automatic:
+            if (result.get("status") != "accepted" or operation_id != self.state.get("draft", {}).get("operation_id")
+                    or self.state.get("sent_checks", 0) >= 3 or self.state.get("sent_result", {}).get("status") == "present"
+                    or time.monotonic() - self.state.get("sent_check_at", 0) < 5):
+                return
+            self.state["sent_checks"] = self.state.get("sent_checks", 0) + 1
+        self.state["sent_check_at"] = time.monotonic()
         policy = self.state["settings"]["sent_policy"] if result.get("status") == "accepted" else "verify"
+        if automatic:
+            policy = "verify"  # Follow-up polling never appends or submits mail.
         sent = reconcile_sent(self.imap, mime, self.roles.get("sent"), policy, receipt=self.state.setdefault("sent_receipt", {}))
         self.state["sent_result"] = sent
-        self.state["notice"] = result.get("notice", "") + " " + sent["notice"]
+        self.state["notice"] = ""  # The composer owns submission and Sent-copy status.
 
     def save_draft(self):
         draft = self.state.get("draft")
@@ -595,6 +628,7 @@ class Workspace:
             "view": s["view"], "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
+            "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
             "download": s.get("download"), "settings": {"sender_name": settings["sender_name"], "sent_policy": settings["sent_policy"],
             "folder_mapping": settings["folder_mapping"], "signatures": signatures}, "settings_available": s.get("settings_available", False),
             "admin": os_accounts.is_admin(user), "signature_preference": selected_signature(settings, user, s.get("preference")),

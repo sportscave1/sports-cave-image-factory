@@ -7,12 +7,14 @@ from email.header import decode_header, make_header
 from email.parser import BytesHeaderParser, BytesParser
 from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
+from functools import wraps
 import hashlib
 import base64
 import imaplib
 import logging
 import os
 import re
+import socket
 import ssl
 import time
 from typing import Protocol
@@ -20,7 +22,7 @@ from urllib.parse import urlsplit
 
 
 LOGGER = logging.getLogger(__name__)
-SAFE_ERROR = "Email connection failed. Check Render email credentials."
+SAFE_ERROR = "Email server temporarily unavailable. Retry connection."
 MAX_TEXT_BYTES = 512 * 1024
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES CONTENT-TYPE"
@@ -28,6 +30,56 @@ HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFEREN
 
 class MailboxError(RuntimeError):
     """Only constant, safe messages may cross the provider boundary."""
+
+    def __init__(self, message, *, code="operation", retryable=False):
+        super().__init__(message)
+        self.code, self.retryable = code, retryable
+
+
+FAILURES = {
+    "configuration": "Mailbox is not configured.",
+    "authentication": "Mailbox authentication failed. Check server credentials.",
+    "timeout": "Email connection timed out. Retry connection.",
+    "tls": "Secure email connection failed. TLS verification was unsuccessful.",
+    "dns": "Email server address could not be resolved. Retry connection.",
+    "folders": "Folder listing failed. Retry connection.",
+    "select": "Mailbox folder could not be opened. Retry connection.",
+    "temporary": SAFE_ERROR,
+    "operation": SAFE_ERROR,
+}
+
+
+def _failure(error, stage):
+    if isinstance(error, TimeoutError):
+        code = "timeout"
+    elif isinstance(error, ssl.SSLError):
+        code = "tls"
+    elif isinstance(error, socket.gaierror):
+        code = "dns"
+    elif isinstance(error, (imaplib.IMAP4.abort, OSError, EOFError)):
+        code = "temporary"
+    elif isinstance(error, imaplib.IMAP4.error) and stage == "authentication":
+        code = "authentication"
+    elif stage in {"folders", "select"}:
+        code = stage
+    else:
+        code = "operation"
+    return MailboxError(FAILURES[code], code=code,
+                        retryable=code in {"timeout", "dns", "temporary"})
+
+
+def _retry_read(method):
+    """Replay only explicitly safe reads, on a fresh socket, at most once."""
+    @wraps(method)
+    def read(self, *args, **kwargs):
+        for attempt in range(2):
+            try:
+                return method(self, *args, **kwargs)
+            except MailboxError as error:
+                if attempt or not error.retryable:
+                    raise
+                LOGGER.info("Support email retrying read (%s)", error.code)
+    return read
 
 
 @dataclass(frozen=True)
@@ -380,30 +432,36 @@ class ImapProvider:
     @contextmanager
     def _connection(self, folder="INBOX", expected_validity=None, *, write=False):
         conn = None
+        stage = "configuration"
         try:
             cfg = self.configuration
             if not cfg.configured:
-                raise MailboxError("Email is not configured. Add the secure IMAP environment variables.")
+                raise MailboxError(FAILURES[stage], code=stage)
             argument = folder_argument(folder) if folder is not None else None
+            stage = "connect"
             conn = self.connection_factory(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=cfg.timeout)
             conn.debug = 0
-            self._ok(conn.login(cfg.address, cfg.password))
+            stage = "authentication"
+            self._ok(conn.login(cfg.address, cfg.password), stage=stage)
             count, uidvalidity = 0, ""
             if argument is not None:
-                count = int(self._ok(conn.select(argument, readonly=not write))[0])
+                stage = "select"
+                count = int(self._ok(conn.select(argument, readonly=not write), stage=stage)[0])
                 _, validity = conn.response("UIDVALIDITY")
                 uidvalidity = validity[0].decode("ascii")
                 if not uidvalidity.isdigit():
                     raise MailboxError(SAFE_ERROR)
             if expected_validity is not None and uidvalidity != str(expected_validity):
                 raise MailboxError("Mailbox identifiers changed. Refresh Inbox before opening this message.")
+            stage = "operation"
             yield conn, count, uidvalidity
         except MailboxError:
             raise
         except Exception as error:
             # Never log provider response text, arguments, repr, tracebacks or credentials.
-            LOGGER.warning("Support email IMAP operation failed (%s)", type(error).__name__)
-            raise MailboxError(SAFE_ERROR) from None
+            failure = _failure(error, stage)
+            LOGGER.warning("Support email IMAP failed (stage=%s code=%s type=%s)", stage, failure.code, type(error).__name__)
+            raise failure from None
         finally:
             if conn is not None:
                 try:
@@ -415,15 +473,27 @@ class ImapProvider:
                         pass
 
     @staticmethod
-    def _ok(response):
+    def _ok(response, *, stage="operation"):
         status, data = response
         if status != "OK":
-            raise MailboxError(SAFE_ERROR)
+            LOGGER.warning("Support email IMAP command rejected (stage=%s)", stage)
+            raise MailboxError(FAILURES[stage], code=stage, retryable=stage == "folders")
         return data
 
+    def _list_folders(self, conn):
+        try:
+            return self._ok(conn.list(), stage="folders")
+        except MailboxError:
+            raise
+        except Exception as error:
+            failure = _failure(error, "folders")
+            LOGGER.warning("Support email IMAP failed (stage=folders code=%s type=%s)", failure.code, type(error).__name__)
+            raise failure from None
+
+    @_retry_read
     def test_connection(self):
         with self._connection() as (conn, count, validity):
-            folders = self._ok(conn.list())
+            folders = self._list_folders(conn)
             # Discovery results are informational only; never infer or select a Sent folder.
             return {"count": count, "folders": tuple(v.decode("utf-8", "replace") for v in folders if isinstance(v, bytes)),
                     "uidvalidity": validity}
@@ -489,9 +559,10 @@ class ImapProvider:
                 return exact[0] if len(exact) == 1 else None
         return None
 
+    @_retry_read
     def discover_folders(self):
         with self._connection(None) as (conn, _, __):
-            folders = parse_folders(self._ok(conn.list()))
+            folders = parse_folders(self._list_folders(conn))
             deadline = time.monotonic() + 6
             for folder in [f for f in folders if f["role"]][:6]:
                 if time.monotonic() > deadline:
@@ -539,6 +610,7 @@ class ImapProvider:
         return self._headers(self._ok(conn.uid("FETCH", ",".join(uids),
             f"(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")), validity, folder)
 
+    @_retry_read
     def list_headers(self, limit=50, folder="INBOX", *, query="", field="TEXT", since=None, before=None, previews=False):
         limit = min(max(int(limit), 1), 1000)
         with self._connection(folder) as (conn, count, validity):

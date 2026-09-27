@@ -274,7 +274,7 @@ def selected_signature(settings, user, preference=None):
 def new_draft(mailbox, *, mode="new", header=None, text="", signature="company"):
     draft = {"id": str(uuid.uuid4()), "operation_id": str(uuid.uuid4()), "mode": mode,
              "to": "", "cc": "", "bcc": "", "subject": "", "html": "<p><br></p>",
-             "signature": signature, "quote_html": "", "include_quote": mode != "new",
+             "signature": signature, "quote_html": "", "include_quote": mode == "forward",
              "in_reply_to": "", "references": [], "attachments": [], "revision": 0, "mailbox_ref": None}
     if header:
         draft["subject"] = header["subject"]
