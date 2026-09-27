@@ -122,11 +122,13 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "repairSections": repair_sections_for_user(user),
         "repairCurrentSection": repair_section_for_route(current_route),
         "orderStatusUrl": "/api/os/top-bar/order-status",
+        "emailStatusUrl": "/api/os/top-bar/email-status",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
         "dailyPlannerTimerScope": planner_timer_scope,
         "dailyPlannerEnabled": planner_enabled,
         "ordersEnabled": "Orders" in allowed_routes,
+        "emailEnabled": "Email" in allowed_routes,
         "authToken": token,
         "revision": revision,
     }

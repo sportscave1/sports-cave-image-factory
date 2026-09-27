@@ -28,6 +28,7 @@
       refresh: '<path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path>',
       planner: '<rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M8 2v4"></path><path d="M16 2v4"></path><path d="M3 10h18"></path><path d="M12 14v3l2 1"></path>',
       bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
+      mail: '<rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 6 9 7 9-7"></path>',
       hammer: '<path d="m14 5 5 5"></path><path d="m13 6 4-4 5 5-4 4"></path><path d="M5 21 16 10"></path><path d="m2 18 4 4"></path>',
       user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
       settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>',
@@ -278,7 +279,8 @@
     .sc-os-planner-pill-task { font-size: 11px; font-weight: 680; max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sc-os-planner-pill-state { color: #c9c3b7; font-size: 10px; white-space: nowrap; }
     .sc-os-planner-pill-time { color: #f1ca6c; flex: 0 0 auto; font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 8ch; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-    section[data-testid="stSidebar"] .st-key-sidebar-row-orders button {
+    section[data-testid="stSidebar"] .st-key-sidebar-row-orders button,
+    section[data-testid="stSidebar"] .st-key-sidebar-row-email button {
       position: relative;
     }
     .sc-orders-action-badge {
@@ -1318,16 +1320,16 @@
         root.dataset.acceptedNavigationEpoch = String(liveEpoch);
       }
     };
-    const navigateDocument = (url) => {
+    const navigateDocument = (url, direct = false) => {
       closeMobileNavigation();
       closePanels(false);
       const target = new URL(url, parentWindow.location.href);
       const routeKey = target.searchParams.get("page") || "";
-      if (routeKey && routeKey === state.config.currentRouteKey) {
+      if (!direct && routeKey && routeKey === state.config.currentRouteKey) {
         clearNavigationPending({clearIntent: true});
         return;
       }
-      if (routeKey) {
+      if (routeKey && !direct) {
         const routeButton = sidebarRouteButton(routeKey);
         if (routeButton) {
           routeButton.click();
@@ -1546,12 +1548,12 @@
         scheduleTopBarGreeting();
       }, delay);
     };
-    const updateOrdersBadge = (count, label, attempt = 0) => {
-      const row = doc.querySelector('section[data-testid="stSidebar"] .st-key-sidebar-row-orders');
+    const updateSidebarBadge = (route, count, label, attempt = 0) => {
+      const row = doc.querySelector(`section[data-testid="stSidebar"] .st-key-sidebar-row-${route}`);
       const button = row?.querySelector("button");
       if (!button) {
         if (Number(count) > 0 && attempt < 20) {
-          later(() => updateOrdersBadge(count, label, attempt + 1), 180);
+          later(() => updateSidebarBadge(route, count, label, attempt + 1), 180);
         }
         return;
       }
@@ -1560,7 +1562,8 @@
       if (!numericCount) {
         badge?.remove();
         button.removeAttribute("data-action-required-count");
-        button.setAttribute("aria-label", "Orders");
+        if (route === "orders") button.setAttribute("aria-label", "Orders");
+        else button.setAttribute("aria-label", "Email");
         return;
       }
       if (!badge) {
@@ -1571,7 +1574,37 @@
       }
       badge.textContent = label || (numericCount > 99 ? "99+" : String(numericCount));
       button.dataset.actionRequiredCount = String(numericCount);
-      button.setAttribute("aria-label", `Orders, ${numericCount} require action`);
+      button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `Email, ${numericCount} unread`);
+    };
+    const updateOrdersBadge = (count, label) => updateSidebarBadge("orders", count, label);
+    const applyEmailStatus = (payload) => {
+      if (!state.config.emailEnabled) return;
+      const previous = readStatusCache("email").payload || {};
+      if (payload.unread_count !== null && Number.isInteger(payload.unread_count)) {
+        if (Date.now()/1000 - Number(payload.checked_at || 0) > 120) {
+          updateSidebarBadge("email", 0, "");
+          return;
+        }
+        if (Number(payload.checked_at || 0) < Number(previous.checked_at || 0)) return;
+        writeStatusCache("email", payload);
+        updateSidebarBadge("email", payload.unread_count, "");
+        doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
+          frame.contentWindow?.postMessage({type:"sc:email-unread", ...payload}, parentWindow.location.origin));
+      } else if (Date.now()/1000 - Number(previous.checked_at || 0) > 120) {
+        updateSidebarBadge("email", 0, ""); // Hide unavailable state; never report a zero mailbox count.
+      }
+    };
+    let emailStatusPending = false;
+    const refreshEmailStatus = async () => {
+      if (!state.config.emailEnabled || !state.config.emailStatusUrl || emailStatusPending) return;
+      emailStatusPending = true;
+      try {
+        const payload = await requestJson(state.config.emailStatusUrl);
+        applyEmailStatus(payload);
+        state.notifications = null;
+        if (state.activePanel === "notifications") renderNotifications(await loadNotifications());
+      } catch (_error) { applyEmailStatus({unread_count:null}); }
+      finally { emailStatusPending = false; }
     };
     const dismissOrderToast = (identity = "") => {
       temporaryToasts.dismiss("orders", identity, {remember: true});
@@ -1772,8 +1805,11 @@
       }, {remember: true});
     };
     const refreshOrderStatus = async () => {
+      // Share the existing global schedule; Email never blocks the Orders response.
+      void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
+        if (state.config.emailEnabled) later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS);
         return;
       }
       writeStatusCache("orders");
@@ -2428,7 +2464,7 @@
       }
       notificationsPanel.innerHTML += items.map((item, index) => `
         <button type="button" class="sc-os-notification-item" data-index="${index}">
-          <span class="sc-os-notification-icon">${icon("warning")}</span>
+          <span class="sc-os-notification-icon">${icon(item.icon === "mail" ? "mail" : "warning")}</span>
           <span class="sc-os-notification-copy">
             <span class="sc-os-notification-title">${escapeHtml(item.title)}</span>
             <span class="sc-os-notification-subtitle">${escapeHtml(item.subtitle || "Activity Log")}</span>
@@ -2438,6 +2474,14 @@
       notificationsPanel.querySelectorAll(".sc-os-notification-item").forEach((button) => {
         button.addEventListener("click", () => {
           const item = items[Number(button.dataset.index)];
+          if (item.route_key === "email" && item.email_target) {
+            const url = new URL(routeUrl("email", "", false));
+            for (const key of ["uid", "uidvalidity", "message_id"]) {
+              url.searchParams.set("email_" + key, String(item.email_target[key] || ""));
+            }
+            navigateDocument(url.toString(), true);
+            return;
+          }
           navigate({route_key: item.route_key || "dashboard", group: "Pages"});
         });
       });
@@ -2547,7 +2591,9 @@
         doc.body.classList.remove("sc-mobile-search-open");
       }
     };
-    searchInput.addEventListener("focus", () => {
+    // Focus can be restored by the browser/Streamlit or keyboard traversal.
+    // Only an explicit search action may open the palette.
+    searchInput.addEventListener("click", () => {
       if (state.activePanel !== "search") openSearch();
     }, listenerOptions);
     mobileSearchButton?.addEventListener("click", async () => {
@@ -2559,6 +2605,7 @@
       if (state.activePanel === "search") renderSearchResults();
     }, listenerOptions);
     refreshButton.addEventListener("click", () => {
+      try { parentWindow.sessionStorage.removeItem(statusCacheKey("email")); } catch (_error) {}
       parentWindow.location.reload();
     }, listenerOptions);
     plannerButton.addEventListener("click", () => {
@@ -2570,10 +2617,10 @@
       openDailyPlanner({focusActive:true});
     }, listenerOptions);
     searchInput.addEventListener("input", () => {
-      if (state.activePanel !== "search") openPanel("search");
-      renderSearchResults();
+      if (state.activePanel === "search") renderSearchResults();
     }, listenerOptions);
     searchInput.addEventListener("keydown", (event) => {
+      if (state.activePanel !== "search" || event.isComposing) return;
       if (event.key === "ArrowDown" && state.visibleResults.length) {
         event.preventDefault();
         state.highlighted = (state.highlighted + 1) % state.visibleResults.length;
@@ -2605,7 +2652,17 @@
       renderSettings();
       settingsPanel.querySelector("button")?.focus({preventScroll: true});
     }, listenerOptions);
+    const isEditableSearchEvent = (event) => {
+      const selector = 'input, textarea, select, button, [contenteditable], [role="textbox"], [role="combobox"], [data-email-composer], .email-composer';
+      // composedPath includes the real target inside a shadow-root editor.
+      const path = event.composedPath?.() || [event.target];
+      return path.some(node => node?.isContentEditable || node?.closest?.(selector))
+        // Keyboard events do not normally bubble out of an iframe. If a host
+        // forwards one, leave it with the focused embedded editor as well.
+        || doc.activeElement?.tagName === "IFRAME";
+    };
     doc.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented || event.isComposing) return;
       const target = event.target;
       const navigationButton = target?.closest?.(
         'section[data-testid="stSidebar"] button:not(:disabled)',
@@ -2623,11 +2680,9 @@
         navigationButton.click();
         return;
       }
-      const editable = target && (
-        target.matches?.("input, textarea, select") || target.isContentEditable
-      );
-      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
-        if (editable && target !== searchInput) return;
+      if (target !== searchInput && isEditableSearchEvent(event)
+          && !(event.key === "Escape" && root.contains(target))) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.repeat && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchInput.focus({preventScroll: true});
         if (state.activePanel !== "search") openSearch();
@@ -2804,7 +2859,10 @@
               cachedOrders.payload.badge_label,
             );
           }
-          const orderDelay = statusRefreshDelay("orders");
+          const orderDelay = statusRefreshDelay(state.config.ordersEnabled ? "orders" : "email", ORDER_STATUS_REFRESH_MS);
+          const cachedEmail = readStatusCache("email").payload;
+          if (cachedEmail) applyEmailStatus(cachedEmail);
+          if (orderDelay && state.config.emailEnabled && statusRefreshDelay("email", ORDER_STATUS_REFRESH_MS) === 0) void refreshEmailStatus();
           if (orderDelay) later(refreshOrderStatus, orderDelay);
           else refreshOrderStatus();
         }
@@ -2826,6 +2884,12 @@
       },
       beginNavigation(routeKey = "", label = "", sourceElement = null) {
         return beginNavigation(routeKey, label, sourceElement);
+      },
+      mailboxUnreadChanged(payload) {
+        applyEmailStatus(payload);
+      },
+      emailUnreadStatus() {
+        return readStatusCache("email").payload || {};
       },
       completeNavigation({routeKey = "", epoch = 0, status = "ready"} = {}) {
         const liveEpoch = Number(root.dataset.navigationEpoch || 0);

@@ -91,6 +91,15 @@
   const roleLabels={inbox:'Inbox',sent:'Sent',drafts:'Drafts',archive:'Archive',junk:'Junk',trash:'Trash'};
   const symbols={inbox:'▤',sent:'↗',drafts:'▧',archive:'▣',junk:'⊘',trash:'⌫'};
   const roleOf=f=>Object.keys(model.roles||{}).find(r=>model.roles[r]===f.name);
+  function inboxUnread(payload) {
+    if (!Number.isInteger(payload?.unread_count) || Date.now()/1000-Number(payload.checked_at||0)>120) return;
+    if (Number(payload.checked_at||0)<Number(model.inbox_status?.checked_at||0)) return;
+    model.inbox_status=payload;
+    const folder=(model.folders||[]).find(f=>f.name.toUpperCase()==='INBOX');
+    if(folder)folder.unread=payload.unread_count;
+    const count=root.querySelector('[data-action="folder"][data-folder="INBOX"] .folder-count');
+    if(count)count.textContent=payload.unread_count>0?String(payload.unread_count):'';
+  }
   function folders() {
     return `<nav class="folders" aria-label="Mail folders"><div class="folder-heading label">Mailbox</div>${(model.folders||[]).map(f=>{
       const role=roleOf(f); return `<button class="folder ${model.folder===f.name?'selected':''}" data-action="folder" data-folder="${esc(f.name)}" title="${esc(f.label)}" aria-label="${esc(roleLabels[role]||f.label)}"><span class="folder-symbol">${symbols[role]||'▱'}</span><span class="folder-name">${esc(roleLabels[role]||f.label)}</span><span class="folder-count">${f.unread>0?esc(f.unread):''}</span></button>`;
@@ -152,6 +161,10 @@
     if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
     model=next;
+    try {
+      window.parent.SportsCaveTopBar?.mailboxUnreadChanged?.(model.inbox_status||{});
+      inboxUnread(window.parent.SportsCaveTopBar?.emailUnreadStatus?.());
+    } catch (_) {}
     if (model.ack===pending) {
       busy=false;pending='';pendingAction='';
       if (model.draft && !model.send_result?.status) submitted.delete(model.draft.operation_id);
@@ -250,10 +263,14 @@
   document.addEventListener('keydown',e=>{
     if(e.ctrlKey&&e.key==='Enter'&&model.view==='compose'){e.preventDefault();send();}
     if(e.key==='Escape'&&model.view==='compose'){e.preventDefault();emit('close_composer');}
-    const typing=e.target.matches('input,textarea,select,[contenteditable]')||e.target.closest('[contenteditable]');
+    const typing=(e.composedPath?.()||[e.target]).some(node=>node?.isContentEditable||node?.closest?.('input,textarea,select,button,[contenteditable],[role="textbox"],[role="combobox"],[data-email-composer],.email-composer'));
     if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&model.view==='mail'&&model.active_message){if(e.key.toLowerCase()==='r')compose('reply');if(e.key.toLowerCase()==='f')compose('forward');}
   });
-  window.addEventListener('message',event=>{if(event.source===window.parent&&event.data.type==='streamlit:render')render(event.data.args.model);});
+  window.addEventListener('message',event=>{
+    if(event.source!==window.parent)return;
+    if(event.data.type==='streamlit:render')render(event.data.args.model);
+    if(event.data.type==='sc:email-unread')inboxUnread(event.data);
+  });
   window.addEventListener('resize',fit);try{window.parent.addEventListener('resize',fit);new ResizeObserver(fit).observe(window.frameElement);}catch(_){}
   post('streamlit:componentReady',{apiVersion:1});fit();
 })();

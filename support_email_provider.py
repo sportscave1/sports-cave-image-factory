@@ -428,6 +428,67 @@ class ImapProvider:
             return {"count": count, "folders": tuple(v.decode("utf-8", "replace") for v in folders if isinstance(v, bytes)),
                     "uidvalidity": validity}
 
+    def _inbox_status(self, conn):
+        raw = self._ok(conn.status('"INBOX"', "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)"))
+        values = dict(re.findall(rb"\b(UNSEEN|MESSAGES|UIDNEXT|UIDVALIDITY) (\d+)",
+                                b" ".join(v for v in raw if isinstance(v, bytes))))
+        if len(values) != 4 or int(values[b"UIDNEXT"]) < 1 or int(values[b"UIDVALIDITY"]) < 1:
+            raise MailboxError(SAFE_ERROR)
+        return {key.decode().lower(): int(value) for key, value in values.items()}
+
+    def get_unread_count(self):
+        """Dedicated lightweight count; no SELECT, headers, MIME or attachments."""
+        with self._connection(None) as (conn, _, __):
+            return self._inbox_status(conn)["unseen"]
+
+    def notification_snapshot(self, cursor=None):
+        """One bounded operation: STATUS, then at most 50 new header-only UIDs.
+
+        BODY.PEEK[HEADER.FIELDS] is IMAP's header fetch syntax; no message body
+        section, preview, structure or attachment is requested here.
+        """
+        with self._connection(None) as (conn, _, __):
+            status = self._inbox_status(conn)
+            validity = str(status["uidvalidity"])
+            previous = cursor or {}
+            high = status["uidnext"] - 1
+            rows = []
+            if str(previous.get("uidvalidity")) == validity:
+                low = int(previous.get("last_uid", 0)) + 1
+                if low <= high:
+                    high = min(high, low + 49)
+                    self._ok(conn.select('"INBOX"', readonly=True))
+                    _, selected = conn.response("UIDVALIDITY")
+                    if not selected or selected[0].decode("ascii") != validity:
+                        raise MailboxError(SAFE_ERROR)
+                    data = self._ok(conn.uid("FETCH", f"{low}:{high}",
+                        "(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"))
+                    rows = [row for row in self._headers(data, validity, "INBOX")
+                            if low <= int(row["uid"]) <= high]
+                else:
+                    high = max(high, int(previous.get("last_uid", 0)))
+            return {**status, "uidvalidity": validity, "last_uid": high, "messages": rows}
+
+    def notification_target(self, uidvalidity, uid, message_id=""):
+        """Resolve one Inbox deep link on the Email page only, without changing flags."""
+        if not str(uid).isdigit() or not str(uidvalidity).isdigit():
+            return None
+        with self._connection("INBOX") as (conn, _, validity):
+            rows = self._fetch_uids(conn, [str(uid)], validity, "INBOX") if validity == str(uidvalidity) else []
+            exact = next((r for r in rows if r["uid"] == str(uid) and
+                          (not message_id or r["message_id"] == message_id)), None)
+            if exact:
+                return exact
+            identifiers = message_ids(message_id)
+            if len(identifiers) == 1 and identifiers[0] == message_id and len(message_id) <= 998:
+                uids = self._search(conn, f"HEADER Message-ID {_quoted_search(message_id)}")
+                if len(uids) > 50:
+                    return None
+                rows = self._fetch_uids(conn, uids, validity, "INBOX")
+                exact = [r for r in rows if r["message_id"] == message_id]
+                return exact[0] if len(exact) == 1 else None
+        return None
+
     def discover_folders(self):
         with self._connection(None) as (conn, _, __):
             folders = parse_folders(self._ok(conn.list()))

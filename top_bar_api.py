@@ -27,6 +27,7 @@ LOCAL_PRODUCT_DB_PATH = BASE_DIR / "data" / "sports_cave_os.db"
 SEARCH_INDEX_PATH = "/api/os/top-bar/search-index"
 NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
 ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
+EMAIL_STATUS_PATH = "/api/os/top-bar/email-status"
 DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
 REPAIR_REQUESTS_PATH = "/api/os/top-bar/repair-requests"
 ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS = 30.0
@@ -792,12 +793,30 @@ def _friendly_notification_text(row):
 
 
 def build_notifications(claims, *, activity_rows=(), alerts=()):
-    if not claims.get("can_view_activity"):
-        return []
     subject = str(claims.get("sub") or "")
     items = []
     seen = set()
     for row in activity_rows or ():
+        if row.get("event_type") == "new_email_received":
+            if "Email" not in set(claims.get("allowed_routes") or ()):
+                continue
+            from support_email_provider import load_configuration
+            metadata = _notification_payload(row).get("metadata") or {}
+            if metadata.get("mailbox") != load_configuration().address.casefold():
+                continue
+            identity = ("email", str(row.get("entity_id")))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            items.append({"title": "New email", "icon": "mail", "route_key": "email",
+                "subtitle": _text(metadata.get("sender_name") or metadata.get("sender_email"), limit=160)
+                    + " · " + _text(metadata.get("subject"), limit=240),
+                "created_at": str(row.get("created_at") or ""), "priority": 2,
+                "email_target": {key: _text(metadata.get(key), limit=998) for key in
+                                 ("uid", "uidvalidity", "message_id")}})
+            continue
+        if not claims.get("can_view_activity"):
+            continue
         if not _notification_row_allowed(row):
             continue
         payload = _notification_payload(row)
@@ -855,8 +874,15 @@ def load_notification_sources(claims):
                             """
                         )
                         activity_rows = [dict(row or {}) for row in cur.fetchall()]
+                        if "Email" in set(claims.get("allowed_routes") or ()):
+                            # Keep existing activity selection unchanged; mail events cannot
+                            # disappear just because unrelated audit entries filled its window.
+                            cur.execute("""SELECT event_type,entity_type,entity_id,source,created_at,new_value
+                                FROM audit_logs WHERE event_type='new_email_received'
+                                ORDER BY created_at DESC LIMIT 10""")
+                            activity_rows.extend(dict(row or {}) for row in cur.fetchall())
     except Exception:
-        activity_rows = []
+        pass  # Preserve already-loaded activity if the optional Email tail query fails.
     return activity_rows, []
 
 
@@ -959,6 +985,15 @@ async def top_bar_order_status(request: Request):
         return _json({"ok": False, "error": "Access not approved."}, 403)
     status = await run_in_threadpool(load_order_status, claims)
     return _json({"ok": True, **status})
+
+
+async def top_bar_email_status(request: Request):
+    claims = _claims(request)
+    if not claims or "Email" not in set(claims.get("allowed_routes") or ()):
+        return _json({"ok": False, "error": "Access not approved."}, 403)
+    from support_email_notifications import status
+    result = await run_in_threadpool(status)
+    return _json({"ok": True, **result})
 
 
 def _daily_planner_timer_mirror(timer):
@@ -1101,6 +1136,7 @@ TOP_BAR_ROUTE_HANDLERS = (
     (SEARCH_INDEX_PATH, top_bar_search_index, ("GET",)),
     (NOTIFICATIONS_PATH, top_bar_notifications, ("GET",)),
     (ORDER_STATUS_PATH, top_bar_order_status, ("GET",)),
+    (EMAIL_STATUS_PATH, top_bar_email_status, ("GET",)),
     (DAILY_PLANNER_STATUS_PATH, top_bar_daily_planner_status, ("GET",)),
     (REPAIR_REQUESTS_PATH, top_bar_repair_requests, ("GET", "POST", "PATCH")),
 )

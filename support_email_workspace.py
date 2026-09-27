@@ -74,6 +74,8 @@ class Workspace:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
         if force:
+            from support_email_notifications import invalidate
+            invalidate()
             self.cache.clear()
             self.state.pop("folder_cache", None)
             self.resolved_threads.clear()
@@ -89,6 +91,10 @@ class Workspace:
             folders = cached_read({}, "folders", self.imap.discover_folders)
             folders["expires"] = time.monotonic() + (FOLDER_TTL if not folders["error"] else 20)
             self.state["folder_cache"] = folders
+            if not folders["error"]:
+                inbox = next((f for f in folders["data"]["folders"] if f["name"].upper() == "INBOX"), {})
+                if isinstance(inbox.get("unread"), int):
+                    self.state["inbox_status"] = {"unread_count": inbox["unread"], "checked_at": time.time()}
         if folders["error"]:
             self.state.update(error="Could not load folders. Check the mailbox connection.", threads=[])
             return
@@ -181,6 +187,33 @@ class Workspace:
             raise MailboxError("This conversation is no longer in the current list.")
         # First paint needs only the requested MIME, never historical searches.
         self._body(self._select_thread(thread))
+
+    def open_notification(self, target):
+        """Deep link resolution belongs exclusively to the authorised Email page."""
+        if not str(target.get("uid", "")).isdigit() or not str(target.get("uidvalidity", "")).isdigit():
+            return
+        self.state.update(folder="INBOX", query="", selected=None, conversation=[])
+        self.load()
+        if self.state.get("error"):
+            return
+        try:
+            message = self.imap.notification_target(target["uidvalidity"], target["uid"], target.get("message_id", ""))
+            if not message:
+                self.state["notice"] = "This email is no longer in Inbox. The current Inbox is shown."
+                return
+            threads = self.state["threads"]
+            thread = next((t for t in threads if any(reference_key(m) == reference_key(message) for m in t["messages"])), None)
+            if thread is None:
+                thread = build_threads([message], self.config.address)[0]
+                threads.insert(0, thread)
+                self.state["thread_index"][thread["thread_key"]] = thread
+                self.state.pop("list_model", None)
+            self._select_thread(thread)
+            self.state.update(active_message=reference_key(message), expanded={reference_key(message)})
+            self._body(message)
+        except Exception as error:
+            LOGGER.info("Email notification target unavailable (%s)", type(error).__name__)
+            self.state["notice"] = "Could not open that email. The current Inbox is shown."
 
     def resolve_thread(self, thread_key, version):
         if self.state.get("error") or thread_key != self.state.get("selected") or version != self.state["mailbox_version"]:
@@ -552,6 +585,7 @@ class Workspace:
             s["signature_source"] = signature_source
         signatures = s["signature_model"]
         return {"mailbox": self.config.address, "configured": self.config.configured,
+            "inbox_status": s.get("inbox_status", {}),
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
             "error": s.get("error", ""), "notice": s["notice"], "ack": s.get("ack", ""),
             "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],

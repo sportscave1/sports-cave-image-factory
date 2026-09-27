@@ -1,5 +1,8 @@
 # Email V1 — live VentraIP inbox
 
+Historical V1 implementation record. The current desktop mailbox and explicit SMTP actions are
+documented in [EMAIL_V2.md](EMAIL_V2.md); V2 retains the mailbox-as-truth and metadata-only boundaries.
+
 Implemented locally only. No deployment, commit, push, mailbox connection, remote migration,
 Render change, DNS change, forwarding change or Resend change was performed.
 
