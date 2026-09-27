@@ -145,6 +145,7 @@ PAGE_REGISTRY = (
         "label": "VA Training",
         "worker_assignable": True,
     },
+    {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
     {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},
     {
         "key": REPORTING_PAGE_KEY,

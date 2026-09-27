@@ -109,12 +109,14 @@ class SidebarDisclosureTests(unittest.TestCase):
         self.assertNotIn('"v" if expanded else ">"', source)
         self.assertNotIn('st.columns([5, 1]', source)
 
-    def test_parent_toggle_does_not_navigate_and_email_has_no_route(self):
+    def test_parent_toggle_does_not_navigate_and_email_is_lazy(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         toggle_start = source.index("def _toggle_sidebar_group")
         toggle_end = source.index("@st.fragment", toggle_start)
         self.assertNotIn("set_current_page", source[toggle_start:toggle_end])
-        self.assertNotIn('"route": "Email"', source)
+        self.assertIn('elif current_page == "Email":', source)
+        self.assertIn('get_support_email_page().render_page(current_os_user())', source)
+        self.assertNotIn('import support_email_page', source)
 
     def test_inactive_seo_tabs_are_not_constructed(self):
         source = inspect.getsource(seo_page._render_active_route)

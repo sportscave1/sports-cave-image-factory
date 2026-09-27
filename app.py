@@ -70,6 +70,7 @@ os_pages = None
 shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
+support_email_page_module = None
 design_studio_page_module = None
 social_media_reels_studio_page_module = None
 social_media_page_module = None
@@ -175,6 +176,13 @@ def get_orders_page():
         orders_page_module = importlib.import_module("orders_page")
         log_startup_stage("ORDERS PAGE IMPORT DONE")
     return orders_page_module
+
+
+def get_support_email_page():
+    global support_email_page_module
+    if support_email_page_module is None:
+        support_email_page_module = importlib.import_module("support_email_page")
+    return support_email_page_module
 
 
 def get_design_studio_page():
@@ -3433,23 +3441,6 @@ def inject_styles():
             overflow: visible;
             text-overflow: clip;
             white-space: normal;
-        }
-
-        section[data-testid="stSidebar"] .st-key-sidebar-email-soon button {
-            opacity: 0.72 !important;
-            position: relative;
-        }
-
-        section[data-testid="stSidebar"] .st-key-sidebar-email-soon button::after {
-            background: #EEE5D1;
-            border: 1px solid #D5BD87;
-            border-radius: 999px;
-            color: #72591E;
-            content: "Soon";
-            font-size: 0.62rem;
-            font-weight: 720;
-            margin-left: auto;
-            padding: 0.1rem 0.38rem;
         }
 
         section[data-testid="stSidebar"] .st-key-sidebar-profile-footer {
@@ -9256,6 +9247,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "VA Training": ":material/school:",
+    "Email": ":material/mail:",
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
@@ -9476,15 +9468,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 include_overview=True,
             ):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
-    email_container = st.container(key="sidebar-email-soon")
-    email_container.button(
-        "Email",
-        key="sidebar-nav::Email::soon",
-        use_container_width=True,
-        disabled=True,
-        help="Coming later",
-        icon=":material/mail:",
-    )
+    _sidebar_route_button("Email", current_page, allowed_routes, root=st)
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:
@@ -16313,6 +16297,8 @@ def render_selected_page(current_page):
         get_edition_ops().render_page()
     elif current_page == "Orders":
         get_orders_page().render_page()
+    elif current_page == "Email":
+        get_support_email_page().render_page(current_os_user())
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
