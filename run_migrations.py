@@ -46,6 +46,7 @@ MANUAL_EXPIRED_EDITION_IDENTITY_MIGRATION = (
     "20260829_fix_manual_expired_edition_identity.sql"
 )
 REVIEWED_MIGRATION_SHA256 = {
+    "20260927221221_edition_design_tracking.sql": "0f285d1b54c25aaa038f8533498da0d771a7b80f8e1e194abf1d42ca3b6942d5",
     "20260912235112_meta_review_reporting.sql": "ca7f573efcddd829b9385a44097af5d79018b14cbb6ff551261f85cc3fafb25b",
     '20260912231446_manual_certificate_identity.sql': 'b90b3d649e86ba5cccba05231d1e8c0ae8f80965b470d8f12ee390847ad7591d',
     "20260912224424_manual_certificate_controls.sql": "59b72a16e4e41d78ed261374cddeee449e75a5f34300836c8ebf1f44be7a8c24",
@@ -65,6 +66,7 @@ REVIEWED_MIGRATION_SHA256 = {
 DEPLOYMENT_MIGRATIONS = (
     "20260912224424_manual_certificate_controls.sql",
     "20260912231446_manual_certificate_identity.sql",
+    "20260927221221_edition_design_tracking.sql",
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {

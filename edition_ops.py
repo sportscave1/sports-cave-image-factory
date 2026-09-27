@@ -2493,6 +2493,9 @@ def render_page():
         if not load_error:
             st.info("No products loaded yet. Products are added by Shopify webhooks or Advanced sync.")
 
+    from design_tracking_page import render as render_design_tracking
+    render_design_tracking()
+
     elapsed = time.perf_counter() - started
     print(
         "PERF Edition Ops total="

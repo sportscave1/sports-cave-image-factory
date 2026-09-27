@@ -145,6 +145,9 @@ class _FakeStreamlit:
     def warning(self, message, *args, **kwargs):
         self.warnings.append(str(message))
 
+    def write(self, message, *args, **kwargs):
+        self.warnings.append(str(message))
+
     def error(self, message, *args, **kwargs):
         self.errors.append(str(message))
 
