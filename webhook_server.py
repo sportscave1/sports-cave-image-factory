@@ -24,6 +24,10 @@ SHOPIFY_ADMIN_TOKEN_PREFIXES = ("shpat_", "shpca_", "shppa_", "shpss_")
 
 app = FastAPI(title="Sports Cave OS Webhooks")
 
+# Router declarations only; CRM clients and storage initialize inside requests.
+from crm_http import router as crm_router
+app.include_router(crm_router)
+
 # Paid-order requests were previously serialized by virtue of doing all work on
 # Uvicorn's single event-loop thread. Keep that ordering guarantee after moving
 # the blocking persistence pipeline to a worker thread. Database advisory locks

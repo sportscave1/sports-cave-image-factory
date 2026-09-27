@@ -1,0 +1,65 @@
+"""Lazy FastAPI handlers mounted in the existing webhook service."""
+import json
+import os
+from html import escape
+from fastapi import APIRouter,Request,Response
+from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
+
+router=APIRouter()
+
+async def bounded_body(request):
+    raw=bytearray()
+    async for part in request.stream():
+        raw.extend(part)
+        if len(raw)>2*1024*1024:raise ValueError('Request too large.')
+    return bytes(raw)
+
+@router.post('/webhooks/shopify/crm')
+async def shopify_hook(request:Request):
+    from webhook_server import verify_shopify_webhook_hmac
+    from crm_webhooks import receive_shopify
+    from crm_store import Store
+    from shopify_sync import normalize_store_domain
+    try:
+        raw=await bounded_body(request)
+        if not verify_shopify_webhook_hmac(raw,request.headers)['ok']:return Response(status_code=401)
+        expected=normalize_store_domain(os.getenv('SHOPIFY_STORE_DOMAIN',''))
+        if not expected or normalize_store_domain(request.headers.get('x-shopify-shop-domain',''))!=expected:return Response(status_code=403)
+        payload=json.loads(raw)
+        await run_in_threadpool(receive_shopify,Store(),request.headers.get('x-shopify-topic',''),request.headers.get('x-shopify-webhook-id',''),payload,request.headers.get('x-shopify-triggered-at'))
+        return Response(status_code=200)
+    except (ValueError,TypeError):return Response(status_code=400)
+    except Exception:return Response(status_code=503)
+
+@router.post('/webhooks/resend/crm')
+async def resend_hook(request:Request):
+    from crm_resend import Config,verify_resend
+    from crm_store import Store
+    from crm_webhooks import receive_resend
+    try:
+        raw=await bounded_body(request)
+        if not verify_resend(raw,request.headers,Config().resend_webhook_secret):return Response(status_code=401)
+        await run_in_threadpool(receive_resend,Store(),request.headers['svix-id'],json.loads(raw))
+        return Response(status_code=200)
+    except (ValueError,TypeError):return Response(status_code=400)
+    except Exception:return Response(status_code=503)
+
+@router.get('/crm/unsubscribe')
+async def unsubscribe_page(token:str=''):
+    from crm_resend import Config
+    if not Config().verify_token(token):return Response('Invalid unsubscribe link.',status_code=400)
+    # GET is a confirmation only: link scanners must not unsubscribe recipients.
+    return HTMLResponse('<!doctype html><title>Sports Cave · Unsubscribe</title><main style="font:16px Arial;max-width:480px;margin:12vh auto;padding:24px"><h2>Sports Cave</h2><p>Stop Sports Cave marketing emails?</p><form method="post" action="?token='+escape(token,quote=True)+'"><button type="submit">Unsubscribe</button></form></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+
+@router.post('/crm/unsubscribe')
+async def unsubscribe_post(token:str=''):
+    from crm_resend import Config
+    from crm_store import Store
+    from crm_shopify import Shopify
+    from crm_webhooks import unsubscribe
+    try:
+        await run_in_threadpool(unsubscribe,Store(),Config(),token,Shopify())
+        return HTMLResponse('<title>Sports Cave</title><p>You are unsubscribed from Sports Cave marketing emails.</p>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+    except ValueError:return Response('Invalid unsubscribe link.',status_code=400)
+    except Exception:return Response('Please try again shortly.',status_code=503)

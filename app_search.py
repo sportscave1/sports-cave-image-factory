@@ -5,6 +5,12 @@ import os_accounts
 
 
 ALIASES = {
+    "crm_customers_view": ("crm", "customers", "customer intelligence"),
+    "crm_segments_view": ("segments", "audiences"),
+    "crm_automations_manage": ("automations", "marketing automation"),
+    "crm_campaigns_manage": ("campaigns", "marketing campaigns"),
+    "crm_templates_manage": ("templates", "marketing templates"),
+    "crm_reports_view": ("marketing reports", "crm reports"),
     "dashboard": ("home", "dashboard"),
     "orders": ("order", "purchases"),
     "prodigi": ("fulfil", "fulfillment", "prodigi", "shipping"),
@@ -24,6 +30,8 @@ ALIASES = {
 
 # These features have no stable section deep link; route to their existing parent.
 FEATURES = (
+    ("crm_abandoned", "Abandoned Checkout", "CRM & Marketing · Automations", "crm_automations_manage", ("abandoned cart", "checkout recovery"), ("automation",), "Tool"),
+    ("crm_welcome", "Welcome Series", "CRM & Marketing · Automations", "crm_automations_manage", ("welcome",), ("automation",), "Tool"),
     ("email_settings", "Email Settings", "Signatures & mailbox settings", "email", ("mail settings",), ("email", "signature"), "Setting"),
     ("email_support", "Customer Support", "Email · shared customer inbox", "email", ("customer support", "email support"), ("email", "support"), "Tool"),
     ("email_signatures", "Signatures", "Email Settings · Nathan, Maria & Company Default", "email", ("signature", "email signature"), ("email", "settings"), "Setting"),

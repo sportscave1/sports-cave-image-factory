@@ -9284,6 +9284,9 @@ def _sidebar_route_button(
 
 
 def _active_sidebar_group(route):
+    import crm_navigation
+    if route in crm_navigation.ROUTES:
+        return "crm"
     return navigation_runtime.active_disclosure_group(
         route,
         social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
@@ -9469,6 +9472,12 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             ):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
     _sidebar_route_button("Email", current_page, allowed_routes, root=st)
+    import crm_navigation
+    crm_routes = tuple(route for route in crm_navigation.ROUTES if route in allowed_routes)
+    if crm_routes and disclosure("crm", "CRM & Marketing", ":material/contacts:", crm_routes[0], force_open_routes=crm_routes):
+        children = st.container(key="sidebar-crm-children")
+        for route in crm_routes:
+            child_button(children, route, crm_navigation.LABELS[route])
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:
@@ -16299,6 +16308,12 @@ def render_selected_page(current_page):
         get_orders_page().render_page()
     elif current_page == "Email":
         get_support_email_page().render_page(current_os_user())
+    elif current_page in os_accounts.crm_navigation.ROUTES:
+        import crm_page
+        def crm_navigate(route):
+            set_current_page(route, source="crm")
+            st.rerun()
+        crm_page.render_page(current_page, current_os_user(), crm_navigate)
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":

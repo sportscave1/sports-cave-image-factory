@@ -4,6 +4,7 @@ import uuid
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
+import crm_navigation
 import ads_navigation
 import analytics_navigation
 from shared_credentials import CREDENTIAL_PERMISSION_KEYS
@@ -146,6 +147,8 @@ PAGE_REGISTRY = (
         "worker_assignable": True,
     },
     {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
+    *({"key": key, "route": route, "label": label, "worker_assignable": True, "navigation_child": True}
+      for key, route, label in crm_navigation.PAGES),
     {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},
     {
         "key": REPORTING_PAGE_KEY,
