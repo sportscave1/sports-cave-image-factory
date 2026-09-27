@@ -420,10 +420,10 @@ class WorkspaceTests(unittest.TestCase):
         self.event("folder",folder="Invented")
         self.assertEqual(self.state["folder"],"INBOX.Sent Items")
 
-    def test_message_open_does_not_refresh_inbox_or_mark_read(self):
+    def test_message_open_marks_read_without_refreshing_inbox(self):
         self.open()
         self.assertEqual(len([c for c in self.imap.calls if c[0]=="headers"]),1)
-        self.assertFalse(any(c[0]=="flag" for c in self.imap.calls))
+        self.assertEqual(len([c for c in self.imap.calls if c[0]=="flag"]),1)
         self.assertEqual(len([c for c in self.imap.calls if c[0]=="body"]),1)
 
     def test_cross_folder_thread_historical_sent_reply(self):

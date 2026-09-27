@@ -22,6 +22,7 @@ from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT
 
 LOGGER = logging.getLogger(__name__)
 FOLDER_TTL = 300
+LIVE_INTERVAL = 25  # Coalesce the shell's 30-second ticks despite scheduling jitter.
 
 
 def reference_key(header):
@@ -70,7 +71,7 @@ class Workspace:
         except Exception as error:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
-    def load(self, *, force=False):
+    def load(self, *, force=False, previews=True):
         if not self.config.configured:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
@@ -118,14 +119,14 @@ class Workspace:
             self.state["folder"] = self.roles.get("inbox", names[0])
         key = ("headers", self.state["folder"], self.state["limit"], self.state["query"], self.state["field"])
         entry = cached_read(self.cache, key, lambda: self.imap.list_headers(self.state["limit"], self.state["folder"],
-                            query=self.state["query"], field=self.state["field"], previews=True))
+                            query=self.state["query"], field=self.state["field"], previews=previews))
         if entry["error"]:
             self.state.update(error=entry["error"], threads=[])
             return
         snapshot = entry["data"]
         signature = (key, entry["refreshed_at"])
         changed = self.state.get("snapshot_signature") != signature
-        self.state.update(error="", refreshed_at=entry["refreshed_at"], snapshot=snapshot)
+        self.state.update(error="", live_error="", refreshed_at=entry["refreshed_at"], snapshot=snapshot)
         if changed:
             self.state["mailbox_version"] += 1
             self.state["snapshot_signature"] = signature
@@ -143,6 +144,7 @@ class Workspace:
             self._select_thread(self._thread())
             self.state.update(view=view, context=context)
         self.state["loaded"] = True
+        self.state["live_checked_at"] = time.monotonic()
 
     def _thread(self):
         return self.state.get("thread_index", {}).get(self.state.get("selected"))
@@ -150,7 +152,7 @@ class Workspace:
     def _header(self, key):
         if self.state.get("error"):
             raise MailboxError("Refresh the mailbox before taking this action.")
-        for message in self.state.get("conversation", []):
+        for message in [*self.state.get("conversation", []), *self.state.get("snapshot", {}).get("messages", [])]:
             if reference_key(message) == key:
                 return message
         raise MailboxError("Message is no longer selected. Refresh the mailbox.")
@@ -196,7 +198,141 @@ class Workspace:
         if not thread:
             raise MailboxError("This conversation is no longer in the current list.")
         # First paint needs only the requested MIME, never historical searches.
-        self._body(self._select_thread(thread))
+        message = self._select_thread(thread)
+        self._body(message)
+        self._read_visible(message)
+
+    def _read_visible(self, message):
+        if message.get("unread"):
+            try:
+                self.message_action("mark_read", message)
+            except MailboxError:
+                self.state["notice"] = "Could not update message. Try again."
+
+    def _folder_count(self, folder, count, *, checked_at=None):
+        if not isinstance(count, int):
+            return
+        count = max(0, count)
+        for f in self.state.get("folders", []):
+            if f["name"] == folder:
+                f["unread"] = count
+        if folder.upper() == "INBOX":
+            self.state["inbox_status"] = {"unread_count": count, "checked_at": checked_at or time.time()}
+
+    def _refresh_rows(self, *, membership_changed=True):
+        for thread in self.state.get("threads", []):
+            thread["unread"] = sum(m["unread"] for m in thread["messages"])
+        self.state.pop("list_model", None)
+        self.state["mailbox_version"] += 1
+        # Flag-only changes invalidate rendered rows, not expensive thread membership.
+        retained = [] if membership_changed else [
+            (key[1], entry["value"]) for key, entry in self.resolved_threads.data["entries"].items()]
+        self.resolved_threads.clear()
+        for thread_key, messages in retained:
+            self.resolved_threads.put((self.state["mailbox_version"], thread_key), messages)
+        self.cache.clear()
+
+    def _apply_flag(self, message, flag, enabled):
+        key = reference_key(message)
+        all_rows = [message, *self.state.get("snapshot", {}).get("messages", []), *self.state.get("conversation", [])]
+        all_rows += [m for t in self.state.get("threads", []) for m in t["messages"]]
+        all_rows += [m for entry in self.resolved_threads.data["entries"].values() for m in entry["value"]]
+        for row in all_rows:
+            if reference_key(row) == key:
+                flags = set(row["flags"])
+                flags.add(flag) if enabled else flags.discard(flag)
+                row.update(flags=tuple(sorted(flags)), unread="\\Seen" not in flags)
+
+    def live_check(self):
+        """The existing shell heartbeat invokes this; selections/reruns do not."""
+        now = time.monotonic()
+        if now - self.state.get("live_checked_at", 0) < LIVE_INTERVAL:
+            return
+        self.state["live_checked_at"] = now  # Failures are bounded too.
+        if not self.state.get("loaded") or self.state.get("error"):
+            self.load(force=True, previews=False)
+            return
+        try:
+            s = self.state
+            old = s["snapshot"]
+            delta = self.imap.live_changes(s["folder"], {**old, "visible_messages": s.get("conversation", [])},
+                                          limit=s["limit"], query=s["query"], field=s["field"])
+            rows = [] if delta["reset"] else [m for m in old["messages"] if m["uid"] in delta["flags"]]
+            membership_changed = delta["reset"] or len(rows) != len(old["messages"]) or bool(delta["added"])
+            changed = membership_changed
+            cached_headers = {}
+            if not membership_changed:
+                for entry in self.resolved_threads.data["entries"].values():
+                    for cached in entry["value"]:
+                        cached_headers.setdefault(reference_key(cached), []).append(cached)
+            for m in rows:
+                flags = delta["flags"][m["uid"]]
+                if set(flags) != set(m["flags"]):
+                    changed = True
+                m.update(flags=flags, unread="\\Seen" not in flags)
+                for cached in cached_headers.get(reference_key(m), []):
+                    cached.update(flags=flags, unread=m["unread"])
+            checked = set(delta.get("checked_uids", [m["uid"] for m in old["messages"]]))
+            for m in s.get("conversation", []):
+                if m["folder"] == s["folder"] and not delta["reset"] and m["uid"] in delta["flags"]:
+                    flags = delta["flags"][m["uid"]]
+                    changed = changed or set(flags) != set(m["flags"])
+                    m.update(flags=flags, unread="\\Seen" not in flags)
+                elif m["folder"] == s["folder"] and m["uid"] in checked:
+                    changed = True
+                    membership_changed = True
+            removed = len(old["messages"]) - len(rows)
+            unique = {reference_key(m): m for m in [*rows, *delta["added"]]}
+            matched = max(0, old.get("matched", len(old["messages"])) - removed + len(delta["added"]))
+            rows = sorted(unique.values(), key=lambda m: int(m["uid"]))[-s["limit"]:]
+            self._folder_count(s["folder"], delta["unread"], checked_at=delta["checked_at"])
+            s["snapshot"] = {**old, "messages": rows, "uidvalidity": delta["uidvalidity"], "live_uid": delta["live_uid"],
+                "total": delta["total"], "matched": matched,
+                "has_more": (matched if s["query"] else delta["total"]) > len(rows),
+                "refreshed_at": datetime.now(timezone.utc)}
+            s["refreshed_at"] = s["snapshot"]["refreshed_at"]
+            s["live_error"] = ""
+            if changed:
+                s["threads"] = sorted(build_threads(rows, self.config.address), key=lambda t: t["last_activity"], reverse=True)
+                s["thread_index"] = {t["thread_key"]: t for t in s["threads"]}
+                # Keep opened bodies and compose state. Update only known displayed flags.
+                by_key = {reference_key(m): m for m in rows}
+                s["conversation"] = [by_key.get(reference_key(m), m) for m in s.get("conversation", [])
+                    if m["folder"] != s["folder"] or (not delta["reset"] and
+                        (m["uid"] not in checked or m["uid"] in delta["flags"])) or reference_key(m) in by_key]
+                active = s.get("active_message")
+                for thread in s["threads"]:
+                    if any(reference_key(m) == active for m in thread["messages"]):
+                        s["selected"] = thread["thread_key"]
+                self._refresh_rows(membership_changed=membership_changed)
+                s["history_pending"] = False  # Polling never launches history searches.
+        except Exception as error:
+            LOGGER.info("Email live check unavailable (%s)", type(error).__name__)
+            self.state["live_error"] = "Live updates paused. Retrying automatically."
+
+    def folder_action(self, action, folder, *, confirmed=False):
+        if folder not in {f["name"] for f in self.state.get("folders", [])}:
+            raise MailboxError("Choose a discovered mailbox folder.")
+        if action == "mark_folder_read":
+            if not confirmed:
+                raise MailboxError("Confirm Mark folder read first.")
+            result = self.imap.mark_folder_read(folder)
+            marked = set(result["uids"])
+            for m in [*self.state.get("snapshot", {}).get("messages", []), *self.state.get("conversation", [])]:
+                if m["folder"] == folder and m["uidvalidity"] == result["uidvalidity"] and m["uid"] in marked:
+                    self._apply_flag(m, "\\Seen", True)
+            self._folder_count(folder, result["unread"])
+            self._refresh_rows(membership_changed=False)
+            from support_email_notifications import invalidate
+            invalidate()
+            self.audit("email_folder_marked_read", folder)
+        else:
+            if action == "search_folder" and folder == self.state.get("folder"):
+                return  # Focus the existing search control without another mailbox read.
+            if folder != self.state.get("folder"):
+                self.state.update(folder=folder, selected=None, conversation=[], query="")
+            self.cache.clear()
+            self.load()  # Keeps discovered folders and opened bodies cached.
 
     def open_notification(self, target):
         """Deep link resolution belongs exclusively to the authorised Email page."""
@@ -221,6 +357,7 @@ class Workspace:
             self._select_thread(thread)
             self.state.update(active_message=reference_key(message), expanded={reference_key(message)})
             self._body(message)
+            self._read_visible(message)
         except Exception as error:
             LOGGER.info("Email notification target unavailable (%s)", type(error).__name__)
             self.state["notice"] = "Could not open that email. The current Inbox is shown."
@@ -279,17 +416,25 @@ class Workspace:
             event_id = str(uuid.UUID(str(event["id"])))
         except ValueError:
             return False
-        if event_id in self.state["processed"]:
+        if event_id == self.state.get("ack") or event_id in self.state["processed"]:
             return False
         if len(self.state["processed"]) > 10000:
             raise MailboxError("Session action limit reached. Reopen Email.")
-        self.state["processed"].add(event_id)
-        self.state.update(ack=event_id, notice="")
+        # Heartbeats are idempotent and TTL guarded; do not consume the action ledger forever.
+        if event.get("action") != "live_check":
+            self.state["processed"].add(event_id)
+        self.state["ack"] = event_id
+        if event.get("action") != "live_check":
+            self.state["notice"] = ""
         self.state.pop("download", None)
         try:
             self._sync_draft(event.get("draft"))
             action = event.get("action")
-            if action in {"refresh", "folder", "search", "load_more"}:
+            if action == "live_check":
+                self.live_check()
+            elif action in {"refresh_folder", "search_folder", "mark_folder_read"}:
+                self.folder_action(action, event.get("folder"), confirmed=event.get("confirmed") is True)
+            elif action in {"refresh", "folder", "search", "load_more"}:
                 if action == "folder":
                     if event.get("folder") not in {f["name"] for f in self.state.get("folders", [])}:
                         raise MailboxError("Choose a discovered mailbox folder.")
@@ -314,8 +459,9 @@ class Workspace:
                 self.state["active_message"] = reference_key(message)
                 self.state["expanded"].add(reference_key(message))
                 self._body(message)
-            elif action in {"mark_read", "mark_unread", "star", "unstar", "archive", "trash", "junk"}:
-                self.message_action(action, self._header(event.get("message_key")))
+                self._read_visible(message)
+            elif action in {"mark_read", "mark_unread", "star", "unstar", "archive", "trash", "junk", "move", "copy"}:
+                self.message_action(action, self._header(event.get("message_key")), event.get("destination"))
             elif action == "download":
                 message = self._header(event.get("message_key"))
                 self._validate_part(message, event.get("section"))
@@ -329,6 +475,10 @@ class Workspace:
                 if mode != "new":
                     message = self._header(event.get("message_key"))
                     text = self._body(message)["text"]
+                    thread = next((t for t in self.state["threads"] if any(reference_key(m) == reference_key(message) for m in t["messages"])), self._thread())
+                    if thread:
+                        self._select_thread(thread)
+                    self._read_visible(message)
                 self.state["draft"] = new_draft(self.config.address, mode=mode, header=message, text=text,
                     signature=selected_signature(self.state["settings"], self.user, self.state.get("preference")))
                 if mode != "new":
@@ -400,7 +550,8 @@ class Workspace:
             else:
                 raise ComposeError("Unknown Email action.")
         except (MailboxError, ComposeError, store.SupportStorageError) as error:
-            self.state["notice"] = str(error)
+            self.state["notice"] = "Could not update message. Try again." if event.get("action") in {
+                "mark_read", "mark_unread", "star", "unstar", "move", "copy", "archive", "trash", "junk"} else str(error)
             if event.get("action") == "test_connection":
                 self.state["error"] = "Connection unavailable. Refresh to reconnect."
         except Exception as error:
@@ -408,20 +559,49 @@ class Workspace:
             self.state["notice"] = "Could not complete this Email action. Refresh and try again."
         return True
 
-    def message_action(self, action, message):
+    def message_action(self, action, message, destination=None):
         if action in {"mark_read", "mark_unread", "star", "unstar"}:
-            self.imap.set_flag(message, "\\Seen" if action.startswith("mark_") else "\\Flagged", action in {"mark_read", "star"})
+            flag, enabled = ("\\Seen" if action.startswith("mark_") else "\\Flagged"), action in {"mark_read", "star"}
+            if (flag in message["flags"]) == enabled:
+                return
+            was_unread = message["unread"]
+            self.imap.set_flag(message, flag, enabled)
+            self._apply_flag(message, flag, enabled)
+            if flag == "\\Seen":
+                folder = next((f for f in self.state["folders"] if f["name"] == message["folder"]), {})
+                if isinstance(folder.get("unread"), int):
+                    self._folder_count(message["folder"], folder["unread"] + (-1 if was_unread else 1))
             self.audit("email_" + action if action.startswith("mark_") else "email_flag_changed", reference_key(message))
         else:
-            destination = self.roles.get(action)
-            if not destination:
+            destination = destination if action in {"move", "copy"} else self.roles.get(action)
+            if destination not in {f["name"] for f in self.state["folders"]} or destination == message["folder"]:
                 raise MailboxError("Map this folder in Email settings first.")
-            result = self.imap.move_message(message, destination)
-            self.state["notice"] = result.get("notice", "Message moved.")
-            self.audit({"archive": "email_archived", "trash": "email_trashed", "junk": "email_junked"}[action]
+            result = self.imap.copy_message(message, destination) if action == "copy" else self.imap.move_message(message, destination)
+            self.state["notice"] = result.get("notice", "Message copied." if result["status"] == "copied" else "Message moved.")
+            if result["status"] == "moved":
+                key = reference_key(message)
+                snapshot = self.state.get("snapshot", {})
+                snapshot["messages"] = [m for m in snapshot.get("messages", []) if reference_key(m) != key]
+                if message["folder"] == self.state["folder"]:
+                    for count in ("total", "matched"):
+                        if isinstance(snapshot.get(count), int):
+                            snapshot[count] = max(0, snapshot[count] - 1)
+                self.state["conversation"] = [m for m in self.state.get("conversation", []) if reference_key(m) != key]
+                self.state["threads"] = build_threads(snapshot["messages"], self.config.address)
+                self.state["threads"].sort(key=lambda t: t["last_activity"], reverse=True)
+                self.state["thread_index"] = {t["thread_key"]: t for t in self.state["threads"]}
+            if message["unread"]:
+                for folder in self.state["folders"]:
+                    if isinstance(folder.get("unread"), int):
+                        if folder["name"] == destination:
+                            self._folder_count(destination, folder["unread"] + 1)
+                        elif folder["name"] == message["folder"] and result["status"] == "moved":
+                            self._folder_count(message["folder"], folder["unread"] - 1)
+            self.audit({"archive": "email_archived", "trash": "email_trashed", "junk": "email_junked"}.get(action, "email_moved")
                        if result["status"] == "moved" else "email_copied", reference_key(message))
-        self.state.update(selected=None, conversation=[])
-        self.load(force=True)
+        self._refresh_rows(membership_changed=action not in {"mark_read", "mark_unread", "star", "unstar"})
+        from support_email_notifications import invalidate
+        invalidate()
 
     def _editable_draft(self):
         draft = self.state.get("draft")
@@ -620,7 +800,7 @@ class Workspace:
         return {"mailbox": self.config.address, "configured": self.config.configured,
             "inbox_status": s.get("inbox_status", {}),
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
-            "error": s.get("error", ""), "notice": s["notice"], "ack": s.get("ack", ""),
+            "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
             "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],
             "refreshed": formatted_date(s.get("refreshed_at"), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
@@ -639,7 +819,9 @@ class Workspace:
             "email": t["customer"]["email"], "subject": t["subject"], "time": formatted_date(t["last_activity_at"], self.user),
             "unread": bool(t["unread"]), "count": len(t["messages"]), "snippet": t["messages"][-1].get("snippet", ""),
             "attachment": any(m.get("has_attachments") for m in t["messages"]),
-            "starred": any("\\Flagged" in m["flags"] for m in t["messages"])} for t in self.state.get("threads", [])]
+            "starred": any("\\Flagged" in m["flags"] for m in t["messages"]),
+            "message_key": reference_key(t["messages"][-1]), "message_unread": t["messages"][-1]["unread"],
+            "message_starred": "\\Flagged" in t["messages"][-1]["flags"]} for t in self.state.get("threads", [])]
     def context_model(self):
         context = self.state.get("context", {})
         match, order = context.get("match", {}), context.get("match", {}).get("order")

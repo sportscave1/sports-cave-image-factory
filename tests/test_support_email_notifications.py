@@ -198,14 +198,14 @@ class WorkspaceNotificationTests(unittest.TestCase):
         self.assertEqual(self.state['folder'],'INBOX')
         self.assertEqual(self.state['active_message'],v2.reference_key(message))
         self.assertIn(('body','1'),self.imap.calls)
-        self.assertFalse(any(c[0]=='flag' for c in self.imap.calls))
+        self.assertEqual([c for c in self.imap.calls if c[0]=='flag'],[('flag','1','\\Seen',True)])
     def test_missing_notification_opens_inbox_safely(self):
         self.imap.notification_target=Mock(return_value=None)
         self.w.open_notification({'uid':'999','uidvalidity':'500'})
         self.assertIsNone(self.state['selected']);self.assertIn('no longer in Inbox',self.state['notice'])
     def test_mark_read_and_unread_invalidate_shared_notification_count(self):
-        for action in ('mark_read','mark_unread'):
-            key=self.open()
+        key=self.open()
+        for action in ('mark_unread','mark_read'):
             with patch.object(notifications,'invalidate') as invalidate:
                 self.event(action,message_key=key)
                 invalidate.assert_called_once()

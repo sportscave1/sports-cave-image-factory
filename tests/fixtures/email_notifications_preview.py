@@ -52,6 +52,10 @@ else:
                 if st.button(label,key='nav-'+key,use_container_width=True):
                     st.query_params['page']=key;st.rerun()
         st.caption('LOCAL FIXTURE · no external I/O')
+        if st.button('Simulate new email'):
+            fixture.arrive()
+        if st.button('Simulate Thunderbird read + flag'):
+            fixture.other_client()
     logo=Path(__file__).resolve().parents[2]/'assets/sports-cave-os-app-icon.webp'
     logo_src='data:image/webp;base64,'+base64.b64encode(logo.read_bytes()).decode('ascii')
     config=top_bar.top_bar_config(user,logo_src=logo_src,current_route=names.get(route,'Dashboard'))

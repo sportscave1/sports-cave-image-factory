@@ -16,7 +16,7 @@ const source=fs.readFileSync('components/support_email/mail.js','utf8');
 const timers=[],ctx={model:{view:'compose',send_result:{status:'accepted'},sent_result:{status:'pending'},sent_checks:0,draft:{operation_id:'op'}},busy:false,
   clearTimeout(){},setTimeout(fn,ms){timers.push({fn,ms});},emit(action,data){assert.equal(action,'auto_check_sent');assert.equal(data.operation_id,'op');}};
 vm.createContext(ctx);
-vm.runInContext(source.slice(source.indexOf('let sentTimer='),source.indexOf("window.addEventListener('pagehide'"))+';this.schedule=scheduleSentCheck;',ctx);
+vm.runInContext(source.slice(source.indexOf('let sentTimer='),source.indexOf("window.addEventListener('pagehide'",source.indexOf('let sentTimer=')))+';this.schedule=scheduleSentCheck;',ctx);
 for(let n=0;n<5;n++){ctx.model.sent_checks=n;ctx.schedule();}
 assert.deepEqual(timers.map(t=>t.ms),[6000,12000,24000]);timers[0].fn();
 ctx.model.sent_checks=0;ctx.model.send_result.status='unknown';ctx.schedule();assert.equal(timers.length,3);

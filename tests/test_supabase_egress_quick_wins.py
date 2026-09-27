@@ -96,7 +96,8 @@ class SupabaseEgressQuickWinTests(unittest.TestCase):
         self.assertEqual(orders_page.ORDERS_SUPABASE_LIVE_CHECK_SECONDS, 30)
         self.assertIn("const ORDER_STATUS_REFRESH_MS = 60000;", component)
         self.assertIn("const PLANNER_STATUS_REFRESH_MS = 30000;", component)
-        self.assertIn("later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS)", component)
+        self.assertIn('statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS)', component)
+        self.assertIn("later(refreshOrderStatus, state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS)", component)
 
     def test_notification_read_selects_only_fields_the_top_bar_consumes(self):
         cursor = _Cursor(

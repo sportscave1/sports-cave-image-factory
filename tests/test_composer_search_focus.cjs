@@ -57,7 +57,7 @@ ctx.doc.activeElement=null;
 // Actual Email shortcuts keep their established send/close behavior and ignore
 // single-key actions in editable descendants, token controls and shadow roots.
 let emailHandler, sends=0, closes=0, replies=0;
-const emailCtx={document:{addEventListener(k,fn){emailHandler=fn;}},model:{view:'compose',active_message:'1'},
+const emailCtx={menu:null,document:{addEventListener(k,fn){emailHandler=fn;}},model:{view:'compose',active_message:'1'},
   send(){sends++;},emit(){closes++;},compose(){replies++;}};
 vm.createContext(emailCtx);
 vm.runInContext(mail.slice(mail.indexOf("document.addEventListener('keydown'"),mail.indexOf("window.addEventListener('message'")),emailCtx);

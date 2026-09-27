@@ -39,6 +39,7 @@ STORE=Store()
 
 
 def status():
+    WIRE.unseen=sum(m['unread'] for m in MAILBOX_FIXTURE.messages if m['folder']=='INBOX')
     return notifications.status(configuration=CONFIG,provider=ADAPTER,store=STORE)
 
 
@@ -48,6 +49,12 @@ def arrive():
     message=header(str(uid),f'<mail-{uid}@example.test>',subject='Damaged frame',sender='john@example.test',hours=100+uid)
     message['sender']['name']='John Smith'
     MAILBOX_FIXTURE.messages.append(message)
+    notifications.invalidate()
+
+
+def other_client():
+    message=MAILBOX_FIXTURE.messages[-1]
+    message.update(flags=('\\Seen','\\Flagged'),unread=False)
     notifications.invalidate()
 
 

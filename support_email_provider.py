@@ -627,8 +627,73 @@ class ImapProvider:
                 rows = self._headers(response, validity, folder)
             if previews and rows:
                 self._previews(conn, rows)
+            _, next_uid = conn.response("UIDNEXT")
+            baseline = int(next_uid[0]) - 1 if next_uid and isinstance(next_uid[0], bytes) and next_uid[0].isdigit() else max((int(m["uid"]) for m in rows), default=0)
             return {"messages": rows, "total": count, "matched": matched, "uidvalidity": validity,
+                    "live_uid": max(baseline, max((int(m["uid"]) for m in rows), default=0)),
                     "refreshed_at": datetime.now(timezone.utc), "has_more": matched > limit}
+
+    @_retry_read
+    def live_changes(self, folder, snapshot, *, limit=50, query="", field="TEXT"):
+        """Bounded current-view sync: counters, loaded UID flags and new headers only."""
+        limit = min(max(int(limit), 1), 1000)
+        with self._connection(folder) as (conn, count, validity):
+            raw = self._ok(conn.status(folder_argument(folder), "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)"))
+            values = dict(re.findall(rb"\b(UNSEEN|MESSAGES|UIDNEXT|UIDVALIDITY) (\d+)",
+                                    b" ".join(v for v in raw if isinstance(v, bytes))))
+            if len(values) != 4 or values[b"UIDVALIDITY"].decode() != validity or int(values[b"UIDNEXT"]) < 1:
+                raise MailboxError("Mailbox changed during the live check. Refresh to reconnect.")
+            # Include a bounded opened thread/notification target outside the list page.
+            known = list({m["uid"]: m for m in [*snapshot.get("messages", [])[:1000],
+                *snapshot.get("visible_messages", [])[:100]] if m["folder"] == folder}.values())
+            reset = str(snapshot.get("uidvalidity")) != validity
+            flags, added = {}, []
+            if reset:
+                # A new UIDVALIDITY invalidates old identities, never their immutable body cache keys.
+                if query:
+                    uids = self._search(conn, search_criteria(query, field))[-limit:]
+                    added = self._fetch_uids(conn, uids, validity, folder)
+                elif count:
+                    added = self._headers(self._ok(conn.fetch(f"{max(1, count-limit+1)}:{count}",
+                        f"(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")), validity, folder)
+            else:
+                if known:
+                    data = self._ok(conn.uid("FETCH", ",".join(m["uid"] for m in known), "(UID FLAGS)"))
+                    for item in data:
+                        raw_flags = item[0] if isinstance(item, tuple) else item
+                        if not isinstance(raw_flags, bytes):
+                            continue
+                        uid = re.search(rb"\bUID (\d+)", raw_flags)
+                        if uid:
+                            flags[uid[1].decode()] = tuple(v.decode("ascii", "replace") for v in imaplib.ParseFlags(raw_flags))
+                low = int(snapshot.get("live_uid", max((int(m["uid"]) for m in known), default=0))) + 1
+                high = int(values[b"UIDNEXT"]) - 1
+                if low <= high:
+                    criteria = f"UID {low}:{high}" + (" " + search_criteria(query, field) if query else "")
+                    uids = [uid for uid in self._search(conn, criteria) if low <= int(uid) <= high]
+                    added = self._fetch_uids(conn, uids[-limit:], validity, folder)
+            return {"flags": flags, "checked_uids": [m["uid"] for m in known],
+                    "added": added, "reset": reset, "uidvalidity": validity,
+                    "live_uid": int(values[b"UIDNEXT"]) - 1, "total": int(values[b"MESSAGES"]),
+                    "unread": int(values[b"UNSEEN"]), "checked_at": time.time()}
+
+    def copy_message(self, header, destination):
+        if destination == header["folder"] or not re.fullmatch(r"[1-9]\d*", str(header["uid"])):
+            raise MailboxError("Choose another folder for this message.")
+        with self._connection(header["folder"], header["uidvalidity"], write=True) as (conn, _, __):
+            self._ok(conn.uid("COPY", header["uid"], folder_argument(destination)))
+        return {"status": "copied"}
+
+    def mark_folder_read(self, folder):
+        """Explicit confirmed bulk action. No body fetch and no write replay."""
+        with self._connection(folder, write=True) as (conn, _, validity):
+            uids = self._search(conn, "UNSEEN")
+            for offset in range(0, len(uids), 500):
+                self._ok(conn.uid("STORE", ",".join(uids[offset:offset+500]), "+FLAGS.SILENT", "(\\Seen)"))
+            raw = self._ok(conn.status(folder_argument(folder), "(UNSEEN)"))
+            unread = re.search(rb"UNSEEN (\d+)", b" ".join(v for v in raw if isinstance(v, bytes)))
+            return {"uids": uids, "uidvalidity": validity,
+                    "unread": int(unread[1]) if unread else None}
 
     def _previews(self, conn, rows):
         """Bounded partial TEXT parts only, never attachment sections or full messages."""

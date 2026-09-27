@@ -22,7 +22,7 @@ class SelectionPerformanceTests(unittest.TestCase):
         self.imap.calls.clear()
         with patch.object(workspace.store,"load_orders") as orders,patch.object(workspace.store,"load_metadata") as metadata:
             self.open()
-            self.assertEqual([c[0] for c in self.imap.calls],["body"])
+            self.assertEqual([c[0] for c in self.imap.calls],["body","flag"])
             orders.assert_not_called();metadata.assert_not_called()
         self.assertTrue(self.w.model()["messages"][0]["expanded"])
         self.assertTrue(self.state["history_pending"])
@@ -40,7 +40,7 @@ class SelectionPerformanceTests(unittest.TestCase):
             for t in self.state['threads'][:5]:
                 self.event('open_thread',thread_key=t['thread_key'])
                 self.w.model()
-            self.assertEqual([c[0] for c in self.imap.calls],['body']*5)
+            self.assertEqual([c[0] for c in self.imap.calls if c[0]!='flag'],['body']*5)
             orders.assert_not_called()
 
     def test_safe_html_prepared_once_and_model_list_reused(self):

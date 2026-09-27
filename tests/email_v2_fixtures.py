@@ -31,7 +31,40 @@ class MailboxFixture:
 
     def discover_folders(self):
         self.calls.append(("folders",))
-        return {"folders": deepcopy(self.folders), "capabilities": {"MOVE", "IMAP4REV1"}}
+        folders = deepcopy(self.folders)
+        for folder in folders:
+            folder["unread"] = sum(m["unread"] for m in self.messages if m["folder"] == folder["name"])
+        return {"folders": folders, "capabilities": {"MOVE", "IMAP4REV1"}}
+
+    def live_changes(self, folder, snapshot, *, limit=50, query="", field="TEXT"):
+        import time
+        self.calls.append(("live", folder))
+        if self.fail:
+            raise RuntimeError("fixture-secret must never be displayed")
+        rows = [m for m in self.messages if m["folder"] == folder]
+        high = max((int(m["uid"]) for m in rows), default=0)
+        low = snapshot.get("live_uid", max((int(m["uid"]) for m in snapshot["messages"]), default=0))
+        known = {m["uid"] for m in [*snapshot["messages"], *snapshot.get("visible_messages", [])] if m["folder"] == folder}
+        return {"flags": {m["uid"]: m["flags"] for m in rows if m["uid"] in known},
+                "added": deepcopy([m for m in rows if int(m["uid"]) > low and (not query or query.casefold() in str(m).casefold())][-limit:]),
+                "checked_uids": list(known), "reset": False, "uidvalidity": "500", "live_uid": high, "total": len(rows),
+                "unread": sum(m["unread"] for m in rows), "checked_at": time.time()}
+
+    def copy_message(self, message, destination):
+        self.calls.append(("copy", message["uid"], destination))
+        copied = deepcopy(next(m for m in self.messages if m["uid"] == message["uid"] and m["folder"] == message["folder"]))
+        copied.update(folder=destination, uid=str(max(int(m["uid"]) for m in self.messages)+1))
+        self.messages.append(copied)
+        return {"status": "copied"}
+
+    def mark_folder_read(self, folder):
+        self.calls.append(("folder_read", folder))
+        uids = []
+        for message in self.messages:
+            if message["folder"] == folder and message["unread"]:
+                uids.append(message["uid"])
+                message.update(unread=False, flags=tuple(sorted({*message["flags"], "\\Seen"})))
+        return {"uids": uids, "uidvalidity": "500", "unread": 0}
 
     def list_headers(self, limit=50, folder="INBOX", **kwargs):
         self.calls.append(("headers", folder, limit, kwargs))
@@ -42,6 +75,7 @@ class MailboxFixture:
         if query:
             items = [m for m in items if query.casefold() in str(m).casefold()]
         return {"messages": deepcopy(items[-limit:]), "total": len(items), "matched": len(items),
+                "live_uid": max((int(m["uid"]) for m in self.messages if m["folder"] == folder), default=0),
                 "uidvalidity": "500", "refreshed_at": datetime.now(timezone.utc), "has_more": len(items) > limit}
 
     def related_headers(self, folder, identifiers, limit=100):

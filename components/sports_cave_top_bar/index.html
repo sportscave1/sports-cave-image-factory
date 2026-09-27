@@ -7,6 +7,7 @@
 <body>
 <script>
 (() => {
+  if (window.frameElement) window.frameElement.dataset.scTopBar = "true";
   const config = __SPORTS_CAVE_TOP_BAR_CONFIG__;
   const parentWindow = window.parent || window;
   const doc = parentWindow.document;
@@ -981,6 +982,7 @@
       } catch (_error) {}
     };
     const ORDER_STATUS_REFRESH_MS = 60000;
+    const EMAIL_HEARTBEAT_MS = 30000;
     const PLANNER_STATUS_REFRESH_MS = 30000;
     const statusRefreshDelay = (
       kind,
@@ -1607,7 +1609,12 @@
         state.notifications = null;
         if (state.activePanel === "notifications") renderNotifications(await loadNotifications());
       } catch (_error) { applyEmailStatus({unread_count:null}); }
-      finally { emailStatusPending = false; }
+      finally {
+        emailStatusPending = false;
+        // Reuse the established notification heartbeat, including failed checks.
+        doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
+          frame.contentWindow?.postMessage({type:"sc:email-tick"}, parentWindow.location.origin));
+      }
     };
     const dismissOrderToast = (identity = "") => {
       temporaryToasts.dismiss("orders", identity, {remember: true});
@@ -1812,7 +1819,13 @@
       void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled) later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS);
+        if (state.config.emailEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
+        return;
+      }
+      // One timer, with Orders retaining its existing 60-second request cadence.
+      const remaining = statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS);
+      if (remaining > 0) {
+        later(refreshOrderStatus, Math.min(remaining, state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
         return;
       }
       writeStatusCache("orders");
@@ -1827,7 +1840,7 @@
       } catch (_error) {
         // Keep the last visible local state when the lightweight status read is unavailable.
       } finally {
-        later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS);
+        later(refreshOrderStatus, state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
       }
     };
     const compactTimerLabel = (seconds) => {
@@ -2869,10 +2882,11 @@
               cachedOrders.payload.badge_label,
             );
           }
-          const orderDelay = statusRefreshDelay(state.config.ordersEnabled ? "orders" : "email", ORDER_STATUS_REFRESH_MS);
+          const orderDelay = Math.min(state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS,
+            statusRefreshDelay(state.config.ordersEnabled ? "orders" : "email", state.config.ordersEnabled ? ORDER_STATUS_REFRESH_MS : EMAIL_HEARTBEAT_MS));
           const cachedEmail = readStatusCache("email").payload;
           if (cachedEmail) applyEmailStatus(cachedEmail);
-          if (orderDelay && state.config.emailEnabled && statusRefreshDelay("email", ORDER_STATUS_REFRESH_MS) === 0) void refreshEmailStatus();
+          if (orderDelay && state.config.emailEnabled && statusRefreshDelay("email", EMAIL_HEARTBEAT_MS) === 0) void refreshEmailStatus();
           if (orderDelay) later(refreshOrderStatus, orderDelay);
           else refreshOrderStatus();
         }

@@ -5,6 +5,13 @@
   const safeLink = value => {try {const u=new URL(value); return ['https:','http:','mailto:'].includes(u.protocol) && !u.username && !u.password ? u.href : '';} catch (_) {return '';}};
   const locked = m => ['accepted','unknown','in_progress'].includes((m.send_result || {}).status) || m.draft_pending;
   const mailboxCount = m => m.error ? 'Mailbox unavailable' : (m.query ? 'Search · ' : '') + (m.threads || []).length + ' conversations';
+  function messageMenuItems(target,roles){
+    return [['Open','open'],['Reply','reply'],['Reply all','reply_all'],['Forward','forward'],
+      [target.unread?'Mark as read':'Mark as unread',target.unread?'mark_read':'mark_unread'],
+      [target.starred?'Unflag':'Flag',target.starred?'unstar':'star'],
+      ['Archive','archive',!roles.archive],['Move to…','move'],['Copy to…','copy'],
+      ['Junk','junk',!roles.junk],['Trash','trash',!roles.trash]];
+  }
   function sendStatus(m) {
     const status=m.send_result?.status, progress=m.send_progress||{};
     if(status==='accepted') return '<div class="send-success">✓ Sent</div><div class="'+(m.sent_result?.status==='present'?'send-success':'send-pending')+'">'+(m.sent_result?.status==='present'?'✓ Sent copy available':'● Sent copy pending')+'</div>';
@@ -27,12 +34,21 @@
     if(!active?.expanded)return null;
     return {active_message:active.key,messages:messages.map(m=>({...m,expanded:m.key===active.key&&m.expanded}))};
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,sendStatus,createViewCache,threadView}; return;}
+  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,sendStatus,createViewCache,threadView}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
   const views=createViewCache();
   const submitted=new Set();
+  let lastLiveCheck=Date.now(), menu=null, menuTarget=null, focusSearch=false;
+  function liveTick(){
+    if(busy||menu||document.hidden||!model.configured||Date.now()-lastLiveCheck<25000)return;
+    lastLiveCheck=Date.now();emit('live_check');
+  }
+  // Only standalone fixtures/embeds need a timer; the OS supplies its existing heartbeat.
+  let standaloneTimer=null;
+  try{if(!window.parent.SportsCaveTopBar)standaloneTimer=setInterval(liveTick,30000);}catch(_){}
+  window.addEventListener('pagehide',()=>clearInterval(standaloneTimer));
   let sentTimer=null;
   function scheduleSentCheck(){
     clearTimeout(sentTimer);
@@ -52,7 +68,7 @@
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
     if (busy) {
-      if(selecting || ['open_thread','open_message','resolve_thread','auto_check_sent'].includes(pendingAction)){
+      if(selecting || ['open_thread','open_message','resolve_thread','auto_check_sent','live_check'].includes(pendingAction)){
         queued={action,values};
         if(selecting) optimistic(action,values);
       }
@@ -63,8 +79,8 @@
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
-    else if(!['resolve_thread','auto_check_sent'].includes(action)){root.classList.add('busy');freeze();}
-    if (!selecting && !['resolve_thread','auto_check_sent'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
+    else if(!['resolve_thread','auto_check_sent','live_check'].includes(action)){root.classList.add('busy');freeze();}
+    if (!selecting && !['resolve_thread','auto_check_sent','live_check'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
   const viewKey=(m,key)=>JSON.stringify([m.mailbox,m.mailbox_version,key]);
@@ -119,19 +135,19 @@
   }
   function folders() {
     return `<nav class="folders" aria-label="Mail folders"><div class="folder-heading label">Mailbox</div>${(model.folders||[]).map(f=>{
-      const role=roleOf(f); return `<button class="folder ${model.folder===f.name?'selected':''}" data-action="folder" data-folder="${esc(f.name)}" title="${esc(f.label)}" aria-label="${esc(roleLabels[role]||f.label)}"><span class="folder-symbol">${symbols[role]||'▱'}</span><span class="folder-name">${esc(roleLabels[role]||f.label)}</span><span class="folder-count">${f.unread>0?esc(f.unread):''}</span></button>`;
+      const role=roleOf(f); return `<div class="folder-wrap"><button class="folder ${model.folder===f.name?'selected':''}" data-action="folder" data-folder="${esc(f.name)}" title="${esc(f.label)}" aria-label="${esc(roleLabels[role]||f.label)}"><span class="folder-symbol">${symbols[role]||'▱'}</span><span class="folder-name">${esc(roleLabels[role]||f.label)}</span><span class="folder-count">${f.unread>0?esc(f.unread):''}</span></button><button class="folder-more" data-action="folder_menu" data-folder="${esc(f.name)}" aria-label="Actions for ${esc(roleLabels[role]||f.label)}">⋯</button></div>`;
     }).join('')}${button('☰ <span>Collapse folders</span>','collapse','','', 'collapse plain')}</nav>`;
   }
   function conversations() {
     const folder=(model.folders||[]).find(f=>f.name===model.folder);
-    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(model))}</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more&&!model.error?button('Load 50 more','load_more'): '<span class="muted">'+(model.error?'Mailbox unavailable':model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
+    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(model))}</small></div><div class="conversations">${model.error?`<div class="empty">${esc(model.error)}</div>`:(model.threads||[]).map(t=>`<div class="conversation-wrap"><button class="conversation ${t.unread?'unread':''} ${model.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${esc(t.snippet||'Open conversation')}</span><small>${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button><button class="row-more" data-action="message_menu" data-key="${esc(t.key)}" aria-label="More actions for ${esc(t.subject)}">⋯</button></div>`).join('')||'<div class="empty">No messages in this view.</div>'}</div><div class="list-footer">${model.has_more&&!model.error?button('Load 50 more','load_more'): '<span class="muted">'+(model.error?'Mailbox unavailable':model.query?'Live search · current folder':'Live mailbox · latest messages')+'</span>'}</div></section>`;
   }
   const names=people=>(people||[]).map(p=>p.name?`${p.name} <${p.email}>`:p.email).join(', ');
   function messages() {
     const rows=model.messages||[], active=rows.find(m=>m.key===model.active_message)||rows[rows.length-1];
     const selectedThread=(model.threads||[]).find(t=>t.key===model.selected);
     if (!active) return `<div class="reading-scroll empty">${model.error?esc(model.error):'Select a conversation to read it.'}${model.draft?'<p class="attachments">'+button('Resume draft','resume_composer')+'</p>':''}</div>`;
-    return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Star / unstar"')}${button('Junk','junk','',!model.roles.junk)}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span><small>${esc(m.time)}</small></div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div></button>${m.expanded?`<div class="message-body">${m.html}</div>${m.quote?`<details><summary>Show quoted text</summary><div class="quote">${m.quote}</div></details>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="Download directly from mailbox"`)).join('')}</div>`:''}</article>`).join('')}</div></div>`;
+    return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Star / unstar"')}${button('Junk','junk','',!model.roles.junk)}${button('⋯','message_menu','title="More message actions" aria-label="More message actions"')}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span><small>${esc(m.time)}</small></div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div></button>${m.expanded?`<div class="message-body">${m.html}</div>${m.quote?`<details><summary>Show quoted text</summary><div class="quote">${m.quote}</div></details>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="Download directly from mailbox"`)).join('')}</div>`:''}</article>`).join('')}</div></div>`;
   }
   function formatBar(target='editor') {
     return `<div class="format-bar" data-editor="${target}">${[['B','bold'],['I','italic'],['U','underline'],['↗ Link','createLink'],['• List','insertUnorderedList'],['1. List','insertOrderedList']].map(([label,cmd])=>`<button type="button" data-command="${cmd}" title="${cmd}" ${target==='editor'&&locked(model)?'disabled':''}>${label}</button>`).join('')}</div>`;
@@ -173,7 +189,10 @@
   function render(next) {
     // The fragment first receives the old model before processing its event. Ignore that echo.
     if(pending&&next.ack!==pending)return;
-    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent'].includes(pendingAction);
+    const liveUpdate=pendingAction==='live_check';
+    if(liveUpdate)snapshot(); // Keep edits made while the network read was in flight.
+    const oldFolder=model.folder, oldQuery=model.query;
+    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent','live_check'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
     if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
@@ -202,17 +221,18 @@
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
       toolbarStamp=toolbarKey;
     }
-    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.error?'Connection error':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
+    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||model.live_error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.error?'Connection error':model.live_error?'Reconnecting':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
     const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,model.limit]);
-    if(wasFrozen||listKey!==listStamp){const node=root.querySelector('.listpane'),top=node.querySelector('.conversations')?.scrollTop||0;node.outerHTML=conversations();root.querySelector('.conversations').scrollTop=listKey===listStamp?top:0;listStamp=listKey;}
+    if(wasFrozen||listKey!==listStamp){const node=root.querySelector('.listpane'),top=node.querySelector('.conversations')?.scrollTop||0;node.outerHTML=conversations();root.querySelector('.conversations').scrollTop=oldFolder===model.folder&&oldQuery===model.query?top:0;listStamp=listKey;}
     root.querySelector('.workspace').className=`workspace ${collapsed?'collapsed':''} ${mobileReading?'show-reading':''}`;
-    markSelection();paintReading(wasFrozen,selectionChanged);
+    markSelection();if(!(liveUpdate&&model.view==='compose'))paintReading(wasFrozen,selectionChanged);
     // Selection-only reads never freeze folder/list/toolbar nodes. Re-enable selected-message controls
     // by repainting only their pane after the server acknowledges the selected reference.
     if(root.querySelector('.reading button:disabled')&&!locked(model)&&model.view==='mail')paintReading(true);
     wire();fit();
+    if(focusSearch&&!busy){focusSearch=false;$('search')?.focus();}
     if(model.download && model.download.id!==downloaded){
       downloaded=model.download.id;
       const bytes=Uint8Array.from(atob(model.download.base64),c=>c.charCodeAt(0));
@@ -238,6 +258,8 @@
   function wire(){
     $('search-form').onsubmit=e=>{e.preventDefault();emit('search',{query:$('search').value});};
     root.onclick=e=>{
+      const more=e.target.closest('[data-action="message_menu"],[data-action="folder_menu"]');
+      if(more){const rect=more.getBoundingClientRect();showMenu(targetFor(more),rect.right,rect.bottom);return;}
       const b=e.target.closest('button');if(!b||b.disabled)return;
       if(b.dataset.command){
         const target=$(b.closest('[data-editor]').dataset.editor);if(target.contentEditable!=='true')return;
@@ -279,7 +301,57 @@
     if($('signature'))$('signature').onchange=()=>{$('signature-preview').innerHTML=signaturePreview($('signature').value);snapshot();};
     if($('attachment'))$('attachment').onchange=async()=>{const f=$('attachment').files[0];if(!f)return;if(f.size>10*1048576){$('notice').textContent='Attachment too large. Maximum file size is 10 MB.';return;}const reader=new FileReader();reader.onload=()=>emit('attach',{filename:f.name,base64:reader.result.split(',')[1]});reader.readAsDataURL(f);};
   }
+  function targetFor(node){
+    const folder=node.closest('[data-folder]');
+    if(folder)return {kind:'folder',folder:folder.dataset.folder};
+    const row=node.closest('[data-key]'),key=row?.dataset.key;
+    const thread=model.threads.find(t=>t.key===key);
+    if(thread)return {kind:'message',thread_key:thread.key,message_key:thread.message_key,
+      unread:thread.message_unread,starred:thread.message_starred,folder:model.folder};
+    const message=model.messages.find(m=>m.key===(key||model.active_message));
+    return message?{kind:'message',message_key:message.key,unread:message.unread,starred:message.starred,folder:message.folder}:null;
+  }
+  function closeMenu(){menu?.remove();menu=null;menuTarget=null;}
+  function showMenu(target,x,y,items=null,heading=''){
+    closeMenu();if(!target||(busy&&!['resolve_thread','live_check'].includes(pendingAction)))return;
+    menuTarget=target;menu=document.createElement('div');menu.className='mail-context';menu.setAttribute('role','menu');menu.setAttribute('aria-label',target.kind==='folder'?'Folder actions':'Message actions');
+    const rows=items||(target.kind==='folder'?[['Refresh','refresh_folder'],['Search messages…','search_folder'],['Mark folder read','confirm_folder']]:messageMenuItems(target,model.roles));
+    menu.innerHTML=(heading?'<p>'+esc(heading)+'</p>':'')+rows.map(([label,action,disabled,destination])=>`<button role="menuitem" type="button" data-menu-action="${esc(action)}" ${disabled?'disabled':''} ${destination?`data-destination="${esc(destination)}"`:''}>${esc(label)}</button>`).join('');
+    document.body.append(menu);menu.style.left=Math.max(4,Math.min(x,window.innerWidth-menu.offsetWidth-4))+'px';menu.style.top=Math.max(4,Math.min(y,window.innerHeight-menu.offsetHeight-4))+'px';
+    menu.onclick=e=>{
+      const button=e.target.closest('[data-menu-action]');if(!button||button.disabled)return;
+      const action=button.dataset.menuAction,target=menuTarget,rect=menu.getBoundingClientRect();
+      if(action==='move'||action==='copy'){
+        showMenu(target,rect.x,rect.y,model.folders.filter(f=>f.name!==target.folder).map(f=>[roleLabels[roleOf(f)]||f.label,action+'_to',false,f.name]),action==='move'?'Move to':'Copy to');return;
+      }
+      if(action==='confirm_folder'){showMenu(target,rect.x,rect.y,[['Cancel','cancel'],['Mark read','mark_folder_read']],`Mark all messages in ${target.folder} as read?`);return;}
+      closeMenu();if(action==='cancel')return;
+      if(['reply','reply_all','forward'].includes(action)){
+        if(model.draft&&!locked(model)&&!confirm('Replace this open compose session? Save a mailbox draft first if you want to keep it.'))return;
+        localDraft=null;mobileReading=true;emit('compose',{mode:action,message_key:target.message_key});return;
+      }
+      if(action==='open'){emit(target.thread_key?'open_thread':'open_message',target);return;}
+      if(action==='search_folder'){focusSearch=true;emit(action,{folder:target.folder});return;}
+      if(action==='refresh_folder'||action==='mark_folder_read'){emit(action,{folder:target.folder,confirmed:action==='mark_folder_read'});return;}
+      if(['trash','junk'].includes(action)&&!confirm(`Move this message to ${action==='trash'?'Trash':'Junk'}?`))return;
+      emit(action.replace('_to',''),{message_key:target.message_key,destination:button.dataset.destination});
+    };
+    menu.querySelector('button:not(:disabled)')?.focus();
+  }
+  root.addEventListener('contextmenu',e=>{
+    const target=e.target.closest('.conversation,.folder,.message-head');if(!target)return;
+    e.preventDefault();showMenu(targetFor(target),e.clientX,e.clientY);
+  });
+  document.addEventListener('pointerdown',e=>{if(menu&&!menu.contains(e.target))closeMenu();});
+  const parentMenuListeners=new AbortController();
+  try{window.parent.document.addEventListener('pointerdown',closeMenu,{signal:parentMenuListeners.signal});}catch(_){}
+  window.addEventListener('pagehide',()=>parentMenuListeners.abort());
   document.addEventListener('keydown',e=>{
+    if(menu){
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();return;}
+      if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const items=[...menu.querySelectorAll('button:not(:disabled)')];const at=items.indexOf(document.activeElement);items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}
+      if(e.key==='Enter'){e.preventDefault();document.activeElement?.click();return;}
+    }
     if(e.ctrlKey&&e.key==='Enter'&&model.view==='compose'){e.preventDefault();send();}
     if(e.key==='Escape'&&model.view==='compose'){e.preventDefault();emit('close_composer');}
     const typing=(e.composedPath?.()||[e.target]).some(node=>node?.isContentEditable||node?.closest?.('input,textarea,select,button,[contenteditable],[role="textbox"],[role="combobox"],[data-email-composer],.email-composer'));
@@ -296,9 +368,17 @@
       if($('send-status'))$('send-status').innerHTML=sendStatus(model);
       return;
     }
+    if(['sc:email-unread','sc:email-tick'].includes(event.data?.type)){
+      // The OS header runs in a sibling Streamlit srcdoc iframe, not the parent realm.
+      let trusted=event.source===window.parent;
+      try{trusted=trusted||[...window.parent.document.querySelectorAll('iframe')].some(f=>f.contentWindow===event.source&&f.dataset.scTopBar==='true');}catch(_){}
+      if(!trusted)return;
+      if(event.data.type==='sc:email-unread')inboxUnread(event.data);
+      else liveTick();
+      return;
+    }
     if(event.source!==window.parent)return;
     if(event.data.type==='streamlit:render')render(event.data.args.model);
-    if(event.data.type==='sc:email-unread')inboxUnread(event.data);
   });
   window.addEventListener('resize',fit);try{window.parent.addEventListener('resize',fit);new ResizeObserver(fit).observe(window.frameElement);}catch(_){}
   post('streamlit:componentReady',{apiVersion:1});fit();

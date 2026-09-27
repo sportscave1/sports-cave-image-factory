@@ -31,6 +31,6 @@ for(const count of [0,1,3,99,100,0]) {
 }
 assert.equal(rows.orders.button.badge.textContent,'7');assertions++;
 assert.equal(rows.email.button.attrs['aria-label'],'Email');assertions++;
-assert.match(source,/later\(refreshOrderStatus, ORDER_STATUS_REFRESH_MS\)/);assertions++;
+assert.match(source,/state.config.emailEnabled \? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS/);assertions++;
 assert.doesNotMatch(source,/setInterval\(refreshEmailStatus|later\(refreshEmailStatus/);assertions++;
 console.log(`Shared notification badge checks passed (${assertions} assertions).`);
