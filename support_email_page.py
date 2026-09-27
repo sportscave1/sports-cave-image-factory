@@ -6,6 +6,7 @@ from threading import Lock
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit.errors import StreamlitAPIException
 
 import os_accounts
 from support_email_provider import load_configuration
@@ -34,16 +35,42 @@ def render_page(user):
     if not os_accounts.can_access_page(user, "Email"):
         st.info("Your OS account does not have Email access.")
         return
-    # Only the Email shell removes Streamlit's trailing page padding; the iframe fills
-    # the viewport below the existing navigation and owns its internal scroll areas.
-    st.html("""<style>
-    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) {
-        padding-bottom: 0 !important;
-    }
-    .st-key-support-email-shell { min-height: 0; }
-    </style>""")
+    email_shell_styles()
     with st.container(key="support-email-shell"):
         _render_workspace(user)
+
+
+def email_shell_styles():
+    """Scoped to this page's marker: existing OS navigation/sidebar CSS is untouched."""
+    st.html("""<style>
+    [data-testid="stMain"]:has(.st-key-support-email-shell) {
+        overflow: hidden !important;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) {
+        max-width: none !important;
+        width: 100% !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        padding-top: calc(var(--sc-topbar-height, 0px) + 6px) !important;
+        padding-bottom: 0 !important;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) > [data-testid="stVerticalBlock"] {
+        gap: 0 !important;
+    }
+    .st-key-support-email-shell { min-height: 0; }
+    .st-key-support-email-shell iframe,
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) iframe[height="0"] {
+        display: block;
+    }
+    </style>""")
+
+
+def rerun_email():
+    """Normal clicks stay in the fragment; a reconnect during a full run must rerun the app."""
+    try:
+        st.rerun(scope="fragment")
+    except StreamlitAPIException:
+        st.rerun()
 
 
 @st.fragment
@@ -62,7 +89,7 @@ def _render_workspace(user):
             state["navigation_epoch"] = epoch
         event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
         if event and workspace.handle(event):
-            st.rerun(scope="fragment")
+            rerun_email()
     except Exception as error:
         LOGGER.warning("Email workspace unavailable (%s)", type(error).__name__)
         st.warning("Email is temporarily unavailable. Refresh Email to reconnect.")

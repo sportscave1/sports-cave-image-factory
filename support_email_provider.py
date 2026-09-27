@@ -286,6 +286,7 @@ class EmailProvider(Protocol):
     def set_flag(self, header, flag, enabled): ...
     def move_message(self, header, destination): ...
     def related_headers(self, folder, identifiers, limit=100): ...
+    def related_headers_many(self, folders, identifiers, limit=100): ...
     def find_message_id(self, folder, message_id): ...
     def append_message(self, folder, mime_bytes, *, draft=False): ...
     def read_draft(self, header): ...
@@ -543,15 +544,38 @@ class ImapProvider:
             LOGGER.info("Email previews unavailable (%s)", type(error).__name__)
 
     def related_headers(self, folder, identifiers, limit=100):
-        tokens = [i for i in dict.fromkeys(identifiers) if re.fullmatch(r"<[^<>\s\"\\]{1,250}>", i)][:8]
-        if not tokens:
+        criteria = self._related_criteria(identifiers)
+        if not criteria:
             return []
-        clauses = [f"HEADER {field} {_quoted_search(token)}" for token in tokens
-                   for field in ("Message-ID", "References", "In-Reply-To")]
-        criteria = "OR " * (len(clauses)-1) + " ".join(clauses)
         with self._connection(folder) as (conn, _, validity):
             uids = self._search(conn, criteria)
             return self._fetch_uids(conn, uids[-min(limit, 100):], validity, folder)
+
+    @staticmethod
+    def _related_criteria(identifiers):
+        tokens = [i for i in dict.fromkeys(identifiers) if re.fullmatch(r"<[^<>\s\"\\]{1,250}>", i)][:8]
+        if not tokens:
+            return ""
+        clauses = [f"HEADER {field} {_quoted_search(token)}" for token in tokens
+                   for field in ("Message-ID", "References", "In-Reply-To")]
+        return "OR " * (len(clauses)-1) + " ".join(clauses)
+
+    def related_headers_many(self, folders, identifiers, limit=100):
+        """One bounded authenticated read operation, never a persistent session socket."""
+        criteria = self._related_criteria(identifiers)
+        if not criteria:
+            return []
+        messages = []
+        with self._connection(None) as (conn, _, __):
+            for folder in list(dict.fromkeys(folders))[:3]:
+                self._ok(conn.select(folder_argument(folder), readonly=True))
+                _, response = conn.response("UIDVALIDITY")
+                validity = response[0].decode("ascii")
+                if not validity.isdigit():
+                    raise MailboxError(SAFE_ERROR)
+                uids = self._search(conn, criteria)
+                messages.extend(self._fetch_uids(conn, uids[-min(limit, 100):], validity, folder))
+        return messages
 
     def find_message_id(self, folder, message_id):
         if len(message_ids(message_id)) != 1 or message_ids(message_id)[0] != message_id:

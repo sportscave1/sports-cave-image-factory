@@ -428,7 +428,9 @@ class WorkspaceTests(unittest.TestCase):
         original=self.state["threads"][0]["messages"][0]
         reply=header("900","<sent-reply@example.test>",(original["message_id"],),"Re: "+original["subject"],sender=MAILBOX,hours=100)
         reply["folder"]="INBOX.Sent Items";self.imap.messages.append(reply)
-        self.open();self.assertEqual(len(self.w.model()["messages"]),2)
+        self.open()
+        self.event("resolve_thread",thread_key=self.state["selected"],mailbox_version=self.state["mailbox_version"])
+        self.assertEqual(len(self.w.model()["messages"]),2)
         self.assertTrue(self.w.model()["messages"][-1]["own"])
         self.assertTrue(self.w.model()["messages"][0]["expanded"])
         self.assertFalse(self.w.model()["messages"][1]["expanded"])
