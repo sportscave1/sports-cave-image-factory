@@ -42,7 +42,7 @@ def flow_workspace(shop,store,actions):
         st.info('No draft flows yet.')
         if st.button('Initialize draft library'):actions.seed();st.rerun()
         return
-    st.caption('● Marketing delivery OFF · Flows inactive')
+    st.caption('● Marketing delivery OFF · Automations inactive')
     selectors=st.columns([3,1])
     row=selectors[0].selectbox('Flow',rows,format_func=lambda r:r['name'])
     sends=[i for i,s in enumerate(row['steps']) if s['type']=='send']

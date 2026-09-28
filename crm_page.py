@@ -362,7 +362,7 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
         if route not in ('CRM Customers','CRM Segments'):
             st.error(str(exc))
             if route=='CRM Automations':
-                st.caption('Flows · existing workflows will return when persistence is restored. OS flow activation remains disabled.')
+                st.caption('Automations · existing workflows will return when persistence is restored. OS flow activation remains disabled.')
                 st.button('Initialize draft library',disabled=True)
             return
     try:

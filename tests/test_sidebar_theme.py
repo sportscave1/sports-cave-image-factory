@@ -28,10 +28,10 @@ class SidebarThemeTests(unittest.TestCase):
   self.assertEqual(at.session_state['route'],'CRM Automations')
   at.run()
   self.assertEqual(at.button(key='sidebar-child::CRM Automations').proto.type,'primary')
-  self.assertEqual(at.session_state['sidebar-open-group'],'crm')
+  self.assertEqual(at.session_state['sidebar-open-group'],'email')
  def test_top_level_and_parent_destinations(self):
   at=AppTest.from_file(str(ROOT/'tests/sidebar_preview_app.py')).run()
-  for key,route in [('sidebar-nav::Orders','Orders'),('sidebar-nav::Prodigi','Prodigi'),('sidebar-disclosure::seo','SEO Overview'),('sidebar-disclosure::crm','CRM Campaigns')]:
+  for key,route in [('sidebar-nav::Orders','Orders'),('sidebar-nav::Prodigi','Prodigi'),('sidebar-disclosure::seo','SEO Overview'),('sidebar-disclosure::email','Email')]:
    at.button(key=key).click().run()
    self.assertFalse(at.exception)
    self.assertEqual(at.session_state['route'],route)

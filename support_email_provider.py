@@ -940,6 +940,48 @@ class ImapProvider:
             self._ok(conn.uid("COPY", header["uid"], folder_argument(destination)))
             return {"status": "copied", "notice": "Server MOVE is unavailable. Copied to the destination; original retained."}
 
+    def delete_trash_messages(self, headers, *, trash_folder, folder_mapping=None):
+        """Explicit, bounded UID deletion. Never fall back to mailbox-wide EXPUNGE."""
+        if not headers or len(headers) > 1000:
+            raise MailboxError("Select a Trash conversation before deleting.")
+        validity = str(headers[0].get("uidvalidity", ""))
+        if (not validity.isdigit() or any(h.get("folder") != trash_folder or
+                str(h.get("uidvalidity")) != validity or
+                not re.fullmatch(r"[1-9]\d*", str(h.get("uid", ""))) for h in headers)):
+            raise MailboxError("Trash message identifiers changed. Refresh before deleting.")
+        uids = sorted({str(h["uid"]) for h in headers}, key=int)
+        with self._connection(trash_folder, validity, write=True) as (conn, _, __):
+            folders = parse_folders(self._list_folders(conn))
+            roles = folder_roles(folders, folder_mapping)
+            target = next((f for f in folders if f["name"] == trash_folder), {})
+            if (roles.get("trash") != trash_folder or trash_folder.upper() == "INBOX" or
+                    target.get("role") not in {"", "trash"}):
+                raise MailboxError("Permanent deletion is only available in the mapped Trash folder.")
+            if not {"UIDPLUS", "IMAP4REV2"}.intersection(self._capabilities(conn)):
+                raise MailboxError("This server does not support safe targeted deletion. Nothing was deleted; use your mailbox provider's Trash controls.")
+            uid_set = ",".join(uids)
+            present = set(self._search(conn, "UID " + uid_set)).intersection(uids)
+            if not present:
+                return {"status": "deleted", "uids": uids}
+            uid_set = ",".join(sorted(present, key=int))
+            already_deleted = set(self._search(conn, "UID " + uid_set + " DELETED"))
+            added_flags = ",".join(sorted(present - already_deleted, key=int))
+            try:
+                self._ok(conn.uid("STORE", uid_set, "+FLAGS.SILENT", "(\\Deleted)"))
+                self._ok(conn.uid("EXPUNGE", uid_set))
+                if set(self._search(conn, "UID " + uid_set)).intersection(present):
+                    raise MailboxError("Incomplete targeted deletion.")
+            except Exception:
+                # On rejection/partial completion, undo only flags set by this operation.
+                # A dropped connection may prevent cleanup; never retry an expunge here.
+                if added_flags:
+                    try:
+                        self._ok(conn.uid("STORE", added_flags, "-FLAGS.SILENT", "(\\Deleted)"))
+                    except Exception:
+                        pass
+                raise MailboxError("Could not verify permanent deletion of every selected Trash message. Some may have been deleted. Refresh Trash before trying again.", code="delete_uncertain") from None
+        return {"status": "deleted", "uids": uids}
+
     def append_message(self, folder, mime_bytes, *, draft=False):
         if len(mime_bytes) > 20 * 1024 * 1024:
             raise MailboxError("Message exceeds the 20 MB mailbox upload limit.", code="append_not_started")

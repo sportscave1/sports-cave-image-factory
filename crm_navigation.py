@@ -2,7 +2,7 @@
 
 PAGES = (
     ('crm_campaigns_manage', 'CRM Campaigns', 'Campaigns'),
-    ('crm_automations_manage', 'CRM Automations', 'Flows'),
+    ('crm_automations_manage', 'CRM Automations', 'Automations'),
     ('crm_settings_view', 'CRM Settings', 'Settings'),
     ('crm_customers_view', 'CRM Customers', 'Customers'),
     ('crm_segments_view', 'CRM Segments', 'Segments'),
@@ -13,7 +13,9 @@ ROUTES = tuple(p[1] for p in PAGES)
 PAGE_KEYS = {p[1]: p[0] for p in PAGES}
 LABELS = {p[1]: p[2] for p in PAGES}
 DEFAULT_ROUTE = ROUTES[0]
-SIDEBAR_ROUTES=('CRM Campaigns','CRM Automations','CRM Settings')
+SIDEBAR_ROUTES=('Email','CRM Campaigns','CRM Automations')
+EMAIL_LABELS={'Email':'Inbox','CRM Campaigns':'Campaigns','CRM Automations':'Automations'}
+EMAIL_DEFAULT_ROUTE='Email'
 SETTINGS_ALIASES={'CRM Customers':'Customers','CRM Segments':'Segments','CRM Templates':'Templates','CRM Reports':'Reports'}
 
 

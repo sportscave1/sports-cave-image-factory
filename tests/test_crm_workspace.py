@@ -44,7 +44,7 @@ def profile(identity,address,state='SUBSCRIBED'):
 class WorkspaceUnitTests(unittest.TestCase):
     def test_navigation_alias_permissions(self):
         import os_accounts
-        self.assertEqual(SIDEBAR_ROUTES,('CRM Campaigns','CRM Automations','CRM Settings'));self.assertEqual(DEFAULT_ROUTE,'CRM Campaigns')
+        self.assertEqual(SIDEBAR_ROUTES,('Email','CRM Campaigns','CRM Automations'));self.assertEqual(DEFAULT_ROUTE,'CRM Campaigns')
         self.assertTrue(os_accounts.can_access_page(WORKER,'CRM Customers'));self.assertTrue(os_accounts.can_access_page(WORKER,'CRM Settings'))
         self.assertFalse(os_accounts.can_access_page(WORKER,'CRM Campaigns'))
 

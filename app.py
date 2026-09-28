@@ -9078,8 +9078,8 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
-    if route in crm_navigation.ROUTES:
-        return "crm"
+    if route == "Email" or route in crm_navigation.ROUTES:
+        return "email"
     return navigation_runtime.active_disclosure_group(
         route,
         social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
@@ -9118,10 +9118,11 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             analytics_routes=analytics_nav.ANALYTICS_ROUTES,
         )
     active_group = _active_sidebar_group(current_page)
-    if active_group:
+    if active_group and (current_page != "Email" or st.session_state.get("sidebar-email-last-route") != current_page):
         # The selected route owns disclosure state.  A stale fragment value
         # must not collapse a parent or resurrect the previously open family.
         st.session_state[SIDEBAR_OPEN_GROUP_KEY] = active_group
+    st.session_state["sidebar-email-last-route"] = current_page
     open_group = str(st.session_state.get(SIDEBAR_OPEN_GROUP_KEY) or "")
 
     def disclosure(
@@ -9264,13 +9265,13 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 include_overview=True,
             ):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
-    _sidebar_route_button("Email", current_page, allowed_routes, root=st)
     import crm_navigation
-    crm_routes = tuple(route for route in crm_navigation.SIDEBAR_ROUTES if route in allowed_routes)
-    if crm_routes and disclosure("crm", "CRM & Marketing", ":material/contacts:", crm_routes[0], force_open_routes=crm_navigation.ROUTES):
-        children = st.container(key="sidebar-crm-children")
-        for route in crm_routes:
-            child_button(children, route, crm_navigation.LABELS[route], active_routes=tuple(crm_navigation.SETTINGS_ALIASES) if route == 'CRM Settings' else ())
+    email_routes = tuple(route for route in crm_navigation.SIDEBAR_ROUTES if route in allowed_routes)
+    if email_routes and disclosure("email", "Email", SIDEBAR_ICON_BY_ROUTE["Email"], crm_navigation.EMAIL_DEFAULT_ROUTE,
+                                   can_open_overview="Email" in allowed_routes, force_open_routes=crm_navigation.ROUTES):
+        children = st.container(key="sidebar-email-children")
+        for route in email_routes:
+            child_button(children, route, crm_navigation.EMAIL_LABELS[route])
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:

@@ -121,7 +121,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertIsNone(at.session_state['campaign_editor']['id'])
         self.assertEqual(before,self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n'])
         labels={b.label for b in at.button}
-        self.assertTrue(labels.isdisjoint({'Campaigns','Flows','Settings','Refresh','+ New Campaign','Preview'}))
+        self.assertTrue(labels.isdisjoint({'Campaigns','Flows','Refresh','+ New Campaign','Preview'}))
         self.assertFalse(any(t.label=='Search campaigns' for t in at.text_input))
         self.assertTrue(any('Recent campaigns' in m.value for m in at.markdown))
         at.session_state['campaign_editor']['document']['custom_html']=HTML

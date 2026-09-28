@@ -160,6 +160,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         if st.button('Send test',disabled=not available or not os_accounts.is_admin(actions.user)):st.session_state[key+'show_test']=True
         if os_accounts.can_access_page(actions.user,'crm_settings_view') and st.button('Settings',icon=':material/settings:',type='tertiary',key='campaign_settings_toggle',help='Campaign Settings'):
             st.session_state['campaign_settings_open']=not st.session_state.get('campaign_settings_open',False)
+            if st.session_state['campaign_settings_open']:st.toast('Campaign Settings opened below the editor.')
         with st.popover('More'):
             new_requested=st.button('+ New')
             st.caption('History, duplicate, archive and deletion are in the left panel.')

@@ -18,14 +18,38 @@ SECTIONS=('Customers','Segments','Templates','Reports','Branding','Connections &
 PERMISSIONS={'Customers':'crm_customers_view','Segments':'crm_segments_view','Templates':'crm_templates_manage','Reports':'crm_reports_view'}
 
 
-def settings_page(shop,store,actions,navigate,initial=None):
+def campaign_settings_panel(shop,store,actions,navigate):
+    """Secondary campaign surface; reuse existing permissions and setting writers."""
+    require(actions.user,'crm_settings_view')
+    with st.container(key='campaign-settings-panel'):
+        st.markdown('#### Campaign Settings')
+        st.html('<style>.st-key-campaign-settings-panel button{background:#fff!important;color:#222!important;border:1px solid #ddd!important;box-shadow:none!important}</style>')
+        if st.button('Close settings',type='tertiary'):
+            st.session_state['campaign_settings_open']=False;st.rerun()
+        if os_accounts.is_admin(actions.user):
+            try:
+                records=CampaignStore(store.connect);sending=records.setting('sending')['value']
+                delivery=get_resend_marketing_config_status()
+                from crm_onsite import config
+                st.table([{'Setting':name,'Value':value} for name,value in (
+                    ('Marketing delivery','Off · production sending unavailable'),
+                    ('Smart Sending',str(sending['smart_hours'])+' hours'),
+                    ('Website tracking','On' if config()['enabled'] else 'Off'),
+                    ('Test allowlist','Configured' if sending['internal_recipients'] else 'Not configured'),
+                    ('Sender',delivery['sender'] or 'Not configured'),
+                    ('Reply-To',delivery['reply_to'] or 'Not configured'))])
+            except StoreUnavailable as exc:st.error(str(exc))
+        settings_page(shop,store,actions,navigate,initial='Sending & Compliance',compact=True)
+
+
+def settings_page(shop,store,actions,navigate,initial=None,compact=False):
     user=actions.user
     allowed=[name for name in SECTIONS if os_accounts.is_admin(user) or (name in PERMISSIONS and os_accounts.can_access_page(user,PERMISSIONS[name]))]
-    if not allowed:st.info('Ask an administrator for access to CRM settings.');return
+    if not allowed:st.info('Ask an administrator for access to campaign settings.');return
     if initial in allowed and st.session_state.get('crm_settings_alias')!=initial:
         st.session_state['crm_settings_section']=initial;st.session_state['crm_settings_alias']=initial
     if st.session_state.get('crm_settings_section') not in allowed:st.session_state['crm_settings_section']=allowed[0]
-    section=st.selectbox('CRM Settings',allowed,key='crm_settings_section')
+    section=st.selectbox('Campaign Settings',allowed,key='crm_settings_section')
     if section in PERMISSIONS:require(user,PERMISSIONS[section])
     if section=='Customers':
         from crm_page import customers_page
@@ -36,7 +60,10 @@ def settings_page(shop,store,actions,navigate,initial=None):
     records=CampaignStore(store.connect)
     if section=='Sending & Compliance':
         from crm_delivery_panel import render_delivery_panel
-        render_delivery_panel(user)
+        if compact:
+            with st.expander('Delivery diagnostics'):
+                render_delivery_panel(user)
+        else:render_delivery_panel(user)
     try:
         if section=='Templates':templates_page(records,shop,user)
         elif section=='Reports':campaign_report(records,shop,user)
