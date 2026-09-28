@@ -119,11 +119,14 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(copy['status'],'DRAFT');self.assertEqual(copy['document']['counts'],{})
         self.assertFalse(copy['document']['copy_reviewed'])
         self.store.archive(ADMIN,copy['id'],1)
-        self.assertEqual(self.store.draft(copy['id'])['status'],'CANCELED')
+        self.assertEqual(self.store.draft(copy['id'])['status'],'ARCHIVED')
         self.assertIn('campaign_archived',[h['action'] for h in self.store.history(copy['id'])])
 
     def test_test_send_single_manual_recipient_only_and_safe_receipt(self):
-        wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':RECEIPT})
+        receipt=str(uuid.uuid4())
+        setting=self.store.setting('sending')
+        self.store.save_setting(ADMIN,'sending',{'internal_recipients':['manual@example.test'],'smart_hours':16},setting['version'])
+        wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':receipt})
         with patch('crm_resend_marketing._audit',return_value=True),patch('requests.sessions.Session.request',side_effect=AssertionError('Network forbidden')):
             for address in (['a@example.test'],{'segment':'1'},'a@example.test,b@example.test'):
                 with self.assertRaises(RuntimeError):
@@ -133,7 +136,7 @@ class PersistenceTests(unittest.TestCase):
         wire.post.assert_called_once();mail=wire.post.call_args.kwargs['json']
         self.assertEqual(mail['to'],['manual@example.test']);self.assertTrue(mail['subject'].startswith('[CAMPAIGN TEST]'))
         self.assertEqual(mail['tags'][0]['value'],'campaign_test')
-        self.assertEqual(result['message_id'],RECEIPT)
+        self.assertEqual(result['message_id'],receipt)
         row=self.store.draft(self.row['id']);self.assertEqual(row['status'],'TESTED');self.assertEqual(row['tested_version'],1)
         self.assertIn('campaign_test_sent',[h['action'] for h in self.store.history(row['id'])])
         self.store.save(ADMIN,row['name'],row['document'],row['id'],1,env=ENV)

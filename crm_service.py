@@ -23,7 +23,9 @@ class Actions:
         result=self.store.save_template(row['id'],name,content);audit('template_saved',row['id'],self.user);return result
     def automation(self,row,steps,config,status):
         require(self.user,'crm_automations_manage')
-        if status=='ACTIVE':self.config.require_send()
+        if status=='ACTIVE':
+            from crm_resend import MarketingDisabled
+            raise MarketingDisabled('Flow activation is disabled during the campaigns-first foundation stage.')
         validate_steps(steps)
         if not 1<=int(config.get('days',180))<=3650:raise ValueError('Use 1–3650 days.')
         self.store.save_automation(row['id'],steps,config,status);audit('automation_saved',row['id'],self.user)
@@ -32,12 +34,13 @@ class Actions:
         if not name.strip():raise ValueError('Campaign name is required.')
         row=self.store.save_campaign(name,template,segment_id,definition_id);audit('campaign_created',row['id'],self.user);return row
     def schedule(self,row,at):
-        require(self.user,'crm_campaigns_manage');self.config.require_send()
-        if not date(at) or date(at)<now():raise ValueError('Choose a future schedule.')
-        self.store.schedule(row['id'],at);audit('campaign_scheduled',row['id'],self.user)
+        require(self.user,'crm_campaigns_manage')
+        from crm_resend import MarketingDisabled
+        raise MarketingDisabled('Production campaign scheduling is disabled in this stage.')
     def resume(self,row):
-        require(self.user,'crm_campaigns_manage');self.config.require_send()
-        self.store.resume_campaign(row['id']);audit('campaign_resumed',row['id'],self.user)
+        require(self.user,'crm_campaigns_manage')
+        from crm_resend import MarketingDisabled
+        raise MarketingDisabled('Production campaign resuming is disabled in this stage.')
     def test(self,template,address,request_id):
         require(self.user,'crm_campaigns_manage');self.config.require_send(test=True)
         if not email(address):raise ValueError('Enter one explicit test email address.')

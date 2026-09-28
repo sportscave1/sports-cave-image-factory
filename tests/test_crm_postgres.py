@@ -34,7 +34,7 @@ class PostgresTests(unittest.TestCase):
         self.store.seed();self.assertEqual(len(self.store.list('templates')),9);self.assertEqual(len(self.store.list('segments')),17)
         self.assertTrue(all(a['status']=='DRAFT' for a in self.store.list('automations')))
         rows=self.store.q("SELECT relname,relrowsecurity FROM pg_class WHERE relname LIKE 'crm_%' AND relkind='r'")
-        self.assertEqual(len(rows),13);self.assertTrue(all(r['relrowsecurity'] for r in rows))
+        self.assertEqual(len(rows),19);self.assertTrue(all(r['relrowsecurity'] for r in rows))
     def test_template_version_immutable(self):
         original=self.store.template(self.template['id'],1);content=dict(original);content['headline']='Edited'
         updated=self.store.save_template(self.template['id'],'Edited',content)
@@ -124,8 +124,10 @@ class PostgresTests(unittest.TestCase):
         self.assertNotIn('private',json.dumps(self.store.q('SELECT * FROM crm_webhook_events'),default=str))
     def test_resend_events_deduped_and_reports(self):
         row=self.queue();self.engine.send_one();receipt=self.store.receipt(row['id'])
-        for event in ('sent','delivered','opened','clicked','bounced','complained','suppressed'):
-            payload={'type':'email.'+event,'created_at':now().isoformat(),'data':{'email_id':receipt['provider_email_id'],'to':['collector1@example.test'],'html':'never stored'}}
+        provider_id=str(uuid.uuid4())
+        self.store.q('UPDATE crm_marketing_sends SET provider_email_id=%s WHERE id=%s',(provider_id,row['id']))
+        for event in ('sent','delivered','opened','clicked','bounced','complained','delivery_delayed'):
+            payload={'type':'email.'+event,'created_at':now().isoformat(),'data':{'email_id':provider_id,'to':['collector1@example.test'],'html':'never stored','bounce':{'type':'Permanent'}}}
             receive_resend(self.store,event,payload);receive_resend(self.store,event,payload)
         self.assertEqual(len(self.store.q('SELECT * FROM crm_marketing_events')),7)
         summary,_,_=self.store.reports();self.assertEqual(summary['delivered'],1);self.assertEqual(summary['bounces'],1)

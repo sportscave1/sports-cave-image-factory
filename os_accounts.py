@@ -147,7 +147,7 @@ PAGE_REGISTRY = (
         "worker_assignable": True,
     },
     {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
-    *({"key": key, "route": route, "label": label, "worker_assignable": True, "navigation_child": True}
+    *({"key": key, "route": route, "label": label, "worker_assignable": key != 'crm_settings_view', "navigation_child": True}
       for key, route, label in crm_navigation.PAGES),
     {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},
     {
@@ -403,6 +403,8 @@ def can_access_page(user, route_or_key):
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
+    if page and page['key']=='crm_settings_view':
+        return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:
         return can_access_reporting(user)
     if page and page["key"] in {DAILY_PLANNER_PAGE_KEY, WEEKLY_REVIEW_PAGE_KEY}:

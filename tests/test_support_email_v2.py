@@ -295,7 +295,7 @@ class FolderTests(unittest.TestCase):
         self.assertNotIn("Parent", [f["name"] for f in folders])
         self.assertEqual(folders[-1]["label"], "日本語")
         self.assertEqual(provider.folder_argument('Sent "Items"'), '"Sent \\"Items\\""')
-        self.assertNotIn("sent", provider.folder_roles(provider.parse_folders([b'() "/" "Sent"'])))
+        self.assertEqual(provider.folder_roles(provider.parse_folders([b'() "/" "Sent"']))["sent"], "Sent")
         with self.assertRaises(provider.MailboxError): provider.folder_argument("x\r\nSTORE")
 
     def test_ambiguous_special_folder_requires_mapping(self):
@@ -392,7 +392,13 @@ class WorkspaceTests(unittest.TestCase):
         self.w.load()
 
     def event(self,action,**kwargs):
-        event={"id":str(uuid.uuid4()),"action":action,**kwargs};self.w.handle(event);return event
+        event={"id":str(uuid.uuid4()),"action":action,**kwargs};self.w.handle(event)
+        # The component acknowledges and paints each stage before continuing the same operation.
+        if action == "send":
+            for _ in range(2):
+                if self.state.get("send_stage") in {"SENDING", "SAVING_SENT_COPY"}:
+                    self.w.handle({"id":str(uuid.uuid4()), "action":"advance_send", "operation_id":kwargs.get("operation_id")})
+        return event
 
     def open(self):
         self.event("open_thread",thread_key=self.state["threads"][0]["thread_key"])

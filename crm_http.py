@@ -8,11 +8,31 @@ from starlette.concurrency import run_in_threadpool
 
 router=APIRouter()
 
-async def bounded_body(request):
+
+@router.api_route('/crm/tracking/events',methods=['POST','OPTIONS'])
+async def website_event(request:Request):
+    from crm_onsite import config,allow_rate,record_event
+    from crm_store import Store
+    cfg=config();origin=request.headers.get('origin','')
+    if not cfg['enabled'] or not cfg['configured']:return Response(status_code=404)
+    if origin not in cfg['origins']:return Response(status_code=403)
+    cors={'Access-Control-Allow-Origin':origin,'Vary':'Origin','Access-Control-Allow-Methods':'POST, OPTIONS',
+          'Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'300','Cache-Control':'no-store'}
+    if request.method=='OPTIONS':return Response(status_code=204,headers=cors)
+    if not allow_rate(request.client.host if request.client else 'unknown'):return Response(status_code=429,headers=cors)
+    if request.headers.get('content-type','').split(';')[0]!='application/json':return Response(status_code=415,headers=cors)
+    try:
+        payload=json.loads(await bounded_body(request,4096))
+        await run_in_threadpool(record_event,Store(),payload,cfg)
+        return Response(status_code=202,headers=cors)
+    except (ValueError,TypeError):return Response(status_code=400,headers=cors)
+    except Exception:return Response(status_code=503,headers=cors)
+
+async def bounded_body(request,limit=2*1024*1024):
     raw=bytearray()
     async for part in request.stream():
         raw.extend(part)
-        if len(raw)>2*1024*1024:raise ValueError('Request too large.')
+        if len(raw)>limit:raise ValueError('Request too large.')
     return bytes(raw)
 
 @router.post('/webhooks/shopify/crm')
@@ -38,7 +58,7 @@ async def resend_hook(request:Request):
     from crm_store import Store
     from crm_webhooks import receive_resend
     try:
-        raw=await bounded_body(request)
+        raw=await bounded_body(request,128*1024)
         if not verify_resend(raw,request.headers,Config().resend_webhook_secret):return Response(status_code=401)
         await run_in_threadpool(receive_resend,Store(),request.headers['svix-id'],json.loads(raw))
         return Response(status_code=200)

@@ -23,6 +23,10 @@ def seeds():
         'footer':'Sports Cave · Limited Edition Sports Art'}) for k,n,s,b,cta,url in items]
 
 def validate(content):
+    if isinstance(content,dict) and content.get('format')=='campaign_blocks_v1':
+        from crm_campaign_content import validate_document
+        if set(content)!={'format','document'}:raise ValueError('Invalid design template.')
+        validate_document(content['document']);return content
     if set(content)!=set(FIELDS):raise ValueError('Template fields are incomplete.')
     for key,value in content.items():
         if key=='product_block':
@@ -37,22 +41,34 @@ def validate(content):
     return content
 
 def render(content,context,unsubscribe_url,logo_url,campaign_key):
+    """Legacy flow adapter into the same locked campaign renderer.
+
+    Stored legacy templates/versions are preserved. This adapter resolves only the
+    existing placeholders; production dispatch still requires the CRM master gate.
+    """
     validate(content)
     if not safe_url(unsubscribe_url) or not safe_url(logo_url):raise ValueError('Public HTTPS logo and unsubscribe URL are required.')
+    import hashlib
+    from crm_campaign_content import new_document,render_campaign,settings
+    from crm_email_blocks import block
+    from crm_tracking import campaign_link
+    if content.get('format')=='campaign_blocks_v1':
+        result=render_campaign(content['document'],{**settings(),'logo':logo_url},unsubscribe_url=unsubscribe_url)
+        result['unsubscribe_url']=unsubscribe_url
+        return result
     def text(key):
         return re.sub(r'{{\s*(.*?)\s*}}',lambda m:str(context.get(m[1]) or ('there' if m[1]=='first_name' else '')),content[key])
-    subject=text('subject');body=text('body');cta=utm(text('cta_url'),campaign_key)
-    if not cta:raise ValueError('Current message has no valid CTA URL.')
-    product_html=[];product_text=[]
+    doc=new_document();doc['campaign_key']='sc_'+hashlib.sha256(str(campaign_key).encode()).hexdigest()[:32]
+    cta=campaign_link(text('cta_url'),doc['campaign_key'],'b_primary',test=False)
+    if not safe_url(cta):raise ValueError('Current message has no valid CTA URL.')
+    doc['content'].update(subject=text('subject'),preheader=text('preview'))
+    doc['blocks']=[block('heading',text=text('headline')),block('text',text=text('body'))]
     if content['product_block']:
-        for p in context.get('products',[])[:12]:
-            title=str(p.get('title',''));qty=str(p.get('quantity',1));price=str(p.get('price',''))
-            product_html.append('<tr><td style="padding:10px 0;border-bottom:1px solid #dedad0">'+escape(title)+' × '+escape(qty)+' <span style="color:#777">'+escape(price)+'</span></td></tr>')
-            product_text.append(f'{title} × {qty} {price}'.strip())
-    html='''<!doctype html><html><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,sans-serif">
-+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 14px">
-+<table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:white">
-+<tr><td style="padding:22px;background:#111"><img alt="Sports Cave" width="48" height="48" src="'''.replace('\n+','\n')+escape(logo_url,quote=True)+'''"></td></tr>
-+<tr><td style="padding:28px"><div style="display:none;max-height:0;overflow:hidden">'''.replace('\n+','\n')+escape(text('preview'))+'''</div><h1 style="font-size:25px;margin:0 0 20px">'''+escape(text('headline'))+'''</h1><div style="font-size:15px;line-height:1.65">'''+escape(body).replace('\n','<br>')+'''</div><table role="presentation" width="100%">'''+''.join(product_html)+'''</table><p style="margin:26px 0"><a style="display:inline-block;background:#171717;color:#fff;padding:13px 20px;text-decoration:none;border-bottom:2px solid #b29454" href="'''+escape(cta,quote=True)+'''">'''+escape(text('cta_label'))+'''</a></p><div style="border-top:1px solid #dedad0;padding-top:18px;font-size:11px;color:#777">'''+escape(text('footer'))+'''<br><a style="color:#777" href="'''+escape(unsubscribe_url,quote=True)+'''">Unsubscribe</a></div></td></tr></table></td></tr></table></body></html>'''
-    plain='\n\n'.join([text('headline'),body,'\n'.join(product_text),text('cta_label')+': '+cta,text('footer'),'Unsubscribe: '+unsubscribe_url])
-    return {'subject':subject,'html':html,'text':plain,'unsubscribe_url':unsubscribe_url}
+        for product in context.get('products',[])[:12]:
+            doc['blocks'].append(block('text',text=str(product.get('title',''))+' × '+str(product.get('quantity',1))+' '+str(product.get('price',''))))
+    doc['blocks'].append(block('button',label=text('cta_label'),url=cta))
+    # Keep resolved legacy tracking stable; the renderer must not add test UTMs.
+    doc.pop('campaign_key')
+    result=render_campaign(doc,{**settings(),'logo':logo_url},unsubscribe_url=unsubscribe_url)
+    result['subject']=text('subject');result['unsubscribe_url']=unsubscribe_url
+    return result

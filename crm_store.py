@@ -77,7 +77,7 @@ class Store:
     def suppress(self,hashed,customer_id,reason,source,address=None):
         self.q('''INSERT INTO crm_suppressions(recipient_hash,shopify_customer_id,reason,source,email_for_provider)
          VALUES(%s,%s,%s,%s,%s) ON CONFLICT(recipient_hash) DO UPDATE SET reason=excluded.reason,
-         source=excluded.source,email_for_provider=COALESCE(excluded.email_for_provider,crm_suppressions.email_for_provider),provider_synced=false,updated_at=now()''',(hashed,customer_id,reason,source,address))
+         source=excluded.source,email_for_provider=COALESCE(excluded.email_for_provider,crm_suppressions.email_for_provider),provider_synced=false,shopify_sync_state='PENDING',active=true,updated_at=now()''',(hashed,customer_id,reason,source,address))
         if customer_id:self.q("UPDATE crm_automation_enrollments SET status='STOPPED',stop_reason='suppressed',updated_at=now() WHERE shopify_customer_id=%s AND status='ACTIVE'",(customer_id,))
     def editions(self,customer_id,address=''):
         return self.q('''SELECT edition_number,edition_total,product_title,variant_title,certificate_file_url,shopify_order_name
@@ -115,8 +115,17 @@ class Store:
          AND (enrollment_id IS NULL OR EXISTS(SELECT 1 FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id
               WHERE e.id=enrollment_id AND e.status='ACTIVE' AND a.status='ACTIVE')) RETURNING *""",(request_hash,hashed,row['id'],row['lease_token']),True)
     def finish_send(self,row,status,code='',provider_id=None):
-        return self.q('''UPDATE crm_marketing_sends SET status=%s,error_code=%s,provider_email_id=%s,updated_at=now(),lease_until=NULL
+        result=self.q('''UPDATE crm_marketing_sends SET status=%s,error_code=%s,provider_email_id=%s,updated_at=now(),lease_until=NULL
          WHERE id=%s AND lease_token=%s RETURNING *''',(status,code,provider_id,row['id'],row['lease_token']),True)
+        if status=='ACCEPTED' and provider_id:
+            try:
+                from crm_workspace_store import WorkspaceRecords
+                WorkspaceRecords(self.connect).reconcile_events(provider_id)
+            except Exception:
+                # Acceptance is durable. Event processing must never cause a resend.
+                import logging
+                logging.getLogger(__name__).warning('crm_event_reconciliation_deferred')
+        return result
     def defer_send(self,row):
         self.q("UPDATE crm_marketing_sends SET status=CASE WHEN attempts>=5 THEN 'FAILED' ELSE 'PENDING' END,error_code='revalidation_unavailable',due_at=now()+interval '5 minutes',lease_until=NULL WHERE id=%s AND lease_token=%s AND status='CLAIMED'",(row['id'],row['lease_token']))
     def receipt(self,send_id):return self.q('SELECT * FROM crm_marketing_sends WHERE id=%s',(send_id,),True)
@@ -139,16 +148,16 @@ class Store:
          count(DISTINCT provider_email_id) FILTER(WHERE event_type='email.clicked') AS clicked,
          count(DISTINCT provider_email_id) FILTER(WHERE event_type='email.bounced') AS bounces,
          count(DISTINCT provider_email_id) FILTER(WHERE event_type='email.complained') AS complaints,
-         (SELECT count(*) FROM crm_suppressions WHERE reason='unsubscribe') AS unsubscribes
+         (SELECT count(*) FROM crm_suppressions WHERE active=true AND reason IN ('unsubscribe','manual_unsubscribe','provider_unsubscribe')) AS unsubscribes
          FROM crm_marketing_events WHERE provider_email_id IN (SELECT provider_email_id FROM crm_marketing_sends WHERE NOT test_send)''',one=True)
         campaigns=self.q('''SELECT c.name,count(DISTINCT s.id) AS recipients,count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED') AS sent,
          count(DISTINCT s.id) FILTER(WHERE v.event_type='email.delivered') AS delivered,count(DISTINCT s.id) FILTER(WHERE v.event_type='email.opened') AS opened,
          count(DISTINCT s.id) FILTER(WHERE v.event_type='email.clicked') AS clicked FROM crm_campaigns c
-         LEFT JOIN crm_marketing_sends s ON s.campaign_id=c.id LEFT JOIN crm_marketing_events v ON v.provider_email_id=s.provider_email_id GROUP BY c.id,c.name''')
+         LEFT JOIN crm_marketing_sends s ON s.campaign_id=c.id AND NOT s.test_send LEFT JOIN crm_marketing_events v ON v.provider_email_id=s.provider_email_id GROUP BY c.id,c.name''')
         automations=self.q('''SELECT a.name,count(DISTINCT e.id) AS entered,count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED') AS sent,
          count(DISTINCT s.id) FILTER(WHERE v.event_type='email.delivered') AS delivered,count(DISTINCT s.id) FILTER(WHERE v.event_type='email.opened') AS opened,
          count(DISTINCT s.id) FILTER(WHERE v.event_type='email.clicked') AS clicked,count(DISTINCT e.id) FILTER(WHERE e.status='RECOVERED') AS recovered,
          count(DISTINCT e.id) FILTER(WHERE e.status='COMPLETED') AS completed FROM crm_automations a LEFT JOIN crm_automation_enrollments e ON e.automation_id=a.id
-         LEFT JOIN crm_marketing_sends s ON s.enrollment_id=e.id LEFT JOIN crm_marketing_events v ON v.provider_email_id=s.provider_email_id GROUP BY a.id,a.name''')
+         LEFT JOIN crm_marketing_sends s ON s.enrollment_id=e.id AND NOT s.test_send LEFT JOIN crm_marketing_events v ON v.provider_email_id=s.provider_email_id GROUP BY a.id,a.name''')
         return summary,campaigns,automations
 

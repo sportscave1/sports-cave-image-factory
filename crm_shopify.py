@@ -29,6 +29,24 @@ FIRST_ORDER = '''query CrmFirstOrder($id:ID!) { customer(id:$id) {
 PRODUCT_FIELDS = '''id title productType tags onlineStoreUrl featuredImage { url }
  collections(first:5) { nodes { id title handle } '''+PAGE+' }'
 PRODUCTS = 'query CrmProducts($ids:[ID!]!) { nodes(ids:$ids) { ... on Product { '+PRODUCT_FIELDS+' } } }'
+CAMPAIGN_CONNECTION='''query CrmCampaignConnection {
+ shop { id } currentAppInstallation { accessScopes { handle } }
+}'''
+CAMPAIGN_PRODUCTS='''query CrmCampaignProducts($query:String,$after:String) {
+ products(first:12,query:$query,after:$after) { nodes { id title onlineStoreUrl
+ media(first:12) { nodes { ... on MediaImage { image { id url emailUrl:url(transform:{maxWidth:1000,preferredContentType:JPG}) altText width height } } } '''+PAGE+''' }
+ } '''+PAGE+''' } }'''
+CAMPAIGN_IMAGES='''query CrmCampaignImages($id:ID!,$after:String) { product(id:$id) {
+ media(first:24,after:$after) { nodes { ... on MediaImage { image { id url emailUrl:url(transform:{maxWidth:1000,preferredContentType:JPG}) altText width height } } } '''+PAGE+''' } } }'''
+CAMPAIGN_VARIANTS='''query CrmCampaignVariants($id:ID!,$after:String) { product(id:$id) {
+ variants(first:25,after:$after) { nodes { id title } '''+PAGE+''' } } }'''
+CAMPAIGN_PRICE='''query CrmCampaignPrice($id:ID!,$country:CountryCode!) {
+ productVariant(id:$id) { id contextualPricing(context:{country:$country}) { price { amount currencyCode } } } }'''
+CAMPAIGN_ORDERS='''query CrmCampaignAttribution($query:String!,$after:String) {
+ orders(first:25,query:$query,after:$after,sortKey:CREATED_AT) { nodes {
+ id createdAt cancelledAt fullyPaid test netPaymentSet { shopMoney { amount currencyCode } }
+ customerJourneySummary { ready lastVisit { occurredAt landingPage utmParameters { source medium campaign content } } }
+ } '''+PAGE+''' } }'''
 COLLECTIONS = '''query CrmCollections($id:ID!,$after:String) { product(id:$id) {
  collections(first:100,after:$after) { nodes { id title handle } '''+PAGE+' } } }'
 SEGMENTS = 'query CrmSegments($after:String) { segments(first:50,after:$after) { nodes { id name query lastEditDate } '+PAGE+' } }'
@@ -164,7 +182,8 @@ class Shopify:
     def members(self, segment_id=None, query=None, after=None, fresh=False):
         data = self.query(MEMBERS, {'id':segment_id, 'query':query, 'after':after}, 'segments', 45, fresh)['customerSegmentMembers']
         ids = [gid(e['node']['id'].rsplit('/', 1)[-1]) for e in data['edges']]
-        return {'nodes':self.customer_batch(ids, fresh), 'pageInfo':data['pageInfo'], 'totalCount':data['totalCount']}
+        nodes=self.customer_batch(ids,fresh)
+        return {'nodes':nodes, 'pageInfo':data['pageInfo'], 'totalCount':data['totalCount'], 'complete':len(nodes)==len(ids)}
     def count(self, query=None):
         if query is None:
             data = self.query(TOTAL, {}, 'customer counts', 45)['customersCount']
@@ -180,3 +199,48 @@ class Shopify:
         if not segments:return set()
         data=self.query(MEMBERSHIPS,{'id':customer_id,'segments':segments[:50]},'segments',45)
         return {r['segmentId'] for r in data['customerSegmentMembership']['memberships'] if r['isMember']}
+
+    def campaign_products(self,query,after=None,fresh=False):
+        from copy import deepcopy
+        page=deepcopy(self.query(CAMPAIGN_PRODUCTS,{'query':str(query)[:200],'after':after},'campaign products',60,fresh)['products'])
+        for p in page['nodes']:
+            media=p.pop('media',{'nodes':[],'pageInfo':{}})
+            p['images']={'nodes':[self.email_image(m['image']) for m in media['nodes'] if m.get('image')],'pageInfo':media['pageInfo']}
+        return page
+
+    def campaign_connection(self):
+        data=self.query(CAMPAIGN_CONNECTION,{},'connection / granted read scopes',0,True)
+        installation=data.get('currentAppInstallation') or {}
+        return {'connected':bool((data.get('shop') or {}).get('id')),
+                'scopes':[s['handle'] for s in installation.get('accessScopes',[])]}
+
+    def campaign_images(self,product_id,after=None):
+        media=self.query(CAMPAIGN_IMAGES,{'id':product_id,'after':after},'product images',60)['product']['media']
+        return {'nodes':[self.email_image(m['image']) for m in media['nodes'] if m.get('image')],'pageInfo':media['pageInfo']}
+
+    @staticmethod
+    def email_image(image):
+        from crm_tracking import asset_url
+        result=dict(image)
+        # Shopify performs a bounded-width proportional derivative. No server fetch,
+        # credentials in URLs, new asset host, or destructive crop is involved.
+        derivative=result.pop('emailUrl',None)
+        if asset_url(derivative):result['url']=derivative
+        return result
+
+    def campaign_variants(self,product_id,after=None):
+        return self.query(CAMPAIGN_VARIANTS,{'id':product_id,'after':after},'product variants',60)['product']['variants']
+
+    def campaign_price(self,variant_id,market):
+        country={'AU':'AU','US':'US','UK':'GB'}.get(market)
+        if not country:return None
+        data=self.query(CAMPAIGN_PRICE,{'id':variant_id,'country':country},'market product price',60,True).get('productVariant')
+        price=((data or {}).get('contextualPricing') or {}).get('price')
+        # Missing market pricing may fall back to shop currency. Never show that fallback.
+        return price if price and price.get('currencyCode')=={'AU':'AUD','US':'USD','UK':'GBP'}[market] else None
+
+    def campaign_orders(self,start,end,after=None):
+        from crm_logic import date
+        if not date(start) or not date(end):raise ValueError('Use valid UTC order dates.')
+        query='created_at:>='+date(start).isoformat()+' created_at:<'+date(end).isoformat()
+        return self.query(CAMPAIGN_ORDERS,{'query':query,'after':after},'order attribution (read_orders)',0,True)['orders']

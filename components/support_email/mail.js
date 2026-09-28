@@ -3,7 +3,7 @@
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const size = n => Number(n) >= 1048576 ? (Number(n)/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(Number(n)/1024))+' KB';
   const safeLink = value => {try {const u=new URL(value); return ['https:','http:','mailto:'].includes(u.protocol) && !u.username && !u.password ? u.href : '';} catch (_) {return '';}};
-  const locked = m => ['accepted','unknown','in_progress'].includes((m.send_result || {}).status) || m.draft_pending;
+  const locked = m => Boolean((m.draft && ['accepted','unknown','in_progress'].includes((m.send_result || {}).status)) || m.draft_pending);
   const mailboxCount = m => m.error ? 'Mailbox unavailable' : (m.query ? 'Search · ' : '') + (m.threads || []).length + ' conversations';
   function messageMenuItems(target,roles){
     return [['Open','open'],['Reply','reply'],['Reply all','reply_all'],['Forward','forward'],
@@ -13,12 +13,19 @@
       ['Junk','junk',!roles.junk],['Trash','trash',!roles.trash]];
   }
   function sendStatus(m) {
-    const status=m.send_result?.status, progress=m.send_progress||{};
-    if(status==='accepted') return '<div class="send-success">✓ Sent</div><div class="'+(m.sent_result?.status==='present'?'send-success':'send-pending')+'">'+(m.sent_result?.status==='present'?'✓ Sent copy available':'● Sent copy pending')+'</div>';
+    const status=m.send_result?.status;
+    if(m.send_stage==='SAVING_SENT_COPY') return '<div class="send-success">✓ Sent</div><div>Saving Sent copy…</div>';
+    if(status==='accepted') return '<div class="send-success">✓ Sent</div>';
     if(status==='unknown') return '<div class="send-uncertain">⚠ Send status uncertain</div><small>Do not resend yet.</small>';
     if(status==='rejected') return '<div class="send-failed">✕ Not sent</div><small>Could not send this email.</small>';
-    if(status==='in_progress') return `<div>${esc(progress.label||'Validating message…')} <span aria-hidden="true">${Math.min(75,progress.percent||5)}%</span></div><progress aria-label="Send stages completed" max="100" value="${Math.min(75,progress.percent||5)}"></progress>`;
+    if(status==='in_progress') return `<div>${m.send_stage==='SENDING'?'Sending email…':'Validating email…'}</div>`;
     return '';
+  }
+  function sentReceipt(m){
+    const sent=m.last_sent;
+    if(!sent?.operation_id)return '';
+    const copy=sent.copy||{}, saved=['present','appended'].includes(copy.status);
+    return `<div class="sent-receipt" role="status"><span class="send-success">✓ Sent</span> <span>${esc(sent.subject)}</span>${saved?'':`<span class="send-pending">Email sent successfully, but ${copy.status==='pending'?'the Sent-folder copy is not visible yet.':'the Sent-folder copy could not be saved or verified.'} ${esc(copy.notice||'')}</span><button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(sent.operation_id)}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`}${sent.draft_warning?`<span>${esc(sent.draft_warning)}</span>`:''}</div>`;
   }
   function createViewCache(limit=20,byteLimit=8*1024*1024){
     const entries=new Map();let bytes=0;
@@ -34,7 +41,7 @@
     if(!active?.expanded)return null;
     return {active_message:active.key,messages:messages.map(m=>({...m,expanded:m.key===active.key&&m.expanded}))};
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,sendStatus,createViewCache,threadView}; return;}
+  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,sendStatus,sentReceipt,createViewCache,threadView}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -67,10 +74,20 @@
   let sentTimer=null;
   function scheduleSentCheck(){
     clearTimeout(sentTimer);
-    if(model.send_result?.status!=='accepted'||model.sent_result?.status==='present'||model.sent_checks>=3||model.view!=='compose'||busy)return;
-    sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:model.draft?.operation_id}),[6000,12000,24000][model.sent_checks||0]);
+    const sent=model.last_sent;
+    if(!sent?.operation_id||sent.copy?.status!=='pending'||sent.checks>=3||busy)return;
+    sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:sent.operation_id}),[6000,12000,24000][sent.checks||0]);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sentTimer));
+  let sendTimer=null;
+  function scheduleSendStage(){
+    clearTimeout(sendTimer);
+    if(busy||!model.send_result?.operation_id||!['SENDING','SAVING_SENT_COPY'].includes(model.send_stage))return;
+    const operation_id=model.send_result.operation_id;
+    // Only continue the operation created by an explicit Send click, after painting its real stage.
+    sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),100);
+  }
+  window.addEventListener('pagehide',()=>clearTimeout(sendTimer));
   const post=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
   const $=id=>document.getElementById(id);
   const button=(label,action,data='',disabled=false,klass='')=>`<button type="button" class="${klass}" data-action="${action}" ${data} ${disabled?'disabled':''}>${label}</button>`;
@@ -90,7 +107,7 @@
       return;
     }
     const draft=snapshot();
-    if(action==='send'){model.send_result={status:'in_progress'};model.sent_result={};model.send_progress={percent:5,label:'Validating message…'};if($('send-status'))$('send-status').innerHTML=sendStatus(model);}
+    if(action==='send'){model.send_result={status:'in_progress'};model.sent_result={};model.send_stage='VALIDATING';if($('send-status'))$('send-status').innerHTML=sendStatus(model);}
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
@@ -183,7 +200,7 @@
   function settings() {
     const s=model.settings;
     const previews=Object.entries(s.signatures).map(([key,sig])=>`<div><label>${esc(sig.label)} <small>Preview</small></label>${model.admin?formatBar('sig-'+key):''}<div id="sig-${key}" class="signature-edit" contenteditable="${model.admin}" role="${model.admin?'textbox':'group'}" aria-label="${esc(sig.label)} signature">${signaturePreview(key)}</div></div>`).join('');
-    const mailbox=model.admin?`<div class="section stack"><div class="label">Mailbox settings</div><label>Sender display name<input id="sender-name" value="${esc(s.sender_name)}" maxlength="120"></label><div class="mapping">${['sent','drafts','archive','junk','trash'].map(role=>`<label for="map-${role}">${roleLabels[role]}</label><select id="map-${role}"><option value="">Use special-use discovery</option>${model.folders.filter(f=>f.name.toUpperCase()!=='INBOX').map(f=>`<option value="${esc(f.name)}" ${s.folder_mapping[role]===f.name?'selected':''}>${esc(f.label)}</option>`).join('')}</select>`).join('')}</div><label>Sent copy handling<select id="sent-policy">${[['verify','Verify only · awaiting live test'],['server','Server saves Sent · confirmed'],['append','App saves Sent · confirmed server does not']].map(([v,l])=>`<option value="${v}" ${s.sent_policy===v?'selected':''}>${l}</option>`).join('')}</select></label><small>Choose app saving only after a supervised test confirms SMTP does not save Sent. Every send checks its Message-ID first.</small></div>`:'';
+    const mailbox=model.admin?`<div class="section stack"><div class="label">Mailbox settings</div><label>Sender display name<input id="sender-name" value="${esc(s.sender_name)}" maxlength="120"></label><div class="mapping">${['sent','drafts','archive','junk','trash'].map(role=>`<label for="map-${role}">${roleLabels[role]}</label><select id="map-${role}"><option value="">Use special-use discovery</option>${model.folders.filter(f=>f.name.toUpperCase()!=='INBOX').map(f=>`<option value="${esc(f.name)}" ${s.folder_mapping[role]===f.name?'selected':''}>${esc(f.label)}</option>`).join('')}</select>`).join('')}</div><label>Sent copy handling<select id="sent-policy">${[['verify','Automatic · find or save Sent copy'],['server','Server saves Sent · confirmed'],['append','App saves Sent copy']].map(([v,l])=>`<option value="${v}" ${s.sent_policy===v?'selected':''}>${l}</option>`).join('')}</select></label><small>Automatic checks the real Sent folder by Message-ID before saving a missing copy. Use server saving only when confirmed for this mailbox.</small></div>`:'';
     return `<section class="panel"><div class="panel-head"><strong>Email settings</strong>${button('Close','close_panel','','','plain')}</div><div class="panel-scroll stack"><div><div class="label">Connection</div><p>${esc(model.mailbox)}</p><small>IMAP ${model.configured?'configured':'not configured'} · SMTP ${model.smtp_configured?'configured':'not configured'}</small></div>${button('Test IMAP connection','test_connection','',!model.configured)}<label>Your default signature<select id="preference">${signaturesOptions(model.signature_preference)}</select></label>${button('Save my preference','save_preference','',!model.settings_available)}${!model.settings_available?'<small>Settings storage is unavailable. Defaults remain usable.</small>':''}${mailbox}<div class="section stack"><div class="label">Signatures</div>${previews}${model.admin?button('Save mailbox settings','save_settings','',!model.settings_available,'primary'):''}</div></div></section>`;
   }
   function external(label,url){url=safeLink(url); return url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`:'';}
@@ -193,7 +210,7 @@
     return `<section class="panel"><div class="panel-head"><strong>Customer / Order</strong>${button('Close','close_panel','','','plain')}</div><div class="panel-scroll"><h3>${esc(c.label||'No order matched')}</h3>${(c.candidates||[]).map(v=>'<p class="context-item">'+esc(v.name)+' · '+esc(v.date)+'</p>').join('')}${o?`<div class="context-item"><strong>${esc(o.name)}</strong><br>${esc(o.date)}<br>Fulfilment: ${esc(o.fulfilment)}</div>${o.lines.map(l=>`<div class="context-item">${esc(l.product_title)}<br><small>${esc(l.variant_title)}</small></div>`).join('')}${o.editions.map(e=>`<div class="context-item">Edition ${esc(e.edition_number)} / ${esc(e.edition_total)}<br>Certificate: ${esc(e.certificate_status||'Not recorded')}<br>${external('Open Edition',appURL(o.edition_url))}</div>`).join('')}<div class="section stack">${external('Open Shopify order',o.shopify_url)}${external('Open Sports Cave order',appURL(o.os_url))}${o.tracking.map(u=>external('Open tracking',u)).join('')}</div>${o.previous.length?'<div class="section"><div class="label">Previous orders</div>'+o.previous.map(p=>'<p class="context-item">'+esc(p.name)+' · '+esc(p.date)+'</p>').join('')+'</div>':''}`:''}<div class="section stack"><div class="label">Internal support workflow</div>${c.workflow_available&&!w.conflict?`<label>Status<select id="workflow-status">${['Needs Reply','Waiting on Customer','Waiting on Sports Cave','Resolved'].map(s=>`<option ${w.support_status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Assigned<select id="workflow-assigned"><option value="">Unassigned</option>${c.assignees.map(a=>`<option value="${esc(a.id)}" ${w.assigned_user_id===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label><label>Internal notes<textarea id="workflow-notes" maxlength="8000">${esc(w.internal_notes||'')}</textarea></label><label class="checkbox"><input id="workflow-approval" type="checkbox" ${w.needs_approval?'checked':''}>Requires Nathan's approval</label><small>Internal only. Notes are never included in email.</small>${button('Save workflow','workflow')}`:'<small>Workflow metadata is unavailable or conflicting. Mail remains in the live mailbox.</small>'}</div></div></section>`;
   }
   function paintReading(force=false,reset=false){
-    const stamp=JSON.stringify([model.selected,model.view,model.active_message,model.messages,model.error,model.draft,model.send_result,model.sent_result,model.send_progress,model.draft_pending,model.context,model.settings,model.settings_available,model.signature_preference]);
+    const stamp=JSON.stringify([model.selected,model.view,model.active_message,model.messages,model.error,model.draft,model.send_result,model.send_stage,model.sent_result,model.draft_pending,model.context,model.settings,model.settings_available,model.signature_preference]);
     const pane=root.querySelector('.reading');if(!pane)return;
     if(force||stamp!==readingStamp){
       const old=pane.querySelector('.reading-scroll,.compose-scroll,.panel-scroll');const top=reset?0:old?.scrollTop||0;
@@ -232,7 +249,9 @@
     if(queued){const action=queued;queued=null;emit(action.action,action.values);return;}
     root.classList.remove('busy');
     scheduleSentCheck();
-    if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div class="statusbar"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
+    scheduleSendStage();
+    if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div class="statusbar"></div><div class="delivery-receipt"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
+    root.querySelector('.delivery-receipt').innerHTML=(model.pending_sent||[]).map(last_sent=>sentReceipt({last_sent})).join('')+sentReceipt(model);
     const toolbarKey=JSON.stringify([model.configured,model.query,model.field]);
     if(wasFrozen||toolbarKey!==toolbarStamp){
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
@@ -308,6 +327,7 @@
       if(action==='folder')data.folder=b.dataset.folder;
       if(b.dataset.section)data.section=b.dataset.section;
       if(b.dataset.attachment)data.attachment_id=b.dataset.attachment;
+      if(b.dataset.operation)data.operation_id=b.dataset.operation;
       if(action==='save_preference')data.signature=$('preference').value;
       if(action==='save_settings'){
         data.settings={sender_name:$('sender-name').value,sent_policy:$('sent-policy').value,folder_mapping:{},signatures:{}};
@@ -385,16 +405,6 @@
     if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&model.view==='mail'&&model.active_message){if(e.key.toLowerCase()==='r')compose('reply');if(e.key.toLowerCase()==='f')compose('forward');}
   });
   window.addEventListener('message',event=>{
-    if(event.data?.type==='sc:send-progress'){
-      // Streamlit's srcdoc bridge can report a null origin. Validate the exact
-      // sibling window and its operation marker, not arbitrary postMessages.
-      let bridge;try{bridge=[...window.parent.document.querySelectorAll('iframe')].find(f=>f.contentWindow===event.source);}catch(_){return;}
-      if(!bridge||bridge.dataset.scSendProgress!==model.draft?.operation_id||event.data.operation_id!==model.draft?.operation_id||pendingAction!=='send')return;
-      model.send_progress={percent:event.data.percent,label:event.data.label};
-      if(event.data.percent===100){model.send_result={status:'accepted'};model.sent_result={status:'pending'};}
-      if($('send-status'))$('send-status').innerHTML=sendStatus(model);
-      return;
-    }
     if(['sc:email-unread','sc:email-tick','sc:email-change'].includes(event.data?.type)){
       // The OS header runs in a sibling Streamlit srcdoc iframe, not the parent realm.
       let trusted=event.source===window.parent;

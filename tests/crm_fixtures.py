@@ -48,6 +48,15 @@ class ShopifyFixture:
         if doc==q.FIRST_ORDER:return {'customer':{'orders':page(list(reversed(self.orders[v['id']])),size=1)}}
         if doc==q.ORDER:return {'order':deepcopy(next((o for rows in self.orders.values() for o in rows if o['id']==v['id']),None))}
         if doc==q.PRODUCTS:return {'nodes':deepcopy([p for p in self.products if p['id'] in v['ids']])}
+        if doc==q.CAMPAIGN_CONNECTION:return {'shop':{'id':q.gid(1,'Shop')},'currentAppInstallation':{'accessScopes':[{'handle':s} for s in ('read_customers','read_products','read_orders')]}}
+        if doc==q.CAMPAIGN_PRODUCTS:
+            products=self.products+[{**self.products[0],'id':q.gid(2,'Product'),'title':'Second collector artwork','onlineStoreUrl':'https://example.test/second-art'}]
+            rows=[{**p,'media':page([{'image':{'id':q.gid(1,'Image'),'url':'https://cdn.shopify.com/fixture-art.png','altText':'Collector sports artwork','width':800,'height':600}}])} for p in products]
+            return {'products':page(rows,v.get('after'),12)}
+        if doc==q.CAMPAIGN_IMAGES:return {'product':{'media':page([])}}
+        if doc==q.CAMPAIGN_VARIANTS:return {'product':{'variants':page([{'id':q.gid(1,'ProductVariant'),'title':'Small / Black'}])}}
+        if doc==q.CAMPAIGN_PRICE:return {'productVariant':{'id':v['id'],'contextualPricing':{'price':{'amount':'179.00','currencyCode':{'AU':'AUD','US':'USD','GB':'GBP'}[v['country']]}}}}
+        if doc==q.CAMPAIGN_ORDERS:return {'orders':page([])}
         if doc==q.SEGMENTS:return {'segments':page(self.segments,v.get('after'))}
         if doc==q.SEGMENT:return {'segment':deepcopy(next((s for s in self.segments if s['id']==v['id']),None))}
         if doc==q.MEMBERS:

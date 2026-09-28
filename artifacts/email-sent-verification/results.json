@@ -1,0 +1,44 @@
+[
+  {
+    "scenario": "success",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  },
+  {
+    "scenario": "success",
+    "width": 1920,
+    "height": 1080,
+    "result": "passed"
+  },
+  {
+    "scenario": "copy_failure",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  },
+  {
+    "scenario": "rejected",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  },
+  {
+    "scenario": "unknown",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  },
+  {
+    "scenario": "server",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  },
+  {
+    "scenario": "delayed",
+    "width": 1440,
+    "height": 900,
+    "result": "passed"
+  }
+]

@@ -88,6 +88,13 @@ class MailboxFixture:
 
     def read_message(self, message):
         self.calls.append(("body", message["uid"]))
+        for raw in self.appended:
+            mime = BytesParser(policy=policy.default).parsebytes(raw)
+            if str(mime["Message-ID"]) == message["message_id"]:
+                return {"text": mime.get_body(preferencelist=("plain",)).get_content(), "warnings": [],
+                        "attachments": [{"section": str(i), "filename": part.get_filename(),
+                            "content_type": part.get_content_type(), "encoded_size": len(part.get_payload(decode=True))}
+                            for i, part in enumerate(mime.walk()) if part.get_content_disposition() == "attachment"]}
         return {"text": "Hi Sports Cave,\n\nMy frame arrived with a damaged corner. Could you please help me arrange a replacement?\n\nThank you,\nJohn\n\nOn Sunday, Sports Cave wrote:\n> Your order is on its way.",
                 "warnings": [], "attachments": [{"section": "2", "filename": "frame-corner.jpg", "content_type": "image/jpeg", "encoded_size": 1800000}]}
 
@@ -114,6 +121,7 @@ class MailboxFixture:
         self.calls.append(("append", folder, draft))
         self.appended.append(raw)
         h = parse_headers(raw, uid=str(len(self.messages)+1), uidvalidity="500", folder=folder)
+        h.update(flags=("\\Draft",) if draft else ("\\Seen",), unread=bool(draft))
         self.messages.append(h)
         return {"status": "appended"}
 

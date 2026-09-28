@@ -19,11 +19,12 @@ class SendUXTests(unittest.TestCase):
 
     def test_acceptance_and_bounded_exact_message_id_checks_survive_reruns(self):
         draft=self.compose(); stages=[];self.w.progress=lambda p,l:stages.append(p)
+        self.state['settings']['sent_policy']='server'
         self.imap.find_message_id=Mock(return_value=[])
         self.event('send',operation_id=draft['operation_id'])
         self.assertEqual(self.state['send_result']['status'],'accepted')
         self.assertEqual(self.state['sent_result']['status'],'pending')
-        self.assertEqual(stages,[15,100]) # The fixture SMTP itself has no transport stages.
+        self.assertEqual(stages,[]) # The fixture SMTP itself has no transport stages or display callbacks.
         mid=self.state['outgoing_mime']['message_id']
         self.event('auto_check_sent',operation_id=draft['operation_id'])
         self.assertEqual(self.imap.find_message_id.call_count,1) # too soon

@@ -6,7 +6,7 @@ assert.equal(safeLink('javascript:alert(1)'), '');
 assert.equal(safeLink('https://user:password@example.test'), '');
 assert.equal(safeLink('https://example.test/path'), 'https://example.test/path');
 assert.equal(size(1800000), '1.7 MB');
-for (const status of ['accepted','unknown','in_progress']) assert.equal(locked({send_result:{status}}),true);
+for (const status of ['accepted','unknown','in_progress']) assert.equal(locked({draft:{id:'compose'},send_result:{status}}),true);
 assert.ok(!locked({send_result:{status:'rejected'}}));
 assert.equal(locked({send_result:{},draft_pending:true}),true);
 const cache=createViewCache(2,100);

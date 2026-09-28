@@ -72,6 +72,12 @@ class Engine:
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):
                 self.store.finish_send(row,'BLOCKED','local_suppression');return True
+            if not row['test_send']:
+                from crm_workspace_store import WorkspaceRecords
+                records=WorkspaceRecords(self.store.connect)
+                hours=records.setting('sending')['value']['smart_hours']
+                if records.frequency_blocked(recipient_hash(address),hours):
+                    self.store.finish_send(row,'BLOCKED','smart_sending');return True
             self.hold_lease()
             if not self.store.begin_send(row,digest,recipient_hash(address)):return True
             submitting=True

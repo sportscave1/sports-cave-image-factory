@@ -45,14 +45,17 @@ class Config:
         if not self.api_key or not self.sender or not self.reply_to or len(self.secret)<32 or not safe_url(self.public_base):raise MarketingDisabled('Marketing delivery configuration is incomplete.')
     def unsubscribe_url(self,send_id):
         if len(self.secret)<32:raise MarketingDisabled('Marketing unsubscribe signing is not configured.')
-        value=str(uuid.UUID(str(send_id)));signature=hmac.new(self.secret.encode(),value.encode(),hashlib.sha256).hexdigest()
+        value=str(uuid.UUID(str(send_id)));signature=hmac.new(self.secret.encode(),('crm-marketing-opt-out/v1:'+value).encode(),hashlib.sha256).hexdigest()
         return self.public_base+'/crm/unsubscribe?token='+value+'.'+signature
     def verify_token(self,token):
         try:
             value,sig=token.split('.',1)
             value=str(uuid.UUID(value))
-            expected=hmac.new(self.secret.encode(),value.encode(),hashlib.sha256).hexdigest()
-            return value if len(self.secret)>=32 and hmac.compare_digest(sig,expected) else None
+            expected=hmac.new(self.secret.encode(),('crm-marketing-opt-out/v1:'+value).encode(),hashlib.sha256).hexdigest()
+            legacy=hmac.new(self.secret.encode(),value.encode(),hashlib.sha256).hexdigest()
+            # Retain any earlier issued links indefinitely; both are restricted to
+            # existing production receipt IDs by the POST handler.
+            return value if len(self.secret)>=32 and (hmac.compare_digest(sig,expected) or hmac.compare_digest(sig,legacy)) else None
         except (ValueError,AttributeError):return None
 
 class Resend:
@@ -99,13 +102,13 @@ class Resend:
         return result.provider_message_id
 
 def verify_resend(raw,headers,secret,clock=time.time):
-    """Svix signature verification against the untouched request bytes."""
+    """Official Svix verifier: untouched bytes, signature and five-minute tolerance."""
     try:
+        from svix.webhooks import Webhook
         timestamp=headers.get('svix-timestamp','');event=headers.get('svix-id','')
         if not event or abs(clock()-int(timestamp))>300:return False
         key=base64.b64decode(secret.removeprefix('whsec_'),validate=True)
         if len(key)<16:return False
-        signed=event.encode()+b'.'+timestamp.encode()+b'.'+raw
-        expected=base64.b64encode(hmac.new(key,signed,hashlib.sha256).digest()).decode()
-        return any(part.startswith('v1,') and hmac.compare_digest(part[3:],expected) for part in headers.get('svix-signature','').split())
-    except (ValueError,TypeError):return False
+        Webhook(secret).verify(raw,dict(headers))
+        return True
+    except Exception:return False

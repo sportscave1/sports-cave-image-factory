@@ -497,6 +497,8 @@ class Workspace:
                 file = self.imap.read_attachment(message, event["section"])
                 self.state["download"] = {"id": event_id, "filename": file["filename"], "base64": base64.b64encode(file["data"]).decode()}
             elif action == "compose":
+                if self.state.get("send_stage") in {"SENDING", "SAVING_SENT_COPY"}:
+                    raise ComposeError("Wait for the current send to finish.")
                 mode = event.get("mode", "new")
                 if mode not in {"new", "reply", "reply_all", "forward"}:
                     raise ComposeError("Unknown compose action.")
@@ -513,7 +515,7 @@ class Workspace:
                 if mode != "new":
                     thread = self._thread()
                     self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
-                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None)
+                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None, send_stage="")
             elif action in {"attach", "remove_attachment", "forward_attachment"}:
                 draft = self._editable_draft()
                 if action == "attach":
@@ -529,25 +531,31 @@ class Workspace:
                     add_attachment(draft, make_attachment(file["filename"], file["data"]))
             elif action == "send":
                 self.send(event.get("operation_id"))
+            elif action == "advance_send":
+                self.advance_send(event.get("operation_id"))
             elif action == "retry_rejected":
                 if self.state.get("send_result", {}).get("status") != "rejected":
                     raise ComposeError("Only a known rejected send can be prepared again.")
                 self.state["draft"]["operation_id"] = str(uuid.uuid4())
                 self.state["send_result"] = {}
             elif action == "check_sent":
-                self.check_sent()
+                self.check_sent(operation_id=event.get("operation_id"))
+            elif action == "retry_sent_copy":
+                self.check_sent(retry=True, operation_id=event.get("operation_id"))
             elif action == "auto_check_sent":
                 self.check_sent(automatic=True, operation_id=event.get("operation_id"))
             elif action == "save_draft":
                 self.save_draft()
             elif action == "edit_draft":
+                if self.state.get("send_stage") in {"SENDING", "SAVING_SENT_COPY"}:
+                    raise ComposeError("Wait for the current send to finish.")
                 message = self._header(event.get("message_key"))
                 if message["folder"] != self.roles.get("drafts"):
                     raise ComposeError("Only messages in the mapped Drafts folder can be edited.")
                 self.state["draft"] = edit_mailbox_draft(self.imap.read_draft(message), self.config.address, message)
                 thread = self._thread()
                 self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
-                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None)
+                self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None, send_stage="")
             elif action == "discard_draft":
                 draft = self._editable_draft()
                 if draft and draft.get("mailbox_ref"):
@@ -579,6 +587,8 @@ class Workspace:
             else:
                 raise ComposeError("Unknown Email action.")
         except (MailboxError, ComposeError, store.SupportStorageError) as error:
+            if self.state.get("send_stage") == "VALIDATING":
+                self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
             self.state["notice"] = "Could not update message. Try again." if event.get("action") in {
                 "mark_read", "mark_unread", "star", "unstar", "move", "copy", "archive", "trash", "junk"} else str(error)
             if event.get("action") == "test_connection":
@@ -586,6 +596,8 @@ class Workspace:
         except Exception as error:
             LOGGER.warning("Email action failed (%s)", type(error).__name__)
             self.state["notice"] = "Could not complete this Email action. Refresh and try again."
+            if self.state.get("send_stage") == "VALIDATING":
+                self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
         return True
 
     def message_action(self, action, message, destination=None):
@@ -645,23 +657,25 @@ class Workspace:
             raise MailboxError("Attachment is not available in this message.")
 
     def _send_progress(self, percent, label):
-        self.state["send_progress"] = {"percent": percent, "label": label}
-        if percent == 100:
-            self.state["send_result"] = {"status": "accepted", "notice": "Sent",
-                                          "message_id": self.state["outgoing_mime"]["message_id"]}
-            self.state["sent_result"] = {"status": "pending"}
+        # Pure state update: never call Streamlit from inside SMTP/IMAP I/O.
+        self.state["send_stage"] = "SAVING_SENT_COPY" if percent == 100 else "SENDING"
         report_progress(self.progress, percent, label)
 
     def send(self, operation_id):
+        """An explicit Send click validates and freezes the exact outgoing MIME once."""
+        old = self.state.get("send_result", {})
+        if old.get("operation_id") == operation_id and old.get("status"):
+            return
         draft = self.state.get("draft")
         if not draft or operation_id != draft["operation_id"]:
             raise ComposeError("Send session changed. Review the current draft before sending.")
-        old = self.state.get("send_result", {})
         if old.get("status") in {"accepted", "unknown", "in_progress", "rejected"}:
             self.state["notice"] = old["notice"]
             return
         if self.state.get("draft_pending"):
             raise ComposeError("Resolve the pending draft save before sending.")
+        if len(self.state.get("pending_sent", {})) >= 5:
+            raise ComposeError("Save the pending Sent copies before sending more messages. No email was sent.")
         # Always re-read a known workflow before sending a reply, rather than trusting a drawer visit.
         thread = draft.get("source_thread")
         if thread and draft["mode"] in {"reply", "reply_all", "forward"}:
@@ -673,46 +687,110 @@ class Workspace:
                 workflow = {}
             if (workflow.get("needs_approval") or workflow.get("conflict")) and not os_accounts.is_admin(self.user):
                 raise ComposeError("This conversation requires Nathan's approval. Save a mailbox draft for review.")
-        self._send_progress(15, "Preparing email…")
+        self.state["send_stage"] = "VALIDATING"
         mime = build_mime(draft, self.config.address, self.state["settings"]["sender_name"], self.state["settings"]["signatures"])
         self.state["outgoing_mime"] = mime
-        self.state["send_result"] = {"status": "in_progress", "notice": "Sending…"}
-        result = self.registry.submit(operation_id, self.config.address, mime, self.smtp, progress=self._send_progress)
-        self.state["send_result"], self.state["notice"] = result, ""
-        if result["status"] == "accepted":
-            self.state["sent_result"] = {"status": "pending"}
-            self.state["sent_checks"] = 0
-            self._send_progress(100, "Sent")
-            action = "email_reply_sent" if draft["mode"] in {"reply", "reply_all"} else "email_forward_sent" if draft["mode"] == "forward" else "email_sent"
-            self.audit(action, mime["message_id"])
-            self.state["sent_receipt"] = {}
-            self.check_sent()
-            if draft.get("mailbox_ref"):
-                try:
-                    self._trash_draft(draft["mailbox_ref"])
-                    draft["mailbox_ref"] = None
-                except MailboxError:
-                    self.state["notice"] += " The saved draft remains in Drafts; do not send it again."
-            self._mailbox_changed()
+        self.state.update(send_result={"status": "in_progress", "operation_id": operation_id, "notice": "Sending…"},
+                          send_stage="SENDING", send_progress={}, send_finalized=False)
 
-    def check_sent(self, *, automatic=False, operation_id=None):
-        mime = self.state.get("outgoing_mime")
-        if not mime:
-            return
+    def recover_send(self):
+        """Reconcile an interrupted run from metadata only; rendering cannot send mail."""
         result = self.state.get("send_result", {})
+        if result.get("status") == "in_progress":
+            receipt = self.registry.get(result.get("operation_id"), self.config.address)
+            if receipt and receipt.get("status") != "in_progress":
+                self.state["send_result"] = receipt
+                self.state["send_stage"] = "SAVING_SENT_COPY" if receipt["status"] == "accepted" else receipt["status"].upper()
+
+    def advance_send(self, operation_id):
+        """Continue only a previously confirmed send, using its frozen bytes and receipt."""
+        self.recover_send()
+        result = self.state.get("send_result", {})
+        if not operation_id or operation_id != result.get("operation_id") or self.state.get("send_finalized"):
+            return
+        if result.get("status") == "in_progress" and self.state.get("outgoing_mime"):
+            result = self.registry.submit(operation_id, self.config.address, self.state["outgoing_mime"], self.smtp,
+                                          progress=self._send_progress)
+            self.state.update(send_result=result, send_progress={},
+                              send_stage="SAVING_SENT_COPY" if result["status"] == "accepted" else result["status"].upper())
+            # Complete accepted delivery even if the browser disconnects now. No Streamlit
+            # calls occur between SMTP acceptance and saving its mailbox copy.
+        if result.get("status") == "accepted":
+            self._finish_send()
+
+    def _finish_send(self):
+        s, result, draft = self.state, self.state["send_result"], self.state.get("draft") or {}
+        if s.get("last_sent", {}).get("operation_id") != result["operation_id"]:
+            s["last_sent"] = {"operation_id": result["operation_id"], "mime": s["outgoing_mime"],
+                              "result": dict(result), "subject": draft.get("subject", ""), "checks": 0}
+        delivery = s["last_sent"]
+        if not delivery.get("audited"):
+            delivery["audited"] = True
+            action = "email_reply_sent" if draft.get("mode") in {"reply", "reply_all"} else "email_forward_sent" if draft.get("mode") == "forward" else "email_sent"
+            self.audit(action, result["message_id"])
+        self.check_sent()
+        if draft.get("mailbox_ref") and not delivery.get("draft_cleanup_attempted"):
+            delivery["draft_cleanup_attempted"] = True
+            try:
+                self._trash_draft(draft["mailbox_ref"])
+            except Exception:
+                delivery["draft_warning"] = "The saved draft remains in Drafts; do not send it again."
+        try:
+            self._show_sent(delivery)
+        except Exception as error:
+            LOGGER.warning("Email Sent view unavailable (%s)", type(error).__name__)
+            self.state["notice"] = "Email sent. Sent-folder refresh is temporarily unavailable; refresh Sent to view it."
+        s.update(send_stage="SENT", send_progress={}, send_finalized=True, draft=None, draft_pending=None, view="mail")
+
+    def _show_sent(self, delivery):
+        folder = self.roles.get("sent")
+        if not folder:
+            return
+        self.state.update(folder=folder, query="", field="TEXT", limit=50, selected=None,
+                          conversation=[], history_pending=False, view="mail", load_retry_at=0)
+        self._mailbox_changed()
+        self.load()  # Reload real IMAP headers, including mail sent by other clients.
+        thread = next((t for t in self.state.get("threads", []) if any(
+            m["message_id"] == delivery["mime"]["message_id"] for m in t["messages"])), None)
+        if thread:
+            try:
+                self.open_thread(thread["thread_key"])
+            except MailboxError:
+                self.state["notice"] = "Sent. The message body is temporarily unavailable; reopen it in Sent."
+
+    def check_sent(self, *, automatic=False, operation_id=None, retry=False):
+        result = self.state.get("send_result", {})
+        delivery = self.state.get("pending_sent", {}).get(operation_id) or self.state.get("last_sent", {})
+        # Uncertain transport outcomes can only be searched, never appended.
+        if result.get("status") == "unknown" and not operation_id:
+            self.state["sent_result"] = reconcile_sent(self.imap, self.state["outgoing_mime"], self.roles.get("sent"))
+            return
+        if not delivery or (operation_id and operation_id != delivery["operation_id"]):
+            return
+        retry = retry and delivery.get("copy", {}).get("retryable") is True
         if automatic:
-            if (result.get("status") != "accepted" or operation_id != self.state.get("draft", {}).get("operation_id")
-                    or self.state.get("sent_checks", 0) >= 3 or self.state.get("sent_result", {}).get("status") == "present"
+            if (delivery.get("checks", 0) >= 3 or delivery.get("copy", {}).get("status") in {"present", "appended"}
                     or time.monotonic() - self.state.get("sent_check_at", 0) < 5):
                 return
-            self.state["sent_checks"] = self.state.get("sent_checks", 0) + 1
+            delivery["checks"] = delivery.get("checks", 0) + 1
         self.state["sent_check_at"] = time.monotonic()
-        policy = self.state["settings"]["sent_policy"] if result.get("status") == "accepted" else "verify"
-        if automatic:
-            policy = "verify"  # Follow-up polling never appends or submits mail.
-        sent = reconcile_sent(self.imap, mime, self.roles.get("sent"), policy, receipt=self.state.setdefault("sent_receipt", {}))
-        self.state["sent_result"] = sent
-        self.state["notice"] = ""  # The composer owns submission and Sent-copy status.
+        # Legacy verify default now ensures a copy. Explicit confirmed server-saving is respected.
+        policy = "verify" if automatic or self.state["settings"]["sent_policy"] == "server" else "append"
+        if retry:
+            policy = "append"
+        previous = delivery.get("copy", {}).get("status")
+        delivery["copy"] = self.registry.save_sent(delivery["operation_id"], self.config.address, self.imap,
+            delivery["mime"], self.roles.get("sent"), policy, retry=retry)
+        pending = self.state.setdefault("pending_sent", {})
+        if delivery["copy"]["status"] in {"present", "appended"}:
+            pending.pop(delivery["operation_id"], None)
+        else:
+            pending[delivery["operation_id"]] = delivery
+        if result.get("operation_id") == delivery["operation_id"]:
+            self.state.update(sent_result=delivery["copy"], sent_checks=delivery.get("checks", 0))
+        if (self.state.get("send_finalized") and delivery["copy"]["status"] in {"present", "appended"}
+                and (retry or previous not in {"present", "appended"}) and self.state["view"] != "compose"):
+            self._show_sent(delivery)
 
     def save_draft(self):
         draft = self.state.get("draft")
@@ -796,6 +874,7 @@ class Workspace:
 
     def model(self):
         """Whitelisted browser payload: no credentials, raw MIME or unsolicited attachment bytes."""
+        self.recover_send()
         s, user = self.state, self.user
         if "list_model" not in s:
             s["list_model"] = self._list_model()
@@ -838,7 +917,10 @@ class Workspace:
             "view": s["view"], "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
-            "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
+            "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
+            "last_sent": {k: s.get("last_sent", {}).get(k) for k in ("operation_id", "subject", "result", "copy", "checks", "draft_warning")},
+            "pending_sent": [{k: d.get(k) for k in ("operation_id", "subject", "copy", "checks", "draft_warning")}
+                             for d in s.get("pending_sent", {}).values() if d["operation_id"] != s.get("last_sent", {}).get("operation_id")],
             "download": s.get("download"), "settings": {"sender_name": settings["sender_name"], "sent_policy": settings["sent_policy"],
             "folder_mapping": settings["folder_mapping"], "signatures": signatures}, "settings_available": s.get("settings_available", False),
             "admin": os_accounts.is_admin(user), "signature_preference": selected_signature(settings, user, s.get("preference")),

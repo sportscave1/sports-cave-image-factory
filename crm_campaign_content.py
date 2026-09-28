@@ -3,12 +3,15 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from html import escape
 from urllib.parse import urlsplit
 from crm_resend_marketing import get_resend_marketing_config_status, single_email
+from crm_email_blocks import PURPOSES, validate_blocks, legacy_blocks, render_blocks, block_checks
+from crm_tracking import public_https, asset_url
 
 RENDER_VERSION = 1
-TYPES = ('Product Launch','New Collector Edition','Final Editions','Best Sellers','Sport / Collection Spotlight',
+TYPES = PURPOSES + ('Product Launch','New Collector Edition','Best Sellers','Sport / Collection Spotlight',
          'Offer / Promotion','Newsletter','Seasonal','Custom')
 MARKETS = ('AU','US','Global','UK')
 OBJECTIVES = ('Launch','Purchase','Engagement','Cross-sell','Collector urgency','Announcement')
@@ -24,11 +27,7 @@ POLICIES = {
 
 
 def https(value):
-    try:
-        p = urlsplit(value)
-        return bool(p.scheme == 'https' and p.hostname and not p.username and not p.password
-                    and not any(c.isspace() for c in value) and len(value) <= 2000)
-    except (ValueError, TypeError): return False
+    return public_https(value)
 
 
 def settings(env=None):
@@ -46,11 +45,18 @@ def new_document():
             'notes': '', 'product': {}, 'audience': {'kind':'Rules','name':'All subscribed',
             'rules': {'field':'consent','op':'eq','value':'SUBSCRIBED'}},
             'counts': {}, 'content': {k:'' for k in FIELDS}, 'copy_reviewed': False,
-            'renderer_version': RENDER_VERSION}
+            'renderer_version': RENDER_VERSION, 'blocks':[], 'tags':[],
+            'campaign_key':'sc_'+uuid.uuid4().hex, 'smart_hours':16, 'template_ref':{}}
 
 
 def validate_document(doc):
-    if not isinstance(doc, dict) or set(doc) != set(new_document()): raise ValueError('Invalid campaign structure.')
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref'}
+    if not isinstance(doc, dict) or set(doc)-set(new_document()) or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
+    validate_blocks(doc.get('blocks',[]))
+    if not isinstance(doc.get('tags',[]),list) or len(doc.get('tags',[]))>10 or any(not isinstance(t,str) or len(t)>40 for t in doc.get('tags',[])): raise ValueError('Use up to 10 short internal tags.')
+    if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',doc.get('campaign_key','legacy')): raise ValueError('Invalid campaign tracking key.')
+    if type(doc.get('smart_hours',16)) is not int or not 1<=doc.get('smart_hours',16)<=168: raise ValueError('Smart Sending must be 1–168 hours.')
+    if not isinstance(doc.get('template_ref',{}),dict) or set(doc.get('template_ref',{}))-{'id','version','name'}: raise ValueError('Invalid template reference.')
     if doc['type'] not in TYPES or doc['market'] not in MARKETS or doc['objective'] not in OBJECTIVES:
         raise ValueError('Invalid campaign basics.')
     if type(doc['copy_reviewed']) is not bool or type(doc['offer_reviewed']) is not bool: raise ValueError('Review confirmation required.')
@@ -63,7 +69,11 @@ def validate_document(doc):
         if k in ('subject','preheader') and ('\n' in v or '\r' in v): raise ValueError('Subject and preheader must be single lines.')
     if doc['renderer_version'] != RENDER_VERSION: raise ValueError('Unsupported renderer version.')
     audience=doc['audience']
-    if not isinstance(audience,dict) or audience.get('kind') not in ('Shopify','Rules'): raise ValueError('Choose a Shopify audience or saved rule.')
+    if not isinstance(audience,dict) or audience.get('kind') not in ('Shopify','Rules','Selection'): raise ValueError('Choose a Shopify audience or saved rule.')
+    if audience['kind']=='Selection':
+        from crm_audience import validate_selection
+        validate_selection(audience)
+        audience={'kind':'Rules','name':'Validated selection','rules':{'field':'consent','op':'eq','value':'SUBSCRIBED'}}
     if audience['kind']=='Shopify':
         if not re.fullmatch(r'gid://shopify/Segment/\d+',audience.get('id','')): raise ValueError('Invalid Shopify segment.')
     else:
@@ -82,7 +92,7 @@ def validate_document(doc):
         if any(type(counts[k]) is not int or counts[k]<0 for k in ('members','eligible')): raise ValueError('Invalid counts.')
         if not isinstance(counts['excluded'],dict) or any(type(v) is not int or v<0 for v in counts['excluded'].values()): raise ValueError('Invalid exclusions.')
         if counts['members']!=counts['eligible']+sum(counts['excluded'].values()): raise ValueError('Audience totals do not reconcile.')
-    if len(json.dumps(doc))>60000: raise ValueError('Campaign is too large.')
+    if len(json.dumps(doc))>100000: raise ValueError('Campaign is too large.')
     return doc
 
 
@@ -90,37 +100,42 @@ def fingerprint(doc, cfg):
     return hashlib.sha256(json.dumps({'document':doc,'footer':cfg},sort_keys=True).encode()).hexdigest()
 
 
-def render_campaign(doc, cfg=None):
+def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     validate_document(doc); cfg=settings() if cfg is None else cfg; c=doc['content']
     e=lambda value: escape(str(value), quote=True)
-    paragraphs=lambda value: ''.join('<p style="margin:0 0 18px;font-size:16px;line-height:1.6">'+e(p).replace('\n','<br>')+'</p>' for p in value.split('\n\n') if p)
-    image=''
-    if c['hero_url'] and https(c['hero_url']):
-        image='<tr><td><img src="'+e(c['hero_url'])+'" alt="'+e(c['hero_alt'])+'" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0"></td></tr>'
-    cta=''
-    if https(c['cta_url']):
-        cta='<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#171717" style="padding:15px 24px;border-bottom:3px solid #b49450"><a href="'+e(c['cta_url'])+'" style="font:700 16px Arial;color:#ffffff;text-decoration:none;display:inline-block;min-height:20px">'+e(c['cta_label'])+'</a></td></tr></table>'
-    # No fake unsubscribe href or unproven Broadcast substitution in an /emails test.
+    blocks=doc.get('blocks') or legacy_blocks(c)
+    accent=cfg.get('accent','#b49450')
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}',accent):accent='#b49450'
+    body,plain=render_blocks(blocks,campaign_key=doc.get('campaign_key',''),market=doc['market'],images_off=images_off,accent=accent,font=cfg.get('font','Arial'),button_style=cfg.get('button_style','Solid black'))
     unsubscribe='Unsubscribe — production link not activated (layout/test only).'
-    footer='''<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial">
-<strong>'''+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'
-    if https(cfg['website']): footer+='<a style="color:#333" href="'+e(cfg['website'])+'">'+e(cfg['website'])+'</a><br>'
-    if single_email(cfg['contact']): footer+='<a style="color:#333" href="mailto:'+e(cfg['contact'])+'">'+e(cfg['contact'])+'</a><br>'
-    footer+='<p>You’re receiving this marketing email because you subscribed to Sports Cave updates.</p><p><u>'+unsubscribe+'</u></p></td></tr>'
-    html='''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
-<body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">'''+e(c['preheader'])+'''</div>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
-<!--[if mso]><table role="presentation" width="600"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff">
-<tr><td style="padding:22px 24px;background:#171717;color:#fff;border-bottom:3px solid #b49450;font:700 20px Arial">SPORTS CAVE <span style="font-size:11px;color:#dfc986"> · CAMPAIGN TEST / PREVIEW</span></td></tr>'''+image+'''
-<tr><td style="padding:24px"><p style="font-size:12px;letter-spacing:1px;color:#675226">'''+e(c['eyebrow'])+'</p><h1 style="font-size:28px;line-height:1.2;margin:0 0 20px">'+e(c['headline'])+'</h1>'+paragraphs(c['intro'])+paragraphs(c['body'])+paragraphs(c['product_block'])+cta+paragraphs(c['secondary'])+paragraphs(c['ps'])+'</td></tr>'+footer+'</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
-    text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],c['eyebrow'],c['headline'],c['intro'],c['body'],c['product_block'],c['cta_label']+': '+(c['cta_url'] if https(c['cta_url']) else ''),c['secondary'],c['ps'],cfg['business'],cfg['postal'] or 'Business postal address not configured',cfg['website'],cfg['contact'],'You’re receiving this marketing email because you subscribed to Sports Cave updates.',unsubscribe])
+    footer='<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial"><strong>'+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'
+    if https(cfg['website']):footer+='<a style="color:#333" href="'+e(cfg['website'])+'">'+e(cfg['website'])+'</a><br>'
+    if single_email(cfg['contact']):footer+='<a style="color:#333" href="mailto:'+e(cfg['contact'])+'">'+e(cfg['contact'])+'</a><br>'
+    if https(cfg.get('privacy','')):footer+='<a style="color:#333" href="'+e(cfg['privacy'])+'">Privacy</a><br>'
+    unsubscribe_html='<u>'+unsubscribe+'</u>'
+    if unsubscribe_url is not None:
+        if not https(unsubscribe_url):raise ValueError('Verified HTTPS unsubscribe URL required.')
+        unsubscribe='Unsubscribe: '+unsubscribe_url
+        unsubscribe_html='<a style="color:#333" href="'+e(unsubscribe_url)+'">Unsubscribe</a>'
+    footer+='<p>You’re receiving this marketing email because you subscribed to Sports Cave updates.</p><p>'+unsubscribe_html+'</p>'
+    for url in cfg.get('social_links',[]):
+        if https(url):footer+='<a style="color:#333;padding-right:12px" href="'+e(url)+'">'+e(urlsplit(url).hostname)+'</a>'
+    footer+='</td></tr>'
+    logo=cfg.get('logo','')
+    header=('<img src="'+e(logo)+'" alt="Sports Cave" width="180" style="max-width:180px;height:auto">') if asset_url(logo) and not images_off else 'SPORTS CAVE'
+    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">'+e(c['preheader'])+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff"><tr><td style="padding:22px 24px;background:#171717;color:#fff;border-bottom:3px solid '+accent+';font:700 20px Arial">'+header+'<p style="font:11px Arial;color:#dfc986">CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED</p></td></tr>'+body+footer+'</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
+    text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain,cfg['business'],cfg['postal'] or 'Business postal address not configured',cfg['website'],cfg['contact'],'You’re receiving this marketing email because you subscribed to Sports Cave updates.',unsubscribe])
     return {'subject':'[CAMPAIGN TEST] '+c['subject'],'html':html,'text':text}
 
 
-def preflight(doc, env=None):
-    validate_document(doc); cfg=settings(env); delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
+def html_budget(html):
+    size=len(html.encode('utf-8'))
+    return {'bytes':size,'review_required':size>95000,'warning':size>=85000,
+            'label':f'{size/1000:.1f} KB HTML · target <80 KB; warn at 85 KB; review above 95 KB. Images measured separately.'}
+
+
+def preflight(doc, env=None, cfg=None):
+    validate_document(doc); cfg=settings(env) if cfg is None else cfg; delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
     from crm_logic import date, now
     counted=date(counts.get('checked_at'))
     recent=bool(counted and 0 <= (now()-counted).total_seconds() < 86400)
@@ -139,15 +154,23 @@ def preflight(doc, env=None):
     }
     live={
         'Business postal address configured and verified':bool(len(cfg['postal'])>=10 and cfg['postal_verified']),
-        'Contact identity configured':bool(cfg['business'] and single_email(cfg['contact']) and https(cfg['website'])),
+        'Contact identity configured and confirmed':bool(cfg['business'] and single_email(cfg['contact']) and https(cfg['website']) and cfg.get('identity_confirmed')),
         'Visible unsubscribe footer / functional production link':False,
         'One-click unsubscribe production path activated':False,
         'SPF/DKIM verification documented':cfg['domain_verified'],
         'DMARC confirmed before bulk activation':False,
         'Resend webhooks proven before bulk activation':False,
-        'Market legal review complete':doc['market']!='UK',
+        'Market legal review complete':False,
         'Broadcast provider activated':False,
     }
+    if doc.get('blocks'):
+        # Internal tests exercise saved content, not a production audience dispatch.
+        checks.pop('Eligible recipients > 0 (complete calculation within 24h)',None)
+        checks.pop('Headline and body present',None)
+        checks.pop('Hero uses HTTPS',None)
+        checks.update(block_checks(doc['blocks'],doc['market']))
+        checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']
+    live['Fresh complete eligible audience']=bool(recent and counts.get('complete') and counts.get('eligible',0)>0)
     return {'test':checks,'live':live,'test_ready':all(checks.values()),'live_ready':False,
             'marketing_enabled':delivery['marketing_enabled'],'policy':POLICIES[doc['market']]}
 

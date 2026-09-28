@@ -49,10 +49,15 @@ class UiTests(unittest.TestCase):
         self.assertTrue(any('live members' in c.value for c in at.caption));at.run()
         self.assertTrue(any('live members' in c.value for c in at.caption));self.assertFalse(at.exception)
     def test_audience_count_is_complete_and_session_only(self):
-        at=self.app('CRM Campaigns');next(b for b in at.button if b.label=='+ New Campaign').click().run()
-        next(r for r in at.radio if r.label=='Campaign editor').set_value('2 · Audience').run()
+        from crm_campaign_store import CampaignStore
+        from crm_campaign_content import new_document
+        from tests.crm_db_fixture import connect
+        from tests.test_crm import ADMIN
+        row=CampaignStore(connect).save(ADMIN,'Audience UI test',new_document())
+        at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns'
+        at.session_state['campaign_editor']=row;at.session_state['campaign_saved']=row.copy();at.run(timeout=20)
         next(b for b in at.button if b.label=='Recalculate eligibility').click().run()
-        next(b for b in at.button if b.label=='Continue calculation').click().run()
+        for _ in range(3):next(b for b in at.button if b.label=='Continue calculation').click().run()
         self.assertTrue(any(c.value.startswith('Complete') for c in at.caption));self.assertFalse(at.exception)
     def test_automation_activation_fails_closed(self):
         at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')

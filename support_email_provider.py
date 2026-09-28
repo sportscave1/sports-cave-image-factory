@@ -412,13 +412,18 @@ def parse_folders(data):
 
 
 def folder_roles(folders, overrides=None):
-    """Only unique SPECIAL-USE attributes or an explicit mapping to an observed LIST name."""
+    """Observed LIST names only: explicit mapping, SPECIAL-USE, then an unambiguous Sent fallback."""
     names = {f["name"] for f in folders}
     roles = {}
     for role in ("inbox", "sent", "drafts", "archive", "junk", "trash"):
         matches = [f["name"] for f in folders if f["role"] == role]
         if len(matches) == 1:
             roles[role] = matches[0]
+        if role == "sent" and not matches:
+            fallbacks = [f["name"] for f in folders if not f["role"] and
+                         f["name"].casefold() in {"sent", "sent items", "sent messages", "inbox.sent"}]
+            if len(fallbacks) == 1:
+                roles[role] = fallbacks[0]
         if (overrides or {}).get(role) in names:
             roles[role] = overrides[role]
     # An explicit mapping must not accidentally turn a discovered Sent folder into Trash too.
@@ -937,11 +942,22 @@ class ImapProvider:
 
     def append_message(self, folder, mime_bytes, *, draft=False):
         if len(mime_bytes) > 20 * 1024 * 1024:
-            raise MailboxError("Message exceeds the 20 MB mailbox upload limit.")
-        with self._connection(None) as (conn, _, __):
-            data = self._ok(conn.append(folder_argument(folder), "(\\Draft)" if draft else "(\\Seen)",
-                                       imaplib.Time2Internaldate(time.time()), mime_bytes))
-            return {"status": "appended", "append_uid": next((v.decode("ascii", "replace") for v in data if isinstance(v, bytes)), "")}
+            raise MailboxError("Message exceeds the 20 MB mailbox upload limit.", code="append_not_started")
+        attempted = False
+        try:
+            target = folder_argument(folder)
+            with self._connection(None, write=True) as (conn, _, __):
+                attempted = True
+                status, data = conn.append(target, "(\\Draft)" if draft else "(\\Seen)",
+                                          imaplib.Time2Internaldate(time.time()), mime_bytes)
+                if status in {"NO", "BAD"}:
+                    raise MailboxError("Mailbox rejected the copy.", code="append_rejected")
+                self._ok((status, data))
+                return {"status": "appended", "append_uid": next((v.decode("ascii", "replace") for v in data if isinstance(v, bytes)), "")}
+        except MailboxError as error:
+            if not attempted:
+                raise MailboxError("Could not connect to save the mailbox copy.", code="append_not_started") from None
+            raise error
 
     def read_draft(self, header):
         with self._connection(header["folder"], header["uidvalidity"]) as (conn, _, __):

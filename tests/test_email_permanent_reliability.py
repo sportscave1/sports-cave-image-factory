@@ -162,7 +162,10 @@ with patch('support_email_provider.ImapProvider._connection',side_effect=Asserti
             app.session_state['route'] = route
             app.run(timeout=15)
             self.assertFalse(app.exception, route)
-            self.assertFalse(app.warning, route)
+            if route == 'CRM Campaigns':
+                self.assertTrue(all('LIVE MARKETING DELIVERY: DISABLED' in item.value for item in app.warning))
+            else:
+                self.assertFalse(app.warning, route)
             app.run(timeout=15)
             self.assertFalse(app.exception, route)
 

@@ -240,11 +240,11 @@ def templates_page(store,actions):
 def automations_page(store,actions):
     rows=store.list('automations')
     if not rows:
-        st.info('The draft library has not been initialized. All four flows start OFF.')
+        st.info('The Sports Cave OS draft library has not been initialized. OS flows start OFF. External Klaviyo flows are not managed here.')
         if st.button('Initialize draft library'):actions.seed();st.rerun()
         return
-    st.dataframe([{'Automation':r['name'],'Status':r['status'],'Steps':len(r['steps'])} for r in rows],hide_index=True,use_container_width=True)
-    row=st.selectbox('Automation',rows,format_func=lambda r:r['name'])
+    st.dataframe([{'Flow':r['name'],'Status':r['status'],'Steps':len(r['steps'])} for r in rows],hide_index=True,use_container_width=True)
+    row=st.selectbox('Flow',rows,format_func=lambda r:r['name'])
     template_names=[t['template_key'] for t in store.list('templates')]
     with st.form('crm_automation_'+str(row['id'])):
         steps=[]
@@ -265,7 +265,7 @@ def automations_page(store,actions):
         if append:steps.append({'type':'revalidate'})
         if remove:steps=steps[:-1]
         actions.automation(row,steps,config,status);st.success('Workflow saved.');st.rerun()
-    st.caption('Activation is blocked while marketing delivery is disabled. Existing enrollments keep their reviewed step snapshot.')
+    st.caption('OS flow activation remains disabled. Existing enrollments keep their reviewed step snapshot. Review external Klaviyo / Shopify flows for overlap before any future activation; their live status has not been changed.')
 
 
 def campaigns_page(shop,store,actions):
@@ -342,13 +342,16 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     left,right=st.columns([9,1])
     left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
     if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
-    if route=='CRM Automations':
-        from crm_delivery_panel import render_delivery_panel
-        render_delivery_panel(user)
+    from crm_navigation import SETTINGS_ALIASES
+    if route=='CRM Settings' or route in SETTINGS_ALIASES:
+        from crm_settings_page import settings_page
+        try:settings_page(shop,store,actions,navigate,SETTINGS_ALIASES.get(route))
+        except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,PermissionError,ValueError) as exc:st.warning(str(exc))
+        return
     if route=='CRM Campaigns':
         from crm_campaign_page import campaign_workspace
         from crm_resend_marketing import DeliveryError
-        try: campaign_workspace(shop,store,actions)
+        try: campaign_workspace(shop,store,actions,navigate)
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
     try:
@@ -371,6 +374,6 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
 
 
 def render_page(route,user,navigate=lambda _:None,**dependencies):
-    st.html('<style>[data-testid="stMainBlockContainer"]:has(.st-key-crm-workspace){padding-top:1.5rem} .st-key-crm-workspace [data-testid="stForm"]{padding:.65rem} .st-key-crm-workspace h3{font-size:1.3rem}</style>')
+    st.html('<style>[data-testid="stMainBlockContainer"]:has(.st-key-crm-workspace){padding-top:4rem} .st-key-crm-workspace [data-testid="stForm"]{padding:.65rem} .st-key-crm-workspace h3{font-size:1.3rem}</style>')
     with st.container(key='crm-workspace'):
         _render_page(route,user,navigate,**dependencies)

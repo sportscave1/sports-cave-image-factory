@@ -4301,6 +4301,8 @@ def set_current_page(page, *, source="user", sync_query=True, force=False):
     if not route:
         raise ValueError(f"Unknown Sports Cave page: {page}")
     current_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
+    if not force and not os_accounts.crm_navigation.navigation_allowed(st.session_state, current_route, route):
+        return current_route
     current_query = page_query_param_value()
     if not force and current_route == route and (
         not sync_query or current_query == page_query_value(route)
@@ -9392,14 +9394,14 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         )
         return expanded
 
-    def child_button(container, route, label, *, icon=None):
+    def child_button(container, route, label, *, icon=None, active_routes=()):
         route_key = os_accounts.page_key_for_route(route)
         row = container.container(key=f"sidebar-row-{route_key}")
         clicked = row.button(
             label,
             key=f"sidebar-child::{route}",
             use_container_width=True,
-            type="primary" if current_page == route else "secondary",
+            type="primary" if current_page == route or current_page in active_routes else "secondary",
             icon=icon,
         )
         if clicked and current_page != route:
@@ -9486,11 +9488,11 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
     _sidebar_route_button("Email", current_page, allowed_routes, root=st)
     import crm_navigation
-    crm_routes = tuple(route for route in crm_navigation.ROUTES if route in allowed_routes)
-    if crm_routes and disclosure("crm", "CRM & Marketing", ":material/contacts:", crm_routes[0], force_open_routes=crm_routes):
+    crm_routes = tuple(route for route in crm_navigation.SIDEBAR_ROUTES if route in allowed_routes)
+    if crm_routes and disclosure("crm", "CRM & Marketing", ":material/contacts:", crm_routes[0], force_open_routes=crm_navigation.ROUTES):
         children = st.container(key="sidebar-crm-children")
         for route in crm_routes:
-            child_button(children, route, crm_navigation.LABELS[route])
+            child_button(children, route, crm_navigation.LABELS[route], active_routes=tuple(crm_navigation.SETTINGS_ALIASES) if route == 'CRM Settings' else ())
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:

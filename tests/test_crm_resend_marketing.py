@@ -149,12 +149,13 @@ from tests.test_crm_resend_marketing import ENV, ADMIN, WORKER, RECEIPT
 user = ADMIN if ADMIN_FLAG else dict(WORKER, page_permissions=['crm_automations_manage'])
 store=Mock(); store.state.side_effect=StoreUnavailable('not installed')
 st.session_state.setdefault('send_calls', 0)
+st.session_state['crm_settings_section']='Sending & Compliance'
 def send(**kwargs):
     st.session_state['send_calls'] += 1
     st.session_state['send_args'] = kwargs
     return {'message': 'Test email accepted by Resend', 'message_id': RECEIPT, 'audit_saved': True}
 with patch.dict('os.environ', ENV, clear=True), patch('crm_delivery_panel.send_resend_test_email', side_effect=send), patch('requests.sessions.Session.request', side_effect=AssertionError('Network forbidden')):
-    render_page('CRM Automations', user, shop=Mock(), store=store, config=Config(ENV))
+    render_page('CRM Settings', user, shop=Mock(), store=store, config=Config(ENV))
 '''.replace('ADMIN_FLAG', repr(admin))
         return AppTest.from_string(script).run()
 
@@ -163,7 +164,7 @@ with patch.dict('os.environ', ENV, clear=True), patch('crm_delivery_panel.send_r
         self.assertFalse(at.exception)
         self.assertEqual(at.session_state['send_calls'], 0)
         self.assertEqual(at.text_input[0].value, '')
-        self.assertTrue(any('Workflow storage' in i.value for i in at.info))
+        self.assertTrue(any('Workspace storage' in i.value for i in at.info))
         self.assertTrue(any('Marketing Delivery: DISABLED' in t.value for t in at.text))
         at.run(); self.assertEqual(at.session_state['send_calls'], 0)
         at.text_input[0].set_value('nathan@example.test')

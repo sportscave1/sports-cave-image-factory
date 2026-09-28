@@ -1,5 +1,7 @@
 """Minimal CRM webhook processing. Never persists raw Shopify/Resend payloads."""
 import hashlib
+import re
+import uuid
 from crm_logic import date,now,email,recipient_hash
 from crm_shopify import gid
 
@@ -23,25 +25,31 @@ def receive_shopify(store,topic,event_id,payload,occurred_at):
     return store.webhook('shopify',event_id,topic,object_id,customer_id,date(occurred_at) or now())
 
 def receive_resend(store,event_id,payload):
-    event_type=payload.get('type','');data=payload.get('data') or {};provider_id=str(data.get('email_id') or '')
-    allowed={'email.sent','email.delivered','email.opened','email.clicked','email.bounced','email.complained','email.suppressed','email.failed'}
+    from crm_workspace_store import WorkspaceRecords
+    if not isinstance(event_id,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,200}',event_id) or not isinstance(payload,dict):raise ValueError('Invalid event envelope.')
+    event_type=payload.get('type','');data=payload.get('data')
+    allowed={'email.sent','email.delivered','email.delivery_delayed','email.opened','email.clicked','email.bounced','email.complained','email.failed'}
     if event_type not in allowed:return False
-    row=store.q('SELECT * FROM crm_marketing_sends WHERE provider_email_id=%s',(provider_id,),True)
-    # Signed events can arrive before the send response is recorded. Retain only ID/type;
-    # suppression is also checked directly against Resend before every subsequent send.
-    address=next((email(x) for x in data.get('to',[]) if email(x)),'')
-    hashed=row['recipient_hash'] if row else recipient_hash(address) if address else None
-    result=store.event(event_id,provider_id,event_type,hashed,date(payload.get('created_at')) or now())
-    if event_type in ('email.bounced','email.complained','email.suppressed') and hashed:
-        reason={'email.bounced':'bounce','email.complained':'complaint','email.suppressed':'suppressed'}[event_type]
-        store.suppress(hashed,row.get('shopify_customer_id') if row else None,reason,'resend',address or None)
+    if not isinstance(data,dict):raise ValueError('Invalid event data.')
+    try:provider_id=str(uuid.UUID(data.get('email_id','')))
+    except (ValueError,TypeError,AttributeError):raise ValueError('Invalid provider ID.') from None
+    occurred=date(payload.get('created_at'))
+    if not occurred:raise ValueError('Invalid event timestamp.')
+    bounce=data.get('bounce') or {}
+    if not isinstance(bounce,dict):raise ValueError('Invalid bounce metadata.')
+    hard=event_type=='email.bounced' and bounce.get('type')=='Permanent'
+    records=WorkspaceRecords(store.connect)
+    result=records.q('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,hard_bounce) VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING event_id',(event_id,provider_id,event_type,occurred,hard),True)
+    # Store minimal unmatched events for race recovery. They cannot count as CRM
+    # delivery or suppress anyone until a locally stored provider receipt matches.
+    records.reconcile_events(provider_id)
     return bool(result)
 
 def unsubscribe(store,config,token,shop=None):
     send_id=config.verify_token(token)
     if not send_id:raise ValueError('Invalid unsubscribe link.')
     row=store.receipt(send_id)
-    if not row or not row.get('recipient_hash'):raise ValueError('Invalid unsubscribe link.')
+    if not row or not row.get('recipient_hash') or row.get('test_send'):raise ValueError('Invalid unsubscribe link.')
     address=row.get('test_recipient')
     # Suppress immediately, even during Shopify outages. The worker resolves the
     # original delivery address from Resend only when provider synchronization needs it.

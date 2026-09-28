@@ -84,7 +84,7 @@ class LogicTests(unittest.TestCase):
     def test_html_escaping_unsubscribe_and_branding(self):
         for t in seeds():
             message=render(t['content'],{'first_name':'<script>x</script>','checkout_url':'https://example.test/cart','store_url':'https://example.test'},'https://example.test/u','https://example.test/logo.png','campaign-1')
-            self.assertNotIn('<script>',message['html']);self.assertIn('Unsubscribe',message['text']);self.assertIn('utm_source=sportscave',message['html'])
+            self.assertNotIn('<script>',message['html']);self.assertIn('Unsubscribe',message['text']);self.assertIn('utm_source=sports_cave',message['html'])
             self.assertNotIn('Nathan',message['html']);self.assertNotIn('Maria',message['html'])
     def test_unsafe_template_and_unknown_placeholder(self):
         c=seeds()[0]['content'];c['cta_url']='javascript:bad'
@@ -99,11 +99,12 @@ class LogicTests(unittest.TestCase):
     def test_unsubscribe_token_and_svix(self):
         c=config();identity=str(uuid.uuid4());token=c.unsubscribe_url(identity).split('token=')[1]
         self.assertEqual(c.verify_token(token),identity);self.assertIsNone(c.verify_token(token+'x'))
-        raw=b'{"type":"email.sent"}';key=b'x'*32;timestamp='1700000000';headers={'svix-id':'evt1','svix-timestamp':timestamp}
+        import time
+        raw=b'{"type":"email.sent"}';key=b'x'*32;timestamp=str(int(time.time()));headers={'svix-id':'evt1','svix-timestamp':timestamp}
         headers['svix-signature']='v1,'+base64.b64encode(hmac.new(key,b'evt1.'+timestamp.encode()+b'.'+raw,hashlib.sha256).digest()).decode()
-        self.assertTrue(verify_resend(raw,headers,'whsec_'+base64.b64encode(key).decode(),lambda:1700000000))
-        self.assertFalse(verify_resend(raw+b' ',headers,'whsec_'+base64.b64encode(key).decode(),lambda:1700000000))
-        self.assertFalse(verify_resend(raw,headers,'whsec_'+base64.b64encode(key).decode(),lambda:1700001000))
+        self.assertTrue(verify_resend(raw,headers,'whsec_'+base64.b64encode(key).decode()))
+        self.assertFalse(verify_resend(raw+b' ',headers,'whsec_'+base64.b64encode(key).decode()))
+        self.assertFalse(verify_resend(raw,headers,'whsec_'+base64.b64encode(key).decode(),lambda:int(timestamp)+1000))
     def test_webhooks_only_minimal_metadata(self):
         store=Mock();receive_shopify(store,'customers_email_marketing_consent/update','e',{'customer_id':1,'email_address':'private@example.test','note':'private body'},now())
         self.assertNotIn('private',str(store.method_calls));self.assertEqual(store.webhook.call_args.args[4],gid(1))
