@@ -44,7 +44,7 @@ def settings_page(shop,store,actions,navigate,initial=None):
         elif section=='Connections & Tracking':connections_page(records,shop)
         elif section=='Prompts':prompts_page(records,user)
         else:compliance_page(records,user)
-    except StoreUnavailable:st.info('Workspace storage is unavailable. Apply the reviewed migrations in docs/CRM_CAMPAIGNS_FIRST.md locally before saving. Customers and Shopify segments remain independent.')
+    except StoreUnavailable as exc:st.error(str(exc))
 
 
 def templates_page(store,shop,user):

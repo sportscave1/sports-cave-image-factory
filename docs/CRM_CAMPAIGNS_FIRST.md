@@ -1,9 +1,21 @@
-# CRM campaigns-first workspace — local implementation runbook
+# CRM campaigns-first workspace — implementation and recovery runbook
 
-Implementation date: 28 September 2026. Nothing was committed, pushed, deployed,
-sent to Resend, installed in Shopify or applied to production Supabase. Marketing
-and website tracking were not enabled. The live environment was not queried or
-changed. Keep `CRM_MARKETING_ENABLED=false`.
+Implementation date: 28 September 2026. The original build was local-only. The
+subsequent deployment omitted all three CRM migrations. The authorized storage
+recovery on the same date applied them with `run_migrations.py --crm` to the
+confirmed primary service database: Supabase project `ceyzbfpuwuuxaiqwiltz`,
+database `postgres`, schema `public`, via its Sydney transaction pooler.
+Render's `DATABASE_URL` target and `CRM_MARKETING_ENABLED=false` were checked in
+the canonical `sports-cave-os` service. No code was committed, pushed or deployed
+during recovery. No emails were sent. Keep `CRM_MARKETING_ENABLED=false`.
+
+The original failure had three causes: neither the repair-only Render pre-deploy
+command nor the startup migration manifest included CRM; Campaigns returned
+before showing actions when `crm_workspace_settings` was missing; navigation
+excluded Settings because it was not worker-assignable. Recovery adds a reviewed
+CRM migration chain to the existing startup manifest, restores the registered
+Settings route without expanding permissions, and preserves a diagnostic page
+shell with disabled save/create actions during outages.
 
 ## What works locally
 
@@ -113,7 +125,8 @@ It adds template archive metadata and suppression reconciliation state, and maps
 legacy authoring status spellings to DRAFT/NEEDS_REVIEW/TEST_READY/TESTED/ARCHIVED.
 Existing draft/template/history records are retained. Tables have server-only RLS
 and revoke public/anon/authenticated access. No browser service-role key, mirrored
-customer database, page-load DDL or production migration registration is added.
+customer database or page-load DDL is added. The recovery registers these three
+files in the existing SHA-reviewed deployment manifest.
 
 The local SQL fixture applies all three migrations in memory on real PGlite
 PostgreSQL, with no Supabase connection:
@@ -126,19 +139,27 @@ $env:CRM_TEST_POSTGRES='1'
 .venv/Scripts/python.exe -m unittest tests.test_crm_workspace tests.test_crm_campaigns_v1 tests.test_crm_resend_marketing tests.test_crm tests.test_crm_boundaries tests.test_crm_postgres tests.test_crm_ui
 ```
 
-For an independently created disposable local Supabase database, apply only the
-missing migrations once. Example local-only commands (not executed in production):
+For a confirmed target database, use the repository runner rather than raw SQL
+files, so DDL and the `public.schema_migrations` ledger commit atomically:
 
 ```powershell
-psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f migrations/20260927093818_crm_marketing_v1.sql
-psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f migrations/20260928020740_crm_campaign_workspace_v1.sql
-psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f migrations/20260928024722_crm_campaigns_first_workspace.sql
+python run_migrations.py --crm --check
+python run_migrations.py --crm
+python run_migrations.py --verify-crm-schema
 ```
 
-Do not point those commands at production. The existing `run_migrations.py` allowlist
-has intentionally not been expanded. A reviewed production migration plan, backup
-and deployment approval are separate prerequisites. Missing storage produces an
-installation diagnostic rather than a session-only “saved” message.
+Production execution requires an explicitly approved target and migration scope.
+The recovery received that authorization and verified no CRM tables or ledger
+entries existed in any schema before applying this chain. No table was dropped,
+truncated or reset. The runner uses the existing deployment advisory lock, strips
+file transaction wrappers, applies only unrecorded files, verifies 19 tables / 183
+columns / 17 named indexes and RLS, then independently verifies committed schema
+and all three ledger entries. A second run verified the no-op ledger path.
+`crm_schema.py` contains the read-only contract. No SQL functions were added.
+The custom repository ledger remains authoritative; no second Supabase CLI
+migration history was fabricated. The Render pre-deploy command/topology are
+unchanged; the existing `sports_cave_server.py` startup manifest includes CRM on
+the next separately approved code deployment.
 
 ## Configuration after approved deployment
 

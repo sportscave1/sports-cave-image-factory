@@ -50,8 +50,12 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     st.warning('Live marketing disabled — internal tests only. LIVE MARKETING DELIVERY: DISABLED')
     try:
         drafts.setting('sending')
-    except StoreUnavailable:
-        st.info('Campaign storage is unavailable. The reviewed CRM migrations must be applied locally before editing; see docs/CRM_CAMPAIGNS_FIRST.md. No draft has been saved.')
+    except StoreUnavailable as exc:
+        st.error(str(exc))
+        st.button('+ New Campaign', type='primary', disabled=True)
+        st.caption('Campaigns · draft list and editing will return when persistence is restored. Refresh to retry. Existing saved drafts have not been erased.')
+        if st.session_state.get('campaign_editor'):
+            st.info('Your open draft remains in this session. Saving is disabled until storage is available.')
         return
     editor=st.session_state.get('campaign_editor')
     if not editor:

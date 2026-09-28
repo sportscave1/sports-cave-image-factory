@@ -342,6 +342,13 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     left,right=st.columns([9,1])
     left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
     if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
+    from crm_navigation import SIDEBAR_ROUTES, navigation_allowed
+    import os_accounts
+    tabs=st.columns(3)
+    for column,target in zip(tabs,SIDEBAR_ROUTES):
+        if os_accounts.can_access_page(user,PAGE_KEYS[target]):
+            if column.button(LABELS[target],key='crm_nav_'+target,disabled=target==route):
+                if navigation_allowed(st.session_state,route,target):navigate(target)
     from crm_navigation import SETTINGS_ALIASES
     if route=='CRM Settings' or route in SETTINGS_ALIASES:
         from crm_settings_page import settings_page
@@ -357,8 +364,13 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     try:
         version=store.state('cache_version').get('version')
         if version:CACHE.invalidate(version)
-    except StoreUnavailable:
-        if route not in ('CRM Customers','CRM Segments'):st.info('Workflow storage is not installed yet. Customer and Shopify segment browsing remain available.');return
+    except StoreUnavailable as exc:
+        if route not in ('CRM Customers','CRM Segments'):
+            st.error(str(exc))
+            if route=='CRM Automations':
+                st.caption('Flows · existing workflows will return when persistence is restored. OS flow activation remains disabled.')
+                st.button('Initialize draft library',disabled=True)
+            return
     try:
         if route=='CRM Customers':customers_page(shop,store,user,navigate)
         elif route=='CRM Segments':segments_page(shop,store,actions)

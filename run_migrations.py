@@ -6,6 +6,7 @@ import re
 
 import psycopg
 import manual_certificate_schema
+import crm_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,7 +46,16 @@ MANUAL_EXPIRED_EDITION_MIGRATION = "20260828_manual_expired_order_line_editions.
 MANUAL_EXPIRED_EDITION_IDENTITY_MIGRATION = (
     "20260829_fix_manual_expired_edition_identity.sql"
 )
+CRM_MIGRATIONS = (
+    '20260927093818_crm_marketing_v1.sql',
+    '20260928020740_crm_campaign_workspace_v1.sql',
+    '20260928024722_crm_campaigns_first_workspace.sql',
+)
 REVIEWED_MIGRATION_SHA256 = {
+    "20260927093818_crm_marketing_v1.sql": "8deb23e7d7f4d635244315b15e233bf68d40d431f72a7fec9f8a5851207e8704",
+    "20260928020740_crm_campaign_workspace_v1.sql": "62f28ae7930478bb102910afccce60d8a3e8420f9022fdd870da70646f8f22bf",
+    "20260928024722_crm_campaigns_first_workspace.sql": "497139e3833ee34e14fea0e6f646d17273f4ec70afafbf47e8677b3852b11ca3",
+
     "20260927223857_edition_design_tracking_spreadsheet.sql": "f125c342f073795ce01bdf105840a451504ceef6a1d4f44ba2e917a4faec32b6",
     "20260927221221_edition_design_tracking.sql": "0f285d1b54c25aaa038f8533498da0d771a7b80f8e1e194abf1d42ca3b6942d5",
     "20260912235112_meta_review_reporting.sql": "ca7f573efcddd829b9385a44097af5d79018b14cbb6ff551261f85cc3fafb25b",
@@ -69,6 +79,7 @@ DEPLOYMENT_MIGRATIONS = (
     "20260912231446_manual_certificate_identity.sql",
     "20260927221221_edition_design_tracking.sql",
     "20260927223857_edition_design_tracking_spreadsheet.sql",
+    *CRM_MIGRATIONS,
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
@@ -382,7 +393,7 @@ def run_deployment_migrations(*, check=False):
                     cur.execute(_migration_body(sql))
                 cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
                 applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
-            issues = manual_certificate_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
         conn.commit()
@@ -390,7 +401,7 @@ def run_deployment_migrations(*, check=False):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
                           options='-c default_transaction_read_only=on') as conn:
         with conn.cursor() as cur:
-            issues = manual_certificate_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
             cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')
@@ -400,11 +411,55 @@ def run_deployment_migrations(*, check=False):
     print(f'READY manual certificate schema source={source} persisted_overrides={count}', flush=True)
 
 
+def run_crm_migrations(*, check=False, verify=False):
+    """Targeted CRM dependency chain, atomic DDL + ledger, same deployment lock."""
+    selected = [(MIGRATIONS_DIR / name, (MIGRATIONS_DIR / name).read_text(encoding='utf-8')) for name in CRM_MIGRATIONS]
+    for path, sql in selected:
+        if not reviewed_migration_sql(path, sql):
+            raise RuntimeError('CRM migration is not SHA-reviewed: ' + path.name)
+    if check:
+        print('READY CRM migration manifest: ' + ', '.join(CRM_MIGRATIONS))
+        return
+    database_url, source = get_database_url()
+    if not database_url:
+        raise RuntimeError('CRM migration failed: database URL is missing')
+    from psycopg.rows import dict_row
+    with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15, prepare_threshold=None) as conn:
+        with conn.cursor() as cur:
+            if verify:
+                cur.execute('SET TRANSACTION READ ONLY')
+            else:
+                cur.execute("SET LOCAL lock_timeout='60s'")
+                cur.execute("SET LOCAL statement_timeout='120s'")
+                cur.execute("SET LOCAL search_path=public")
+                cur.execute('SELECT pg_advisory_xact_lock(731948321)')
+                cur.execute('CREATE TABLE IF NOT EXISTS public.schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())')
+                for path, sql in selected:
+                    cur.execute('SELECT filename FROM public.schema_migrations WHERE filename=%s', (path.name,))
+                    if cur.fetchone():
+                        continue
+                    cur.execute(_migration_body(sql))
+                    cur.execute('INSERT INTO public.schema_migrations(filename) VALUES (%s)', (path.name,))
+            issues = crm_schema.schema_issues(cur)
+            cur.execute('SELECT filename FROM public.schema_migrations WHERE filename=ANY(%s)', (list(CRM_MIGRATIONS),))
+            recorded = {r['filename'] for r in cur.fetchall()}
+            issues.extend('missing migration ledger entry ' + name for name in CRM_MIGRATIONS if name not in recorded)
+            if issues:
+                raise RuntimeError('CRM schema incompatible: ' + '; '.join(issues))
+        conn.commit()
+    if not verify:
+        run_crm_migrations(verify=True)
+    else:
+        print('READY CRM schema and migration ledger verified; source=' + source)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply reviewed Sports Cave database migrations.")
     parser.add_argument("--only", help="Apply one migration filename from the migrations directory.")
     parser.add_argument("--check", action="store_true", help="Validate selection and safety without connecting.")
     parser.add_argument("--deploy", action="store_true", help="Apply the SHA-reviewed deployment manifest and verify compatibility.")
+    parser.add_argument('--crm', action='store_true', help='Apply only the three SHA-reviewed CRM migrations.')
+    parser.add_argument('--verify-crm-schema', action='store_true', help='Read-only CRM schema and ledger verification.')
     parser.add_argument(
         "--verify-required-schema",
         action="store_true",
@@ -416,7 +471,11 @@ if __name__ == "__main__":
         help="Read-only verification of optional marketplace diagnostic columns and indexes.",
     )
     args = parser.parse_args()
-    if args.deploy:
+    if args.crm or args.verify_crm_schema:
+        if args.only or args.deploy or args.verify_required_schema or args.verify_marketplace_schema or (args.crm and args.verify_crm_schema) or (args.verify_crm_schema and args.check):
+            parser.error('choose one migration selection or verification mode')
+        run_crm_migrations(check=args.check, verify=args.verify_crm_schema)
+    elif args.deploy:
         if args.only or args.verify_required_schema or args.verify_marketplace_schema:
             parser.error('--deploy cannot be combined with another migration selection')
         run_deployment_migrations(check=args.check)

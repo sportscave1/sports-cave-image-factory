@@ -1,5 +1,5 @@
 -- Shopify-first CRM control plane ONLY. Generated locally with Supabase CLI.
--- Not part of the automatic deployment manifest. Apply only after approval.
+-- SHA-reviewed deployment manifest; targeted --crm applies only the CRM dependency chain.
 BEGIN;
 CREATE TABLE IF NOT EXISTS crm_segment_definitions (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), system_key text UNIQUE, name text NOT NULL,

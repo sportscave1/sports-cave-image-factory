@@ -164,7 +164,7 @@ with patch.dict('os.environ', ENV, clear=True), patch('crm_delivery_panel.send_r
         self.assertFalse(at.exception)
         self.assertEqual(at.session_state['send_calls'], 0)
         self.assertEqual(at.text_input[0].value, '')
-        self.assertTrue(any('Workspace storage' in i.value for i in at.info))
+        self.assertTrue(at.error)
         self.assertTrue(any('Marketing Delivery: DISABLED' in t.value for t in at.text))
         at.run(); self.assertEqual(at.session_state['send_calls'], 0)
         at.text_input[0].set_value('nathan@example.test')

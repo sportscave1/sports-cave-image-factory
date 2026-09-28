@@ -22,7 +22,14 @@ class Store:
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning('crm_control_store_unavailable type=%s',type(exc).__name__)
-            raise StoreUnavailable('CRM workflow storage is unavailable. Apply the reviewed CRM migration before editing workflows.') from None
+            code = getattr(exc, 'sqlstate', '') or ''
+            if code in ('42P01', '42703'):
+                detail = 'Required CRM tables or columns are missing. An administrator must verify and apply the reviewed CRM migrations to the configured database.'
+            elif code == '42501':
+                detail = 'The configured database account cannot access CRM storage. An administrator must check its permissions.'
+            else:
+                detail = 'The configured database could not complete this operation. Retry or ask an administrator to check connectivity and the CRM schema.'
+            raise StoreUnavailable('CRM persistence is unavailable. ' + detail + ' No successful save is confirmed.') from None
     def q(self,sql,args=(),one=False):
         with self.db() as conn:
             cur=conn.execute(sql,args)

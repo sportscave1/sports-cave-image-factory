@@ -290,7 +290,7 @@ def navigation_pages():
     return tuple(
         page
         for page in PAGE_REGISTRY
-        if page.get("worker_assignable") or page.get("top_level")
+        if page.get("worker_assignable") or page.get("top_level") or page.get("key") == "crm_settings_view"
     )
 
 
