@@ -28,10 +28,8 @@ def consent(customer):
     return state if state in {'SUBSCRIBED','UNSUBSCRIBED','PENDING','NOT_SUBSCRIBED','REDACTED','INVALID'} else 'NOT_SUBSCRIBED'
 
 def eligibility(customer, suppressed=False, provider_suppressed=False):
-    if consent(customer)!='SUBSCRIBED':return False,'consent_'+consent(customer).lower()
-    if suppressed:return False,'local_suppression'
-    if provider_suppressed:return False,'provider_suppression'
-    return True,''
+    from crm_eligibility import eligible
+    return eligible(customer, suppressed, provider_suppressed)
 
 def safe_url(value):
     parsed=urlsplit(str(value or ''))

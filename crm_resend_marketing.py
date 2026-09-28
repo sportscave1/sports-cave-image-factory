@@ -78,7 +78,7 @@ def get_resend_marketing_config_status(env=None):
             'configured': bool(api and sender and name_ok and reply)}
 
 
-def _audit(user, operation, recipient, sender, status, message_id='', error_category=''):
+def _audit(user, operation, recipient, sender, status, message_id='', error_category='', campaign=None):
     # Direct existing audit writer: avoid the general wrapper's raw exception logging.
     try:
         from supabase_backend import record_activity_log
@@ -91,7 +91,9 @@ def _audit(user, operation, recipient, sender, status, message_id='', error_cate
             metadata={'timestamp': datetime.now(timezone.utc).isoformat(),
                       'action': 'resend_test_send', 'recipient': recipient,
                       'sender': sender, 'provider': 'resend', 'message_id': message_id,
-                      'status': status, 'error_category': error_category},
+                      'status': status, 'error_category': error_category,
+                      'test_kind': 'CAMPAIGN TEST' if campaign else 'ADMIN DIAGNOSTIC',
+                      'campaign': campaign},
         ))
     except Exception:
         LOG.warning('resend_test_send audit_unavailable')
@@ -104,6 +106,12 @@ def send_resend_test_email(*, user, recipient, confirmed, operation_id, env=None
     No retries. The UI reuses a UUID for this attempt; Resend receives it as the
     idempotency key. No body/template/segment/customer overrides are accepted.
     """
+    return _send_admin_email(user=user, recipient=recipient, confirmed=confirmed, operation_id=operation_id,
+                             env=env, session=session, message={'subject':SUBJECT,'html':HTML,'text':TEXT})
+
+
+def _send_admin_email(*, user, recipient, confirmed, operation_id, message, env=None, session=None, campaign=None):
+    """Internal single-recipient transport shared by vetted renderers, never audiences."""
     if not os_accounts.is_admin(user):
         raise PermissionError('Only an active administrator can send a Resend test.')
     if confirmed is not True:
@@ -121,11 +129,12 @@ def send_resend_test_email(*, user, recipient, confirmed, operation_id, env=None
     if get_resend_marketing_config_status(cfg)['marketing_enabled']:
         raise DeliveryError('stage_one_only')
     sender = formataddr((cfg['RESEND_FROM_NAME'], cfg['RESEND_FROM_EMAIL']))
-    if not _audit(user, operation, recipient, sender, 'requested'):
+    audit_extra = {'campaign':campaign} if campaign else {}
+    if not _audit(user, operation, recipient, sender, 'requested', **audit_extra):
         raise DeliveryError('audit_unavailable')
     payload = {'from': sender, 'reply_to': cfg['RESEND_REPLY_TO'], 'to': [recipient],
-               'subject': SUBJECT, 'html': HTML, 'text': TEXT,
-               'tags': [{'name': 'purpose', 'value': 'admin_delivery_test'}]}
+               'subject': message['subject'], 'html': message['html'], 'text': message['text'],
+               'tags': [{'name': 'purpose', 'value': 'campaign_test' if campaign else 'admin_delivery_test'}]}
     category = 'resend_unavailable'
     http_status = 0
     message_id = ''
@@ -151,11 +160,11 @@ def send_resend_test_email(*, user, recipient, confirmed, operation_id, env=None
     if not message_id:
         LOG.warning('resend_test_send failed category=%s http_status=%s', category, http_status)
         _audit(user, operation, recipient, sender,
-               'uncertain' if category == 'resend_unavailable' else 'failed', error_category=category)
+               'uncertain' if category == 'resend_unavailable' else 'failed', error_category=category, **audit_extra)
         raise DeliveryError(category) from None
-    saved = _audit(user, operation, recipient, sender, 'accepted', message_id=message_id)
+    saved = _audit(user, operation, recipient, sender, 'accepted', message_id=message_id, **audit_extra)
     return {'message': 'Test email accepted by Resend', 'message_id': message_id,
-            'audit_saved': saved}
+            'audit_saved': saved, 'accepted_at': datetime.now(timezone.utc).isoformat()}
 
 
 def send_marketing_email(*args, **kwargs):

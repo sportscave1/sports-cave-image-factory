@@ -1,0 +1,87 @@
+"""Versioned authoring only. Never writes legacy sends/campaign queues or profiles."""
+from copy import deepcopy
+import json
+import uuid
+from crm_store import Store
+from crm_navigation import require
+from crm_campaign_content import new_document, validate_document, preflight, settings, fingerprint, render_campaign
+
+
+class CampaignStore(Store):
+    def list_drafts(self, archived=False):
+        return self.q('SELECT * FROM crm_campaign_drafts WHERE (archived_at IS NOT NULL)=%s ORDER BY updated_at DESC LIMIT 100',(archived,))
+
+    def draft(self, identity):
+        row=self.q('SELECT * FROM crm_campaign_drafts WHERE id=%s',(identity,),True)
+        if not row: raise ValueError('Campaign not found.')
+        return row
+
+    def history(self, identity):
+        return self.q('SELECT action,actor,version,created_at FROM crm_campaign_history WHERE campaign_id=%s ORDER BY id DESC LIMIT 50',(identity,))
+
+    def save(self, user, name, document, identity=None, version=None, *, requested_status='DRAFT', env=None, duplicate_of=None):
+        require(user,'crm_campaigns_manage'); validate_document(document)
+        if not name.strip() or len(name)>150: raise ValueError('Use a campaign name of 1–150 characters.')
+        if requested_status not in ('DRAFT','NEEDS REVIEW','TEST READY','CANCELED'): raise ValueError('Production campaign states are unavailable.')
+        checks=preflight(document,env)
+        status=requested_status
+        if status=='TEST READY' and not checks['test_ready']: status='COMPLIANCE BLOCKED'
+        actor=str(user.get('id') or user.get('username') or '')
+        with self.db() as conn:
+            old={}
+            if identity:
+                old=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+                if not old or old['version']!=version: raise ValueError('Campaign changed elsewhere. Reload before saving.')
+                if old['archived_at']: raise ValueError('Archived campaigns are read-only. Duplicate to edit.')
+                row=conn.execute('UPDATE crm_campaign_drafts SET name=%s,document=%s::jsonb,status=%s,version=version+1,updated_at=now(),tested_version=NULL WHERE id=%s RETURNING *',(name,json.dumps(document),status,identity)).fetchone()
+            else:
+                row=conn.execute('INSERT INTO crm_campaign_drafts(name,document,status,created_by) VALUES(%s,%s::jsonb,%s,%s) RETURNING *',(name,json.dumps(document),status,actor)).fetchone()
+            actions=['campaign_duplicated' if duplicate_of else 'campaign_edited' if old else 'campaign_created']
+            if old and old['document']['audience']!=document['audience']: actions.append('segment_changed')
+            if old and old['document']['content']!=document['content']: actions.append('content_changed')
+            if old and old['status']!=status: actions.append('compliance_status_changed')
+            for action in actions:
+                self._history(conn,row,action,actor,old)
+            return row
+
+    def _history(self,conn,row,action,actor,before):
+        # Campaign content/config only. No credentials or resolved audience membership.
+        conn.execute('INSERT INTO crm_campaign_history(campaign_id,version,action,actor,before_value,after_value) VALUES(%s,%s,%s,%s,%s::jsonb,%s::jsonb)',
+                     (row['id'],row['version'],action,actor,json.dumps(before,default=str),json.dumps(row,default=str)))
+
+    def duplicate(self,user,identity):
+        row=self.draft(identity); doc=deepcopy(row['document']); doc['counts']={}; doc['copy_reviewed']=False
+        return self.save(user,(row['name']+' — copy')[:150],doc,duplicate_of=str(identity))
+
+    def archive(self,user,identity,version):
+        require(user,'crm_campaigns_manage')
+        with self.db() as conn:
+            before=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            if not before or before['version']!=version: raise ValueError('Campaign changed elsewhere. Reload before archiving.')
+            row=conn.execute("UPDATE crm_campaign_drafts SET archived_at=now(),status='CANCELED',version=version+1,updated_at=now() WHERE id=%s RETURNING *",(identity,)).fetchone()
+            self._history(conn,row,'campaign_archived',str(user.get('id','')),before)
+
+    def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None):
+        require(user,'crm_campaigns_manage')
+        import os_accounts
+        from crm_resend_marketing import _send_admin_email
+        if not os_accounts.is_admin(user): raise PermissionError('Only an administrator can send a campaign test.')
+        row=self.draft(identity)
+        if row['version']!=version or row['archived_at'] or row['status']=='CANCELED': raise ValueError('Reload the current editable campaign before testing.')
+        if not preflight(row['document'],env)['test_ready']: raise ValueError('Resolve the test preflight items first.')
+        rendered=render_campaign(row['document'],settings(env))
+        result=_send_admin_email(user=user,recipient=recipient,confirmed=confirmed,operation_id=operation_id,
+                                env=env,session=session,message=rendered,
+                                campaign={'id':str(identity),'version':version,'render_hash':fingerprint(row['document'],settings(env))})
+        # Provider I/O is outside the lock. A concurrent edit cannot inherit TESTED.
+        try:
+            with self.db() as conn:
+                current=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+                same=current['version']==version and not current['archived_at']
+                updated=conn.execute("UPDATE crm_campaign_drafts SET last_tested_at=%s,last_test_resend_id=%s,tested_version=%s,status=CASE WHEN %s THEN 'TESTED' ELSE status END WHERE id=%s RETURNING *",
+                                     (result['accepted_at'],result['message_id'],version if same else None,same,identity)).fetchone()
+                receipt={**updated,'test_receipt':result,'test_footer':settings(env),'tested_document_version':version}
+                self._history(conn,receipt,'campaign_test_sent',str(user.get('id','')),current)
+        except Exception:
+            result['audit_saved']=False
+        return result

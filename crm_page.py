@@ -345,6 +345,12 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     if route=='CRM Automations':
         from crm_delivery_panel import render_delivery_panel
         render_delivery_panel(user)
+    if route=='CRM Campaigns':
+        from crm_campaign_page import campaign_workspace
+        from crm_resend_marketing import DeliveryError
+        try: campaign_workspace(shop,store,actions)
+        except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
+        return
     try:
         version=store.state('cache_version').get('version')
         if version:CACHE.invalidate(version)

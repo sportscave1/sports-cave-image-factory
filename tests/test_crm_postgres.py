@@ -34,7 +34,7 @@ class PostgresTests(unittest.TestCase):
         self.store.seed();self.assertEqual(len(self.store.list('templates')),9);self.assertEqual(len(self.store.list('segments')),17)
         self.assertTrue(all(a['status']=='DRAFT' for a in self.store.list('automations')))
         rows=self.store.q("SELECT relname,relrowsecurity FROM pg_class WHERE relname LIKE 'crm_%' AND relkind='r'")
-        self.assertEqual(len(rows),11);self.assertTrue(all(r['relrowsecurity'] for r in rows))
+        self.assertEqual(len(rows),13);self.assertTrue(all(r['relrowsecurity'] for r in rows))
     def test_template_version_immutable(self):
         original=self.store.template(self.template['id'],1);content=dict(original);content['headline']='Edited'
         updated=self.store.save_template(self.template['id'],'Edited',content)

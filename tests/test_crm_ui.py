@@ -30,8 +30,10 @@ class UiTests(unittest.TestCase):
     def test_six_pages_load_with_gated_delivery(self):
         for route in ('CRM Customers','CRM Segments','CRM Automations','CRM Campaigns','CRM Templates','CRM Reports'):
             with self.subTest(route=route):
-                at=self.app(route);self.assertFalse(at.exception);self.assertFalse(at.warning)
-                if route=='CRM Campaigns':self.assertTrue(next(b for b in at.button if b.label=='Send test').disabled)
+                at=self.app(route);self.assertFalse(at.exception)
+                if route!='CRM Campaigns':self.assertFalse(at.warning)
+                else:self.assertTrue(any('LIVE MARKETING DELIVERY: DISABLED' in w.value for w in at.warning))
+                if route=='CRM Campaigns':self.assertFalse(any(b.label=='Send campaign' for b in at.button))
     def test_customer_pagination_and_search(self):
         at=self.app('CRM Customers');self.assertEqual(len(at.dataframe[0].value),50)
         at.button(key='crm_customer_cursor_next').click().run();self.assertEqual(len(at.dataframe[0].value),23)
@@ -47,8 +49,11 @@ class UiTests(unittest.TestCase):
         self.assertTrue(any('live members' in c.value for c in at.caption));at.run()
         self.assertTrue(any('live members' in c.value for c in at.caption));self.assertFalse(at.exception)
     def test_audience_count_is_complete_and_session_only(self):
-        at=self.app('CRM Campaigns');next(b for b in at.button if b.label=='Count eligible audience').click().run()
-        self.assertTrue(any('count complete' in c.value for c in at.caption));self.assertFalse(at.warning)
+        at=self.app('CRM Campaigns');next(b for b in at.button if b.label=='+ New Campaign').click().run()
+        next(r for r in at.radio if r.label=='Campaign editor').set_value('2 · Audience').run()
+        next(b for b in at.button if b.label=='Recalculate eligibility').click().run()
+        next(b for b in at.button if b.label=='Continue calculation').click().run()
+        self.assertTrue(any(c.value.startswith('Complete') for c in at.caption));self.assertFalse(at.exception)
     def test_automation_activation_fails_closed(self):
         at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')
         next(b for b in at.button if b.label=='Save workflow').click().run()
