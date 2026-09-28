@@ -4,8 +4,9 @@ import json
 import uuid
 from crm_store import Store
 from crm_navigation import require
-from crm_campaign_sections import section_defaults, FOOTER_TOKEN
+from crm_campaign_sections import section_defaults
 from crm_campaign_html import import_html
+from crm_campaign_footer import prepare_footer, render_footer
 from crm_logic import now
 
 FORMAT='campaign_brand_section_v1'
@@ -15,8 +16,11 @@ DEFAULT_KEY='email_brand_defaults'
 def section_source(kind,source):
     if kind not in ('header','footer') or not isinstance(source,str) or len(source.encode('utf-8'))>30000:
         raise ValueError('Use Header or Footer HTML up to 30 KB.')
-    if kind=='footer' and FOOTER_TOKEN not in source:source+='\n'+FOOTER_TOKEN
-    _,_,checks=import_html(source.replace(FOOTER_TOKEN,''))
+    if kind=='footer':
+        source=prepare_footer(source)
+        if len(source.encode('utf-8'))>30000:raise ValueError('Footer HTML including required content must be at most 30 KB.')
+        _,_,checks=render_footer(source,{})
+    else:_,_,checks=import_html(source)
     if not all(v for k,v in checks.items() if k!='HTML content present'):
         raise ValueError('Remove unsafe markup and use HTTPS image/link URLs with image alt text.')
     return source
@@ -31,6 +35,9 @@ class BrandTemplates(Store):
         builtin={'id':'builtin_'+kind,'name':'Sports Cave Default '+kind.title(),'version':0,
                  'content':{'format':FORMAT,'section':kind,'html':section_defaults(cfg)[kind]},'builtin':True}
         result=[builtin,*rows]
+        # Read-time compatibility only; existing stored versions remain immutable.
+        for row in rows:
+            if kind=='footer':row['content']={**row['content'],'html':prepare_footer(row['content']['html'])}
         # Fail closed rather than silently changing new campaigns after registry corruption.
         if default and not any(str(r['id'])==default for r in rows):raise ValueError('Default brand template is unavailable. Ask an administrator to select a default.')
         for row in result:row['is_default']=str(row['id'])==(default or builtin['id'])

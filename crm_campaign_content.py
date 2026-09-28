@@ -120,7 +120,7 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
         imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
         if 'html_sections' in doc:
             from crm_campaign_sections import import_sections
-            imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''))
+            imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''),cfg=cfg,unsubscribe_url=unsubscribe_url)
         body='<tr><td>'+imported+'</td></tr>'
     unsubscribe='Unsubscribe — production link not activated (layout/test only).'
     footer='<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial"><strong>'+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'
@@ -139,9 +139,13 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     logo=cfg.get('logo','')
     header=('<img src="'+e(logo)+'" alt="Sports Cave" width="180" style="max-width:180px;height:auto">') if asset_url(logo) and not images_off else 'SPORTS CAVE'
     header_row='<tr><td style="padding:22px 24px;background:#171717;color:#fff;border-bottom:3px solid '+accent+';font:700 20px Arial">'+header+'<p style="font:11px Arial;color:#dfc986">CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED</p></td></tr>'
-    if 'html_sections' in doc:header_row=''
+    if 'html_sections' in doc:
+        header_row=''
+        footer=''  # Footer is already rendered in the editable section, once.
     html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">'+e(c['preheader'])+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff">'+header_row+body+footer+'</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
     text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain,cfg['business'],cfg['postal'] or 'Business postal address not configured',cfg['website'],cfg['contact'],'You’re receiving this marketing email because you subscribed to Sports Cave updates.',unsubscribe])
+    if 'html_sections' in doc:
+        text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain])
     return {'subject':'[CAMPAIGN TEST] '+c['subject'],'html':html,'text':text}
 
 
@@ -187,7 +191,7 @@ def preflight(doc, env=None, cfg=None):
         _,plain,html_checks=import_html(doc.get('custom_html',''))
         if 'html_sections' in doc:
             from crm_campaign_sections import import_sections
-            _,plain,html_checks=import_sections(doc)
+            _,plain,html_checks=import_sections(doc,cfg=cfg)
         checks.update(html_checks)
         checks['Plain-text alternative generated']=bool(plain.strip())
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']

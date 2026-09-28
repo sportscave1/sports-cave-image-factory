@@ -75,16 +75,16 @@ the preview renderer output. No test email was actually sent.
 
 ## Footer protection and compatibility
 
-`{{SYSTEM_FOOTER}}` is restored when missing from a saved Footer template. More
-importantly, the mandatory footer is always rendered outside user-controlled
-balanced fragments, so deleting, duplicating, nesting or hiding the token cannot
-remove or hide the system identity, configured postal/contact information,
-marketing disclosure or unsubscribe information. Configured privacy/social links
-continue to use the existing implementation.
+Footer protection now lives inside the editable template through inline identity,
+contact, address, disclosure and unsubscribe placeholders. Missing fields are
+restored inline; hidden/invalid compliance markup blocks test readiness. There is
+no separate appended visual footer. Legacy `{{SYSTEM_FOOTER}}` sources convert
+in memory and persist through explicit save. See [One editable campaign footer](CRM_SINGLE_FOOTER.md).
 
 No production unsubscribe URL is fabricated. Existing test-only unsubscribe
-wording and live-delivery preflight blocks remain. Missing postal information is
-still flagged. Required compliance details come from the existing safe settings.
+live-delivery preflight blocks remain. Missing postal information is flagged in
+preflight, not as a permanent email design block. Required compliance details
+come from the existing safe settings.
 
 Existing full-HTML campaigns stay on their original rendering path. Defaults are
 not retroactively wrapped around saved campaigns, and no stored draft is migrated

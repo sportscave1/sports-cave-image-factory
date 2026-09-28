@@ -15,11 +15,11 @@ operation or email send was performed for this change.
 - HTML has collapsed Header, expanded Body and collapsed Footer sections.
   New bodies are empty. Header defaults use the existing configured logo or
   SPORTS CAVE text and existing test-only branding; no invented assets.
-- Footer starts with `{{SYSTEM_FOOTER}}`. Optional editable footer HTML is
-  sanitized independently; mandatory configured identity, address, contact,
-  disclosure and unsubscribe content is appended outside it exactly once.
-  Removing, duplicating or hiding the token cannot remove the locked footer.
-  Existing production-unsubscribe gating remains unchanged.
+- Footer now starts from an editable branded HTML template with inline protected
+  compliance placeholders. The previous separate `{{SYSTEM_FOOTER}}` layer is
+  superseded by [one editable footer](CRM_SINGLE_FOOTER.md). Missing placeholders
+  are restored inline and hidden content blocks tests. Existing production
+  unsubscribe gating remains unchanged.
 - Desktop and Mobile icon buttons select 600px and 390px previews. Outgoing
   HTML stays responsive; 430/375/320 support remains.
 - Header and footer sources use optional `html_sections` in existing document

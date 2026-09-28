@@ -4,8 +4,7 @@ import re
 from crm_campaign_html import import_html
 from crm_tracking import asset_url
 
-FOOTER_TOKEN = '{{SYSTEM_FOOTER}}'
-DEFAULT_FOOTER = '<!-- Add optional footer content above the protected Sports Cave compliance footer. -->\n' + FOOTER_TOKEN
+from crm_campaign_footer import LEGACY_TOKEN as FOOTER_TOKEN, DEFAULT_FOOTER, render_footer
 
 
 def section_defaults(cfg):
@@ -22,15 +21,17 @@ def section_defaults(cfg):
     return {'header': header, 'footer': DEFAULT_FOOTER}
 
 
-def import_sections(doc, *, images_off=False, campaign_key=''):
-    """Sanitize sections independently; user markup cannot wrap the locked footer."""
+def import_sections(doc, *, images_off=False, campaign_key='', cfg=None, unsubscribe_url=None):
+    """Balance each section independently and validate inline footer compliance."""
     sections = doc['html_sections']
     header, header_text, header_checks = import_html(sections['header'], images_off=images_off, campaign_key=campaign_key)
     body, body_text, checks = import_html(doc.get('custom_html', ''), images_off=images_off, campaign_key=campaign_key)
-    footer, footer_text, footer_checks = import_html(sections['footer'].replace(FOOTER_TOKEN, ''), images_off=images_off, campaign_key=campaign_key)
+    if cfg is None:
+        from crm_campaign_content import settings
+        cfg=settings()
+    footer, footer_text, footer_checks = render_footer(sections['footer'],cfg,images_off=images_off,unsubscribe_url=unsubscribe_url)
     for label in checks:
         if label != 'HTML content present':
             checks[label] = checks[label] and header_checks[label] and footer_checks[label]
-    # The mandatory footer is always appended separately by render_campaign, even
-    # if its token is removed, duplicated or nested inside hidden/malformed HTML.
+    checks['Footer compliance placeholders visible']=footer_checks['Footer compliance placeholders visible']
     return header + body + footer, '\n\n'.join(t for t in (header_text, body_text, footer_text) if t), checks

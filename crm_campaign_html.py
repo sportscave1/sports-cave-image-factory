@@ -11,6 +11,7 @@ from crm_tracking import public_https, asset_url, campaign_link
 
 TAGS = set('table tbody thead tfoot tr td th div p span font h1 h2 h3 h4 strong b em i u s br hr a img ul ol li blockquote center'.split())
 VOID = {'br', 'hr', 'img'}
+TEMPLATE_LINK_TOKENS = frozenset({'{{UNSUBSCRIBE_URL}}', '{{WEBSITE_URL}}', '{{CONTACT_URL}}', '{{PRIVACY_URL}}'})
 CSS = set('color background background-color font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform vertical-align display padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-color border-width border-style border-radius border-collapse border-spacing width max-width min-width height max-height'.split())
 
 
@@ -29,10 +30,11 @@ def email_image_url(value):
 
 
 class EmailHTML(HTMLParser):
-    def __init__(self, images_off=False, campaign_key=""):
+    def __init__(self, images_off=False, campaign_key="", template_links=()):
         super().__init__(convert_charrefs=True)
         self.parts=[]; self.plain=[]; self.stack=[]; self.skipped=[]
         self.images_off=images_off; self.campaign_key=campaign_key; self.links=0
+        self.template_links=frozenset(template_links) & TEMPLATE_LINK_TOKENS
         self.checks={'HTML content present':False, 'HTML contains only safe email markup':True,
                      'Image alt text complete':True, 'Images use durable public JPEG/PNG URLs':True,
                      'CTA label and HTTPS URL valid':True}
@@ -71,6 +73,8 @@ class EmailHTML(HTMLParser):
             elif tag=='font' and name=='size' and re.fullmatch(r'[1-7]',value):safe.append((name,value))
             elif tag=='a' and name=='target' and value in {'_blank','_self'}:safe.extend([(name,value),('rel','noopener noreferrer')])
             elif name=='href' and tag=='a':
+                if value in self.template_links:
+                    safe.append((name,value));continue
                 self.checks['CTA label and HTTPS URL valid'] &= public_https(value)
                 if public_https(value):
                     self.links+=1
@@ -108,7 +112,7 @@ class EmailHTML(HTMLParser):
             self.checks['HTML content present'] |= bool(data.strip())
 
 
-def import_html(source, *, images_off=False, campaign_key=""):
-    parser=EmailHTML(images_off,campaign_key);parser.feed(source);parser.close()
+def import_html(source, *, images_off=False, campaign_key="", template_links=()):
+    parser=EmailHTML(images_off,campaign_key,template_links);parser.feed(source);parser.close()
     markup=''.join(parser.parts)+''.join('</'+t+'>' for t in reversed(parser.stack))
     return markup, ''.join(parser.plain).strip(), parser.checks

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from crm_campaign_content import render_campaign, settings, preflight, validate_document
 from crm_campaign_sections import section_defaults, FOOTER_TOKEN
+from crm_campaign_footer import prepare_footer
 from crm_html_workspace import PREVIEW_WIDTHS
 from tests.test_crm_simple_editor import document, HTML
 from tests.test_crm_resend_marketing import ENV
@@ -38,7 +39,7 @@ class SectionTests(unittest.TestCase):
         doc = sectioned()
         self.assertIn('SPORTS CAVE', doc['html_sections']['header'])
         self.assertNotIn('<img', doc['html_sections']['header'])
-        self.assertIn(FOOTER_TOKEN, doc['html_sections']['footer'])
+        self.assertIn('{{UNSUBSCRIBE_URL}}', doc['html_sections']['footer'])
         doc['custom_html'] = ''
         self.assertFalse(preflight(doc, ENV)['test_ready'])
 
@@ -98,6 +99,7 @@ class SectionPersistenceTests(unittest.TestCase):
         doc = sectioned()
         doc['custom_html'] = '\r\n' + HTML + '\n  '
         doc['html_sections'] = {'header':' <h1>My header</h1>\r\n', 'footer':'<p>Closing note</p>\n' + FOOTER_TOKEN}
+        doc['html_sections']['footer']=prepare_footer(doc['html_sections']['footer'])
         row = self.store.save(ADMIN, 'Sections persistence', doc, env=ENV)
         self.assertEqual(self.store.draft(row['id'])['document'], doc)
         changed = deepcopy(doc); changed['html_sections']['header'] += '<p>Edited header</p>'
@@ -140,7 +142,7 @@ class SectionPersistenceTests(unittest.TestCase):
         self.assertFalse(at.exception)
         saved = self.store.draft(at.session_state['campaign_editor']['id'])['document']
         self.assertEqual(saved['custom_html'], HTML)
-        self.assertEqual(saved['html_sections'], {'header':'<p>Saved header</p>\n', 'footer':'<p>Saved footer</p>'})
+        self.assertEqual(saved['html_sections'], {'header':'<p>Saved header</p>\n', 'footer':prepare_footer('<p>Saved footer</p>')})
         at.run(); self.assertEqual(at.session_state['campaign_editor']['document'], saved)
         old = self.store.save(ADMIN, 'Legacy full HTML', document(), env=ENV)
         fresh = AppTest.from_string(SCRIPT); fresh.session_state['route']='CRM Campaigns'

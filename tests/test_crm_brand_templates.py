@@ -106,7 +106,8 @@ class BrandTemplateTests(unittest.TestCase):
             self.assertNotEqual(self.store.default_sections(self.cfg)[kind],doc['html_sections'][kind])
             with self.assertRaises(ValueError):self.store.delete_section_template(ADMIN,edited['id'],2,confirmed=True)
         self.assertEqual(self.store.draft(campaign['id'])['document'],campaign['document'])
-        self.assertIn(FOOTER_TOKEN,footer['content']['html'])
+        self.assertNotIn(FOOTER_TOKEN,footer['content']['html'])
+        self.assertIn('{{UNSUBSCRIBE_URL}}',footer['content']['html'])
         output=render_campaign(doc,self.cfg)['html']
         self.assertEqual(output.count('Unsubscribe'),1)
         self.assertEqual(output.count('You’re receiving this marketing email'),1)
