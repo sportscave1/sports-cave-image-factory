@@ -1,0 +1,8 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": false,
+  "[json]": { "files.trimTrailingWhitespace": true },
+  "[jsonc]": { "files.trimTrailingWhitespace": true }
+}

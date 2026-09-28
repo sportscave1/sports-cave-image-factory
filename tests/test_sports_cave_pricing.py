@@ -1,5 +1,6 @@
 from copy import deepcopy
 import unittest
+from unittest.mock import patch
 
 import shopify_sync
 import sports_cave_pricing
@@ -149,9 +150,14 @@ class SportsCavePricingTests(unittest.TestCase):
 
     def test_dry_run_does_not_call_shopify_update(self):
         product = standard_product(price="0.00", compare_at_price="0.00")
-        summary = sports_cave_pricing.summarize_price_backfill([product])
-        self.assertEqual(summary["variants_needing_update"], 12)
+        original = deepcopy(product)
+        with patch("requests.sessions.Session.request", side_effect=AssertionError("No live requests")) as request:
+            summary = sports_cave_pricing.summarize_price_backfill([product])
+        # Four sizes across Black/Oak/White/Unframed, all initially priced at zero.
+        self.assertEqual(summary["variants_needing_update"], 16)
         self.assertEqual(summary["products_scanned"], 1)
+        self.assertEqual(product, original)
+        request.assert_not_called()
 
     def test_apply_only_updates_price_and_compare_at_price(self):
         requests_seen = []

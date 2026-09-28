@@ -141,7 +141,9 @@ class SqlWorkspaceTests(unittest.TestCase):
     def test_recent_open_uses_same_editor_and_protects_unsaved_compose(self):
         saved=self.draft();at=self.app()
         next(t for t in at.text_input if t.label=='Subject').set_value('Keep this local edit').run()
-        table_key=next(k for k in at.session_state.filtered_state if k.startswith('recent_campaigns_'))
+        # Current AppTest exposes mapping keys; retain support for older Streamlit.
+        keys=at.session_state.keys() if callable(getattr(at.session_state,'keys',None)) else at.session_state.filtered_state
+        table_key=next(k for k in keys if k.startswith('recent_campaigns_'))
         at.session_state[table_key]={'selection':{'rows':[],'columns':[],'cells':[[0,'Campaign']]}};at.run()
         self.assertIsNone(at.session_state['campaign_editor']['id'])
         self.assertTrue(any('Save your changes first' in w.value for w in at.warning))

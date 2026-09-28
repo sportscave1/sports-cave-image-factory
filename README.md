@@ -79,6 +79,21 @@ worker, and daily cron are recorded in
 `python scripts/validate_render_topology.py` before any Blueprint sync. Do not
 rename the primary Render service to rebrand the application.
 
+## Deploy from Windows / VS Code
+
+From this repository on `main`, use one command after reviewing your changes:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
+```
+
+This tracked helper fetches, checks, commits only actual changes, pushes, and
+verifies `HEAD == origin/main`. A clean tree exits successfully without a commit
+or push. Do not append another `git commit` command. Git push success is separate
+from Render build success. For selected paths, staging behaviour, check-only
+mode, recovery after a rejected push, and the September build investigation, see
+[`docs/DEPLOY_WORKFLOW.md`](docs/DEPLOY_WORKFLOW.md).
+
 ## Daily Staff Reporting
 
 The owner-only Reporting page, Resend delivery, Supabase archive, and manual
