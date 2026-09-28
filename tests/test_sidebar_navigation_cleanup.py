@@ -66,19 +66,11 @@ class SidebarNavigationCleanupTests(unittest.TestCase):
         self.assertIn('st.rerun(scope="app")', disclosure_source)
 
     def test_disclosure_parent_style_uses_normal_sidebar_button_colours(self):
-        css_start = APP_SOURCE.index(
-            'section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] {'
-        )
-        css_end = APP_SOURCE.index(
-            'section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"] button::after',
-            css_start,
-        )
-        disclosure_css = APP_SOURCE[css_start:css_end]
-
-        self.assertIn("background: transparent;", disclosure_css)
-        self.assertNotIn("#EAE7E0", disclosure_css)
-        self.assertNotIn("background: transparent !important", disclosure_css)
-        self.assertNotIn("border-color: transparent !important", disclosure_css)
+        from sidebar_theme import SIDEBAR_CSS
+        self.assertIn('--sidebar-panel:#272826', SIDEBAR_CSS)
+        self.assertIn('[class*="st-key-sidebar-disclosure-"]', SIDEBAR_CSS)
+        self.assertIn('[class*="-children"]', SIDEBAR_CSS)
+        self.assertNotIn('st-key-sidebar-disclosure-crm', SIDEBAR_CSS)
 
     def test_remaining_child_routes_and_deep_route_metadata_are_unchanged(self):
         self.assertIn(

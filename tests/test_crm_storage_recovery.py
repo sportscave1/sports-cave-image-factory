@@ -83,7 +83,7 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('No ex
             self.assertTrue({'Campaigns','Flows','Settings'}.issubset({b.label for b in at.button}))
             if route=='CRM Campaigns':
                 self.assertTrue(next(b for b in at.button if b.label=='+ New Campaign').disabled)
-                self.assertTrue(any('LIVE MARKETING DELIVERY: DISABLED' in w.value for w in at.caption))
+                self.assertTrue(any('Marketing delivery OFF' in w.value for w in at.caption))
             at.run();self.assertFalse(at.exception)
 
 

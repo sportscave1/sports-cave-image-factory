@@ -101,9 +101,10 @@ class SidebarDisclosureTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("@st.fragment\ndef _render_sidebar_create_growth", source)
         self.assertIn("button::after", source)
-        self.assertIn("transform: rotate(-45deg)", source)
-        self.assertIn("transform: rotate(45deg)", source)
-        self.assertIn("transition: transform 140ms ease", source)
+        from sidebar_theme import SIDEBAR_CSS
+        self.assertIn("transform:rotate(45deg)", SIDEBAR_CSS)
+        self.assertIn("transform:rotate(225deg)", SIDEBAR_CSS)
+        self.assertIn("transition:transform 150ms ease", SIDEBAR_CSS)
         self.assertIn('aria-expanded=', source)
         self.assertIn('aria-controls=', source)
         self.assertNotIn('"v" if expanded else ">"', source)

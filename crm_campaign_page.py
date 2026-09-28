@@ -21,7 +21,9 @@ from crm_logic import now
 
 def open_editor(row):
     st.session_state['campaign_list_generation']=st.session_state.get('campaign_list_generation',0)+1
+    from crm_html_workspace import html_document
     st.session_state['campaign_editor']=deepcopy(row)
+    st.session_state['campaign_editor']['document']=html_document(row['document'])
     st.session_state['campaign_saved']=deepcopy(row)
     st.session_state['campaign_edit_key']=str(uuid.uuid4())
 
@@ -31,9 +33,78 @@ def dirty(editor):
     return editor.get('document')!=saved.get('document') or editor.get('name')!=saved.get('name')
 
 
+def test_panel(store,user,editor,key,cfg,pending=None):
+    """Collect intent only; dispatch happens after all editor widgets are read."""
+    from hashlib import sha256
+    doc=editor['document']
+    digest=sha256(json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True).encode()).hexdigest()[:16]
+    doc['copy_reviewed']=st.checkbox('Copy and subject reviewed',doc['copy_reviewed'],key=key+'review_'+digest)
+    try:checks=preflight(doc,cfg=cfg)
+    except ValueError as exc:
+        st.caption(str(exc));return None
+    with st.expander('Checks'):
+        for label,ok in checks['test'].items():st.caption(('✓ ' if ok else '○ ')+label)
+        st.caption('Live sending disabled. Production unsubscribe must be activated before any future live send.')
+    if not os_accounts.is_admin(user):st.caption('Admin internal tests only.');return None
+    with st.form(key+'internal_test'):
+        recipient=st.text_input('Test recipient',value='')
+        confirmed=st.checkbox('One approved internal mailbox only')
+        send=st.form_submit_button('Send internal test',disabled=not checks['test_ready'] or bool(editor.get('archived_at')))
+    if dirty(editor) if pending is None else pending:st.caption('Save reviewed content before testing.')
+    if st.button('New test attempt',key=key+'new_test'):st.session_state[key+'test_operation']=str(uuid.uuid4())
+    if st.session_state.get(key+'receipt'):st.success(st.session_state[key+'receipt'])
+    return {'recipient':recipient,'confirmed':confirmed} if send else None
+
+
+def perform_test(store,user,editor,key,request):
+    from crm_resend_marketing import DeliveryError
+    saved=store.draft(editor['id'])
+    if saved['document']!=editor['document'] or saved['version']!=editor['version']:st.warning('Save current content and review before sending a test.');return
+    try:
+        operation=st.session_state.setdefault(key+'test_operation',str(uuid.uuid4()))
+        result=store.test_campaign(user,editor['id'],editor['version'],operation_id=operation,**request)
+        st.session_state[key+'receipt']='Test accepted by Resend · '+result['message_id']+' · '+str(result['accepted_at'])
+        editor['status']=store.draft(editor['id'])['status']
+        if not result['audit_saved']:st.warning('Test accepted; receipt storage needs review. Do not resend.')
+        else:st.success(st.session_state[key+'receipt'])
+    except (ValueError,PermissionError,StoreUnavailable,DeliveryError) as exc:st.warning(str(exc))
+
+
+def html_templates(store,user,editor,key):
+    from crm_html_workspace import html_document
+    doc=editor['document'];templates=store.templates()
+    if templates:
+        selected=st.selectbox('Saved templates',templates,format_func=lambda t:t['name'],key=key+'html_template')
+        confirmed=st.checkbox('Replace current HTML and subject',key=key+'replace_html')
+        if st.button('Load template',disabled=not confirmed):
+            snapshot=html_document(store.template_document(selected))
+            doc.update(custom_html=snapshot['custom_html'],content_mode='HTML',content=snapshot['content'],template_ref={'id':str(selected['id']),'name':selected['name'],'version':selected['version']})
+            reset_widgets();st.rerun()
+    if os_accounts.can_access_page(user,'crm_templates_manage'):
+        name=st.text_input('Template name',key=key+'template_name')
+        if st.button('Save as template',disabled=dirty(editor)):store.save_design(user,name,doc);st.success('Template saved')
+
+
+@st.dialog('Delete draft')
+def delete_dialog(store,user,editor):
+    st.write('Delete “'+editor['name']+'”?')
+    st.warning('This permanently deletes this draft and its draft revisions. This cannot be undone. Delivery and test history cannot be deleted here.')
+    with st.container(horizontal=True):
+        cancel=st.button('Cancel')
+        confirm=st.button('Delete draft',type='primary',key='confirm_delete_'+str(editor['id']))
+    if cancel:st.rerun()
+    if confirm:
+        try:
+            result=store.delete_draft(user,editor['id'],editor['version'],confirmed=True,confirmed_name=editor['name'])
+            st.session_state.pop('campaign_editor',None);st.session_state.pop('campaign_saved',None)
+            st.session_state['campaign_delete_notice']='Draft deleted.' if result['audit_saved'] else 'Draft deleted. Activity log could not be recorded.'
+            st.rerun()
+        except (ValueError,StoreUnavailable) as exc:st.error(str(exc))
+
+
 def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     drafts=CampaignStore(store.connect)
-    st.caption('Marketing delivery OFF / Internal tests only / LIVE MARKETING DELIVERY: DISABLED')
+    st.caption('● Marketing delivery OFF · Tests only')
     try:
         drafts.setting('sending')
     except StoreUnavailable as exc:
@@ -43,6 +114,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         if st.session_state.get('campaign_editor'):
             st.info('Your open draft remains in this session. Saving is disabled until storage is available.')
         return
+    if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
     editor=st.session_state.get('campaign_editor')
     if not editor:
         top=st.columns([2,5,2])
@@ -60,14 +132,14 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         page=drafts.list_drafts(status=='ARCHIVED',search=search,status=status,market=market,offset=offset,limit=26)
         rows=page[:25]
         if not rows:st.info('No matching campaigns. Create a draft to begin.');return
-        columns=st.columns([4,1.5,1,2,2])
-        for col,label in zip(columns,('Campaign','Status','Market','Updated','Last test')):col.caption(label)
+        columns=st.columns([4,1.3,2,1,2,2])
+        for col,label in zip(columns,('Campaign','Status','Audience','Market','Updated','Last test')):col.caption(label)
         with st.container(height=min(420,48*len(rows)+12),border=False):
             for row in rows:
-                cols=st.columns([4,1.5,1,2,2])
+                cols=st.columns([4,1.3,2,1,2,2])
                 if cols[0].button(row['name'],key='open_'+str(row['id']),type='tertiary'):
                     open_editor(row);st.rerun()
-                for col,value in zip(cols[1:],(row['status'],row['document']['market'],str(row['updated_at'])[:16],str(row['last_tested_at'] or 'Not tested')[:16])):col.caption(value)
+                for col,value in zip(cols[1:],(row['status'],row['document']['audience'].get('name','All subscribed'),row['document']['market'],str(row['updated_at'])[:16],str(row['last_tested_at'] or 'Not tested')[:16])):col.caption(value)
         if offset or len(page)>25:
             previous,following=st.columns(2)
             if previous.button('Previous campaigns',disabled=offset==0):st.session_state['campaign_list_offset']=max(0,offset-25);st.rerun()
@@ -84,68 +156,69 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         if b.button('Discard and continue'):
             st.session_state['campaign_editor']=deepcopy(st.session_state['campaign_saved']);st.session_state.pop('crm_requested_route',None);navigate(target);return
         if c.button('Keep editing'):st.session_state.pop('crm_requested_route',None);st.rerun()
-    cfg=drafts.render_settings()
-    st.html('<style>.st-key-crm-workspace,.st-key-crm-workspace [data-testid="stVerticalBlock"]{gap:.35rem}.st-key-crm-workspace p{margin-bottom:.2rem}.st-key-crm-workspace button[kind="primary"]{background:#d6a548;border-color:#d6a548;color:#171717}</style>')
-    header=st.columns([7,1,2])
-    editor['name']=header[0].text_input('Campaign name',editor['name'],max_chars=150,key=key+'name',label_visibility='collapsed')
-    header[1].caption(editor['status'])
-    with header[2].popover('More'):
-        duplicate_requested=st.button('Duplicate campaign',disabled=dirty(editor))
-        archive_requested=st.button('Archive campaign',disabled=bool(editor['archived_at']) or dirty(editor))
-        restore_requested=bool(editor['archived_at']) and st.button('Restore campaign')
-        with st.expander('Version history'):st.dataframe(drafts.history(editor['id']),hide_index=True)
-        if st.button('Report'):st.session_state[key+'report']=True
-    if st.session_state.get(key+'report'):
-        from crm_settings_page import campaign_report
-        with st.expander('Campaign report',expanded=True):campaign_report(drafts,shop,actions.user,editor['id'])
-    c=doc['content'];before=json.dumps(doc,sort_keys=True)
+    from crm_html_workspace import canvas,workspace_styles
+    cfg=drafts.render_settings();workspace_styles()
+    c=doc['content'];before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
+    title,status=st.columns([8,1])
+    editor['name']=title.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name',label_visibility='collapsed')
+    status.caption(editor['status'])
     a,b=st.columns(2)
     c['subject']=a.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
     c['preheader']=b.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
-    counts=doc.get('counts',{})
-    st.caption('Audience: '+doc['audience'].get('name','All subscribed')+' / '+doc['market']+' / '+('Eligible: '+str(counts['eligible']) if counts.get('complete') else 'Not calculated'))
-    with st.expander('Advanced settings'):
-        doc['market']=st.selectbox('Market',MARKETS,index=MARKETS.index(doc['market']),key=key+'market')
-        doc['type']=st.selectbox('Purpose',TYPES,index=TYPES.index(doc['type']),key=key+'purpose')
-        audience_editor(shop,drafts,doc,key)
-        with st.expander('Templates, prompt factory and campaign details'):
-            message_editor(shop,drafts,actions.user,editor,key,cfg)
-    left,right=st.columns([6,4],gap='medium')
-    with left:
-        doc['content_mode']=st.radio('Content mode',('HTML','Blocks'),index=0 if doc.get('content_mode')=='HTML' else 1,horizontal=True,key=key+'mode')
-        st.caption('Both designs are retained. Only the selected mode is previewed and tested.')
-        if doc['content_mode']=='HTML':
-            from pathlib import Path
-            html_editor=components.declare_component('crm_html_editor',path=str(Path(__file__).parent/'components'/'crm_html_editor'))
-            doc['custom_html']=html_editor(source=doc.get('custom_html',''),key=key+'html',default=doc.get('custom_html',''))
-            st.caption('Inline email styles retained; scripts and head styles excluded. System footer always appended.')
-        else:block_editor(shop,doc,key)
-        if before!=json.dumps(doc,sort_keys=True):doc['copy_reviewed']=False;st.session_state[key+'review']=False
-        doc['copy_reviewed']=st.checkbox('I reviewed facts, offer and subject for accuracy',doc['copy_reviewed'],key=key+'review')
-    with right:
-        try:layout_preview(doc,cfg,key)
-        except ValueError as exc:st.warning(str(exc))
     with st.container(horizontal=True,gap='small'):
         save=st.button('Save draft',type='primary',disabled=bool(editor['archived_at']))
-        st.button('Preview')
-        test=st.button('Send test',disabled=not os_accounts.is_admin(actions.user) or bool(editor['archived_at']))
-        close=st.button('Back to campaigns')
-        st.caption('Unsaved changes' if dirty(editor) else 'Saved / revision '+str(editor['version']))
+        if st.button('Preview'):st.session_state[key+'view']='Preview'
+        if st.button('Send test',disabled=not os_accounts.is_admin(actions.user)):st.session_state[key+'show_test']=True
+        close=st.button('Back')
+        indicator=st.empty()
+    with st.container(horizontal=True,gap='small',key='crm-email-layout'):
+        with st.container(width=250,height=540,border=False,key='crm-email-controls'):
+            with st.expander('Details'):
+                doc['market']=st.selectbox('Market',MARKETS,index=MARKETS.index(doc['market']),key=key+'market')
+                doc['type']=st.selectbox('Purpose',TYPES,index=TYPES.index(doc['type']),key=key+'purpose')
+                doc['notes']=st.text_area('Notes',doc['notes'],height=90,key=key+'notes')
+                doc['offer']=st.text_input('Offer',doc['offer'],key=key+'offer')
+                doc['offer_reviewed']=st.checkbox('Offer verified',doc['offer_reviewed'],key=key+'offer_reviewed')
+            counts=doc.get('counts',{})
+            st.caption(doc['audience'].get('name','All subscribed')+' · '+doc['market'])
+            st.caption('Eligible: '+str(counts['eligible']) if counts.get('complete') else 'Eligible: not calculated')
+            with st.expander('Audience'):
+                audience_editor(shop,drafts,doc,key,compact=True)
+            with st.expander('Test',expanded=st.session_state.get(key+'show_test',False)):
+                test_request=test_panel(drafts,actions.user,editor,key,cfg)
+            with st.expander('More'):
+                duplicate_requested=st.button('Duplicate',disabled=dirty(editor))
+                archive_requested=st.button('Archive',disabled=bool(editor['archived_at']) or dirty(editor))
+                restore_requested=bool(editor['archived_at']) and st.button('Restore')
+                delete_requested=st.button('Delete draft',disabled=editor['status']!='DRAFT' or bool(editor['archived_at']) or dirty(editor) or bool(editor.get('last_tested_at')))
+                with st.expander('Version history'):st.dataframe(drafts.history(editor['id']),hide_index=True)
+                with st.expander('Reports'):
+                    from crm_settings_page import campaign_report
+                    if st.button('Load report'):st.session_state[key+'report']=True
+                    if st.session_state.get(key+'report'):campaign_report(drafts,shop,actions.user,editor['id'])
+            with st.expander('Templates'):
+                html_templates(drafts,actions.user,editor,key)
+        with st.container(width='stretch'):
+            canvas(doc,cfg,key)
+    if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):
+        # A review made against older content cannot authorize changed content.
+        doc['copy_reviewed']=False
+    indicator.caption('Unsaved' if dirty(editor) else 'Saved')
     if save:
         try:
             updated=drafts.save(actions.user,editor['name'],doc,editor['id'],editor['version'])
             st.session_state['campaign_editor']=deepcopy(updated);st.session_state['campaign_saved']=deepcopy(updated)
-            st.session_state[key+'save_notice']='Saved';st.rerun()
-        except (ValueError,StoreUnavailable) as exc:st.error('Save failed - your edits are retained. '+str(exc))
-    if st.session_state.pop(key+'save_notice',None):st.success('Saved. Your draft is stored in the CRM database.')
-    if duplicate_requested or archive_requested or restore_requested:
-        if dirty(editor):st.warning('Save or discard your pending edits before using this action.')
+            st.toast('Draft saved');st.rerun()
+        except (ValueError,StoreUnavailable) as exc:st.error('Save failed; your edits are retained. '+str(exc))
+    if test_request:perform_test(drafts,actions.user,editor,key,test_request)
+    if duplicate_requested or archive_requested or restore_requested or delete_requested:
+        if dirty(editor):st.warning('Save or discard pending edits first.')
         elif duplicate_requested:open_editor(drafts.duplicate(actions.user,editor['id']));st.rerun()
         elif archive_requested:
             drafts.archive(actions.user,editor['id'],editor['version']);st.session_state.pop('campaign_editor',None);st.rerun()
-        else:
+        elif restore_requested:
             drafts.restore(actions.user,editor['id'],editor['version']);open_editor(drafts.draft(editor['id']));st.rerun()
-    if test:test_dialog(drafts,actions.user,editor,key,cfg)
+        elif delete_requested:delete_dialog(drafts,actions.user,editor)
     if close:st.session_state[key+'close_requested']=True
     if st.session_state.get(key+'close_requested'):
         if dirty(editor):
@@ -154,17 +227,18 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         else:st.session_state.pop('campaign_editor',None);st.rerun()
 
 
-def audience_editor(shop,store,doc,key):
-    st.caption('RECIPIENTS · Existing Shopify customers and consent. No recipient list is stored with a draft.')
-    a,b=st.columns([3,1]);a.write('Include segments as a union. Exclusions always win.')
+def audience_editor(shop,store,doc,key,compact=False):
+    if not compact:st.caption('RECIPIENTS · Existing Shopify customers and consent. No recipient list is stored with a draft.')
+    a,b=(st.container(),st.container()) if compact else st.columns([3,1])
+    if not compact:a.write('Include segments as a union. Exclusions always win.')
     old_hours=doc.get('smart_hours',16)
     doc['smart_hours']=int(b.number_input('Smart Sending · hours',1,168,int(old_hours),key=key+'frequency'))
     if old_hours!=doc['smart_hours']:doc['counts']={};st.session_state.pop(key+'count',None)
-    st.caption('Default 16 hours · based only on actual Sports Cave OS marketing sends, including future campaigns and flows. Excludes internal tests, support and transactional emails. External Klaviyo / Shopify Email history is not included.')
+    if not compact:st.caption('Default 16 hours · based only on actual Sports Cave OS marketing sends, including future campaigns and flows. Excludes internal tests, support and transactional emails. External Klaviyo / Shopify Email history is not included.')
     mode=st.radio('Audience source',('All subscribed / filters','Saved segments'),horizontal=True,key=key+'source')
     current=json.dumps(doc['audience'],sort_keys=True)
     if mode.startswith('All'):
-        cols=st.columns(4)
+        cols=[st.container() for _ in range(4)] if compact else st.columns(4)
         country=cols[0].selectbox('Country',('Any','AU','US','GB'),key=key+'country')
         sport=cols[1].selectbox('Interest / sport',('Any',*SPORTS),key=key+'sport')
         orders=cols[2].number_input('Minimum orders',0,10000,key=key+'orders')
@@ -184,7 +258,7 @@ def audience_editor(shop,store,doc,key):
         st.session_state[key+'segment_cursor']=page['pageInfo'].get('endCursor') if page['pageInfo'].get('hasNextPage') else None
     options=st.session_state.get(key+'segments',[])
     if options:
-        cols=st.columns(2)
+        cols=[st.container(),st.container()] if compact else st.columns(2)
         included=cols[0].multiselect('Include segments',range(len(options)),format_func=lambda i:options[i]['name'],key=key+'include')
         excluded=cols[1].multiselect('Exclude segments',range(len(options)),format_func=lambda i:options[i]['name'],key=key+'exclude')
         if st.button('Apply segment selection'):
@@ -193,7 +267,7 @@ def audience_editor(shop,store,doc,key):
     if current!=json.dumps(doc['audience'],sort_keys=True):doc['counts']={};st.session_state.pop(key+'count',None)
     selection=doc['audience'] if doc['audience']['kind']=='Selection' else {'kind':'Selection','name':doc['audience']['name'],'include':[doc['audience']],'exclude':[]}
     st.caption('Selected: '+selection['name']+' · Only explicit SUBSCRIBED profiles are eligible. Purchase is not consent.')
-    a,b=st.columns(2);restart=a.button('Recalculate eligibility');previous=st.session_state.get(key+'count')
+    a,b=(st.container(),st.container()) if compact else st.columns(2);restart=a.button('Recalculate eligibility');previous=st.session_state.get(key+'count')
     more=b.button('Continue calculation',disabled=not previous or previous.get('complete',False))
     if restart or more:
         doc['counts']={}
@@ -202,8 +276,10 @@ def audience_editor(shop,store,doc,key):
         if state['complete']:doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
         st.rerun()
     state=st.session_state.get(key+'count',doc['counts']);complete=state.get('complete',False)
-    cols=st.columns(3)
-    for col,label,value in zip(cols,('Matched profiles','Eligible estimate','Excluded'),(state.get('members','—'),state.get('eligible','—') if complete else 'Unavailable',sum(state.get('excluded',{}).values()) if complete else 'Unavailable')):col.metric(label,value)
+    cols=[st.container() for _ in range(3)] if compact else st.columns(3)
+    for col,label,value in zip(cols,('Matched profiles','Eligible estimate','Excluded'),(state.get('members','—'),state.get('eligible','—') if complete else 'Unavailable',sum(state.get('excluded',{}).values()) if complete else 'Unavailable')):
+        if compact:col.caption(label+': '+str(value))
+        else:col.metric(label,value)
     st.caption(('Complete' if complete else 'Not calculated / partial — continue all pages, including consent verification')+' · '+state.get('checked_at','')+' · Always recheck consent, suppression and frequency before future dispatch.')
     with st.expander('Exclusion reasons + calculation detail'):
         st.json({'primary_reasons':state.get('excluded',{}),'diagnostics':state.get('diagnostics',{}),'pages_scanned':state.get('pages',0)})

@@ -1,38 +1,50 @@
-# Campaigns V1 simplified editor
+# Campaigns V1 HTML workspace
 
-Implemented locally. No commit, push, deployment, production database mutation or real email send.
+Implemented locally. No commit, push, deployment, production database mutation or email send. No migrations required.
 
-## Workflow
+## Primary workflow and layout
 
-New Campaign saves an Untitled campaign DRAFT and immediately opens one editor. Subject and Preview text are blank. HTML is the initial mode. Campaign names in the compact list open their editor directly; optional filters are in a popover. The grouped actions are Save draft, Preview, Send test and Back to campaigns. Duplicate, archive, restore, history and reports remain under More. Pending edits must be saved or discarded before destructive navigation/actions.
+Campaigns uses a compact clickable campaign list with Campaign, Status, Audience, Market, Updated and Last test columns. Filters are optional. New Campaign saves an Untitled campaign DRAFT and immediately opens blank HTML, subject and preview text. No wizard, Blocks tab, drag tray or side-by-side preview appears in the primary editor.
 
-Audience, market, purpose, segments, country/sport/order/last-purchase filters, exclusions, Smart Sending and eligibility stay under Advanced settings. Existing templates, Shopify product/image selection and prompt/copy import are retained. Flows and Settings remain accessible.
+Name, subject and preview text sit above grouped Save draft / Preview / Send test / Back actions. A 250px left panel holds collapsed Details, Audience, Test, More and Templates sections. Audience expands without replacing the canvas. It retains segments, filters, exclusions, eligibility and Smart Sending. More retains duplicate, archive/restore, versions and reports, and adds confirmed draft deletion. Templates use the existing storage only.
 
-## Content and storage
+The main white workspace switches between HTML source and one Preview. Preview widths are Desktop (600), 430, 390, 375 and 320; images-off and plain-text views remain available. Source edits update session state, not database versions. Save draft is explicit.
 
-Optional `content_mode` and `custom_html` fields use the existing JSON campaign document and version history. No schema migration or removed column/table. Legacy documents continue to render their existing blocks/legacy fields. Switching modes retains both sources; only the selected mode renders. Template snapshots retain HTML mode/source too. Content changes invalidate prior testing and are audited using existing content_changed events.
+## Content preservation and safety
 
-HTML source is kept unchanged for editing/reload. A conservative standard-library parser reconstructs safe balanced email markup for preview/test delivery, generating plain text and appending the locked system footer. Public HTTPS links and durable JPEG/PNG images use existing validation; images require alt text. Existing test-link tracking is applied to HTML links. Scripts, event handlers, forms, SVG, embedded documents and unsafe styles never render. Head stylesheet rules are not imported: use inline email CSS. Unsupported CSS/document wrappers may therefore change the pasted design's appearance; review the layout before testing. Original source remains available. The existing overall document and rendered HTML size limits remain in force; drafts exceeding them show an explicit save error.
+Original HTML is saved/reloaded unchanged. Existing sanitization reconstructs safe email markup, retains supported inline styles/tables/images/links, validates URLs and alt text, generates plain text and inserts the locked mandatory footer. Editing source cannot remove that footer. Scripts, unsafe attributes, forms and unsupported styles cannot render. Head stylesheet rules are not imported; use inline email CSS and review the preview. Existing size limits remain enforced.
 
-The lightweight HTML component sends debounced edits to the Streamlit session for automatic preview (no database write on each keystroke). Save draft is the persistence boundary. The block component has a draggable tray and pointer-based ordering handles, keyboard Alt+Arrow ordering, selection, duplication and deletion. The server validates exact block ID sets and rejects stale/replayed operations. Ordered block arrays persist using the existing draft/version model. No new dependencies.
+Legacy block campaigns open an HTML snapshot of their rendered body. Their block arrays and original version history remain stored. Pasted HTML is never converted into blocks. Block components/helpers remain dormant and unchanged. Existing Shopify product/prompt helpers remain in the code but are not part of the primary V1 workspace. No backend tables, columns or consent/eligibility/suppression/deduplication/Smart Sending/tracking/attribution capabilities were removed.
 
-## Safety
+## Draft deletion
 
-CRM_MARKETING_ENABLED and existing marketing infrastructure were not changed. Production sending remains disabled. Send test only opens the existing admin-only preflight/manual single allowlisted recipient workflow; it cannot dispatch an audience. No real test was sent. Consent, suppression, deduplication, Smart Sending, attribution, webhooks and normal Email transport are unchanged.
+The named confirmation warns that deletion is permanent. The service requires campaign-management permission, an explicit confirmation, the exact name and current version, and a row lock. Only a non-archived DRAFT without test/delivery/attribution/suppression references is eligible. Even a failed internal-test record prevents deletion; archive such drafts instead. Only the target draft and its own draft revisions are removed transactionally. An existing activity-log event is attempted afterward; unavailable audit storage is reported rather than pretending it succeeded. No Shopify or mailbox records are touched.
+
+## Flows and Settings
+
+Flows use the same HTML/Preview canvas, with trigger/details/audience/email/test controls in the left panel. Only inactive DRAFT/PAUSED flow emails can save. Each explicit email save forks an immutable versioned template snapshot and updates only the selected flow step; other flows and enrolled template snapshots are unchanged. Optimistic concurrency prevents overwriting changed flow/template state. Trigger edits require the email to be saved first; reload requires an explicit discard checkbox when dirty. Existing workflow configuration remains collapsed under More.
+
+Flow tests prepare a separate campaign test snapshot and use the existing single-recipient admin/allowlist/preflight/idempotency boundary. Preparation never sends an email. Settings remains a separate CRM navigation entry with existing functions.
+
+## Marketing safety
+
+CRM_MARKETING_ENABLED and delivery configuration were not changed. Production delivery remains OFF and flows are not activated. Test sending requires an explicit admin action, saved/reviewed current content and exactly one approved manually entered internal recipient. Audience calculations, preview, page loads and saves never send. No real email was sent during implementation or verification.
 
 ## Verification
 
-- 134 CRM tests passed, including seven new focused editor/content/storage regressions.
-- 73 Email and 212 support Email tests passed (mocked transport).
+- 142 CRM tests passed, including 8 new workspace/deletion/flow-storage tests.
+- 73 Email and 212 support Email regression tests passed with mocked transport.
 - 34 navigation/startup tests passed.
+- Final focused 21-test rerun passed after spacing and unsaved-flow protection changes.
 - Changed Python files compile; git diff --check passes.
-- Actual Streamlit CRM pages tested locally with disposable PostgreSQL and synthetic Shopify, external sends blocked. These checks did not connect to production.
-- Browser checked at 1440x900 and 1920x1080: HTML/editor and one preview beside each other, grouped actions, Advanced collapsed. 1440x900 has the actions at the bottom of the viewport; larger desktop has additional space. Blocks with expanded editing controls can require modest vertical scrolling.
-- Browser verified HTML paste/automatic preview, save, reload, direct list opening, mode preservation, drag a new block, drag divider above text, save/reopen with correct order, admin test preflight without sending, Flows and Settings.
-- Preview widths 320, 375, 390 and 430 verified by rendered iframe width, plus Desktop up to 600px (constrained to available column width).
+- Browser exercised actual Streamlit CRM UI/components with disposable PostgreSQL and synthetic Shopify, with external requests blocked. Production credentials/data were not used.
+- Checked at 1440x900 and 1920x1080: campaign list, blank New Campaign, HTML paste/save, source preservation after server reload, same-surface preview, Audience panel, restricted Test panel, named Delete confirmation/cancel, Flows and Settings. Permanent deletion is covered by isolated SQL tests, not a browser deletion of user data.
+- 1920x1080 campaign editor fits on one screen. 1440x900 can require modest vertical scrolling to the canvas bottom; primary actions stay at the top. Long settings scroll within the left panel. Email preview itself scrolls inside its frame.
+- Desktop and 320px preview frame widths verified in this pass; intermediate sizes retain the same previously verified shared rendering path.
+- Screenshots: .venv/crm-ultra-1920.jpg and .venv/crm-ultra-1440.jpg (local verification environment; OS production shell/auth was not exercised).
 
-## Files
+## Files changed in this update
 
-crm_campaign_page.py; crm_page.py; crm_campaign_content.py; crm_campaign_html.py; crm_block_editor.py; crm_campaign_store.py; crm_workspace_store.py; components/crm_blocks/index.html; components/crm_html_editor/index.html; tests/test_crm_simple_editor.py; tests/test_crm_ui.py; tests/test_crm_storage_recovery.py; docs/CRM_SIMPLE_EDITOR.md.
+crm_campaign_page.py; crm_campaign_store.py; crm_page.py; crm_html_workspace.py (new); crm_flow_editor.py (new); components/crm_html_editor/index.html; tests/test_crm_html_workspace.py (new); tests/test_crm_ui.py; tests/test_crm_storage_recovery.py; docs/CRM_SIMPLE_EDITOR.md.
 
-Nathan can review the local editor and save drafts. After deployment approval, manually test one approved internal mailbox using the existing configured allowlist. No live/bulk activation is part of this change.
+Nathan can safely review/edit/save drafts locally. A manual internal test requires the existing configured admin allowlist and preflight. No production/bulk sending or deployment is authorized by this change.

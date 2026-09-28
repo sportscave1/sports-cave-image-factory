@@ -237,14 +237,12 @@ def templates_page(store,actions):
     with right:preview_template(content,actions.config)
 
 
-def automations_page(store,actions):
-    rows=store.list('automations')
-    if not rows:
-        st.info('The Sports Cave OS draft library has not been initialized. OS flows start OFF. External Klaviyo flows are not managed here.')
-        if st.button('Initialize draft library'):actions.seed();st.rerun()
-        return
-    st.dataframe([{'Flow':r['name'],'Status':r['status'],'Steps':len(r['steps'])} for r in rows],hide_index=True,use_container_width=True)
-    row=st.selectbox('Flow',rows,format_func=lambda r:r['name'])
+def automations_page(store,actions,shop=None):
+    from crm_flow_editor import flow_workspace
+    flow_workspace(shop,store,actions)
+
+
+def legacy_flow_configuration(store,actions,row):
     template_names=[t['template_key'] for t in store.list('templates')]
     with st.form('crm_automation_'+str(row['id'])):
         steps=[]
@@ -377,7 +375,7 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     try:
         if route=='CRM Customers':customers_page(shop,store,user,navigate)
         elif route=='CRM Segments':segments_page(shop,store,actions)
-        elif route=='CRM Automations':automations_page(store,actions)
+        elif route=='CRM Automations':automations_page(store,actions,shop)
         elif route=='CRM Campaigns':campaigns_page(shop,store,actions)
         elif route=='CRM Templates':templates_page(store,actions)
         elif route=='CRM Reports':reports_page(store)

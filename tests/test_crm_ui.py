@@ -32,7 +32,7 @@ class UiTests(unittest.TestCase):
             with self.subTest(route=route):
                 at=self.app(route);self.assertFalse(at.exception)
                 if route!='CRM Campaigns':self.assertFalse(at.warning)
-                else:self.assertTrue(any('LIVE MARKETING DELIVERY: DISABLED' in w.value for w in at.caption))
+                else:self.assertTrue(any('Marketing delivery OFF' in w.value for w in at.caption))
                 if route=='CRM Campaigns':self.assertFalse(any(b.label=='Send campaign' for b in at.button))
     def test_customer_pagination_and_search(self):
         at=self.app('CRM Customers');self.assertEqual(len(at.dataframe[0].value),50)

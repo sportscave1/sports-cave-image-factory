@@ -463,7 +463,10 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn("min-height: 2rem", app_source)
         self.assertIn("--sc-topbar-height: 64px", app_source)
         self.assertIn("height: calc(100dvh - var(--sc-topbar-height))", app_source)
-        self.assertIn('[data-testid="stSidebarHeader"]', app_source)
+        from sidebar_theme import SIDEBAR_CSS
+        self.assertIn('[data-testid="stSidebarHeader"]', SIDEBAR_CSS)
+        self.assertIn("height:40px", SIDEBAR_CSS)
+        self.assertIn("height:37px", SIDEBAR_CSS)
         self.assertIn("resetInitialSidebarScroll", COMPONENT_PATH.read_text(encoding="utf-8"))
 
     def test_component_bridge_has_zero_layout_height(self):

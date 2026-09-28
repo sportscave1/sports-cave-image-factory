@@ -65,6 +65,31 @@ class CampaignStore(WorkspaceRecords):
             row=conn.execute("UPDATE crm_campaign_drafts SET archived_at=now(),status='ARCHIVED',version=version+1,updated_at=now() WHERE id=%s RETURNING *",(identity,)).fetchone()
             self._history(conn,row,'campaign_archived',str(user.get('id','')),before)
 
+    def delete_draft(self,user,identity,version,*,confirmed=False,confirmed_name=''):
+        """Delete only untouched authoring history; every delivery/reference fails closed."""
+        require(user,'crm_campaigns_manage')
+        if confirmed is not True:raise ValueError('Explicit draft deletion confirmation is required.')
+        with self.db() as conn:
+            row=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            if not row or row['version']!=version or row['name']!=confirmed_name:
+                raise ValueError('Campaign changed. Reopen the deletion confirmation.')
+            if row['status']!='DRAFT' or row['archived_at'] or row['last_tested_at'] or row['last_test_resend_id']:
+                raise ValueError('Only an unsent DRAFT can be deleted. Archive this campaign instead.')
+            for table,column in (('crm_internal_tests','campaign_id'),('crm_suppressions','campaign_reference'),
+                                 ('crm_order_attribution','campaign_id'),('crm_marketing_sends','campaign_id')):
+                if conn.execute(f'SELECT 1 FROM {table} WHERE {column}=%s LIMIT 1',(identity,)).fetchone():
+                    raise ValueError('This campaign has retained test, delivery or compliance history. Archive it instead.')
+            if conn.execute('SELECT 1 FROM crm_website_events WHERE campaign_key=%s LIMIT 1',(row['document'].get('campaign_key',''),)).fetchone():
+                raise ValueError('This campaign has attribution events. Archive it instead.')
+            # Restrictive foreign keys also protect concurrent/new reference types.
+            conn.execute('DELETE FROM crm_campaign_history WHERE campaign_id=%s',(identity,))
+            conn.execute('DELETE FROM crm_campaign_drafts WHERE id=%s',(identity,))
+        from activity_log import record_activity_log
+        receipt=record_activity_log(action_type='crm_draft_deleted',page='CRM & Marketing',
+            message='Draft deleted: '+row['name'],entity_type='crm_campaign_draft',entity_id=str(identity),
+            metadata={'name':row['name'],'version':row['version']},actor=str(user.get('id','')))
+        return {'deleted':True,'audit_saved':bool(receipt)}
+
     def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None):
         require(user,'crm_campaigns_manage')
         import os_accounts

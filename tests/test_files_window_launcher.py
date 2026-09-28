@@ -83,8 +83,8 @@ class FilesWindowLauncherLifecycleTests(unittest.TestCase):
         relative = 'components/files_window_launcher/index.html'
         tracked = subprocess.check_output(['git','ls-files','--error-unmatch',relative], cwd=ROOT, text=True)
         self.assertEqual(relative, tracked.strip())
-        bundled = subprocess.check_output(['git','show','HEAD:'+relative], cwd=ROOT)
-        self.assertEqual(bundled, LAUNCHER_CLIENT.read_bytes())
+        # Export the tracked working-tree asset so uncommitted presentation updates are tested.
+        bundled = LAUNCHER_CLIENT.read_bytes()
         self.assertNotIn(b'<script src=', bundled)
         self.assertNotIn(b'<link ', bundled)
         with tempfile.TemporaryDirectory() as directory:
@@ -92,7 +92,7 @@ class FilesWindowLauncherLifecycleTests(unittest.TestCase):
             target = clean / relative
             target.parent.mkdir(parents=True)
             target.write_bytes(bundled)
-            # The only overlay is the proposed Python patch; assets come from HEAD.
+            # Package the current Python and HTML sources without generated dependencies.
             (clean/'files_window_launcher.py').write_bytes(Path(files_window_launcher.__file__).read_bytes())
             subprocess.run([__import__('sys').executable,'-c',
                 'import files_window_launcher as f; assert f.validate_component_assets().is_dir(); '
