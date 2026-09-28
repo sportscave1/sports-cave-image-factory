@@ -6,11 +6,26 @@ and balanced markup prevents pasted HTML from escaping the locked footer wrapper
 from html import escape
 from html.parser import HTMLParser
 import re
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from crm_tracking import public_https, asset_url, campaign_link
 
-TAGS = set('table tbody thead tfoot tr td th div p span h1 h2 h3 h4 strong b em i u s br hr a img ul ol li blockquote center'.split())
+TAGS = set('table tbody thead tfoot tr td th div p span font h1 h2 h3 h4 strong b em i u s br hr a img ul ol li blockquote center'.split())
 VOID = {'br', 'hr', 'img'}
-CSS = set('color background-color font-family font-size font-weight font-style line-height text-align text-decoration vertical-align padding padding-top padding-bottom padding-left padding-right border border-top border-bottom border-left border-right border-color border-width border-style border-radius border-collapse border-spacing width max-width height max-height'.split())
+CSS = set('color background background-color font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform vertical-align display padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-color border-width border-style border-radius border-collapse border-spacing width max-width min-width height max-height'.split())
+
+
+def email_image_url(value):
+    """Keep durable raster URLs; request PNG from Shopify for its WebP assets.
+
+    Source stays untouched. This same canonical URL is used in preview and send.
+    No server-side fetch and no relaxation of the shared Flow asset policy.
+    """
+    if asset_url(value):return value
+    if not public_https(value):return ''
+    parts=urlsplit(value);query=parse_qsl(parts.query,keep_blank_values=True)
+    if parts.hostname!='cdn.shopify.com' or not re.search(r'\.webp$',parts.path,re.I):return ''
+    if {k.lower() for k,_ in query} & {'token','signature','expires','x-amz-signature','x-goog-signature','se','sig'}:return ''
+    return urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode([(k,v) for k,v in query if k.lower()!='format']+[('format','png')]),parts.fragment))
 
 
 class EmailHTML(HTMLParser):
@@ -25,6 +40,9 @@ class EmailHTML(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if self.skipped:
             if tag not in VOID: self.skipped.append(tag)
+            return
+        if tag=='embed':
+            self.checks['HTML contains only safe email markup']=False
             return
         if tag in {'head','script','style','iframe','object','svg','math','form','template'}:
             self.skipped.append(tag)
@@ -43,10 +61,15 @@ class EmailHTML(HTMLParser):
                 for declaration in value.split(';'):
                     prop,sep,val=declaration.partition(':'); prop=prop.strip().lower(); val=val.strip()
                     if sep and prop in CSS and re.fullmatch(r'[a-zA-Z0-9#.,% ()"\'-]+',val) and not re.search(r'url|expression|var\(|calc\(|-\d',val,re.I):
+                        if prop=='display' and val.lower() not in {'block','inline','inline-block','table','table-row','table-cell','none'}:continue
                         styles.append(prop+':'+val)
                 safe.append(('style',';'.join(styles)))
             elif name in {'width','height','cellpadding','cellspacing','colspan','rowspan','border'} and re.fullmatch(r'\d{1,4}%?',value): safe.append((name,value))
             elif name in {'align','valign','alt','title','role'}: safe.append((name,value))
+            elif name in {'bgcolor','color'} and (name=='bgcolor' or tag=='font') and re.fullmatch(r'#[a-fA-F0-9]{3}(?:[a-fA-F0-9]{3})?|[a-zA-Z]{1,25}',value):safe.append((name,value))
+            elif tag=='font' and name=='face' and re.fullmatch(r'[a-zA-Z0-9 ,\'"-]{1,200}',value):safe.append((name,value))
+            elif tag=='font' and name=='size' and re.fullmatch(r'[1-7]',value):safe.append((name,value))
+            elif tag=='a' and name=='target' and value in {'_blank','_self'}:safe.extend([(name,value),('rel','noopener noreferrer')])
             elif name=='href' and tag=='a':
                 self.checks['CTA label and HTTPS URL valid'] &= public_https(value)
                 if public_https(value):
@@ -54,11 +77,12 @@ class EmailHTML(HTMLParser):
                     value=campaign_link(value,self.campaign_key,'html_'+str(self.links),test=True) if self.campaign_key else value
                     safe.append((name,value)); self.plain.append(' '+value+' ')
             elif name=='src' and tag=='img':
-                self.checks['Images use durable public JPEG/PNG URLs'] &= asset_url(value)
-                if asset_url(value) and not self.images_off: safe.append((name,value))
+                resolved=email_image_url(value)
+                self.checks['Images use durable public JPEG/PNG URLs'] &= bool(resolved)
+                if resolved and not self.images_off: safe.append((name,resolved))
         if tag=='img':
             self.checks['Image alt text complete'] &= bool((attributes.get('alt') or '').strip())
-            self.checks['Images use durable public JPEG/PNG URLs'] &= asset_url(attributes.get('src') or '')
+            self.checks['Images use durable public JPEG/PNG URLs'] &= bool(email_image_url(attributes.get('src') or ''))
             self.plain.append(attributes.get('alt') or '')
         self.parts.append('<'+tag+''.join(' '+n+'="'+escape(v,quote=True)+'"' for n,v in safe)+'>')
         if tag not in VOID:self.stack.append(tag)

@@ -77,7 +77,7 @@ class SEONavigationTests(unittest.TestCase):
         )
         self.assertLess(
             source.index('key="sidebar-nav::Email::soon"'),
-            source.index('_sidebar_route_button("VA Training"'),
+            source.index('if "Files" in allowed_routes:'),
         )
         for label in seo.SEO_NAV_LABELS.values():
             self.assertIn(f'"{label}"', (ROOT / "seo_navigation.py").read_text(encoding="utf-8"))

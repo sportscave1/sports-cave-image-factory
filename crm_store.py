@@ -36,7 +36,9 @@ class Store:
             if cur.description:
                 return cur.fetchone() if one else cur.fetchall()
             return None
-    def list(self,kind):return self.q('SELECT * FROM '+TABLES[kind]+' ORDER BY name LIMIT 500')
+    def list(self,kind):
+        where=" WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1'" if kind=='templates' else ''
+        return self.q('SELECT * FROM '+TABLES[kind]+where+' ORDER BY name LIMIT 500')
     def get(self,kind,object_id):return self.q('SELECT * FROM '+TABLES[kind]+' WHERE id=%s',(object_id,),True)
     def state(self,key):
         row=self.q('SELECT value FROM crm_runtime_state WHERE key=%s',(key,),True)

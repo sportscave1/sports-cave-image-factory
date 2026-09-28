@@ -14,7 +14,7 @@ from crm_resend_marketing import get_resend_marketing_config_status
 from crm_store import StoreUnavailable
 from crm_logic import now
 
-SECTIONS=('Customers','Segments','Templates','Reports','Branding','Connections & Tracking','Prompts','Sending & Compliance')
+SECTIONS=('Customers','Segments','Templates','Reports','Email brand templates','Branding','Connections & Tracking','Prompts','Sending & Compliance')
 PERMISSIONS={'Customers':'crm_customers_view','Segments':'crm_segments_view','Templates':'crm_templates_manage','Reports':'crm_reports_view'}
 
 
@@ -68,6 +68,9 @@ def settings_page(shop,store,actions,navigate,initial=None,compact=False):
         if section=='Templates':templates_page(records,shop,user)
         elif section=='Reports':campaign_report(records,shop,user)
         elif section=='Branding':branding_page(records,user)
+        elif section=='Email brand templates':
+            from crm_brand_template_ui import brand_templates_settings
+            brand_templates_settings(records,user)
         elif section=='Connections & Tracking':connections_page(records,shop)
         elif section=='Prompts':prompts_page(records,user)
         else:compliance_page(records,user)

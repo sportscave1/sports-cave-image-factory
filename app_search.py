@@ -25,7 +25,6 @@ ALIASES = {
     "seo": ("search console", "gsc", "organic"),
     "email": ("mail", "inbox", "support email", "reply"),
     "accounts_access": ("users", "staff", "permissions", "roles", "accounts"),
-    "va_training": ("training", "staff training"),
 }
 
 # These features have no stable section deep link; route to their existing parent.

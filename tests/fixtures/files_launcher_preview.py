@@ -30,7 +30,6 @@ else:
 
     st.set_page_config(page_title='Files launcher · production assets fixture', layout='wide')
     with st.sidebar:
-        st.button('VA Training')
         with st.container(key='files-window-launcher-slot'):
             files_window_launcher.render(st, components)
         st.button('Reporting')

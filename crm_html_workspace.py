@@ -91,19 +91,24 @@ def composer_styles():
     </style>""")
 
 
-def section_editor(doc,cfg,key):
+def section_editor(doc,cfg,key,store=None,user=None):
     from crm_campaign_sections import section_defaults
+    from crm_brand_template_ui import section_picker,save_section_control
     defaults=section_defaults(cfg)
     sections=doc.get('html_sections',defaults)
     with st.expander('Header',expanded=False):
+        if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'])
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
+        if store:save_section_control(store,user,'header',header,key+'header_')
     with st.expander('Body',expanded=True):
         with st.container(key='campaign-body-source'):
             body=st.text_area('Body HTML',doc.get('custom_html',''),height=430,key=key+'body_source',
                 placeholder='<!-- Paste your campaign body HTML here -->',label_visibility='collapsed')
     with st.expander('Footer',expanded=False):
+        if store:section_picker(store,user,'footer',key+'footer_source',key+'footer_',cfg,sections['footer'])
         footer=st.text_area('Footer HTML',sections['footer'],height=180,key=key+'footer_source')
         st.caption('{{SYSTEM_FOOTER}} adds the protected identity, address, contact and unsubscribe content. It is restored if removed.')
+        if store:save_section_control(store,user,'footer',footer,key+'footer_')
     if header!=sections['header'] or footer!=sections['footer']:
         doc['html_sections']={'header':header,'footer':footer}
     doc['custom_html']=body

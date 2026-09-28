@@ -9039,7 +9039,6 @@ SIDEBAR_ICON_BY_ROUTE = {
     ads_nav.META_REVIEW_ROUTE: ":material/rate_review:",
     analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
-    "VA Training": ":material/school:",
     "Email": ":material/mail:",
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
@@ -9385,7 +9384,6 @@ def render_sidebar():
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
-    _sidebar_route_button("VA Training", current_page, allowed_routes)
     if "Files" in allowed_routes:
         st.sidebar.markdown(
             '<span class="sc-files-window-launcher-label">Files</span>',

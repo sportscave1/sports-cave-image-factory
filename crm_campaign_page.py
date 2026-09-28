@@ -105,10 +105,10 @@ def delete_dialog(store,user,editor):
         except (ValueError,StoreUnavailable) as exc:st.error(str(exc))
 
 
-def new_compose(smart_hours=16,cfg=None):
+def new_compose(smart_hours=16,cfg=None,sections=None):
     """Session-only draft; opening the route never writes a campaign."""
     from crm_campaign_sections import section_defaults
-    doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=section_defaults(cfg or settings()))
+    doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
     open_editor({'id':None,'version':None,'name':'Untitled campaign','status':'DRAFT',
                  'archived_at':None,'last_tested_at':None,'document':doc})
 
@@ -150,7 +150,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     except StoreUnavailable as exc:
         available=False;defaults={'smart_hours':16};cfg=settings()
         st.error(str(exc));st.caption('Persistence unavailable. Your compose state stays in this session; saves and tests are disabled.')
-    if not st.session_state.get('campaign_editor'):new_compose(defaults['smart_hours'],cfg)
+    if not st.session_state.get('campaign_editor'):new_compose(defaults['smart_hours'],cfg,drafts.default_sections(cfg) if available else None)
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
@@ -205,7 +205,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
                         doc['notes']=st.text_area('Notes',doc['notes'],height=90,key=key+'notes')
                         doc['offer']=st.text_input('Offer',doc['offer'],key=key+'offer')
                         doc['offer_reviewed']=st.checkbox('Offer verified',doc['offer_reviewed'],key=key+'offer_reviewed')
-            with html_tab:section_editor(doc,cfg,key)
+            with html_tab:section_editor(doc,cfg,key,drafts if available else None,actions.user)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
     st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')
@@ -220,7 +220,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         if dirty(editor):st.warning('Save pending edits first.')
         elif duplicate_requested:open_editor(drafts.duplicate(actions.user,editor['id']));st.rerun()
         elif archive_requested:
-            drafts.archive(actions.user,editor['id'],editor['version']);new_compose(defaults['smart_hours'],cfg);st.rerun()
+            drafts.archive(actions.user,editor['id'],editor['version']);new_compose(defaults['smart_hours'],cfg,drafts.default_sections(cfg));st.rerun()
         elif restore_requested:
             drafts.restore(actions.user,editor['id'],editor['version']);open_editor(drafts.draft(editor['id']));st.rerun()
         elif delete_requested:delete_dialog(drafts,actions.user,editor)
@@ -244,7 +244,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
             st.session_state.pop('campaign_pending_open',None);st.session_state.pop('crm_requested_route',None)
             if target:
                 st.session_state['campaign_editor']=deepcopy(st.session_state['campaign_saved']);navigate(target);return
-            if pending=='new':new_compose(defaults['smart_hours'],cfg)
+            if pending=='new':new_compose(defaults['smart_hours'],cfg,drafts.default_sections(cfg))
             else:open_editor(drafts.draft(pending))
             st.rerun()
 
