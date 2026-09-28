@@ -12,6 +12,7 @@
 @media(max-width:680px){.workspace,.workspace.collapsed{grid-template-columns:48px minmax(0,1fr)}.reading{display:none}.workspace.show-reading .listpane{display:none}.workspace.show-reading .reading{display:flex}.mobile-back{display:inline-block}.search button{display:none}.topbar .brand{display:none}.topbar button{font-size:11px;padding:6px}.topbar{gap:4px}.notice{max-width:60%}.subject-header{padding:15px}}
 
 .message-loading{padding:16px 18px;color:var(--muted);font-size:12px}.message-body,.quote{max-width:100%;overflow-wrap:anywhere;word-break:break-word}.reading [aria-busy=true]{cursor:progress}
+.connection-retry{font-size:10px;padding:1px 7px;margin-left:8px}.reconnect-spinner{display:inline-block;width:9px;height:9px;margin-right:6px;border:1px solid currentColor;border-right-color:transparent;border-radius:50%;animation:mail-reconnect .8s linear infinite}@keyframes mail-reconnect{to{transform:rotate(360deg)}}
 
 .signature-preview table,.signature-edit table{max-width:100%}.signature-preview img,.signature-edit img{display:block;flex:none}.compose-scroll .editor{min-height:100px}
 

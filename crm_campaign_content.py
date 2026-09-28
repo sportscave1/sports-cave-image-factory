@@ -117,10 +117,11 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     body,plain=render_blocks(blocks,campaign_key=doc.get('campaign_key',''),market=doc['market'],images_off=images_off,accent=accent,font=cfg.get('font','Arial'),button_style=cfg.get('button_style','Solid black'))
     if doc.get('content_mode')=='HTML':
         from crm_campaign_html import import_html
-        imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
         if 'html_sections' in doc:
             from crm_campaign_sections import import_sections
             imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''),cfg=cfg,unsubscribe_url=unsubscribe_url)
+        else:
+            imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
         body='<tr><td>'+imported+'</td></tr>'
     unsubscribe='Unsubscribe — production link not activated (layout/test only).'
     footer='<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial"><strong>'+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'

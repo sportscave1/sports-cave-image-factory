@@ -83,6 +83,13 @@ class MailboxRuntime:
                 if key[0] == scope:
                     del self.cache[key]
 
+    def recovery(self, scope):
+        """Safe admission metadata, never a socket or provider error text."""
+        with self.condition:
+            state = self._state(scope)
+            return {"code": state.get("failure_code", ""),
+                    "retry_after": max(0, state["retry_at"] - self.clock())}
+
     def get(self, scope, key):
         with self.condition:
             entry = self.cache.get((scope, key))
@@ -160,14 +167,14 @@ class MailboxRuntime:
                 with self.condition:
                     state = self._state(scope)
                     state["failures"] = min(4, state["failures"] + 1)
-                    state.update(last_failure_at=time.time(), failure_stage=getattr(error, "stage", "operation"),
+                    state.update(last_failure_at=time.time(), failure_code=code, failure_stage=getattr(error, "stage", "operation"),
                                  fallback_state="backoff")
                     state["retry_at"] = self.clock() + min(120, 15 * 2 ** (state["failures"] - 1))
                     self.invalidate(scope)
             raise
         else:
             with self.condition:
-                self._state(scope).update(failures=0, retry_at=0, last_success_at=time.time(), fallback_state="ready")
+                self._state(scope).update(failures=0, retry_at=0, failure_code="", last_success_at=time.time(), fallback_state="ready")
         finally:
             with self.condition:
                 self.active -= 1

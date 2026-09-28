@@ -52,7 +52,13 @@
     if(!active?.expanded)return null;
     return {active_message:active.key,messages:messages.map(m=>({...m,expanded:m.key===active.key&&m.expanded}))};
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView}; return;}
+  function recoveryFeedback(m,active=false){
+    const recovery=m.recovery||{};
+    if(active)return '<span class="reconnect-spinner" aria-hidden="true"></span><span role="status">Reconnecting mailbox…</span>';
+    if(!recovery.state)return '';
+    return `<span role="status">${esc(recovery.message)}</span>${recovery.state==='stopped'?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':''}`;
+  }
+  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -63,6 +69,7 @@
   let pendingSignal='', seenSignal='';
   let signalAttempts=0, signalRetryTimer=null;
   function signalTick(version){
+    if(model.recovery?.state)return;
     if(typeof version!=='string'||!version||version.length>128||version===seenSignal)return;
     pendingSignal=version;
     if(busy||menu||model.delete_confirmation||document.hidden||!model.configured)return;
@@ -70,6 +77,7 @@
     emit('live_check',{signal_version:version});
   }
   function liveTick(){
+    if(model.recovery?.state)return; // Dedicated bounded recovery owns outage attempts.
     if(pendingSignal){signalTick(pendingSignal);return;}
     if(busy||menu||model.delete_confirmation||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
     lastLiveCheck=Date.now();emit('live_check');
@@ -99,6 +107,16 @@
     sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),100);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sendTimer));
+  let reconnectTimer=null;
+  function scheduleReconnect(){
+    clearTimeout(reconnectTimer);
+    if(model.recovery?.state!=='waiting')return;
+    reconnectTimer=setTimeout(()=>{
+      if(busy||menu||model.delete_confirmation||document.hidden){scheduleReconnect();return;}
+      emit('reconnect');
+    },Math.max(1000,model.recovery.delay_ms||0));
+  }
+  window.addEventListener('pagehide',()=>clearTimeout(reconnectTimer));
   const post=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
   const $=id=>document.getElementById(id);
   const button=(label,action,data='',disabled=false,klass='')=>`<button type="button" class="${klass}" data-action="${action}" ${data} ${disabled?'disabled':''}>${label}</button>`;
@@ -122,8 +140,9 @@
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
-    else if(!['resolve_thread','auto_check_sent','live_check'].includes(action)){root.classList.add('busy');freeze();}
+    else if(!['resolve_thread','auto_check_sent','live_check','reconnect'].includes(action)){root.classList.add('busy');freeze();}
     if (!selecting && !['resolve_thread','auto_check_sent','live_check'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
+    if(['reconnect','retry_connection'].includes(action)&&$('notice'))$('notice').innerHTML=recoveryFeedback(model,true);
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
   const viewKey=(m,key)=>JSON.stringify([m.mailbox,m.mailbox_version,key]);
@@ -234,10 +253,10 @@
   function render(next) {
     // The fragment first receives the old model before processing its event. Ignore that echo.
     if(pending&&next.ack!==pending)return;
-    const liveUpdate=pendingAction==='live_check';
+    const liveUpdate=['live_check','reconnect'].includes(pendingAction);
     if(liveUpdate)snapshot(); // Keep edits made while the network read was in flight.
     const oldFolder=model.folder, oldQuery=model.query;
-    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent','live_check'].includes(pendingAction);
+    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent','live_check','reconnect'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
     if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
@@ -268,7 +287,11 @@
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
       toolbarStamp=toolbarKey;
     }
-    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||model.live_error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.error?'Connection error':model.live_error?'Connection interrupted · Reconnecting…':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
+    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${model.error||model.live_error||!model.configured?'off':''}"></span>${!model.configured?'Not configured':model.recovery?.state==='stopped'?'Connection unavailable':model.error?'Connection error':model.live_error?'Connection interrupted · Reconnecting…':'Live'} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status" title="${esc(model.notice||model.error)}">${esc(model.notice||model.error)}</span>`;
+    if(model.recovery?.state){
+      $('notice').innerHTML=recoveryFeedback(model);
+    }
+    scheduleReconnect();
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
     const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit]);

@@ -3,7 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
-from crm_campaign_content import render_campaign
+from crm_preview_cache import preview as cached_preview
 from crm_email_blocks import render_blocks,legacy_blocks
 
 
@@ -46,17 +46,25 @@ def canvas(doc,cfg,key):
             if value!=original:doc['copy_reviewed']=False
             doc['custom_html']=value
         else:
-            controls=st.columns([2,2,4])
-            width=controls[0].selectbox('Width',(600,430,390,375,320),format_func=lambda w:'Desktop' if w==600 else str(w),key=key+'width',label_visibility='collapsed')
-            mode=controls[1].selectbox('Preview display',('Email','Images off','Plain text'),key=key+'display',label_visibility='collapsed')
-            try:
-                rendered=render_campaign(doc,cfg,images_off=mode=='Images off')
-                if mode=='Plain text':st.text_area('Plain text',rendered['text'],height=410,disabled=True,key=key+'plain')
-                else:
-                    with st.container(horizontal=True,horizontal_alignment='center'):
-                        components.html(rendered['html'],width=width,height=410,scrolling=True)
-            except ValueError as exc:st.warning(str(exc))
+            flow_preview(doc,cfg,key)
         return view
+
+
+@st.fragment
+def flow_preview(doc,cfg,key):
+    # Only presentation controls rerun independently. Source edits still run the
+    # parent editor's dirty-state/review checks before Save/Test controls render.
+    controls=st.columns([2,2,4])
+    width=controls[0].selectbox('Width',(600,430,390,375,320),format_func=lambda w:'Desktop' if w==600 else str(w),key=key+'width',label_visibility='collapsed')
+    mode=controls[1].selectbox('Preview display',('Email','Images off','Plain text'),key=key+'display',label_visibility='collapsed')
+    try:
+        rendered=cached_preview(st.session_state,doc,cfg,images_off=mode=='Images off',
+                                loading=lambda:st.spinner('Updating preview…'))
+        if mode=='Plain text':st.text_area('Plain text',rendered['text'],height=410,disabled=True,key=key+'plain')
+        else:
+            with st.container(horizontal=True,horizontal_alignment='center'):
+                components.html(rendered['html'],width=width,height=410,scrolling=True)
+    except ValueError as exc:st.warning(str(exc))
 
 
 
@@ -91,7 +99,7 @@ def composer_styles():
     </style>""")
 
 
-def section_editor(doc,cfg,key,store=None,user=None):
+def section_editor(doc,cfg,key,store=None,user=None,choices=None):
     from crm_campaign_sections import section_defaults
     from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
     from crm_brand_template_ui import section_picker,save_section_control
@@ -99,7 +107,7 @@ def section_editor(doc,cfg,key,store=None,user=None):
     sections=doc.get('html_sections',defaults)
     footer_source=sections['footer']
     with st.expander('Header',expanded=False):
-        if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'])
+        if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'],None if choices is None else choices['header'])
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
         if store:save_section_control(store,user,'header',header,key+'header_')
     with st.expander('Body',expanded=True):
@@ -108,7 +116,7 @@ def section_editor(doc,cfg,key,store=None,user=None):
                 placeholder='<!-- Paste your campaign body HTML here -->',label_visibility='collapsed')
     with st.expander('Footer',expanded=False):
         source_key=key+'footer_source'
-        if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source)
+        if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source,None if choices is None else choices['footer'])
         footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key)
         if not has_unsubscribe_link(footer):st.caption(UNSUBSCRIBE_REQUIRED)
         if store:save_section_control(store,user,'footer',footer,key+'footer_')
@@ -120,18 +128,23 @@ def section_editor(doc,cfg,key,store=None,user=None):
 PREVIEW_WIDTHS=(600,430,390,375,320)
 
 
+def _preview_device(key,label):
+    st.session_state[key+'preview_device']=label
+
+
+@st.fragment
 def composer_canvas(doc,cfg,key):
-    """Campaign preview only; the shared Flow canvas above is unchanged."""
+    """Preview-only reruns never fetch campaigns, templates or audiences."""
     with st.container(key='crm-composer-preview'):
         with st.container(horizontal=True,vertical_alignment='center'):
             st.markdown('**Email Preview**')
             with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-preview-devices'):
                 mode=st.session_state.get(key+'preview_device','Desktop')
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
-                    if st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary'):
-                        st.session_state[key+'preview_device']=label;mode=label;st.rerun()
+                    st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',
+                              on_click=_preview_device,args=(key,label))
         try:
-            rendered=render_campaign(doc,cfg)
+            rendered=cached_preview(st.session_state,doc,cfg,loading=lambda:st.spinner('Updating preview…'))
             with st.container(horizontal=True,horizontal_alignment='center'):
                 components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=680,scrolling=True)
         except ValueError as exc:st.warning(str(exc))

@@ -24,6 +24,8 @@ from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT
 LOGGER = logging.getLogger(__name__)
 FOLDER_TTL = 300
 LIVE_INTERVAL = 55  # The existing 30-second shell heartbeat yields one check/minute.
+RECOVERY_LIMIT = 2
+TERMINAL_CONNECTION_ERRORS = {"configuration", "authentication", "tls", "select"}
 
 
 def reference_key(header):
@@ -73,23 +75,63 @@ class Workspace:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
     def load(self, *, force=False, previews=True):
-        if not force and time.monotonic() < self.state.get("load_retry_at", 0):
+        if not force and (self.state.get("recovery_state") == "stopped" or
+                          time.monotonic() < self.state.get("load_retry_at", 0)):
+            if self.state.get("snapshot_view") != (self.state.get("folder"), self.state["query"], self.state["field"]):
+                self.state["error"] = self.state.get("connection_message") or "Mailbox connection unavailable."
             return
+        recovering = bool(self.state.get("recovery_state"))
+        if force:
+            self.state.update(recovery_attempts=0, recovery_state="", load_failures=0, load_retry_at=0)
         refresh = getattr(self.imap, "interactive_refresh", None)
         with refresh() if force and refresh else nullcontext():
-            self._load(force=force, previews=previews)
+            self._load(force=force, previews=previews, recovering=recovering)
 
-    def _unavailable(self, message):
+    def _unavailable(self, message, *, code="temporary", retry_after=0):
         s = self.state
         s["load_failures"] = min(4, s.get("load_failures", 0) + 1)
-        s["load_retry_at"] = time.monotonic() + min(120, 15 * 2 ** (s["load_failures"] - 1))
+        s["load_retry_at"] = time.monotonic() + max(retry_after, min(120, 15 * 2 ** (s["load_failures"] - 1)))
+        stopped = code in TERMINAL_CONNECTION_ERRORS or s.get("recovery_attempts", 0) >= RECOVERY_LIMIT
+        s.update(recovery_state="stopped" if stopped else "waiting", connection_code=code)
+        s["connection_message"] = (message if code in TERMINAL_CONNECTION_ERRORS else
+                                  "Mailbox connection unavailable." if stopped else "Reconnecting mailbox…")
         same_view = s.get("snapshot_view") == (s.get("folder"), s["query"], s["field"])
         if s.get("snapshot") and same_view:
-            s.update(error="", live_error="Connection interrupted · Reconnecting… Showing last successful mailbox view.")
+            s.update(error="", live_error=s["connection_message"] + " Showing last successful mailbox view.")
         else:
             s["error"] = message
 
-    def _load(self, *, force=False, previews=True):
+    def _recovered(self):
+        s = self.state
+        if s.get("recovery_state"):
+            LOGGER.info("email_workspace_reconnect_succeeded attempts=%d", s.get("recovery_attempts", 0))
+        if s.get("notice") == s.pop("connection_notice", None):
+            s["notice"] = ""
+        s.update(error="", live_error="", recovery_state="", recovery_attempts=0,
+                 connection_code="", connection_message="", load_failures=0, load_retry_at=0)
+
+    def reconnect(self):
+        """Bounded UI recovery. Only authoritative reads; never replay an action."""
+        s = self.state
+        if s.get("recovery_state") != "waiting" or time.monotonic() < s.get("load_retry_at", 0):
+            return
+        if s.get("recovery_attempts", 0) >= RECOVERY_LIMIT:
+            self._unavailable("Mailbox connection unavailable.", code=s.get("connection_code", "temporary"))
+            return
+        s["recovery_attempts"] = s.get("recovery_attempts", 0) + 1
+        LOGGER.info("email_workspace_reconnect_started attempt=%d", s["recovery_attempts"])
+        # Preserve folder mapping, cached bodies, compose state and selected UID.
+        # Refresh only header membership and a failed discovery result.
+        for key in list(self.cache):
+            if key[0] == "headers":
+                self.cache.pop(key, None)
+        s.pop("folder_failure", None)
+        self.load(previews=False)
+        if s.get("recovery_state"):
+            LOGGER.warning("email_workspace_reconnect_failed code=%s stopped=%s",
+                           s.get("connection_code"), s["recovery_state"] == "stopped")
+
+    def _load(self, *, force=False, previews=True, recovering=False):
         if not self.config.configured:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
@@ -108,7 +150,6 @@ class Workspace:
         folders = None if force else self.state.get("folder_cache")
         failure = self.state.get("folder_failure", {})
         if failure.get("expires", 0) > time.monotonic():
-            self._unavailable(failure["error"])
             return
         if not folders or folders["expires"] <= time.monotonic():
             folders = cached_read({}, "folders", self.imap.discover_folders)
@@ -121,7 +162,7 @@ class Workspace:
                     self.state["inbox_status"] = {"unread_count": inbox["unread"], "checked_at": time.time()}
         if folders["error"]:
             # Throttle failed reruns separately; never cache an empty successful mailbox.
-            self._unavailable(folders["error"])
+            self._unavailable(folders["error"], code=folders.get("error_code", "temporary"), retry_after=folders.get("retry_after", 0))
             self.state["folder_failure"] = {"error": folders["error"], "expires": self.state["load_retry_at"]}
             return
         self.state["folders"] = folders["data"]["folders"]
@@ -137,12 +178,14 @@ class Workspace:
                             query=self.state["query"], field=self.state["field"], previews=previews))
         if entry["error"]:
             self.cache.pop(key, None)  # Retry timing belongs to backoff, never a failed data cache.
-            self._unavailable(entry["error"])
+            self._unavailable(entry["error"], code=entry.get("error_code", "temporary"), retry_after=entry.get("retry_after", 0))
             return
         snapshot = entry["data"]
-        signature = (key, entry["refreshed_at"])
+        # Two refreshes can share a wall-clock tick. Fresh snapshots must still
+        # invalidate membership/flags and UIDVALIDITY-dependent caches.
+        signature = (key, entry.get("revision", entry["refreshed_at"]))
         changed = self.state.get("snapshot_signature") != signature
-        self.state.update(error="", live_error="", load_failures=0, load_retry_at=0,
+        self.state.update(error="",
                           snapshot_view=(self.state["folder"], self.state["query"], self.state["field"]),
                           refreshed_at=entry["refreshed_at"], snapshot=snapshot)
         if changed:
@@ -161,15 +204,30 @@ class Workspace:
             view, context = self.state["view"], self.state.get("context", {})
             self._select_thread(self._thread())
             self.state.update(view=view, context=context)
+        selected_first = False
         if (not self.state.get("selected") and self.state["threads"]
                 and self.state["folder"] == self.roles.get("inbox")
                 and not self.state["query"] and self.state["view"] == "mail"):
             # Initial Inbox paint only: preserve ordering and do not mutate read flags.
-            message = self._select_thread(self.state["threads"][0])
+            self._select_thread(self.state["threads"][0])
+            selected_first = True
+        if (self.state["view"] == "mail" and self.state.get("selected")
+                and (selected_first or recovering or self.state.get("recovery_state"))):
+            message = next((m for m in self.state.get("conversation", [])
+                            if reference_key(m) == self.state.get("active_message")), None)
             try:
-                self._body(message)
+                if message and reference_key(message) in self.state["expanded"]:
+                    self._body(message)
             except MailboxError as error:
+                connection_failure = error.retryable or error.code in TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}
+                if not connection_failure:
+                    self._recovered()  # Headers recovered; a missing/malformed body is a separate error.
                 self.state["notice"] = str(error)
+                if connection_failure:
+                    self.state["connection_notice"] = str(error)
+                self.state["loaded"] = True
+                return
+        self._recovered()
         self.state["loaded"] = True
         self.state["live_checked_at"] = time.monotonic()
 
@@ -200,6 +258,10 @@ class Workspace:
             body = self.imap.read_message(message)
         except Exception as error:
             LOGGER.info("Email body read unavailable (%s)", type(error).__name__)
+            if isinstance(error, MailboxError) and (error.retryable or error.code in
+                    TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}):
+                self._unavailable(str(error), code=error.code, retry_after=error.retry_after)
+                raise
             raise MailboxError("Could not open this message. Refresh and try again.")
         text, quote = split_quote(body["text"])
         content = {"body": body, "html": readable_html(text), "quote": readable_html(quote)}
@@ -272,6 +334,9 @@ class Workspace:
 
     def live_check(self, signal_version=None):
         """Heartbeat or validated push invokes this; selections/reruns do not."""
+        if self.state.get("recovery_state"):
+            self.reconnect()
+            return
         now = time.monotonic()
         pushed = False
         if signal_version and signal_version != self.state.get('idle_version'):
@@ -346,7 +411,8 @@ class Workspace:
             if isinstance(error, MailboxError) and error.code == "busy":
                 return  # A skipped/coalesced poll says nothing about connection health.
             LOGGER.info("Email live check unavailable (%s)", type(error).__name__)
-            self._unavailable("Mailbox is temporarily unavailable. Reconnecting automatically.")
+            self._unavailable(str(error) if isinstance(error, MailboxError) else "Mailbox is temporarily unavailable.",
+                              code=getattr(error, "code", "temporary"), retry_after=getattr(error, "retry_after", 0))
 
     def folder_action(self, action, folder, *, confirmed=False):
         if folder not in {f["name"] for f in self.state.get("folders", [])}:
@@ -471,7 +537,11 @@ class Workspace:
             action = event.get("action")
             if action not in {"request_delete_forever", "confirm_delete_forever", "cancel_delete_forever", "live_check", "resolve_thread"}:
                 self.state.pop("delete_confirmation", None)
-            if action == "live_check":
+            if action == "reconnect":
+                self.reconnect()
+            elif action == "retry_connection":
+                self.load(force=True)
+            elif action == "live_check":
                 self.live_check(event.get('signal_version'))
             elif action == "request_delete_forever":
                 self.request_delete_forever(event.get("thread_key"))
@@ -610,6 +680,8 @@ class Workspace:
                 self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
             self.state["notice"] = "Could not update message. Try again." if event.get("action") in {
                 "mark_read", "mark_unread", "star", "unstar", "move", "copy", "archive", "trash", "junk"} else str(error)
+            if event.get("action") in {"open_thread", "open_message"} and self.state.get("recovery_state"):
+                self.state["connection_notice"] = self.state["notice"]
             if event.get("action") == "test_connection":
                 self.state["error"] = "Connection unavailable. Refresh to reconnect."
         except Exception as error:
@@ -982,6 +1054,8 @@ class Workspace:
             "inbox_status": s.get("inbox_status", {}),
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
             "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
+            "recovery": {"state": s.get("recovery_state", ""), "message": s.get("connection_message", ""),
+                         "delay_ms": max(0, int((s.get("load_retry_at", 0) - time.monotonic()) * 1000))},
             "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],
             "idle_version": s.get("idle_version", ""),
             "refreshed": formatted_date(s.get("refreshed_at"), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,

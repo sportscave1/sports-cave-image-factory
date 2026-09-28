@@ -1,0 +1,151 @@
+{
+  "campaign_initial": {
+    "total_ms": 627.94,
+    "calls": {
+      "database_read": 8,
+      "sanitizer": 15
+    },
+    "operation_ms": {
+      "database_read": 45.29,
+      "sanitizer": 3.11
+    }
+  },
+  "campaign_paste_38kb": {
+    "total_ms": 85.85,
+    "calls": {
+      "database_read": 8,
+      "sanitizer": 15
+    },
+    "operation_ms": {
+      "database_read": 51.24,
+      "sanitizer": 11.43
+    }
+  },
+  "campaign_mobile": {
+    "total_ms": 129.0,
+    "calls": {
+      "database_read": 8,
+      "sanitizer": 11
+    },
+    "operation_ms": {
+      "database_read": 54.4,
+      "sanitizer": 29.81
+    }
+  },
+  "campaign_desktop": {
+    "total_ms": 173.5,
+    "calls": {
+      "database_read": 8,
+      "sanitizer": 11
+    },
+    "operation_ms": {
+      "database_read": 120.27,
+      "sanitizer": 30.82
+    }
+  },
+  "campaign_unchanged_rerun": {
+    "total_ms": 122.88,
+    "calls": {
+      "database_read": 8,
+      "sanitizer": 11
+    },
+    "operation_ms": {
+      "database_read": 69.72,
+      "sanitizer": 30.69
+    }
+  },
+  "flow_initial": {
+    "total_ms": 223.08,
+    "calls": {
+      "database_read": 6
+    },
+    "operation_ms": {
+      "database_read": 65.84
+    }
+  },
+  "flow_preview": {
+    "total_ms": 122.05,
+    "calls": {
+      "database_read": 5,
+      "sanitizer": 1
+    },
+    "operation_ms": {
+      "database_read": 103.41,
+      "sanitizer": 0.16
+    }
+  },
+  "flow_unchanged_rerun": {
+    "total_ms": 58.54,
+    "calls": {
+      "database_read": 5
+    },
+    "operation_ms": {
+      "database_read": 39.69
+    }
+  },
+  "flow_mobile": {
+    "total_ms": 54.89,
+    "calls": {
+      "database_read": 5
+    },
+    "operation_ms": {
+      "database_read": 35.42
+    }
+  },
+  "canonical_html_38kb": {
+    "total_ms": 9.65,
+    "calls": {
+      "sanitizer": 4
+    },
+    "operation_ms": {
+      "sanitizer": 9.36
+    }
+  },
+  "inbox_initial": {
+    "total_ms": 3.33,
+    "calls": {
+      "discover_folders": 1,
+      "list_headers": 1,
+      "read_message": 1
+    },
+    "operation_ms": {
+      "discover_folders": 0.05,
+      "list_headers": 1.07,
+      "read_message": 0.0
+    }
+  },
+  "inbox_cached_model": {
+    "total_ms": 0.06,
+    "calls": {},
+    "operation_ms": {}
+  },
+  "inbox_refresh": {
+    "total_ms": 2.99,
+    "calls": {
+      "discover_folders": 1,
+      "list_headers": 1
+    },
+    "operation_ms": {
+      "discover_folders": 0.07,
+      "list_headers": 1.26
+    }
+  },
+  "inbox_other_message": {
+    "total_ms": 0.06,
+    "calls": {
+      "read_message": 1
+    },
+    "operation_ms": {
+      "read_message": 0.0
+    }
+  },
+  "inbox_enrichment": {
+    "total_ms": 0.15,
+    "calls": {
+      "enrichment": 1
+    },
+    "operation_ms": {
+      "enrichment": 0.01
+    }
+  }
+}

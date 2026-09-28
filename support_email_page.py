@@ -84,15 +84,18 @@ def _render_workspace(user):
     workspace = Workspace(state, user, config, smtp)
     try:
         epoch = st.session_state.get("navigation_epoch", 0)
-        if not state.get("loaded") or state.get("navigation_epoch") != epoch:
-            workspace.load(force=bool(state.get("loaded")))
+        if ((not state.get("loaded") and not state.get("recovery_state"))
+                or state.get("navigation_epoch") != epoch):
+            with st.spinner("Refreshing inbox…" if state.get("loaded") else "Loading inbox…"):
+                workspace.load(force=bool(state.get("loaded")))
             state["navigation_epoch"] = epoch
         target = {key: str(st.query_params.get("email_" + key, ""))[:998]
                   for key in ("uid", "uidvalidity", "message_id")}
         identity = tuple(target.values())
         if target["uid"] and state.get("notification_target") != identity:
             state["notification_target"] = identity
-            workspace.open_notification(target)
+            with st.spinner("Loading message…"):
+                workspace.open_notification(target)
         event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
         if event and workspace.handle(event):
             rerun_email()

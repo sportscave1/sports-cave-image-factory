@@ -12,8 +12,9 @@ def template_label(row):
     return row['name']+(' (built-in)' if row.get('builtin') else '')
 
 
-def section_picker(store,user,kind,source_key,key,cfg,source):
-    rows=store.section_templates(kind,cfg);by_id={str(r['id']):r for r in rows}
+def section_picker(store,user,kind,source_key,key,cfg,source,rows=None):
+    rows=store.section_templates(kind,cfg) if rows is None else rows
+    by_id={str(r['id']):r for r in rows}
     if key+'template' not in st.session_state:
         st.session_state[key+'template']=next((i for i,r in by_id.items() if r['content']['html']==source),None)
     elif st.session_state[key+'template'] not in by_id:

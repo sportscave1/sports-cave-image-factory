@@ -37,7 +37,8 @@ def save_flow_email(store,user,flow,index,doc,template_version):
 def flow_workspace(shop,store,actions):
     from crm_campaign_page import test_panel,perform_test
     workspace_styles();drafts=CampaignStore(store.connect)
-    rows=store.list('automations')
+    with st.spinner('Loading automations…'):
+        rows=store.list('automations')
     if not rows:
         st.info('No draft flows yet.')
         if st.button('Initialize draft library'):actions.seed();st.rerun()
@@ -48,11 +49,14 @@ def flow_workspace(shop,store,actions):
     sends=[i for i,s in enumerate(row['steps']) if s['type']=='send']
     if not sends:st.info('This flow has no email step.');return
     index=selectors[1].selectbox('Email',sends,format_func=lambda i:'Email '+str(sends.index(i)+1))
-    template=drafts.q('SELECT * FROM crm_templates WHERE template_key=%s',(row['steps'][index]['template'],),True)
-    if not template:st.warning('The selected email template is unavailable.');return
     identity=str(row['id'])+':'+str(index)
     record_key='flow_html_'+identity
-    state=st.session_state.setdefault(record_key,{'document':html_document(drafts.template_document(template)),'saved':None,'version':template['version'],'flow':deepcopy(row)})
+    if record_key not in st.session_state:
+        with st.spinner('Loading automation email…'):
+            template=drafts.q('SELECT * FROM crm_templates WHERE template_key=%s',(row['steps'][index]['template'],),True)
+            if not template:st.warning('The selected email template is unavailable.');return
+            st.session_state[record_key]={'document':html_document(drafts.template_document(template)),'saved':None,'version':template['version'],'flow':deepcopy(row)}
+    state=st.session_state[record_key]
     key=record_key+state.setdefault('widget_version',uuid.uuid4().hex)
     if state['saved'] is None:state['saved']=deepcopy(state['document'])
     doc=state['document'];c=doc['content']
@@ -103,7 +107,8 @@ def flow_workspace(shop,store,actions):
         with st.container(width='stretch'):canvas(doc,drafts.render_settings(),key)
     if save:
         try:
-            flow,saved=save_flow_email(drafts,actions.user,state['flow'],index,doc,state['version'])
+            with st.spinner('Saving draft…'):
+                flow,saved=save_flow_email(drafts,actions.user,state['flow'],index,doc,state['version'])
             state.update(flow=flow,version=saved['version'],saved=deepcopy(doc));st.toast('Flow email draft saved');st.rerun()
         except (ValueError,StoreUnavailable,PermissionError) as exc:st.warning(str(exc))
     if prepare:

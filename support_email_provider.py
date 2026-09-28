@@ -33,10 +33,11 @@ HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFEREN
 class MailboxError(RuntimeError):
     """Only constant, safe messages may cross the provider boundary."""
 
-    def __init__(self, message, *, code="operation", retryable=False, stage="operation"):
+    def __init__(self, message, *, code="operation", retryable=False, stage="operation", retry_after=0):
         super().__init__(message)
         self.code, self.retryable = code, retryable
         self.stage = stage
+        self.retry_after = retry_after
 
 
 FAILURES = {
@@ -98,11 +99,15 @@ def _retry_read(method):
         for attempt in range(2):
             try:
                 with operation(force=True) if attempt else nullcontext():
-                    return method(self, *args, **kwargs)
+                    result = method(self, *args, **kwargs)
+                if attempt:
+                    LOGGER.info("email_imap_reconnect_succeeded operation=%s", method.__name__)
+                return result
             except MailboxError as error:
                 if attempt or not error.retryable:
+                    LOGGER.warning("email_imap_operation_failed operation=%s code=%s attempts=%d", method.__name__, error.code, attempt+1)
                     raise
-                LOGGER.info("email_imap_retry code=%s", error.code)
+                LOGGER.info("email_imap_reconnect_started operation=%s code=%s retry=1", method.__name__, error.code)
     return read
 
 
@@ -507,7 +512,10 @@ class ImapProvider:
         except Deferred as error:
             LOGGER.info("email_imap_deferred stage=acquire code=%s", error.reason)
             code = "deferred" if error.reason == "backoff" else "busy"
-            raise MailboxError(FAILURES[code], code=code) from None
+            recovery = self.runtime.recovery(cfg.scope) if self.runtime else {}
+            if code == "deferred" and recovery.get("code") in {"authentication", "tls", "configuration"}:
+                code = recovery["code"]
+            raise MailboxError(FAILURES[code], code=code, retry_after=recovery.get("retry_after", 0)) from None
         finally:
             if write and self.runtime:
                 # Invalidates snapshots, including in-flight poll results; never sockets.
@@ -529,6 +537,7 @@ class ImapProvider:
             conn.debug = 0
             stage = "authentication"
             self._ok(conn.login(cfg.address, cfg.password), stage=stage)
+            LOGGER.debug("email_imap_connection_opened")
             count, uidvalidity = 0, ""
             if argument is not None:
                 stage = "select"
@@ -577,7 +586,7 @@ class ImapProvider:
             limited = bool(re.search(r"too many|connection limit|rate.?limit|maximum.*connections", str(data), re.I))
             code = "limit" if limited else "bye" if status == "BYE" else stage
             LOGGER.warning("email_imap_check_failure stage=%s code=%s", stage, code)
-            raise MailboxError(FAILURES[code], code=code, stage=stage, retryable=code == "folders")
+            raise MailboxError(FAILURES[code], code=code, stage=stage, retryable=code in {"folders", "bye"})
         return data
 
     def _list_folders(self, conn):
@@ -1006,6 +1015,7 @@ class ImapProvider:
                 raise MailboxError("Could not connect to save the mailbox copy.", code="append_not_started") from None
             raise error
 
+    @_retry_read
     def read_draft(self, header):
         with self._connection(header["folder"], header["uidvalidity"]) as (conn, _, __):
             if not str(header["uid"]).isdigit():
@@ -1048,6 +1058,7 @@ class ImapProvider:
             raise MailboxError("This message part could not be read safely.")
         return decode_part(payloads[0], part)
 
+    @_retry_read
     def read_message(self, header):
         with self._connection(header["folder"], header["uidvalidity"]) as (conn, _, __):
             parts = self._structure(conn, header["uid"])
@@ -1079,6 +1090,7 @@ class ImapProvider:
             return {"text": "\n\n".join(result), "attachments": [p for p in parts if p["attachment"]],
                     "warnings": warnings}
 
+    @_retry_read
     def read_attachment(self, header, section):
         with self._connection(header["folder"], header["uidvalidity"]) as (conn, _, __):
             # Re-read authoritative structure instead of trusting a stale UI filename/part size.

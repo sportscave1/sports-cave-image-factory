@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 import re
 import time
+import uuid
 
 from support_email_provider import MailboxError, SAFE_ERROR
 
@@ -166,9 +167,11 @@ def cached_read(cache, key, loader, *, clock=time.monotonic):
         if cache[old_key].get("expires", 0) <= now:
             del cache[old_key]
     try:
-        entry = {"data": loader(), "error": "", "refreshed_at": datetime.now(timezone.utc)}
+        entry = {"data": loader(), "error": "", "refreshed_at": datetime.now(timezone.utc),
+                 "revision": uuid.uuid4().hex}
     except Exception as error:
         entry = {"data": None, "error": str(error) if isinstance(error, MailboxError) else SAFE_ERROR,
+                 "error_code": getattr(error, "code", "temporary"), "retry_after": getattr(error, "retry_after", 0),
                  "refreshed_at": last_success}
     entry["expires"] = clock() + CACHE_TTL
     cache[key] = entry
