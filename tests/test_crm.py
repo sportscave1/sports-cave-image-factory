@@ -24,7 +24,7 @@ from tests.crm_fixtures import ShopifyFixture,ResendFixture
 ROOT=Path(__file__).resolve().parents[1]
 ADMIN={'id':'synthetic-admin','role':'admin','is_active':True,'page_permissions':[]}
 WORKER={'id':'synthetic-staff','role':'worker','is_active':True,'page_permissions':['crm_customers_view']}
-def config(enabled=True):return Config({'CRM_MARKETING_SEND_ENABLED':str(enabled).lower(),'CRM_MARKETING_TEST_ENABLED':'true','RESEND_API_KEY':'fixture-only','ACTIVITY_DIGEST_FROM':'Sports Cave <fixture@example.test>', 'CRM_UNSUBSCRIBE_SECRET':'fixture-secret'*4,'CRM_PUBLIC_BASE_URL':'https://example.test'})
+def config(enabled=True):return Config({'CRM_MARKETING_ENABLED':str(enabled).lower(),'CRM_MARKETING_SEND_ENABLED':str(enabled).lower(),'CRM_MARKETING_TEST_ENABLED':'true','RESEND_MARKETING_API_KEY':'fixture-only','RESEND_FROM_NAME':'Sports Cave','RESEND_FROM_EMAIL':'fixture@example.test','RESEND_REPLY_TO':'reply@example.test', 'CRM_UNSUBSCRIBE_SECRET':'fixture-secret'*4,'CRM_PUBLIC_BASE_URL':'https://example.test'})
 
 class ProviderTests(unittest.TestCase):
     def setUp(self):self.wire=ShopifyFixture();self.cache=DisplayCache();self.shop=Shopify(self.wire,self.cache)

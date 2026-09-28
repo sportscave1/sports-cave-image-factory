@@ -27,11 +27,14 @@ def pace():
 class Config:
     def __init__(self,env=None):
         env=os.environ if env is None else env
-        self.enabled=env.get('CRM_MARKETING_SEND_ENABLED','').lower()=='true'
-        self.tests_enabled=env.get('CRM_MARKETING_TEST_ENABLED','').lower()=='true'
-        self.api_key=env.get('RESEND_API_KEY','')
-        self.sender=env.get('CRM_MARKETING_FROM') or env.get('ACTIVITY_DIGEST_FROM','')
-        self.reply_to=env.get('ACTIVITY_DIGEST_REPLY_TO','hello@sportscaveshop.com')
+        master=env.get('CRM_MARKETING_ENABLED','').lower()=='true'
+        self.enabled=master and env.get('CRM_MARKETING_SEND_ENABLED','').lower()=='true'
+        # The old queued template tests are NOT the Stage 1 admin diagnostic.
+        self.tests_enabled=master and env.get('CRM_MARKETING_TEST_ENABLED','').lower()=='true'
+        self.api_key=env.get('RESEND_MARKETING_API_KEY','')
+        from email.utils import formataddr
+        self.sender=formataddr((env.get('RESEND_FROM_NAME',''),env.get('RESEND_FROM_EMAIL',''))) if env.get('RESEND_FROM_EMAIL') and env.get('RESEND_FROM_NAME') else ''
+        self.reply_to=env.get('RESEND_REPLY_TO','')
         self.public_base=(env.get('CRM_PUBLIC_BASE_URL') or env.get('SPORTS_CAVE_WEBHOOK_BASE_URL','')).rstrip('/')
         app=(env.get('SPORTS_CAVE_OS_BASE_URL') or env.get('PUBLIC_APP_URL') or 'https://sports-cave-image-factory.onrender.com').rstrip('/')
         self.logo_url=app+LOGO_PATH
@@ -39,7 +42,7 @@ class Config:
         self.resend_webhook_secret=env.get('CRM_RESEND_WEBHOOK_SECRET','')
     def require_send(self,test=False):
         if not (self.tests_enabled if test else self.enabled):raise MarketingDisabled('Marketing delivery is disabled. Drafts and previews remain available.')
-        if not self.api_key or not self.sender or len(self.secret)<32 or not safe_url(self.public_base):raise MarketingDisabled('Marketing delivery configuration is incomplete.')
+        if not self.api_key or not self.sender or not self.reply_to or len(self.secret)<32 or not safe_url(self.public_base):raise MarketingDisabled('Marketing delivery configuration is incomplete.')
     def unsubscribe_url(self,send_id):
         if len(self.secret)<32:raise MarketingDisabled('Marketing unsubscribe signing is not configured.')
         value=str(uuid.UUID(str(send_id)));signature=hmac.new(self.secret.encode(),value.encode(),hashlib.sha256).hexdigest()

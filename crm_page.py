@@ -342,6 +342,9 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     left,right=st.columns([9,1])
     left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
     if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
+    if route=='CRM Automations':
+        from crm_delivery_panel import render_delivery_panel
+        render_delivery_panel(user)
     try:
         version=store.state('cache_version').get('version')
         if version:CACHE.invalidate(version)
