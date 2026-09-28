@@ -5585,8 +5585,8 @@ PRODUCT_UPLOAD_AUD_PRICING = {
     "framed": (
         ("Framed XL", "A$339", "A$449", "A$110", "24%"),
         ("Framed Large", "A$269", "A$339", "A$70", "21%"),
-        ("Framed Medium", "A$219", "A$269", "A$50", "19%"),
-        ("Framed Small", "A$179", "A$209", "A$30", "14%"),
+        ("Framed Medium", "A$209", "A$269", "A$50", "19%"),
+        ("Framed Small", "A$169", "A$209", "A$30", "14%"),
     ),
     "unframed": (
         ("Unframed XL", "A$159", "A$209", "A$50", "24%"),
@@ -5601,7 +5601,7 @@ PRODUCT_UPLOAD_PRICE_BLOCK_END = (
 )
 PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
 
-Authorised exception for every Sports Cave product: set only the Australian Black, Oak and White framed variants in all four sizes to the exact selling and compare-at prices in the CENTRAL SPORTS CAVE AUD PRICE LADDER. This exception overrides the price-preservation rules below, including post-update checks and restoration; preserve every unframed variant and international market price."""
+Only when the operator intentionally runs a pricing update for the selected existing product, set the Australian Small Black/Oak/White framed selling price to A$169 and Medium Black/Oak/White framed selling price to A$209. Update only the Price field of those six variants; omit compare-at/RRP from the mutation and preserve its exact existing value, including blank values. Preserve Large, XL, every unframed price, international market prices, savings and discount percentages. This restriction takes precedence over the central ladder, Full Standardisation pricing instructions and pricing QA: read back the six selling prices and verify all other prices/RRPs against the pre-update snapshot. Media-only updates do not authorise price changes. Never update other products or run a mass/startup update."""
 
 
 def product_upload_price_ladder_prompt_text():
@@ -5684,7 +5684,7 @@ def apply_product_upload_pricing_update(prompt_text):
         PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
     )
     prompt = re.sub(
-        r"EXISTING PRODUCT — PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian Small Black, Oak and White framed variants[^\r\n]*",
+        r"EXISTING PRODUCT — PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian (?:Small )?Black, Oak and White framed variants[^\r\n]*",
         lambda match: PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
         prompt,
     )
@@ -6073,6 +6073,8 @@ def apply_product_upload_prompt_updates(
         prompt_text=strip_collection_rules(common_build(prompt_text))
     prompt = apply_product_upload_product_name_update(prompt_text, metadata, preview=preview)
     prompt = apply_product_upload_pricing_update(prompt)
+    if update_existing and PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION not in prompt:
+        prompt += "\n\n" + PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION
     from product_collector_copy import apply_rules
     prompt = apply_rules(apply_product_upload_media_reliability_patch(
         prompt,

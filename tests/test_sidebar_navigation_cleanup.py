@@ -11,6 +11,17 @@ APP_SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
 
 
 class SidebarNavigationCleanupTests(unittest.TestCase):
+    def test_unused_training_page_is_not_registered_or_discoverable(self):
+        import os_accounts
+        import app_search
+        self.assertNotIn('va_training', os_accounts.PAGE_BY_KEY)
+        self.assertNotIn('VA Training', os_accounts.PAGE_BY_ROUTE)
+        self.assertNotIn('VA Training', APP_SOURCE)
+        self.assertNotIn('va_training', app_search.ALIASES)
+        routes = [page['route'] for page in os_accounts.PAGE_REGISTRY]
+        self.assertFalse(any(row['route_key']=='va_training' for row in app_search.build_app_index(routes)))
+        self.assertNotIn('VA Training', [page['route'] for page in os_accounts.navigation_pages()])
+
     def test_only_overview_routes_activate_disclosure_parents(self):
         self.assertTrue(
             navigation_runtime.disclosure_parent_is_active(

@@ -18,8 +18,8 @@ EXISTING_PROMPT_SHA256 = "190193bdbbc70f29ccd981441eeee257d37805f8c602c06d09878c
 EXPECTED_FRAMED_PRICING_LINES = (
     "- Framed XL: Selling price A$339 | RRP / compare-at price A$449 | Saving A$110 | Approx. discount 24%",
     "- Framed Large: Selling price A$269 | RRP / compare-at price A$339 | Saving A$70 | Approx. discount 21%",
-    "- Framed Medium: Selling price A$219 | RRP / compare-at price A$269 | Saving A$50 | Approx. discount 19%",
-    "- Framed Small: Selling price A$179 | RRP / compare-at price A$209 | Saving A$30 | Approx. discount 14%",
+    "- Framed Medium: Selling price A$209 | RRP / compare-at price A$269 | Saving A$50 | Approx. discount 19%",
+    "- Framed Small: Selling price A$169 | RRP / compare-at price A$209 | Saving A$30 | Approx. discount 14%",
 )
 EXPECTED_UNFRAMED_PRICING_LINES = (
     "- Unframed XL: Selling price A$159 | RRP / compare-at price A$209 | Saving A$50 | Approx. discount 24%",
@@ -306,12 +306,55 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
                         for frame in ("Black", "Oak", "White")
                         for size, price, rrp in (("XL", "339.00", "449.00"),
                                                  ("L", "269.00", "339.00"),
-                                                 ("M", "219.00", "269.00"),
-                                                 ("S", "179.00", "209.00"))
+                                                 ("M", "209.00", "269.00"),
+                                                 ("S", "169.00", "209.00"))
                     ],
                 )
                 self.assertEqual(prices[("Framed", "Small")],
-                                 {"price": "179.00", "compare_at_price": "209.00"})
+                                 {"price": "169.00", "compare_at_price": "209.00"})
+
+    def test_small_medium_revert_preserves_every_other_pricing_field_and_has_no_network(self):
+        before = {
+            'framed': (
+                ('Framed XL', 'A$339', 'A$449', 'A$110', '24%'),
+                ('Framed Large', 'A$269', 'A$339', 'A$70', '21%'),
+                ('Framed Medium', 'A$219', 'A$269', 'A$50', '19%'),
+                ('Framed Small', 'A$179', 'A$209', 'A$30', '14%'),
+            ),
+            'unframed': (
+                ('Unframed XL', 'A$159', 'A$209', 'A$50', '24%'),
+                ('Unframed Large', 'A$119', 'A$159', 'A$40', '25%'),
+                ('Unframed Medium', 'A$89', 'A$109', 'A$20', '18%'),
+                ('Unframed Small', 'A$69', 'A$79', 'A$10', '13%'),
+            ),
+        }
+        restored = {group: tuple((row[0], dict(Framed_Medium='A$219', Framed_Small='A$179').get(row[0].replace(' ', '_'), row[1]), *row[2:]) for row in rows)
+                    for group, rows in app.PRODUCT_UPLOAD_AUD_PRICING.items()}
+        self.assertEqual(restored, before)
+        with patch('requests.sessions.Session.request', side_effect=AssertionError('No live Shopify calls')) as network:
+            for existing, mode in ((False, 'DRAFT'), (False, 'LIVE'), (True, 'DRAFT')):
+                with self.subTest(existing=existing, mode=mode):
+                    current = app.get_product_upload_prompt(source_context(), update_existing=existing, publication_mode=mode)
+                    saved = current.replace('Framed Small: Selling price A$169', 'Framed Small: Selling price A$179').replace('Framed Medium: Selling price A$209', 'Framed Medium: Selling price A$219')
+                    updated = app.apply_product_upload_prompt_updates(saved, source_context(), update_existing=existing, publication_mode=mode)
+                    self.assertEqual(updated, current)
+                    self.assertNotIn('Framed Small: Selling price A$179', updated)
+                    self.assertNotIn('Framed Medium: Selling price A$219', updated)
+                    self.assertIn('Black, Oak, and White framed variants use the same framed pricing:', updated)
+                    if existing:
+                        self.assertIn('omit compare-at/RRP from the mutation', updated)
+                        self.assertIn('including blank values', updated)
+                        self.assertIn('Preserve Large, XL, every unframed price', updated)
+                        self.assertIn('Media-only updates do not authorise price changes', updated)
+            network.assert_not_called()
+
+    def test_saved_all_framed_rrp_exception_is_replaced_by_price_only_scope(self):
+        old = ('EXISTING PRODUCT — PRICE PROTECTION\n\n'
+               'Authorised exception for every Sports Cave product: set only the Australian Black, Oak and White framed variants in all four sizes to the exact selling and compare-at prices in the CENTRAL SPORTS CAVE AUD PRICE LADDER.')
+        updated = app.apply_product_upload_pricing_update(old)
+        self.assertNotIn('in all four sizes', updated)
+        self.assertIn(app.PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION, updated)
+        self.assertEqual(app.apply_product_upload_pricing_update(updated), updated)
 
     def test_saved_supplemental_pricing_tables_are_updated_in_all_three_modes(self):
         appendix = """NEW PRODUCT CREATION — EXACT AUD PRICES
@@ -333,9 +376,7 @@ EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION
 Preserve every other price and product field.
 """
         expected_appendix = appendix.replace(
-            "S — Price $159.00", "S — Price $179.00"
-        ).replace(
-            "M — Price $209.00", "M — Price $219.00"
+            "S — Price $159.00", "S — Price $169.00"
         ).replace(
             "L — Price $269.00 / Compare-at price $349.00",
             "L — Price $269.00 / Compare-at price $339.00"
@@ -356,7 +397,7 @@ Preserve every other price and product field.
                     saved, source_context(), update_existing=existing, publication_mode=mode,
                 )
                 self.assertNotIn("S — Price $159.00", rendered)
-                self.assertIn("S — Price $179.00 / Compare-at price $209.00", rendered)
+                self.assertIn("S — Price $169.00 / Compare-at price $209.00", rendered)
                 self.assertIn("XL — Price $159.00 / Compare-at price $209.00", rendered)
                 self.assertIn("L — Price $119.00 / Compare-at price $159.00", rendered)
                 self.assertIn(app.PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION, rendered)
@@ -474,7 +515,7 @@ Preserve every other price and product field.
                     update_existing=update_existing,
                 )
                 self.assertEqual(
-                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(strip_title_rules(current_prompt))),
+                    (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(strip_title_rules(current_prompt))).replace('\n\n'+app.PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION, ''),
                     (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules((lambda p: p if update_existing else common_build(p))(legacy_prompt.replace(legacy_pricing, new_pricing)))),
                 )
 
@@ -492,7 +533,7 @@ Preserve every other price and product field.
                 self.assertEqual(
                     (lambda p: p if update_existing else common_build(p))(app.remove_product_upload_product_name_block(
                         app.remove_product_upload_media_reliability_patch(strip_title_rules(upgraded))
-                    )),
+                    )).replace('\n\n'+app.PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION, ''),
                     (lambda p: p if update_existing else apply_collection_rules(p))(apply_rules(legacy if update_existing else common_build(legacy))),
                 )
                 self.assertTrue(upgraded.startswith(app.PRODUCT_UPLOAD_NAME_BLOCK_START if update_existing else CORE))
