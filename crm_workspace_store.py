@@ -92,6 +92,7 @@ class WorkspaceRecords(Store):
         if not name.strip() or len(name)>150:raise ValueError('Use a template name of 1–150 characters.')
         doc=new_document();doc['type']=document['type'];doc['market']=document['market']
         doc['content']=deepcopy(document['content']);doc['blocks']=deepcopy(document.get('blocks') or legacy_blocks(document['content']))
+        if 'content_mode' in document:doc.update(content_mode=document['content_mode'],custom_html=document.get('custom_html',''))
         content={'format':'campaign_blocks_v1','document':doc}
         with self.db() as conn:
             if identity:

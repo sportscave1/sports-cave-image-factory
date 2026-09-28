@@ -32,7 +32,7 @@ class UiTests(unittest.TestCase):
             with self.subTest(route=route):
                 at=self.app(route);self.assertFalse(at.exception)
                 if route!='CRM Campaigns':self.assertFalse(at.warning)
-                else:self.assertTrue(any('LIVE MARKETING DELIVERY: DISABLED' in w.value for w in at.warning))
+                else:self.assertTrue(any('LIVE MARKETING DELIVERY: DISABLED' in w.value for w in at.caption))
                 if route=='CRM Campaigns':self.assertFalse(any(b.label=='Send campaign' for b in at.button))
     def test_customer_pagination_and_search(self):
         at=self.app('CRM Customers');self.assertEqual(len(at.dataframe[0].value),50)
@@ -62,6 +62,6 @@ class UiTests(unittest.TestCase):
     def test_automation_activation_fails_closed(self):
         at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')
         next(b for b in at.button if b.label=='Save workflow').click().run()
-        self.assertTrue(any('disabled' in w.value for w in at.warning));self.assertFalse(at.exception)
+        self.assertTrue(any('disabled' in w.value for w in at.caption));self.assertFalse(at.exception)
 
 if __name__=='__main__':unittest.main()

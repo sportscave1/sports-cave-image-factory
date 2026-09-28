@@ -41,7 +41,7 @@ class CampaignStore(WorkspaceRecords):
                 row=conn.execute('INSERT INTO crm_campaign_drafts(name,document,status,created_by) VALUES(%s,%s::jsonb,%s,%s) RETURNING *',(name,json.dumps(document),status,actor)).fetchone()
             actions=['campaign_duplicated' if duplicate_of else 'campaign_edited' if old else 'campaign_created']
             if old and old['document']['audience']!=document['audience']: actions.append('segment_changed')
-            if old and (old['document']['content']!=document['content'] or old['document'].get('blocks')!=document.get('blocks')): actions.append('content_changed')
+            if old and (old['document']['content']!=document['content'] or old['document'].get('blocks')!=document.get('blocks') or old['document'].get('custom_html')!=document.get('custom_html') or old['document'].get('content_mode')!=document.get('content_mode')): actions.append('content_changed')
             if old and old['status']!=status: actions.append('compliance_status_changed')
             for action in actions:
                 self._history(conn,row,action,actor,old)

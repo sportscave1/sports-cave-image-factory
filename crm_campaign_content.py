@@ -50,8 +50,10 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref'}
-    if not isinstance(doc, dict) or set(doc)-set(new_document()) or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html'}
+    if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
+    if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
+    if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
     validate_blocks(doc.get('blocks',[]))
     if not isinstance(doc.get('tags',[]),list) or len(doc.get('tags',[]))>10 or any(not isinstance(t,str) or len(t)>40 for t in doc.get('tags',[])): raise ValueError('Use up to 10 short internal tags.')
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',doc.get('campaign_key','legacy')): raise ValueError('Invalid campaign tracking key.')
@@ -107,6 +109,10 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     accent=cfg.get('accent','#b49450')
     if not re.fullmatch(r'#[0-9a-fA-F]{6}',accent):accent='#b49450'
     body,plain=render_blocks(blocks,campaign_key=doc.get('campaign_key',''),market=doc['market'],images_off=images_off,accent=accent,font=cfg.get('font','Arial'),button_style=cfg.get('button_style','Solid black'))
+    if doc.get('content_mode')=='HTML':
+        from crm_campaign_html import import_html
+        imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
+        body='<tr><td>'+imported+'</td></tr>'
     unsubscribe='Unsubscribe — production link not activated (layout/test only).'
     footer='<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial"><strong>'+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'
     if https(cfg['website']):footer+='<a style="color:#333" href="'+e(cfg['website'])+'">'+e(cfg['website'])+'</a><br>'
@@ -163,7 +169,15 @@ def preflight(doc, env=None, cfg=None):
         'Market legal review complete':False,
         'Broadcast provider activated':False,
     }
-    if doc.get('blocks'):
+    if doc.get('content_mode')=='HTML':
+        from crm_campaign_html import import_html
+        for label in ('Eligible recipients > 0 (complete calculation within 24h)','Headline and body present','Hero uses HTTPS','Image alt text complete','CTA label and HTTPS URL valid'):
+            checks.pop(label,None)
+        _,plain,html_checks=import_html(doc.get('custom_html',''))
+        checks.update(html_checks)
+        checks['Plain-text alternative generated']=bool(plain.strip())
+        checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']
+    elif doc.get('blocks'):
         # Internal tests exercise saved content, not a production audience dispatch.
         checks.pop('Eligible recipients > 0 (complete calculation within 24h)',None)
         checks.pop('Headline and body present',None)

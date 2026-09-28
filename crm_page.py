@@ -338,13 +338,16 @@ def reports_page(store):
 def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config=None):
     require(user,PAGE_KEYS[route])
     shop=shop or Shopify();store=store or Store();actions=Actions(store,user,config)
-    st.markdown('### CRM & MARKETING · '+LABELS[route].upper())
     left,right=st.columns([9,1])
-    left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
+    if route=='CRM Campaigns':
+        left.markdown('### CRM & MARKETING · CAMPAIGNS')
+    else:
+        left.markdown('### CRM & MARKETING · '+LABELS[route].upper())
+        left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
     if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
     from crm_navigation import SIDEBAR_ROUTES, navigation_allowed
     import os_accounts
-    tabs=st.columns(3)
+    tabs=st.columns([1,1,1,7])[:3]
     for column,target in zip(tabs,SIDEBAR_ROUTES):
         if os_accounts.can_access_page(user,PAGE_KEYS[target]):
             if column.button(LABELS[target],key='crm_nav_'+target,disabled=target==route):
