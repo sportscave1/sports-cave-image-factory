@@ -336,31 +336,24 @@ def reports_page(store):
 def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config=None):
     require(user,PAGE_KEYS[route])
     shop=shop or Shopify();store=store or Store();actions=Actions(store,user,config)
-    left,right=st.columns([9,1])
-    if route=='CRM Campaigns':
-        left.markdown('### CRM & MARKETING · CAMPAIGNS')
-    else:
-        left.markdown('### CRM & MARKETING · '+LABELS[route].upper())
-        left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
-    if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
-    from crm_navigation import SIDEBAR_ROUTES, navigation_allowed
-    import os_accounts
-    tabs=st.columns([1,1,1,7])[:3]
-    for column,target in zip(tabs,SIDEBAR_ROUTES):
-        if os_accounts.can_access_page(user,PAGE_KEYS[target]):
-            if column.button(LABELS[target],key='crm_nav_'+target,disabled=target==route):
-                if navigation_allowed(st.session_state,route,target):navigate(target)
-    from crm_navigation import SETTINGS_ALIASES
-    if route=='CRM Settings' or route in SETTINGS_ALIASES:
-        from crm_settings_page import settings_page
-        try:settings_page(shop,store,actions,navigate,SETTINGS_ALIASES.get(route))
-        except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,PermissionError,ValueError) as exc:st.warning(str(exc))
-        return
     if route=='CRM Campaigns':
         from crm_campaign_page import campaign_workspace
         from crm_resend_marketing import DeliveryError
         try: campaign_workspace(shop,store,actions,navigate)
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
+        return
+    left,right=st.columns([9,1])
+    left.markdown('### EMAIL · '+('CAMPAIGN SETTINGS' if route=='CRM Settings' else LABELS[route].upper()))
+    left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
+    if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
+    import os_accounts
+    from crm_navigation import SETTINGS_ALIASES
+    if route=='CRM Settings' or route in SETTINGS_ALIASES:
+        if os_accounts.can_access_page(user,'crm_campaigns_manage') and st.button('Back to campaigns',type='tertiary'):
+            navigate('CRM Campaigns')
+        from crm_settings_page import settings_page
+        try:settings_page(shop,store,actions,navigate,SETTINGS_ALIASES.get(route))
+        except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,PermissionError,ValueError) as exc:st.warning(str(exc))
         return
     try:
         version=store.state('cache_version').get('version')

@@ -80,9 +80,9 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('No ex
             at.session_state['crm_settings_section']='Branding';at.run()
             self.assertFalse(at.exception)
             self.assertTrue(at.error)
-            self.assertTrue({'Campaigns','Flows','Settings'}.issubset({b.label for b in at.button}))
+            if route!='CRM Campaigns':self.assertTrue({'Campaigns','Flows','Settings'}.issubset({b.label for b in at.button}))
             if route=='CRM Campaigns':
-                self.assertTrue(next(b for b in at.button if b.label=='+ New Campaign').disabled)
+                self.assertTrue(next(b for b in at.button if b.label=='Save draft').disabled)
                 self.assertTrue(any('Marketing delivery OFF' in w.value for w in at.caption))
             at.run();self.assertFalse(at.exception)
 
@@ -103,9 +103,9 @@ class SchemaRecoveryTests(unittest.TestCase):
             if route=='CRM Settings':at.session_state['crm_settings_section']='Templates'
             at.run(timeout=20);self.assertFalse(at.exception);self.assertFalse(at.error)
             if route=='CRM Campaigns':
-                next(t for t in at.text_input if t.label=='Search campaigns').set_value('no-such-campaign-739421');at.run()
-                self.assertTrue(any('No matching campaigns' in i.value for i in at.info))
-                self.assertFalse(next(b for b in at.button if b.label=='+ New Campaign').disabled)
+                next(t for t in at.text_input if t.label=='Find campaign').set_value('no-such-campaign-739421');at.run()
+                self.assertTrue(any('No saved campaigns' in i.value for i in at.caption))
+                self.assertFalse(next(b for b in at.button if b.label=='Save draft').disabled)
 
     def test_save_reload_edit_duplicate_archive_history(self):
         from tests.crm_db_fixture import connect

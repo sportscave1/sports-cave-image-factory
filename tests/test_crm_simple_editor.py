@@ -94,7 +94,6 @@ class PersistenceTests(unittest.TestCase):
         from tests.test_crm_ui import SCRIPT
         with patch('crm_resend_marketing._send_admin_email',side_effect=AssertionError('No email')):
             at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';at.run(timeout=20)
-            next(b for b in at.button if b.label=='+ New Campaign').click().run(timeout=20)
             self.assertFalse(at.exception)
             self.assertEqual(at.session_state['campaign_editor']['name'],'Untitled campaign')
             self.assertEqual(at.session_state['campaign_editor']['document']['content_mode'],'HTML')

@@ -84,14 +84,14 @@ class SqlWorkspaceTests(unittest.TestCase):
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';return at.run(timeout=20)
 
     def test_blank_new_canvas_no_blocks_and_preview_roundtrip(self):
-        at=self.app();next(b for b in at.button if b.label=='+ New Campaign').click().run(timeout=20)
+        at=self.app()
         self.assertFalse(at.exception)
         doc=at.session_state['campaign_editor']['document']
         self.assertEqual(doc['custom_html'],'');self.assertEqual(doc['content']['subject'],'');self.assertEqual(doc['content']['preheader'],'')
         self.assertFalse(any(r.label=='Content mode' for r in at.radio))
         self.assertFalse(any('Blocks' in r.options for r in at.radio))
         at.session_state['campaign_editor']['document']['custom_html']=HTML
-        next(b for b in at.button if b.label=='Preview').click().run(timeout=20)
+        next(r for r in at.radio if r.label=='Email workspace').set_value('Preview').run(timeout=20)
         self.assertFalse(at.exception)
         self.assertEqual(next(r for r in at.radio if r.label=='Email workspace').value,'Preview')
         iframe=next(e for e in at.get('iframe') if 'A collector moment' in e.proto.srcdoc)
@@ -101,7 +101,8 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertFalse(at.exception)
 
     def test_delete_confirmation_is_explicit_and_cancel_retains_draft(self):
-        at=self.app();next(b for b in at.button if b.label=='+ New Campaign').click().run(timeout=20)
+        at=self.app()
+        next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         identity=at.session_state['campaign_editor']['id']
         next(b for b in at.button if b.label=='Delete draft').click().run(timeout=20)
         self.assertTrue(any('This cannot be undone' in w.value for w in at.warning))
@@ -109,3 +110,48 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.store.draft(identity))
         next(b for b in at.button if b.label=='Cancel').click().run(timeout=20)
         self.assertTrue(self.store.draft(identity));self.assertFalse(at.exception)
+
+
+    def test_compose_is_local_until_explicit_save_and_initial_reads_are_bounded(self):
+        from crm_campaign_store import CampaignStore
+        before=self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n']
+        with patch.object(CampaignStore,'history',side_effect=AssertionError('History must be lazy')),patch.object(CampaignStore,'templates',side_effect=AssertionError('Templates must be lazy')),patch('crm_campaign_page.selection_page',side_effect=AssertionError('Eligibility must be explicit')):
+            at=self.app();at.run()
+        self.assertFalse(at.exception)
+        self.assertIsNone(at.session_state['campaign_editor']['id'])
+        self.assertEqual(before,self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n'])
+        labels={b.label for b in at.button}
+        self.assertTrue(labels.isdisjoint({'Campaigns','Flows','Settings','Refresh','+ New Campaign','Preview'}))
+        self.assertFalse(any(t.label=='Search campaigns' for t in at.text_input))
+        self.assertTrue(any('Recent campaigns' in m.value for m in at.markdown))
+        at.session_state['campaign_editor']['document']['custom_html']=HTML
+        next(t for t in at.text_input if t.label=='Subject').set_value('Saved subject')
+        next(t for t in at.text_input if t.label=='Preview text').set_value('Saved preview')
+        next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
+        self.assertFalse(at.exception)
+        row=self.store.draft(at.session_state['campaign_editor']['id'])
+        self.assertEqual(row['document']['custom_html'],HTML)
+        self.assertEqual(row['document']['content']['subject'],'Saved subject')
+        self.assertEqual(row['document']['content']['preheader'],'Saved preview')
+        self.assertTrue(any('A collector moment' in e.proto.srcdoc for e in at.get('iframe')))
+        next(b for b in at.button if b.label=='+ New').click().run(timeout=20)
+        self.assertIsNone(at.session_state['campaign_editor']['id'])
+        self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'')
+        self.assertEqual(before+1,self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n'])
+
+    def test_recent_open_uses_same_editor_and_protects_unsaved_compose(self):
+        saved=self.draft();at=self.app()
+        next(t for t in at.text_input if t.label=='Subject').set_value('Keep this local edit').run()
+        table_key=next(k for k in at.session_state.filtered_state if k.startswith('recent_campaigns_'))
+        at.session_state[table_key]={'selection':{'rows':[],'columns':[],'cells':[[0,'Campaign']]}};at.run()
+        self.assertIsNone(at.session_state['campaign_editor']['id'])
+        self.assertTrue(any('Save your changes first' in w.value for w in at.warning))
+        next(b for b in at.button if b.label=='Keep editing').click().run()
+        self.assertEqual(at.session_state['campaign_editor']['document']['content']['subject'],'Keep this local edit')
+        at.session_state['campaign_pending_open']=str(saved['id']);at.run()
+        next(b for b in at.button if b.label=='Discard unsaved changes and continue').click().run()
+        self.assertFalse(at.exception)
+        self.assertEqual(str(at.session_state['campaign_editor']['id']),str(saved['id']))
+        self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],HTML)
+        at.run()
+        self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],HTML)

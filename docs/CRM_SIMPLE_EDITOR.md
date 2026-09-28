@@ -4,11 +4,15 @@ Implemented locally. No commit, push, deployment, production database mutation o
 
 ## Primary workflow and layout
 
-Campaigns uses a compact clickable campaign list with Campaign, Status, Audience, Market, Updated and Last test columns. Filters are optional. New Campaign saves an Untitled campaign DRAFT and immediately opens blank HTML, subject and preview text. No wizard, Blocks tab, drag tray or side-by-side preview appears in the primary editor.
+Campaigns opens directly into the email composer. There is no campaign-list landing screen, duplicated Campaigns / Flows / Settings navigation, Refresh, wizard or prominent search/filter dashboard. Navigation remains in the existing OS sidebar. Other CRM routes are unchanged.
 
-Name, subject and preview text sit above grouped Save draft / Preview / Send test / Back actions. A 250px left panel holds collapsed Details, Audience, Test, More and Templates sections. Audience expands without replacing the canvas. It retains segments, filters, exclusions, eligibility and Smart Sending. More retains duplicate, archive/restore, versions and reports, and adds confirmed draft deletion. Templates use the existing storage only.
+A new compose session has no database ID: Untitled campaign, DRAFT, blank subject, preview text and HTML. Opening the page, switching preview widths and editing source do not insert a database draft or revision. The explicit Save draft action inserts the first record, then uses existing optimistic versioned updates. Session-only unsaved content is not durable across a disconnected session or hard reload; save explicitly. More > + New starts another local compose. Switching drafts or pages with unsaved edits requires saving or explicitly discarding them.
 
-The main white workspace switches between HTML source and one Preview. Preview widths are Desktop (600), 430, 390, 375 and 320; images-off and plain-text views remain available. Source edits update session state, not database versions. Save draft is explicit.
+The compact top bar contains the current title/status, Marketing delivery OFF / Tests only, Save draft, Send test and More. Save is the only gold action. A 240px independently scrolling left panel contains Campaign Details (name, subject, preview text, market), collapsed Audience, Test, Templates and More. Audience retains filters, segments, exclusions, eligibility and Smart Sending without replacing the editor. Existing version history, reports and templates load only on request.
+
+The center is a large white monospace HTML surface with HTML / Preview controls. An always-visible preview sits to the right. Its compact width selector displays exactly one layout at Desktop (600), 430, 390, 375 or 320px. Source edits update session state after a short debounce or blur, then refresh the preview; they do not save to the database. The source canvas height follows the viewport without growing when the page is scrolled. Long emails scroll within the preview frame. Existing Flow preview controls, including images-off/plain text, are unchanged.
+
+Recent campaigns appears below the composer, with six rows per page and Campaign, Status, Market, Updated and Last test columns. Click a campaign cell or select its row to open it in the same editor above. Optional search/archived filters are collapsed. The query fetches at most seven rows for pagination; it does not fetch revision history or calculate audiences on page load. Duplicate, archive/restore, history and safe draft deletion remain in More. There is no schema change.
 
 ## Content preservation and safety
 
@@ -30,21 +34,21 @@ Flow tests prepare a separate campaign test snapshot and use the existing single
 
 CRM_MARKETING_ENABLED and delivery configuration were not changed. Production delivery remains OFF and flows are not activated. Test sending requires an explicit admin action, saved/reviewed current content and exactly one approved manually entered internal recipient. Audience calculations, preview, page loads and saves never send. No real email was sent during implementation or verification.
 
-## Verification
+## Verification — final composer-first update
 
-- 142 CRM tests passed, including 8 new workspace/deletion/flow-storage tests.
-- 73 Email and 212 support Email regression tests passed with mocked transport.
+- 144 CRM tests passed against disposable PostgreSQL, including original HTML persistence, unsaved compose, no database insertion on page load/rerun, explicit save, recent-draft reopening, unsaved-change protection, lazy history/templates/eligibility, safe tests and deletion, and existing Flows/Settings behavior.
+- 73 Email and 212 support Email regression tests passed with mocked transports.
 - 34 navigation/startup tests passed.
-- Final focused 21-test rerun passed after spacing and unsaved-flow protection changes.
-- Changed Python files compile; git diff --check passes.
-- Browser exercised actual Streamlit CRM UI/components with disposable PostgreSQL and synthetic Shopify, with external requests blocked. Production credentials/data were not used.
-- Checked at 1440x900 and 1920x1080: campaign list, blank New Campaign, HTML paste/save, source preservation after server reload, same-surface preview, Audience panel, restricted Test panel, named Delete confirmation/cancel, Flows and Settings. Permanent deletion is covered by isolated SQL tests, not a browser deletion of user data.
-- 1920x1080 campaign editor fits on one screen. 1440x900 can require modest vertical scrolling to the canvas bottom; primary actions stay at the top. Long settings scroll within the left panel. Email preview itself scrolls inside its frame.
-- Desktop and 320px preview frame widths verified in this pass; intermediate sizes retain the same previously verified shared rendering path.
-- Screenshots: .venv/crm-ultra-1920.jpg and .venv/crm-ultra-1440.jpg (local verification environment; OS production shell/auth was not exercised).
+- Changed Python files compile; JavaScript syntax check and git diff --check pass.
+- Browser verification uses the actual Streamlit CRM UI/components and existing sidebar with disposable PostgreSQL and synthetic Shopify data. External HTTP requests are blocked. It does not exercise production authentication or production data.
+- Browser checks: direct blank composer, full HTML paste and live right preview, explicit save, reopening saved source from recent campaigns, HTML/Preview round trip, collapsed Audience, restricted Test panel, named Delete confirmation/cancel, separate Flows and Settings. Permanent draft deletion is tested in isolated SQL; no user data is deleted in the browser.
+- Screen sizes: 1920x1080, 1440x900 and 1366x768. The editor and right preview dominate the initial viewport. Lower desktop heights require modest vertical scrolling; controls can scroll independently. Recent campaigns stays below the editor.
+- Screenshots: .venv/composer-1920.jpg, .venv/composer-1440.jpg, .venv/composer-1366.jpg. These show the local verification environment. Missing legal/sender configuration is intentionally represented by the existing test-only preview warnings.
 
-## Files changed in this update
+## Files changed in the final simplification
 
-crm_campaign_page.py; crm_campaign_store.py; crm_page.py; crm_html_workspace.py (new); crm_flow_editor.py (new); components/crm_html_editor/index.html; tests/test_crm_html_workspace.py (new); tests/test_crm_ui.py; tests/test_crm_storage_recovery.py; docs/CRM_SIMPLE_EDITOR.md.
+crm_campaign_page.py; crm_html_workspace.py; crm_page.py; components/crm_html_editor/index.html; tests/test_crm_html_workspace.py; tests/test_crm_simple_editor.py; tests/test_crm_storage_recovery.py; docs/CRM_SIMPLE_EDITOR.md.
 
-Nathan can safely review/edit/save drafts locally. A manual internal test requires the existing configured admin allowlist and preflight. No production/bulk sending or deployment is authorized by this change.
+Only campaign presentation and related tests/documentation changed. Existing backend/schema, Email, Orders, Edition Ops, Product Uploads, Ads, SEO, Shopify access, permissions and delivery settings remain unchanged. Block storage/helpers are retained outside the primary V1 UI.
+
+Nathan can safely review/edit/save drafts locally and after a separately approved deployment. A manual internal test still requires the existing configured admin allowlist, saved reviewed content and preflight. No production/bulk sending or deployment is authorized by this change. No commit, push, deployment or real email send was performed.
