@@ -29,7 +29,7 @@ class SectionTests(unittest.TestCase):
         for source in (result['html'], result['text']):
             self.assertLess(source.index('Custom header'), source.index('A collector moment'))
             self.assertLess(source.index('A collector moment'), source.index('Custom footer'))
-            self.assertLess(source.index('Custom footer'), source.index('Unsubscribe'))
+            self.assertNotIn('Unsubscribe', source)
         self.assertEqual(doc, original)
         self.assertNotIn(FOOTER_TOKEN, result['html'])
         self.assertTrue(preflight(doc, ENV)['test_ready'])
@@ -43,7 +43,7 @@ class SectionTests(unittest.TestCase):
         doc['custom_html'] = ''
         self.assertFalse(preflight(doc, ENV)['test_ready'])
 
-    def test_locked_footer_survives_removed_duplicated_and_hidden_tokens(self):
+    def test_legacy_tokens_never_inject_a_footer(self):
         cfg = settings({**ENV, 'BUSINESS_POSTAL_ADDRESS':'Configured business address'})
         for footer in ('', FOOTER_TOKEN * 2,
                        '<div hidden style="display:none;position:fixed;height:0;overflow:hidden">' + FOOTER_TOKEN,
@@ -51,12 +51,12 @@ class SectionTests(unittest.TestCase):
             with self.subTest(footer=footer):
                 doc = sectioned(); doc['html_sections']['footer'] = footer
                 output = render_campaign(doc, cfg)
-                self.assertEqual(output['html'].count('Configured business address'), 1)
-                self.assertEqual(output['html'].count('You’re receiving this marketing email'), 1)
-                self.assertEqual(output['html'].count('Unsubscribe'), 1)
+                self.assertNotIn('Configured business address', output['html'])
+                self.assertNotIn('You’re receiving this marketing email', output['html'])
+                self.assertNotIn('Unsubscribe', output['html'])
                 self.assertNotIn('<script', output['html'])
                 self.assertNotIn(FOOTER_TOKEN, output['html'])
-                self.assertIn('Configured business address', output['text'])
+                self.assertNotIn('Configured business address', output['text'])
 
     def test_checks_cover_header_and_footer_without_mutating_source(self):
         for section in ('header','footer'):
@@ -99,7 +99,6 @@ class SectionPersistenceTests(unittest.TestCase):
         doc = sectioned()
         doc['custom_html'] = '\r\n' + HTML + '\n  '
         doc['html_sections'] = {'header':' <h1>My header</h1>\r\n', 'footer':'<p>Closing note</p>\n' + FOOTER_TOKEN}
-        doc['html_sections']['footer']=prepare_footer(doc['html_sections']['footer'])
         row = self.store.save(ADMIN, 'Sections persistence', doc, env=ENV)
         self.assertEqual(self.store.draft(row['id'])['document'], doc)
         changed = deepcopy(doc); changed['html_sections']['header'] += '<p>Edited header</p>'

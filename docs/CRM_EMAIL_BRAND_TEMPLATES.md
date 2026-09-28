@@ -36,8 +36,8 @@ the gold separator. Both Desktop and Mobile show the same styling.
 ## One rendering path
 
 Header, Body and Footer source each pass through the same balanced sanitizer.
-The canonical `render_campaign` output appends the protected system footer and
-generates plain text. Campaign preview and internal test sending use that same
+The canonical `render_campaign` output assembles the authored Header, Body and
+Footer and generates plain text. Campaign preview and internal test sending use that same
 function; a mocked delivery regression compares the complete outgoing HTML with
 the preview renderer output. No test email was actually sent.
 
@@ -53,8 +53,8 @@ the preview renderer output. No test email was actually sent.
 - No schema migration or second storage system was added. Page load performs
   reads only. Built-in defaults are virtual and need no seeding write.
 - The initial Header uses the existing charcoal/text-or-approved-logo brand
-  implementation with its gold accent. The initial Footer uses the existing
-  protected system-footer token. No speculative asset, address or link was added.
+  implementation with its gold accent. The initial Footer is editable branded
+  HTML with optional configured placeholders and the approved social links.
 - New compose state copies the current defaults and leaves Body blank. Save draft
   persists Header/Footer HTML snapshots in the existing campaign document and
   revision model. Later template edits/default changes/deletion do not change
@@ -75,16 +75,16 @@ the preview renderer output. No test email was actually sent.
 
 ## Footer protection and compatibility
 
-Footer protection now lives inside the editable template through inline identity,
-contact, address, disclosure and unsubscribe placeholders. Missing fields are
-restored inline; hidden/invalid compliance markup blocks test readiness. There is
-no separate appended visual footer. Legacy `{{SYSTEM_FOOTER}}` sources convert
-in memory and persist through explicit save. See [One editable campaign footer](CRM_SINGLE_FOOTER.md).
+Footer HTML is authoritative. No missing identity, contact, address, disclosure
+or unsubscribe fields are restored. Only future live readiness requires an
+authored visible unsubscribe anchor; drafts and internal tests can omit it.
+Legacy `{{SYSTEM_FOOTER}}` markers render as nothing without rewriting stored
+source. See [One editable campaign footer](CRM_SINGLE_FOOTER.md).
 
 No production unsubscribe URL is fabricated. Existing test-only unsubscribe
 live-delivery preflight blocks remain. Missing postal information is flagged in
-preflight, not as a permanent email design block. Required compliance details
-come from the existing safe settings.
+preflight, not as a permanent email design block. Optional placeholders resolve
+from safe settings only when the author includes them in the template.
 
 Existing full-HTML campaigns stay on their original rendering path. Defaults are
 not retroactively wrapped around saved campaigns, and no stored draft is migrated

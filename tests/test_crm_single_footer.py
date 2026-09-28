@@ -3,10 +3,11 @@ from copy import deepcopy
 import os
 import unittest
 import uuid
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from crm_campaign_content import render_campaign, preflight, settings
-from crm_campaign_footer import DEFAULT_FOOTER, DISCLOSURE, prepare_footer, render_footer
+from crm_campaign_footer import (DEFAULT_FOOTER, DISCLOSURE, prepare_footer, render_footer,
+                                 has_unsubscribe_link, UNSUBSCRIBE_REQUIRED)
 from crm_brand_templates import section_source
 from tests.test_crm_campaign_sections import sectioned
 from tests.test_crm_resend_marketing import ENV
@@ -29,14 +30,36 @@ class FooterTests(unittest.TestCase):
         self.assertFalse(preflight(doc,ENV)['marketing_enabled'])
         self.assertFalse(preflight(doc,ENV)['live']['Business postal address configured and verified'])
 
-    def test_removal_restores_inline_not_second_styled_footer(self):
+    def test_removal_stays_removed_and_only_live_footer_check_blocks(self):
         raw=DEFAULT_FOOTER.replace('<a href="{{UNSUBSCRIBE_URL}}" style="color:#dfc986">Unsubscribe</a>','')
-        fixed=prepare_footer(raw)
-        self.assertIn('{{UNSUBSCRIBE_URL}}',fixed)
-        self.assertEqual(fixed.count('<table'),1)
-        self.assertEqual(prepare_footer(fixed),fixed)
-        self.assertLess(fixed.index('Unsubscribe'),fixed.index('</td>'))
-        self.assertEqual(section_source('footer',raw),fixed)
+        self.assertEqual(prepare_footer(raw),raw)
+        self.assertEqual(section_source('footer',raw),raw)
+        doc=sectioned();doc['html_sections']['footer']=raw
+        checks=preflight(doc,ENV)
+        self.assertTrue(checks['test_ready'])
+        self.assertFalse(checks['live'][UNSUBSCRIBE_REQUIRED])
+        self.assertFalse(checks['live_ready'])
+        self.assertNotIn('Unsubscribe',render_campaign(doc,settings(ENV))['html'])
+        with self.assertRaises(ValueError) as error:
+            render_campaign(doc,settings(ENV),unsubscribe_url='https://example.test/unsubscribe?token=signed')
+        self.assertEqual(str(error.exception),UNSUBSCRIBE_REQUIRED)
+        self.assertEqual(doc['html_sections']['footer'],raw)
+
+    def test_custom_footer_is_authoritative_even_with_all_business_settings(self):
+        raw='<table bgcolor="#111111"><tr><td style="color:#ffffff;padding:12px"><p>Made for collectors.</p><a href="https://example.test/custom">My link</a></td></tr></table>'
+        cfg={**settings(ENV),'business':'Injected company','postal':'Injected address',
+             'contact':'injected@example.test','website':'https://example.test/injected',
+             'privacy':'https://example.test/privacy','social_links':['https://example.test/social']}
+        self.assertEqual(prepare_footer(raw),raw)
+        self.assertEqual(section_source('footer',raw),raw)
+        self.assertEqual(render_footer(raw,cfg)[0],raw)
+        doc=sectioned();doc['html_sections']={'header':'<p>My header</p>','footer':raw}
+        output=render_campaign(doc,cfg)
+        self.assertEqual(output['html'].count(raw),1)
+        for forbidden in ('Sports Cave','injected@example.test','Website',DISCLOSURE,'Injected company',
+                          'Injected address','https://example.test/injected','Privacy','Unsubscribe',
+                          'background:#f4f1e9','SYSTEM_FOOTER','Business postal address not configured'):
+            self.assertNotIn(forbidden,str(output))
 
     def test_legacy_token_is_inline_once_and_render_compatible(self):
         doc=sectioned();doc['html_sections']['footer']='<div style="background-color:#171717;color:white"><p>My footer</p>{{SYSTEM_FOOTER}}{{SYSTEM_FOOTER}}</div>'
@@ -46,18 +69,41 @@ class FooterTests(unittest.TestCase):
         result=render_campaign(doc,settings(ENV))
         doc['html_sections']['footer']=converted
         self.assertEqual(render_campaign(doc,settings(ENV)),result)
-        self.assertEqual(result['html'].count(DISCLOSURE),1)
+        self.assertEqual(result['html'].count(DISCLOSURE),0)
+        self.assertEqual(result['html'].count('My footer'),1)
+        self.assertEqual(prepare_footer('{{SYSTEM_FOOTER}}'),'')
         self.assertEqual(prepare_footer(DEFAULT_FOOTER+'{{SYSTEM_FOOTER}}'),DEFAULT_FOOTER)
 
-    def test_hidden_or_comment_only_compliance_cannot_pass_test_preflight(self):
+    def test_missing_hidden_unlinked_or_comment_tokens_block_only_live(self):
         for footer in ('<div style="display:none">'+DEFAULT_FOOTER+'</div>',
                        '<div style="font-size:0.0px">'+DEFAULT_FOOTER+'</div>',
-                       DEFAULT_FOOTER.replace('{{MARKETING_DISCLOSURE}}','<!--{{MARKETING_DISCLOSURE}}-->'),
+                       '<!--<a href="{{UNSUBSCRIBE_URL}}">Unsubscribe</a>-->',
+                       '{{UNSUBSCRIBE_URL}}', '<p>Custom footer</p>', '',
+                       '<a href="https://example.test/not-a-recipient-link">Unsubscribe</a>',
                        DEFAULT_FOOTER.replace('>Unsubscribe</a>','></a>')):
             with self.subTest(footer=footer):
                 doc=sectioned();doc['html_sections']['footer']=footer
-                self.assertFalse(preflight(doc,ENV)['test_ready'])
-                with self.assertRaises(ValueError):section_source('footer',footer)
+                self.assertTrue(preflight(doc,ENV)['test_ready'])
+                self.assertFalse(preflight(doc,ENV)['live'][UNSUBSCRIBE_REQUIRED])
+                self.assertFalse(has_unsubscribe_link(footer))
+                self.assertEqual(section_source('footer',footer),footer)
+                self.assertEqual(doc['html_sections']['footer'],footer)
+
+    def test_authored_unsubscribe_label_style_and_stored_token_unchanged(self):
+        raw='<p><a href="{{UNSUBSCRIBE_URL}}" style="color:#c9a33f" title="Preferences">Stop these updates</a></p>'
+        self.assertTrue(has_unsubscribe_link(raw))
+        self.assertEqual(section_source('footer',raw),raw)
+        preview=render_footer(raw,settings(ENV))[0]
+        self.assertEqual(preview,'<p><span style="color:#c9a33f" title="Preferences">Stop these updates</span></p>')
+        url='https://example.test/unsubscribe?recipient=abc&signature=xyz'
+        resolved=render_footer(raw,settings(ENV),unsubscribe_url=url)[0]
+        self.assertEqual(resolved,raw.replace('{{UNSUBSCRIBE_URL}}',url.replace('&','&amp;')))
+        self.assertEqual(resolved.count('Stop these updates'),1)
+        self.assertNotIn('utm_',resolved)
+        doc=sectioned();doc['html_sections']['footer']=raw
+        self.assertTrue(preflight(doc,ENV)['live'][UNSUBSCRIBE_REQUIRED])
+        self.assertFalse(preflight(doc,ENV)['live_ready'])
+        self.assertIn(resolved,render_campaign(doc,settings(ENV),unsubscribe_url=url)['html'])
 
     def test_configured_identity_address_contact_privacy_and_real_unsubscribe(self):
         cfg={**settings(ENV),'postal':'Configured business premises','privacy':'https://example.test/privacy'}
@@ -103,35 +149,63 @@ class FooterStorageTests(unittest.TestCase):
         source.set_value(source.value.replace('<strong>','<strong>Collector footer ')).run()
         self.assertTrue(any('Collector footer' in e.proto.srcdoc for e in at.get('iframe')))
         source=next(t for t in at.text_area if t.label=='Footer HTML')
-        source.set_value(source.value.replace('{{UNSUBSCRIBE_URL}}','https://example.test/wrong')).run()
-        self.assertTrue(any('Required compliance content restored' in w.value for w in at.warning))
-        self.assertIn('{{UNSUBSCRIBE_URL}}',next(t for t in at.text_area if t.label=='Footer HTML').value)
+        raw='<p>My custom footer</p>\n'
+        source.set_value(raw).run()
+        self.assertFalse(any('restored' in w.value for w in at.warning))
+        self.assertEqual(next(t for t in at.text_area if t.label=='Footer HTML').value,raw)
+        self.assertTrue(any(UNSUBSCRIBE_REQUIRED in c.value for c in at.caption))
+        self.assertTrue(any('My custom footer' in e.proto.srcdoc and DISCLOSURE not in e.proto.srcdoc for e in at.get('iframe')))
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         self.assertFalse(at.exception)
         row=self.store.draft(at.session_state['campaign_editor']['id'])
-        self.assertIn('Collector footer',row['document']['html_sections']['footer'])
+        self.assertEqual(row['document']['html_sections']['footer'],raw)
         self.assertEqual(row['document']['custom_html'],'')
+        at.run()
+        self.assertEqual(next(t for t in at.text_area if t.label=='Footer HTML').value,raw)
 
     def test_legacy_save_snapshot_and_reusable_footer(self):
         doc=sectioned();doc['html_sections']['footer']='<p>Old custom</p>{{SYSTEM_FOOTER}}'
         row=self.store.save(ADMIN,'Legacy footer',doc,env=ENV)
-        self.assertNotIn('SYSTEM_FOOTER',row['document']['html_sections']['footer'])
+        self.assertEqual(row['document'],doc)
         self.assertEqual(render_campaign(doc,settings(ENV)),render_campaign(row['document'],settings(ENV)))
+        history_before=self.store.q('SELECT * FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],))
         template=self.store.save_section_template(ADMIN,'footer','Footer '+uuid.uuid4().hex,row['document']['html_sections']['footer'],make_default=True)
         self.assertEqual(self.store.default_sections(settings(ENV))['footer'],row['document']['html_sections']['footer'])
         self.store.save_section_template(ADMIN,'footer',template['name'],DEFAULT_FOOTER,identity=template['id'],version=template['version'],confirmed=True)
         self.assertEqual(self.store.draft(row['id'])['document'],row['document'])
+        self.assertEqual(self.store.q('SELECT * FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],)),history_before)
         self.store.set_section_default(ADMIN,'footer','builtin_footer')
 
-    def test_hidden_footer_never_reaches_test_transport(self):
-        doc=sectioned();doc['html_sections']['footer']='<div style="display:none">'+DEFAULT_FOOTER+'</div>'
-        row=self.store.save(ADMIN,'Hidden footer blocked',doc,env=ENV)
+    def test_stored_unsubscribe_source_is_exact_across_template_draft_and_history(self):
+        raw='\r\n<p>My words</p><a href="{{UNSUBSCRIBE_URL}}">Leave this list</a>\n  '
+        template=self.store.save_section_template(ADMIN,'footer','Exact '+uuid.uuid4().hex,raw,make_default=True)
+        self.assertEqual(template['content']['html'],raw)
+        self.assertEqual(self.store.default_sections(settings(ENV))['footer'],raw)
+        doc=sectioned();doc['html_sections']['footer']=raw
+        row=self.store.save(ADMIN,'Exact footer snapshot',doc,env=ENV)
+        self.assertEqual(self.store.draft(row['id'])['document']['html_sections']['footer'],raw)
+        version=self.store.q('SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],),True)
+        self.assertEqual(version['after_value']['document']['html_sections']['footer'],raw)
+        self.store.set_section_default(ADMIN,'footer','builtin_footer')
+
+    def test_internal_test_without_unsubscribe_matches_preview_and_never_resends(self):
+        doc=sectioned();doc['html_sections']['footer']='<p>Only my footer</p>'
+        row=self.store.save(ADMIN,'Author footer test',doc,env=ENV)
         sending=self.store.setting('sending')
         self.store.save_setting(ADMIN,'sending',{'internal_recipients':['manual@example.test'],'smart_hours':16},sending['version'])
-        wire=Mock()
-        with self.assertRaisesRegex(ValueError,'preflight'):
-            self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV,session=wire)
-        wire.post.assert_not_called()
+        wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+        operation=str(uuid.uuid4())
+        preview=render_campaign(row['document'],self.store.render_settings(ENV))
+        with patch('requests.sessions.Session.request',side_effect=AssertionError('No external network')),patch('crm_resend_marketing._audit',return_value=True):
+            for _ in range(2):
+                self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=operation,env=ENV,session=wire)
+        wire.post.assert_called_once()
+        payload=wire.post.call_args.kwargs['json']
+        self.assertEqual(payload['html'],preview['html'])
+        self.assertEqual(payload['text'],preview['text'])
+        self.assertEqual(payload['to'],['manual@example.test'])
+        self.assertFalse(preflight(doc,ENV)['marketing_enabled'])
+        self.assertFalse(preflight(doc,ENV)['live'][UNSUBSCRIBE_REQUIRED])
 
 
 if __name__=='__main__':unittest.main()

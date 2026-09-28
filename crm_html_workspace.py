@@ -93,11 +93,11 @@ def composer_styles():
 
 def section_editor(doc,cfg,key,store=None,user=None):
     from crm_campaign_sections import section_defaults
-    from crm_campaign_footer import prepare_footer, render_footer
+    from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
     from crm_brand_template_ui import section_picker,save_section_control
     defaults=section_defaults(cfg)
     sections=doc.get('html_sections',defaults)
-    footer_source=prepare_footer(sections['footer'])
+    footer_source=sections['footer']
     with st.expander('Header',expanded=False):
         if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'])
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
@@ -108,17 +108,9 @@ def section_editor(doc,cfg,key,store=None,user=None):
                 placeholder='<!-- Paste your campaign body HTML here -->',label_visibility='collapsed')
     with st.expander('Footer',expanded=False):
         source_key=key+'footer_source'
-        def protect_footer():
-            raw=st.session_state[source_key];protected=prepare_footer(raw)
-            st.session_state[source_key]=protected
-            st.session_state[key+'footer_restored']=protected!=raw
         if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source)
-        footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key,on_change=protect_footer)
-        footer=prepare_footer(footer)
-        st.caption('Required compliance links are protected.')
-        if st.session_state.pop(key+'footer_restored',False):st.warning('Required compliance content restored inside this footer.')
-        if not render_footer(footer,cfg)[2]['Footer compliance placeholders visible']:
-            st.warning('Required footer content must be visible. Correct the footer before sending a test.')
+        footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key)
+        if not has_unsubscribe_link(footer):st.caption(UNSUBSCRIBE_REQUIRED)
         if store:save_section_control(store,user,'footer',footer,key+'footer_')
     if header!=sections['header'] or footer!=sections['footer']:
         doc['html_sections']={'header':header,'footer':footer}

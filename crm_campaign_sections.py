@@ -22,7 +22,7 @@ def section_defaults(cfg):
 
 
 def import_sections(doc, *, images_off=False, campaign_key='', cfg=None, unsubscribe_url=None):
-    """Balance each section independently and validate inline footer compliance."""
+    """Balance and sanitize each authored section without adding footer content."""
     sections = doc['html_sections']
     header, header_text, header_checks = import_html(sections['header'], images_off=images_off, campaign_key=campaign_key)
     body, body_text, checks = import_html(doc.get('custom_html', ''), images_off=images_off, campaign_key=campaign_key)
@@ -33,5 +33,4 @@ def import_sections(doc, *, images_off=False, campaign_key='', cfg=None, unsubsc
     for label in checks:
         if label != 'HTML content present':
             checks[label] = checks[label] and header_checks[label] and footer_checks[label]
-    checks['Footer compliance placeholders visible']=footer_checks['Footer compliance placeholders visible']
     return header + body + footer, '\n\n'.join(t for t in (header_text, body_text, footer_text) if t), checks

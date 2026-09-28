@@ -94,7 +94,7 @@ class BrandTemplateTests(unittest.TestCase):
         self.assertEqual(at.session_state['campaign_editor']['document'],before)
         self.assertEqual(next(s for s in at.selectbox if s.label=='Header template').options[:2],labels[:2])
 
-    def test_snapshots_versions_default_changes_and_protected_footer(self):
+    def test_snapshots_versions_default_changes_and_exact_footer(self):
         header=self.save('header',make_default=True);footer=self.save('footer',make_default=True)
         doc=sectioned();doc['html_sections']=self.store.default_sections(self.cfg)
         campaign=self.store.save(ADMIN,'Snapshot test',doc,env=ENV)
@@ -107,10 +107,10 @@ class BrandTemplateTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.store.delete_section_template(ADMIN,edited['id'],2,confirmed=True)
         self.assertEqual(self.store.draft(campaign['id'])['document'],campaign['document'])
         self.assertNotIn(FOOTER_TOKEN,footer['content']['html'])
-        self.assertIn('{{UNSUBSCRIBE_URL}}',footer['content']['html'])
+        self.assertEqual(footer['content']['html'],'<p>Footer note</p>')
         output=render_campaign(doc,self.cfg)['html']
-        self.assertEqual(output.count('Unsubscribe'),1)
-        self.assertEqual(output.count('You’re receiving this marketing email'),1)
+        self.assertEqual(output.count('Unsubscribe'),0)
+        self.assertEqual(output.count('You’re receiving this marketing email'),0)
 
     def test_permissions_overwrite_delete_and_type_boundaries(self):
         row=self.save('header')

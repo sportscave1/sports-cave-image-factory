@@ -191,7 +191,9 @@ def preflight(doc, env=None, cfg=None):
         _,plain,html_checks=import_html(doc.get('custom_html',''))
         if 'html_sections' in doc:
             from crm_campaign_sections import import_sections
+            from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
             _,plain,html_checks=import_sections(doc,cfg=cfg)
+            live[UNSUBSCRIBE_REQUIRED]=has_unsubscribe_link(doc['html_sections']['footer'])
         checks.update(html_checks)
         checks['Plain-text alternative generated']=bool(plain.strip())
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']

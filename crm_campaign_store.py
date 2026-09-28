@@ -21,9 +21,6 @@ class CampaignStore(WorkspaceRecords):
 
     def save(self, user, name, document, identity=None, version=None, *, requested_status='DRAFT', env=None, duplicate_of=None):
         document=deepcopy(document)
-        if isinstance(document,dict) and isinstance(document.get('html_sections'),dict) and isinstance(document['html_sections'].get('footer'),str):
-            from crm_campaign_footer import prepare_footer
-            document['html_sections']['footer']=prepare_footer(document['html_sections']['footer'])
         document.setdefault('campaign_key','sc_'+uuid.uuid4().hex)
         require(user,'crm_campaigns_manage'); validate_document(document)
         if not name.strip() or len(name)>150: raise ValueError('Use a campaign name of 1–150 characters.')
