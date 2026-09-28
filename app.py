@@ -5804,9 +5804,9 @@ FINAL
 PRODUCT_UPLOAD_AUD_PRICING = {
     "framed": (
         ("Framed XL", "A$339", "A$449", "A$110", "24%"),
-        ("Framed Large", "A$269", "A$349", "A$80", "23%"),
-        ("Framed Medium", "A$209", "A$269", "A$60", "22%"),
-        ("Framed Small", "A$169", "A$209", "A$40", "19%"),
+        ("Framed Large", "A$269", "A$339", "A$70", "21%"),
+        ("Framed Medium", "A$219", "A$269", "A$50", "19%"),
+        ("Framed Small", "A$179", "A$209", "A$30", "14%"),
     ),
     "unframed": (
         ("Unframed XL", "A$159", "A$209", "A$50", "24%"),
@@ -5819,9 +5819,9 @@ PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"
 PRODUCT_UPLOAD_PRICE_BLOCK_END = (
     "These rules do not authorise live publishing or live Shopify price updates."
 )
-PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
+PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
 
-Authorised exception for every Sports Cave product: set only the Australian Small Black, Oak and White framed variants to Price A$169.00 and Compare-at price / RRP A$209.00. This exception overrides the price-preservation rules below, including post-update checks and restoration; preserve every other variant and international market price."""
+Authorised exception for every Sports Cave product: set only the Australian Black, Oak and White framed variants in all four sizes to the exact selling and compare-at prices in the CENTRAL SPORTS CAVE AUD PRICE LADDER. This exception overrides the price-preservation rules below, including post-update checks and restoration; preserve every unframed variant and international market price."""
 
 
 def product_upload_price_ladder_prompt_text():
@@ -5873,19 +5873,27 @@ def apply_product_upload_pricing_update(prompt_text):
     prompt = str(prompt_text or "")
     pricing_block = product_upload_price_ladder_prompt_text()
     # Saved prompts can also contain pricing tables outside the central block.
-    small_framed_line = next(
-        line for line in pricing_block.splitlines() if line.startswith("- Framed Small:")
-    )
+    framed_lines = {
+        line.split(":", 1)[0]: line
+        for line in pricing_block.splitlines() if line.startswith("- Framed ")
+    }
     prompt = re.sub(
-        r"(?m)^- Framed Small: Selling price A\$159 \| RRP / compare-at price A\$209 \| Saving A\$50 \| Approx\. discount 24%",
-        lambda match: small_framed_line,
+        r"(?m)^(- Framed (?:Small|Medium|Large|XL)): Selling price A\$[\d.]+ \| RRP / compare-at price A\$[\d.]+ \| Saving A\$[\d.]+ \| Approx\. discount \d+%",
+        lambda match: framed_lines[match[1]],
         prompt,
     )
+    framed_prices = {
+        size: (price[2:], rrp[2:])
+        for size, (_, price, rrp, _, _) in zip(
+            ("XL", "L", "M", "S"), PRODUCT_UPLOAD_AUD_PRICING["framed"]
+        )
+    }
     prompt = re.sub(
         r"(Black, Oak,? and White framed variants:\r?\n)(.*?)(?=\r?\nUnframed variants:)",
         lambda match: match[1] + re.sub(
-            r"(?m)^(S[ \t]+[—–-][ \t]+Price[ \t]+\$)159(?=\.00[ \t]*/[ \t]*Compare-at price[ \t]+\$209\.00)",
-            lambda price: price[1] + "169",
+            r"(?m)^((XL|L|M|S)[ \t]+[—–-][ \t]+Price[ \t]+\$)[\d.]+([ \t]*/[ \t]*Compare-at price[ \t]+\$)[\d.]+",
+            lambda price: price[1] + framed_prices[price[2]][0] + ".00"
+            + price[3] + framed_prices[price[2]][1] + ".00",
             match[2],
         ),
         prompt,
@@ -5893,7 +5901,12 @@ def apply_product_upload_pricing_update(prompt_text):
     )
     prompt = prompt.replace(
         "EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION",
-        PRODUCT_UPLOAD_EXISTING_SMALL_FRAMED_EXCEPTION,
+        PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
+    )
+    prompt = re.sub(
+        r"EXISTING PRODUCT — PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian Small Black, Oak and White framed variants[^\r\n]*",
+        lambda match: PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
+        prompt,
     )
     if pricing_block in prompt:
         return prompt
