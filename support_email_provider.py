@@ -361,6 +361,7 @@ class EmailProvider(Protocol):
     def discover_folders(self): ...
     def set_flag(self, header, flag, enabled): ...
     def move_message(self, header, destination): ...
+    def delete_trash_messages(self, headers, *, trash_folder, folder_mapping=None): ...
     def related_headers(self, folder, identifiers, limit=100): ...
     def related_headers_many(self, folders, identifiers, limit=100): ...
     def find_message_id(self, folder, message_id): ...
@@ -966,8 +967,10 @@ class ImapProvider:
             uid_set = ",".join(sorted(present, key=int))
             already_deleted = set(self._search(conn, "UID " + uid_set + " DELETED"))
             added_flags = ",".join(sorted(present - already_deleted, key=int))
+            expunge_started = False
             try:
                 self._ok(conn.uid("STORE", uid_set, "+FLAGS.SILENT", "(\\Deleted)"))
+                expunge_started = True
                 self._ok(conn.uid("EXPUNGE", uid_set))
                 if set(self._search(conn, "UID " + uid_set)).intersection(present):
                     raise MailboxError("Incomplete targeted deletion.")
@@ -979,6 +982,8 @@ class ImapProvider:
                         self._ok(conn.uid("STORE", added_flags, "-FLAGS.SILENT", "(\\Deleted)"))
                     except Exception:
                         pass
+                if not expunge_started:
+                    raise MailboxError("Could not permanently delete this email. Please try again.") from None
                 raise MailboxError("Could not verify permanent deletion of every selected Trash message. Some may have been deleted. Refresh Trash before trying again.", code="delete_uncertain") from None
         return {"status": "deleted", "uids": uids}
 

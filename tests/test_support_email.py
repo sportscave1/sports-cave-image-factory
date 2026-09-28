@@ -455,14 +455,15 @@ class PageTests(unittest.TestCase):
     def app(self, user=USER):
         return AppTest.from_string(f"import support_email_page\nsupport_email_page.render_page({user!r})").run()
 
-    def test_desktop_page_initial_load_has_model_without_body_fetch(self):
+    def test_desktop_page_initial_load_opens_first_inbox_body(self):
         app = self.app()
         self.assertFalse(app.exception)
         self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
-        self.fake.read_message.assert_not_called()
+        self.fake.read_message.assert_called_once()
         model = self.component.call_args.kwargs["model"]
         self.assertEqual(len(model["threads"]), 50)
-        self.assertEqual(model["messages"], [])
+        self.assertEqual(model["selected"], model["threads"][0]["key"])
+        self.assertTrue(model["messages"][0]["expanded"])
         self.assertNotIn(CONFIG.password, str(model))
 
     def test_not_configured_and_not_authorized_do_not_connect(self):

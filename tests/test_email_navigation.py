@@ -66,7 +66,7 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
         with patch.dict(os.environ,{'RESEND_MARKETING_API_KEY':'SECRET-SENTINEL','CRM_MARKETING_ENABLED':'false'}),patch('crm_delivery_panel.send_resend_test_email') as send:
             at.run(timeout=20)
             editor=at.session_state['campaign_editor']
-            at.session_state['campaign_editor']['document']['custom_html']='<p>Keep source</p>'
+            next(t for t in at.text_area if t.label=='Body HTML').set_value('<p>Keep source</p>')
             at.button(key='campaign_settings_toggle').click().run(timeout=20)
             self.assertFalse(at.exception)
             self.assertTrue(any('Campaign Settings' in m.value for m in at.markdown))

@@ -412,7 +412,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_initial_50_lazy_body_and_refresh_bypasses_cache(self):
         self.assertEqual(len(self.w.model()["threads"]),50)
-        self.assertFalse(any(c[0]=="body" for c in self.imap.calls))
+        self.assertEqual(len([c for c in self.imap.calls if c[0]=="body"]),1)
         self.event("refresh"); self.assertEqual(len([c for c in self.imap.calls if c[0]=="headers"]),2)
         self.event("load_more");self.assertEqual(len(self.w.model()["threads"]),75)
 

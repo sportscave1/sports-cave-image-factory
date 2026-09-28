@@ -161,6 +161,15 @@ class Workspace:
             view, context = self.state["view"], self.state.get("context", {})
             self._select_thread(self._thread())
             self.state.update(view=view, context=context)
+        if (not self.state.get("selected") and self.state["threads"]
+                and self.state["folder"] == self.roles.get("inbox")
+                and not self.state["query"] and self.state["view"] == "mail"):
+            # Initial Inbox paint only: preserve ordering and do not mutate read flags.
+            message = self._select_thread(self.state["threads"][0])
+            try:
+                self._body(message)
+            except MailboxError as error:
+                self.state["notice"] = str(error)
         self.state["loaded"] = True
         self.state["live_checked_at"] = time.monotonic()
 
@@ -453,14 +462,24 @@ class Workspace:
         if event.get("action") != "live_check":
             self.state["processed"].add(event_id)
         self.state["ack"] = event_id
-        if event.get("action") != "live_check":
+        if event.get("action") != "live_check" and not (event.get("action") in {"confirm_delete_forever", "cancel_delete_forever"}
+                and event.get("token") != self.state.get("delete_confirmation", {}).get("token")):
             self.state["notice"] = ""
         self.state.pop("download", None)
         try:
             self._sync_draft(event.get("draft"))
             action = event.get("action")
+            if action not in {"request_delete_forever", "confirm_delete_forever", "cancel_delete_forever", "live_check", "resolve_thread"}:
+                self.state.pop("delete_confirmation", None)
             if action == "live_check":
                 self.live_check(event.get('signal_version'))
+            elif action == "request_delete_forever":
+                self.request_delete_forever(event.get("thread_key"))
+            elif action == "cancel_delete_forever":
+                if event.get("token") == self.state.get("delete_confirmation", {}).get("token"):
+                    self.state.pop("delete_confirmation", None)
+            elif action == "confirm_delete_forever":
+                self.confirm_delete_forever(event.get("token"))
             elif action in {"refresh_folder", "search_folder", "mark_folder_read"}:
                 self.folder_action(action, event.get("folder"), confirmed=event.get("confirmed") is True)
             elif action in {"refresh", "folder", "search", "load_more"}:
@@ -599,6 +618,60 @@ class Workspace:
             if self.state.get("send_stage") == "VALIDATING":
                 self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
         return True
+
+    def request_delete_forever(self, thread_key):
+        """Freeze the exact visible Trash row membership for explicit confirmation."""
+        if self.state.get("delete_confirmation"):
+            return
+        folder = self.roles.get("trash")
+        thread = self.state.get("thread_index", {}).get(thread_key)
+        if (not folder or self.state.get("folder") != folder or self.state["view"] != "mail" or
+                self.state.get("error") or not thread):
+            raise MailboxError("Select a conversation in Trash before deleting permanently.")
+        # Never use the expanded cross-folder reading-pane conversation as a delete target.
+        messages = [dict(m) for m in thread["messages"] if m["folder"] == folder]
+        if not messages or len(messages) != len(thread["messages"]):
+            raise MailboxError("Refresh Trash before deleting this conversation.")
+        self.state["delete_confirmation"] = {"token": str(uuid.uuid4()), "folder": folder,
+            "thread_key": thread_key, "subject": thread["subject"], "messages": messages}
+
+    def confirm_delete_forever(self, token):
+        pending = self.state.get("delete_confirmation")
+        if not pending or not token or token != pending["token"]:
+            return
+        # Consume before I/O: replayed confirmations/reruns cannot issue another command.
+        self.state.pop("delete_confirmation", None)
+        if (self.state["view"] != "mail" or self.state.get("folder") != pending["folder"] or
+                self.roles.get("trash") != pending["folder"]):
+            raise MailboxError("Return to Trash and confirm this deletion again.")
+        try:
+            result = self.imap.delete_trash_messages(pending["messages"], trash_folder=pending["folder"],
+                folder_mapping=self.state["settings"].get("folder_mapping"))
+            if result.get("status") != "deleted":
+                raise MailboxError("Deletion was not confirmed.")
+        except Exception as error:
+            LOGGER.warning("Email permanent deletion unconfirmed type=%s", type(error).__name__)
+            self.state["notice"] = (str(error) if isinstance(error, MailboxError) else
+                "Could not permanently delete this email. Please try again.")
+            return
+        keys = {reference_key(m) for m in pending["messages"]}
+        snapshot = self.state.get("snapshot", {})
+        removed = [m for m in snapshot.get("messages", []) if reference_key(m) in keys]
+        snapshot["messages"] = [m for m in snapshot.get("messages", []) if reference_key(m) not in keys]
+        for count in ("total", "matched"):
+            if isinstance(snapshot.get(count), int):
+                snapshot[count] = max(0, snapshot[count] - len(removed))
+        self.state["threads"] = sorted(build_threads(snapshot["messages"], self.config.address), key=lambda t: t["last_activity"], reverse=True)
+        self.state["thread_index"] = {t["thread_key"]: t for t in self.state["threads"]}
+        if self.state.get("selected") == pending["thread_key"]:
+            self.state.update(selected=None, active_message=None, conversation=[], expanded=set(), history_pending=False, context={})
+        self.bodies.remove_where(lambda k: any(k == self._content_key(m) for m in pending["messages"]))
+        self._refresh_rows()
+        self.audit("email_permanently_deleted", "|".join(sorted(keys)))
+        self.load(force=True, previews=False)
+        self.state["notice"] = "Permanently deleted from Trash."
+        if self.state.get("live_error") or self.state.get("error"):
+            self.state["notice"] += " Trash refresh is temporarily unavailable."
 
     def message_action(self, action, message, destination=None):
         if action in {"mark_read", "mark_unread", "star", "unstar"}:
@@ -914,6 +987,8 @@ class Workspace:
             "refreshed": formatted_date(s.get("refreshed_at"), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
+            "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
+                "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
             "view": s["view"], "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),

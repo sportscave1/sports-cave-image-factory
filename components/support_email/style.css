@@ -20,3 +20,10 @@
 .conversation-wrap,.folder-wrap{position:relative}.row-more,.folder-more{position:absolute;right:4px;bottom:3px;padding:0 5px;border:0;background:var(--paper);opacity:0;font-size:15px;line-height:20px}.folder-more{top:7px;bottom:auto}.conversation-wrap:hover .row-more,.conversation-wrap:focus-within .row-more,.conversation-wrap:has(.selected) .row-more,.folder-wrap:hover .folder-more,.folder-wrap:focus-within .folder-more,.row-more:focus,.folder-more:focus{opacity:1}.conversation .preview{padding-right:20px}.folder-name{padding-right:10px}.mail-context{position:fixed;z-index:1000;min-width:180px;max-width:min(280px,calc(100vw - 8px));max-height:calc(100vh - 8px);overflow:auto;padding:4px;border:1px solid var(--line);border-radius:5px;background:var(--paper);box-shadow:0 5px 18px #0002}.mail-context button{display:block;width:100%;border:0;text-align:left;font-size:12px;padding:7px 10px;white-space:normal}.mail-context p{padding:9px 10px;font-size:12px;line-height:1.5}.mail-context button:focus{background:var(--wash);outline:1px solid var(--gold)}
 
 .sent-receipt{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--paper);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.sent-receipt button{font-size:11px}.delivery-receipt{max-height:140px;overflow:auto}
+/* Trash confirmation only; the existing mailbox layout and menu are unchanged. */
+.trash-delete-dialog{border:1px solid #ddd9cf;border-radius:8px;background:#fffefa;color:#242522;padding:20px;max-width:420px;width:calc(100% - 40px);box-shadow:0 10px 36px #0002}
+.trash-delete-dialog::backdrop{background:#0004}
+.trash-delete-dialog h3{margin:0 0 12px;font-size:17px}
+.trash-delete-dialog p{line-height:1.5;overflow-wrap:anywhere}
+.trash-delete-dialog .row{justify-content:flex-end;gap:8px;margin-top:18px}
+.trash-delete-dialog [data-delete="confirm"]{color:#8c2922;border-color:#caa39e}

@@ -219,7 +219,7 @@ class WorkspaceNotificationTests(unittest.TestCase):
     def test_missing_notification_opens_inbox_safely(self):
         self.imap.notification_target=Mock(return_value=None)
         self.w.open_notification({'uid':'999','uidvalidity':'500'})
-        self.assertIsNone(self.state['selected']);self.assertIn('no longer in Inbox',self.state['notice'])
+        self.assertEqual(self.state['selected'],self.state['threads'][0]['thread_key']);self.assertIn('no longer in Inbox',self.state['notice'])
     def test_mark_read_and_unread_invalidate_shared_notification_count(self):
         key=self.open()
         for action in ('mark_unread','mark_read'):

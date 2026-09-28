@@ -108,6 +108,7 @@ def audit(action, thread_key="", *, actor=""):
         "email_forward_sent": "Forward accepted by the mail server",
         "email_archived": "Email moved to Archive",
         "email_trashed": "Email moved to Trash",
+        "email_permanently_deleted": "Email permanently deleted from Trash",
         "email_junked": "Email moved to Junk",
         "email_copied": "Email copied; original retained",
         "email_mark_read": "Email marked read",

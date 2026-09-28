@@ -5,12 +5,23 @@
   const safeLink = value => {try {const u=new URL(value); return ['https:','http:','mailto:'].includes(u.protocol) && !u.username && !u.password ? u.href : '';} catch (_) {return '';}};
   const locked = m => Boolean((m.draft && ['accepted','unknown','in_progress'].includes((m.send_result || {}).status)) || m.draft_pending);
   const mailboxCount = m => m.error ? 'Mailbox unavailable' : (m.query ? 'Search · ' : '') + (m.threads || []).length + ' conversations';
-  function messageMenuItems(target,roles){
-    return [['Open','open'],['Reply','reply'],['Reply all','reply_all'],['Forward','forward'],
+  function messageMenuItems(target,roles,activeFolder){
+    const items=[['Open','open'],['Reply','reply'],['Reply all','reply_all'],['Forward','forward'],
       [target.unread?'Mark as read':'Mark as unread',target.unread?'mark_read':'mark_unread'],
       [target.starred?'Unflag':'Flag',target.starred?'unstar':'star'],
       ['Archive','archive',!roles.archive],['Move to…','move'],['Copy to…','copy'],
       ['Junk','junk',!roles.junk],['Trash','trash',!roles.trash]];
+    if(target.thread_key&&roles.trash&&activeFolder===roles.trash&&target.folder===roles.trash)
+      items.push(['Delete forever','request_delete_forever']);
+    return items;
+  }
+  function trashDeleteTarget(m,e,isBusy=false){
+    if(e.key!=='Delete'||e.repeat||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey||isBusy||m.delete_confirmation||
+        m.view!=='mail'||!m.roles?.trash||m.folder!==m.roles.trash||!m.selected||m.error)return null;
+    const typing=(e.composedPath?.()||[e.target]).some(node=>node?.isContentEditable||
+      node?.closest?.('input,textarea,select,[contenteditable],[role="textbox"],[role="combobox"],[role="dialog"],[data-email-composer],.email-composer')||
+      (node?.closest?.('button')&&!node.closest('.conversation')));
+    return typing?null:(m.threads||[]).find(t=>t.key===m.selected)?.key||null;
   }
   function sendStatus(m) {
     const status=m.send_result?.status;
@@ -41,7 +52,7 @@
     if(!active?.expanded)return null;
     return {active_message:active.key,messages:messages.map(m=>({...m,expanded:m.key===active.key&&m.expanded}))};
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,sendStatus,sentReceipt,createViewCache,threadView}; return;}
+  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -54,13 +65,13 @@
   function signalTick(version){
     if(typeof version!=='string'||!version||version.length>128||version===seenSignal)return;
     pendingSignal=version;
-    if(busy||menu||document.hidden||!model.configured)return;
+    if(busy||menu||model.delete_confirmation||document.hidden||!model.configured)return;
     seenSignal=version;pendingSignal='';signalAttempts=0;
     emit('live_check',{signal_version:version});
   }
   function liveTick(){
     if(pendingSignal){signalTick(pendingSignal);return;}
-    if(busy||menu||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
+    if(busy||menu||model.delete_confirmation||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
     lastLiveCheck=Date.now();emit('live_check');
   }
   // Only standalone fixtures/embeds need a timer; the OS supplies its existing heartbeat.
@@ -267,7 +278,7 @@
     // Selection-only reads never freeze folder/list/toolbar nodes. Re-enable selected-message controls
     // by repainting only their pane after the server acknowledges the selected reference.
     if(selectionControlsDisabled&&!locked(model)&&model.view==='mail')paintReading(true);
-    wire();fit();
+    wire();renderDeleteConfirmation();fit();
     if(pendingSignal&&!busy)setTimeout(()=>signalTick(pendingSignal),0);
     clearTimeout(signalRetryTimer);
     if(seenSignal&&model.idle_version!==seenSignal&&signalAttempts<3&&!busy){
@@ -358,11 +369,25 @@
     const message=model.messages.find(m=>m.key===(key||model.active_message));
     return message?{kind:'message',message_key:message.key,unread:message.unread,starred:message.starred,folder:message.folder}:null;
   }
+  function renderDeleteConfirmation(){
+    const pending=model.delete_confirmation,existing=$('trash-delete-confirmation');
+    if(existing?.dataset.token===pending?.token&&existing)return;
+    existing?.remove();if(!pending)return;
+    closeMenu();
+    const dialog=document.createElement('dialog');dialog.id='trash-delete-confirmation';dialog.className='trash-delete-dialog';
+    dialog.dataset.token=pending.token;dialog.setAttribute('aria-labelledby','trash-delete-title');
+    dialog.innerHTML=`<h3 id="trash-delete-title">Delete permanently?</h3><p>“${esc(pending.subject)}” will be permanently deleted from Trash.</p><p class="muted">${pending.count>1?esc(pending.count)+' messages in this Trash conversation. ':''}This cannot be undone.</p><div class="row"><button type="button" data-delete="cancel">Cancel</button><button type="button" data-delete="confirm">Delete forever</button></div>`;
+    let requested=false;
+    const submit=action=>{if(requested||busy)return;requested=true;dialog.querySelectorAll('button').forEach(b=>b.disabled=true);emit(action,{token:pending.token});};
+    dialog.onclick=e=>{const action=e.target.closest('[data-delete]')?.dataset.delete;if(action)submit(action==='confirm'?'confirm_delete_forever':'cancel_delete_forever');};
+    dialog.oncancel=e=>{e.preventDefault();submit('cancel_delete_forever');};
+    document.body.append(dialog);dialog.showModal();dialog.querySelector('[data-delete="cancel"]').focus();
+  }
   function closeMenu(){menu?.remove();menu=null;menuTarget=null;if(pendingSignal)setTimeout(()=>signalTick(pendingSignal),0);}
   function showMenu(target,x,y,items=null,heading=''){
     closeMenu();if(!target||(busy&&!['resolve_thread','live_check'].includes(pendingAction)))return;
     menuTarget=target;menu=document.createElement('div');menu.className='mail-context';menu.setAttribute('role','menu');menu.setAttribute('aria-label',target.kind==='folder'?'Folder actions':'Message actions');
-    const rows=items||(target.kind==='folder'?[['Refresh','refresh_folder'],['Search messages…','search_folder'],['Mark folder read','confirm_folder']]:messageMenuItems(target,model.roles));
+    const rows=items||(target.kind==='folder'?[['Refresh','refresh_folder'],['Search messages…','search_folder'],['Mark folder read','confirm_folder']]:messageMenuItems(target,model.roles,model.view==='mail'?model.folder:null));
     menu.innerHTML=(heading?'<p>'+esc(heading)+'</p>':'')+rows.map(([label,action,disabled,destination])=>`<button role="menuitem" type="button" data-menu-action="${esc(action)}" ${disabled?'disabled':''} ${destination?`data-destination="${esc(destination)}"`:''}>${esc(label)}</button>`).join('');
     document.body.append(menu);menu.style.left=Math.max(4,Math.min(x,window.innerWidth-menu.offsetWidth-4))+'px';menu.style.top=Math.max(4,Math.min(y,window.innerHeight-menu.offsetHeight-4))+'px';
     menu.onclick=e=>{
@@ -373,6 +398,7 @@
       }
       if(action==='confirm_folder'){showMenu(target,rect.x,rect.y,[['Cancel','cancel'],['Mark read','mark_folder_read']],`Mark all messages in ${target.folder} as read?`);return;}
       closeMenu();if(action==='cancel')return;
+      if(action==='request_delete_forever'){emit(action,{thread_key:target.thread_key});return;}
       if(['reply','reply_all','forward'].includes(action)){
         if(model.draft&&!locked(model)&&!confirm('Replace this open compose session? Save a mailbox draft first if you want to keep it.'))return;
         localDraft=null;mobileReading=true;emit('compose',{mode:action,message_key:target.message_key});return;
@@ -394,6 +420,7 @@
   try{window.parent.document.addEventListener('pointerdown',closeMenu,{signal:parentMenuListeners.signal});}catch(_){}
   window.addEventListener('pagehide',()=>parentMenuListeners.abort());
   document.addEventListener('keydown',e=>{
+    if(e.key==='Delete'&&!menu){const thread_key=trashDeleteTarget(model,e,busy);if(thread_key){e.preventDefault();emit('request_delete_forever',{thread_key});return;}}
     if(menu){
       if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();return;}
       if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const items=[...menu.querySelectorAll('button:not(:disabled)')];const at=items.indexOf(document.activeElement);items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}

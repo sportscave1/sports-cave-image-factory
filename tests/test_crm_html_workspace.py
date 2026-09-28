@@ -90,13 +90,12 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertEqual(doc['custom_html'],'');self.assertEqual(doc['content']['subject'],'');self.assertEqual(doc['content']['preheader'],'')
         self.assertFalse(any(r.label=='Content mode' for r in at.radio))
         self.assertFalse(any('Blocks' in r.options for r in at.radio))
-        at.session_state['campaign_editor']['document']['custom_html']=HTML
-        next(r for r in at.radio if r.label=='Email workspace').set_value('Preview').run(timeout=20)
+        next(t for t in at.text_area if t.label=='Body HTML').set_value(HTML).run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual(next(r for r in at.radio if r.label=='Email workspace').value,'Preview')
+        self.assertEqual([t.label for t in at.tabs],['Campaign Details','HTML'])
         iframe=next(e for e in at.get('iframe') if 'A collector moment' in e.proto.srcdoc)
         self.assertIn('Unsubscribe',iframe.proto.srcdoc)
-        next(r for r in at.radio if r.label=='Email workspace').set_value('HTML').run()
+        next(b for b in at.button if str(b.key).endswith('device_Mobile')).click().run()
         self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],HTML)
         self.assertFalse(at.exception)
 
@@ -124,7 +123,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertTrue(labels.isdisjoint({'Campaigns','Flows','Refresh','+ New Campaign','Preview'}))
         self.assertFalse(any(t.label=='Search campaigns' for t in at.text_input))
         self.assertTrue(any('Recent campaigns' in m.value for m in at.markdown))
-        at.session_state['campaign_editor']['document']['custom_html']=HTML
+        next(t for t in at.text_area if t.label=='Body HTML').set_value(HTML)
         next(t for t in at.text_input if t.label=='Subject').set_value('Saved subject')
         next(t for t in at.text_input if t.label=='Preview text').set_value('Saved preview')
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)

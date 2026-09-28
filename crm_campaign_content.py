@@ -50,10 +50,16 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html'}
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections'}
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
     if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
     if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
+    if 'html_sections' in doc:
+        sections=doc['html_sections']
+        if not isinstance(sections,dict) or set(sections)!={'header','footer'} or any(not isinstance(v,str) for v in sections.values()):
+            raise ValueError('HTML sections require header and footer source strings.')
+        if doc.get('content_mode')!='HTML' or sum(len(v.encode('utf-8')) for v in [doc.get('custom_html',''),*sections.values()])>95000:
+            raise ValueError('Combined Header, Body and Footer HTML must be at most 95 KB.')
     validate_blocks(doc.get('blocks',[]))
     if not isinstance(doc.get('tags',[]),list) or len(doc.get('tags',[]))>10 or any(not isinstance(t,str) or len(t)>40 for t in doc.get('tags',[])): raise ValueError('Use up to 10 short internal tags.')
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',doc.get('campaign_key','legacy')): raise ValueError('Invalid campaign tracking key.')
@@ -112,6 +118,9 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     if doc.get('content_mode')=='HTML':
         from crm_campaign_html import import_html
         imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
+        if 'html_sections' in doc:
+            from crm_campaign_sections import import_sections
+            imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''))
         body='<tr><td>'+imported+'</td></tr>'
     unsubscribe='Unsubscribe — production link not activated (layout/test only).'
     footer='<tr><td style="padding:24px;border-top:1px solid #ded8ca;background:#f4f1e9;color:#333;font:13px/1.6 Arial"><strong>'+e(cfg['business'])+'</strong><br>'+e(cfg['postal'] or 'Business postal address not configured — TEST ONLY')+'<br>'
@@ -129,7 +138,9 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     footer+='</td></tr>'
     logo=cfg.get('logo','')
     header=('<img src="'+e(logo)+'" alt="Sports Cave" width="180" style="max-width:180px;height:auto">') if asset_url(logo) and not images_off else 'SPORTS CAVE'
-    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">'+e(c['preheader'])+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff"><tr><td style="padding:22px 24px;background:#171717;color:#fff;border-bottom:3px solid '+accent+';font:700 20px Arial">'+header+'<p style="font:11px Arial;color:#dfc986">CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED</p></td></tr>'+body+footer+'</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
+    header_row='<tr><td style="padding:22px 24px;background:#171717;color:#fff;border-bottom:3px solid '+accent+';font:700 20px Arial">'+header+'<p style="font:11px Arial;color:#dfc986">CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED</p></td></tr>'
+    if 'html_sections' in doc:header_row=''
+    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">'+e(c['preheader'])+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff">'+header_row+body+footer+'</table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
     text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain,cfg['business'],cfg['postal'] or 'Business postal address not configured',cfg['website'],cfg['contact'],'You’re receiving this marketing email because you subscribed to Sports Cave updates.',unsubscribe])
     return {'subject':'[CAMPAIGN TEST] '+c['subject'],'html':html,'text':text}
 
@@ -174,6 +185,9 @@ def preflight(doc, env=None, cfg=None):
         for label in ('Eligible recipients > 0 (complete calculation within 24h)','Headline and body present','Hero uses HTTPS','Image alt text complete','CTA label and HTTPS URL valid'):
             checks.pop(label,None)
         _,plain,html_checks=import_html(doc.get('custom_html',''))
+        if 'html_sections' in doc:
+            from crm_campaign_sections import import_sections
+            _,plain,html_checks=import_sections(doc)
         checks.update(html_checks)
         checks['Plain-text alternative generated']=bool(plain.strip())
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']

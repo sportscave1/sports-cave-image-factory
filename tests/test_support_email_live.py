@@ -170,7 +170,7 @@ class LiveWorkspaceTests(unittest.TestCase):
     def test_only_visible_message_marks_read_and_reopen_does_not_store_again(self):
         before=self.w.model()['inbox_status']['unread_count']
         self.imap.calls.clear();self.open()
-        self.assertEqual([c[0] for c in self.imap.calls],['body','flag'])
+        self.assertEqual([c[0] for c in self.imap.calls],['flag'])  # Default selection already cached the body.
         self.assertFalse(self.w.model()['messages'][0]['unread'])
         self.assertEqual(self.w.model()['inbox_status']['unread_count'],before-1)
         self.imap.calls.clear();self.open();self.assertEqual(self.imap.calls,[])
@@ -199,6 +199,7 @@ class LiveWorkspaceTests(unittest.TestCase):
         self.assertFalse(self.state['snapshot']['has_more'])
 
     def test_failed_body_never_marks_read_and_failed_store_never_lies(self):
+        self.w.bodies.clear()  # Exercise a cold read, not the default-selection cache.
         before=self.w.model()['inbox_status']['unread_count']
         with patch.object(self.imap,'read_message',side_effect=RuntimeError('fixture')):
             self.open()
@@ -218,10 +219,11 @@ class LiveWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.w.model()['messages'][0]['starred'])
 
     def test_context_nonselected_target_no_body_and_shared_actions(self):
+        selected=self.state['selected']
         target=self.w.model()['threads'][2];self.imap.calls.clear()
         self.event('star',message_key=target['message_key'])
         self.assertEqual([c[0] for c in self.imap.calls],['flag'])
-        self.assertIsNone(self.state.get('selected'))
+        self.assertEqual(self.state.get('selected'),selected)
         self.event('unstar',message_key=target['message_key'])
         self.assertFalse(next(t for t in self.w.model()['threads'] if t['key']==target['key'])['starred'])
 

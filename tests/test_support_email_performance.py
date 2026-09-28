@@ -19,6 +19,7 @@ class SelectionPerformanceTests(unittest.TestCase):
         self.event("resolve_thread",thread_key=self.state["selected"],mailbox_version=self.state["mailbox_version"])
 
     def test_cold_selection_only_fetches_requested_body(self):
+        self.w.bodies.clear()  # Initial Inbox selection now preloads one body.
         self.imap.calls.clear()
         with patch.object(workspace.store,"load_orders") as orders,patch.object(workspace.store,"load_metadata") as metadata:
             self.open()
@@ -35,6 +36,7 @@ class SelectionPerformanceTests(unittest.TestCase):
         self.assertEqual(self.imap.calls,[])
 
     def test_selection_never_discovers_folders_headers_previews_or_orders(self):
+        self.w.bodies.clear()
         self.imap.calls.clear()
         with patch.object(workspace.store,'load_orders') as orders:
             for t in self.state['threads'][:5]:
@@ -44,6 +46,7 @@ class SelectionPerformanceTests(unittest.TestCase):
             orders.assert_not_called()
 
     def test_safe_html_prepared_once_and_model_list_reused(self):
+        self.w.bodies.clear()
         with patch.object(workspace,'readable_html',wraps=workspace.readable_html) as html,patch.object(workspace,'build_threads',wraps=workspace.build_threads) as threads:
             self.open()
             rows=self.w.model()['threads']
@@ -91,8 +94,10 @@ class SelectionPerformanceTests(unittest.TestCase):
 
     def test_changed_message_id_cannot_reuse_old_content(self):
         self.open();self.imap.messages[-1]['message_id']='<different@example.test>'
-        self.event('refresh');self.imap.calls.clear();self.open()
-        self.assertEqual([c[0] for c in self.imap.calls],['body'])
+        self.imap.calls.clear();self.event('refresh')
+        self.assertEqual([c[0] for c in self.imap.calls if c[0]=='body'],['body'])
+        self.imap.calls.clear();self.open()
+        self.assertEqual(self.imap.calls,[])  # Fallback selection fetched the new identity.
 
     def test_delayed_history_for_old_selection_or_version_is_ignored(self):
         self.open();old=self.state['selected'];version=self.state['mailbox_version']
@@ -112,6 +117,7 @@ class SelectionPerformanceTests(unittest.TestCase):
         self.assertFalse(model['error']);self.assertIn('Older conversation',model['notice'])
 
     def test_body_failure_not_cached_and_no_attachment_fetch_on_open(self):
+        self.w.bodies.clear()
         with patch.object(self.imap,'read_message',side_effect=RuntimeError('fixture-secret')):
             self.open()
         self.assertEqual(len(self.w.bodies.data['entries']),0)
