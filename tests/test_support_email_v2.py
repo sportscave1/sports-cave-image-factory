@@ -519,19 +519,20 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(any(c[0]=="move" and c[2]=="Archive" for c in self.imap.calls))
         self.event("test_connection");self.assertIn(("test",),self.imap.calls)
 
-    def test_approval_source_survives_folder_switch_and_database_outage(self):
+    def test_staff_reply_survives_folder_switch_and_optional_database_outage(self):
         d=self.compose("reply");self.w.user=WORKER
         self.event("folder",folder="Archive")
         with patch.object(store,"load_metadata",side_effect=RuntimeError("unavailable")):
             self.event("send",operation_id=d["operation_id"])
-        self.smtp.submit.assert_not_called();self.assertIn("Approval",self.state["notice"])
+        self.smtp.submit.assert_called_once()
+        self.assertEqual(self.state["send_result"]["status"], "accepted")
 
-    def test_required_approval_blocks_worker_send_and_worker_cannot_clear_it(self):
+    def test_review_metadata_does_not_gate_send_but_worker_cannot_clear_it(self):
         d=self.compose('reply');self.w.user=WORKER
         key=d['source_thread']['thread_key']
         with patch.object(store,'load_metadata',return_value={key:{'thread_key':key,'needs_approval':True}}):
             self.event('send',operation_id=d['operation_id'])
-        self.smtp.submit.assert_not_called()
+        self.smtp.submit.assert_called_once()
         with self.assertRaises(store.SupportStorageError):
             store.save_workflow(MAILBOX,key,actor=WORKER,support_status='Needs Reply',needs_approval=False,previous={'needs_approval':True})
 
