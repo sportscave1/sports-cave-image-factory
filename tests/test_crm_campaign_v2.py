@@ -24,7 +24,7 @@ def profile(i,code='AU',state='NSW',consent='SUBSCRIBED',address=None):
       'emailMarketingConsent':{'marketingState':consent},'defaultAddress':address or {'countryCodeV2':code,'provinceCode':state}}
 
 def authority(rows):
-    shop=Mock();shop.customers.return_value={'nodes':rows,'pageInfo':{'hasNextPage':False}}
+    shop=Mock();shop.campaign_subscribers.return_value={'nodes':rows,'pageInfo':{'hasNextPage':False}}
     return shop
 
 class MarketAndTimezoneTests(unittest.TestCase):
@@ -162,7 +162,7 @@ class SimplifiedUiTests(unittest.TestCase):
         return at
     def test_tabs_no_infrastructure_templates_lazy_counts_cached(self):
         at=self.app()
-        with patch.object(CampaignStore,'html_library',side_effect=AssertionError('Library must be lazy')),patch('crm_settings_page.campaign_settings_panel',side_effect=AssertionError('Removed settings must not load')):
+        with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':True,'error':False}),patch.object(CampaignStore,'html_library',side_effect=AssertionError('Library must be lazy')),patch('crm_settings_page.campaign_settings_panel',side_effect=AssertionError('Removed settings must not load')):
             at.run(timeout=20);self.assertFalse(at.exception)
             self.assertEqual([t.label for t in at.tabs],['Campaign Settings','HTML','Templates'])
             calls=len(at.session_state['wire'].calls)
@@ -172,8 +172,8 @@ class SimplifiedUiTests(unittest.TestCase):
             self.assertFalse(any('Smart Sending' in n.label for n in at.number_input))
     def test_market_and_timing_save_reload_and_no_hidden_copy_confirmation(self):
         at=self.app();at.run(timeout=20)
-        market=next(s for s in at.selectbox if s.label=='Market')
-        self.assertEqual([s.split(' · ')[0] for s in market.options],['AU','USA','UK','GLOBAL'])
+        market=next(s for s in at.selectbox if s.label=='Segment')
+        self.assertEqual([s.split(' · ')[0] for s in market.options],['AUSTRALIA','USA','UK','ALL SUBSCRIBERS'])
         market.set_value('US').run(timeout=20)
         next(r for r in at.radio if r.label=='Send timing').set_value('Schedule').run(timeout=20)
         self.assertEqual(len(at.date_input),1);self.assertEqual(len(at.time_input),1)
@@ -185,9 +185,9 @@ class SimplifiedUiTests(unittest.TestCase):
         self.assertFalse(any(c.label in ('Copy and subject reviewed','One approved internal mailbox only') for c in at.checkbox))
     def test_counts_failure_keeps_composer_available(self):
         at=self.app()
-        with patch('crm_campaign_controls.calculate',side_effect=TimeoutError('SECRET')):
+        with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':False,'error':True}):
             at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertEqual(next(s for s in at.selectbox if s.label=='Market').options,['AU · —','USA · —','UK · —','GLOBAL · —'])
+            self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,['AUSTRALIA · —','USA · —','UK · —','ALL SUBSCRIBERS · —'])
             self.assertTrue(any('counts unavailable' in c.value for c in at.caption))
             self.assertFalse(any('SECRET' in c.value for c in at.caption))

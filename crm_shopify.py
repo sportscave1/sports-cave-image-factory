@@ -1,4 +1,4 @@
-"""Read-only, paginated Shopify authority. No connection at import time."""
+"""Paginated Shopify authority plus a narrow opt-out-only write adapter."""
 import json
 import logging
 import threading
@@ -13,7 +13,19 @@ PAGE = 'pageInfo { hasNextPage endCursor }'
 CUSTOMERS = '''query CrmCustomers($after:String,$query:String) {
  customers(first:50,after:$after,sortKey:UPDATED_AT,reverse:true,query:$query) {
  nodes { '''+CUSTOMER_FIELDS+' } '+PAGE+' } }'
+# No order/profile enrichment for campaign eligibility. Keep timezone evidence for
+# the same authoritative final-send calculation and scheduler.
+CAMPAIGN_SUBSCRIBERS = '''query CrmCampaignSubscribers($after:String) {
+ customers(first:250,after:$after,sortKey:UPDATED_AT,reverse:true) { nodes {
+ id email validEmailAddress emailMarketingConsent { marketingState }
+ defaultAddress { countryCodeV2 provinceCode timeZone }
+ } '''+PAGE+' } }'
 CUSTOMER = 'query CrmCustomer($id:ID!) { customer(id:$id) { '+CUSTOMER_FIELDS+' } }'
+UNSUBSCRIBE = '''mutation CrmUnsubscribe($input:CustomerEmailMarketingConsentUpdateInput!) {
+ customerEmailMarketingConsentUpdate(input:$input) {
+ customer { id emailMarketingConsent { marketingState } }
+ userErrors { field message }
+ } }'''
 CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { '+CUSTOMER_FIELDS+' } } }'
 ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus
  customer { id } totalPriceSet { shopMoney { amount currencyCode } }
@@ -150,10 +162,24 @@ class Shopify:
                 if not transient or attempt == 2:
                     raise
 
+    def campaign_subscribers(self, after=None):
+        return self.query(CAMPAIGN_SUBSCRIBERS,{'after':after},'campaign subscribers',0,True)['customers']
+
     def customers(self, after=None, query=None, fresh=False):
         return self.query(CUSTOMERS, {'after':after, 'query':query}, 'customers', 45, fresh)['customers']
     def customer(self, customer_id, fresh=False):
         return self.query(CUSTOMER, {'id':gid(customer_id)}, 'customers', 45, fresh).get('customer')
+    def unsubscribe_only(self, customer_id, email=None):
+        identity=gid(customer_id)
+        if not identity:raise ValueError('Customer identity unavailable for consent synchronization.')
+        result=self.query(UNSUBSCRIBE,{'input':{'customerId':identity,
+            'emailMarketingConsent':{'marketingState':'UNSUBSCRIBED'}}},'email marketing opt-out',0,True)
+        payload=result.get('customerEmailMarketingConsentUpdate') or {}
+        customer=payload.get('customer') or {}
+        if payload.get('userErrors') or customer.get('id')!=identity or (customer.get('emailMarketingConsent') or {}).get('marketingState')!='UNSUBSCRIBED':
+            raise CapabilityUnavailable('email marketing opt-out')
+        self.cache.invalidate()
+        return True
     def customer_batch(self, ids, fresh=False):
         if not ids:return []
         return [n for n in self.query(CUSTOMER_BATCH, {'ids':[gid(i) for i in ids[:50]]}, 'customers', 45, fresh)['nodes'] if n]

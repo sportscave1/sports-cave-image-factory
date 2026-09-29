@@ -8,12 +8,16 @@ from crm_middle_sections import middle_sections, commit_middle
 
 def library_rows(store):
     # Flow and legacy delivery templates are not editable campaign-library items.
-    return store.html_library()
+    return store.html_library(metadata=True)
 
 
 def template_html(store,row):
     from crm_html_workspace import html_document
     from crm_middle_sections import render_middle
+    if 'document' not in row['content']:
+        loaded=store.get('templates',row['id'])
+        if not loaded or loaded['version']!=row['version'] or loaded.get('archived_at'):raise ValueError('Template changed. Reload the template list.')
+        row=loaded
     doc=html_document(store.template_document(row))
     return render_middle(doc)[0] if doc.get('middle_sections') else doc.get('custom_html','')
 

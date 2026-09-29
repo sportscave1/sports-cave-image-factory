@@ -49,6 +49,7 @@ class Config:
         return self.public_base+'/crm/unsubscribe?token='+value+'.'+signature
     def verify_token(self,token):
         try:
+            if not isinstance(token,str) or len(token)>101:return None
             value,sig=token.split('.',1)
             value=str(uuid.UUID(value))
             expected=hmac.new(self.secret.encode(),('crm-marketing-opt-out/v1:'+value).encode(),hashlib.sha256).hexdigest()
@@ -56,7 +57,10 @@ class Config:
             # Retain any earlier issued links indefinitely; both are restricted to
             # existing production receipt IDs by the POST handler.
             return value if len(self.secret)>=32 and (hmac.compare_digest(sig,expected) or hmac.compare_digest(sig,legacy)) else None
-        except (ValueError,AttributeError):return None
+        except (ValueError,AttributeError,TypeError):return None
+
+    def test_unsubscribe_url(self):
+        return self.public_base+'/crm/unsubscribe/test' if safe_url(self.public_base) else ''
 
 class Resend:
     def __init__(self,config=None,session=None):

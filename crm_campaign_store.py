@@ -8,8 +8,9 @@ from crm_campaign_content import new_document, validate_document, preflight, set
 
 
 class CampaignStore(WorkspaceRecords):
-    def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100):
-        return self.q("""SELECT d.*,c.status AS delivery_status,
+    def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False):
+        fields="d.id,d.name,d.version,d.status,d.archived_at,d.updated_at,d.last_tested_at,jsonb_build_object('market',d.document->'market','send_timing',d.document->'send_timing') AS document" if metadata else 'd.*'
+        return self.q("""SELECT """+fields+""",c.status AS delivery_status,
           (SELECT s.error_code FROM crm_marketing_sends s WHERE s.campaign_id=d.id
            AND s.error_code IN ('schedule_missed','marketing_off_schedule') LIMIT 1) AS schedule_error
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
@@ -104,8 +105,6 @@ class CampaignStore(WorkspaceRecords):
         if not os_accounts.is_admin(user): raise PermissionError('Only an administrator can send a campaign test.')
         row=self.draft(identity)
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
-        allowlist=self.setting('sending')['value']['internal_recipients']
-        if recipient.casefold() not in {v.casefold() for v in allowlist}:raise ValueError('Recipient is not in the configured internal-test allowlist. Ask an administrator to configure it in Settings.')
         if confirmed is not True:raise DeliveryError('confirmation_required')
         operation=str(uuid.UUID(str(operation_id)))
         if row['version']!=version or row['archived_at']: raise ValueError('Reload the current editable campaign before testing.')
@@ -115,7 +114,6 @@ class CampaignStore(WorkspaceRecords):
         from crm_resend_marketing import get_resend_marketing_config_status
         delivery=get_resend_marketing_config_status(env)
         if not delivery['configured']:raise DeliveryError('configuration_missing')
-        if delivery['marketing_enabled']:raise DeliveryError('stage_one_only')
         # A repeated operation must use its recorded snapshot, never resolve fresh
         # facts and silently issue a second send after prices/counters change.
         catalogue_sections=[s for s in row['document'].get('middle_sections',[]) if s['type']=='catalogue' and s['visible']]
@@ -131,12 +129,19 @@ class CampaignStore(WorkspaceRecords):
             if current!=row['document']:
                 raise ValueError('Catalogue facts changed. Refresh catalogue facts, review the preview and save before testing.')
         with self.db() as conn:
+            # Serialize per-admin attempts across sessions, preserving receipt replay.
+            actor=str(user.get('id',''))
+            guard_key='campaign-test-rate:'+actor
+            conn.execute("INSERT INTO crm_runtime_state(key,value) VALUES(%s,'{}'::jsonb) ON CONFLICT DO NOTHING",(guard_key,))
+            conn.execute('SELECT key FROM crm_runtime_state WHERE key=%s FOR UPDATE',(guard_key,))
             attempt=conn.execute("INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
             if not attempt:
                 prior=conn.execute('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,)).fetchone()
                 if str(prior['campaign_id'])!=str(identity) or prior['campaign_version']!=version or prior['render_hash']!=digest or prior['recipient']!=recipient.casefold():raise ValueError('Test operation already belongs to another saved request.')
                 if prior['status']=='ACCEPTED':return {'message':'Test email accepted by Resend','message_id':prior['provider_id'],'accepted_at':str(prior['accepted_at']),'audit_saved':True}
                 raise ValueError('This test was already attempted. Check its receipt; uncertain tests are never retried automatically.')
+            recent=conn.execute("SELECT count(*) AS n FROM crm_internal_tests WHERE actor=%s AND created_at>now()-interval '1 hour'",(actor,)).fetchone()
+            if recent['n']>60:raise ValueError('Test email limit reached (60 per hour). Please try again later.')
             if catalogue_sections:
                 # Commit exact outbound bytes/facts BEFORE external delivery. Retained
                 # even if the provider or receipt update later becomes uncertain.

@@ -149,6 +149,12 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
     if single_email(cfg['contact']):footer+='<a style="color:#333" href="mailto:'+e(cfg['contact'])+'">'+e(cfg['contact'])+'</a><br>'
     if https(cfg.get('privacy','')):footer+='<a style="color:#333" href="'+e(cfg['privacy'])+'">Privacy</a><br>'
     unsubscribe_html='<u>'+unsubscribe+'</u>'
+    if unsubscribe_url is None and not production:
+        from crm_resend import Config
+        test_url=Config().test_unsubscribe_url()
+        if test_url:
+            unsubscribe='Test unsubscribe: '+test_url
+            unsubscribe_html='<a style="color:#333" href="'+e(test_url)+'">Unsubscribe</a>'
     if unsubscribe_url is not None:
         if not https(unsubscribe_url):raise ValueError('Verified HTTPS unsubscribe URL required.')
         unsubscribe='Unsubscribe: '+unsubscribe_url

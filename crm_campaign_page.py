@@ -48,7 +48,7 @@ def test_panel(store,user,editor,key,cfg,pending=None):
     if not os_accounts.is_admin(user):st.caption('Admin internal tests only.');return None
     with st.form(key+'internal_test'):
         recipient=st.text_input('Test recipient',value='')
-        confirmed=st.checkbox('One approved internal mailbox only')
+        confirmed=st.checkbox('One manually entered test recipient')
         send=st.form_submit_button('Send internal test',disabled=not editor.get('id') or not checks['test_ready'] or bool(editor.get('archived_at')))
     if dirty(editor) if pending is None else pending:st.caption('Save reviewed content before testing.')
     if st.button('New test attempt',key=key+'new_test'):st.session_state[key+'test_operation']=str(uuid.uuid4())
@@ -117,6 +117,7 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
 
 
 def recent_campaigns(drafts,key,user):
+    from crm_campaign_markets import MARKET_LABELS
     with st.container(horizontal=True,vertical_alignment='center'):
         st.markdown('#### Recent campaigns')
         if st.button('+ New campaign'):st.session_state['campaign_pending_open']='new'
@@ -127,7 +128,7 @@ def recent_campaigns(drafts,key,user):
     if st.session_state.get('recent_filters')!=filters:
         st.session_state['recent_filters']=filters;st.session_state['recent_offset']=0
     offset=st.session_state.get('recent_offset',0)
-    rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7)
+    rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True)
     if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
     for row in rows[:6]:
         identity=str(row['id'])
@@ -138,7 +139,7 @@ def recent_campaigns(drafts,key,user):
         error=row.get('schedule_error')
         status={'marketing_off_schedule':'Delivery blocked — marketing is OFF','schedule_missed':'Schedule missed — reschedule required'}.get(error)
         if not status:status=('SCHEDULED' if row.get('delivery_status')=='SENDING' and row['document'].get('send_timing',{}).get('mode')=='schedule' else row.get('delivery_status')) or row['status']
-        columns[2].caption(status);columns[3].caption({'US':'USA','Global':'GLOBAL'}.get(row['document']['market'],row['document']['market']))
+        columns[2].caption(status);columns[3].caption(MARKET_LABELS[row['document']['market']])
         columns[4].caption(str(row['updated_at'])[:16].replace('T',' '))
         with columns[5].popover('Actions'):
             st.caption('Last test: '+(str(row['last_tested_at'])[:16] if row['last_tested_at'] else '—'))
@@ -326,7 +327,7 @@ def message_editor(shop,store,user,editor,key,cfg):
             st.text_input('Sender address',delivery['sender'],disabled=True)
             st.text_input('Reply-To',delivery['reply_to'],disabled=True)
             st.caption('Approved sender configuration only. Change verified identity through the reviewed deployment configuration.')
-            st.caption('Purpose: '+doc['type']+' · Market: '+doc['market'])
+            st.caption('Purpose: '+doc['type']+' · Segment: '+__import__('crm_campaign_markets').MARKET_LABELS[doc['market']])
             doc['notes']=st.text_area('Notes for prompt',doc['notes'],height=90,key=key+'notes')
             doc['offer']=st.text_input('Reviewed offer or None',doc['offer'],key=key+'offer')
             doc['offer_reviewed']=st.checkbox('I verified this offer',doc['offer_reviewed'],key=key+'offer_reviewed')
@@ -424,7 +425,7 @@ def product_picker(shop,b,market,key):
         p=b['products'][index];p['alt']=st.text_input('Artwork alt text',p.get('alt',''),key=key+str(index)+'alt')
         variant_key=key+p['id']+'variants_data'
         st.caption(p['title']+' · '+(p.get('currency','')+' '+p.get('price','') if p.get('price') else 'Price omitted')+' · Edition availability omitted until verified by an approved source.')
-        if st.button('Load variants / market price',key=key+'variants'):
+        if st.button('Load variants / segment price',key=key+'variants'):
             st.session_state[variant_key]=shop.campaign_variants(p['id'])
         variant_page=st.session_state.get(variant_key,{})
         variants=variant_page.get('nodes',[])
@@ -432,10 +433,10 @@ def product_picker(shop,b,market,key):
             page=shop.campaign_variants(p['id'],variant_page['pageInfo']['endCursor']);page['nodes']=variants+page['nodes'];st.session_state[variant_key]=page;st.rerun()
         if variants:
             v=st.selectbox('Variant for displayed price',variants,format_func=lambda v:v['title'],key=key+p['id']+'variant')
-            if st.button('Use verified market price',key=key+'price'):
+            if st.button('Use verified segment price',key=key+'price'):
                 money=shop.campaign_price(v['id'],market)
                 if money:p.update(variant_id=v['id'],variant_title=v['title'],market=market,price=money['amount'],currency=money['currencyCode'],facts_checked_at=now().isoformat());st.rerun()
-                else:st.warning('Market price unavailable. No price was added.')
+                else:st.warning('Segment price unavailable. No price was added.')
         if st.button('Refresh canonical facts for comparison',key=key+'refreshproduct'):
             current=shop.products([p['id']],fresh=True)
             if current:
@@ -455,7 +456,7 @@ def review_editor(store,user,editor,key,cfg):
             for label,ok in checks['test'].items():st.caption(('✓ ' if ok else '○ ')+label)
         with st.expander('Production readiness — blocked'):
             for label,ok in checks['live'].items():st.caption(('✓ ' if ok else '○ ')+label)
-            st.caption('One-click unsubscribe production path not activated. Missing legal identity is shown as a test-only warning; no market is automatically legally cleared.')
+            st.caption('One-click unsubscribe production path not activated. Missing legal identity is shown as a test-only warning; no segment is automatically legally cleared.')
         a,b=st.columns(2)
         needs=a.button('Needs review',disabled=dirty(editor))
         ready=b.button('Mark test ready',disabled=dirty(editor) or not checks['test_ready'])
@@ -463,12 +464,10 @@ def review_editor(store,user,editor,key,cfg):
             updated=store.save(user,editor['name'],doc,editor['id'],editor['version'],requested_status='NEEDS_REVIEW' if needs else 'TEST_READY')
             st.session_state['campaign_editor']=deepcopy(updated);st.session_state['campaign_saved']=deepcopy(updated);st.rerun()
         if os_accounts.is_admin(user):
-            allowlist=store.setting('sending')['value']['internal_recipients']
-            if not allowlist:st.info('Configure internal-test recipients in Settings → Sending & Compliance before sending.')
             with st.form(key+'test',clear_on_submit=False):
                 recipient=st.text_input('Manual internal test recipient',value='')
                 confirmed=st.checkbox('I confirm one internal mailbox and the TEST ONLY footer / inactive unsubscribe warnings.')
-                clicked=st.form_submit_button('Send internal test',disabled=not checks['test_ready'] or not allowlist or dirty(editor))
+                clicked=st.form_submit_button('Send internal test',disabled=not checks['test_ready'] or dirty(editor))
             if dirty(editor):st.caption('Save current changes before sending a test.')
             if clicked:
                 saved=store.draft(editor['id'])
@@ -481,7 +480,7 @@ def review_editor(store,user,editor,key,cfg):
                     if not result['audit_saved']:st.warning('Receipt persistence needs review. Do not resend.')
             if st.button('Start a separate test attempt'):
                 st.session_state[key+'test_operation']=str(uuid.uuid4());st.caption('New explicit test attempt prepared. Type and confirm the recipient before sending.')
-        else:st.caption('Only an administrator can send an allowlisted internal test.')
+        else:st.caption('Only an administrator can send a single-recipient test.')
         with st.expander('Test history'):
             st.dataframe([{k:r[k] for k in ('campaign_version','status','provider_id','created_at','delivered')} for r in store.test_history(editor['id'])],hide_index=True)
         with st.expander('Revision history'):st.dataframe(store.history(editor['id']),hide_index=True)

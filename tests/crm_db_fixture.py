@@ -1,4 +1,6 @@
 """Explicit localhost-only adapter for real SQL tests and fabricated CRM UI."""
+import threading
+_TRANSACTION_LOCK=threading.RLock()
 import json
 import urllib.request
 import urllib.error
@@ -8,8 +10,13 @@ class Cursor:
     def fetchone(self):return self.rows[0] if self.rows else None
     def fetchall(self):return self.rows
 class Connection:
-    def __enter__(self):self.execute('BEGIN');return self
-    def __exit__(self,typ,*_):self.execute('ROLLBACK' if typ else 'COMMIT')
+    def __enter__(self):
+        _TRANSACTION_LOCK.acquire()
+        try:self.execute('BEGIN');return self
+        except BaseException:_TRANSACTION_LOCK.release();raise
+    def __exit__(self,typ,*_):
+        try:self.execute('ROLLBACK' if typ else 'COMMIT')
+        finally:_TRANSACTION_LOCK.release()
     def execute(self,sql,args=()):
         chunks=sql.split('%s');sql=chunks[0]+''.join('$'+str(i)+part for i,part in enumerate(chunks[1:],1))
         payload=json.dumps({'sql':sql,'args':list(args)},default=str).encode()

@@ -48,11 +48,51 @@ class SendFlowTests(unittest.TestCase):
         self.assertEqual(payload['timeout'],15);self.assertEqual(payload['json']['to'],['internal@example.test'])
         self.assertEqual(payload['json']['html'],render_campaign(e['document'],CFG)['html'])
         self.assertEqual(self.count('crm_marketing_sends'),before)
-    def test_invalid_unapproved_and_nonadmin_test_never_calls_provider(self):
-        for address,user in [('bad',ADMIN),('customer@example.test',ADMIN),('internal@example.test',{**ADMIN,'role':'worker'})]:
+    def test_invalid_multiple_and_nonadmin_test_never_calls_provider(self):
+        for address,user in [('bad',ADMIN),('first@example.test,second@example.test',ADMIN),('internal@example.test',{**ADMIN,'role':'worker'})]:
             with self.subTest(address=address,user=user['role']),self.assertRaises((ValueError,PermissionError)):
                 send_test(self.store,user,self.editor(),address,str(uuid.uuid4()),env=ENV,session=self.provider)
         self.provider.post.assert_not_called()
+    def test_arbitrary_single_recipient_with_marketing_off_and_on_no_allowlist(self):
+        for flag in ('false','true'):
+            user={**ADMIN,'id':'test-admin-'+uuid.uuid4().hex}
+            env={**ENV,'CRM_MARKETING_ENABLED':flag}
+            e=self.editor();operation=str(uuid.uuid4())
+            before={table:self.count(table) for table in ('crm_campaigns','crm_marketing_sends')}
+            self.provider.reset_mock()
+            self.provider.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+            # No recipient configuration is needed even when the legacy key is absent.
+            original=self.store.setting
+            with patch.object(self.store,'setting',side_effect=lambda key:{'value':{'smart_hours':16}} if key=='sending' else original(key)):
+                first=send_test(self.store,user,e,'any.valid+test@example.org',operation,env=env,session=self.provider)
+                again=send_test(self.store,user,e,'any.valid+test@example.org',operation,env=env,session=self.provider)
+            self.assertEqual(first['message_id'],again['message_id']);self.provider.post.assert_called_once()
+            payload=self.provider.post.call_args.kwargs['json']
+            self.assertEqual(payload['to'],['any.valid+test@example.org'])
+            self.assertIn('[CAMPAIGN TEST]',payload['subject'])
+            self.assertEqual(payload['tags'][0]['value'],'campaign_test')
+            self.assertNotIn('/crm/unsubscribe?token=',payload['html'])
+            self.assertEqual(before,{table:self.count(table) for table in before})
+            self.assertNotIn(__import__('crm_logic').recipient_hash('any.valid+test@example.org'),self.store.recent_marketing_hashes())
+
+    def test_single_recipient_validation_rejects_lists_and_header_injection(self):
+        for value in (None,[],['a@example.org'],{'email':'a@example.org'},'a@example.org;b@example.org','a@example.org\r\nBcc: other@example.org'):
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                send_test(self.store,ADMIN,self.editor(),value,str(uuid.uuid4()),env=ENV,session=self.provider)
+        self.provider.post.assert_not_called()
+
+    def test_durable_admin_rate_limit_preserves_receipt_replay(self):
+        user={**ADMIN,'id':'rate-admin-'+uuid.uuid4().hex};e=self.editor();op=str(uuid.uuid4())
+        send_test(self.store,user,e,'arbitrary@example.org',op,env=ENV,session=self.provider)
+        self.store.q("""INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status)
+            SELECT gen_random_uuid(),campaign_id,campaign_version,render_hash,recipient,sender,actor,'FAILED'
+            FROM crm_internal_tests CROSS JOIN generate_series(1,59) WHERE id=%s""",(op,))
+        with self.assertRaisesRegex(ValueError,'60 per hour'):
+            send_test(self.store,user,e,'arbitrary@example.org',str(uuid.uuid4()),env=ENV,session=self.provider)
+        send_test(self.store,user,e,'arbitrary@example.org',op,env=ENV,session=self.provider)
+        self.provider.post.assert_called_once()
+        self.assertEqual(self.store.q('SELECT count(*) n FROM crm_internal_tests WHERE actor=%s',(user['id'],),True)['n'],60)
+
     def test_provider_failure_is_safe_and_not_automatically_retried(self):
         self.provider.post.side_effect=TimeoutError('SECRET SHOULD NOT APPEAR')
         e=self.editor();op=str(uuid.uuid4())

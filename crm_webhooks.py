@@ -50,8 +50,10 @@ def unsubscribe(store,config,token,shop=None):
     if not send_id:raise ValueError('Invalid unsubscribe link.')
     row=store.receipt(send_id)
     if not row or not row.get('recipient_hash') or row.get('test_send'):raise ValueError('Invalid unsubscribe link.')
-    address=row.get('test_recipient')
     # Suppress immediately, even during Shopify outages. The worker resolves the
     # original delivery address from Resend only when provider synchronization needs it.
-    store.suppress(row['recipient_hash'],row['shopify_customer_id'],'unsubscribe','marketing_footer',address)
+    store.record_unsubscribe(dict(row,id=send_id))
+    from crm_consent_sync import reconcile_opt_out
+    # Client configuration can fail too. It must never precede the local commit.
+    reconcile_opt_out(store,row['recipient_hash'],shop,approved=True)
     return True

@@ -42,8 +42,8 @@ def test_control(store,user,editor,key,available=True):
         })();</script>""",unsafe_allow_javascript=True)
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
-            recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Enter confirms you reviewed this copy and chose one approved internal mailbox.')
-            submit=cols[1].form_submit_button('→',help='Send this reviewed internal test',disabled=bool(st.session_state.get(key+'test_busy')))
+            recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Enter sends one test to the email address you entered.')
+            submit=cols[1].form_submit_button('→',help='Send this test email',disabled=bool(st.session_state.get(key+'test_busy')))
         if submit:
             if st.session_state.get(key+'test_busy'):return
             # Identical content/recipient retries retain their durable operation ID.
@@ -78,7 +78,7 @@ def review_dialog(shop,store,user,editor,key):
     st.write('**Campaign**  '+editor['name'])
     st.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
     from crm_campaign_markets import MARKET_LABELS
-    st.caption('Market: '+MARKET_LABELS[doc['market']]+' · Audience: '+doc['audience']['name'])
+    st.caption('Segment: '+MARKET_LABELS[doc['market']]+' · Audience: '+doc['audience']['name'])
     st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
     if counts['excluded']:
         with st.expander('Excluded'):

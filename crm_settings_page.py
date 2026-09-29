@@ -33,7 +33,6 @@ def campaign_settings_panel(shop,store,actions,navigate):
                     ('Marketing delivery','On' if delivery['marketing_enabled'] else 'Off · production sending unavailable'),
                     ('Smart Sending',str(sending['smart_hours'])+' hours'),
                     ('Website tracking','On' if config()['enabled'] else 'Off'),
-                    ('Test allowlist','Configured' if sending['internal_recipients'] else 'Not configured'),
                     ('Sender',delivery['sender'] or 'Not configured'),
                     ('Reply-To',delivery['reply_to'] or 'Not configured'))])
             except StoreUnavailable as exc:st.error(str(exc))
@@ -160,14 +159,12 @@ def compliance_page(store,user):
             v['identity_confirmed']=b.checkbox('Nathan confirmed this contact identity',v['identity_confirmed'])
             saved=st.form_submit_button('Save compliance details')
         if saved:store.save_setting(user,'compliance',v,row['version']);st.success('Business details saved.');st.rerun()
-    with st.expander('Internal tests + frequency',expanded=True):
+    with st.expander('Sending frequency',expanded=True):
         with st.form('internal_settings'):
-            recipients=st.text_area('Internal-test allowlist (one email per line)','\n'.join(s['internal_recipients']),height=90)
             s['smart_hours']=int(st.number_input('Default Smart Sending hours',1,168,s['smart_hours']))
-            s['internal_recipients']=[e.strip().casefold() for e in recipients.splitlines() if e.strip()]
-            saved=st.form_submit_button('Save internal-test settings')
-        if saved:store.save_setting(user,'sending',s,send['version']);st.success('Test allowlist and frequency saved.');st.rerun()
-        st.caption('Allowlisting does not send anything. Campaign tests still require an administrator to type exactly one mailbox and explicitly confirm the saved revision. Marketing kill-switch values are not editable here.')
+            saved=st.form_submit_button('Save sending frequency')
+        if saved:store.save_setting(user,'sending',s,send['version']);st.success('Sending frequency saved.');st.rerun()
+        st.caption('Campaign tests accept one manually entered email address from an administrator. Production marketing controls are not editable here.')
     with st.expander('Manual suppression for support unsubscribe requests'):
         with st.form('manual_suppression'):
             address=st.text_input('Mailbox to suppress')

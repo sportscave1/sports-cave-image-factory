@@ -30,6 +30,7 @@ class ShopifyFixture:
     def __call__(self,doc,v):
         self.calls.append((doc,v.copy()))
         if self.fail:raise self.fail
+        if doc==q.CAMPAIGN_SUBSCRIBERS:return {'customers':page(self.customers,v.get('after'),250)}
         if doc==q.CUSTOMERS:
             rows=self.customers;query=v.get('query') or ''
             if 'id:' in query:rows=[c for c in rows if c['id'].rsplit('/',1)[-1]==query.split('id:')[1].split()[0]]

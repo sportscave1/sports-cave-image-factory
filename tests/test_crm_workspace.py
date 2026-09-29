@@ -190,12 +190,13 @@ class WorkspacePersistenceTests(unittest.TestCase):
     def send(self,operation=None,recipient='internal@example.test'):
         return self.store.test_campaign(ADMIN,self.campaign['id'],self.campaign['version'],recipient=recipient,confirmed=True,operation_id=operation or str(uuid.uuid4()),env=ENV,session=self.wire)
 
-    def test_allowlist_fail_closed_and_no_lists(self):
-        for value in ('customer@example.test',['internal@example.test'],{'segment':'1'},'internal@example.test,second@example.test'):
+    def test_arbitrary_recipient_without_allowlist_but_no_lists(self):
+        for value in ('invalid',['internal@example.test'],{'segment':'1'},'internal@example.test,second@example.test'):
             with self.assertRaises((ValueError,RuntimeError)):self.send(recipient=value)
         self.wire.post.assert_not_called()
         row=self.store.setting('sending');self.store.save_setting(ADMIN,'sending',{'internal_recipients':[],'smart_hours':16},row['version'])
-        with self.assertRaises(ValueError):self.send()
+        self.send(recipient='customer@example.test')
+        self.wire.post.assert_called_once()
 
     def test_durable_idempotency_and_test_not_frequency_history(self):
         operation=str(uuid.uuid4());first=self.send(operation);second=self.send(operation)
@@ -233,6 +234,7 @@ class WorkspacePersistenceTests(unittest.TestCase):
         writer.unsubscribe_only.side_effect=None;writer.unsubscribe_only.return_value=False
         self.assertEqual(reconcile_opt_out(self.store,hashed,writer,approved=True),'PENDING')
         writer.unsubscribe_only.return_value=True
+        self.store.q("UPDATE crm_suppressions SET shopify_sync_checked_at=NULL WHERE recipient_hash=%s",(hashed,))
         self.assertEqual(reconcile_opt_out(self.store,hashed,writer,approved=True),'SYNCED')
         self.store.suppress(hashed,None,'manual_unsubscribe','fixture')
         self.assertEqual(self.store.q('SELECT shopify_sync_state FROM crm_suppressions WHERE recipient_hash=%s',(hashed,),True)['shopify_sync_state'],'PENDING')

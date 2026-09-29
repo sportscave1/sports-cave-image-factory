@@ -72,14 +72,22 @@ async def unsubscribe_page(token:str=''):
     # GET is a confirmation only: link scanners must not unsubscribe recipients.
     return HTMLResponse('<!doctype html><title>Sports Cave · Unsubscribe</title><main style="font:16px Arial;max-width:480px;margin:12vh auto;padding:24px"><h2>Sports Cave</h2><p>Stop Sports Cave marketing emails?</p><form method="post" action="?token='+escape(token,quote=True)+'"><button type="submit">Unsubscribe</button></form></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
 
+@router.api_route('/crm/unsubscribe/test',methods=['GET','POST'])
+async def unsubscribe_test():
+    return unsubscribe_confirmation('This is a test unsubscribe link. No subscription has been changed.')
+
+def unsubscribe_confirmation(message):
+    return HTMLResponse('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sports Cave · Unsubscribe</title>'
+        '<main style="font:16px Arial;max-width:480px;margin:12vh auto;padding:28px;border-top:3px solid #c9a33f;color:#171717">'
+        '<h2>Sports Cave</h2><p>'+escape(message)+'</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+
 @router.post('/crm/unsubscribe')
 async def unsubscribe_post(token:str=''):
     from crm_resend import Config
     from crm_store import Store
-    from crm_shopify import Shopify
     from crm_webhooks import unsubscribe
     try:
-        await run_in_threadpool(unsubscribe,Store(),Config(),token,Shopify())
-        return HTMLResponse('<title>Sports Cave</title><p>You are unsubscribed from Sports Cave marketing emails.</p>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+        await run_in_threadpool(unsubscribe,Store(),Config(),token)
+        return unsubscribe_confirmation("You've been unsubscribed. You won't receive marketing emails from Sports Cave.")
     except ValueError:return Response('Invalid unsubscribe link.',status_code=400)
     except Exception:return Response('Please try again shortly.',status_code=503)

@@ -87,7 +87,8 @@ class Engine:
                 message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True)
                 message['unsubscribe_url']=unsubscribe
             else:
-                message=render(content,context,self.config.unsubscribe_url(row['id']),self.config.logo_url,row['idempotency_key'])
+                optout=self.config.test_unsubscribe_url() if row['test_send'] else self.config.unsubscribe_url(row['id'])
+                message=render(content,context,optout,self.config.logo_url,row['idempotency_key'])
             digest=hashlib.sha256(json.dumps({'to':address,**message},sort_keys=True).encode()).hexdigest()
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):
@@ -229,6 +230,8 @@ class Engine:
                 if not self.store.lease(owner) or not self.send_one():break
             self.store.q("UPDATE crm_campaigns c SET status='SENT',updated_at=now() WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))")
             # Provider suppression writes are separate from send permissions; local stop-state already applies.
+            from crm_consent_sync import reconcile_pending
+            reconcile_pending(self.store,self.shop)
             if self.config.api_key:
                 pending=self.store.q("SELECT p.*,s.provider_email_id FROM crm_suppressions p LEFT JOIN LATERAL (SELECT provider_email_id FROM crm_marketing_sends WHERE recipient_hash=p.recipient_hash AND provider_email_id IS NOT NULL ORDER BY created_at DESC LIMIT 1) s ON true WHERE NOT p.provider_synced AND (p.email_for_provider IS NOT NULL OR s.provider_email_id IS NOT NULL) ORDER BY p.updated_at LIMIT 5")
                 for row in pending:

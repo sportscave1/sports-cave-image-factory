@@ -1,9 +1,9 @@
 """Market audiences on the existing Shopify authority; no persistent customer copy."""
 import time
-from crm_audience import evaluate_profiles
+from crm_logic import eligibility
 from crm_logic import recipient_hash, now
 
-MARKET_LABELS={'AU':'AU','US':'USA','UK':'UK','Global':'GLOBAL'}
+MARKET_LABELS={'AU':'AUSTRALIA','US':'USA','UK':'UK','Global':'ALL SUBSCRIBERS'}
 COUNTRIES={'AU':'AU','US':'US','UK':'GB'}
 
 def country(customer):
@@ -25,7 +25,7 @@ def calculate(shop,store,hours=16,*,clock=time.monotonic):
     start=clock();cursor=None;profiles={};seen=set()
     while True:
         if clock()-start>30:raise ValueError('Subscriber counts timed out. Review again before sending.')
-        page=shop.customers(after=cursor,fresh=True)
+        page=shop.campaign_subscribers(after=cursor)
         if page.get('complete') is False:raise ValueError('Subscriber records are incomplete.')
         profiles.update({c['id']:c for c in page['nodes']})
         if len(profiles)>20000:raise ValueError('Subscriber calculation limit reached; review required.')
@@ -34,17 +34,28 @@ def calculate(shop,store,hours=16,*,clock=time.monotonic):
         if not cursor or cursor in seen:raise ValueError('Subscriber pagination did not advance.')
         seen.add(cursor)
     suppressed,ids=store.active_suppression_hashes();recent=store.recent_marketing_hashes(hours)
-    states={}
-    for c in profiles.values():states.setdefault(recipient_hash(c.get('email')),set()).add((c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED'))
-    conflicts={h for h,s in states.items() if len(s)>1}
-    results={}
-    for market in MARKET_LABELS:
-        rows=[c for c in profiles.values() if market=='Global' or country(c)==COUNTRIES[market]]
-        safe=[c for c in rows if recipient_hash(c.get('email')) not in conflicts]
-        result=evaluate_profiles(safe,set(),set(),suppressed,ids,recent,recipients=True)
-        conflict_count=len(rows)-len(safe)
-        if conflict_count:result['excluded']['conflicting_consent']=conflict_count
-        result.update(members=len(rows),complete=True,checked_at=now().isoformat())
-        result['profiles']={r['id']:profiles[r['id']] for r in result['recipients']}
-        results[market]=result
+    # Normalize/group once. Evaluate each profile once using the shared policy.
+    # Segment-local dedup preserves existing country semantics when two profiles
+    # share an address across countries; worldwide dedup still counts it once.
+    groups={}
+    for c in profiles.values():
+        h=recipient_hash(c.get('email'))
+        groups.setdefault(h,[]).append((c,country(c)))
+    results={m:{'members':0,'eligible':0,'excluded':{},'diagnostics':{'conflicting_profiles':0},
+        'recipients':[],'profiles':{},'complete':True,'checked_at':now().isoformat()} for m in MARKET_LABELS}
+    reverse={code:m for m,code in COUNTRIES.items()}
+    for h,rows in groups.items():
+        conflict=len({(c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED') for c,_ in rows})>1
+        accepted=set()
+        for c,code in rows:
+            ok,reason=eligibility(c,h in suppressed or c['id'] in ids)
+            if conflict:reason='conflicting_consent'
+            elif ok and h in recent:reason='smart_sending'
+            for market in (['Global',reverse[code]] if code in reverse else ['Global']):
+                result=results[market];result['members']+=1
+                why=reason or ('duplicate' if market in accepted else '')
+                if why:result['excluded'][why]=result['excluded'].get(why,0)+1
+                else:
+                    accepted.add(market);result['eligible']+=1
+                    result['recipients'].append({'id':c['id'],'hash':h});result['profiles'][c['id']]=c
     return results

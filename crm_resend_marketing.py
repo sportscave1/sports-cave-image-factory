@@ -16,12 +16,12 @@ import os_accounts
 LOG = logging.getLogger(__name__)
 SUBJECT = 'Sports Cave OS — Resend Test'
 TEXT = ('Sports Cave OS Resend delivery is connected successfully.\n\n'
-        'This is a test email only. Live CRM marketing remains disabled.')
+        'This is a test email only. No production campaign is sent by this test.')
 HTML = ('<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222;'
         'background:#faf8f2;padding:24px"><main style="max-width:560px;margin:auto;'
         'background:white;padding:28px;border-top:4px solid #d5a642">'
         '<h2>Sports Cave</h2><p>Sports Cave OS Resend delivery is connected successfully.</p>'
-        '<p>This is a test email only. Live CRM marketing remains disabled.</p>'
+        '<p>This is a test email only. No production campaign is sent by this test.</p>'
         '<small>Sports Cave OS · Delivery test</small></main></body></html>')
 ERRORS = {
     'configuration_missing': 'Resend configuration is missing or invalid.',
@@ -125,9 +125,6 @@ def _send_admin_email(*, user, recipient, confirmed, operation_id, message, env=
     cfg = _config(env)
     if not get_resend_marketing_config_status(cfg)['configured']:
         raise DeliveryError('configuration_missing')
-    # Keep the fixed Stage 1 test statement truthful. Production is a separate path.
-    if get_resend_marketing_config_status(cfg)['marketing_enabled']:
-        raise DeliveryError('stage_one_only')
     sender = formataddr((cfg['RESEND_FROM_NAME'], cfg['RESEND_FROM_EMAIL']))
     audit_extra = {'campaign':campaign} if campaign else {}
     if not _audit(user, operation, recipient, sender, 'requested', **audit_extra):

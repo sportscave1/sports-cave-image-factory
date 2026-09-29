@@ -60,10 +60,8 @@ def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     require(user,'crm_campaigns_manage')
     import os_accounts
     if not os_accounts.is_admin(user):raise PermissionError('Only an administrator can send a campaign test.')
-    recipient=recipient.strip()
+    recipient=recipient.strip() if isinstance(recipient,str) else recipient
     if not single_email(recipient):raise ValueError('Enter one valid email address.')
-    if recipient.casefold() not in {v.casefold() for v in store.setting('sending')['value']['internal_recipients']}:
-        raise ValueError('Recipient is not in the configured internal-test allowlist.')
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
     checks=preflight(doc,env,store.render_settings(env))
     failed=[k for k,v in checks['test'].items() if not v]

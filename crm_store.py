@@ -88,6 +88,24 @@ class Store:
          VALUES(%s,%s,%s,%s,%s) ON CONFLICT(recipient_hash) DO UPDATE SET reason=excluded.reason,
          source=excluded.source,email_for_provider=COALESCE(excluded.email_for_provider,crm_suppressions.email_for_provider),provider_synced=false,shopify_sync_state='PENDING',active=true,updated_at=now()''',(hashed,customer_id,reason,source,address))
         if customer_id:self.q("UPDATE crm_automation_enrollments SET status='STOPPED',stop_reason='suppressed',updated_at=now() WHERE shopify_customer_id=%s AND status='ACTIVE'",(customer_id,))
+    def record_unsubscribe(self,row):
+        """Commit local stop-state, audit and cache revision before any network work."""
+        with self.db() as conn:
+            conn.execute('''INSERT INTO crm_suppressions(recipient_hash,shopify_customer_id,reason,source)
+                VALUES(%s,%s,'unsubscribe','marketing_footer') ON CONFLICT(recipient_hash) DO UPDATE SET
+                shopify_customer_id=COALESCE(crm_suppressions.shopify_customer_id,excluded.shopify_customer_id),
+                reason='unsubscribe',source='marketing_footer',active=true,
+                shopify_sync_state=CASE WHEN crm_suppressions.active THEN crm_suppressions.shopify_sync_state ELSE 'PENDING' END,
+                updated_at=CASE WHEN crm_suppressions.active THEN crm_suppressions.updated_at ELSE now() END''',
+                (row['recipient_hash'],row['shopify_customer_id']))
+            conn.execute("UPDATE crm_automation_enrollments SET status='STOPPED',stop_reason='suppressed',updated_at=now() WHERE shopify_customer_id=%s AND status='ACTIVE'",(row['shopify_customer_id'],))
+            event=conn.execute('''INSERT INTO crm_marketing_events(event_id,provider_email_id,event_type,recipient_hash,occurred_at)
+                VALUES(%s,%s,'email.unsubscribed',%s,now()) ON CONFLICT DO NOTHING RETURNING event_id''',
+                ('unsubscribe:'+str(row['id']),row.get('provider_email_id'),row['recipient_hash'])).fetchone()
+            if event:
+                conn.execute('''INSERT INTO crm_runtime_state(key,value) VALUES('cache_version',%s::jsonb)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()''',(json.dumps({'version':str(uuid.uuid4())}),))
+
     def editions(self,customer_id,address=''):
         return self.q('''SELECT edition_number,edition_total,product_title,variant_title,certificate_file_url,shopify_order_name
          FROM edition_orders WHERE shopify_customer_id IN (%s,%s) OR (customer_email<>'' AND lower(customer_email)=lower(%s))

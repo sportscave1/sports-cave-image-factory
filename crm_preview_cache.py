@@ -17,6 +17,9 @@ def preview_key(doc, cfg, images_off=False):
     # Validate even on a hit; the cache cannot make an invalid document valid.
     validate_document(doc)
     content = {field: doc.get(field) for field in RENDER_FIELDS}
+    # HTML and catalogue snapshot markup carries its own prices/content; segment
+    # selection alone cannot change those bytes. Legacy blocks remain market-aware.
+    if doc.get('content_mode')=='HTML':content.pop('market',None)
     return hashlib.sha256(json.dumps([content, cfg, images_off], sort_keys=True).encode()).hexdigest()
 
 

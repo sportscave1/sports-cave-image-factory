@@ -14,7 +14,7 @@ from crm_logic import now
 
 DEFAULTS={'branding':{'logo':'','accent':'#b49450','font':'Arial','button_style':'Solid black','social_links':[]},
           'compliance':{'business':'Sports Cave','postal':'','postal_verified':False,'website':'https://www.sportscaveshop.com','privacy':'https://www.sportscaveshop.com/policies/privacy-policy','contact':'','identity_confirmed':False},
-          'sending':{'internal_recipients':[],'smart_hours':16},
+          'sending':{'smart_hours':16},
           'prompts':{'default':'Premium collector-focused copy. Concise and truthful.'}}
 
 
@@ -25,13 +25,12 @@ def admin(user):
 
 def validate_setting(key,value):
     if key not in DEFAULTS or not isinstance(value,dict):raise ValueError('Unknown workspace setting.')
+    if key=='sending':
+        value={k:v for k,v in value.items() if k!='internal_recipients'} # Ignore retired settings from older clients.
     if key=='prompts':
         if set(value)-({'default'}|set(PURPOSES)) or not all(isinstance(v,str) and len(v)<=6000 for v in value.values()):raise ValueError('Invalid prompt guidance.')
     elif set(value)!=set(DEFAULTS[key]):raise ValueError('Only non-secret workspace settings can be saved.')
     elif key=='sending':
-        recipients=value['internal_recipients']
-        if not isinstance(recipients,list) or len(recipients)>20 or any(not single_email(v) for v in recipients):raise ValueError('Enter at most 20 valid internal mailbox addresses.')
-        if len(set(v.casefold() for v in recipients))!=len(recipients):raise ValueError('Remove duplicate internal recipients.')
         if type(value['smart_hours']) is not int or not 1<=value['smart_hours']<=168:raise ValueError('Smart Sending must be 1–168 hours.')
     elif key=='branding':
         if value['logo'] and not asset_url(value['logo']):raise ValueError('Use a durable public JPEG or PNG logo URL.')
@@ -53,11 +52,13 @@ class WorkspaceRecords(BrandTemplates):
         row=self.q('SELECT * FROM crm_workspace_settings WHERE key=%s',(key,),True)
         if row:
             row['value']={**deepcopy(DEFAULTS[key]),**row['value']}
+            if key=='sending':row['value'].pop('internal_recipients',None)
             return row
         return {'key':key,'value':deepcopy(DEFAULTS[key]),'version':0}
 
     def save_setting(self,user,key,value,version):
         admin(user);validate_setting(key,value)
+        if key=='sending':value={k:v for k,v in value.items() if k!='internal_recipients'}
         actor=str(user.get('id',''))
         with self.db() as conn:
             if version==0:
@@ -79,9 +80,10 @@ class WorkspaceRecords(BrandTemplates):
     def templates(self,archived=False):
         return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
 
-    def html_library(self):
+    def html_library(self,metadata=False):
         # A template used by an automation is managed by that workflow, not here.
-        return self.q("""SELECT t.* FROM crm_templates t WHERE t.archived_at IS NULL
+        fields="t.id,t.name,t.version,t.kind,t.updated_at,jsonb_build_object('format',t.content->'format') AS content" if metadata else 't.*'
+        return self.q("""SELECT """+fields+""" FROM crm_templates t WHERE t.archived_at IS NULL
           AND t.kind='Campaign' AND t.content->>'format'='campaign_blocks_v1'
           AND NOT EXISTS (SELECT 1 FROM crm_automations a,
             jsonb_array_elements(a.steps) step WHERE step->>'template'=t.template_key)

@@ -83,7 +83,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(args['json']['to'], ['nathan@example.test'])
         self.assertEqual(args['json']['subject'], delivery.SUBJECT)
         self.assertEqual(args['json']['text'], delivery.TEXT)
-        self.assertIn('Live CRM marketing remains disabled.', args['json']['html'])
+        self.assertIn('No production campaign is sent by this test.', args['json']['html'])
         self.assertTrue(args['headers']['Idempotency-Key'].startswith('crm-admin-test/'))
         self.assertFalse(args['allow_redirects'])
         self.assertEqual(self.audit.call_args_list[0].args[4], 'requested')

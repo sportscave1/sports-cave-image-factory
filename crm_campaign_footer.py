@@ -65,11 +65,13 @@ def render_footer(source, cfg, *, images_off=False, unsubscribe_url=None):
         if not public_https(unsubscribe_url):raise ValueError('Verified HTTPS unsubscribe URL required.')
     # Resolve only placeholders explicitly present in the author's template.
     # No identity, address, disclosure, link or paragraph is ever added for them.
+    from crm_resend import Config
+    test_url=Config().test_unsubscribe_url() if unsubscribe_url is None else ''
     values={
         '{{BUSINESS_NAME}}':cfg.get('business',''), '{{BUSINESS_ADDRESS}}':cfg.get('postal',''),
         '{{CONTACT_EMAIL}}':cfg.get('contact',''), '{{WEBSITE_URL}}':cfg.get('website','') if public_https(cfg.get('website','')) else '',
         '{{CONTACT_URL}}':'mailto:'+cfg['contact'] if single_email(cfg.get('contact','')) else '',
-        '{{UNSUBSCRIBE_URL}}':unsubscribe_url or '', '{{MARKETING_DISCLOSURE}}':DISCLOSURE,
+        '{{UNSUBSCRIBE_URL}}':unsubscribe_url or test_url, '{{MARKETING_DISCLOSURE}}':DISCLOSURE,
         '{{PRIVACY_URL}}':cfg.get('privacy','') if public_https(cfg.get('privacy','')) else '',
     }
     # Inactive test unsubscribe and missing optional links become text in place,

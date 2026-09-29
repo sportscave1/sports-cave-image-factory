@@ -55,9 +55,9 @@ class HttpTests(unittest.TestCase):
         self.store.receipt.return_value={'recipient_hash':recipient_hash('old@example.test'),'shopify_customer_id':gid(1),'test_recipient':None}
         with patch('crm_resend.Config',return_value=cfg),patch('crm_shopify.Shopify') as shop:
             self.assertEqual(self.client.get('/crm/unsubscribe',params={'token':token}).status_code,200)
-            self.store.suppress.assert_not_called()
+            self.store.record_unsubscribe.assert_not_called()
             self.assertEqual(self.client.post('/crm/unsubscribe',params={'token':token}).status_code,200)
-            self.store.suppress.assert_called_once();shop.return_value.customer.assert_not_called()
+            self.store.record_unsubscribe.assert_called_once();shop.return_value.customer.assert_not_called()
 
 
 class DeliveryTests(unittest.TestCase):
