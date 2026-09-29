@@ -1,4 +1,5 @@
 """Local SQL + mocked transports only. Never sends customer or internal email."""
+from tests.crm_fixtures import TEST_UNSUBSCRIBE_URL
 from copy import deepcopy
 import os
 import uuid
@@ -25,6 +26,9 @@ CFG={**settings(ENV),'postal':'Configured fixture address','postal_verified':Tru
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class SendFlowTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         self.store=CampaignStore(connect);self.wire=ShopifyFixture(8);self.shop=Shopify(self.wire)
         self.patch=patch.object(self.store,'render_settings',return_value=deepcopy(CFG));self.patch.start();self.addCleanup(self.patch.stop)
         original=self.store.setting
@@ -46,14 +50,14 @@ class SendFlowTests(unittest.TestCase):
         self.provider.post.assert_called_once();self.assertEqual(first['message_id'],second['message_id'])
         payload=self.provider.post.call_args.kwargs
         self.assertEqual(payload['timeout'],15);self.assertEqual(payload['json']['to'],['internal@example.test'])
-        self.assertEqual(payload['json']['html'],render_campaign(e['document'],CFG)['html'])
+        self.assertEqual(payload['json']['html'],render_campaign(e['document'],CFG,production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
         self.assertEqual(self.count('crm_marketing_sends'),before)
     def test_invalid_multiple_and_nonadmin_test_never_calls_provider(self):
         for address,user in [('bad',ADMIN),('first@example.test,second@example.test',ADMIN),('internal@example.test',{**ADMIN,'role':'worker'})]:
             with self.subTest(address=address,user=user['role']),self.assertRaises((ValueError,PermissionError)):
                 send_test(self.store,user,self.editor(),address,str(uuid.uuid4()),env=ENV,session=self.provider)
         self.provider.post.assert_not_called()
-    def test_arbitrary_single_recipient_with_marketing_off_and_on_no_allowlist(self):
+    def test_subscribed_single_recipient_with_marketing_off_and_on_no_allowlist(self):
         for flag in ('false','true'):
             user={**ADMIN,'id':'test-admin-'+uuid.uuid4().hex}
             env={**ENV,'CRM_MARKETING_ENABLED':flag}

@@ -103,7 +103,7 @@ class CampaignStore(WorkspaceRecords):
             metadata={'name':row['name'],'version':row['version']},actor=str(user.get('id','')))
         return {'deleted':True,'audit_saved':bool(receipt)}
 
-    def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None):
+    def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None, shop=None):
         require(user,'crm_campaigns_manage')
         import os_accounts
         from crm_resend_marketing import _send_admin_email, single_email, DeliveryError
@@ -115,24 +115,22 @@ class CampaignStore(WorkspaceRecords):
         if row['version']!=version or row['archived_at']: raise ValueError('Reload the current editable campaign before testing.')
         cfg=self.render_settings(env)
         if not preflight(row['document'],env,cfg)['test_ready']: raise ValueError('Resolve the test preflight items first.')
-        rendered=render_campaign(row['document'],cfg);digest=fingerprint(row['document'],cfg)
+        digest=fingerprint(row['document'],cfg)
         from crm_resend_marketing import get_resend_marketing_config_status
         delivery=get_resend_marketing_config_status(env)
         if not delivery['configured']:raise DeliveryError('configuration_missing')
         # A repeated operation must use its recorded snapshot, never resolve fresh
         # facts and silently issue a second send after prices/counters change.
         catalogue_sections=[s for s in row['document'].get('middle_sections',[]) if s['type']=='catalogue' and s['visible']]
-        prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True) if catalogue_sections else None
-        if catalogue_sections and not prior:
-            from crm_catalogue import Catalogue, refresh_catalogues
-            from crm_shopify import Shopify
-            try:current=refresh_catalogues(row['document'],Catalogue(Shopify()))
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning('crm_catalogue_test_verification_failed type=%s',type(exc).__name__)
-                raise ValueError('Current catalogue facts cannot be verified. Refresh the catalogue and retry before testing.') from None
-            if current!=row['document']:
-                raise ValueError('Catalogue facts changed. Refresh catalogue facts, review the preview and save before testing.')
+        prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True)
+        if prior:
+            return self._test_receipt(prior,identity,version,digest,recipient)
+        from crm_test_recipient import test_recipient_url
+        unsubscribe_url=test_recipient_url(self,recipient,shop=shop)
+        rendered=render_campaign(row['document'],cfg,unsubscribe_url=unsubscribe_url,production=True)
+        # Production-authentic content, still a manual TEST transport and receipt.
+        rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
+        rendered['unsubscribe_url']=unsubscribe_url
         with self.db() as conn:
             # Serialize per-admin attempts across sessions, preserving receipt replay.
             actor=str(user.get('id',''))
@@ -142,16 +140,17 @@ class CampaignStore(WorkspaceRecords):
             attempt=conn.execute("INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
             if not attempt:
                 prior=conn.execute('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,)).fetchone()
-                if str(prior['campaign_id'])!=str(identity) or prior['campaign_version']!=version or prior['render_hash']!=digest or prior['recipient']!=recipient.casefold():raise ValueError('Test operation already belongs to another saved request.')
-                if prior['status']=='ACCEPTED':return {'message':'Test email accepted by Resend','message_id':prior['provider_id'],'accepted_at':str(prior['accepted_at']),'audit_saved':True}
-                raise ValueError('This test was already attempted. Check its receipt; uncertain tests are never retried automatically.')
+                return self._test_receipt(prior,identity,version,digest,recipient)
             recent=conn.execute("SELECT count(*) AS n FROM crm_internal_tests WHERE actor=%s AND created_at>now()-interval '1 hour'",(actor,)).fetchone()
             if recent['n']>60:raise ValueError('Test email limit reached (60 per hour). Please try again later.')
             if catalogue_sections:
-                # Commit exact outbound bytes/facts BEFORE external delivery. Retained
-                # even if the provider or receipt update later becomes uncertain.
+                # Retain content/facts without putting a customer unsubscribe token
+                # into campaign history. The provider alone receives the live URL.
+                from html import escape
+                snapshot={k:v.replace(escape(unsubscribe_url,quote=True),'{{UNSUBSCRIBE_URL}}').replace(unsubscribe_url,'{{UNSUBSCRIBE_URL}}')
+                          for k,v in rendered.items() if k!='unsubscribe_url'}
                 self._history(conn,{**row,'outbound_snapshot':{'operation_id':operation,
-                    'rendered':rendered,'sections':deepcopy(row['document']['middle_sections']),
+                    'rendered':snapshot,'production_unsubscribe_url':True,'sections':deepcopy(row['document']['middle_sections']),
                     'render_hash':digest}},'campaign_test_snapshot',str(user.get('id','')), {})
         try:
             result=_send_admin_email(user=user,recipient=recipient,confirmed=confirmed,operation_id=operation,
@@ -174,6 +173,16 @@ class CampaignStore(WorkspaceRecords):
         except Exception:
             result['audit_saved']=False
         return result
+
+    @staticmethod
+    def _test_receipt(prior,identity,version,digest,recipient):
+        if (str(prior['campaign_id'])!=str(identity) or prior['campaign_version']!=version
+                or prior['render_hash']!=digest or prior['recipient']!=recipient.casefold()):
+            raise ValueError('Test operation already belongs to another saved request.')
+        if prior['status']=='ACCEPTED':
+            return {'message':'Test email accepted by Resend','message_id':prior['provider_id'],
+                    'accepted_at':str(prior['accepted_at']),'audit_saved':True}
+        raise ValueError('This test was already attempted. Check its receipt; uncertain tests are never retried automatically.')
 
     def restore(self,user,identity,version):
         require(user,'crm_campaigns_manage')

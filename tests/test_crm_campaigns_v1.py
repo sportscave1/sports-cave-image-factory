@@ -97,6 +97,9 @@ class PolicyTests(unittest.TestCase):
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires isolated local PostgreSQL fixture.')
 class PersistenceTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         self.store=CampaignStore(connect)
         self.row=self.store.save(ADMIN,'V1 '+str(uuid.uuid4())[:8],ready_document(),env=ENV)
 

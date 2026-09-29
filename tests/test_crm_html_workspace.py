@@ -105,6 +105,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         at=self.app()
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         identity=at.session_state['campaign_editor']['id']
+        at.run(timeout=20)
         next(b for b in at.button if b.key=='recent_delete_'+str(identity)).click().run(timeout=20)
         self.assertTrue(any('audit history are retained' in w.value for w in at.warning))
         self.assertTrue(any('Untitled campaign' in m.value for m in at.markdown))
@@ -113,7 +114,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.store.draft(identity));self.assertFalse(at.exception)
 
 
-    def test_compose_is_local_until_explicit_save_and_initial_reads_are_bounded(self):
+    def test_empty_compose_creates_no_draft_and_initial_reads_are_bounded(self):
         from crm_campaign_store import CampaignStore
         before=self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n']
         with patch.object(CampaignStore,'history',side_effect=AssertionError('History must be lazy')),patch.object(CampaignStore,'templates',side_effect=AssertionError('Templates must be lazy')),patch('crm_campaign_page.selection_page',side_effect=AssertionError('Eligibility must be explicit')):
@@ -145,12 +146,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         saved=self.draft();at=self.app()
         next(t for t in at.text_input if t.label=='Subject').set_value('Keep this local edit').run()
         next(b for b in at.button if b.key=='recent_open_'+str(saved['id'])).click().run()
-        self.assertIsNone(at.session_state['campaign_editor']['id'])
-        self.assertTrue(any('Save your changes first' in w.value for w in at.warning))
-        next(b for b in at.button if b.label=='Keep editing').click().run()
-        self.assertEqual(at.session_state['campaign_editor']['document']['content']['subject'],'Keep this local edit')
-        at.session_state['campaign_pending_open']=str(saved['id']);at.run()
-        next(b for b in at.button if b.label=='Discard unsaved changes and continue').click().run()
+        self.assertTrue(self.store.q("SELECT id FROM crm_campaign_drafts WHERE document->'content'->>'subject'=%s",('Keep this local edit',)))
         self.assertFalse(at.exception)
         self.assertEqual(str(at.session_state['campaign_editor']['id']),str(saved['id']))
         self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],HTML)

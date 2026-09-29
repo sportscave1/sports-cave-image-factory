@@ -1,4 +1,5 @@
 """Sectioned campaign authoring; isolated SQL and mocked delivery only."""
+from tests.crm_fixtures import TEST_UNSUBSCRIBE_URL
 from copy import deepcopy
 import os
 import unittest
@@ -91,6 +92,9 @@ class SectionTests(unittest.TestCase):
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires disposable SQL fixture')
 class SectionPersistenceTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         from crm_campaign_store import CampaignStore
         from tests.crm_db_fixture import connect
         self.store = CampaignStore(connect)
@@ -110,13 +114,13 @@ class SectionPersistenceTests(unittest.TestCase):
         saved = self.store.save_design(ADMIN, 'Sections template', changed)
         self.assertEqual(self.store.template_document(saved)['html_sections'], changed['html_sections'])
 
-    def test_preview_equals_mocked_internal_test_and_repeat_is_not_resent(self):
+    def test_production_render_equals_mocked_test_and_repeat_is_not_resent(self):
         doc = sectioned(); row = self.store.save(ADMIN, 'Section render parity', doc, env=ENV)
         sending = self.store.setting('sending')
         self.store.save_setting(ADMIN, 'sending', {'internal_recipients':['manual@example.test'], 'smart_hours':16}, sending['version'])
         wire = Mock(); wire.post.return_value = Mock(status_code=200, json=lambda:{'id':str(uuid.uuid4())})
         operation = str(uuid.uuid4())
-        expected = render_campaign(row['document'], self.store.render_settings(ENV))
+        expected = render_campaign(row['document'], self.store.render_settings(ENV),production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
         with patch('requests.sessions.Session.request', side_effect=AssertionError('External network forbidden')), patch('crm_resend_marketing._audit', return_value=True):
             for _ in range(2):
                 self.store.test_campaign(ADMIN, row['id'], row['version'], recipient='manual@example.test', confirmed=True, operation_id=operation, env=ENV, session=wire)

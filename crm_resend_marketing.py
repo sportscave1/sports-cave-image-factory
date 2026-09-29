@@ -132,6 +132,8 @@ def _send_admin_email(*, user, recipient, confirmed, operation_id, message, env=
     payload = {'from': sender, 'reply_to': cfg['RESEND_REPLY_TO'], 'to': [recipient],
                'subject': message['subject'], 'html': message['html'], 'text': message['text'],
                'tags': [{'name': 'purpose', 'value': 'campaign_test' if campaign else 'admin_delivery_test'}]}
+    if campaign and message.get('unsubscribe_url'):
+        payload['headers']={'List-Unsubscribe':'<'+message['unsubscribe_url']+'>'}
     category = 'resend_unavailable'
     http_status = 0
     message_id = ''

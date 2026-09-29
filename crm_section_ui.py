@@ -5,17 +5,21 @@ import logging
 import uuid
 import streamlit as st
 import streamlit.components.v1 as components
+from crm_campaign_recovery import autosaving, flush_current
+from crm_component_json import render_component
 from crm_middle_sections import middle_sections, apply_event, commit_middle
 from crm_catalogue import Catalogue, product_issues, price_label, refresh_catalogues
 
 
 def rerun_editor():
+    flush_current()
     from streamlit.errors import StreamlitAPIException
     try: st.rerun(scope='fragment')
     except StreamlitAPIException: st.rerun()
 
 
 @st.dialog('Select products', width='medium', on_dismiss='rerun')
+@autosaving
 def product_picker(doc, section_id, catalogue, key, editor_key=None):
     section = next(s for s in middle_sections(doc) if s['id']==section_id)
     basket = st.session_state.setdefault(key+'basket', {p['id']:deepcopy(p) for p in section['products']})
@@ -111,7 +115,7 @@ def middle_editor(doc, key, shop, store=None):
         from crm_store import StoreUnavailable
         try:templates=[{k:r[k] for k in ('id','name','version')} for r in library_rows(store)]
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
-    event = component(sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    event = render_component(component,sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')

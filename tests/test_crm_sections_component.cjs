@@ -9,7 +9,7 @@ const vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('components/crm_sections/composer.js','utf8');
 const handlers={},reorders=[];
 let target=null;
-const ctx=vm.createContext({drag:null,document:{addEventListener:(name,fn)=>handlers[name]=fn,
+const ctx=vm.createContext({drag:null,addEventListener:(name,fn)=>handlers[name]=fn,document:{addEventListener:(name,fn)=>handlers[name]=fn,
  querySelectorAll:()=>[],elementFromPoint:()=>target},reorder:(...args)=>reorders.push(args)});
 vm.runInContext(source.slice(source.indexOf("document.addEventListener('pointerdown'"),source.indexOf("addEventListener('message'")),ctx);
 const handle={dataset:{drag:'cat',section:''},setPointerCapture(){}};
@@ -27,7 +27,9 @@ down();target={closest:()=>({dataset:{parent:'another-cat',product:'p1'},classLi
 assert.equal(reorders.length,0);
 // A handle click without a drag must not reorder.
 down();up();assert.equal(reorders.length,0);
-console.log('9 section/product ordering and pointer boundary checks passed');
+down();handlers.blur();assert.equal(vm.runInContext('drag',ctx),null);
+down();handlers.pointercancel();assert.equal(vm.runInContext('drag',ctx),null);
+console.log('11 section/product ordering, pointer boundary and resume cleanup checks passed');
 const messages=[],listeners={};let sequence=0;
 const parent={postMessage:msg=>messages.push(msg.value)};
 const bridge=vm.createContext({parent,crypto:{randomUUID:()=>String(++sequence)},
@@ -60,7 +62,7 @@ console.log('Rapid catalogue settings retain all changes');
 
 const timers=new Map(),ctaChanges=[];let timerId=0;
 const input={setAttribute(){}};
-const ctaContext=vm.createContext({document:{createElement:()=>input},s:section,content:{append(){}},
+const ctaContext=vm.createContext({parent:{dispatchEvent(){}},CustomEvent:class{},document:{createElement:()=>input},s:section,content:{append(){}},
  changeSettings:(s,patch)=>ctaChanges.push(patch),
  setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
 vm.runInContext(source.slice(source.indexOf('const cta='),source.indexOf('for(const warning')),ctaContext);

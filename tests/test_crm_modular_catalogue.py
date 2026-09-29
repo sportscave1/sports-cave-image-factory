@@ -182,7 +182,7 @@ class ModularTests(unittest.TestCase):
         with patch.object(Catalogue,'search',side_effect=AssertionError('Index must be lazy')),patch.object(Catalogue,'resolve',side_effect=AssertionError('Facts must be lazy')):
             at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertNotIn('middle_sections',at.session_state['campaign_editor']['document'])
+            self.assertEqual([s['type'] for s in at.session_state['campaign_editor']['document']['middle_sections']],['html'])
 
     def test_product_picker_selection_and_cancel_use_local_basket(self):
         from streamlit.testing.v1 import AppTest
@@ -213,6 +213,9 @@ if st.session_state.get('open'):product_picker(doc,doc['middle_sections'][-1]['i
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires disposable SQL fixture')
 class ModularPersistenceTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         from crm_campaign_store import CampaignStore
         from tests.crm_db_fixture import connect
         self.store=CampaignStore(connect)
@@ -234,7 +237,9 @@ class ModularPersistenceTests(unittest.TestCase):
         def sent(*a,**kw):
             history=self.store.q("SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s AND action='campaign_test_snapshot'",(row['id'],))
             snapshot=history[-1]['after_value']['outbound_snapshot']
-            self.assertEqual(snapshot['rendered']['html'],kw['json']['html'])
+            from tests.crm_fixtures import TEST_UNSUBSCRIBE_URL
+            self.assertEqual(snapshot['rendered']['html'],kw['json']['html'].replace(TEST_UNSUBSCRIBE_URL,'{{UNSUBSCRIBE_URL}}'))
+            self.assertNotIn(TEST_UNSUBSCRIBE_URL,str(snapshot))
             self.assertEqual(snapshot['sections'][-1]['products'][0]['url'],doc['middle_sections'][-1]['products'][0]['url'])
             from tests.test_crm_catalogue_presentation import Markup
             links=[a for a in Markup(kw['json']['html']).anchors if '/products/art-1' in a.get('href','')]
@@ -250,24 +255,14 @@ class ModularPersistenceTests(unittest.TestCase):
             # already accepted operation send again.
             facts.edition_reader.side_effect=lambda **kw:[{**edition(),'next_edition_number':42}]
             self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=operation,env=ENV,session=wire)
-        wire.post.assert_called_once();self.assertEqual(facts.shop.query.call_count,1)
+        wire.post.assert_called_once();self.assertEqual(facts.shop.query.call_count,0)
         history=self.store.q("SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s AND action='campaign_test_snapshot'",(row['id'],))
         self.assertEqual(history[-1]['after_value']['outbound_snapshot']['sections'][-1]['products'][0]['edition']['next'],37)
 
-    def test_changed_current_facts_block_test_until_review_no_writes_to_editions(self):
-        doc=catalogue_doc();row=self.store.save(ADMIN,'Changed facts',doc,env=ENV)
-        setting=self.store.setting('sending');self.store.save_setting(ADMIN,'sending',{'internal_recipients':['manual@example.test'],'smart_hours':16},setting['version'])
-        current=deepcopy(doc);current['middle_sections'][-1]['products'][0]['edition']['next']=42
-        with patch('crm_catalogue.refresh_catalogues',return_value=current),patch('crm_resend_marketing._send_admin_email') as send:
-            with self.assertRaisesRegex(ValueError,'facts changed'):
-                self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV)
-            send.assert_not_called()
+    def test_test_send_does_not_refresh_products_or_editions(self):
+        doc=catalogue_doc();row=self.store.save(ADMIN,'Saved facts',doc,env=ENV)
+        wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+        with patch('crm_catalogue.refresh_catalogues',side_effect=AssertionError('No product refresh')) as refresh,patch('crm_resend_marketing._audit',return_value=True):
+            self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV,session=wire)
+        refresh.assert_not_called();wire.post.assert_called_once()
         self.assertEqual(self.store.draft(row['id'])['document'],doc)
-
-    def test_fact_lookup_failure_blocks_send_without_sensitive_exception(self):
-        doc=catalogue_doc();row=self.store.save(ADMIN,'Unavailable facts',doc,env=ENV)
-        setting=self.store.setting('sending');self.store.save_setting(ADMIN,'sending',{'internal_recipients':['manual@example.test'],'smart_hours':16},setting['version'])
-        with patch('crm_catalogue.refresh_catalogues',side_effect=RuntimeError('private-token')),patch('crm_resend_marketing._send_admin_email') as send:
-            with self.assertRaisesRegex(ValueError,'cannot be verified') as failure:
-                self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV)
-            self.assertNotIn('private-token',str(failure.exception));send.assert_not_called()

@@ -42,7 +42,7 @@ def test_control(store,user,editor,key,available=True):
         })();</script>""",unsafe_allow_javascript=True)
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
-            recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Enter sends one test to the email address you entered.')
+            recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Send test uses the real Shopify unsubscribe link for this customer.')
             submit=cols[1].form_submit_button('→',help='Send this test email',disabled=bool(st.session_state.get(key+'test_busy')))
         if submit:
             if st.session_state.get(key+'test_busy'):return

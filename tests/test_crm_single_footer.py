@@ -1,4 +1,5 @@
 """One editable footer; local fixture and mocked delivery only."""
+from tests.crm_fixtures import TEST_UNSUBSCRIBE_URL
 from copy import deepcopy
 import os
 import unittest
@@ -131,17 +132,20 @@ class FooterTests(unittest.TestCase):
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires disposable SQL fixture')
 class FooterStorageTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         from crm_campaign_store import CampaignStore
         from tests.crm_db_fixture import connect
         self.store=CampaignStore(connect)
-    def test_internal_test_without_unsubscribe_matches_preview_and_never_resends(self):
+    def test_internal_test_uses_global_footer_production_render_and_never_resends(self):
         doc=sectioned();doc['html_sections']['footer']='<p>Only my footer</p>'
         row=self.store.save(ADMIN,'Author footer test',doc,env=ENV)
         sending=self.store.setting('sending')
         self.store.save_setting(ADMIN,'sending',{'internal_recipients':['manual@example.test'],'smart_hours':16},sending['version'])
         wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         operation=str(uuid.uuid4())
-        preview=render_campaign(row['document'],self.store.render_settings(ENV))
+        preview=render_campaign(row['document'],self.store.render_settings(ENV),production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
         with patch('requests.sessions.Session.request',side_effect=AssertionError('No external network')),patch('crm_resend_marketing._audit',return_value=True):
             for _ in range(2):
                 self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=operation,env=ENV,session=wire)

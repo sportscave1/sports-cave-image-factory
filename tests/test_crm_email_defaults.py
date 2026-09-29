@@ -1,4 +1,5 @@
 """Singleton defaults: real disposable SQL, synthetic content, no external writes."""
+from tests.crm_fixtures import TEST_UNSUBSCRIBE_URL
 from copy import deepcopy
 import json
 import os
@@ -17,6 +18,9 @@ from tests.test_crm_resend_marketing import ENV
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable SQL required')
 class EmailDefaultsTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         self.store=CampaignStore(connect)
         self.reset()
         self.cfg=settings(ENV)
@@ -109,7 +113,7 @@ class EmailDefaultsTests(unittest.TestCase):
             self.change('header','<p>Invalidates immediately</p>')
             self.assertEqual(self.store.default_sections(self.cfg)['header'],'<p>Invalidates immediately</p>')
 
-    def test_mocked_test_payload_uses_latest_defaults_and_safe_link(self):
+    def test_mocked_test_payload_uses_latest_defaults_and_native_link(self):
         row=self.store.save(ADMIN,'Default test snapshot',sectioned(),env=ENV)
         self.change('header','<p>Latest test header</p>')
         wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
@@ -117,8 +121,8 @@ class EmailDefaultsTests(unittest.TestCase):
         with patch('crm_resend_marketing._audit',return_value=True),patch('requests.sessions.Session.request',side_effect=AssertionError('No external network')):
             self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=env,session=wire)
         payload=wire.post.call_args.kwargs['json']
-        self.assertIn('Latest test header',payload['html']);self.assertIn('/crm/unsubscribe/test',payload['html'])
-        self.assertEqual(payload['html'],render_campaign(row['document'],self.store.render_settings(env))['html'])
+        self.assertIn('Latest test header',payload['html']);self.assertIn(TEST_UNSUBSCRIBE_URL,payload['html'])
+        self.assertEqual(payload['html'],render_campaign(row['document'],self.store.render_settings(env),production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
 
     def test_ui_has_only_global_edit_actions_and_preserves_body(self):
         from streamlit.testing.v1 import AppTest

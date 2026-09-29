@@ -180,6 +180,9 @@ class WorkspaceUnitTests(unittest.TestCase):
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires local fixture.')
 class WorkspacePersistenceTests(unittest.TestCase):
     def setUp(self):
+        from tests.crm_fixtures import TestRecipientShop
+        customer_patch=patch('crm_test_recipient.Shopify',return_value=TestRecipientShop())
+        customer_patch.start();self.addCleanup(customer_patch.stop)
         self.store=CampaignStore(connect)
         row=self.store.setting('sending');self.store.save_setting(ADMIN,'sending',{'internal_recipients':['internal@example.test'],'smart_hours':16},row['version'])
         self.campaign=self.store.save(ADMIN,'Workspace '+uuid.uuid4().hex[:8],ready(),env=ENV)
@@ -190,7 +193,7 @@ class WorkspacePersistenceTests(unittest.TestCase):
     def send(self,operation=None,recipient='internal@example.test'):
         return self.store.test_campaign(ADMIN,self.campaign['id'],self.campaign['version'],recipient=recipient,confirmed=True,operation_id=operation or str(uuid.uuid4()),env=ENV,session=self.wire)
 
-    def test_arbitrary_recipient_without_allowlist_but_no_lists(self):
+    def test_subscribed_recipient_without_allowlist_but_no_lists(self):
         for value in ('invalid',['internal@example.test'],{'segment':'1'},'internal@example.test,second@example.test'):
             with self.assertRaises((ValueError,RuntimeError)):self.send(recipient=value)
         self.wire.post.assert_not_called()

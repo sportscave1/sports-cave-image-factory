@@ -38,6 +38,7 @@ def safe_startup_print(message):
 safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 
 from dotenv import load_dotenv
+import session_recovery
 import streamlit as st
 
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
@@ -16191,6 +16192,8 @@ def main():
         current_route=current_page,
         navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
     )
+
+    session_recovery.install(st)
 
     log_startup_stage("SIDEBAR START")
     render_sidebar()

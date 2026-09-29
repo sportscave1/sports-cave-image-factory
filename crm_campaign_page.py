@@ -18,6 +18,7 @@ from crm_audience import selection_page
 from crm_tracking import asset_url
 from crm_resend_marketing import get_resend_marketing_config_status
 from crm_logic import now
+from crm_campaign_recovery import autosaving, flush_current, activate, restore
 
 
 def open_editor(row):
@@ -25,7 +26,26 @@ def open_editor(row):
     from crm_html_workspace import html_document
     st.session_state['campaign_editor']=deepcopy(row)
     st.session_state['campaign_editor']['document']=html_document(row['document'])
-    st.session_state['campaign_saved']=deepcopy(row)
+    editor=st.session_state['campaign_editor']
+    from crm_campaign_markets import audience
+    from crm_middle_sections import middle_sections,commit_middle
+    editor['document']['market_audience']=True
+    editor['document']['audience']=audience(editor['document']['market'])
+    editor['document'].setdefault('send_timing',{'mode':'now'})
+    commit_middle(editor['document'],middle_sections(editor['document']))
+    editor['recovery_seed']=uuid.uuid4().hex
+    st.session_state['campaign_saved']=deepcopy(editor)
+    st.session_state.pop('campaign_save_error',None)
+    st.session_state['campaign_save_status']='Saved' if row.get('id') else 'Ready · changes save automatically'
+    context=st.session_state.get('campaign_recovery_context')
+    if context:
+        try:activate(*context,row.get('id'))
+        except ValueError:
+            editor['recovery_readonly']=True
+            st.session_state.pop('campaign_recovery_context',None)
+            st.session_state['campaign_save_status']='Read-only campaign'
+    if row.get('id'):st.query_params['campaign']=str(row['id'])
+    elif 'campaign' in st.query_params:del st.query_params['campaign']
     st.session_state['campaign_edit_key']=str(uuid.uuid4())
 
 
@@ -110,7 +130,7 @@ def delete_dialog(store,user,editor):
 
 
 def new_compose(smart_hours=16,cfg=None,sections=None):
-    """Session-only draft; opening the route never writes a campaign."""
+    """Empty composer; first meaningful edit creates a durable checkpoint."""
     from crm_campaign_sections import section_defaults
     doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
     if cfg and 'email_defaults' in cfg:doc.pop('html_sections',None)
@@ -145,7 +165,7 @@ def recent_campaigns(drafts,key,user):
         columns[4].caption(str(row['updated_at'])[:16].replace('T',' '))
         with columns[5].popover('Actions'):
             st.caption('Last test: '+(str(row['last_tested_at'])[:16] if row['last_tested_at'] else '—'))
-            if st.button('Duplicate',key='recent_copy_'+identity):open_editor(drafts.duplicate(user,identity));st.rerun()
+            if st.button('Duplicate',key='recent_copy_'+identity) and flush_current():open_editor(drafts.duplicate(user,identity));st.rerun()
             if st.button('History',key='recent_history_'+identity):st.dataframe(drafts.history(identity),hide_index=True)
             if not row.get('delivery_status'):
                 if row['archived_at']:
@@ -158,11 +178,14 @@ def recent_campaigns(drafts,key,user):
 
 
 @st.fragment(**({'key':COMPOSER_TARGET} if COMPOSER_TARGET else {}))
+@autosaving
 def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
     """Content interactions repaint only composer/preview; no workspace DB reads."""
     closing=st.session_state.pop('campaign_template_close_dialog',None)
     if closing is not None:closing.close()
     from crm_html_workspace import section_editor,composer_canvas
+    from crm_recovery_ui import recovery_bridge
+    if available:recovery_bridge(drafts,actions.user,editor,key)
     doc=editor['document'];c=doc['content']
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
@@ -187,13 +210,42 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
                     library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
-    st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')
+    flush_current()
+    from html import escape
+    st.html('<p id="sc-campaign-save-status" role="status" style="font-size:13px;color:#777">'+escape(st.session_state.get('campaign_save_status','Saved'))+'</p>')
+    if st.session_state.get('campaign_save_error'):
+        st.warning(st.session_state['campaign_save_error'])
+        if st.button('Retry save',key=key+'retry_save'):
+            from crm_recovery_ui import retry_browser
+            if not retry_browser(drafts,actions.user,editor,key):flush_current(force=True)
+        if st.button('Save separate recovery copy',key=key+'recovery_copy'):
+            pending=st.session_state.pop('campaign_browser_recovery',None)
+            if pending:editor.update(pending['editor'])
+            editor['id']=None;editor['version']=None;editor['recovery_seed']=uuid.uuid4().hex
+            if flush_current(force=True):open_editor(editor);st.rerun()
+
+
+
+def continue_campaign_leave(drafts,navigate):
+    target=st.session_state.pop('crm_requested_route',None)
+    pending=st.session_state.pop('campaign_pending_open',None)
+    if target:navigate(target)
+    elif pending=='new':
+        cfg=drafts.render_settings()
+        new_compose(drafts.setting('sending')['value']['smart_hours'],cfg,drafts.default_sections(cfg))
+    elif pending:open_editor(drafts.draft(pending))
+    st.rerun()
 
 
 @st.fragment
 def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     from crm_html_workspace import composer_canvas,composer_styles,section_editor
     drafts=CampaignStore(store.connect);available=True
+    editor=st.session_state.get('campaign_editor')
+    if editor and dirty(editor) and (st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open')):
+        from crm_campaign_leave_ui import leave_dialog
+        leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))
+        return
     try:
         with st.spinner('Loading campaign…'):
             defaults=drafts.setting('sending')['value'];cfg=drafts.render_settings()
@@ -201,9 +253,19 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     except StoreUnavailable as exc:
         available=False;defaults={'smart_hours':16};cfg=settings()
         st.error(str(exc));st.caption('Persistence unavailable. Your compose state stays in this session; saves and tests are disabled.')
+    st.session_state['campaign_persistence_unavailable']=not available
+    if available:st.session_state['campaign_recovery_context']=(drafts,actions.user)
+    else:st.session_state.pop('campaign_recovery_context',None)
     if not st.session_state.get('campaign_editor'):
-        sections=cfg.get('email_defaults')
-        new_compose(defaults['smart_hours'],cfg,sections)
+        if not available:return  # Never replace an unavailable saved draft with defaults.
+        try:
+            explicit=st.query_params.get('campaign')
+            recovered=restore(drafts,actions.user,explicit)
+            if recovered:open_editor(recovered)
+            else:new_compose(defaults['smart_hours'],cfg,cfg.get('email_defaults'))
+        except StoreUnavailable as exc:
+            st.error(str(exc));return
+
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
     from crm_campaign_markets import audience
     doc['market_audience']=True
@@ -216,21 +278,13 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
     title.caption('● Marketing delivery '+('ON' if get_resend_marketing_config_status()['marketing_enabled'] else 'OFF · Tests only'))
     with buttons.container(horizontal=True,horizontal_alignment='right',gap='small'):
-        save=st.button('Save draft',type='primary',disabled=not available or bool(editor['archived_at']))
+        save=st.button('Save draft',type='primary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
         test_control(drafts,actions.user,editor,key,available)
-        send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']))
+        send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
-    if save:
-        try:
-            with st.spinner('Saving draft…'):
-                updated=drafts.save(actions.user,editor['name'],doc,editor.get('id'),editor.get('version'))
-            st.session_state['campaign_editor']=deepcopy(updated);st.session_state['campaign_saved']=deepcopy(updated)
-            st.toast('Draft saved')
-            from crm_section_ui import rerun_editor
-            rerun_editor()
-        except (ValueError,StoreUnavailable) as exc:st.error('Save failed; your edits are retained. '+str(exc))
+    if save and flush_current(force=True):st.toast('Draft saved')
     if send_now:
         from crm_campaign_send_ui import review_dialog
         st.session_state.pop(key+'send_review',None)
@@ -239,21 +293,11 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:
-        discard=False
         if dirty(editor):
-            st.warning('Save your changes first, or explicitly discard them before opening another campaign/page.')
-            discard=st.button('Discard unsaved changes and continue')
-            if st.button('Keep editing'):
-                st.session_state.pop('campaign_pending_open',None);st.session_state.pop('crm_requested_route',None)
-                st.session_state['campaign_list_generation']=st.session_state.get('campaign_list_generation',0)+1;st.rerun()
-        if not dirty(editor) or discard:
-            st.session_state.pop('campaign_pending_open',None);st.session_state.pop('crm_requested_route',None)
-            if target:
-                st.session_state['campaign_editor']=deepcopy(st.session_state['campaign_saved']);navigate(target);return
-            if pending=='new':new_compose(defaults['smart_hours'],cfg,drafts.default_sections(cfg))
-            else:
-                with st.spinner('Loading campaign…'):open_editor(drafts.draft(pending))
-            st.rerun()
+            from crm_campaign_leave_ui import leave_dialog
+            leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))
+        else:continue_campaign_leave(drafts,navigate)
+
 
 
 def html_escape_name(name):

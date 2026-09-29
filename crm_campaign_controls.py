@@ -17,6 +17,8 @@ def market_control(shop,store,doc,key):
     if state['error'] and not counts:st.caption('Subscriber counts unavailable. Editing and test sending remain available.')
     if doc['market']!=previous:
         doc['copy_reviewed']=False
+        from crm_campaign_recovery import flush_current
+        flush_current()
         st.rerun() # User selection can affect catalogue prices; hydration cannot.
 
 

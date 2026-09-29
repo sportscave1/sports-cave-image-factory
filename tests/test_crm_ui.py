@@ -15,7 +15,8 @@ from tests.crm_db_fixture import connect
 from tests.crm_fixtures import ShopifyFixture
 wire=st.session_state.setdefault('wire',ShopifyFixture())
 store=Store(connect);store.seed()
-user={'id':'fixture','role':'worker','is_active':True,'page_permissions':[p[0] for p in PAGES]+['email']}
+import uuid
+user={'id':st.session_state.setdefault('fixture_user_id','fixture-'+uuid.uuid4().hex),'role':'worker','is_active':True,'page_permissions':[p[0] for p in PAGES]+['email']}
 with patch('crm_service.audit'),patch('requests.sessions.Session.request',side_effect=AssertionError('External I/O forbidden')):
     if st.session_state.get('profile'):
         profile(Shopify(wire),store,gid(1),lambda _:None,user)

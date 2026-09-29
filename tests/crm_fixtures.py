@@ -89,3 +89,18 @@ class ResendFixture:
         self.sent.append((address,message,key,test))
         if self.error:raise self.error
         return 'fixture-'+str(len(self.sent))
+
+
+TEST_UNSUBSCRIBE_URL='https://www.sportscaveshop.com/account/unsubscribe?token=synthetic-test-only'
+
+class TestRecipientShop:
+    """Explicit synthetic subscribed recipient lookup; never connects to Shopify."""
+    def __init__(self):self.calls=[]
+    def customers(self,*,query,fresh):
+        import json
+        self.calls.append((query,fresh))
+        address=json.loads(query.removeprefix('email:'))
+        return page([{'id':'gid://shopify/Customer/999999999', 'email':address,
+            'emailMarketingConsent':{'marketingState':'SUBSCRIBED'},
+            'defaultEmailAddress':{'emailAddress':address,'marketingState':'SUBSCRIBED',
+                'validFormat':True,'marketingUnsubscribeUrl':TEST_UNSUBSCRIBE_URL}}])
