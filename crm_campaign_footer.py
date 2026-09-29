@@ -57,6 +57,15 @@ def has_unsubscribe_link(source):
     return inspector.unsubscribe
 
 
+def test_unsubscribe_url(cfg):
+    """Use the send's configuration; legacy snapshots fall back to runtime config."""
+    from crm_resend import Config
+    url=cfg['test_unsubscribe_url'] if 'test_unsubscribe_url' in cfg else Config().test_unsubscribe_url()
+    if url and not public_https(url):
+        raise ValueError('Verified HTTPS test unsubscribe URL required.')
+    return url
+
+
 def render_footer(source, cfg, *, images_off=False, unsubscribe_url=None):
     source=prepare_footer(source)
     markup,_,checks=import_html(source, images_off=images_off, template_links=LINK_TOKENS)
@@ -65,8 +74,7 @@ def render_footer(source, cfg, *, images_off=False, unsubscribe_url=None):
         if not public_https(unsubscribe_url):raise ValueError('Verified HTTPS unsubscribe URL required.')
     # Resolve only placeholders explicitly present in the author's template.
     # No identity, address, disclosure, link or paragraph is ever added for them.
-    from crm_resend import Config
-    test_url=Config().test_unsubscribe_url() if unsubscribe_url is None else ''
+    test_url=test_unsubscribe_url(cfg) if unsubscribe_url is None else ''
     values={
         '{{BUSINESS_NAME}}':cfg.get('business',''), '{{BUSINESS_ADDRESS}}':cfg.get('postal',''),
         '{{CONTACT_EMAIL}}':cfg.get('contact',''), '{{WEBSITE_URL}}':cfg.get('website','') if public_https(cfg.get('website','')) else '',

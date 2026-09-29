@@ -140,9 +140,15 @@ class ComposerTests(unittest.TestCase):
         item=next(r for r in library_rows(store) if r['id']==template['id'])
         self.assertEqual(set(item['content']),{'format'})
         self.assertIn('Only load on selection',template_html(store,item))
-        store.save_section_template(ADMIN,'header','Lazy header '+uuid.uuid4().hex,'<p>Only selected header</p>',make_default=True)
-        headers=store.section_templates('header',CFG,metadata=True)
-        chosen=next(r for r in headers if r['is_default'])
-        self.assertNotIn('html',chosen['content'])
-        self.assertEqual(store.section_html(chosen),'<p>Only selected header</p>')
-        self.assertEqual(store.default_sections(CFG)['header'],'<p>Only selected header</p>')
+        before=store.email_defaults(CFG)['header']
+        try:
+            store.save_email_default(ADMIN,'header','<p>Only selected header</p>',before['version'])
+            with patch.object(store,'q',wraps=store.q) as reads:
+                store.default_sections(CFG)
+                reads.reset_mock()
+                self.assertEqual(store.default_sections(CFG)['header'],'<p>Only selected header</p>')
+                self.assertEqual(reads.call_count,1)
+                self.assertIn('SELECT key,version',reads.call_args.args[0])
+        finally:
+            current=store.email_defaults(CFG)['header']
+            store.save_email_default(ADMIN,'header',before['value']['html'],current['version'])

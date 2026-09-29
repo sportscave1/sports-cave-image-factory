@@ -60,7 +60,7 @@ def apply_event(doc, event):
                 html_number=max((s.get('html_number', 0) for s in sections), default=0)+1, html=''))
         elif event.get('kind') == 'catalogue':
             sections.append(dict(id=identity, type='catalogue', visible=True, products=[],
-                settings={'columns':2, 'display':dict.fromkeys(DISPLAY, True), 'cta':'View the Edition'}))
+                settings={'columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
         else: raise ValueError('Unknown section type.')
     elif kind == 'order':
         ids = event.get('ids')

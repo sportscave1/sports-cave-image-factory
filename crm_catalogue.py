@@ -13,6 +13,27 @@ FACTS_QUERY = '''query CrmCatalogueFacts($ids:[ID!]!,$country:CountryCode!) {
  featuredMedia { ... on MediaImage { image { url(transform:{maxWidth:1000,preferredContentType:JPG}) altText } } }
  contextualPricing(context:{country:$country}) { minVariantPricing { price { amount currencyCode } compareAtPrice { amount currencyCode } } }
  } } }'''
+PICKER_COLLECTIONS = """query CrmPickerCollections($after:String) {
+ collections(first:100,after:$after) { nodes { id title } pageInfo { hasNextPage endCursor } }
+}"""
+PICKER_PRODUCTS = """query CrmPickerProducts($query:String,$after:String) {
+ products(first:12,after:$after,query:$query,sortKey:TITLE) { nodes { id handle title status
+ featuredImage { url(transform:{maxWidth:80,maxHeight:80}) } }
+ pageInfo { hasNextPage endCursor } }
+}"""
+
+
+def picker_thumbnail(value):
+    from urllib.parse import urlencode, urlunsplit
+    value = email_image_url(value)
+    if not value: return ''
+    parts = urlsplit(value)
+    if parts.hostname == 'cdn.shopify.com':
+        params = dict(parse_qsl(parts.query)); params.update(width='80',height='80')
+        return urlunsplit(parts._replace(query=urlencode(params)))
+    return value
+
+
 FIELDS = {'id','handle','title','status','url','image','price','compare_at','currency','market','edition'}
 
 
@@ -79,7 +100,7 @@ class Catalogue:
     def __init__(self, shop, *, connect=None, edition_reader=None):
         self.shop, self.connect, self.edition_reader = shop, connect, edition_reader
 
-    def search(self, query='', offset=0, active=True):
+    def _index_search(self, query='', offset=0, active=True):
         """12 compact index rows; no all-product mirror or Shopify request."""
         from supabase_backend import connect
         with (self.connect or connect)() as conn:
@@ -94,6 +115,55 @@ class Catalogue:
         return {'rows':[{'id':product_id(r['shopify_product_id']), 'title':str(r['title'] or '')[:300],
                         'handle':r['handle'], 'status':r['status'], 'image':email_image_url(r['image_url'] or '')}
                        for r in rows[:12]], 'more':len(rows)>12}
+
+    def _picker_key(self, *parts):
+        return ('catalogue-picker', self.shop.namespace, self.connect, *parts)
+
+    def collections(self):
+        from crm_picker_cache import load
+        def fetch():
+            rows, cursor, seen = [], None, set()
+            for _ in range(50):
+                result = self.shop.query(PICKER_COLLECTIONS, {'after':cursor}, 'catalogue collections', 0)['collections']
+                rows.extend(result['nodes'])
+                if not result['pageInfo']['hasNextPage']:
+                    return sorted(rows, key=lambda r:(r['title'].casefold(), r['id']))
+                cursor = result['pageInfo']['endCursor']
+                if not cursor or cursor in seen: break
+                seen.add(cursor)
+            raise ValueError('Collection list could not be completed. Please retry.')
+        rows, stale = load(self._picker_key('collections'), fetch)
+        return {'rows':rows, 'stale':stale}
+
+    def search(self, query='', offset=0, active=True, collection=''):
+        from crm_picker_cache import load
+        query, offset = str(query).strip()[:150], max(0,int(offset))
+        if collection and not re.fullmatch(r'gid://shopify/Collection/[0-9]+', collection):
+            raise ValueError('Invalid collection.')
+        def fetch():
+            if not collection: return self._index_search(query, offset, active)
+            filters = ['collection_id:'+collection.rsplit('/',1)[-1]]
+            if active: filters.append('status:active')
+            if query:
+                # Quoted search values cannot inject status/collection operators.
+                import json
+                term = json.dumps(query, ensure_ascii=False)
+                filters.append('(title:'+term+' OR handle:'+term+')')
+            expression = ' AND '.join(filters)
+            cursor, page = None, None
+            for index in range(offset//12+1):
+                page = self.shop.query(PICKER_PRODUCTS, {'query':expression,'after':cursor}, 'collection products', 600)['products']
+                if index < offset//12:
+                    if not page['pageInfo']['hasNextPage']: return {'rows':[], 'more':False}
+                    cursor = page['pageInfo']['endCursor']
+                    if not cursor: raise ValueError('Invalid product pagination.')
+            return {'rows':[{'id':n['id'],'title':n['title'],'handle':n['handle'],'status':n['status'],
+                             'image':(n.get('featuredImage') or {}).get('url','')} for n in page['nodes']],
+                    'more':page['pageInfo']['hasNextPage']}
+        result, stale = load(self._picker_key('search',query,offset,bool(active),collection), fetch)
+        result['stale'] = stale
+        for row in result['rows']: row['image'] = picker_thumbnail(row['image'])
+        return result
 
     def resolve(self, ids, market='AU', *, fresh=False):
         ids = list(dict.fromkeys(ids))

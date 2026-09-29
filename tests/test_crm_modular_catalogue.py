@@ -41,6 +41,9 @@ def event(doc,action,**kw):
 
 def catalogue_doc():
     doc=sectioned();event(doc,'add',kind='catalogue')
+    # Existing saved campaign fixture retains its original presentation.
+    doc['middle_sections'][-1]['settings']['display']['price']=True
+    doc['middle_sections'][-1]['settings']['cta']='View the Edition'
     doc['middle_sections'][-1]['products']=service().resolve([node()['id'],node(2)['id']])
     return doc
 

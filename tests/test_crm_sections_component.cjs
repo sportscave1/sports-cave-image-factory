@@ -32,7 +32,7 @@ const messages=[],listeners={};let sequence=0;
 const parent={postMessage:msg=>messages.push(msg.value)};
 const bridge=vm.createContext({parent,crypto:{randomUUID:()=>String(++sequence)},
  addEventListener:(name,fn)=>listeners[name]=fn,render(){}});
-vm.runInContext("let args={sections:[{id:'html-1',html:''}]},pending=false,inFlight=null,drafts={},queue=[];"+
+vm.runInContext("let args={sections:[{id:'html-1',html:''}]},pending=false,inFlight=null,drafts={},queue=[],settingsDrafts={};"+
  source.slice(source.indexOf('const emit='),source.indexOf('const el='))+
  source.slice(source.indexOf("addEventListener('message'"),source.indexOf('new ResizeObserver'))+
  ';this.send=emit;this.drafts=drafts;',bridge);
@@ -46,3 +46,25 @@ assert.equal(messages[2].html,'<p>Typing during a pending action</p>');
 listeners.message({source:parent,data:{type:'streamlit:render',args:{sections:[{id:'html-1',html:messages[2].html}],ack:messages[2].event}}});
 bridge.send('picker',{id:'cat'});assert.equal(messages[3].type,'picker');
 console.log('4 acknowledgement, queued action and pending-edit checks passed');
+
+// Rapid presentation changes merge instead of losing unacknowledged toggles.
+const updates=[];
+const settingsContext=vm.createContext({settingsDrafts:{},emit:(type,event)=>updates.push(event)});
+vm.runInContext(source.slice(source.indexOf('function changeSettings'),source.indexOf('function render')),settingsContext);
+const section={id:'cat',settings:{columns:2,cta:'Claim Your Edition',display:{price:false,limit:true,remaining:true}}};
+settingsContext.changeSettings(section,{display:{price:true}});
+settingsContext.changeSettings(section,{display:{limit:false}});
+settingsContext.changeSettings(section,{display:{remaining:false}});
+assert.deepEqual(JSON.parse(JSON.stringify(updates[2].settings.display)),{price:true,limit:false,remaining:false});
+console.log('Rapid catalogue settings retain all changes');
+
+const timers=new Map(),ctaChanges=[];let timerId=0;
+const input={setAttribute(){}};
+const ctaContext=vm.createContext({document:{createElement:()=>input},s:section,content:{append(){}},
+ changeSettings:(s,patch)=>ctaChanges.push(patch),
+ setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
+vm.runInContext(source.slice(source.indexOf('const cta='),source.indexOf('for(const warning')),ctaContext);
+input.value='Claim Your Edition';input.oninput();assert.equal(ctaChanges.length,0);
+input.onchange();assert.equal(timers.size,0);assert.equal(ctaChanges[0].cta,'Claim Your Edition');
+input.value='';input.oninput();[...timers.values()][0]();assert.equal(ctaChanges.length,1);
+console.log('CTA input debounce and blur commit checks passed');

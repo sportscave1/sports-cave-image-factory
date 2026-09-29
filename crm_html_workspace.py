@@ -118,26 +118,12 @@ def composer_styles():
 
 
 def section_editor(doc,cfg,key,store=None,user=None,choices=None,shop=None):
-    from crm_campaign_sections import section_defaults
-    from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
-    from crm_brand_template_ui import section_picker,save_section_control
-    defaults=section_defaults(cfg)
-    sections=doc.get('html_sections',defaults)
-    footer_source=sections['footer']
     with st.container(key='crm-fixed-header'), st.expander('Header',expanded=False,icon=':material/lock:'):
-        if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'],None if choices is None else choices['header'])
-        header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
-        if store:save_section_control(store,user,'header',header,key+'header_')
+        st.caption('Default Header · Edit in Templates → Email defaults')
     from crm_section_ui import middle_editor
     middle_editor(doc,key,shop,store)
     with st.container(key='crm-fixed-footer'), st.expander('Footer',expanded=False,icon=':material/lock:'):
-        source_key=key+'footer_source'
-        if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source,None if choices is None else choices['footer'])
-        footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key)
-        if not has_unsubscribe_link(footer):st.caption(UNSUBSCRIBE_REQUIRED)
-        if store:save_section_control(store,user,'footer',footer,key+'footer_')
-    if header!=sections['header'] or footer!=sections['footer']:
-        doc['html_sections']={'header':header,'footer':footer}
+        st.caption('Default Footer · Edit in Templates → Email defaults')
 
 
 PREVIEW_WIDTHS=(600,430,390,375,320)
@@ -148,8 +134,8 @@ def _preview_device(key,label):
 
 
 @st.fragment
-def composer_canvas(doc,cfg,key):
-    """Preview-only reruns never fetch campaigns, templates or audiences."""
+def composer_canvas(doc,cfg,key,store=None):
+    """Only check default revisions; no campaigns, template library or audience fetch."""
     with st.container(key='crm-composer-preview'):
         with st.container(horizontal=True,vertical_alignment='center'):
             st.markdown('**Email Preview**')
@@ -158,8 +144,10 @@ def composer_canvas(doc,cfg,key):
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
                     st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',
                               on_click=_preview_device,args=(key,label))
+        from crm_store import StoreUnavailable
         try:
+            if store:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
             rendered=cached_preview(st.session_state,doc,cfg,loading=lambda:st.spinner('Updating preview…'))
             with st.container(horizontal=True,horizontal_alignment='center'):
                 components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=680,scrolling=True)
-        except ValueError as exc:st.warning(str(exc))
+        except (ValueError,StoreUnavailable) as exc:st.warning(str(exc))

@@ -112,6 +112,7 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
     """Session-only draft; opening the route never writes a campaign."""
     from crm_campaign_sections import section_defaults
     doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
+    if cfg and 'email_defaults' in cfg:doc.pop('html_sections',None)
     open_editor({'id':None,'version':None,'name':'Untitled campaign','status':'DRAFT',
                  'archived_at':None,'last_tested_at':None,'document':doc})
 
@@ -156,18 +157,49 @@ def recent_campaigns(drafts,key,user):
 
 
 @st.fragment
+def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
+    """Content interactions repaint only composer/preview; no workspace DB reads."""
+    from crm_html_workspace import section_editor,composer_canvas
+    doc=editor['document'];c=doc['content']
+    before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
+    with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
+        with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
+            details,html_tab,templates_tab=st.tabs(['Campaign Settings','HTML','Templates'],key=key+'panel',on_change='rerun')
+            with details:
+                if details.open:
+                    editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
+                    c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
+                    c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
+                    from crm_campaign_controls import market_control,timing_control
+                    market_control(shop,drafts,doc,key)
+                    timing_control(doc,key)
+            with html_tab:
+                section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
+            with templates_tab:
+                if templates_tab.open and available:
+                    from crm_brand_template_ui import brand_templates_settings
+                    brand_templates_settings(drafts,actions.user,cfg)
+                    st.divider()
+                    from crm_campaign_library import library
+                    library(drafts,actions.user,doc)
+        with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
+    if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
+    st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')
+
+
+@st.fragment
 def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     from crm_html_workspace import composer_canvas,composer_styles,section_editor
     drafts=CampaignStore(store.connect);available=True
     try:
         with st.spinner('Loading campaign…'):
             defaults=drafts.setting('sending')['value'];cfg=drafts.render_settings()
-            choices={kind:drafts.section_templates(kind,cfg,metadata=True) for kind in ('header','footer')}
+            choices=None
     except StoreUnavailable as exc:
         available=False;defaults={'smart_hours':16};cfg=settings()
         st.error(str(exc));st.caption('Persistence unavailable. Your compose state stays in this session; saves and tests are disabled.')
     if not st.session_state.get('campaign_editor'):
-        sections={kind:drafts.section_html(next(row for row in rows if row['is_default'])) for kind,rows in choices.items()} if available else None
+        sections=cfg.get('email_defaults')
         new_compose(defaults['smart_hours'],cfg,sections)
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
     from crm_campaign_markets import audience
@@ -186,26 +218,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         test_control(drafts,actions.user,editor,key,available)
         send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']))
     new_requested=False
-    before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
-    with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
-        with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
-            details,html_tab,templates_tab=st.tabs(['Campaign Settings','HTML','Templates'],key=key+'panel',on_change='rerun')
-            with details:
-                editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
-                c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
-                c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
-                from crm_campaign_controls import market_control,timing_control
-                market_control(shop,drafts,doc,key)
-                timing_control(doc,key)
-            with html_tab:
-                section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
-            with templates_tab:
-                if templates_tab.open and available:
-                    from crm_campaign_library import library
-                    library(drafts,actions.user,doc)
-        with st.container(width='stretch'):composer_canvas(doc,cfg,key)
-    if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
-    st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')
+    composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
     if save:
         try:
             with st.spinner('Saving draft…'):

@@ -8,6 +8,11 @@ from crm_campaign_content import new_document, validate_document, preflight, set
 
 
 class CampaignStore(WorkspaceRecords):
+    def render_settings(self,env=None):
+        cfg=super().render_settings(env)
+        cfg['email_defaults']=self.default_sections(cfg)
+        return cfg
+
     def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False):
         fields="d.id,d.name,d.version,d.status,d.archived_at,d.updated_at,d.last_tested_at,jsonb_build_object('market',d.document->'market','send_timing',d.document->'send_timing') AS document" if metadata else 'd.*'
         return self.q("""SELECT """+fields+""",c.status AS delivery_status,

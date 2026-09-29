@@ -33,6 +33,8 @@ def final_audience(shop,store,doc,*,clock=time.monotonic):
     return state
 
 def production_checks(doc,cfg,env=None):
+    from crm_campaign_sections import with_email_defaults
+    doc=with_email_defaults(doc,cfg)
     env=os.environ if env is None else env
     checks=preflight(doc,env,cfg)
     live=dict(checks['live'])

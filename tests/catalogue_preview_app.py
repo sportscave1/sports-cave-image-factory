@@ -60,6 +60,7 @@ else:
                          'version':0,'status':'DRAFT','archived_at':None})
             st.session_state['polish_fixture_loaded']=True
     catalogue.resolve=lambda ids,*a,**kw:[p.copy() for identity in ids for p in facts if p['id']==identity]
-    catalogue.search=lambda query='',offset=0,active=True:{'rows':[p for p in facts if query.lower() in p['title'].lower()][offset:offset+12],'more':False}
+    catalogue.collections=lambda:{'rows':[{'id':'gid://shopify/Collection/1','title':'Motorsport Wall Art'},{'id':'gid://shopify/Collection/2','title':'Tennis'}]}
+    catalogue.search=lambda query='',offset=0,active=True,collection='':{'rows':[p for i,p in enumerate(facts) if query.lower() in p['title'].lower() and (not active or p['status']=='ACTIVE') and (not collection or (i%2==0)==collection.endswith('/1'))][offset:offset+12],'more':False}
     crm_catalogue.Catalogue=lambda *a,**kw:catalogue
     runpy.run_path(str(Path(__file__).resolve().parents[1]/'app.py'),run_name='__main__')

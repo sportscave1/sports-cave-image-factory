@@ -45,6 +45,7 @@ class Config:
         if not self.api_key or not self.sender or not self.reply_to or len(self.secret)<32 or not safe_url(self.public_base):raise MarketingDisabled('Marketing delivery configuration is incomplete.')
     def unsubscribe_url(self,send_id):
         if len(self.secret)<32:raise MarketingDisabled('Marketing unsubscribe signing is not configured.')
+        if not safe_url(self.public_base):raise MarketingDisabled('CRM_PUBLIC_BASE_URL must be a public HTTPS unsubscribe base URL.')
         value=str(uuid.UUID(str(send_id)));signature=hmac.new(self.secret.encode(),('crm-marketing-opt-out/v1:'+value).encode(),hashlib.sha256).hexdigest()
         return self.public_base+'/crm/unsubscribe?token='+value+'.'+signature
     def verify_token(self,token):

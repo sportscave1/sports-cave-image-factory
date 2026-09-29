@@ -72,7 +72,8 @@ class TokenAndTransportTests(unittest.TestCase):
         from crm_campaign_sections import section_defaults
         doc['html_sections']=section_defaults(CFG)
         with patch.dict(os.environ,{'CRM_PUBLIC_BASE_URL':'https://hooks.example.test'},clear=True):
-            preview=render_campaign(doc,CFG)
+            from crm_campaign_content import settings
+            preview=render_campaign(doc,{**CFG,**settings()})
             self.assertIn('/crm/unsubscribe/test',preview['html']);self.assertNotIn('?token=',preview['html'])
             url=config(False).unsubscribe_url(str(uuid.uuid4()))
             live=render_campaign(doc,CFG,unsubscribe_url=url,production=True)

@@ -36,7 +36,7 @@ with (patch('crm_segment_counts.COUNTS',cache),patch.object(ShopifyFixture,'__ca
       patch.object(CampaignStore,'active_suppression_hashes',timed('suppression',CampaignStore.active_suppression_hashes)),
       patch.object(CampaignStore,'list_drafts',timed('draft_list',CampaignStore.list_drafts)),
       patch.object(CampaignStore,'draft',timed('draft_load',CampaignStore.draft)),
-      patch.object(CampaignStore,'section_templates',timed('brand_templates',CampaignStore.section_templates)),
+      patch.object(CampaignStore,'email_defaults',timed('email_defaults',CampaignStore.email_defaults)),
       patch.object(CampaignStore,'html_library',timed('template_library',CampaignStore.html_library)),
       patch.object(preview,'render_campaign',timed('preview',preview.render_campaign))):
     at=AppTest.from_string(SCRIPT.replace('ShopifyFixture()','ShopifyFixture(1000)'));at.session_state['route']='CRM Campaigns'

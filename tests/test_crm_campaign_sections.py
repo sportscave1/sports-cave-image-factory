@@ -139,13 +139,12 @@ class SectionPersistenceTests(unittest.TestCase):
         doc = at.session_state['campaign_editor']['document']
         self.assertEqual(middle_sections(doc)[0]['html'], '')
         apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
-        for label, value in [('Header HTML','<p>Saved header</p>\n'), ('Footer HTML','<p>Saved footer</p>')]:
-            next(t for t in at.text_area if t.label==label).set_value(value)
+        self.assertFalse(any(t.label in ('Header HTML','Footer HTML') for t in at.text_area))
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         self.assertFalse(at.exception)
         saved = self.store.draft(at.session_state['campaign_editor']['id'])['document']
         self.assertEqual(saved['custom_html'], HTML)
-        self.assertEqual(saved['html_sections'], {'header':'<p>Saved header</p>\n', 'footer':prepare_footer('<p>Saved footer</p>')})
+        self.assertNotIn('html_sections', saved)
         at.run(); self.assertEqual(at.session_state['campaign_editor']['document'], saved)
         old = self.store.save(ADMIN, 'Legacy full HTML', document(), env=ENV)
         fresh = AppTest.from_string(SCRIPT); fresh.session_state['route']='CRM Campaigns'

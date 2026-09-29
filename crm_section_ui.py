@@ -16,27 +16,37 @@ def rerun_editor():
 
 
 @st.dialog('Select products', width='medium', on_dismiss='rerun')
-def product_picker(doc, section_id, catalogue, key):
+def product_picker(doc, section_id, catalogue, key, editor_key=None):
     section = next(s for s in middle_sections(doc) if s['id']==section_id)
     basket = st.session_state.setdefault(key+'basket', {p['id']:deepcopy(p) for p in section['products']})
-    with st.form(key+'search'):
-        query = st.text_input('Search products…', max_chars=150)
-        active = st.checkbox('Active only', True)
-        submitted = st.form_submit_button('Search')
-    if submitted:
-        st.session_state[key+'query'] = query; st.session_state[key+'active'] = active
+    query = st.text_input('Search products…', max_chars=150, key=key+'search_text')
+    try:
+        choices = catalogue.collections()
+        if choices.get('stale'): st.caption('Showing cached collections. Refresh will retry shortly.')
+        st.session_state[key+'collections'] = choices['rows']
+    except Exception:
+        st.caption('Collections temporarily unavailable. Existing selection retained.')
+    options = {r['id']:r['title'] for r in st.session_state.get(key+'collections',[])}
+    old = st.session_state.get(key+'collection','')
+    if old and old not in options: options[old] = 'Selected collection (unavailable)'
+    collection = st.selectbox('Collection', ['',*options], format_func=lambda i:options.get(i,'All collections'), key=key+'collection')
+    active = st.checkbox('Active only', True, key=key+'active_control')
+    submitted = st.button('Search', key=key+'search_button')
+    # Text inputs submit on Enter/blur, not every keystroke. Dialog reruns stay local.
+    filters = (query.strip(),active,collection)
+    if filters != st.session_state.get(key+'filters'):
+        st.session_state[key+'filters'] = filters
         st.session_state[key+'offset'] = 0; st.session_state.pop(key+'page', None)
         st.session_state[key+'generation'] = uuid.uuid4().hex
     try:
         if key+'page' not in st.session_state:
             with st.spinner('Loading products…'):
-                page = catalogue.search(st.session_state.get(key+'query',''),st.session_state.get(key+'offset',0),st.session_state.get(key+'active',True))
-                ids = [r['id'] for r in page['rows'] if r['id']]
-                page['facts'] = catalogue.resolve(ids,doc['market'])
+                page = catalogue.search(query,st.session_state.get(key+'offset',0),active,collection)
                 st.session_state[key+'page'] = page
         page = st.session_state[key+'page']
-        facts = page['facts']
-        if not facts:st.caption('No synced products match this search.')
+        facts = page['rows']
+        if page.get('stale'):st.caption('Showing cached products. Refresh will retry shortly.')
+        if not facts:st.caption('No products found in this collection.' if collection else 'No matching products.')
         for p in facts:
             a,b,c = st.columns([1,7,2], vertical_alignment='center')
             selected = a.checkbox('Select '+p['title'],p['id'] in basket,label_visibility='collapsed',key=key+st.session_state[key+'generation']+p['id'])
@@ -46,7 +56,7 @@ def product_picker(doc, section_id, catalogue, key):
                 from crm_campaign_html import email_image_url
                 if email_image_url(p['image']): st.image(email_image_url(p['image']),width=38)
                 st.text(p['title'])
-            ed=p['edition']; c.caption(price_label(p)+' · '+p['status']+(' · #'+format(ed['next'],'03d')+'/'+str(ed['limit']) if ed and ed['remaining'] else ''))
+            c.caption(p['status'])
         left,right=st.columns(2)
         if left.button('Previous',disabled=st.session_state.get(key+'offset',0)==0,key=key+'prev'):
             st.session_state[key+'offset']-=12;st.session_state.pop(key+'page');st.session_state[key+'generation']=uuid.uuid4().hex;st.rerun(scope='fragment')
@@ -62,6 +72,13 @@ def product_picker(doc, section_id, catalogue, key):
             sections=middle_sections(doc)
             next(s for s in sections if s['id']==section_id)['products']=selected
             commit_middle(doc,sections);doc['copy_reviewed']=False
+            if editor_key:
+                previous=st.session_state.get(editor_key+'catalogue_loaded',(doc['market'],()))
+                known=set(previous[1]) if previous[0]==doc['market'] else set()
+                known.update(p['id'] for p in selected)
+                visible=tuple(sorted({p['id'] for s in sections if s['type']=='catalogue' and s['visible'] for p in s['products']}))
+                if set(visible)<=known:
+                    st.session_state[editor_key+'catalogue_loaded']=(doc['market'],visible)
             st.session_state.pop(key+'basket',None);st.rerun()
     except Exception as exc:
         logging.getLogger(__name__).warning('crm_catalogue_picker_failed type=%s',type(exc).__name__)
@@ -102,13 +119,15 @@ def middle_editor(doc, key, shop, store=None):
                 picker_key=key+'picker_'+event['id']
                 for suffix in ('basket','page'):st.session_state.pop(picker_key+suffix,None)
                 st.session_state[picker_key+'generation']=uuid.uuid4().hex
-                product_picker(doc,event['id'],Catalogue(shop),picker_key)
+                product_picker(doc,event['id'],Catalogue(shop),picker_key,editor_key=key)
             elif event.get('type')=='refresh':
                 with st.spinner('Refreshing catalogue facts…'):
                     refreshed=refresh_catalogues(doc,Catalogue(shop))
-                doc.update(refreshed);doc['copy_reviewed']=False;rerun_editor()
+                doc.update(refreshed);doc['copy_reviewed']=False
+                rerun_editor()
             else:
-                apply_event(doc,event);doc['copy_reviewed']=False;rerun_editor()
+                apply_event(doc,event);doc['copy_reviewed']=False
+                rerun_editor()
         except ValueError as exc:
             st.session_state[key+'section_error']=str(exc);rerun_editor()
         except Exception as exc:

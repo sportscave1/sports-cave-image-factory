@@ -134,60 +134,6 @@ class FooterStorageTests(unittest.TestCase):
         from crm_campaign_store import CampaignStore
         from tests.crm_db_fixture import connect
         self.store=CampaignStore(connect)
-        self.store.set_section_default(ADMIN,'footer','builtin_footer')
-
-    def test_default_selected_edit_preview_and_draft_save(self):
-        from streamlit.testing.v1 import AppTest
-        from tests.test_crm_ui import SCRIPT
-        at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"))
-        at.session_state['route']='CRM Campaigns';at.run(timeout=20)
-        picker=next(s for s in at.selectbox if s.label=='Footer template')
-        self.assertEqual(picker.value,'builtin_footer')
-        self.assertIn('Sports Cave Default Footer',str(picker.options))
-        source=next(t for t in at.text_area if t.label=='Footer HTML')
-        self.assertFalse(source.proto.disabled)
-        source.set_value(source.value.replace('<strong>','<strong>Collector footer ')).run()
-        self.assertTrue(any('Collector footer' in e.proto.srcdoc for e in at.get('iframe')))
-        source=next(t for t in at.text_area if t.label=='Footer HTML')
-        raw='<p>My custom footer</p>\n'
-        source.set_value(raw).run()
-        self.assertFalse(any('restored' in w.value for w in at.warning))
-        self.assertEqual(next(t for t in at.text_area if t.label=='Footer HTML').value,raw)
-        self.assertTrue(any(UNSUBSCRIBE_REQUIRED in c.value for c in at.caption))
-        self.assertTrue(any('My custom footer' in e.proto.srcdoc and DISCLOSURE not in e.proto.srcdoc for e in at.get('iframe')))
-        next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
-        self.assertFalse(at.exception)
-        row=self.store.draft(at.session_state['campaign_editor']['id'])
-        self.assertEqual(row['document']['html_sections']['footer'],raw)
-        self.assertEqual(row['document']['custom_html'],'')
-        at.run()
-        self.assertEqual(next(t for t in at.text_area if t.label=='Footer HTML').value,raw)
-
-    def test_legacy_save_snapshot_and_reusable_footer(self):
-        doc=sectioned();doc['html_sections']['footer']='<p>Old custom</p>{{SYSTEM_FOOTER}}'
-        row=self.store.save(ADMIN,'Legacy footer',doc,env=ENV)
-        self.assertEqual(row['document'],doc)
-        self.assertEqual(render_campaign(doc,settings(ENV)),render_campaign(row['document'],settings(ENV)))
-        history_before=self.store.q('SELECT * FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],))
-        template=self.store.save_section_template(ADMIN,'footer','Footer '+uuid.uuid4().hex,row['document']['html_sections']['footer'],make_default=True)
-        self.assertEqual(self.store.default_sections(settings(ENV))['footer'],row['document']['html_sections']['footer'])
-        self.store.save_section_template(ADMIN,'footer',template['name'],DEFAULT_FOOTER,identity=template['id'],version=template['version'],confirmed=True)
-        self.assertEqual(self.store.draft(row['id'])['document'],row['document'])
-        self.assertEqual(self.store.q('SELECT * FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],)),history_before)
-        self.store.set_section_default(ADMIN,'footer','builtin_footer')
-
-    def test_stored_unsubscribe_source_is_exact_across_template_draft_and_history(self):
-        raw='\r\n<p>My words</p><a href="{{UNSUBSCRIBE_URL}}">Leave this list</a>\n  '
-        template=self.store.save_section_template(ADMIN,'footer','Exact '+uuid.uuid4().hex,raw,make_default=True)
-        self.assertEqual(template['content']['html'],raw)
-        self.assertEqual(self.store.default_sections(settings(ENV))['footer'],raw)
-        doc=sectioned();doc['html_sections']['footer']=raw
-        row=self.store.save(ADMIN,'Exact footer snapshot',doc,env=ENV)
-        self.assertEqual(self.store.draft(row['id'])['document']['html_sections']['footer'],raw)
-        version=self.store.q('SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s',(row['id'],),True)
-        self.assertEqual(version['after_value']['document']['html_sections']['footer'],raw)
-        self.store.set_section_default(ADMIN,'footer','builtin_footer')
-
     def test_internal_test_without_unsubscribe_matches_preview_and_never_resends(self):
         doc=sectioned();doc['html_sections']['footer']='<p>Only my footer</p>'
         row=self.store.save(ADMIN,'Author footer test',doc,env=ENV)

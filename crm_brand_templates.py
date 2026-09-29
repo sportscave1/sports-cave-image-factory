@@ -1,20 +1,22 @@
-"""Small reusable header/footer records in the existing CRM template tables."""
+"""Singleton email defaults, retaining the previous template registry for audit."""
 from copy import deepcopy
+from collections import OrderedDict
 import json
-import uuid
+import threading
 from crm_store import Store
-from crm_navigation import require
 from crm_campaign_sections import section_defaults
 from crm_campaign_html import import_html
-from crm_campaign_footer import render_footer
-from crm_logic import now
+from crm_campaign_footer import render_footer, has_unsubscribe_link
 
 FORMAT='campaign_brand_section_v1'
 DEFAULT_KEY='email_brand_defaults'
+DEFAULT_KEYS={'header':'email_default_header','footer':'email_default_footer'}
+_CACHE=OrderedDict()
+_LOCK=threading.RLock()
 
 
 def section_source(kind,source):
-    if kind not in ('header','footer') or not isinstance(source,str) or len(source.encode('utf-8'))>30000:
+    if kind not in DEFAULT_KEYS or not isinstance(source,str) or len(source.encode('utf-8'))>30000:
         raise ValueError('Use Header or Footer HTML up to 30 KB.')
     if kind=='footer':
         _,_,checks=render_footer(source,{})
@@ -25,88 +27,65 @@ def section_source(kind,source):
 
 
 class BrandTemplates(Store):
-    def section_templates(self,kind,cfg,metadata=False):
-        if kind not in ('header','footer'):raise ValueError('Unknown brand section.')
-        fields="id,name,version,kind,(content - 'html') AS content,md5(content->>'html') AS source_hash" if metadata else '*'
-        rows=self.q("SELECT "+fields+" FROM crm_templates WHERE content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL ORDER BY name,id",(FORMAT,kind))
-        defaults=self.q('SELECT value FROM crm_workspace_settings WHERE key=%s',(DEFAULT_KEY,),True)
-        default=(defaults or {}).get('value',{}).get(kind)
-        builtin={'id':'builtin_'+kind,'name':'Sports Cave Default '+kind.title(),'version':0,
-                 'content':{'format':FORMAT,'section':kind,'html':section_defaults(cfg)[kind]},'builtin':True}
-        result=[builtin,*rows]
-        # Fail closed rather than silently changing new campaigns after registry corruption.
-        if default and not any(str(r['id'])==default for r in rows):raise ValueError('Default brand template is unavailable. Ask an administrator to select a default.')
-        for row in result:row['is_default']=str(row['id'])==(default or builtin['id'])
+    def email_defaults(self,cfg):
+        # Read small revisions every time; cache HTML by revision, never by stale TTL.
+        keys=list(DEFAULT_KEYS.values())
+        revisions=self.q('SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key',(keys,))
+        if len(revisions)!=2:
+            self._initialize_email_defaults(cfg)
+            revisions=self.q('SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key',(keys,))
+        cache_key=(self.connect,tuple((r['key'],r['version']) for r in revisions))
+        with _LOCK:
+            if cache_key in _CACHE:return deepcopy(_CACHE[cache_key])
+        rows=self.q('SELECT * FROM crm_workspace_settings WHERE key=ANY(%s)',(keys,))
+        result={kind:next(r for r in rows if r['key']==key) for kind,key in DEFAULT_KEYS.items()}
+        # Key by the versions actually loaded, including a concurrent admin edit.
+        cache_key=(self.connect,tuple(sorted((r['key'],r['version']) for r in rows)))
+        with _LOCK:
+            _CACHE[cache_key]=deepcopy(result)
+            while len(_CACHE)>16:_CACHE.popitem(last=False)
         return result
 
-    def section_html(self,row):
-        if 'html' in row['content']:return row['content']['html']
-        loaded=self.get('templates',row['id'])
-        if not loaded or loaded['version']!=row['version'] or loaded.get('archived_at') or loaded['content'].get('format')!=FORMAT:
-            raise ValueError('Brand template changed. Reload before selecting it.')
-        return loaded['content']['html']
+    def _initialize_email_defaults(self,cfg):
+        with self.db() as conn:
+            # Same lock as the old registry; initialization never overwrites HTML.
+            conn.execute('INSERT INTO crm_workspace_settings(key,value,updated_by) VALUES(%s,%s::jsonb,%s) ON CONFLICT DO NOTHING',(DEFAULT_KEY,json.dumps({'header':None,'footer':None}),'system:email-defaults'))
+            registry=conn.execute('SELECT value FROM crm_workspace_settings WHERE key=%s FOR UPDATE',(DEFAULT_KEY,)).fetchone()['value']
+            for kind,key in DEFAULT_KEYS.items():
+                if conn.execute('SELECT 1 FROM crm_workspace_settings WHERE key=%s',(key,)).fetchone():continue
+                identity=registry.get(kind)
+                source=section_defaults(cfg)[kind]
+                if identity:
+                    row=conn.execute("SELECT content FROM crm_templates WHERE id=%s AND content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL",(identity,FORMAT,kind)).fetchone()
+                    if not row:raise ValueError('Current default '+kind+' is unavailable. Restore its source before continuing.')
+                    source=row['content']['html']
+                value={'html':source,'source_template_id':identity}
+                row=conn.execute('INSERT INTO crm_workspace_settings(key,value,updated_by) VALUES(%s,%s::jsonb,%s) ON CONFLICT DO NOTHING RETURNING *',(key,json.dumps(value),'system:email-defaults')).fetchone()
+                if row:conn.execute('INSERT INTO crm_settings_history(key,version,value,actor) VALUES(%s,%s,%s::jsonb,%s)',(key,row['version'],json.dumps(value),'system:email-defaults'))
 
     def default_sections(self,cfg):
-        return {kind:self.section_html(next(r for r in self.section_templates(kind,cfg,metadata=True) if r['is_default'])) for kind in ('header','footer')}
+        return {kind:row['value']['html'] for kind,row in self.email_defaults(cfg).items()}
 
-    def _brand_lock(self,conn,actor):
-        # Existing settings row serializes default/edit/delete races. Only explicit writes call this.
-        conn.execute('INSERT INTO crm_workspace_settings(key,value,updated_by) VALUES(%s,%s::jsonb,%s) ON CONFLICT DO NOTHING',(DEFAULT_KEY,json.dumps({'header':None,'footer':None}),actor))
-        return conn.execute('SELECT * FROM crm_workspace_settings WHERE key=%s FOR UPDATE',(DEFAULT_KEY,)).fetchone()
-
-    def _brand_default(self,conn,registry,kind,identity,actor):
-        values=deepcopy(registry['value']);values[kind]=identity
-        row=conn.execute('UPDATE crm_workspace_settings SET value=%s::jsonb,version=version+1,updated_by=%s,updated_at=now() WHERE key=%s RETURNING *',(json.dumps(values),actor,DEFAULT_KEY)).fetchone()
-        conn.execute('INSERT INTO crm_settings_history(key,version,value,actor) VALUES(%s,%s,%s::jsonb,%s)',(DEFAULT_KEY,row['version'],json.dumps(values),actor))
-
-    def save_section_template(self,user,kind,name,source,*,identity=None,version=None,confirmed=False,make_default=False):
-        require(user,'crm_templates_manage')
-        if make_default or identity:
-            from crm_workspace_store import admin
-            admin(user)
-        if identity and not confirmed:raise ValueError('Confirm overwriting this shared template.')
-        if not isinstance(name,str) or not name.strip() or len(name)>150:raise ValueError('Use a template name of 1–150 characters.')
-        source=section_source(kind,source);actor=str(user.get('id',''));stamp=now().isoformat()
-        with self.db() as conn:
-            registry=self._brand_lock(conn,actor)
-            duplicate=conn.execute("SELECT id FROM crm_templates WHERE content->>'format'=%s AND content->>'section'=%s AND lower(name)=lower(%s) AND archived_at IS NULL",(FORMAT,kind,name.strip())).fetchone()
-            if duplicate and str(duplicate['id'])!=str(identity):raise ValueError('A template with this name already exists in this section. Choose another name.')
-            content={'format':FORMAT,'section':kind,'html':source,'created_by':actor,'created_at':stamp,'updated_by':actor,'action':'created'}
-            if identity:
-                old=conn.execute("SELECT * FROM crm_templates WHERE id=%s AND content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL FOR UPDATE",(identity,FORMAT,kind)).fetchone()
-                if not old or old['version']!=version:raise ValueError('Template changed elsewhere. Reload before editing.')
-                content.update(created_by=old['content']['created_by'],created_at=old['content']['created_at'],action='edited')
-                row=conn.execute('UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s RETURNING *',(name.strip(),json.dumps(content),identity)).fetchone()
-            else:
-                row=conn.execute("INSERT INTO crm_templates(template_key,name,kind,content) VALUES(%s,%s,'Campaign',%s::jsonb) RETURNING *",('brand_'+uuid.uuid4().hex,name.strip(),json.dumps(content))).fetchone()
-            conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(row['id'],row['version'],json.dumps(content)))
-            if make_default:self._brand_default(conn,registry,kind,str(row['id']),actor)
-            return row
-
-    def set_section_default(self,user,kind,identity):
+    def save_email_default(self,user,kind,source,version):
         from crm_workspace_store import admin
         admin(user)
-        if kind not in ('header','footer'):raise ValueError('Unknown brand section.')
-        actor=str(user.get('id',''))
+        source=section_source(kind,source)
+        if kind=='footer' and not has_unsubscribe_link(source):
+            raise ValueError('Default footer must include a visible {{UNSUBSCRIBE_URL}} link.')
+        key=DEFAULT_KEYS[kind];actor=str(user.get('id',''))
         with self.db() as conn:
-            registry=self._brand_lock(conn,actor)
-            if identity=='builtin_'+kind:identity=None
-            elif not conn.execute("SELECT id FROM crm_templates WHERE id=%s AND content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL",(identity,FORMAT,kind)).fetchone():raise ValueError('Select an active template for this section.')
-            self._brand_default(conn,registry,kind,identity,actor)
+            row=conn.execute("UPDATE crm_workspace_settings SET value=jsonb_set(value,'{html}',%s::jsonb),version=version+1,updated_by=%s,updated_at=now() WHERE key=%s AND version=%s RETURNING *",(json.dumps(source),actor,key,version)).fetchone()
+            if not row:raise ValueError('Default changed elsewhere. Reopen the editor before saving.')
+            conn.execute('INSERT INTO crm_settings_history(key,version,value,actor) VALUES(%s,%s,%s::jsonb,%s)',(key,row['version'],json.dumps(row['value']),actor))
+        with _LOCK:_CACHE.clear()
+        return row
 
-    def delete_section_template(self,user,identity,version,*,confirmed=False):
-        from crm_workspace_store import admin
-        admin(user)
-        if not confirmed:raise ValueError('Confirm deleting this custom template.')
-        if str(identity).startswith('builtin_'):raise ValueError('The built-in default cannot be deleted.')
-        actor=str(user.get('id',''))
-        with self.db() as conn:
-            registry=self._brand_lock(conn,actor)
-            if str(identity) in registry['value'].values():raise ValueError('Choose another default before deleting this template.')
-            old=conn.execute("SELECT * FROM crm_templates WHERE id=%s AND content->>'format'=%s AND archived_at IS NULL FOR UPDATE",(identity,FORMAT)).fetchone()
-            if not old or old['version']!=version:raise ValueError('Template changed elsewhere. Reload before deleting.')
-            content={**old['content'],'updated_by':actor,'action':'deleted'}
-            row=conn.execute('UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1,content=%s::jsonb WHERE id=%s RETURNING *',(json.dumps(content),identity)).fetchone()
-            conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(identity,row['version'],json.dumps(content)))
-            # Logical deletion retains the existing template audit/version history.
-            return row
+    # Old write entry points fail explicitly; audit rows remain readable in storage.
+    def save_section_template(self,*args,**kwargs):
+        raise ValueError('Edit Default Header or Default Footer in Email defaults.')
+
+    def set_section_default(self,*args,**kwargs):
+        raise ValueError('Header and Footer are single global defaults.')
+
+    def delete_section_template(self,*args,**kwargs):
+        raise ValueError('Email defaults cannot be deleted; historical templates are retained for audit.')

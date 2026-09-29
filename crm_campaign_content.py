@@ -32,7 +32,9 @@ def https(value):
 
 def settings(env=None):
     env = os.environ if env is None else env
+    from crm_resend import Config
     return {'business': env.get('CRM_BUSINESS_DISPLAY_NAME','Sports Cave').strip(),
+            'test_unsubscribe_url': Config(env).test_unsubscribe_url(),
             'postal': env.get('BUSINESS_POSTAL_ADDRESS','').strip(),
             'website': env.get('CRM_BUSINESS_WEBSITE','https://www.sportscaveshop.com').strip(),
             'privacy': 'https://www.sportscaveshop.com/policies/privacy-policy',
@@ -126,7 +128,10 @@ def fingerprint(doc, cfg):
 
 
 def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False):
-    validate_document(doc); cfg=settings() if cfg is None else cfg; c=doc['content']
+    cfg=settings() if cfg is None else cfg
+    from crm_campaign_sections import with_email_defaults
+    doc=with_email_defaults(doc,cfg)
+    validate_document(doc); c=doc['content']
     e=lambda value: escape(str(value), quote=True)
     blocks=doc.get('blocks') or legacy_blocks(c)
     accent=cfg.get('accent','#b49450')
@@ -150,8 +155,8 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
     if https(cfg.get('privacy','')):footer+='<a style="color:#333" href="'+e(cfg['privacy'])+'">Privacy</a><br>'
     unsubscribe_html='<u>'+unsubscribe+'</u>'
     if unsubscribe_url is None and not production:
-        from crm_resend import Config
-        test_url=Config().test_unsubscribe_url()
+        from crm_campaign_footer import test_unsubscribe_url
+        test_url=test_unsubscribe_url(cfg)
         if test_url:
             unsubscribe='Test unsubscribe: '+test_url
             unsubscribe_html='<a style="color:#333" href="'+e(test_url)+'">Unsubscribe</a>'
@@ -199,7 +204,10 @@ def html_budget(html):
 
 
 def preflight(doc, env=None, cfg=None):
-    validate_document(doc); cfg=settings(env) if cfg is None else cfg; delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
+    cfg=settings(env) if cfg is None else cfg
+    from crm_campaign_sections import with_email_defaults
+    doc=with_email_defaults(doc,cfg)
+    validate_document(doc); delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
     from crm_logic import date, now
     counted=date(counts.get('checked_at'))
     recent=bool(counted and 0 <= (now()-counted).total_seconds() < 86400)

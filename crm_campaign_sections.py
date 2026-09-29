@@ -7,6 +7,19 @@ from crm_tracking import asset_url
 from crm_campaign_footer import LEGACY_TOKEN as FOOTER_TOKEN, DEFAULT_FOOTER, render_footer
 
 
+def with_email_defaults(doc,cfg):
+    """Resolve a render copy only. Queue snapshots carry their resolved settings."""
+    if 'email_defaults' not in cfg:return doc
+    from copy import deepcopy
+    result=deepcopy(doc)
+    if result.get('content_mode')!='HTML':
+        from crm_email_blocks import render_blocks,legacy_blocks
+        body=render_blocks(result.get('blocks') or legacy_blocks(result['content']),market=result['market'])[0]
+        result.update(content_mode='HTML',custom_html='<table role="presentation" width="100%">'+body+'</table>')
+    result['html_sections']=deepcopy(cfg['email_defaults'])
+    return result
+
+
 def section_defaults(cfg):
     accent = cfg.get('accent', '#b49450')
     if not re.fullmatch(r'#[0-9a-fA-F]{6}', accent):
