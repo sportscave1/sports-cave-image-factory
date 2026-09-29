@@ -81,6 +81,8 @@ def html_templates(store,user,editor,key):
             snapshot=html_document(store.template_document(selected))
             doc.pop('html_sections',None)
             if 'html_sections' in snapshot:doc['html_sections']=deepcopy(snapshot['html_sections'])
+            doc.pop('middle_sections',None)
+            if 'middle_sections' in snapshot:doc['middle_sections']=deepcopy(snapshot['middle_sections'])
             doc.update(custom_html=snapshot['custom_html'],content_mode='HTML',content=snapshot['content'],template_ref={'id':str(selected['id']),'name':selected['name'],'version':selected['version']})
             reset_widgets();st.rerun()
     if os_accounts.can_access_page(user,'crm_templates_manage'):
@@ -142,6 +144,7 @@ def recent_campaigns(drafts,key):
     st.caption('Select a row to open it above. Draft actions are under More.')
 
 
+@st.fragment
 def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     from crm_html_workspace import composer_canvas,composer_styles,section_editor
     drafts=CampaignStore(store.connect);available=True
@@ -209,7 +212,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
                         doc['notes']=st.text_area('Notes',doc['notes'],height=90,key=key+'notes')
                         doc['offer']=st.text_input('Offer',doc['offer'],key=key+'offer')
                         doc['offer_reviewed']=st.checkbox('Offer verified',doc['offer_reviewed'],key=key+'offer_reviewed')
-            with html_tab:section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None)
+            with html_tab:section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
     st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')

@@ -41,7 +41,7 @@ class CampaignStore(WorkspaceRecords):
                 row=conn.execute('INSERT INTO crm_campaign_drafts(name,document,status,created_by) VALUES(%s,%s::jsonb,%s,%s) RETURNING *',(name,json.dumps(document),status,actor)).fetchone()
             actions=['campaign_duplicated' if duplicate_of else 'campaign_edited' if old else 'campaign_created']
             if old and old['document']['audience']!=document['audience']: actions.append('segment_changed')
-            if old and any(old['document'].get(field)!=document.get(field) for field in ('content','blocks','custom_html','content_mode','html_sections')): actions.append('content_changed')
+            if old and any(old['document'].get(field)!=document.get(field) for field in ('content','blocks','custom_html','content_mode','html_sections','middle_sections')): actions.append('content_changed')
             if old and old['status']!=status: actions.append('compliance_status_changed')
             for action in actions:
                 self._history(conn,row,action,actor,old)
@@ -109,6 +109,20 @@ class CampaignStore(WorkspaceRecords):
         delivery=get_resend_marketing_config_status(env)
         if not delivery['configured']:raise DeliveryError('configuration_missing')
         if delivery['marketing_enabled']:raise DeliveryError('stage_one_only')
+        # A repeated operation must use its recorded snapshot, never resolve fresh
+        # facts and silently issue a second send after prices/counters change.
+        catalogue_sections=[s for s in row['document'].get('middle_sections',[]) if s['type']=='catalogue' and s['visible']]
+        prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True) if catalogue_sections else None
+        if catalogue_sections and not prior:
+            from crm_catalogue import Catalogue, refresh_catalogues
+            from crm_shopify import Shopify
+            try:current=refresh_catalogues(row['document'],Catalogue(Shopify()))
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning('crm_catalogue_test_verification_failed type=%s',type(exc).__name__)
+                raise ValueError('Current catalogue facts cannot be verified. Refresh the catalogue and retry before testing.') from None
+            if current!=row['document']:
+                raise ValueError('Catalogue facts changed. Refresh catalogue facts, review the preview and save before testing.')
         with self.db() as conn:
             attempt=conn.execute("INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
             if not attempt:
@@ -116,6 +130,12 @@ class CampaignStore(WorkspaceRecords):
                 if str(prior['campaign_id'])!=str(identity) or prior['campaign_version']!=version or prior['render_hash']!=digest or prior['recipient']!=recipient.casefold():raise ValueError('Test operation already belongs to another saved request.')
                 if prior['status']=='ACCEPTED':return {'message':'Test email accepted by Resend','message_id':prior['provider_id'],'accepted_at':str(prior['accepted_at']),'audit_saved':True}
                 raise ValueError('This test was already attempted. Check its receipt; uncertain tests are never retried automatically.')
+            if catalogue_sections:
+                # Commit exact outbound bytes/facts BEFORE external delivery. Retained
+                # even if the provider or receipt update later becomes uncertain.
+                self._history(conn,{**row,'outbound_snapshot':{'operation_id':operation,
+                    'rendered':rendered,'sections':deepcopy(row['document']['middle_sections']),
+                    'render_hash':digest}},'campaign_test_snapshot',str(user.get('id','')), {})
         try:
             result=_send_admin_email(user=user,recipient=recipient,confirmed=confirmed,operation_id=operation,
                                     env=env,session=session,message=rendered,

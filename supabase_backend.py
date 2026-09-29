@@ -9483,7 +9483,7 @@ def list_edition_products(search="", limit=500, offset=0):
             return _normalize_edition_product_rows(cur.fetchall())
 
 
-def list_edition_products_read_only(search="", limit=500, offset=0):
+def list_edition_products_read_only(search="", limit=500, offset=0, *, product_ids=None, handles=None):
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     limit_value = max(min(int(limit or 500), 1000), 1)
     offset_value = max(int(offset or 0), 0)
@@ -9505,6 +9505,15 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
                )
         """
         params.extend((search_value, search_value, search_value))
+    # Optional exact catalogue lookup reuses the same ledger/integrity projection.
+    # No schema provisioning, counter normalization writes or run creation here.
+    if product_ids is not None or handles is not None:
+        ids = [str(v).rsplit('/', 1)[-1] for v in (product_ids or [])][:50]
+        names = [str(v) for v in (handles or [])][:50]
+        clause = """(regexp_replace(COALESCE(NULLIF(ep.shopify_product_gid,''),ep.shopify_product_id,''),
+                     '^gid://shopify/Product/', '', 'i') = ANY(%s) OR ep.shopify_handle = ANY(%s))"""
+        search_sql = ('WHERE (' + search_sql.strip()[6:] + ') AND ' if search_sql else 'WHERE ') + clause
+        params.extend((ids, names))
     params.extend((limit_value, offset_value))
 
     query = f"""

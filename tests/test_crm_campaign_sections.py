@@ -132,10 +132,13 @@ class SectionPersistenceTests(unittest.TestCase):
         at = AppTest.from_string(SCRIPT); at.session_state['route']='CRM Campaigns'; at.run(timeout=20)
         self.assertFalse(at.exception)
         self.assertEqual([t.label for t in at.tabs], ['Campaign Details','HTML'])
-        sections = {e.label:e.proto.expanded for e in at.expander if e.label in ('Header','Body','Footer')}
-        self.assertEqual(sections, {'Header':False, 'Body':True, 'Footer':False})
-        self.assertEqual(next(t for t in at.text_area if t.label=='Body HTML').value, '')
-        for label, value in [('Header HTML','<p>Saved header</p>\n'), ('Body HTML',HTML), ('Footer HTML','<p>Saved footer</p>')]:
+        sections = {e.label:e.proto.expanded for e in at.expander if e.label in ('✓ Header','✓ Footer')}
+        self.assertEqual(sections, {'✓ Header':False, '✓ Footer':False})
+        from crm_middle_sections import middle_sections, apply_event
+        doc = at.session_state['campaign_editor']['document']
+        self.assertEqual(middle_sections(doc)[0]['html'], '')
+        apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
+        for label, value in [('Header HTML','<p>Saved header</p>\n'), ('Footer HTML','<p>Saved footer</p>')]:
             next(t for t in at.text_area if t.label==label).set_value(value)
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         self.assertFalse(at.exception)

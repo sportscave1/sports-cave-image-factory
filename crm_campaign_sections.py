@@ -25,12 +25,13 @@ def import_sections(doc, *, images_off=False, campaign_key='', cfg=None, unsubsc
     """Balance and sanitize each authored section without adding footer content."""
     sections = doc['html_sections']
     header, header_text, header_checks = import_html(sections['header'], images_off=images_off, campaign_key=campaign_key)
-    body, body_text, checks = import_html(doc.get('custom_html', ''), images_off=images_off, campaign_key=campaign_key)
+    from crm_middle_sections import render_middle
+    body, body_text, checks = render_middle(doc, images_off=images_off, campaign_key=campaign_key)
     if cfg is None:
         from crm_campaign_content import settings
         cfg=settings()
     footer, footer_text, footer_checks = render_footer(sections['footer'],cfg,images_off=images_off,unsubscribe_url=unsubscribe_url)
     for label in checks:
         if label != 'HTML content present':
-            checks[label] = checks[label] and header_checks[label] and footer_checks[label]
+            checks[label] = checks[label] and header_checks.get(label,True) and footer_checks.get(label,True)
     return header + body + footer, '\n\n'.join(t for t in (header_text, body_text, footer_text) if t), checks

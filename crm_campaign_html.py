@@ -68,6 +68,7 @@ class EmailHTML(HTMLParser):
                 safe.append(('style',';'.join(styles)))
             elif name in {'width','height','cellpadding','cellspacing','colspan','rowspan','border'} and re.fullmatch(r'\d{1,4}%?',value): safe.append((name,value))
             elif name in {'align','valign','alt','title','role'}: safe.append((name,value))
+            elif name=='class' and value=='sc-stack' and tag=='td': safe.append((name,value))
             elif name in {'bgcolor','color'} and (name=='bgcolor' or tag=='font') and re.fullmatch(r'#[a-fA-F0-9]{3}(?:[a-fA-F0-9]{3})?|[a-zA-Z]{1,25}',value):safe.append((name,value))
             elif tag=='font' and name=='face' and re.fullmatch(r'[a-zA-Z0-9 ,\'"-]{1,200}',value):safe.append((name,value))
             elif tag=='font' and name=='size' and re.fullmatch(r'[1-7]',value):safe.append((name,value))

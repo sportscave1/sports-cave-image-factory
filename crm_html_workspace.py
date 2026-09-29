@@ -99,22 +99,20 @@ def composer_styles():
     </style>""")
 
 
-def section_editor(doc,cfg,key,store=None,user=None,choices=None):
+def section_editor(doc,cfg,key,store=None,user=None,choices=None,shop=None):
     from crm_campaign_sections import section_defaults
     from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
     from crm_brand_template_ui import section_picker,save_section_control
     defaults=section_defaults(cfg)
     sections=doc.get('html_sections',defaults)
     footer_source=sections['footer']
-    with st.expander('Header',expanded=False):
+    with st.expander('✓ Header',expanded=False):
         if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'],None if choices is None else choices['header'])
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
         if store:save_section_control(store,user,'header',header,key+'header_')
-    with st.expander('Body',expanded=True):
-        with st.container(key='campaign-body-source'):
-            body=st.text_area('Body HTML',doc.get('custom_html',''),height=430,key=key+'body_source',
-                placeholder='<!-- Paste your campaign body HTML here -->',label_visibility='collapsed')
-    with st.expander('Footer',expanded=False):
+    from crm_section_ui import middle_editor
+    middle_editor(doc,key,shop)
+    with st.expander('✓ Footer',expanded=False):
         source_key=key+'footer_source'
         if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source,None if choices is None else choices['footer'])
         footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key)
@@ -122,7 +120,6 @@ def section_editor(doc,cfg,key,store=None,user=None,choices=None):
         if store:save_section_control(store,user,'footer',footer,key+'footer_')
     if header!=sections['header'] or footer!=sections['footer']:
         doc['html_sections']={'header':header,'footer':footer}
-    doc['custom_html']=body
 
 
 PREVIEW_WIDTHS=(600,430,390,375,320)

@@ -95,6 +95,7 @@ class WorkspaceRecords(BrandTemplates):
         doc['content']=deepcopy(document['content']);doc['blocks']=deepcopy(document.get('blocks') or legacy_blocks(document['content']))
         if 'content_mode' in document:doc.update(content_mode=document['content_mode'],custom_html=document.get('custom_html',''))
         if 'html_sections' in document:doc['html_sections']=deepcopy(document['html_sections'])
+        if 'middle_sections' in document:doc['middle_sections']=deepcopy(document['middle_sections'])
         content={'format':'campaign_blocks_v1','document':doc}
         with self.db() as conn:
             if identity:

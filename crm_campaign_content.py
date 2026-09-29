@@ -50,7 +50,7 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections'}
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections'}
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
     if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
     if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
@@ -60,6 +60,14 @@ def validate_document(doc):
             raise ValueError('HTML sections require header and footer source strings.')
         if doc.get('content_mode')!='HTML' or sum(len(v.encode('utf-8')) for v in [doc.get('custom_html',''),*sections.values()])>95000:
             raise ValueError('Combined Header, Body and Footer HTML must be at most 95 KB.')
+    if 'middle_sections' in doc:
+        from crm_middle_sections import validate_middle
+        validate_middle(doc['middle_sections'])
+        if doc.get('content_mode') != 'HTML': raise ValueError('Middle sections require HTML content mode.')
+        if doc.get('custom_html','') != next(s['html'] for s in doc['middle_sections'] if s.get('html_number')==1):
+            raise ValueError('HTML Section 1 and the compatibility source must match.')
+        if sum(len(s.get('html','').encode('utf-8')) for s in doc['middle_sections']) + sum(len(v.encode('utf-8')) for v in doc.get('html_sections',{}).values()) > 95000:
+            raise ValueError('Combined HTML sections must be at most 95 KB.')
     validate_blocks(doc.get('blocks',[]))
     if not isinstance(doc.get('tags',[]),list) or len(doc.get('tags',[]))>10 or any(not isinstance(t,str) or len(t)>40 for t in doc.get('tags',[])): raise ValueError('Use up to 10 short internal tags.')
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',doc.get('campaign_key','legacy')): raise ValueError('Invalid campaign tracking key.')
@@ -100,7 +108,10 @@ def validate_document(doc):
         if any(type(counts[k]) is not int or counts[k]<0 for k in ('members','eligible')): raise ValueError('Invalid counts.')
         if not isinstance(counts['excluded'],dict) or any(type(v) is not int or v<0 for v in counts['excluded'].values()): raise ValueError('Invalid exclusions.')
         if counts['members']!=counts['eligible']+sum(counts['excluded'].values()): raise ValueError('Audience totals do not reconcile.')
-    if len(json.dumps(doc))>100000: raise ValueError('Campaign is too large.')
+    # The backwards-compatible Body mirror is not additional authored content.
+    # Do not halve the existing HTML budget just by adding section metadata.
+    budget_doc={**doc,'custom_html':''} if 'middle_sections' in doc else doc
+    if len(json.dumps(budget_doc))>100000: raise ValueError('Campaign is too large.')
     return doc
 
 
@@ -120,6 +131,9 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
         if 'html_sections' in doc:
             from crm_campaign_sections import import_sections
             imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''),cfg=cfg,unsubscribe_url=unsubscribe_url)
+        elif 'middle_sections' in doc:
+            from crm_middle_sections import render_middle
+            imported,plain,_=render_middle(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''))
         else:
             imported,plain,_=import_html(doc.get('custom_html',''),images_off=images_off,campaign_key=doc.get('campaign_key',''))
         body='<tr><td>'+imported+'</td></tr>'
@@ -195,6 +209,9 @@ def preflight(doc, env=None, cfg=None):
             from crm_campaign_footer import has_unsubscribe_link, UNSUBSCRIBE_REQUIRED
             _,plain,html_checks=import_sections(doc,cfg=cfg)
             live[UNSUBSCRIBE_REQUIRED]=has_unsubscribe_link(doc['html_sections']['footer'])
+        elif 'middle_sections' in doc:
+            from crm_middle_sections import render_middle
+            _,plain,html_checks=render_middle(doc)
         checks.update(html_checks)
         checks['Plain-text alternative generated']=bool(plain.strip())
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']

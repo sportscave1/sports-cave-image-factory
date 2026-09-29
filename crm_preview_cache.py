@@ -10,7 +10,7 @@ KEY = '_crm_preview_cache'
 LIMIT = 4
 BYTE_LIMIT = 1024 * 1024
 RENDER_FIELDS = ('renderer_version', 'content_mode', 'content', 'blocks', 'custom_html',
-                 'html_sections', 'campaign_key', 'market')
+                 'html_sections', 'middle_sections', 'campaign_key', 'market')
 
 
 def preview_key(doc, cfg, images_off=False):
