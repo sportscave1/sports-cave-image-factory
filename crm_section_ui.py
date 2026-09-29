@@ -105,15 +105,26 @@ def middle_editor(doc, key, shop, store=None):
     warnings = {s['id']:[issue for p in s['products'] for issue in product_issues(p,s['settings'])]
                 for s in sections if s['type']=='catalogue'}
     component = components.declare_component('crm_middle_sections_v2',path=str(Path(__file__).parent/'components'/'crm_sections'))
-    event = component(sections=sections,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    templates=[]
+    if store is not None:
+        from crm_campaign_library import library_rows
+        from crm_store import StoreUnavailable
+        try:templates=[{k:r[k] for k in ('id','name','version')} for r in library_rows(store)]
+        except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
+    event = component(sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')
         try:
             if event.get('type')=='add' and event.get('kind')=='template':
                 if store is None:raise ValueError('Template storage is unavailable.')
-                from crm_campaign_library import picker
-                picker(store,doc)
+                from crm_campaign_library import insert_saved_template
+                from crm_store import StoreUnavailable
+                try:
+                    with st.spinner('Loading template...'):
+                        insert_saved_template(store,doc,event.get('template_id'),event.get('version'))
+                except (ValueError,StoreUnavailable):raise ValueError('Template could not be loaded.') from None
+                rerun_editor()
             elif event.get('type')=='picker':
                 if not any(s['id']==event.get('id') and s['type']=='catalogue' for s in sections): raise ValueError('Catalogue not found.')
                 picker_key=key+'picker_'+event['id']

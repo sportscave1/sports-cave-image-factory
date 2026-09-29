@@ -8,6 +8,7 @@ import os_accounts
 from crm_campaign_content import (TYPES,MARKETS,OBJECTIVES,FIELDS,new_document,settings,
                                   preflight,render_campaign,prompt_for,parse_copy)
 from crm_campaign_store import CampaignStore
+from crm_campaign_library import COMPOSER_TARGET
 from crm_audience import count_page
 from crm_logic import rule,SPORTS
 from crm_store import StoreUnavailable
@@ -156,15 +157,17 @@ def recent_campaigns(drafts,key,user):
             if st.button('Next',disabled=len(rows)<=6):st.session_state['recent_offset']=offset+6;st.rerun()
 
 
-@st.fragment
+@st.fragment(**({'key':COMPOSER_TARGET} if COMPOSER_TARGET else {}))
 def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
     """Content interactions repaint only composer/preview; no workspace DB reads."""
+    closing=st.session_state.pop('campaign_template_close_dialog',None)
+    if closing is not None:closing.close()
     from crm_html_workspace import section_editor,composer_canvas
     doc=editor['document'];c=doc['content']
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
-            details,html_tab,templates_tab=st.tabs(['Campaign Settings','HTML','Templates'],key=key+'panel',on_change='rerun')
+            details,html_tab,templates_tab=st.tabs(['Campaign Settings','Editor','Templates'],key=key+'panel',on_change='rerun')
             with details:
                 if details.open:
                     editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
@@ -178,10 +181,10 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
             with templates_tab:
                 if templates_tab.open and available:
                     from crm_brand_template_ui import brand_templates_settings
-                    brand_templates_settings(drafts,actions.user,cfg)
+                    brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)
                     st.divider()
                     from crm_campaign_library import library
-                    library(drafts,actions.user,doc)
+                    library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
     st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')

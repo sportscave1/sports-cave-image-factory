@@ -71,7 +71,7 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
                         {'type':'html','base':['html-1'],'id':'html-1','html':'<p>Keep source</p>'})
             at.session_state['campaign_settings_open']=True;at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertEqual([t.label for t in at.tabs],['Campaign Settings','HTML','Templates'])
+            self.assertEqual([t.label for t in at.tabs],['Campaign Settings','Editor','Templates'])
             self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'<p>Keep source</p>')
             self.assertIsNone(editor['id'])
             self.assertFalse(any(b.label=='Save internal-test settings' for b in at.button))

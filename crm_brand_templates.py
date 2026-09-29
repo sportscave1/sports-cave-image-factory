@@ -27,6 +27,15 @@ def section_source(kind,source):
 
 
 class BrandTemplates(Store):
+    def email_default(self,kind,cfg):
+        """Load only the singleton being opened for editing."""
+        key=DEFAULT_KEYS[kind]
+        row=self.q('SELECT * FROM crm_workspace_settings WHERE key=%s',(key,),True)
+        if row is None:
+            self._initialize_email_defaults(cfg)
+            row=self.q('SELECT * FROM crm_workspace_settings WHERE key=%s',(key,),True)
+        return row
+
     def email_defaults(self,cfg):
         # Read small revisions every time; cache HTML by revision, never by stale TTL.
         keys=list(DEFAULT_KEYS.values())

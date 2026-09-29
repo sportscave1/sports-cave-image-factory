@@ -114,11 +114,15 @@ class WorkspaceRecords(BrandTemplates):
             else:row=conn.execute("INSERT INTO crm_templates(template_key,name,kind,content) VALUES(%s,%s,'Campaign',%s::jsonb) RETURNING *",('design_'+uuid.uuid4().hex,name,json.dumps(content))).fetchone()
             if not row:raise ValueError('Template changed elsewhere or was archived. Reload before editing.')
             conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(row['id'],row['version'],json.dumps(content)))
-            return row
+        from crm_template_cache import invalidate
+        invalidate()
+        return row
 
     def archive_design(self,user,identity,version):
         require(user,'crm_templates_manage')
         if not self.q("UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1 WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' RETURNING id",(identity,version),True):raise ValueError('Template changed elsewhere.')
+        from crm_template_cache import invalidate
+        invalidate()
 
     def recent_marketing_hashes(self,hours=16):
         # OS-only marketing receipts, including future campaign/flow dispatches.

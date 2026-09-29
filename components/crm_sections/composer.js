@@ -12,7 +12,18 @@ function reorder(section,id,target){if(section){const s=args.sections.find(s=>s.
 function handle(row,id,section=null){let h=button('⋮⋮','Drag to reorder; Alt + Up or Down',()=>{},'handle');h.dataset.drag=id;h.dataset.section=section||'';
  h.onkeydown=e=>{if(e.altKey&&['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();const ids=section?args.sections.find(s=>s.id===section).products.map(p=>p.id):args.sections.map(s=>s.id),i=ids.indexOf(id),j=i+(e.key==='ArrowUp'?-1:1);if(j>=0&&j<ids.length)reorder(section,id,ids[j]);}};row.append(h);}
 function changeSettings(s,patch){const current=settingsDrafts[s.id]||s.settings;const next={...current,...patch,display:{...current.display,...(patch.display||{})}};settingsDrafts[s.id]=next;emit('settings',{id:s.id,settings:next});}
-function render(){const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;root.replaceChildren();args.sections.forEach((s,index)=>{
+function renderTemplates(){
+ const container=document.getElementById('saved-templates');container.replaceChildren();
+ if((args.templates||[]).length)container.append(el('hr'));
+ for(const template of args.templates||[]){
+  const item=button(template.name,'Insert '+template.name,()=>{
+   document.getElementById('add').open=false;
+   emit('add',{kind:'template',template_id:template.id,version:template.version});
+  });
+  item.dataset.add='template';container.append(item);
+ }
+}
+function render(){renderTemplates();const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;root.replaceChildren();args.sections.forEach((s,index)=>{
  const name=s.type==='html'?'HTML Section '+s.html_number:'Catalogue';if(opened[s.id]===undefined)opened[s.id]=s.html_number===1;
  let card=el('section','','section');card.dataset.id=s.id;if(s.type==='catalogue')card.classList.add('catalogue');let row=el('div','','row');handle(row,s.id);
  let visibility=button('',(s.visible?'Hide ':'Show ')+name,()=>emit('visible',{id:s.id,visible:!s.visible}),'visibility');

@@ -68,3 +68,16 @@ input.value='Claim Your Edition';input.oninput();assert.equal(ctaChanges.length,
 input.onchange();assert.equal(timers.size,0);assert.equal(ctaChanges[0].cta,'Claim Your Edition');
 input.value='';input.oninput();[...timers.values()][0]();assert.equal(ctaChanges.length,1);
 console.log('CTA input debounce and blur commit checks passed');
+
+// Metadata-only direct template menu: names are text, not injected HTML.
+const menuNodes=[],templateEvents=[];const menu={open:true};
+const menuContext=vm.createContext({args:{templates:[{id:'one',version:3,name:'<img onerror=alert(1)>'},{id:'two',version:1,name:'Trust Icons'}]},
+ document:{getElementById:id=>id==='add'?menu:{replaceChildren:()=>menuNodes.splice(0),append:n=>menuNodes.push(n)}},
+ el:tag=>({tag}),button:(text,label,fn)=>({text,label,fn,dataset:{}}),emit:(type,event)=>templateEvents.push({type,...event})});
+vm.runInContext(source.slice(source.indexOf('function renderTemplates'),source.indexOf('function render(){')),menuContext);
+menuContext.renderTemplates();assert.equal(menuNodes.length,3);
+assert.equal(menuNodes[1].text,'<img onerror=alert(1)>');menuNodes[2].fn();
+assert.equal(menu.open,false);assert.equal(templateEvents[0].template_id,'two');assert.equal(templateEvents[0].version,1);
+menuContext.args.templates=[];menuContext.renderTemplates();assert.equal(menuNodes.length,0);
+assert.ok(!fs.readFileSync('components/crm_sections/index.html','utf8').includes('Add Template'));
+console.log('Direct template menu, safe labels, selected version, empty state checks passed');

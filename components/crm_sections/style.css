@@ -37,6 +37,9 @@ small{font-size:11px;color:var(--editor-muted);white-space:nowrap}
 .add-menu{margin-top:5px;padding:4px;width:180px;border:1px solid var(--editor-line);border-radius:7px;background:white;box-shadow:0 4px 14px #25251e12}
 .add-menu button{display:flex;gap:8px;align-items:center;width:100%;border:0;text-align:left;font-size:13px}
 .add-menu button span{width:18px;color:var(--editor-muted)}
+#saved-templates{max-height:240px;overflow-y:auto}
+#saved-templates hr{border:0;border-top:1px solid var(--editor-line);margin:4px 0}
+#saved-templates button{overflow-wrap:anywhere}
 .warning{font-size:11px;color:#775d28}
 .remove{font-size:11px;margin-top:10px;color:#666}
 .catalogue .content{padding:8px 4px}
