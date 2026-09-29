@@ -129,7 +129,7 @@ def section_editor(doc,cfg,key,store=None,user=None,choices=None,shop=None):
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
         if store:save_section_control(store,user,'header',header,key+'header_')
     from crm_section_ui import middle_editor
-    middle_editor(doc,key,shop)
+    middle_editor(doc,key,shop,store)
     with st.container(key='crm-fixed-footer'), st.expander('Footer',expanded=False,icon=':material/lock:'):
         source_key=key+'footer_source'
         if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source,None if choices is None else choices['footer'])

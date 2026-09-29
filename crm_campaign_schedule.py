@@ -66,7 +66,7 @@ def schedule_gate(store,enabled,at):
     stamp=previous.get('checked_at')
     try:last=datetime.fromisoformat(stamp) if stamp else None
     except ValueError:last=None
-    continuous=bool(enabled and previous.get('enabled') and last and at-last<=timedelta(minutes=5))
+    continuous=bool(enabled and previous.get('enabled') and last and timedelta(0)<=at-last<=timedelta(minutes=5))
     boundary=None if continuous else at
     code='schedule_missed' if enabled else 'marketing_off_schedule'
     if boundary is not None:

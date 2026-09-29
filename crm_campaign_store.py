@@ -9,7 +9,13 @@ from crm_campaign_content import new_document, validate_document, preflight, set
 
 class CampaignStore(WorkspaceRecords):
     def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100):
-        return self.q("SELECT * FROM crm_campaign_drafts WHERE (archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(name))>0 AND (%s='All' OR status=%s) AND (%s='All' OR document->>'market'=%s) ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",(archived,search,status,status,market,market,min(200,max(1,int(limit))),max(0,int(offset))))
+        return self.q("""SELECT d.*,c.status AS delivery_status,
+          (SELECT s.error_code FROM crm_marketing_sends s WHERE s.campaign_id=d.id
+           AND s.error_code IN ('schedule_missed','marketing_off_schedule') LIMIT 1) AS schedule_error
+          FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
+          WHERE (d.archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(d.name))>0
+          AND (%s='All' OR d.status=%s) AND (%s='All' OR d.document->>'market'=%s)
+          ORDER BY d.updated_at DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,min(200,max(1,int(limit))),max(0,int(offset))))
 
     def draft(self, identity):
         row=self.q('SELECT * FROM crm_campaign_drafts WHERE id=%s',(identity,),True)
@@ -35,6 +41,7 @@ class CampaignStore(WorkspaceRecords):
             if identity:
                 old=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
                 if not old or old['version']!=version: raise ValueError('Campaign changed elsewhere. Reload before saving.')
+                if conn.execute('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,)).fetchone():raise ValueError('A queued or sent campaign is read-only. Duplicate to edit.')
                 if old['archived_at']: raise ValueError('Archived campaigns are read-only. Duplicate to edit.')
                 row=conn.execute('UPDATE crm_campaign_drafts SET name=%s,document=%s::jsonb,status=%s,version=version+1,updated_at=now(),tested_version=NULL WHERE id=%s RETURNING *',(name,json.dumps(document),status,identity)).fetchone()
             else:

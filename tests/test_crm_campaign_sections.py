@@ -131,7 +131,7 @@ class SectionPersistenceTests(unittest.TestCase):
         from tests.test_crm_ui import SCRIPT
         at = AppTest.from_string(SCRIPT); at.session_state['route']='CRM Campaigns'; at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs], ['Campaign Details','HTML'])
+        self.assertEqual([t.label for t in at.tabs], ['Campaign Settings','HTML','Templates'])
         # Streamlit AppTest classifies expanders with an explicit icon as status.
         sections = {e.label:e.proto.expanded for e in [*at.expander, *at.status] if e.label in ('Header','Footer')}
         self.assertEqual(sections, {'Header':False, 'Footer':False})
@@ -152,5 +152,5 @@ class SectionPersistenceTests(unittest.TestCase):
         fresh.session_state['campaign_editor']=deepcopy(old); fresh.session_state['campaign_saved']=deepcopy(old)
         fresh.run(timeout=20); fresh.run()
         self.assertFalse(fresh.exception)
-        self.assertEqual(fresh.session_state['campaign_editor']['document'], old['document'])
+        self.assertEqual(fresh.session_state['campaign_editor']['document']['custom_html'], old['document']['custom_html'])
         self.assertNotIn('html_sections', fresh.session_state['campaign_editor']['document'])

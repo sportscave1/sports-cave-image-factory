@@ -93,7 +93,7 @@ def html_templates(store,user,editor,key):
 @st.dialog('Delete draft')
 def delete_dialog(store,user,editor):
     st.write('Delete “'+editor['name']+'”?')
-    st.warning('This permanently deletes this draft and its draft revisions. This cannot be undone. Delivery and test history cannot be deleted here.')
+    st.warning('This removes the unsent draft from the active list. Its revisions and audit history are retained.')
     with st.container(horizontal=True):
         cancel=st.button('Cancel')
         confirm=st.button('Delete draft',type='primary',key='confirm_delete_'+str(editor['id']))
@@ -101,7 +101,8 @@ def delete_dialog(store,user,editor):
     if confirm:
         try:
             result=store.delete_draft(user,editor['id'],editor['version'],confirmed=True,confirmed_name=editor['name'])
-            st.session_state.pop('campaign_editor',None);st.session_state.pop('campaign_saved',None)
+            if str(st.session_state.get('campaign_editor',{}).get('id'))==str(editor['id']):
+                st.session_state.pop('campaign_editor',None);st.session_state.pop('campaign_saved',None)
             st.session_state['campaign_delete_notice']='Draft deleted.' if result['audit_saved'] else 'Draft deleted. Activity log could not be recorded.'
             st.rerun()
         except (ValueError,StoreUnavailable) as exc:st.error(str(exc))
@@ -115,8 +116,10 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
                  'archived_at':None,'last_tested_at':None,'document':doc})
 
 
-def recent_campaigns(drafts,key):
-    st.markdown('#### Recent campaigns')
+def recent_campaigns(drafts,key,user):
+    with st.container(horizontal=True,vertical_alignment='center'):
+        st.markdown('#### Recent campaigns')
+        if st.button('+ New campaign'):st.session_state['campaign_pending_open']='new'
     with st.expander('View all campaigns / archived'):
         archived=st.checkbox('Archived campaigns',key='recent_archived')
         search=st.text_input('Find campaign',key='recent_search')
@@ -126,22 +129,29 @@ def recent_campaigns(drafts,key):
     offset=st.session_state.get('recent_offset',0)
     rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7)
     if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
-    data=[{'Campaign':r['name'],'Status':r['status'],'Market':r['document']['market'],
-           'Updated':str(r['updated_at'])[:16].replace('T',' '),
-           'Last test':str(r['last_tested_at'])[:16] if r['last_tested_at'] else '—'} for r in rows[:6]]
-    generation=st.session_state.get('campaign_list_generation',0)
-    event=st.dataframe(data,hide_index=True,height=38+35*len(data),use_container_width=True,
-        on_select='rerun',selection_mode=['single-row','single-cell'],key=f'recent_campaigns_{generation}_{offset}_{archived}_{search}')
-    selected=event.selection.rows or [cell[0] for cell in event.selection.cells]
-    if selected:
-        picked=rows[selected[0]]
-        if str(picked['id'])!=str(st.session_state['campaign_editor'].get('id')):
-            st.session_state['campaign_pending_open']=str(picked['id'])
+    for row in rows[:6]:
+        identity=str(row['id'])
+        columns=st.columns([0.45,4,3,1,2,1],vertical_alignment='center',gap='small')
+        deletable=row['status']=='DRAFT' and not row['archived_at'] and not row.get('last_tested_at') and not row.get('delivery_status')
+        if columns[0].button('',icon=':material/delete:',help='Delete draft '+row['name'],disabled=not deletable,key='recent_delete_'+identity):delete_dialog(drafts,user,row)
+        if columns[1].button(row['name'],type='tertiary',key='recent_open_'+identity):st.session_state['campaign_pending_open']=identity
+        error=row.get('schedule_error')
+        status={'marketing_off_schedule':'Delivery blocked — marketing is OFF','schedule_missed':'Schedule missed — reschedule required'}.get(error)
+        if not status:status=('SCHEDULED' if row.get('delivery_status')=='SENDING' and row['document'].get('send_timing',{}).get('mode')=='schedule' else row.get('delivery_status')) or row['status']
+        columns[2].caption(status);columns[3].caption({'US':'USA','Global':'GLOBAL'}.get(row['document']['market'],row['document']['market']))
+        columns[4].caption(str(row['updated_at'])[:16].replace('T',' '))
+        with columns[5].popover('Actions'):
+            st.caption('Last test: '+(str(row['last_tested_at'])[:16] if row['last_tested_at'] else '—'))
+            if st.button('Duplicate',key='recent_copy_'+identity):open_editor(drafts.duplicate(user,identity));st.rerun()
+            if st.button('History',key='recent_history_'+identity):st.dataframe(drafts.history(identity),hide_index=True)
+            if not row.get('delivery_status'):
+                if row['archived_at']:
+                    if st.button('Restore',key='recent_restore_'+identity):drafts.restore(user,identity,row['version']);st.rerun()
+                elif st.button('Archive',key='recent_archive_'+identity):drafts.archive(user,identity,row['version']);st.rerun()
     if offset or len(rows)>6:
         with st.container(horizontal=True):
             if st.button('Previous',disabled=offset==0):st.session_state['recent_offset']=max(0,offset-6);st.rerun()
             if st.button('Next',disabled=len(rows)<=6):st.session_state['recent_offset']=offset+6;st.rerun()
-    st.caption('Select a row to open it above. Draft actions are under More.')
 
 
 @st.fragment
@@ -159,6 +169,10 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         sections={kind:next(row['content']['html'] for row in rows if row['is_default']) for kind,rows in choices.items()} if available else None
         new_compose(defaults['smart_hours'],cfg,sections)
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
+    from crm_campaign_markets import audience
+    doc['market_audience']=True
+    selected_audience=audience(doc['market'])
+    if doc['audience']!=selected_audience:doc['audience']=selected_audience;doc['counts']={}
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
@@ -172,41 +186,22 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']))
     new_requested=False
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
-    duplicate_requested=archive_requested=restore_requested=delete_requested=False
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
-            details,html_tab=st.tabs(['Campaign Details','HTML'],key=key+'panel')
+            details,html_tab,templates_tab=st.tabs(['Campaign Settings','HTML','Templates'],key=key+'panel',on_change='rerun')
             with details:
                 editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
                 c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
                 c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
-                doc['market']=st.selectbox('Market',MARKETS,index=MARKETS.index(doc['market']),key=key+'market')
-                counts=doc.get('counts',{})
-                with st.expander('Audience'):
-                    audience_editor(shop,drafts,doc,key,compact=True)
-                st.caption(doc['audience'].get('name','All subscribed')+' · '+doc['market']+' · '+('Eligible: '+str(counts['eligible']) if counts.get('complete') else 'Not calculated'))
-                with st.expander('Templates'):
-                    if st.button('Load saved templates',disabled=not available):st.session_state[key+'templates']=True
-                    if st.session_state.get(key+'templates') and available:html_templates(drafts,actions.user,editor,key)
-                with st.expander('More'):
-                    new_requested=st.button('+ New')
-                    persisted=bool(editor.get('id')) and available
-                    duplicate_requested=st.button('Duplicate',disabled=not persisted or dirty(editor))
-                    archive_requested=st.button('Archive',disabled=not persisted or bool(editor['archived_at']) or dirty(editor))
-                    restore_requested=bool(editor['archived_at']) and st.button('Restore',disabled=not available)
-                    delete_requested=st.button('Delete draft',disabled=not persisted or editor['status']!='DRAFT' or bool(editor['archived_at']) or dirty(editor) or bool(editor.get('last_tested_at')))
-                    if st.button('Load version history',disabled=not persisted):st.session_state[key+'history']=True
-                    if persisted and st.session_state.get(key+'history'):st.dataframe(drafts.history(editor['id']),hide_index=True)
-                    if st.button('Load report',disabled=not persisted):st.session_state[key+'report']=True
-                    if persisted and st.session_state.get(key+'report'):
-                        from crm_settings_page import campaign_report
-                        campaign_report(drafts,shop,actions.user,editor['id'])
-                    with st.expander('Advanced details'):
-                        doc['type']=st.selectbox('Purpose',TYPES,index=TYPES.index(doc['type']),key=key+'purpose')
-                        doc['notes']=st.text_area('Notes',doc['notes'],height=90,key=key+'notes')
-                        doc['offer']=st.text_input('Offer',doc['offer'],key=key+'offer')
-                        doc['offer_reviewed']=st.checkbox('Offer verified',doc['offer_reviewed'],key=key+'offer_reviewed')
-            with html_tab:section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
+                from crm_campaign_controls import market_control,timing_control
+                market_control(shop,drafts,doc,key)
+                timing_control(doc,key)
+            with html_tab:
+                section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
+            with templates_tab:
+                if templates_tab.open and available:
+                    from crm_campaign_library import library
+                    library(drafts,actions.user,doc)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
     st.caption('Unsaved compose · Save draft to persist' if not editor.get('id') else 'Unsaved changes' if dirty(editor) else 'Saved')
@@ -223,17 +218,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         from crm_campaign_send_ui import review_dialog
         st.session_state.pop(key+'send_review',None)
         review_dialog(shop,drafts,actions.user,editor,key)
-    if duplicate_requested or archive_requested or restore_requested or delete_requested:
-        if dirty(editor):st.warning('Save pending edits first.')
-        elif duplicate_requested:open_editor(drafts.duplicate(actions.user,editor['id']));st.rerun()
-        elif archive_requested:
-            drafts.archive(actions.user,editor['id'],editor['version']);new_compose(defaults['smart_hours'],cfg,drafts.default_sections(cfg));st.rerun()
-        elif restore_requested:
-            drafts.restore(actions.user,editor['id'],editor['version']);open_editor(drafts.draft(editor['id']));st.rerun()
-        elif delete_requested:delete_dialog(drafts,actions.user,editor)
-    if available:recent_campaigns(drafts,key)
-    from crm_campaign_send_ui import bottom_settings
-    bottom_settings(shop,store,actions,navigate)
+    if available:recent_campaigns(drafts,key,actions.user)
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:

@@ -59,7 +59,7 @@ class EmailNavigationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires disposable SQL fixture')
 class CampaignSettingsNavigationTests(unittest.TestCase):
-    def test_secondary_settings_reuses_forms_without_sending_or_losing_source(self):
+    def test_removed_settings_cannot_reopen_or_send_or_lose_source(self):
         from tests.test_crm_ui import SCRIPT
         at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"))
         at.session_state['route']='CRM Campaigns'
@@ -71,10 +71,11 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
                         {'type':'html','base':['html-1'],'id':'html-1','html':'<p>Keep source</p>'})
             at.session_state['campaign_settings_open']=True;at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertTrue(any('Campaign Settings' in m.value for m in at.markdown))
+            self.assertEqual([t.label for t in at.tabs],['Campaign Settings','HTML','Templates'])
             self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'<p>Keep source</p>')
             self.assertIsNone(editor['id'])
-            self.assertTrue(any(b.label=='Save internal-test settings' for b in at.button))
+            self.assertFalse(any(b.label=='Save internal-test settings' for b in at.button))
+            self.assertNotIn('Campaign settings',[e.label for e in at.expander])
             self.assertNotIn('SECRET-SENTINEL',str(at))
             at.run();send.assert_not_called()
             at.session_state['campaign_settings_open']=False;at.run()

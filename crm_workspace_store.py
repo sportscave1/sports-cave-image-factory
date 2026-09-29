@@ -79,6 +79,14 @@ class WorkspaceRecords(BrandTemplates):
     def templates(self,archived=False):
         return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
 
+    def html_library(self):
+        # A template used by an automation is managed by that workflow, not here.
+        return self.q("""SELECT t.* FROM crm_templates t WHERE t.archived_at IS NULL
+          AND t.kind='Campaign' AND t.content->>'format'='campaign_blocks_v1'
+          AND NOT EXISTS (SELECT 1 FROM crm_automations a,
+            jsonb_array_elements(a.steps) step WHERE step->>'template'=t.template_key)
+          ORDER BY t.updated_at DESC LIMIT 200""")
+
     def template_document(self,row):
         if row['content'].get('format')=='campaign_brand_section_v1':raise ValueError('Load this template in Header or Footer.')
         if row['content'].get('format')=='campaign_blocks_v1':return deepcopy(row['content']['document'])

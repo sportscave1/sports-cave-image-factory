@@ -70,7 +70,7 @@ def product_picker(doc, section_id, catalogue, key):
             st.session_state.pop(key+'page',None);st.rerun(scope='fragment')
 
 
-def middle_editor(doc, key, shop):
+def middle_editor(doc, key, shop, store=None):
     # Resolve only selected, visible products once per opened draft/market/selection.
     # Preview size and text edits never trigger product/edition reads.
     selection=(doc['market'],tuple(sorted({p['id'] for s in middle_sections(doc)
@@ -93,7 +93,11 @@ def middle_editor(doc, key, shop):
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')
         try:
-            if event.get('type')=='picker':
+            if event.get('type')=='add' and event.get('kind')=='template':
+                if store is None:raise ValueError('Template storage is unavailable.')
+                from crm_campaign_library import picker
+                picker(store,doc)
+            elif event.get('type')=='picker':
                 if not any(s['id']==event.get('id') and s['type']=='catalogue' for s in sections): raise ValueError('Catalogue not found.')
                 picker_key=key+'picker_'+event['id']
                 for suffix in ('basket','page'):st.session_state.pop(picker_key+suffix,None)

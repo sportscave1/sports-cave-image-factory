@@ -46,8 +46,8 @@ class SqlWorkspaceTests(unittest.TestCase):
             result=self.store.delete_draft(ADMIN,row['id'],row['version'],confirmed=True,confirmed_name=row['name'])
         self.assertTrue(result['deleted']);audit.assert_called_once()
         self.assertEqual(audit.call_args.kwargs['entity_id'],str(row['id']))
-        self.assertEqual(self.store.history(row['id']),[])
-        with self.assertRaises(ValueError):self.store.draft(row['id'])
+        self.assertGreaterEqual(len(self.store.history(row['id'])),2)
+        self.assertTrue(self.store.draft(row['id'])['archived_at'])
         self.assertEqual(self.store.draft(other['id'])['name'],other['name'])
         self.assertTrue(self.store.history(other['id']))
 
@@ -94,7 +94,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
         at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs],['Campaign Details','HTML'])
+        self.assertEqual([t.label for t in at.tabs],['Campaign Settings','HTML','Templates'])
         iframe=next(e for e in at.get('iframe') if 'A collector moment' in e.proto.srcdoc)
         self.assertIn('Unsubscribe',iframe.proto.srcdoc)
         next(b for b in at.button if str(b.key).endswith('device_Mobile')).click().run()
@@ -105,8 +105,8 @@ class SqlWorkspaceTests(unittest.TestCase):
         at=self.app()
         next(b for b in at.button if b.label=='Save draft').click().run(timeout=20)
         identity=at.session_state['campaign_editor']['id']
-        next(b for b in at.button if b.label=='Delete draft').click().run(timeout=20)
-        self.assertTrue(any('This cannot be undone' in w.value for w in at.warning))
+        next(b for b in at.button if b.key=='recent_delete_'+str(identity)).click().run(timeout=20)
+        self.assertTrue(any('audit history are retained' in w.value for w in at.warning))
         self.assertTrue(any('Untitled campaign' in m.value for m in at.markdown))
         self.assertTrue(self.store.draft(identity))
         next(b for b in at.button if b.label=='Cancel').click().run(timeout=20)
@@ -136,7 +136,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         self.assertEqual(row['document']['content']['subject'],'Saved subject')
         self.assertEqual(row['document']['content']['preheader'],'Saved preview')
         self.assertTrue(any('A collector moment' in e.proto.srcdoc for e in at.get('iframe')))
-        next(b for b in at.button if b.label=='+ New').click().run(timeout=20)
+        next(b for b in at.button if b.label=='+ New campaign').click().run(timeout=20)
         self.assertIsNone(at.session_state['campaign_editor']['id'])
         self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'')
         self.assertEqual(before+1,self.store.q('SELECT count(*) AS n FROM crm_campaign_drafts',one=True)['n'])
@@ -144,10 +144,7 @@ class SqlWorkspaceTests(unittest.TestCase):
     def test_recent_open_uses_same_editor_and_protects_unsaved_compose(self):
         saved=self.draft();at=self.app()
         next(t for t in at.text_input if t.label=='Subject').set_value('Keep this local edit').run()
-        # Current AppTest exposes mapping keys; retain support for older Streamlit.
-        keys=at.session_state.keys() if callable(getattr(at.session_state,'keys',None)) else at.session_state.filtered_state
-        table_key=next(k for k in keys if k.startswith('recent_campaigns_'))
-        at.session_state[table_key]={'selection':{'rows':[],'columns':[],'cells':[[0,'Campaign']]}};at.run()
+        next(b for b in at.button if b.key=='recent_open_'+str(saved['id'])).click().run()
         self.assertIsNone(at.session_state['campaign_editor']['id'])
         self.assertTrue(any('Save your changes first' in w.value for w in at.warning))
         next(b for b in at.button if b.label=='Keep editing').click().run()

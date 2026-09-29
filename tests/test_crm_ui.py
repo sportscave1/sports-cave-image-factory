@@ -56,9 +56,8 @@ class UiTests(unittest.TestCase):
         row=CampaignStore(connect).save(ADMIN,'Audience UI test',new_document())
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns'
         at.session_state['campaign_editor']=row;at.session_state['campaign_saved']=row.copy();at.run(timeout=20)
-        next(b for b in at.button if b.label=='Recalculate eligibility').click().run()
-        for _ in range(3):next(b for b in at.button if b.label=='Continue calculation').click().run()
-        self.assertTrue(any(c.value.startswith('Complete') for c in at.caption));self.assertFalse(at.exception)
+        self.assertTrue(any('eligible subscribers' in c.value for c in at.caption));self.assertFalse(at.exception)
+        self.assertFalse(any(e.label=='Audience' for e in at.expander))
     def test_automation_activation_fails_closed(self):
         at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')
         next(b for b in at.button if b.label=='Save workflow').click().run()

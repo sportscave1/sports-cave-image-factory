@@ -77,18 +77,21 @@ def review_dialog(shop,store,user,editor,key):
     result=st.session_state[token];doc=result['document'];counts=result['counts']
     st.write('**Campaign**  '+editor['name'])
     st.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
-    st.caption('Market: '+doc['market']+' · Audience: '+doc['audience']['name'])
+    from crm_campaign_markets import MARKET_LABELS
+    st.caption('Market: '+MARKET_LABELS[doc['market']]+' · Audience: '+doc['audience']['name'])
     st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
     if counts['excluded']:
         with st.expander('Excluded'):
             for reason,total in counts['excluded'].items():st.caption(reason.replace('_',' ').capitalize()+': '+str(total))
+    timing=doc.get('send_timing',{'mode':'now'})
+    st.caption('Delivery: '+('Scheduled · '+timing['date']+' · '+timing['time']+' recipient local time' if timing['mode']=='schedule' else 'Send now'))
     st.caption('From: '+(delivery['sender'] or 'Not configured')+' · Marketing delivery '+('ON' if delivery['marketing_enabled'] else 'OFF'))
     blockers=result['blockers']
     content_blockers=[b for b in blockers if b not in ATTESTED_LABELS]
     if not editor.get('id'):content_blockers.insert(0,'Save draft before sending')
     if content_blockers:st.warning('Complete before sending: '+ '; '.join(content_blockers))
     if delivery['marketing_enabled'] and any(b in ATTESTED_LABELS for b in blockers):
-        st.warning('Production delivery setup is not yet verified. Review Campaign settings before activation.')
+        st.warning('Production delivery setup is not yet verified. Production configuration requires administrator verification before activation.')
     if not delivery['marketing_enabled']:st.info(OFF)
     st.caption('Confirming Send now confirms review of this campaign’s copy and subject.')
     a,b=st.columns(2)
@@ -100,12 +103,3 @@ def review_dialog(shop,store,user,editor,key):
                 sent=queue_campaign(shop,store,user,editor,operation)
             st.success('Campaign already queued.' if sent['already_started'] else 'Campaign queued for '+str(sent['recipients'])+' recipients.')
         except Exception as exc:st.error(safe_error(exc))
-
-
-def bottom_settings(shop,store,actions,navigate):
-    if not os_accounts.can_access_page(actions.user,'crm_settings_view'):return
-    section=st.expander('Campaign settings',key='campaign_settings_open',expanded=False,on_change='rerun')
-    if section.open:
-        with section:
-            from crm_settings_page import campaign_settings_panel
-            campaign_settings_panel(shop,store,actions,navigate)

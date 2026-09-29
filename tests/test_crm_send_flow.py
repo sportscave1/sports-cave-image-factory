@@ -122,7 +122,7 @@ class SendFlowUiTests(unittest.TestCase):
             next(t for t in at.text_input if t.label=='Subject').set_value('Editing').run(timeout=20)
             panel.assert_not_called()
             at.session_state['campaign_settings_open']=True;at.run(timeout=20)
-            panel.assert_called_once()
+            panel.assert_not_called()
     def test_expanded_settings_has_no_second_test_action(self):
         at=self.app();at.run(timeout=20)
         at.session_state['campaign_settings_open']=True;at.run(timeout=20)
