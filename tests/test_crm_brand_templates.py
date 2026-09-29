@@ -149,13 +149,17 @@ class BrandTemplateTests(unittest.TestCase):
             self.assertFalse(at.exception)
             self.assertEqual(next(r['name'] for r in self.store.section_templates(kind,self.cfg) if r['is_default']),label)
             self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'')
-        next(b for b in at.button if b.key=='campaign_settings_toggle').click().run(timeout=20)
-        next(s for s in at.selectbox if s.label=='Campaign Settings').select('Email brand templates').run(timeout=20)
-        next(b for b in at.button if b.key=='header_edit').click().run(timeout=20)
+        # AppTest does not serialize stateful expander open state yet. Preserve
+        # the browser's expanded state explicitly across these widget reruns.
+        def settings_run():
+            at.session_state['campaign_settings_open']=True;at.run(timeout=20)
+        settings_run()
+        next(s for s in at.selectbox if s.label=='Campaign Settings').select('Email brand templates');settings_run()
+        next(b for b in at.button if b.key=='header_edit').click();settings_run()
         self.assertFalse(at.exception)
         next(t for t in at.text_area if t.label=='Header template HTML').set_value('<p>Reviewed shared header</p>')
         self.assertTrue(next(b for b in at.button if b.label=='Save shared template').disabled)
-        next(c for c in at.checkbox if c.label=='Confirm overwriting this shared template').check().run(timeout=20)
-        next(b for b in at.button if b.label=='Save shared template').click().run(timeout=20)
+        next(c for c in at.checkbox if c.label=='Confirm overwriting this shared template').check();settings_run()
+        next(b for b in at.button if b.label=='Save shared template').click();settings_run()
         self.assertFalse(at.exception)
         self.assertEqual(self.store.default_sections(self.cfg)['header'],'<p>Reviewed shared header</p>')

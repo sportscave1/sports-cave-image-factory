@@ -35,6 +35,8 @@ def settings(env=None):
     return {'business': env.get('CRM_BUSINESS_DISPLAY_NAME','Sports Cave').strip(),
             'postal': env.get('BUSINESS_POSTAL_ADDRESS','').strip(),
             'website': env.get('CRM_BUSINESS_WEBSITE','https://www.sportscaveshop.com').strip(),
+            'privacy': 'https://www.sportscaveshop.com/policies/privacy-policy',
+            'refund': 'https://www.sportscaveshop.com/policies/refund-policy',
             'contact': env.get('RESEND_REPLY_TO','').strip(),
             'postal_verified': env.get('CRM_BUSINESS_ADDRESS_VERIFIED','').lower() == 'true',
             'domain_verified': env.get('CRM_SENDING_DOMAIN_VERIFIED','').lower() == 'true'}
@@ -50,7 +52,7 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections'}
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience'}
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
     if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
     if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
@@ -68,6 +70,10 @@ def validate_document(doc):
             raise ValueError('HTML Section 1 and the compatibility source must match.')
         if sum(len(s.get('html','').encode('utf-8')) for s in doc['middle_sections']) + sum(len(v.encode('utf-8')) for v in doc.get('html_sections',{}).values()) > 95000:
             raise ValueError('Combined HTML sections must be at most 95 KB.')
+    if 'send_timing' in doc:
+        from crm_campaign_schedule import validate
+        validate(doc['send_timing'])
+    if 'market_audience' in doc and doc['market_audience'] is not True:raise ValueError('Invalid market audience mode.')
     validate_blocks(doc.get('blocks',[]))
     if not isinstance(doc.get('tags',[]),list) or len(doc.get('tags',[]))>10 or any(not isinstance(t,str) or len(t)>40 for t in doc.get('tags',[])): raise ValueError('Use up to 10 short internal tags.')
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',doc.get('campaign_key','legacy')): raise ValueError('Invalid campaign tracking key.')
@@ -119,7 +125,7 @@ def fingerprint(doc, cfg):
     return hashlib.sha256(json.dumps({'document':doc,'footer':cfg},sort_keys=True).encode()).hexdigest()
 
 
-def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
+def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False):
     validate_document(doc); cfg=settings() if cfg is None else cfg; c=doc['content']
     e=lambda value: escape(str(value), quote=True)
     blocks=doc.get('blocks') or legacy_blocks(c)
@@ -161,7 +167,23 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None):
     text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain,cfg['business'],cfg['postal'] or 'Business postal address not configured',cfg['website'],cfg['contact'],'You’re receiving this marketing email because you subscribed to Sports Cave updates.',unsubscribe])
     if 'html_sections' in doc:
         text='\n\n'.join(['CAMPAIGN TEST / PREVIEW — live marketing disabled',c['preheader'],plain])
-    return {'subject':'[CAMPAIGN TEST] '+c['subject'],'html':html,'text':text}
+    if production:
+        if not unsubscribe_url:raise ValueError('Production unsubscribe URL required.')
+        # Only system test markers/tracking change. Authored content and the shared
+        # sanitizer/footer pipeline above remain identical to preview/test output.
+        from html import unescape
+        from urllib.parse import parse_qsl, urlencode, urlunsplit
+        def live_url(url):
+            p=urlsplit(url);pairs=parse_qsl(p.query,keep_blank_values=True)
+            if ('utm_source','sports_cave') in pairs and ('utm_campaign',doc.get('campaign_key','')) in pairs:
+                pairs=[(k,v) for k,v in pairs if k!='sc_test']
+                return urlunsplit((p.scheme,p.netloc,p.path,urlencode(pairs),p.fragment))
+            return url
+        html=re.sub(r'href="([^"]*)"',lambda m:'href="'+e(live_url(unescape(m[1])))+'"',html)
+        text=re.sub(r'https://[^\s<>]+',lambda m:live_url(m[0]),text)
+        html=html.replace('CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED','')
+        text=text.replace('CAMPAIGN TEST / PREVIEW — live marketing disabled','').replace('CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED','').strip()
+    return {'subject':('' if production else '[CAMPAIGN TEST] ')+c['subject'],'html':html,'text':text}
 
 
 def html_budget(html):

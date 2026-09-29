@@ -164,20 +164,15 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
     title,buttons=st.columns([5,4],vertical_alignment='center')
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
-    title.caption('● Marketing delivery OFF · Tests only')
+    title.caption('● Marketing delivery '+('ON' if get_resend_marketing_config_status()['marketing_enabled'] else 'OFF · Tests only'))
     with buttons.container(horizontal=True,horizontal_alignment='right',gap='small'):
         save=st.button('Save draft',type='primary',disabled=not available or bool(editor['archived_at']))
-        if st.button('Send test',disabled=not available or not os_accounts.is_admin(actions.user)):
-            st.session_state[key+'show_test']=True
-            st.session_state[key+'panel']='Campaign Details'
-        if os_accounts.can_access_page(actions.user,'crm_settings_view') and st.button('Settings',icon=':material/settings:',type='tertiary',key='campaign_settings_toggle',help='Campaign Settings'):
-            st.session_state['campaign_settings_open']=not st.session_state.get('campaign_settings_open',False)
-            if st.session_state['campaign_settings_open']:st.toast('Campaign Settings opened below the editor.')
-        with st.popover('More'):
-            new_requested=st.button('+ New')
-            st.caption('History, duplicate, archive and deletion are in the left panel.')
+        from crm_campaign_send_ui import test_control
+        test_control(drafts,actions.user,editor,key,available)
+        send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']))
+    new_requested=False
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
-    test_request=None;duplicate_requested=archive_requested=restore_requested=delete_requested=False
+    duplicate_requested=archive_requested=restore_requested=delete_requested=False
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
             details,html_tab=st.tabs(['Campaign Details','HTML'],key=key+'panel')
@@ -190,12 +185,11 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
                 with st.expander('Audience'):
                     audience_editor(shop,drafts,doc,key,compact=True)
                 st.caption(doc['audience'].get('name','All subscribed')+' · '+doc['market']+' · '+('Eligible: '+str(counts['eligible']) if counts.get('complete') else 'Not calculated'))
-                with st.expander('Test',expanded=st.session_state.get(key+'show_test',False)):
-                    if available:test_request=test_panel(drafts,actions.user,editor,key,cfg)
                 with st.expander('Templates'):
                     if st.button('Load saved templates',disabled=not available):st.session_state[key+'templates']=True
                     if st.session_state.get(key+'templates') and available:html_templates(drafts,actions.user,editor,key)
                 with st.expander('More'):
+                    new_requested=st.button('+ New')
                     persisted=bool(editor.get('id')) and available
                     duplicate_requested=st.button('Duplicate',disabled=not persisted or dirty(editor))
                     archive_requested=st.button('Archive',disabled=not persisted or bool(editor['archived_at']) or dirty(editor))
@@ -221,9 +215,14 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
             with st.spinner('Saving draft…'):
                 updated=drafts.save(actions.user,editor['name'],doc,editor.get('id'),editor.get('version'))
             st.session_state['campaign_editor']=deepcopy(updated);st.session_state['campaign_saved']=deepcopy(updated)
-            st.toast('Draft saved');st.rerun()
+            st.toast('Draft saved')
+            from crm_section_ui import rerun_editor
+            rerun_editor()
         except (ValueError,StoreUnavailable) as exc:st.error('Save failed; your edits are retained. '+str(exc))
-    if test_request:perform_test(drafts,actions.user,editor,key,test_request)
+    if send_now:
+        from crm_campaign_send_ui import review_dialog
+        st.session_state.pop(key+'send_review',None)
+        review_dialog(shop,drafts,actions.user,editor,key)
     if duplicate_requested or archive_requested or restore_requested or delete_requested:
         if dirty(editor):st.warning('Save pending edits first.')
         elif duplicate_requested:open_editor(drafts.duplicate(actions.user,editor['id']));st.rerun()
@@ -232,12 +231,9 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         elif restore_requested:
             drafts.restore(actions.user,editor['id'],editor['version']);open_editor(drafts.draft(editor['id']));st.rerun()
         elif delete_requested:delete_dialog(drafts,actions.user,editor)
-    if st.session_state.get('campaign_settings_open'):
-        from crm_navigation import require
-        require(actions.user,'crm_settings_view')
-        from crm_settings_page import campaign_settings_panel
-        campaign_settings_panel(shop,store,actions,navigate)
     if available:recent_campaigns(drafts,key)
+    from crm_campaign_send_ui import bottom_settings
+    bottom_settings(shop,store,actions,navigate)
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:

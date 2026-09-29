@@ -6,7 +6,7 @@ import time
 from crm_cache import CACHE
 
 CUSTOMER_FIELDS = '''id firstName lastName email validEmailAddress createdAt updatedAt tags
- defaultAddress { countryCodeV2 } amountSpent { amount currencyCode } numberOfOrders
+ defaultAddress { countryCodeV2 country provinceCode province zip timeZone } amountSpent { amount currencyCode } numberOfOrders
  lastOrder { id name createdAt }
  emailMarketingConsent { marketingState marketingOptInLevel consentUpdatedAt }'''
 PAGE = 'pageInfo { hasNextPage endCursor }'

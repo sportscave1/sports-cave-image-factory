@@ -69,7 +69,7 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
             from crm_middle_sections import apply_event
             apply_event(at.session_state['campaign_editor']['document'],
                         {'type':'html','base':['html-1'],'id':'html-1','html':'<p>Keep source</p>'})
-            at.button(key='campaign_settings_toggle').click().run(timeout=20)
+            at.session_state['campaign_settings_open']=True;at.run(timeout=20)
             self.assertFalse(at.exception)
             self.assertTrue(any('Campaign Settings' in m.value for m in at.markdown))
             self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'<p>Keep source</p>')
@@ -77,6 +77,6 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
             self.assertTrue(any(b.label=='Save internal-test settings' for b in at.button))
             self.assertNotIn('SECRET-SENTINEL',str(at))
             at.run();send.assert_not_called()
-            next(b for b in at.button if b.label=='Close settings').click().run()
+            at.session_state['campaign_settings_open']=False;at.run()
             self.assertFalse(at.session_state['campaign_settings_open'])
             self.assertFalse(at.exception)

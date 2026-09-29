@@ -24,15 +24,13 @@ def campaign_settings_panel(shop,store,actions,navigate):
     with st.container(key='campaign-settings-panel'):
         st.markdown('#### Campaign Settings')
         st.html('<style>.st-key-campaign-settings-panel button{background:#fff!important;color:#222!important;border:1px solid #ddd!important;box-shadow:none!important}</style>')
-        if st.button('Close settings',type='tertiary'):
-            st.session_state['campaign_settings_open']=False;st.rerun()
         if os_accounts.is_admin(actions.user):
             try:
                 records=CampaignStore(store.connect);sending=records.setting('sending')['value']
                 delivery=get_resend_marketing_config_status()
                 from crm_onsite import config
                 st.table([{'Setting':name,'Value':value} for name,value in (
-                    ('Marketing delivery','Off · production sending unavailable'),
+                    ('Marketing delivery','On' if delivery['marketing_enabled'] else 'Off · production sending unavailable'),
                     ('Smart Sending',str(sending['smart_hours'])+' hours'),
                     ('Website tracking','On' if config()['enabled'] else 'Off'),
                     ('Test allowlist','Configured' if sending['internal_recipients'] else 'Not configured'),
@@ -58,12 +56,9 @@ def settings_page(shop,store,actions,navigate,initial=None,compact=False):
         from crm_page import segments_page
         segments_page(shop,store,actions);return
     records=CampaignStore(store.connect)
-    if section=='Sending & Compliance':
+    if section=='Sending & Compliance' and not compact:
         from crm_delivery_panel import render_delivery_panel
-        if compact:
-            with st.expander('Delivery diagnostics'):
-                render_delivery_panel(user)
-        else:render_delivery_panel(user)
+        render_delivery_panel(user)
     try:
         if section=='Templates':templates_page(records,shop,user)
         elif section=='Reports':campaign_report(records,shop,user)

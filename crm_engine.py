@@ -67,7 +67,27 @@ class Engine:
                 self.store.suppress(recipient_hash(address),row['shopify_customer_id'],'suppressed','resend',address)
                 self.store.finish_send(row,'BLOCKED','provider_suppression');return True
             content=self.store.template(row['template_id'],row['template_version'])
-            message=render(content,context,self.config.unsubscribe_url(row['id']),self.config.logo_url,row['idempotency_key'])
+            if content.get('format')=='campaign_delivery_v1':
+                from crm_campaign_schedule import overdue_reason
+                late=overdue_reason(content,row,self.clock())
+                if late:
+                    self.store.finish_send(row,'BLOCKED',late);return True
+                if content['document'].get('market_audience'):
+                    from crm_campaign_markets import country,COUNTRIES
+                    market=content['document']['market']
+                    if market!='Global' and country(c)!=COUNTRIES[market]:
+                        self.store.finish_send(row,'BLOCKED','market_changed');return True
+                from crm_campaign_send import production_checks
+                from crm_campaign_content import render_campaign
+                if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
+                    self.store.finish_send(row,'BLOCKED','recipient_changed');return True
+                if not all(production_checks(content['document'],content['render_settings']).values()):
+                    self.store.finish_send(row,'BLOCKED','production_readiness');return True
+                unsubscribe=self.config.unsubscribe_url(row['id'])
+                message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True)
+                message['unsubscribe_url']=unsubscribe
+            else:
+                message=render(content,context,self.config.unsubscribe_url(row['id']),self.config.logo_url,row['idempotency_key'])
             digest=hashlib.sha256(json.dumps({'to':address,**message},sort_keys=True).encode()).hexdigest()
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):
@@ -75,7 +95,7 @@ class Engine:
             if not row['test_send']:
                 from crm_workspace_store import WorkspaceRecords
                 records=WorkspaceRecords(self.store.connect)
-                hours=records.setting('sending')['value']['smart_hours']
+                hours=content['document']['smart_hours'] if content.get('format')=='campaign_delivery_v1' else records.setting('sending')['value']['smart_hours']
                 if records.frequency_blocked(recipient_hash(address),hours):
                     self.store.finish_send(row,'BLOCKED','smart_sending');return True
             self.hold_lease()
@@ -184,6 +204,8 @@ class Engine:
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
         try:
+            from crm_campaign_schedule import schedule_gate
+            schedule_gate(self.store,self.config.enabled,self.clock())
             events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' ORDER BY received_at LIMIT 10")
             for event in events:
                 if not self.store.lease(owner):return {'leader':False}

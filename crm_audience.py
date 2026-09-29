@@ -20,13 +20,13 @@ def validate_selection(audience):
     if not audience['include']:raise ValueError('Choose at least one included audience.')
 
 
-def evaluate_profiles(profiles,excluded_ids,excluded_hashes,suppressed_hashes,suppressed_ids,recent_hashes):
+def evaluate_profiles(profiles,excluded_ids,excluded_hashes,suppressed_hashes,suppressed_ids,recent_hashes, *, recipients=False):
     """Exclusive primary reasons; conflicting consent never resolves to SUBSCRIBED."""
     grouped={}
     for c in profiles:
         normalized=str(c.get('email') or '').strip().casefold()
         grouped.setdefault(normalized or 'missing:'+c['id'],[]).append(c)
-    reasons={};allowed=[];diagnostic={'conflicting_profiles':0}
+    reasons={};allowed=[];selected=[];diagnostic={'conflicting_profiles':0}
     for address,rows in grouped.items():
         states={(c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED') for c in rows}
         conflict=len(states)>1
@@ -41,12 +41,14 @@ def evaluate_profiles(profiles,excluded_ids,excluded_hashes,suppressed_hashes,su
                 if ok:
                     if h in recent_hashes:reason='smart_sending'
                     elif accepted:reason='duplicate'
-                    else:reason='';accepted=True;allowed.append(h)
+                    else:reason='';accepted=True;allowed.append(h);selected.append({'id':c['id'],'hash':h})
             if reason:reasons[reason]=reasons.get(reason,0)+1
-    return {'members':len(profiles),'eligible':len(allowed),'excluded':reasons,'diagnostics':diagnostic}
+    result={'members':len(profiles),'eligible':len(allowed),'excluded':reasons,'diagnostics':diagnostic}
+    if recipients:result['recipients']=selected
+    return result
 
 
-def selection_page(shop,store,audience,previous=None,*,smart_hours=16):
+def selection_page(shop,store,audience,previous=None,*,smart_hours=16,recipients=False):
     """One bounded Shopify page per click; only aggregates leave session memory.
 
     Includes are unioned by customer ID; exclusions also apply by normalized email.
@@ -87,11 +89,11 @@ def selection_page(shop,store,audience,previous=None,*,smart_hours=16):
         for c in list(state['profiles'].values())+list(state.get('consent_profiles',{}).values()):
             states.setdefault(recipient_hash(c.get('email')),set()).add((c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED'))
         conflicts={h for h,s in states.items() if len(s)>1}
-        result=evaluate_profiles(list(state['profiles'].values()),state['excluded_ids'],state['excluded_hashes'],suppressed,ids,recent)
+        result=evaluate_profiles(list(state['profiles'].values()),state['excluded_ids'],state['excluded_hashes'],suppressed,ids,recent,recipients=recipients)
         # Re-evaluate affected selected profiles with the globally observed conflict.
         if conflicts:
             safe=[c for c in state['profiles'].values() if recipient_hash(c.get('email')) not in conflicts]
-            result=evaluate_profiles(safe,state['excluded_ids'],state['excluded_hashes'],suppressed,ids,recent)
+            result=evaluate_profiles(safe,state['excluded_ids'],state['excluded_hashes'],suppressed,ids,recent,recipients=recipients)
             for c in state['profiles'].values():
                 if recipient_hash(c.get('email')) in conflicts:
                     reason='excluded_segment' if c['id'] in state['excluded_ids'] or recipient_hash(c.get('email')) in state['excluded_hashes'] else 'conflicting_consent'

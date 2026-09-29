@@ -37,7 +37,7 @@ class Store:
                 return cur.fetchone() if one else cur.fetchall()
             return None
     def list(self,kind):
-        where=" WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1'" if kind=='templates' else ''
+        where=" WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1'" if kind=='templates' else ''
         return self.q('SELECT * FROM '+TABLES[kind]+where+' ORDER BY name LIMIT 500')
     def get(self,kind,object_id):return self.q('SELECT * FROM '+TABLES[kind]+' WHERE id=%s',(object_id,),True)
     def state(self,key):
@@ -169,4 +169,3 @@ class Store:
          count(DISTINCT e.id) FILTER(WHERE e.status='COMPLETED') AS completed FROM crm_automations a LEFT JOIN crm_automation_enrollments e ON e.automation_id=a.id
          LEFT JOIN crm_marketing_sends s ON s.enrollment_id=e.id AND NOT s.test_send LEFT JOIN crm_marketing_events v ON v.provider_email_id=s.provider_email_id GROUP BY a.id,a.name''')
         return summary,campaigns,automations
-

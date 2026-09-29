@@ -13,7 +13,7 @@ from crm_tracking import asset_url, public_https
 from crm_logic import now
 
 DEFAULTS={'branding':{'logo':'','accent':'#b49450','font':'Arial','button_style':'Solid black','social_links':[]},
-          'compliance':{'business':'Sports Cave','postal':'','postal_verified':False,'website':'https://www.sportscaveshop.com','privacy':'','contact':'','identity_confirmed':False},
+          'compliance':{'business':'Sports Cave','postal':'','postal_verified':False,'website':'https://www.sportscaveshop.com','privacy':'https://www.sportscaveshop.com/policies/privacy-policy','contact':'','identity_confirmed':False},
           'sending':{'internal_recipients':[],'smart_hours':16},
           'prompts':{'default':'Premium collector-focused copy. Concise and truthful.'}}
 
@@ -71,12 +71,13 @@ class WorkspaceRecords(BrandTemplates):
     def render_settings(self,env=None):
         cfg=settings(env)
         business=self.setting('compliance')
-        if business['version']:cfg.update(business['value'])
+        if business['version']:
+            cfg.update({k:v for k,v in business['value'].items() if k not in ('website','privacy','contact') or v})
         cfg.update(self.setting('branding')['value'])
         return cfg
 
     def templates(self,archived=False):
-        return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
+        return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
 
     def template_document(self,row):
         if row['content'].get('format')=='campaign_brand_section_v1':raise ValueError('Load this template in Header or Footer.')
@@ -99,7 +100,7 @@ class WorkspaceRecords(BrandTemplates):
         content={'format':'campaign_blocks_v1','document':doc}
         with self.db() as conn:
             if identity:
-                row=conn.execute("UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' RETURNING *",(name,json.dumps(content),identity,version)).fetchone()
+                row=conn.execute("UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' RETURNING *",(name,json.dumps(content),identity,version)).fetchone()
             else:row=conn.execute("INSERT INTO crm_templates(template_key,name,kind,content) VALUES(%s,%s,'Campaign',%s::jsonb) RETURNING *",('design_'+uuid.uuid4().hex,name,json.dumps(content))).fetchone()
             if not row:raise ValueError('Template changed elsewhere or was archived. Reload before editing.')
             conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(row['id'],row['version'],json.dumps(content)))
@@ -107,7 +108,7 @@ class WorkspaceRecords(BrandTemplates):
 
     def archive_design(self,user,identity,version):
         require(user,'crm_templates_manage')
-        if not self.q("UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1 WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' RETURNING id",(identity,version),True):raise ValueError('Template changed elsewhere.')
+        if not self.q("UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1 WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' RETURNING id",(identity,version),True):raise ValueError('Template changed elsewhere.')
 
     def recent_marketing_hashes(self,hours=16):
         # OS-only marketing receipts, including future campaign/flow dispatches.
