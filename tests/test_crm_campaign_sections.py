@@ -132,8 +132,9 @@ class SectionPersistenceTests(unittest.TestCase):
         at = AppTest.from_string(SCRIPT); at.session_state['route']='CRM Campaigns'; at.run(timeout=20)
         self.assertFalse(at.exception)
         self.assertEqual([t.label for t in at.tabs], ['Campaign Details','HTML'])
-        sections = {e.label:e.proto.expanded for e in at.expander if e.label in ('✓ Header','✓ Footer')}
-        self.assertEqual(sections, {'✓ Header':False, '✓ Footer':False})
+        # Streamlit AppTest classifies expanders with an explicit icon as status.
+        sections = {e.label:e.proto.expanded for e in [*at.expander, *at.status] if e.label in ('Header','Footer')}
+        self.assertEqual(sections, {'Header':False, 'Footer':False})
         from crm_middle_sections import middle_sections, apply_event
         doc = at.session_state['campaign_editor']['document']
         self.assertEqual(middle_sections(doc)[0]['html'], '')

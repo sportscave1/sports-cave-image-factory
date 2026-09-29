@@ -97,7 +97,7 @@ class ModularTests(unittest.TestCase):
 
     def test_catalogue_render_facts_plaintext_responsive_safe_and_not_allocated(self):
         doc=catalogue_doc();output=render_campaign(doc)
-        for text in ('Artwork 1','100 WORLDWIDE','#037 / 100','Only 64 remaining','A$85.00','A$110.00','View the Edition'):
+        for text in ('Artwork 1','100 WORLDWIDE','#037 / 100','64 REMAINING','A$85.00','A$110.00','View the Edition'):
             self.assertIn(text,output['html']);self.assertIn(text,output['text'])
         self.assertNotIn('Your edition',output['html'])
         self.assertIn('class="sc-stack"',output['html']);self.assertIn('@media only screen',output['html'])
@@ -230,7 +230,14 @@ class ModularPersistenceTests(unittest.TestCase):
         operation=str(uuid.uuid4());wire=Mock()
         def sent(*a,**kw):
             history=self.store.q("SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s AND action='campaign_test_snapshot'",(row['id'],))
-            self.assertEqual(history[-1]['after_value']['outbound_snapshot']['rendered']['html'],kw['json']['html'])
+            snapshot=history[-1]['after_value']['outbound_snapshot']
+            self.assertEqual(snapshot['rendered']['html'],kw['json']['html'])
+            self.assertEqual(snapshot['sections'][-1]['products'][0]['url'],doc['middle_sections'][-1]['products'][0]['url'])
+            from tests.test_crm_catalogue_presentation import Markup
+            links=[a for a in Markup(kw['json']['html']).anchors if '/products/art-1' in a.get('href','')]
+            self.assertEqual(len(links),3)
+            self.assertEqual(len({a['href'] for a in links}),1)
+            self.assertTrue(all(a.get('target')=='_blank' for a in links))
             return Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         wire.post.side_effect=sent
         facts=service()

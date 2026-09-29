@@ -77,15 +77,33 @@ def composer_styles():
     .st-key-crm-workspace:has(.st-key-crm-composer-layout) h3{padding:0;margin:0;font-size:20px}
     .st-key-crm-composer-layout{--crm-panel-height:calc(100dvh - var(--sc-topbar-height, 64px) - 120px);align-items:stretch}
     .st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:360px !important;flex:0 0 360px !important;height:var(--crm-panel-height) !important}
-    .st-key-crm-composer-controls{width:100% !important;flex:1 1 auto !important;height:var(--crm-panel-height) !important;min-height:440px;background:#faf9f6;border:1px solid #e5e2da;border-radius:8px;padding:10px;overflow-y:auto}
+    .st-key-crm-composer-controls{width:100% !important;flex:1 1 auto !important;height:var(--crm-panel-height) !important;min-height:440px;background:#faf9f6;border:1px solid #e5e2da;border-radius:10px;padding:16px;overflow-y:auto}
     .st-key-crm-composer-controls [data-testid="stVerticalBlock"]{gap:8px}
     .st-key-crm-composer-controls label p{font-size:12px}
-    .st-key-crm-composer-controls [role="tablist"]{gap:18px}
-    .st-key-crm-composer-controls [role="tab"]{font-size:13px;padding:4px 0;height:34px;background:transparent !important;color:#242424 !important}
-    .st-key-crm-composer-controls [role="tab"][aria-selected="true"]{border-bottom:2px solid #b49450 !important}
-    .st-key-crm-composer-controls [data-baseweb="tab-highlight"]{background:#b49450}
-    .st-key-crm-composer-controls textarea{font:12px/1.5 Consolas,monospace;background:#fff}
-    .st-key-campaign-body-source textarea{height:max(320px,calc(var(--crm-panel-height) - 250px)) !important}
+    .st-key-crm-composer-controls [role="tablist"]{gap:22px;border-bottom:1px solid #e5e2da;margin-bottom:8px}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"],
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{height:36px;padding:0 0 8px;background:transparent !important;border:0 !important;border-radius:0;box-shadow:none !important;color:#706f69 !important;transition:color 140ms}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"] p{font-size:14px;font-weight:500}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"],
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"]:hover{color:#22231f !important}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"] p{font-weight:600}
+    .st-key-crm-composer-controls .react-aria-SelectionIndicator,.st-key-crm-composer-controls [data-baseweb="tab-highlight"]{background:var(--sc-gold,#c9a33f) !important;height:2px}
+    .st-key-crm-composer-controls [data-baseweb="tab-border"]{background:transparent}
+    .st-key-crm-composer-controls [role="tab"]:focus-visible,
+    .st-key-crm-composer-controls button:focus-visible,
+    .st-key-crm-composer-controls summary:focus-visible{outline:2px solid var(--sc-gold,#c9a33f) !important;outline-offset:2px}
+    .st-key-crm-composer-controls textarea{font:13px/1.6 Consolas,monospace !important;background:#f6f6f3 !important;padding:10px !important;resize:vertical;border-radius:6px}
+    .st-key-crm-composer-controls [data-baseweb="input"],
+    .st-key-crm-composer-controls [data-baseweb="select"]>div{border-radius:6px}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"],
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] details{border-radius:7px !important;border-color:#e5e2da !important;background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary{min-height:50px;padding:10px !important;border-radius:6px !important;background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary *{background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary p{font-size:14px !important;font-weight:600}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary:hover,
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] details[open] summary{background:#f0f0eb !important}
+    .st-key-crm-fixed-header summary::after,.st-key-crm-fixed-footer summary::after{content:"Fixed  ⌄";white-space:nowrap;margin-left:auto;font-size:11px;color:#73736c}
+    .st-key-crm-fixed-header details[open] summary::after,.st-key-crm-fixed-footer details[open] summary::after{content:"Fixed  ⌃"}
     .st-key-crm-composer-preview{flex:0 0 auto;height:var(--crm-panel-height);min-height:440px;background:white;border:1px solid #e5e2da;border-radius:8px;padding:10px;min-width:0;overflow:hidden}
     .st-key-crm-composer-preview iframe{max-width:100%;height:max(370px,calc(var(--crm-panel-height) - 65px)) !important}
     .st-key-crm-composer-preview [data-testid="stElementContainer"]:has(>iframe){height:max(370px,calc(var(--crm-panel-height) - 65px)) !important}
@@ -106,13 +124,13 @@ def section_editor(doc,cfg,key,store=None,user=None,choices=None,shop=None):
     defaults=section_defaults(cfg)
     sections=doc.get('html_sections',defaults)
     footer_source=sections['footer']
-    with st.expander('✓ Header',expanded=False):
+    with st.container(key='crm-fixed-header'), st.expander('Header',expanded=False,icon=':material/lock:'):
         if store:section_picker(store,user,'header',key+'header_source',key+'header_',cfg,sections['header'],None if choices is None else choices['header'])
         header=st.text_area('Header HTML',sections['header'],height=220,key=key+'header_source')
         if store:save_section_control(store,user,'header',header,key+'header_')
     from crm_section_ui import middle_editor
     middle_editor(doc,key,shop)
-    with st.expander('✓ Footer',expanded=False):
+    with st.container(key='crm-fixed-footer'), st.expander('Footer',expanded=False,icon=':material/lock:'):
         source_key=key+'footer_source'
         if store:section_picker(store,user,'footer',source_key,key+'footer_',cfg,footer_source,None if choices is None else choices['footer'])
         footer=st.text_area('Footer HTML',footer_source,height=220,key=source_key)

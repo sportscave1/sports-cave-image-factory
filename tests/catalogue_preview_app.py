@@ -9,6 +9,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 if '--serve' in sys.argv:
     sys.argv.remove('--serve')
     import os
+    if '--polish' in sys.argv:
+        sys.argv.remove('--polish')
+        os.environ['CRM_CATALOGUE_POLISH_FIXTURE']='1'
     os.environ['CRM_MARKETING_ENABLED']='false'
     import uvicorn
     from streamlit.web.server.starlette import App
@@ -19,7 +22,7 @@ if '--serve' in sys.argv:
     routes=[Route(p,empty) for p in (top_bar_api.EMAIL_STATUS_PATH,top_bar_api.ORDER_STATUS_PATH,top_bar_api.NOTIFICATIONS_PATH,top_bar_api.DAILY_PLANNER_STATUS_PATH,top_bar_api.REPAIR_REQUESTS_PATH)]
     uvicorn.run(App(str(Path(__file__).resolve()),routes=routes),host='127.0.0.1',port=8514)
 else:
-    import runpy,time
+    import runpy,time,os
     from unittest.mock import Mock
     import streamlit as st
     import requests,supabase_backend,crm_page,crm_service,crm_catalogue,smtplib,imaplib
@@ -48,6 +51,14 @@ else:
     for p,name in zip(facts,names):
         p['title']=name
         p['image']='https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-logo-landscape-gold-transparent-optimised_1.webp?v=1779715351'
+    if os.getenv('CRM_CATALOGUE_POLISH_FIXTURE')=='1':
+        from tests.catalogue_polish_fixture import products,document
+        from crm_campaign_page import open_editor
+        facts=products()
+        if not st.session_state.get('polish_fixture_loaded'):
+            open_editor({'id':None,'name':'Collector catalogue · local fixture','document':document(),
+                         'version':0,'status':'DRAFT','archived_at':None})
+            st.session_state['polish_fixture_loaded']=True
     catalogue.resolve=lambda ids,*a,**kw:[p.copy() for identity in ids for p in facts if p['id']==identity]
     catalogue.search=lambda query='',offset=0,active=True:{'rows':[p for p in facts if query.lower() in p['title'].lower()][offset:offset+12],'more':False}
     crm_catalogue.Catalogue=lambda *a,**kw:catalogue

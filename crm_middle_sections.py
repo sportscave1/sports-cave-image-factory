@@ -90,8 +90,10 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     present = False
     for s in middle_sections(doc):
         if not s['visible']: continue
-        source = s['html'] if s['type'] == 'html' else catalogue_html(s)
-        markup, plain, result = import_html(source, images_off=images_off, campaign_key=campaign_key)
+        source = s['html'] if s['type'] == 'html' else catalogue_html(s, campaign_key=campaign_key)
+        # Generated catalogue links already share one tracked product destination.
+        markup, plain, result = import_html(source, images_off=images_off,
+            campaign_key=campaign_key if s['type'] == 'html' else '')
         if s['type'] == 'catalogue':
             # sc-stack is the renderer's own allowlisted responsive class.
             result['Catalogue product facts valid'] = bool(s['products']) and not any(product_issues(p, s['settings']) for p in s['products'])
