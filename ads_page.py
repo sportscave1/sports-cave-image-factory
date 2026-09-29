@@ -10,8 +10,9 @@ import logging
 import random
 import re
 import secrets
+import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -20,6 +21,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import ads_posting_handoff as posting_handoff
 import ads_refresh_winners
+import ads_refresh_generation
+import ads_standard_workflow
 import ads_ie_visual_systems as ie_visuals
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
@@ -7337,6 +7340,7 @@ def normalize_creative_refresh_context(context=None):
         "winning_primary_text": str(context.get("winning_primary_text") or "").strip(),
         "winning_headline": str(context.get("winning_headline") or "").strip(),
         "winner_image_attached_in_chatgpt": True,
+        **({"source_winner": dict(context["source_winner"])} if context.get("source_winner") else {}),
     }
 
 
@@ -7415,7 +7419,7 @@ def build_instant_experience_winner_refinement_prompt(product_name, category, co
     csv_template = build_instant_experience_copy_csv(identity, blank=True).decode("utf-8-sig")
     return f"""SPORTS CAVE — INSTANT EXPERIENCE WINNER REFINEMENT
 
-This is a proven winning ad. Do not reinvent the strategy. Create controlled sibling evolutions of the winner. Preserve the winning hook, tone, structure, product positioning and emotional style. Improve rather than replace.
+This is the selected reference ad. Treat it as statistically proven only if the supplied source evidence supports that conclusion. Do not reinvent the strategy. Create controlled sibling evolutions of the winner. Preserve the winning hook, tone, structure, product positioning and emotional style. Improve rather than replace.
 Attach the actual winning advertisement image to this ChatGPT message before running this prompt.
 Attach the winning advertisement as the style reference and the canonical Sports Cave product image as the immutable artwork reference.
 
@@ -7424,7 +7428,11 @@ Sport/category: {category}
 Market: {country}
 Destination URL: {product_url}
 Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
-Campaign moment (use only if supplied, without changing the winner's urgency): {json.dumps(campaign_moment or {}, ensure_ascii=False, default=str)}
+Source evidence: {json.dumps(winner.get("source_winner") or {}, ensure_ascii=False, default=str)}
+Winning description: {(winner.get("source_winner") or {}).get("description") or "Not supplied"}
+Winning CTA: {(winner.get("source_winner") or {}).get("cta") or "Not supplied"}
+{build_campaign_moment_copy_relevance_block(campaign_moment, selected_country=country, campaign_type="Instant Experience")}
+Visual Campaign Moment: {build_campaign_moment_visual_context(campaign_moment, selected_country=country) or "Do not inject the event or promotion into image prompts."}
 Winning Primary Text / Description:
 {winner['winning_primary_text']}
 Winning Headline:
@@ -9072,6 +9080,10 @@ def build_ads_prompt(
     recent_instant_experience_fingerprints=None,
     creative_refresh_context=None,
 ):
+    if campaign_type in {"Single Image / Video", "Carousel"} and creative_refresh_context:
+        return ads_refresh_generation.build_prompt(
+            sys.modules[__name__], product_name, category, country, campaign_type, product_url,
+            creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
     if campaign_type == "Instant Experience" and creative_refresh_context:
         return build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
@@ -9343,9 +9355,10 @@ def ads_result_context_key(
             "version": CREATIVE_REFRESH_WINNER_CONTEXT_VERSION,
             "winning_primary_text": winner_context["winning_primary_text"],
             "winning_headline": winner_context["winning_headline"],
+            **({"source_winner": winner_context["source_winner"]} if winner_context.get("source_winner") else {}),
             "winner_image_attached_in_chatgpt": True,
         }
-    payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False)
+    payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
 
@@ -9414,6 +9427,7 @@ def build_ads_result_record(
     )
     result = {
         "platform": "meta",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "context_key": ads_result_context_key(
             clean_product_id,
             clean_product_name,
@@ -9455,6 +9469,7 @@ def build_ads_result_record(
             {
                 "workflow_mode": ADS_WORKFLOW_MODE_CREATIVE_REFRESH,
                 "source": "Creative Refresh",
+                "workflow_type": "creative_refresh",
                 "creative_refresh_context": clean_creative_refresh_context,
             }
         )
@@ -9477,7 +9492,7 @@ def ads_prompt_contract_version_for_campaign(
     if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
         version += f"; {ADS_INSTANT_EXPERIENCE_WIRING_VERSION}; {ie_copy.VERSION}"
     if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}"
+        version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}; REFRESH WORKFLOW V2"
         if campaign_type == "Instant Experience":
             version += f"; WINNER REFINEMENT SINGLE COPY V1; {ie_legacy_description.VERSION}"
     return version
@@ -9549,11 +9564,12 @@ def _new_ads_image_workflow(result):
 
 
 def _reset_ads_image_workflow(result):
-    current_context = str(result.get("context_key") or "")
-    for key in list(st.session_state):
-        if str(key).startswith("ads-image-upload::") and current_context not in str(key):
-            st.session_state.pop(key, None)
-    workflow = _new_ads_image_workflow(result)
+    previous = st.session_state.get(_ads_image_state_key())
+    drafts = st.session_state.setdefault("ads-workflow-drafts", {})
+    if isinstance(previous, dict) and previous.get("context_key"):
+        drafts[previous["context_key"]] = previous
+    workflow = drafts.get(result["context_key"]) or _new_ads_image_workflow(result)
+    drafts[result["context_key"]] = workflow
     st.session_state[_ads_image_state_key()] = workflow
     return workflow
 
@@ -9561,8 +9577,7 @@ def _reset_ads_image_workflow(result):
 def _ads_image_workflow(result):
     workflow = st.session_state.get(_ads_image_state_key())
     if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
-        workflow = _new_ads_image_workflow(result)
-        st.session_state[_ads_image_state_key()] = workflow
+        workflow = _reset_ads_image_workflow(result)
     _configure_refresh_copy(result, workflow)
     return workflow
 
@@ -11499,6 +11514,14 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
         "",
         "Uploaded images",
     ]
+    if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        lines.extend(["", "Creative Refresh provenance", json.dumps({
+            "workflow_type": "creative_refresh", "creative_refresh": True,
+            "created_at": result.get("created_at"),
+            "source": result.get("creative_refresh_context") or {},
+        }, ensure_ascii=False, default=str), ""])
+    if campaign_type == "Single Image / Video":
+        lines.extend(["", "Standard ad copy", json.dumps(workflow.get("standard_ads") or [], ensure_ascii=False)])
     if slot_specs:
         for slot in slot_specs:
             outcome = image_outcomes.get(slot["id"]) or {}
@@ -12491,7 +12514,8 @@ def _render_ads_image_slots(result, workflow):
                     )
                 st.markdown(f"**{slot['label']}**")
             else:
-                st.markdown(f"**{slot['label']}**")
+                label = (f"CREATIVE REFRESH {slot['position']}" if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and result.get("campaign_type") == "Single Image / Video" else slot['label'])
+                st.markdown(f"**{label}**")
             if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
                 title, body = IMAGE_ORDER[index]
                 st.caption(f"Card {index + 1}: {title}")
@@ -12707,6 +12731,7 @@ def _ads_saved_source_signature(result, workflow):
     copy = (
         _instant_experience_concept_copy_notes_from_workflow(workflow)
         if _is_instant_experience_result(result)
+        else workflow.get("standard_ads", []) if result.get("campaign_type") == "Single Image / Video"
         else _carousel_copy_notes_from_workflow(result, workflow)
     )
     return posting_handoff.content_hash({
@@ -12771,11 +12796,12 @@ def _retain_saved_posting_package(result, workflow, outcomes, items, folder):
                     "output_height": item.get("output_height") or source.get("output_height"),
                     "content_type": item.get("content_type") or "image/jpeg",
                 })
-            if item["slot_id"] in {"_carousel_copy_csv", "_new_ads_copy_csv", "_creative_refresh_copy_csv"}:
+            if item["slot_id"] in {"_carousel_copy_csv", "_new_ads_copy_csv", "_creative_refresh_copy_csv", "_creative_refresh_csv"}:
                 copy_csv = data
         source_copy = (
             _instant_experience_concept_copy_notes_from_workflow(workflow)
             if _is_instant_experience_result(result)
+            else workflow.get("standard_ads", []) if result.get("campaign_type") == "Single Image / Video"
             else _carousel_copy_notes_from_workflow(result, saved_workflow)
         )
         workflow[posting_handoff.SAVED_PACKAGE_KEY] = posting_handoff.build_saved_package(
@@ -13072,9 +13098,10 @@ def save_ads_images_to_dropbox(
                 ),
                 "asset_type": "meta_ads_copy_csv",
             }
-    if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+    if result.get("campaign_type") in {ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE, "Single Image / Video"}:
         refresh_csv_bytes = bytes(
-            result.get("creative_refresh_canonical_csv")
+            (ads_standard_workflow.csv_bytes(sys.modules[__name__], result, workflow) if result.get("campaign_type") == "Single Image / Video" else b"")
+            or result.get("creative_refresh_canonical_csv")
             or result.get("creative_refresh_csv")
             or b""
         )
@@ -13138,6 +13165,14 @@ def save_ads_images_to_dropbox(
         ] + [
             {"slot_id": "_ad_setup_notes", "data": notes_bytes},
             {"slot_id": "_carousel_copy_csv", "data": carousel_csv_bytes},
+        ]
+        _retain_saved_posting_package(result, workflow, outcomes, items, export_folder)
+    if result.get("campaign_type") == "Single Image / Video":
+        items = [{"slot_id": slot["id"], "kind": "image",
+                  "data": ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data", b"")}
+                 for slot in slot_specs] + [
+            {"slot_id": "_ad_setup_notes", "data": notes_bytes},
+            {"slot_id": "_creative_refresh_csv", "data": refresh_csv_bytes},
         ]
         _retain_saved_posting_package(result, workflow, outcomes, items, export_folder)
     return outcomes
@@ -13395,9 +13430,10 @@ def _render_ads_image_save(result, workflow):
             == _carousel_copy_csv_signature(result, workflow)
         )
     creative_refresh_csv_saved = True
-    if result.get("campaign_type") == ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE:
+    if result.get("campaign_type") in {ads_image_workflow.CREATIVE_REFRESH_CAMPAIGN_TYPE, "Single Image / Video"}:
         refresh_csv_bytes = bytes(
-            result.get("creative_refresh_canonical_csv")
+            (ads_standard_workflow.csv_bytes(sys.modules[__name__], result, workflow) if result.get("campaign_type") == "Single Image / Video" else b"")
+            or result.get("creative_refresh_canonical_csv")
             or result.get("creative_refresh_csv")
             or b""
         )
@@ -14066,6 +14102,21 @@ def _render_final_ad_review(result):
     )
 
 
+def render_product_artwork_reference(selection, product_url):
+    from ads_product_catalog import product_reference_image_url
+    row = (selection or {}).get("row") or {}
+    image_url = product_reference_image_url(row)
+    with st.expander("Canonical black-frame product image", expanded=False):
+        st.caption("Attachment 2 is the product accuracy reference. Use the exact black-frame website artwork; verify the featured image before attaching it.")
+        if image_url:
+            st.image(image_url, width=220)
+            st.link_button("Open website product image", image_url)
+        if is_valid_product_page_url(product_url):
+            st.link_button("Open product page / download black-frame artwork", product_url)
+        if not image_url:
+            st.caption("No image is available in the shared product catalog. Obtain the black-frame image from the product page.")
+
+
 def render_supported_result(result, *, source_matches=True):
     if google_ads.platform_for(result) == "google":
         import ads_google_ui
@@ -14079,7 +14130,7 @@ def render_supported_result(result, *, source_matches=True):
     master_prompt = result["master_prompt"]
     workflow = _ads_image_workflow(result)
     if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        st.info("Attach the winning ad image to ChatGPT with this prompt.")
+        st.info("Attach image 1: winning Meta ad; image 2: canonical black-frame product; attachment 3: exported CSV.")
 
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
@@ -14113,13 +14164,10 @@ def render_supported_result(result, *, source_matches=True):
 
     if campaign_type == "Single Image / Video":
         st.subheader("1. Copy this ChatGPT prompt")
-        render_prompt_copy_button(
-            master_prompt,
-            f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
-        )
-
-        st.subheader("2. Build it in Meta")
-        st.caption("Use the generated creative prompt, copy variants, headlines, descriptions and CTA guidance.")
+        if result.get("workflow_mode") != ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+            master_prompt += "\nReturn THREE complete ads in this exact CSV template, including standalone image prompts:\n" + build_standard_ads_csv(product_name=product_name).decode("utf-8-sig")
+        render_prompt_copy_button(master_prompt, f"ads-prompt::{result['context_key']}")
+        ads_standard_workflow.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
         render_meta_url_parameters_section(3)
         return
 
@@ -14133,6 +14181,10 @@ def render_supported_result(result, *, source_matches=True):
     _render_ads_setup_notes(result, workflow)
     _render_ads_image_save(result, workflow)
     _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
+    if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        st.caption("Review the imported copy and five images, Save, then use POST NOW to continue in Posting.")
+        render_meta_url_parameters_section(3)
+        return
     st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
 
     st.subheader("2. Build it in Meta")
@@ -14273,7 +14325,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     if is_creative_refresh:
         st.title("Creative Refresh")
-        st.caption("Refine a proven winner while preserving what worked.")
+        st.caption("Refresh a selected winner or reference creative while preserving its strongest principles.")
         import meta_review_handoff
         if not meta_review_handoff.render_source(st):
             _render_refresh_winner_picker()
@@ -14297,12 +14349,12 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             ads_google_ui.how_to()
         elif is_creative_refresh:
             st.markdown(
-                "1. Enter the same product, sport, country, campaign type and optional Campaign Moment used by New Ads.\n"
+                "1. Review the product, sport, country and campaign type received from Meta Review; optionally add a Campaign Moment.\n"
                 "2. Paste the winning primary text and headline, then select Submit.\n"
                 "3. Upload the black-framed Sports Cave product WebP and attach the winning ad image to ChatGPT.\n"
                 "4. Copy and paste the generated master prompt.\n"
                 "5. ChatGPT will return the normal New Ads production package.\n"
-                "6. Import the completed CSV where offered, then upload and save the images through the normal Ads workflow."
+                "6. Import the completed CSV, add generated images, review and Save. Use POST NOW when the saved format is supported by Posting."
             )
         else:
             st.markdown(
@@ -14363,6 +14415,8 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.caption(product_url_state["message"])
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
+    if not is_google:
+        render_product_artwork_reference(product_selection, product_url)
     campaign_moment = render_campaign_moment_section()
     creative_refresh_context = None
     if is_creative_refresh:
@@ -14384,6 +14438,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             {
                 "winning_primary_text": winning_primary_text,
                 "winning_headline": winning_headline,
+                **ads_refresh_generation.source_context(st.session_state.get("meta-review-refresh-source")),
             }
         )
     submitted = st.button(

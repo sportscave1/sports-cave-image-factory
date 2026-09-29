@@ -181,14 +181,14 @@ def render_source(st):
         return False
     with st.container(border=True):
         st.subheader('Winner from Meta Review')
-        st.caption(f"{source.get('campaign_name')} · {source.get('ad_name')} · {source.get('date_range')} · {source['mode'].replace('_',' ')}")
-        st.write(source['decision']['reason'])
+        st.caption(f"{source.get('campaign_name')} · {source.get('ad_name')} · {source.get('date_range')} · {str(source.get('mode') or 'complete_ad').replace('_',' ')}")
+        st.write((source.get('decision') or {}).get('reason') or 'Selected reference creative; performance evidence not supplied.')
         if st.session_state.get('meta-review-product-error'): st.warning(st.session_state['meta-review-product-error'])
         if not (source.get('product_mapping') or {}).get('canonical_row'):
             st.warning('PRODUCT CONFIRMATION REQUIRED · Select the correct canonical Product name below. Suggested matches appear first; selection saves the mapping.')
         else:
             st.caption('Product matched: '+source['product_mapping']['product_title']+' · '+str(source.get('product_match_method') or 'canonical mapping'))
-        if source['mode']=='best_components':
+        if source.get('mode')=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
         try:
             data,mime=store.load_media(source['image_sha256'])
@@ -201,9 +201,14 @@ def render_source(st):
         except Exception:
             st.error('Winner image could not be read from Supabase. Retry when the database is available.')
         with st.expander('Source evidence'):
-            st.dataframe([{'Metric':k.replace('_',' ').title(),'Value':v} for k,v in source['metrics'].items() if v is not None],hide_index=True)
+            st.dataframe([{'Metric':k.replace('_',' ').title(),'Value':v} for k,v in (source.get('metrics') or {}).items() if v is not None],hide_index=True)
             st.caption(f"Ad {source['ad_id']} · Creative {source['creative_id']} · {source['decision']['confidence']} confidence")
         if st.button('Choose a different winner'):
-            st.session_state.pop(ACTIVE,None)
+            # Keep the current winner and draft until a new selection is actually handed off.
+            from ads_navigation import META_REVIEW_ROUTE, META_REVIEW_PAGE_KEY
+            st.query_params.pop('handoff_id', None)
+            st.session_state['current_page'] = META_REVIEW_ROUTE
+            st.session_state['selected_page'] = META_REVIEW_ROUTE
+            st.query_params['page'] = META_REVIEW_PAGE_KEY
             st.rerun()
     return True

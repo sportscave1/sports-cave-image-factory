@@ -85,6 +85,8 @@ def campaign_image_slots(campaign_type):
             }
             for concept in INSTANT_EXPERIENCE_CONCEPTS
         )
+    if campaign_type == "Single Image / Video":
+        return tuple({"id": f"single-{i:02d}", "label": f"Ad {i} Image", "position": i} for i in range(1, 4))
     if campaign_type == CREATIVE_REFRESH_CAMPAIGN_TYPE:
         return tuple(dict(slot) for slot in CREATIVE_REFRESH_IMAGE_SLOTS)
     return ()
@@ -692,6 +694,8 @@ def build_meta_image_filename(product_name, campaign_type, *, position=1, iso_da
         suffix = f" - Carousel {int(position):02d} - {iso_date}.jpg"
     elif campaign_type == "Instant Experience":
         suffix = f" - Instant Experience {int(position):02d} - {iso_date}.jpg"
+    elif campaign_type == "Single Image / Video":
+        suffix = f" - Ad {int(position):02d} - {iso_date}.jpg"
     elif campaign_type == CREATIVE_REFRESH_CAMPAIGN_TYPE:
         suffix = f" - Creative Refresh {int(position):02d} - {iso_date}.jpg"
     else:

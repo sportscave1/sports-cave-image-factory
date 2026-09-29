@@ -48,7 +48,7 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
     if str(result.get("platform") or "meta").lower() != "meta":
         raise SavedPackageError("Only Meta campaigns can enter Meta Posting.")
     ad_type = result.get("campaign_type")
-    if ad_type not in {"Carousel", "Instant Experience"}:
+    if ad_type not in {"Carousel", "Instant Experience", "Single Image / Video"}:
         raise SavedPackageError("This ad type is not supported by POST NOW.")
     shared = {
         "product_name": str(result.get("product_name") or ""),
@@ -77,6 +77,14 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
                         f"Card {card['position']} has a different destination URL. "
                         "Posting supports one product URL for all five cards."
                     )
+        elif ad_type == "Single Image / Video":
+            import ads_page
+            if not ads_page.is_valid_product_page_url(shared["product_url"]):
+                raise SavedPackageError("A valid Sports Cave product URL is required.")
+            if shared["country"] not in {"AUS", "USA", "UK", "CAN", "NZ"} or not shared["sport_category"]:
+                raise SavedPackageError("Select a supported market and category before saving.")
+            rows = ads_page.parse_standard_ads_csv(copy_csv, product_name=shared["product_name"])
+            batch = {"campaign_type": ad_type, "ads": rows, "source_schema_kind": "standard_ads"}
         else:
             # The very CSV bytes just uploaded: same canonical parser/route selection as manual import.
             batch = parse_posting_import_csv(copy_csv)
@@ -89,6 +97,9 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
         "package_id": str(uuid4()),
         "source": "Creative Refresh" if result.get("workflow_mode") == "creative_refresh" else "New Ads",
         "ad_type": ad_type,
+        "workflow_type": result.get("workflow_type") or result.get("workflow_mode") or "new_ads",
+        "creative_refresh": result.get("workflow_mode") == "creative_refresh",
+        "source_provenance": result.get("creative_refresh_context") or {},
         "context_key": result.get("context_key"),
         "source_signature": source_signature,
         "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -109,7 +120,7 @@ def validate_saved_package(package):
         raise SavedPackageError("The saved package is missing or has an unsupported version. Save it again.")
     if str(package.get("platform") or "meta").lower() != "meta" or str((package.get("batch") or {}).get("platform") or "meta").lower() != "meta":
         raise SavedPackageError("Only Meta campaigns can enter Meta Posting.")
-    if package.get("ad_type") not in {"Carousel", "Instant Experience"}:
+    if package.get("ad_type") not in {"Carousel", "Instant Experience", "Single Image / Video"}:
         raise SavedPackageError("The saved package has an unsupported ad type.")
     if not package.get("folder") or not package.get("package_id") or not package.get("copy_csv"):
         raise SavedPackageError("The saved package is missing its Dropbox reference or copy.")

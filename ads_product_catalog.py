@@ -55,3 +55,11 @@ def load_live_edition_product_rows():
                 return list(cur.fetchall() or ())
     except Exception:
         return []
+
+
+def product_reference_image_url(row):
+    """Use the same catalog row as New Ads; never invent an image from a handle."""
+    from urllib.parse import urlparse
+    value = str((row or {}).get("image_url") or "").strip()
+    parsed = urlparse(value)
+    return value if parsed.scheme == "https" and parsed.hostname else ""

@@ -123,7 +123,7 @@ class AdsImageProcessingTests(unittest.TestCase):
             [slot["strategy"] for slot in ads_image_workflow.campaign_image_slots("Creative Refresh")],
             ["Winner Evolution", "Emotional / Collector Expansion", "Pattern Interrupt"],
         )
-        self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
+        self.assertEqual(len(ads_image_workflow.campaign_image_slots("Single Image / Video")), 3)
 
     def test_instant_experience_future_package_paths_use_canonical_route_slugs(self):
         self.assertEqual(

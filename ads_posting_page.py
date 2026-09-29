@@ -751,7 +751,7 @@ def consume_saved_posting_package(product_records, *, state=None):
     if package["ad_type"] == "Instant Experience":
         for key, ad in zip(DESCRIPTION_KEYS, batch["ads"]):
             staging[key] = str(ad.get("description") or "")
-    staging[AD_TYPE_KEY] = CAROUSEL_AD_TYPE if package["ad_type"] == "Carousel" else AD_TYPE
+    staging[AD_TYPE_KEY] = package["ad_type"]
     staging[SAVED_PRODUCT_URL_KEY] = {
         "product_identity": staging[PRODUCT_KEY], "url": batch["product_url"],
     }
@@ -1662,6 +1662,32 @@ def render_page():
     loaded = st.session_state.get(posting_handoff.LOADED_KEY) or {}
     if loaded:
         st.caption(f"Loaded from {loaded['source']} — saved Dropbox package")
+    if loaded.get("ad_type") == "Single Image / Video":
+        # Retain the normal, validated handoff without ever reinterpreting a
+        # website single-image ad as a Collection/Instant Experience.
+        st.subheader("Single Image / Video — saved package review")
+        st.info("This package is saved and loaded. Publishing standard single-image ads is not yet supported by Posting; Carousel and Instant Experience are supported.")
+        for ad, asset in zip(loaded["batch"]["ads"], loaded["assets"]):
+            with st.container(border=True):
+                st.image(asset["data"], width=280)
+                st.write(ad["primary_text"])
+                st.write(ad["headline"])
+                st.caption(ad.get("description") or "")
+        with st.expander("Source provenance"):
+            st.json(loaded.get("source_provenance") or {})
+        if st.button("Return to creative draft"):
+            from ads_navigation import ADS_PAGE_KEY, CREATIVE_REFRESH_PAGE_KEY, ADS_CREATE_ROUTE, CREATIVE_REFRESH_ROUTE
+            refresh = loaded.get("creative_refresh")
+            route = CREATIVE_REFRESH_ROUTE if refresh else ADS_CREATE_ROUTE
+            st.session_state["current_page"] = route
+            st.session_state["selected_page"] = route
+            st.query_params["page"] = CREATIVE_REFRESH_PAGE_KEY if refresh else ADS_PAGE_KEY
+            st.rerun()
+        if st.button("Continue with another Posting package"):
+            st.session_state.pop(posting_handoff.LOADED_KEY, None)
+            st.session_state[AD_TYPE_KEY] = AD_TYPE
+            st.rerun()
+        return
     _ensure_posting_run()
     st.session_state.setdefault(PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
