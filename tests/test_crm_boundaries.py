@@ -68,7 +68,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(result,'receipt');session.post.assert_called_once()
         kwargs=session.post.call_args.kwargs
         self.assertEqual(kwargs['headers']['Idempotency-Key'],'stable-operation')
-        self.assertIn('List-Unsubscribe-Post',kwargs['json']['headers'])
+        self.assertNotIn('List-Unsubscribe-Post',kwargs['json']['headers'])
         self.assertEqual(kwargs['json']['text'],'Preview')
     def test_suppression_failure_closed(self):
         session=Mock();session.request.return_value=Mock(status_code=403,json=lambda:{'message':'private'})

@@ -1,6 +1,6 @@
 """Resumable, memory-only audience counts. Never writes customer membership."""
 from copy import deepcopy
-from crm_logic import eligibility, recipient_hash, LiveFacts, matches, now
+from crm_logic import marketing_state, eligibility, recipient_hash, LiveFacts, matches, now
 import re
 
 
@@ -28,7 +28,7 @@ def evaluate_profiles(profiles,excluded_ids,excluded_hashes,suppressed_hashes,su
         grouped.setdefault(normalized or 'missing:'+c['id'],[]).append(c)
     reasons={};allowed=[];selected=[];diagnostic={'conflicting_profiles':0}
     for address,rows in grouped.items():
-        states={(c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED') for c in rows}
+        states={marketing_state(c) for c in rows}
         conflict=len(states)>1
         if conflict:diagnostic['conflicting_profiles']+=len(rows)
         accepted=False
@@ -87,7 +87,7 @@ def selection_page(shop,store,audience,previous=None,*,smart_hours=16,recipients
         suppressed,ids=store.active_suppression_hashes();recent=store.recent_marketing_hashes(smart_hours)
         conflicts=set();states={}
         for c in list(state['profiles'].values())+list(state.get('consent_profiles',{}).values()):
-            states.setdefault(recipient_hash(c.get('email')),set()).add((c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED'))
+            states.setdefault(recipient_hash(c.get('email')),set()).add(marketing_state(c))
         conflicts={h for h,s in states.items() if len(s)>1}
         result=evaluate_profiles(list(state['profiles'].values()),state['excluded_ids'],state['excluded_hashes'],suppressed,ids,recent,recipients=recipients)
         # Re-evaluate affected selected profiles with the globally observed conflict.

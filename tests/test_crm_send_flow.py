@@ -128,8 +128,23 @@ class SendFlowTests(unittest.TestCase):
             delivery.send.assert_called_once()
             message=delivery.send.call_args.args[1]
             self.assertFalse(message['subject'].startswith('[CAMPAIGN TEST]'))
-            self.assertNotIn('sc_test=1',message['html']);self.assertIn('/crm/unsubscribe?token=',message['html'])
+            self.assertNotIn('sc_test=1',message['html']);self.assertIn('/account/unsubscribe?token=fixture-',message['html'])
+            self.assertFalse(message['unsubscribe_one_click'])
             self.assertNotIn('sc_test=1',message['text'])
+    def test_native_queue_requires_no_custom_secret_and_missing_url_creates_no_jobs(self):
+        env={k:v for k,v in LIVE.items() if k not in ('CRM_UNSUBSCRIBE_SECRET','CRM_PUBLIC_BASE_URL','CRM_ONE_CLICK_UNSUBSCRIBE_VERIFIED')}
+        result=queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env=env)
+        self.assertGreater(result['recipients'],0)
+        from tests.crm_fixtures import native_customer
+        for i,c in enumerate(self.wire.customers):
+            c=native_customer(c);c['defaultEmailAddress']['marketingUnsubscribeUrl']=''
+            self.wire.customers[i]=c
+        before=self.count('crm_marketing_sends')
+        with self.assertRaisesRegex(ValueError,'Missing Shopify marketing unsubscribe URL'):
+            queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env=env)
+        self.assertEqual(self.count('crm_marketing_sends'),before)
+        self.provider.post.assert_not_called()
+
     def test_master_flag_alone_does_not_bypass_readiness(self):
         with self.assertRaises((ValueError,MarketingDisabled)):
             queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env={**ENV,'CRM_MARKETING_ENABLED':'true'})

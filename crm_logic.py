@@ -21,11 +21,24 @@ def email(value):
     return value if len(value)<=254 and re.fullmatch(r'[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+',value) else ''
 
 def recipient_hash(value):return hashlib.sha256(email(value).encode()).hexdigest()
+def marketing_state(customer):
+    customer=customer or {}
+    legacy=(customer.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED')
+    state=legacy
+    if 'defaultEmailAddress' in customer:
+        state=(customer.get('defaultEmailAddress') or {}).get('marketingState','NOT_SUBSCRIBED')
+        # Either source can veto subscription; never upgrade contradictory consent.
+        if state=='SUBSCRIBED' and 'emailMarketingConsent' in customer:state=legacy
+    return state if state in {'SUBSCRIBED','UNSUBSCRIBED','PENDING','NOT_SUBSCRIBED','REDACTED','INVALID'} else 'NOT_SUBSCRIBED'
+
+
 def consent(customer):
     if not customer:return 'REDACTED'
     if not email(customer.get('email')) or customer.get('validEmailAddress') is False:return 'INVALID'
-    state=(customer.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED')
-    return state if state in {'SUBSCRIBED','UNSUBSCRIBED','PENDING','NOT_SUBSCRIBED','REDACTED','INVALID'} else 'NOT_SUBSCRIBED'
+    if 'defaultEmailAddress' in customer:
+        native=customer.get('defaultEmailAddress') or {}
+        if native.get('validFormat') is not True or email(native.get('emailAddress'))!=email(customer.get('email')):return 'INVALID'
+    return marketing_state(customer)
 
 def eligibility(customer, suppressed=False, provider_suppressed=False):
     from crm_eligibility import eligible

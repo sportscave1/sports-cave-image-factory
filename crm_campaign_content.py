@@ -185,6 +185,7 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
         from html import unescape
         from urllib.parse import parse_qsl, urlencode, urlunsplit
         def live_url(url):
+            if url==unsubscribe_url:return url  # Never rewrite provider-signed opt-out URLs.
             p=urlsplit(url);pairs=parse_qsl(p.query,keep_blank_values=True)
             if ('utm_source','sports_cave') in pairs and ('utm_campaign',doc.get('campaign_key','')) in pairs:
                 pairs=[(k,v) for k,v in pairs if k!='sc_test']

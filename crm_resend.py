@@ -42,7 +42,7 @@ class Config:
         self.resend_webhook_secret=env.get('CRM_RESEND_WEBHOOK_SECRET','')
     def require_send(self,test=False):
         if not (self.tests_enabled if test else self.enabled):raise MarketingDisabled('Marketing delivery is disabled. Drafts and previews remain available.')
-        if not self.api_key or not self.sender or not self.reply_to or len(self.secret)<32 or not safe_url(self.public_base):raise MarketingDisabled('Marketing delivery configuration is incomplete.')
+        if not self.api_key or not self.sender or not self.reply_to:raise MarketingDisabled('Marketing delivery configuration is incomplete.')
     def unsubscribe_url(self,send_id):
         if len(self.secret)<32:raise MarketingDisabled('Marketing unsubscribe signing is not configured.')
         if not safe_url(self.public_base):raise MarketingDisabled('CRM_PUBLIC_BASE_URL must be a public HTTPS unsubscribe base URL.')
@@ -98,7 +98,9 @@ class Resend:
         class MarketingProvider(ResendEmailProvider):
             def _payload(self,mail):
                 payload=super()._payload(mail)
-                payload['headers']={'List-Unsubscribe':'<'+message['unsubscribe_url']+'>','List-Unsubscribe-Post':'List-Unsubscribe=One-Click'}
+                payload['headers']={'List-Unsubscribe':'<'+message['unsubscribe_url']+'>'}
+                if message.get('unsubscribe_one_click') is True:
+                    payload['headers']['List-Unsubscribe-Post']='List-Unsubscribe=One-Click'
                 return payload
         configuration=EmailConfiguration(self.config.api_key,self.config.sender,email(address),self.config.reply_to)
         provider=MarketingProvider(configuration,session=self.session,max_attempts=1)

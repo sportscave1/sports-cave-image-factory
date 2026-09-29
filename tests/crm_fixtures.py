@@ -4,6 +4,16 @@ from datetime import timedelta
 from crm_logic import now
 import crm_shopify as q
 
+def native_customer(customer):
+    if customer is None:return None
+    result=deepcopy(customer)
+    result.setdefault('defaultEmailAddress',{'emailAddress':result.get('email'),
+        'marketingState':(result.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED'),
+        'validFormat':result.get('validEmailAddress',True),
+        'marketingUnsubscribeUrl':'https://www.sportscaveshop.com/account/unsubscribe?token=fixture-'+result['id'].rsplit('/',1)[-1]})
+    return result
+
+
 def page(nodes,after=None,size=50):
     offset=int(after or 0);end=min(len(nodes),offset+size)
     return {'nodes':deepcopy(nodes[offset:end]),'pageInfo':{'hasNextPage':end<len(nodes),'endCursor':str(end)}}
@@ -30,14 +40,14 @@ class ShopifyFixture:
     def __call__(self,doc,v):
         self.calls.append((doc,v.copy()))
         if self.fail:raise self.fail
-        if doc==q.CAMPAIGN_SUBSCRIBERS:return {'customers':page(self.customers,v.get('after'),250)}
+        if doc==q.CAMPAIGN_SUBSCRIBERS:return {'customers':page([native_customer(c) for c in self.customers],v.get('after'),250)}
         if doc==q.CUSTOMERS:
             rows=self.customers;query=v.get('query') or ''
             if 'id:' in query:rows=[c for c in rows if c['id'].rsplit('/',1)[-1]==query.split('id:')[1].split()[0]]
             elif query.startswith('"'):rows=[c for c in rows if query.strip('"').lower() in (c['firstName']+' '+c['lastName']+' '+c['email']).lower()]
-            return {'customers':page(rows,v.get('after'))}
-        if doc==q.CUSTOMER:return {'customer':deepcopy(next((c for c in self.customers if c['id']==v['id']),None))}
-        if doc==q.CUSTOMER_BATCH:return {'nodes':deepcopy([c for c in self.customers if c['id'] in v['ids']])}
+            return {'customers':page([native_customer(c) for c in rows],v.get('after'))}
+        if doc==q.CUSTOMER:return {'customer':native_customer(next((c for c in self.customers if c['id']==v['id']),None))}
+        if doc==q.CUSTOMER_BATCH:return {'nodes':[native_customer(c) for c in self.customers if c['id'] in v['ids']]}
         if doc==q.TOTAL:return {'customersCount':{'count':len(self.customers),'precision':'EXACT'}}
         if doc==q.COUNT:
             query=v.get('query','')

@@ -5,10 +5,11 @@ import threading
 import time
 from crm_cache import CACHE
 
+EMAIL_ADDRESS_FIELDS = 'defaultEmailAddress { emailAddress marketingState marketingUnsubscribeUrl validFormat }'
 CUSTOMER_FIELDS = '''id firstName lastName email validEmailAddress createdAt updatedAt tags
  defaultAddress { countryCodeV2 country provinceCode province zip timeZone } amountSpent { amount currencyCode } numberOfOrders
  lastOrder { id name createdAt }
- emailMarketingConsent { marketingState marketingOptInLevel consentUpdatedAt }'''
+ emailMarketingConsent { marketingState marketingOptInLevel consentUpdatedAt } '''+EMAIL_ADDRESS_FIELDS
 PAGE = 'pageInfo { hasNextPage endCursor }'
 CUSTOMERS = '''query CrmCustomers($after:String,$query:String) {
  customers(first:50,after:$after,sortKey:UPDATED_AT,reverse:true,query:$query) {
@@ -17,7 +18,7 @@ CUSTOMERS = '''query CrmCustomers($after:String,$query:String) {
 # the same authoritative final-send calculation and scheduler.
 CAMPAIGN_SUBSCRIBERS = '''query CrmCampaignSubscribers($after:String) {
  customers(first:250,after:$after,sortKey:UPDATED_AT,reverse:true) { nodes {
- id email validEmailAddress emailMarketingConsent { marketingState }
+ id email validEmailAddress emailMarketingConsent { marketingState } '''+EMAIL_ADDRESS_FIELDS+'''
  defaultAddress { countryCodeV2 provinceCode timeZone }
  } '''+PAGE+' } }'
 CUSTOMER = 'query CrmCustomer($id:ID!) { customer(id:$id) { '+CUSTOMER_FIELDS+' } }'

@@ -7,7 +7,8 @@ def eligible(customer, suppressed=False, provider_suppressed=False):
     address = customer.get('email')
     if not isinstance(address, str) or not single_email(address.strip().casefold()) or customer.get('validEmailAddress') is False:
         return False, 'consent_invalid'
-    state = (customer.get('emailMarketingConsent') or {}).get('marketingState', 'NOT_SUBSCRIBED')
+    from crm_logic import consent
+    state = consent(customer)
     if state != 'SUBSCRIBED':
         state = state if state in ('NOT_SUBSCRIBED','PENDING','INVALID','UNSUBSCRIBED','REDACTED') else 'NOT_SUBSCRIBED'
         return False, 'consent_' + state.lower()

@@ -71,6 +71,7 @@ class FooterURLTests(unittest.TestCase):
         url = cfg.unsubscribe_url(str(uuid.uuid4()))
         message = render_campaign(self.doc, self.cfg, unsubscribe_url=url, production=True)
         message['unsubscribe_url'] = url
+        message['unsubscribe_one_click'] = True  # Existing custom endpoint supports RFC 8058.
         session = Mock()
         session.post.return_value.status_code = 200
         session.post.return_value.json.return_value = {'id': 'mock-only'}

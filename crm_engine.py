@@ -63,6 +63,11 @@ class Engine:
                 address=email((c or {}).get('email'))
             if reason:
                 self.store.finish_send(row,'BLOCKED',reason);return True
+            if not row['test_send']:
+                from crm_native_unsubscribe import native_unsubscribe_url
+                unsubscribe=native_unsubscribe_url(c)
+                if not unsubscribe:
+                    self.store.finish_send(row,'BLOCKED','missing_shopify_marketing_unsubscribe_url');return True
             if self.delivery().suppressed(address):
                 self.store.suppress(recipient_hash(address),row['shopify_customer_id'],'suppressed','resend',address)
                 self.store.finish_send(row,'BLOCKED','provider_suppression');return True
@@ -83,12 +88,12 @@ class Engine:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 if not all(production_checks(content['document'],content['render_settings']).values()):
                     self.store.finish_send(row,'BLOCKED','production_readiness');return True
-                unsubscribe=self.config.unsubscribe_url(row['id'])
                 message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True)
                 message['unsubscribe_url']=unsubscribe
             else:
-                optout=self.config.test_unsubscribe_url() if row['test_send'] else self.config.unsubscribe_url(row['id'])
+                optout=self.config.test_unsubscribe_url() if row['test_send'] else unsubscribe
                 message=render(content,context,optout,self.config.logo_url,row['idempotency_key'])
+            message['unsubscribe_one_click']=False  # Shopify documents navigation, not RFC 8058 POST.
             digest=hashlib.sha256(json.dumps({'to':address,**message},sort_keys=True).encode()).hexdigest()
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):

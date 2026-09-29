@@ -13,7 +13,6 @@ from crm_resend_marketing import single_email
 OFF='Marketing delivery is currently OFF. No emails were sent.'
 # Existing foundation readiness checks remain fail-closed until individually attested.
 ATTESTATIONS={
- 'One-click unsubscribe production path activated':'CRM_ONE_CLICK_UNSUBSCRIBE_VERIFIED',
  'DMARC confirmed before bulk activation':'CRM_DMARC_VERIFIED',
  'Resend webhooks proven before bulk activation':'CRM_RESEND_WEBHOOKS_VERIFIED',
  'Market legal review complete':'CRM_MARKET_REVIEW_VERIFIED',
@@ -23,14 +22,21 @@ ATTESTATIONS={
 def final_audience(shop,store,doc,*,clock=time.monotonic):
     if doc.get('market_audience'):
         from crm_campaign_markets import calculate
-        return calculate(shop,store,doc.get('smart_hours',16),clock=clock)[doc['market']]
+        return verified_native_audience(calculate(shop,store,doc.get('smart_hours',16),clock=clock)[doc['market']])
     audience=doc['audience']
     selection=audience if audience['kind']=='Selection' else {'kind':'Selection','name':audience['name'],'include':[audience],'exclude':[]}
     started=clock();state=None
     while state is None or not state['complete']:
         if clock()-started>30:raise ValueError('Audience calculation timed out. Narrow the audience and review again.')
         state=selection_page(shop,store,selection,state,smart_hours=doc.get('smart_hours',16),recipients=True)
+    return verified_native_audience(state)
+
+def verified_native_audience(state):
+    from crm_native_unsubscribe import native_unsubscribe_url
+    if any(not native_unsubscribe_url(state['profiles'].get(r['id'])) for r in state['recipients']):
+        raise ValueError('Missing Shopify marketing unsubscribe URL. No campaign was queued; review recipient data.')
     return state
+
 
 def production_checks(doc,cfg,env=None):
     from crm_campaign_sections import with_email_defaults
@@ -38,10 +44,11 @@ def production_checks(doc,cfg,env=None):
     env=os.environ if env is None else env
     checks=preflight(doc,env,cfg)
     live=dict(checks['live'])
+    live.pop('One-click unsubscribe production path activated',None)
     for label,key in ATTESTATIONS.items():
         live[label]=(doc['market'] in env.get(key,'').split(',')) if key=='CRM_MARKET_REVIEW_VERIFIED' else env.get(key,'').lower()=='true'
     from crm_campaign_footer import has_unsubscribe_link
-    live['Visible unsubscribe footer / functional production link']=bool(Config(env).secret and (not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer'])))
+    live['Visible unsubscribe footer / functional production link']=bool(not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer']))
     return {**checks['test'],**live,'Marketing delivery enabled':Config(env).enabled}
 
 def review(shop,store,editor,env=None):

@@ -24,7 +24,8 @@ def profile(i,code='AU',state='NSW',consent='SUBSCRIBED',address=None):
       'emailMarketingConsent':{'marketingState':consent},'defaultAddress':address or {'countryCodeV2':code,'provinceCode':state}}
 
 def authority(rows):
-    shop=Mock();shop.campaign_subscribers.return_value={'nodes':rows,'pageInfo':{'hasNextPage':False}}
+    from tests.crm_fixtures import native_customer
+    shop=Mock();shop.campaign_subscribers.return_value={'nodes':[native_customer(c) for c in rows],'pageInfo':{'hasNextPage':False}}
     return shop
 
 class MarketAndTimezoneTests(unittest.TestCase):

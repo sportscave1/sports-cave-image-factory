@@ -1,6 +1,6 @@
 """Market audiences on the existing Shopify authority; no persistent customer copy."""
 import time
-from crm_logic import eligibility
+from crm_logic import marketing_state, eligibility
 from crm_logic import recipient_hash, now
 
 MARKET_LABELS={'AU':'AUSTRALIA','US':'USA','UK':'UK','Global':'ALL SUBSCRIBERS'}
@@ -45,7 +45,7 @@ def calculate(shop,store,hours=16,*,clock=time.monotonic):
         'recipients':[],'profiles':{},'complete':True,'checked_at':now().isoformat()} for m in MARKET_LABELS}
     reverse={code:m for m,code in COUNTRIES.items()}
     for h,rows in groups.items():
-        conflict=len({(c.get('emailMarketingConsent') or {}).get('marketingState','NOT_SUBSCRIBED') for c,_ in rows})>1
+        conflict=len({marketing_state(c) for c,_ in rows})>1
         accepted=set()
         for c,code in rows:
             ok,reason=eligibility(c,h in suppressed or c['id'] in ids)
