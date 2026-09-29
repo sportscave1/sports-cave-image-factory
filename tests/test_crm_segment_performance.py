@@ -106,7 +106,7 @@ class ComposerTests(unittest.TestCase):
         executor=ThreadPoolExecutor(max_workers=1);cache=SegmentCounts(executor=executor,loader=Mock(side_effect=slow))
         try:
             with patch('crm_segment_counts.COUNTS',cache):
-                at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';at.run(timeout=10)
+                at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"));at.session_state['route']='CRM Campaigns';at.run(timeout=10)
                 self.assertFalse(at.exception);self.assertTrue(entered.wait(2));self.assertFalse(release.is_set())
                 self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,
                     ['AUSTRALIA · …','USA · …','UK · …','ALL SUBSCRIBERS · …'])
@@ -114,8 +114,15 @@ class ComposerTests(unittest.TestCase):
                 for label in ['Subject','Preview text','Campaign name']:
                     next(t for t in at.text_input if t.label==label).set_value('Edited '+label).run(timeout=10)
                     self.assertFalse(at.exception)
+                for tab in ['HTML','Templates','Campaign Settings']:
+                    at.session_state[at.session_state['campaign_edit_key']+'panel']=tab
+                    at.run(timeout=10);self.assertFalse(at.exception)
+                with patch('crm_campaign_send_ui.send_test',return_value={'audit_saved':True}) as send:
+                    next(t for t in at.text_input if t.label=='Send test email').set_value('manual@example.org')
+                    next(b for b in at.button if b.label=='→').click().run(timeout=10)
+                    send.assert_called_once();self.assertFalse(release.is_set());self.assertFalse(at.exception)
                 cache.loader.assert_called_once()
-                self.assertFalse(any('Loading subscribers' in c.value for c in at.caption))
+                self.assertFalse(any('Loading subscribers'  in c.value for c in at.caption))
                 release.set();executor.shutdown(wait=True)
                 at.run(timeout=10)
                 self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options[0],'AUSTRALIA · 4')
@@ -133,3 +140,9 @@ class ComposerTests(unittest.TestCase):
         item=next(r for r in library_rows(store) if r['id']==template['id'])
         self.assertEqual(set(item['content']),{'format'})
         self.assertIn('Only load on selection',template_html(store,item))
+        store.save_section_template(ADMIN,'header','Lazy header '+uuid.uuid4().hex,'<p>Only selected header</p>',make_default=True)
+        headers=store.section_templates('header',CFG,metadata=True)
+        chosen=next(r for r in headers if r['is_default'])
+        self.assertNotIn('html',chosen['content'])
+        self.assertEqual(store.section_html(chosen),'<p>Only selected header</p>')
+        self.assertEqual(store.default_sections(CFG)['header'],'<p>Only selected header</p>')

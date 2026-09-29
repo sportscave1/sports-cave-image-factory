@@ -48,7 +48,7 @@ class UiTests(unittest.TestCase):
         at=self.app('CRM Segments');next(b for b in at.button if b.label=='Load current members').click().run()
         self.assertTrue(any('live members' in c.value for c in at.caption));at.run()
         self.assertTrue(any('live members' in c.value for c in at.caption));self.assertFalse(at.exception)
-    def test_audience_count_is_complete_and_session_only(self):
+    def test_segment_selector_is_available_before_deferred_counts(self):
         from crm_campaign_store import CampaignStore
         from crm_campaign_content import new_document
         from tests.crm_db_fixture import connect
@@ -56,7 +56,7 @@ class UiTests(unittest.TestCase):
         row=CampaignStore(connect).save(ADMIN,'Audience UI test',new_document())
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns'
         at.session_state['campaign_editor']=row;at.session_state['campaign_saved']=row.copy();at.run(timeout=20)
-        self.assertTrue(any('eligible subscribers' in c.value for c in at.caption));self.assertFalse(at.exception)
+        self.assertTrue(any(s.label=='Segment' for s in at.selectbox));self.assertFalse(at.exception)
         self.assertFalse(any(e.label=='Audience' for e in at.expander))
     def test_automation_activation_fails_closed(self):
         at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')

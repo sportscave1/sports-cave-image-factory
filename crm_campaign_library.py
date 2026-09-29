@@ -41,9 +41,12 @@ def insert_template(doc,html,row):
 
 @st.dialog('HTML template',width='small')
 def edit_template(store,user,row=None):
+    from crm_store import StoreUnavailable
+    try:source=template_html(store,row) if row else ''
+    except (ValueError,StoreUnavailable) as exc:st.error(str(exc));return
     with st.form('library_edit'):
         name=st.text_input('Template name',row['name'] if row else '',max_chars=150)
-        html=st.text_area('HTML',template_html(store,row) if row else '',height=260)
+        html=st.text_area('HTML',source,height=260)
         a,b=st.columns(2);cancel=a.form_submit_button('Cancel');save=b.form_submit_button('Save template',type='primary')
     if cancel:st.rerun()
     if save:

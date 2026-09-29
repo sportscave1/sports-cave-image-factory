@@ -25,9 +25,10 @@ def section_source(kind,source):
 
 
 class BrandTemplates(Store):
-    def section_templates(self,kind,cfg):
+    def section_templates(self,kind,cfg,metadata=False):
         if kind not in ('header','footer'):raise ValueError('Unknown brand section.')
-        rows=self.q("SELECT * FROM crm_templates WHERE content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL ORDER BY name,id",(FORMAT,kind))
+        fields="id,name,version,kind,(content - 'html') AS content,md5(content->>'html') AS source_hash" if metadata else '*'
+        rows=self.q("SELECT "+fields+" FROM crm_templates WHERE content->>'format'=%s AND content->>'section'=%s AND archived_at IS NULL ORDER BY name,id",(FORMAT,kind))
         defaults=self.q('SELECT value FROM crm_workspace_settings WHERE key=%s',(DEFAULT_KEY,),True)
         default=(defaults or {}).get('value',{}).get(kind)
         builtin={'id':'builtin_'+kind,'name':'Sports Cave Default '+kind.title(),'version':0,
@@ -38,8 +39,15 @@ class BrandTemplates(Store):
         for row in result:row['is_default']=str(row['id'])==(default or builtin['id'])
         return result
 
+    def section_html(self,row):
+        if 'html' in row['content']:return row['content']['html']
+        loaded=self.get('templates',row['id'])
+        if not loaded or loaded['version']!=row['version'] or loaded.get('archived_at') or loaded['content'].get('format')!=FORMAT:
+            raise ValueError('Brand template changed. Reload before selecting it.')
+        return loaded['content']['html']
+
     def default_sections(self,cfg):
-        return {kind:next(r['content']['html'] for r in self.section_templates(kind,cfg) if r['is_default']) for kind in ('header','footer')}
+        return {kind:self.section_html(next(r for r in self.section_templates(kind,cfg,metadata=True) if r['is_default'])) for kind in ('header','footer')}
 
     def _brand_lock(self,conn,actor):
         # Existing settings row serializes default/edit/delete races. Only explicit writes call this.

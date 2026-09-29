@@ -16,14 +16,20 @@ def section_picker(store,user,kind,source_key,key,cfg,source,rows=None):
     rows=store.section_templates(kind,cfg) if rows is None else rows
     by_id={str(r['id']):r for r in rows}
     if key+'template' not in st.session_state:
-        st.session_state[key+'template']=next((i for i,r in by_id.items() if r['content']['html']==source),None)
+        from hashlib import md5
+        source_hash=md5(source.encode()).hexdigest()
+        st.session_state[key+'template']=next((i for i,r in by_id.items() if r['content'].get('html')==source or r.get('source_hash')==source_hash),None)
     elif st.session_state[key+'template'] not in by_id:
         st.session_state[key+'template']=None
     def load():
         selected=st.session_state.get(key+'template')
         # A stale browser label may arrive after options are renamed/removed.
         # It must never overwrite a campaign source or crash the rerun.
-        if selected in by_id:st.session_state[source_key]=by_id[selected]['content']['html']
+        if selected in by_id:
+            try:st.session_state[source_key]=store.section_html(by_id[selected])
+            except (ValueError,StoreUnavailable) as exc:
+                st.session_state[key+'template']=None
+                st.warning(str(exc))
     st.selectbox(kind.title()+' template',[None,*by_id],
         format_func=lambda identity:'Current campaign HTML' if identity is None else template_label(by_id[identity]),
         key=key+'template',on_change=load)

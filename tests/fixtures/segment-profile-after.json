@@ -1,0 +1,47 @@
+{
+  "brand_templates": {
+    "seconds": 0.09892120002768934,
+    "calls": 4
+  },
+  "shopify": {
+    "seconds": 0.3323545000166632,
+    "calls": 4
+  },
+  "preview": {
+    "seconds": 0.001283799996599555,
+    "calls": 1
+  },
+  "draft_list": {
+    "seconds": 0.024017600051593035,
+    "calls": 2
+  },
+  "initial_render_seconds": 0.9299999999930151,
+  "exceptions": [],
+  "suppression": {
+    "seconds": 0.03011829999741167,
+    "calls": 1
+  },
+  "country": {
+    "seconds": 0.0007800998282618821,
+    "calls": 1000
+  },
+  "eligibility": {
+    "seconds": 0.0032203997252509,
+    "calls": 1000
+  },
+  "counts": {
+    "seconds": 0.3865358000039123,
+    "calls": 1
+  },
+  "cached_render_seconds": 0.41548269998747855,
+  "cached_render_shopify_calls": 0,
+  "draft_load": {
+    "seconds": 0,
+    "calls": 0
+  },
+  "template_library": {
+    "seconds": 0,
+    "calls": 0
+  },
+  "cached_count_lookup_seconds": 1.780001912266016e-05
+}

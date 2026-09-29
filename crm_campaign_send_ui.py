@@ -21,7 +21,7 @@ ATTESTED_LABELS={
 
 
 def safe_error(exc):
-    if isinstance(exc,(ValueError,PermissionError,DeliveryError,MarketingDisabled)):return str(exc)
+    if isinstance(exc,(ValueError,PermissionError,DeliveryError,MarketingDisabled)):return str(exc).replace('Market legal review','Segment legal review').replace('market audience mode','segment audience mode')
     if isinstance(exc,StoreUnavailable):return 'Campaign storage is unavailable. Your edits are retained.'
     logging.getLogger(__name__).warning('crm_campaign_action_failed type=%s',type(exc).__name__)
     return 'The service is temporarily unavailable. Check the receipt before retrying.'

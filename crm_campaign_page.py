@@ -138,7 +138,7 @@ def recent_campaigns(drafts,key,user):
         if columns[1].button(row['name'],type='tertiary',key='recent_open_'+identity):st.session_state['campaign_pending_open']=identity
         error=row.get('schedule_error')
         status={'marketing_off_schedule':'Delivery blocked — marketing is OFF','schedule_missed':'Schedule missed — reschedule required'}.get(error)
-        if not status:status=('SCHEDULED' if row.get('delivery_status')=='SENDING' and row['document'].get('send_timing',{}).get('mode')=='schedule' else row.get('delivery_status')) or row['status']
+        if not status:status=('SCHEDULED' if row.get('delivery_status')=='SENDING' and (row['document'].get('send_timing') or {}).get('mode')=='schedule' else row.get('delivery_status')) or row['status']
         columns[2].caption(status);columns[3].caption(MARKET_LABELS[row['document']['market']])
         columns[4].caption(str(row['updated_at'])[:16].replace('T',' '))
         with columns[5].popover('Actions'):
@@ -162,12 +162,12 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     try:
         with st.spinner('Loading campaign…'):
             defaults=drafts.setting('sending')['value'];cfg=drafts.render_settings()
-            choices={kind:drafts.section_templates(kind,cfg) for kind in ('header','footer')}
+            choices={kind:drafts.section_templates(kind,cfg,metadata=True) for kind in ('header','footer')}
     except StoreUnavailable as exc:
         available=False;defaults={'smart_hours':16};cfg=settings()
         st.error(str(exc));st.caption('Persistence unavailable. Your compose state stays in this session; saves and tests are disabled.')
     if not st.session_state.get('campaign_editor'):
-        sections={kind:next(row['content']['html'] for row in rows if row['is_default']) for kind,rows in choices.items()} if available else None
+        sections={kind:drafts.section_html(next(row for row in rows if row['is_default'])) for kind,rows in choices.items()} if available else None
         new_compose(defaults['smart_hours'],cfg,sections)
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
     from crm_campaign_markets import audience
