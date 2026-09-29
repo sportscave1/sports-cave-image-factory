@@ -114,7 +114,7 @@ class ComposerTests(unittest.TestCase):
                 for label in ['Subject','Preview text','Campaign name']:
                     next(t for t in at.text_input if t.label==label).set_value('Edited '+label).run(timeout=10)
                     self.assertFalse(at.exception)
-                for tab in ['Editor','Templates','Campaign Settings']:
+                for tab in ['Editor','Templates','Settings']:
                     at.session_state[at.session_state['campaign_edit_key']+'panel']=tab
                     at.run(timeout=10);self.assertFalse(at.exception)
                 with patch('crm_campaign_send_ui.send_test',return_value={'audit_saved':True}) as send:

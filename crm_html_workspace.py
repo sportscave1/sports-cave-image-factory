@@ -69,6 +69,8 @@ def flow_preview(doc,cfg,key):
 
 
 def composer_styles():
+    from crm_composer_style import polished_styles
+    polished_styles()
     # Campaign-only overrides: the shell, Inbox and Flow canvas keep their styles.
     st.html("""<style>
     [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout){max-width:none;padding:calc(var(--sc-topbar-height, 64px) + 8px) 18px 10px !important}

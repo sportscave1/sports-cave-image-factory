@@ -94,7 +94,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
         at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs],['Campaign Settings','Editor','Templates'])
+        self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates'])
         iframe=next(e for e in at.get('iframe') if 'A collector moment' in e.proto.srcdoc)
         self.assertIn('Unsubscribe',iframe.proto.srcdoc)
         next(b for b in at.button if str(b.key).endswith('device_Mobile')).click().run()

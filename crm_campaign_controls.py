@@ -24,7 +24,8 @@ def market_control(shop,store,doc,key):
 
 def timing_control(doc,key):
     value=doc.get('send_timing',{'mode':'now'})
-    selected=st.radio('Send timing',('Send now','Schedule'),index=int(value['mode']=='schedule'),key=key+'timing')
+    with st.container(key='crm-send-timing'):
+        selected=st.radio('Send timing',('Send now','Schedule'),index=int(value['mode']=='schedule'),key=key+'timing',horizontal=True)
     if selected=='Send now':doc['send_timing']={'mode':'now'};return
     a,b=st.columns(2)
     day=a.date_input('Date',date.fromisoformat(value['date']) if value.get('date') else date.today()+timedelta(days=1),key=key+'date')

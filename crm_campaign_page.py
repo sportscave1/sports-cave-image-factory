@@ -190,7 +190,7 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
-            details,html_tab,templates_tab=st.tabs(['Campaign Settings','Editor','Templates'],key=key+'panel',on_change='rerun')
+            details,html_tab,templates_tab=st.tabs(['Settings','Editor','Templates'],key=key+'panel',on_change='rerun')
             with details:
                 if details.open:
                     editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
@@ -276,12 +276,13 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
     title,buttons=st.columns([5,4],vertical_alignment='center')
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
-    title.caption('● Marketing delivery '+('ON' if get_resend_marketing_config_status()['marketing_enabled'] else 'OFF · Tests only'))
-    with buttons.container(horizontal=True,horizontal_alignment='right',gap='small'):
-        save=st.button('Save draft',type='primary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
+    if not get_resend_marketing_config_status()['marketing_enabled']:
+        title.caption('● Marketing delivery OFF · Tests only')
+    with buttons.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-campaign-actions'):
+        save=st.button('Save draft',type='secondary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
         test_control(drafts,actions.user,editor,key,available)
-        send_now=st.button('Send now',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
+        send_now=st.button('Send now',type='primary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
     if save and flush_current(force=True):st.toast('Draft saved')
@@ -289,7 +290,8 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         from crm_campaign_send_ui import review_dialog
         st.session_state.pop(key+'send_review',None)
         review_dialog(shop,drafts,actions.user,editor,key)
-    if available:recent_campaigns(drafts,key,actions.user)
+    if available:
+        with st.container(key='crm-recent-campaigns'):recent_campaigns(drafts,key,actions.user)
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:
