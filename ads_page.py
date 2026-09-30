@@ -23,6 +23,8 @@ import ads_posting_handoff as posting_handoff
 import ads_refresh_winners
 import ads_refresh_generation
 import ads_standard_workflow
+import ads_package_paths
+from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
@@ -1688,6 +1690,7 @@ def render_prompt_copy_button(
     disabled=False,
     track_copy=False,
 ):
+    prompt_text = creation_instructions(prompt_text)
     if track_copy:
         return _PROMPT_COPY_COMPONENT(
             prompt_text=str(prompt_text or ""),
@@ -9152,9 +9155,8 @@ def render_generic_winner_pattern_note(category, campaign_type):
 
 
 def render_meta_url_parameters_section(section_number):
-    st.subheader(f"{section_number}. URL parameters")
-    st.caption("Paste this into the Meta URL parameters field for every ad.")
-    st.code(META_AD_URL_PARAMETERS, language="text")
+    """Compatibility shim for saved/legacy Ads callers; Posting owns tracking."""
+    return None
 
 
 def render_product_name_input(*, rows=None, result=None):
@@ -9936,11 +9938,10 @@ def build_ads_notes_filename(result, workflow):
 
 
 def _ads_export_folder_path(destination, result, workflow):
-    clean_destination = dropbox_integration.normalize_dropbox_path(destination)
-    folder_name = build_ads_export_folder_name(result, workflow)
-    if PurePosixPath(clean_destination).name.casefold() == folder_name.casefold():
-        return clean_destination
-    return dropbox_integration.join_upload_path(clean_destination, folder_name)
+    return ads_package_paths.campaign_folder(
+        destination, build_ads_export_folder_name(result, workflow),
+        saved_folder=workflow.get("saved_folder_path") or "",
+    )
 
 
 def _ads_notes_for_workflow(workflow):
@@ -11848,12 +11849,7 @@ def _instant_experience_package_items(result, workflow):
     items.append({"kind": "text", "slot_id": "_ad_setup_notes", "label": "Ad setup notes",
                   "relative_path": "notes.txt", "filename": "notes.txt", "data": notes_data,
                   "size": len(notes_data), "content_type": "text/plain", "asset_type": "meta_ads_notes"})
-    # Keep every required copy/metadata file, with collision-free names at root.
-    for item in items:
-        flat_name = item["relative_path"].replace("/", "--")
-        item["relative_path"] = flat_name
-        item["filename"] = flat_name
-    return items
+    return ads_package_paths.flat_items(items)
 
 
 def _instant_experience_package_signature(result, workflow):
@@ -12934,6 +12930,7 @@ def save_ads_images_to_dropbox(
         if slot["id"] in valid_slot_ids
         and (
             (outcomes.get(slot["id"]) or {}).get("status") != "saved"
+            or str(PurePosixPath(str((outcomes.get(slot["id"]) or {}).get("path") or "")).parent).casefold() != export_folder.casefold()
             or (result.get("campaign_type") == "Carousel" and
                 (outcomes.get(slot["id"]) or {}).get("processed_hash") != hashlib.sha256(
                     workflow["slots"][slot["id"]]["data"]
@@ -13245,6 +13242,7 @@ def _render_instant_experience_package_save(result, workflow):
         package_saved = (
             package_outcome.get("status") == "saved"
             and package_outcome.get("signature") == package_signature
+            and ads_package_paths.saved_files_are_flat(workflow)
         )
     if not package_ready:
         st.caption("Complete all three covers and their single copy pairs before saving the package." if _refresh_copy_count(result) == 1 else "Complete all three covers and all nine description options before saving the package.")
@@ -13446,7 +13444,7 @@ def _render_ads_image_save(result, workflow):
             == hashlib.sha256(refresh_csv_bytes).hexdigest()
         )
     images_saved = saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
-    all_saved = images_saved and notes_saved and carousel_csv_saved and creative_refresh_csv_saved
+    all_saved = images_saved and notes_saved and carousel_csv_saved and creative_refresh_csv_saved and ads_package_paths.saved_files_are_flat(workflow)
     if not has_valid_upload:
         st.caption(f"0 of {required_count} images ready.")
     elif not ready:
@@ -13670,7 +13668,7 @@ def _render_ads_image_save(result, workflow):
 def _ads_review_prefill(result):
     generated_output = str(result.get("generated_ad_output") or "").strip()
     master_prompt = str(result.get("master_prompt") or "").strip()
-    return generated_output if generated_output and generated_output != master_prompt else ""
+    return creation_instructions(generated_output) if generated_output and generated_output != master_prompt else ""
 
 
 def build_ads_review_context(result):

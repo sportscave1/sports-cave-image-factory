@@ -14,6 +14,7 @@ from PIL import Image
 
 import ads_image_workflow as images
 import dropbox_integration as dropbox
+import ads_package_paths
 
 
 GOOGLE_DEMAND_GEN_PROMPT_V1 = Path(__file__).with_name("prompts").joinpath(
@@ -284,7 +285,8 @@ def save_campaign(access_token, root, destination, record, workflow):
         raise GoogleCampaignError("This save path only accepts Google Demand Gen campaigns.")
     root, destination = dropbox.normalize_dropbox_path(root), dropbox.normalize_dropbox_path(destination)
     name = images.sanitize_product_filename(record["product_name"], max_length=90)
-    folder = workflow.get("saved_folder_path") or f"{destination}/{name}-google-demand-gen-{record['campaign_id']}"
+    folder = ads_package_paths.campaign_folder(destination, f"{name}-google-demand-gen-{record['campaign_id']}",
+        saved_folder=workflow.get("saved_folder_path") or "")
     if not dropbox.path_is_within_root(destination, root) or not dropbox.path_is_within_root(folder, root):
         raise GoogleCampaignError("The selected destination is outside the approved Files folder.")
     dropbox.ensure_folder_path(access_token, folder, root_path=root)
@@ -292,31 +294,54 @@ def save_campaign(access_token, root, destination, record, workflow):
     saved["updated_at"] = utc_now()
     outcomes = {}
     def upload(filename, data):
+        filename = ads_package_paths.flat_items([{ "relative_path": filename }])[0]["relative_path"]
         result = dropbox.upload_batch(access_token, folder,
             [{"relative_path": filename, "data": data, "size": len(data)}], conflict="replace")
         if result.get("failures") or len(result.get("successes") or []) != 1:
             raise GoogleCampaignError(f"Could not save {filename}. Retry saving the campaign.")
         receipt = result["successes"][0].get("metadata") or {}
         return {"status": "saved", "filename": filename, "path": receipt.get("path_display") or f"{folder}/{filename}"}
-    for spec in IMAGE_SLOTS:
-        slot = workflow.get("slots", {}).get(spec["id"]) or {}
-        persisted = {"prompt": saved["google_config"]["image_slots"][spec["id"]].get("prompt", "")}
-        if slot.get("valid") and slot.get("data"):
-            # Validate historical/reopened assets and convert all new saves at the boundary.
-            image = process_image(slot["data"], spec, original_name=slot.get("original_name", ""))
-            digest = hashlib.sha256(image["data"]).hexdigest()
-            # Immutable revision folders keep an earlier manifest usable after a partial save failure.
-            relative_path = f"assets/{digest}/{spec['filename']}"
-            outcomes[spec["id"]] = upload(relative_path, image["data"])
-            persisted.update({"saved_path": outcomes[spec["id"]]["path"], "filename": spec["filename"],
-                              "sha256": digest, "width": spec["width"], "height": spec["height"],
-                              "content_type": "image/jpeg", "original_name": slot.get("original_name", ""), "complete": True})
-        saved["google_config"]["image_slots"][spec["id"]] = persisted
-    saved["asset_count"] = len(outcomes)
-    saved["status"] = "complete" if len(outcomes) == 9 else "incomplete"
-    upload(FILLED_FILENAME, build_csv(saved, {**workflow, "outcomes": outcomes}))
-    upload("google-prompt.txt", saved["master_prompt"].encode("utf-8"))
-    outcomes["_campaign"] = upload(MANIFEST_FILENAME, json.dumps(saved, ensure_ascii=False, indent=2).encode("utf-8"))
+    # Flat overwrites must not invalidate the last committed manifest if a
+    # later upload fails. Snapshot only current files that this save may replace;
+    # old nested assets are read-compatible and are never moved or deleted.
+    backups = {}
+    if (workflow.get("outcomes") or {}).get("_campaign", {}).get("path"):
+        for spec in IMAGE_SLOTS:
+            previous = record["google_config"]["image_slots"][spec["id"]]
+            if previous.get("saved_path") == f"{folder}/{spec['filename']}":
+                backups[spec["filename"]] = dropbox.get_file_bytes(access_token, previous["saved_path"])
+        for filename in (FILLED_FILENAME, "google-prompt.txt"):
+            backups[filename] = dropbox.get_file_bytes(access_token, f"{folder}/{filename}")
+    try:
+        for spec in IMAGE_SLOTS:
+            slot = workflow.get("slots", {}).get(spec["id"]) or {}
+            persisted = {"prompt": saved["google_config"]["image_slots"][spec["id"]].get("prompt", "")}
+            if slot.get("valid") and slot.get("data"):
+                # Validate historical/reopened assets and convert all new saves at the boundary.
+                image = process_image(slot["data"], spec, original_name=slot.get("original_name", ""))
+                digest = hashlib.sha256(image["data"]).hexdigest()
+                # Preserve the existing JPG basename; all new writes belong at campaign root.
+                relative_path = spec["filename"]
+                outcomes[spec["id"]] = upload(relative_path, image["data"])
+                persisted.update({"saved_path": outcomes[spec["id"]]["path"], "filename": spec["filename"],
+                                  "sha256": digest, "width": spec["width"], "height": spec["height"],
+                                  "content_type": "image/jpeg", "original_name": slot.get("original_name", ""), "complete": True})
+            saved["google_config"]["image_slots"][spec["id"]] = persisted
+        saved["asset_count"] = len(outcomes)
+        saved["status"] = "complete" if len(outcomes) == 9 else "incomplete"
+        upload(FILLED_FILENAME, build_csv(saved, {**workflow, "outcomes": outcomes}))
+        upload("google-prompt.txt", saved["master_prompt"].encode("utf-8"))
+        outcomes["_campaign"] = upload(MANIFEST_FILENAME, json.dumps(saved, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception:
+        restore_errors = []
+        for filename, data in backups.items():
+            try:
+                upload(filename, data)
+            except Exception:
+                restore_errors.append(filename)
+        if restore_errors:
+            raise GoogleCampaignError("Save failed and some prior files could not be restored: " + ", ".join(restore_errors) + ". Retry saving before reopening.") from None
+        raise
     record.update(saved)
     workflow.update({"outcomes": outcomes, "saved_folder_path": folder, "save_open": False})
     return outcomes

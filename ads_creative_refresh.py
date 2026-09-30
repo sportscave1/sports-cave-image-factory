@@ -16,6 +16,7 @@ import streamlit as st
 from activity_log import record_activity_log
 import ads_final_review
 import ads_page
+import ads_package_paths
 import dropbox_integration
 import os_accounts
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
@@ -2020,24 +2021,27 @@ def save_creative_refresh_package_to_dropbox(
     destination,
     result,
     items,
+    *,
+    saved_folder="",
 ):
-    items = list(items or ())
+    items = ads_package_paths.flat_items(items or ())
     clean_root = dropbox_integration.normalize_dropbox_path(root_path)
     clean_destination = dropbox_integration.normalize_dropbox_path(destination)
     if not dropbox_integration.path_is_within_root(clean_destination, clean_root):
         raise CreativeRefreshSaveError("The selected destination is outside the approved Files folder.")
     package_name = str((result or {}).get("package_name") or "creative-refresh-package")
-    export_folder = dropbox_integration.join_upload_path(clean_destination, package_name)
+    export_folder = ads_package_paths.campaign_folder(clean_destination, package_name, saved_folder=saved_folder)
     if not dropbox_integration.path_is_within_root(export_folder, clean_root):
         raise CreativeRefreshSaveError("The Creative Refresh package path is outside the approved Files folder.")
-    if dropbox_integration.get_metadata_if_exists(access_token, export_folder):
+    updating = bool(saved_folder) or export_folder == clean_destination
+    if not updating and dropbox_integration.get_metadata_if_exists(access_token, export_folder):
         export_folder = dropbox_integration.windows_numbered_path(access_token, export_folder)
     dropbox_integration.ensure_folder_path(access_token, export_folder, root_path=clean_root)
     upload_result = dropbox_integration.upload_batch(
         access_token,
         export_folder,
         items,
-        conflict="cancel",
+        conflict="replace" if updating else "cancel",
     )
     failures = list(upload_result.get("failures") or ())
     if failures:
@@ -2824,6 +2828,7 @@ def _render_package_save(result, items):
                 destination,
                 result,
                 items,
+                saved_folder=workflow.get("saved_path") or "",
             )
             workflow["destination_path"] = destination
             workflow["saved_path"] = outcome["path"]
@@ -2880,7 +2885,7 @@ def _render_generated_result(result, *, winning_upload, original_prompt_upload, 
     st.markdown("**Complete ChatGPT prompt**")
     st.text_area(
         "Complete ChatGPT prompt",
-        value=result["prompt"],
+        value=ads_page.creation_instructions(result["prompt"]),
         height=420,
         disabled=True,
         label_visibility="collapsed",

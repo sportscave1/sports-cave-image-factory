@@ -14,7 +14,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "notification-dismissal-v2";
+  const CONTROLLER_VERSION = "home-lazy-files-v1";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -24,6 +24,7 @@
 
   const icon = (name) => {
     const paths = {
+      folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>',
       search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>',
       menu: '<path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h16"></path>',
       refresh: '<path d="M20 11a8.1 8.1 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path>',
@@ -137,20 +138,12 @@
       flex: 0 0 auto;
       margin-left: auto;
     }
-    .sc-os-topbar-greeting {
-      color: #c9c7c1;
-      font-size: 13px;
-      font-weight: 650;
-      justify-self: start;
-      line-height: 1;
-      max-width: min(22vw, 220px);
-      min-width: 0;
-      overflow: hidden;
-      padding: 0 2px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .sc-os-topbar-greeting[hidden] { display: none !important; }
+    #sc-os-files { width: auto; padding: 0 12px; gap: 7px; white-space: nowrap; font-size: 13px; }
+    .sc-home-greeting { color: #888; font-size: 14px; margin-bottom: 8px; }
+    .sc-home-active-planner { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 14px; margin-bottom: 10px; border: 1px solid #b99448; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+    .sc-home-active-planner[hidden] { display: none !important; }
+    .sc-home-active-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; }
+    .sc-home-active-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
     .sc-os-topbar-name {
       color: #fff;
       font-size: 14px;
@@ -281,7 +274,7 @@
     .sc-os-planner-pill-state { color: #c9c3b7; font-size: 10px; white-space: nowrap; }
     .sc-os-planner-pill-time { color: #f1ca6c; flex: 0 0 auto; font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 8ch; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
     section[data-testid="stSidebar"] .st-key-sidebar-row-orders button,
-    section[data-testid="stSidebar"] .st-key-sidebar-row-email button {
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button {
       position: relative;
     }
     section[data-testid="stSidebar"] [data-testid="stButton"] button span.sc-orders-action-badge {
@@ -304,6 +297,9 @@
       right: 12px;
       top: 50%;
       transform: translateY(-50%);
+    }
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button span.sc-orders-action-badge {
+      right: 34px;
     }
     #sc-os-order-toast-region {
       position: fixed;
@@ -713,8 +709,8 @@
     }
     .sc-os-topbar-action svg { height: 17px !important; width: 17px !important; }
     @media (max-width: 960px) {
-      #${ROOT_ID} { grid-template-columns: var(--sc-sidebar-width) minmax(0, 150px) minmax(220px, 1fr) auto; }
-      .sc-os-topbar-greeting { max-width: 150px; }
+      #${ROOT_ID} { grid-template-columns: var(--sc-sidebar-width) auto minmax(0, 1fr) auto; }
+
       .sc-os-topbar-search-wrap { padding-left: 12px; padding-right: 12px; }
       #sc-os-search-results { left: 12px; right: 12px; }
       .sc-os-topbar-shortcut { display: none; }
@@ -737,7 +733,7 @@
     @media (max-width: 820px), (max-width: 940px) and (max-height: 520px) {
       :root { --sc-topbar-height: 56px; }
       #${ROOT_ID} {
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         height: var(--sc-topbar-height);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
@@ -751,7 +747,7 @@
       .sc-os-mobile-menu,
       .sc-os-mobile-search { display: inline-flex; }
       .sc-os-topbar-refresh { display: none; }
-      .sc-os-topbar-greeting { display: none; }
+
       .sc-os-topbar-logo { height: 28px; width: 28px; }
       .sc-os-topbar-name { font-size: 12px; }
       .sc-os-topbar-subtitle { display: none; }
@@ -845,7 +841,7 @@
       </div>
       <button id="sc-os-refresh" class="sc-os-topbar-icon-button sc-os-topbar-refresh" type="button" aria-label="Refresh Sports Cave OS" title="Refresh">${icon("refresh")}</button>
     </div>
-    <div id="sc-os-topbar-greeting" class="sc-os-topbar-greeting" aria-label="Signed-in greeting" hidden></div>
+    <button id="sc-os-files" class="sc-os-topbar-icon-button" type="button" aria-label="Open Files" ${config.filesEnabled ? "" : "hidden"}>${icon("folder")}<span>Files</span></button>
     <div class="sc-os-topbar-search-wrap">
       <div class="sc-os-topbar-search-shell">
         ${icon("search")}
@@ -1044,7 +1040,7 @@
     );
     const mobileSearchButton = root.querySelector("#sc-os-mobile-search");
     const refreshButton = root.querySelector("#sc-os-refresh");
-    const topbarGreeting = root.querySelector("#sc-os-topbar-greeting");
+    const filesButton = root.querySelector("#sc-os-files");
     const plannerButton = root.querySelector("#sc-os-daily-planner");
     const plannerTimerPill = root.querySelector("#sc-os-planner-timer-pill");
     const plannerTimerTask = plannerTimerPill?.querySelector(".sc-os-planner-pill-task");
@@ -1395,6 +1391,13 @@
         parentWindow.location.reload();
       }, 0);
     };
+    filesButton.addEventListener("click", () => {
+      if (!state.config.filesEnabled) return;
+      const popup = parentWindow.open("/files-window", "sports-cave-files-window",
+        "popup=yes,width=1280,height=860,left=80,top=40,resizable=yes,scrollbars=yes,noopener=no");
+      if (popup) popup.focus();
+      else parentWindow.open("/files-window", "_blank");
+    }, listenerOptions);
     const sendPlannerAuth = (plannerWindow, {focusActive = false} = {}) => {
       try {
         if (plannerWindow && !plannerWindow.closed) {
@@ -1525,6 +1528,7 @@
       return "Good night";
     };
     const updateTopBarGreeting = () => {
+      const topbarGreeting = doc.getElementById("sc-home-greeting");
       if (!topbarGreeting) return;
       const displayName = String(state.config.userDisplayName || "").trim();
       if (!displayName) {
@@ -1555,7 +1559,15 @@
       }, delay);
     };
     const updateSidebarBadge = (route, count, label, attempt = 0) => {
-      const row = doc.querySelector(`section[data-testid="stSidebar"] .st-key-sidebar-row-${route}`);
+      const row = doc.querySelector(route === "email"
+        ? 'section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"]'
+        : `section[data-testid="stSidebar"] .st-key-sidebar-row-${route}`);
+      if (route === "email") {
+        const inbox = doc.querySelector('section[data-testid="stSidebar"] .st-key-sidebar-row-email button');
+        inbox?.querySelector(".sc-orders-action-badge")?.remove();
+        inbox?.removeAttribute("data-action-required-count");
+        inbox?.removeAttribute("aria-label");
+      }
       const button = row?.querySelector("button");
       if (!button) {
         if (Number(count) > 0 && attempt < 20) {
@@ -1961,7 +1973,22 @@
         run();
       }
     };
+    const updateHomeStatus = () => {
+      updateTopBarGreeting();
+      const strip = doc.getElementById("sc-home-active-planner");
+      if (!strip) return;
+      const timer = state.plannerTimer || {};
+      const active = state.config.dailyPlannerEnabled && timer.id && !timer.outcome
+        && ["running", "paused", "expired"].includes(timer.status);
+      strip.hidden = !active;
+      if (!active) return;
+      strip.querySelector(".sc-home-active-task").textContent = `Focused on: ${timer.task || "Current task"}`;
+      strip.querySelector(".sc-home-active-time").textContent = timer.outcome_required || timer.status === "expired"
+        ? "Outcome required" : `${toolbarTimerLabel(plannerRemaining(timer))} ${timer.status}`;
+      strip.onclick = () => openDailyPlanner({focusActive: true});
+    };
     const updatePlannerMirror = () => {
+      updateHomeStatus();
       if (!plannerButton || !plannerTimerPill) return;
       const timer = state.plannerTimer || {};
       const status = String(timer.status || "");
@@ -2868,6 +2895,7 @@
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
         scheduleTopBarGreeting();
+        filesButton.hidden = !state.config.filesEnabled;
         if (revisionChanged) {
 
           state.notifications = null;

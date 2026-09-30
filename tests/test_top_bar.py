@@ -284,7 +284,7 @@ class TopBarComponentTests(unittest.TestCase):
         markup_start = source.index("const markup = `")
         markup = source[markup_start : source.index("`;", markup_start)]
         refresh = markup.index('id="sc-os-refresh"')
-        greeting = markup.index('id="sc-os-topbar-greeting"')
+        greeting = markup.index('id="sc-os-files"')
         search = markup.index('id="sc-os-global-search"')
         planner = markup.index('id="sc-os-daily-planner"')
         notifications = markup.index('id="sc-os-notifications"')
@@ -302,10 +302,12 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn('title="Open Daily Planner"', markup)
         self.assertNotIn("Shopify", source)
 
-    def test_top_bar_greeting_uses_browser_time_display_name_and_no_smiley(self):
+    def test_home_greeting_uses_browser_time_display_name_and_no_smiley(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
 
-        self.assertEqual(1, source.count('id="sc-os-topbar-greeting"'))
+        self.assertEqual(1, source.count('id="sc-os-files"'))
+        self.assertIn('doc.getElementById("sc-home-greeting")', source)
+        self.assertNotIn('id="sc-os-topbar-greeting"', source)
         self.assertIn("state.config.userDisplayName", source)
         self.assertIn("topBarGreetingForDate(new Date())", source)
         self.assertIn('if (hour >= 5 && hour < 12) return "Good morning";', source)
@@ -498,7 +500,7 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn('"authToken": "signed-token"', body)
         self.assertIn('"userDisplayName": "Admin"', body)
         self.assertEqual(1, body.count('id="sc-os-refresh"'))
-        self.assertEqual(1, body.count('id="sc-os-topbar-greeting"'))
+        self.assertEqual(1, body.count('id="sc-os-files"'))
         self.assertEqual(1, body.count('id="sc-os-daily-planner"'))
         self.assertEqual(1, body.count('id="sc-os-notifications"'))
         self.assertEqual(1, body.count('id="sc-os-repairs"'))

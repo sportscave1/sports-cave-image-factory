@@ -159,7 +159,7 @@ def render_result(result, *, product_rows=(), source_matches=True):
         with st.expander("Google Demand Gen setup", expanded=False):
             for key in ("campaign_name", "ad_group_name", "ad_name", "campaign_goal", "bidding_strategy",
                         "conversion_goal", "product_feed_mode", "product_feed_guidance", "channels", "display_network",
-                        "audience_name", "demographic_signal", "optimised_targeting", "final_url_suffix"):
+                        "audience_name", "demographic_signal", "optimised_targeting"):
                 st.text(f"{key.replace('_', ' ').title()}: {config.get(key, '')}")
             st.text("Custom Search Segment: " + "; ".join(config.get("search_terms", [])))
 
