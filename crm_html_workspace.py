@@ -150,6 +150,7 @@ def composer_canvas(doc,cfg,key,store=None):
         try:
             if store:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
             rendered=cached_preview(st.session_state,doc,cfg,loading=lambda:st.spinner('Updating preview…'))
+            st.session_state[key+'review_preview_settings']=deepcopy(cfg)
             with st.container(horizontal=True,horizontal_alignment='center'):
                 components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=680,scrolling=True)
         except (ValueError,StoreUnavailable) as exc:st.warning(str(exc))

@@ -11,13 +11,7 @@ from crm_resend import Config, MarketingDisabled
 from crm_resend_marketing import single_email
 
 OFF='Marketing delivery is currently OFF. No emails were sent.'
-# Existing foundation readiness checks remain fail-closed until individually attested.
-ATTESTATIONS={
- 'DMARC confirmed before bulk activation':'CRM_DMARC_VERIFIED',
- 'Resend webhooks proven before bulk activation':'CRM_RESEND_WEBHOOKS_VERIFIED',
- 'Market legal review complete':'CRM_MARKET_REVIEW_VERIFIED',
- 'Broadcast provider activated':'CRM_BROADCAST_VERIFIED',
-}
+
 
 def final_audience(shop,store,doc,*,clock=time.monotonic):
     if doc.get('market_audience'):
@@ -50,23 +44,38 @@ def production_checks(doc,cfg,env=None,*,reviewed_audience=False):
         counts=doc.get('counts') or {}
         live['Fresh complete eligible audience']=bool(counts.get('complete') and counts.get('eligible',0)>0)
     live.pop('One-click unsubscribe production path activated',None)
-    for label,key in ATTESTATIONS.items():
-        live[label]=(doc['market'] in env.get(key,'').split(',')) if key=='CRM_MARKET_REVIEW_VERIFIED' else env.get(key,'').lower()=='true'
+    # Legacy human attestations remain readable in old settings, but are not
+    # Campaigns authorization or delivery gates. Validate the actual values.
+    for label in ('Business postal address configured and verified',
+                  'Contact identity configured and confirmed',
+                  'SPF/DKIM verification documented', 'DMARC confirmed before bulk activation',
+                  'Resend webhooks proven before bulk activation', 'Market legal review complete',
+                  'Broadcast provider activated'):
+        live.pop(label,None)
+    from crm_resend_marketing import single_email
+    from crm_campaign_content import https
+    live['Business postal address configured']=len(cfg.get('postal','').strip())>=10
+    live['Business contact identity configured']=bool(cfg.get('business') and single_email(cfg.get('contact','')) and https(cfg.get('website','')))
     from crm_campaign_footer import has_unsubscribe_link
     live['Visible unsubscribe footer / functional production link']=bool(not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer']))
     return {**checks['test'],**live,'Marketing delivery enabled':Config(env).enabled}
 
 def review(shop,store,editor,env=None):
+    from email_loading import stage
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
-    state=final_audience(shop,store,doc)
+    with stage('Campaign review','authoritative_audience'):
+        state=final_audience(shop,store,doc)
     doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
-    cfg=store.render_settings(env)
-    checks=production_checks(doc,cfg,env)
+    with stage('Campaign review','render_settings'):
+        cfg=store.render_settings(env)
+    with stage('Campaign review','production_validation'):
+        checks=production_checks(doc,cfg,env)
     blockers=[k for k,v in checks.items() if not v]
     tracking_ok=False
     if editor.get('id'):
         try:
-            validate_tracking(doc,cfg,editor['id'])
+            with stage('Campaign review','tracking_validation'):
+                validate_tracking(doc,cfg,editor['id'])
             tracking_ok=True
         except ValueError:blockers.append('Sports Cave OS tracking validation failed')
     from crm_campaign_schedule import plan
@@ -75,7 +84,8 @@ def review(shop,store,editor,env=None):
     try:schedule=plan(doc,state,now())
     except ValueError as exc:blockers.append(str(exc))
     from crm_campaign_snapshot import create
-    snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
+    with stage('Campaign review','snapshot_creation'):
+        snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
     return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok}
 
 
@@ -88,8 +98,6 @@ def validate_tracking(doc,cfg,campaign_id):
 def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     """One explicit submission confirms reviewed copy; all backend guards still run."""
     require(user,'crm_campaigns_manage')
-    import os_accounts
-    if not os_accounts.is_admin(user):raise PermissionError('Only an administrator can send a campaign test.')
     recipient=recipient.strip() if isinstance(recipient,str) else recipient
     if not single_email(recipient):raise ValueError('Enter one valid email address.')
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True

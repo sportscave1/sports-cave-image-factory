@@ -115,9 +115,7 @@ class CampaignStore(WorkspaceRecords):
 
     def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None, shop=None):
         require(user,'crm_campaigns_manage')
-        import os_accounts
         from crm_resend_marketing import _send_admin_email, single_email, DeliveryError
-        if not os_accounts.is_admin(user): raise PermissionError('Only an administrator can send a campaign test.')
         row=self.draft(identity)
         if self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
@@ -143,7 +141,7 @@ class CampaignStore(WorkspaceRecords):
         rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
         rendered['unsubscribe_url']=unsubscribe_url
         with self.db() as conn:
-            # Serialize per-admin attempts across sessions, preserving receipt replay.
+            # Serialize per-user attempts across sessions, preserving receipt replay.
             actor=str(user.get('id',''))
             guard_key='campaign-test-rate:'+actor
             conn.execute("INSERT INTO crm_runtime_state(key,value) VALUES(%s,'{}'::jsonb) ON CONFLICT DO NOTHING",(guard_key,))

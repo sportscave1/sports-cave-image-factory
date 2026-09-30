@@ -67,7 +67,7 @@ def test_panel(store,user,editor,key,cfg,pending=None):
     with st.expander('Checks'):
         for label,ok in checks['test'].items():st.caption(('✓ ' if ok else '○ ')+label)
         st.caption('Live sending disabled. Production unsubscribe must be activated before any future live send.')
-    if not os_accounts.is_admin(user):st.caption('Admin internal tests only.');return None
+    if not os_accounts.can_access_page(user,'CRM Campaigns'):return None
     with st.form(key+'internal_test'):
         recipient=st.text_input('Test recipient',value='')
         confirmed=st.checkbox('One manually entered test recipient')
@@ -246,9 +246,12 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
             details,html_tab,templates_tab=st.tabs(['Settings','Editor','Templates'],key=key+'panel',on_change='rerun')
             with details:
                 if details.open:
+                    from crm_prompt_ui import prompt_control,field_feedback
+                    prompt_control(shop,editor,key)
                     editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
                     c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
                     c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
+                    field_feedback()
                     from crm_campaign_controls import market_control,timing_control
                     market_control(shop,drafts,doc,key)
                     timing_control(doc,key)
@@ -378,15 +381,12 @@ def _selected_campaign(shop,store,actions,navigate,drafts,loading):
         save=st.button('Save draft',type='secondary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
         test_control(drafts,actions.user,editor,key,available)
-        send_now=st.button('Send now',type='primary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
+        from crm_campaign_send_ui import send_control
+        send_control(shop,drafts,actions.user,editor,key,cfg,available)
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
     if save and flush_current(force=True):
         st.toast('Draft saved');st.rerun()
-    if send_now:
-        from crm_campaign_send_ui import review_dialog
-        st.session_state.pop(key+'send_review',None)
-        review_dialog(shop,drafts,actions.user,editor,key)
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:
@@ -620,7 +620,7 @@ def review_editor(store,user,editor,key,cfg):
         if needs or ready:
             updated=store.save(user,editor['name'],doc,editor['id'],editor['version'],requested_status='NEEDS_REVIEW' if needs else 'TEST_READY')
             st.session_state['campaign_editor']=deepcopy(updated);st.session_state['campaign_saved']=deepcopy(updated);st.rerun()
-        if os_accounts.is_admin(user):
+        if os_accounts.can_access_page(user,'CRM Campaigns'):
             with st.form(key+'test',clear_on_submit=False):
                 recipient=st.text_input('Manual internal test recipient',value='')
                 confirmed=st.checkbox('I confirm one internal mailbox and the TEST ONLY footer / inactive unsubscribe warnings.')
