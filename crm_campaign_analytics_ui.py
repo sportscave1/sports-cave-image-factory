@@ -19,6 +19,7 @@ def analytics(store,user,row):
     if detail['timing']['mirror_unavailable']:st.caption('Shopify attribution marker unavailable for some orders; recorded attribution is retained.')
     if detail['products']:
         st.dataframe([{'Product':p['product'],'Orders':p['orders'],'Units':p['units'],'Revenue':money({p['currency']:p['revenue']})} for p in detail['products']],hide_index=True,height='content')
+    email_orders(store,detail.get('orders',[]))
     if st.button('Email preview',key='sent_preview_'+str(row['id'])):
         st.session_state['sent_preview_id']=row['id']
     if st.session_state.get('sent_preview_id')==row['id']:
@@ -39,6 +40,67 @@ def analytics(store,user,row):
         (store.restore if row.get('archived_at') else store.archive)(user,row['id'],draft['version'])
         _close_analytics()
         st.rerun()
+
+
+def email_orders(store,orders):
+    from crm_logic import date
+    import os
+    from shopify_sync import normalize_store_domain
+    def stamp(value):return date(value).strftime('%d %b %H:%M %Z') if value else '—'
+    def elapsed(value):
+        if value is None:return '—'
+        seconds=int(value)
+        return str(seconds//86400)+'d '+str(seconds%86400//3600)+'h' if seconds>=86400 else str(seconds//3600)+'h '+str(seconds%3600//60)+'m' if seconds>=3600 else str(seconds//60)+'m'
+    def link(row):
+        host=normalize_store_domain(os.getenv('SHOPIFY_STORE_DOMAIN',''))
+        identity=row['shopify_order_id'].rsplit('/',1)[-1]
+        return 'https://'+host+'/admin/orders/'+identity if host.endswith('.myshopify.com') and identity.isdigit() else ''
+    st.caption('EMAIL ORDERS')
+    if not orders:
+        st.caption('No attributed orders yet.');return
+    selection=st.dataframe([{'Order':r['order_name'],'Ordered':stamp(r['order_created_at']),
+      'Products':', '.join(p['title']+' ×'+str(p.get('purchased_quantity',p['quantity'])) for p in r['products']),
+      'Revenue':money({r['currency']:r['amount']}),'Email click':stamp(r['click_at']),
+      'Time to purchase':elapsed((r.get('evidence') or {}).get('time_to_purchase_seconds')),
+      'Attribution':'Shopify UTM' if r['method'] in ('SHOPIFY_UTM','SHOPIFY_UTM_EXACT') else 'Resend click',
+      'Shopify':{'UPDATED':'✓ Mirrored','FAILED':'Failed','PENDING':'Pending'}.get(r['mirror_status'],r['mirror_status']),
+      'Open':link(r)} for r in orders],hide_index=True,height='content',on_select='rerun',selection_mode='single-row',key='email_orders_'+str(orders[0]['campaign_id']),
+      column_config={'Open':st.column_config.LinkColumn('Open',display_text='Open Shopify ↗')})
+    picked=selection.selection.rows
+    index=picked[0] if picked and 0<=picked[0]<len(orders) else None
+    with st.expander('Order evidence',expanded=index is not None):
+        selected=st.selectbox('Order',options=[r['shopify_order_id'] for r in orders],index=None,
+          format_func=lambda identity:next(r['order_name'] for r in orders if r['shopify_order_id']==identity),key='email_order_evidence') if index is None else orders[index]['shopify_order_id']
+        if not selected:return
+        row=next(r for r in orders if r['shopify_order_id']==selected);proof=row.get('evidence') or {}
+        from crm_campaign_analytics import order_delivery
+        st.caption('Campaign · '+str(proof.get('campaign_name') or '—'))
+        st.caption('Campaign send ID · '+str(row['campaign_send_id']))
+        resend,shopify,attribution,purchase=st.tabs(['Resend','Shopify','Attribution','Purchase'])
+        def facts(items):
+            from html import escape
+            st.html('<div style="display:grid;grid-template-columns:minmax(8rem,12rem) minmax(0,1fr);gap:5px 12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere">'+
+              ''.join('<strong>'+escape(label)+'</strong><span>'+escape(str(value if value is not None else 'Unavailable'))+'</span>' for label,value in items)+'</div>')
+        with resend:
+            delivery=order_delivery(store,row)
+            if not delivery:st.caption('No matching recipient delivery record.')
+            for item in delivery:
+                facts([(k.replace('_',' ').title(),stamp(item[k])) for k in ('sent','delivered','opened','first_click','last_click')])
+                st.caption('Recipient send · '+str(item['recipient_send_id']))
+                st.caption('Resend message · '+str(item['provider_email_id'] or 'Unavailable'))
+        with shopify:
+            facts([('Order',row['order_name']),('Ordered',stamp(row['order_created_at'])),('Journey ready',proof.get('journey_ready')),
+              ('Matching visit',stamp(proof.get('shopify_visit_occurred_at'))),
+              *[(k.replace('_',' ').upper(),proof.get(k)) for k in ('utm_source','utm_medium','utm_campaign','utm_content')]])
+            st.caption('Landing page (tracking parameters only)');st.text(proof.get('landing_page') or 'Unavailable')
+        with attribution:
+            facts([('Method',row['method']),('Confidence',proof.get('confidence')),('Click → purchase',elapsed(proof.get('time_to_purchase_seconds'))),
+              ('Window',str(proof.get('attribution_window_days','—'))+' days'),('Shopify mirror',row['mirror_status'])])
+            if row.get('mirror_error'):st.caption(row['mirror_error'].replace('_',' '))
+        with purchase:
+            st.dataframe(row['products'],hide_index=True,height='content')
+            facts([('Gross received',money({row['currency']:row.get('gross_revenue')})),
+                   ('Refunded',money({row['currency']:row.get('refund_amount')})),('Net attributed revenue',money({row['currency']:row['amount']}))])
 
 @st.fragment(run_every='30s')
 def _live_sent_table(store,user):

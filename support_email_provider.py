@@ -696,11 +696,11 @@ class ImapProvider:
         return None
 
     @_retry_read
-    def discover_folders(self):
+    def discover_folders(self, *, counts=True):
         with self._connection(None) as (conn, _, __):
             folders = parse_folders(self._list_folders(conn))
             deadline = time.monotonic() + 6
-            for folder in [f for f in folders if f["role"]][:6]:
+            for folder in ([f for f in folders if f["role"]][:6] if counts else []):
                 if time.monotonic() > deadline:
                     break
                 try:

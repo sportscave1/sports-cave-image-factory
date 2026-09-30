@@ -54,7 +54,7 @@ def details(store,identity):
       FROM crm_order_attribution a CROSS JOIN LATERAL jsonb_array_elements(a.products) p
       WHERE a.campaign_id=%s AND a.eligible GROUP BY p->>'product_id',a.currency ORDER BY revenue DESC NULLS LAST''',(identity,))
     timing=store.q('''SELECT avg(extract(epoch FROM order_created_at-click_at)) AS seconds,
-      count(*) FILTER(WHERE mirror_status='UNAVAILABLE') AS mirror_unavailable
+      count(*) FILTER(WHERE mirror_status IN ('UNAVAILABLE','FAILED')) AS mirror_unavailable
       FROM crm_order_attribution WHERE campaign_id=%s AND eligible''',(identity,),True)
     recipients=store.q('''SELECT s.shopify_customer_id,s.status,s.error_code,s.provider_email_id,
       min(e.occurred_at) FILTER(WHERE e.event_type='email.sent') AS sent,
@@ -65,7 +65,21 @@ def details(store,identity):
       bool_or(e.event_type='email.suppressed') AS suppressed
       FROM crm_marketing_sends s LEFT JOIN crm_delivery_events e ON e.send_id=s.id
       WHERE s.campaign_id=%s AND NOT s.test_send GROUP BY s.id ORDER BY s.created_at LIMIT 100''',(identity,))
-    return {'products':products,'timing':timing,'recipients':recipients}
+    orders=store.q('''SELECT a.* FROM crm_order_attribution a WHERE campaign_id=%s
+      AND method IS NOT NULL ORDER BY order_created_at DESC LIMIT 100''',(identity,))
+    return {'products':products,'timing':timing,'recipients':recipients,'orders':orders}
+
+
+def order_delivery(store,row):
+    return store.q('''SELECT s.id AS recipient_send_id,s.provider_email_id,
+      min(e.occurred_at) FILTER(WHERE e.event_type='email.sent') AS sent,
+      min(e.occurred_at) FILTER(WHERE e.event_type='email.delivered') AS delivered,
+      min(e.occurred_at) FILTER(WHERE e.event_type='email.opened') AS opened,
+      min(e.occurred_at) FILTER(WHERE e.event_type='email.clicked') AS first_click,
+      max(e.occurred_at) FILTER(WHERE e.event_type='email.clicked') AS last_click
+      FROM crm_marketing_sends s LEFT JOIN crm_delivery_events e ON e.send_id=s.id
+      WHERE s.campaign_id=%s AND s.shopify_customer_id=%s AND NOT s.test_send GROUP BY s.id''',
+      (row['campaign_id'],row['customer_id']))
 
 def money(values):
     symbols={'AUD':'A$','USD':'US$','GBP':'£','CAD':'C$','NZD':'NZ$'}

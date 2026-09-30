@@ -340,6 +340,9 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
         _webhook_log("webhook_receipt_record_failed", webhook_id=webhook_id, topic=topic, error=str(error))
         return Response("Webhook receipt could not be recorded.", status_code=500)
     claim = pipeline.get("claim") or {}
+    if pipeline_state in ("processed", "duplicate"):
+        from crm_webhooks import forward_paid_order
+        background_tasks.add_task(forward_paid_order, payload, webhook_id, triggered_at)
     if pipeline_state == "duplicate":
         _webhook_log("webhook_duplicate_skipped", status="completed", webhook_id=webhook_id, topic=topic)
         return {

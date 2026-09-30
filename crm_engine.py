@@ -88,7 +88,10 @@ class Engine:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 if not all(production_checks(content['document'],content['render_settings'],reviewed_audience=bool(content.get('audience_snapshot_id'))).values()):
                     self.store.finish_send(row,'BLOCKED','production_readiness');return True
-                message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True)
+                campaign=self.store.q('SELECT campaign_send_id FROM crm_campaigns WHERE id=%s',(row['campaign_id'],),True)
+                if not campaign:raise ValueError('Campaign send identity missing.')
+                message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True,
+                                        campaign_id=str(row['campaign_id']),send_id=str(campaign['campaign_send_id']))
                 message['unsubscribe_url']=unsubscribe
             else:
                 optout=self.config.test_unsubscribe_url() if row['test_send'] else unsubscribe
@@ -176,6 +179,8 @@ class Engine:
             for a in automations:
                 if a['trigger_type']=='welcome':self.store.enroll(a,c['id'],c['id'],c['id']+':'+changed.isoformat(),changed)
         elif topic.startswith('orders/'):
+            from crm_campaign_attribution import schedule_order
+            schedule_order(self.store,event['object_id'])
             # The signed existing order event expedites the bounded attribution
             # scan. Order/automation processing keeps its existing semantics.
             scan=self.store.state('email_attribution_scan');scan.pop('next_at',None)

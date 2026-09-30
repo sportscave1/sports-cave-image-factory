@@ -3,11 +3,11 @@ from crm_logic import date
 
 PAGE='pageInfo { hasNextPage endCursor }'
 MONEY='{ shopMoney { amount currencyCode } }'
-VISIT='occurredAt landingPage source sourceDescription utmParameters { source medium campaign content }'
+VISIT='id occurredAt landingPage source sourceDescription utmParameters { source medium campaign content term }'
 LINE='id title quantity currentQuantity product { id } originalTotalSet '+MONEY+' discountAllocations { allocatedAmountSet '+MONEY+' }'
 REFUND_LINE='quantity lineItem { id } subtotalSet '+MONEY
 ORDER='''query CrmEmailOrder($id:ID!) { order(id:$id) {
- id name createdAt updatedAt cancelledAt fullyPaid test customer { id } netPaymentSet '''+MONEY+'''
+ id name createdAt updatedAt cancelledAt fullyPaid test customer { id } netPaymentSet '''+MONEY+' totalReceivedSet '+MONEY+' totalRefundedSet '+MONEY+'''
  customerJourneySummary { ready firstVisit { '''+VISIT+''' } lastVisit { '''+VISIT+''' }
  moments(first:100) { nodes { ... on CustomerVisit { '''+VISIT+' } } '+PAGE+''' } }
  lineItems(first:100) { nodes { '''+LINE+' } '+PAGE+''' }

@@ -8,6 +8,7 @@ await db.exec(readFileSync('migrations/20260927093818_crm_marketing_v1.sql','utf
 await db.exec(readFileSync('migrations/20260928020740_crm_campaign_workspace_v1.sql','utf8'));
 await db.exec(readFileSync('migrations/20260928024722_crm_campaigns_first_workspace.sql','utf8'));
 await db.exec(readFileSync('migrations/20260930031755_crm_campaigns_production_v2.sql','utf8'));
+await db.exec(readFileSync('migrations/20260930051803_crm_email_attribution_hardening.sql','utf8'));
 await db.exec(`CREATE TABLE edition_orders(id bigserial primary key,shopify_customer_id text,customer_email text,edition_number int,edition_total int,product_title text,variant_title text,certificate_file_url text,shopify_order_name text);`);
 let queue=Promise.resolve();
 const server=http.createServer(async(req,res)=>{

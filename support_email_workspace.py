@@ -24,7 +24,6 @@ from support_email_cache import DisplayLRU, BODY_LIMIT, BODY_BYTES, THREAD_LIMIT
 LOGGER = logging.getLogger(__name__)
 FOLDER_TTL = 300
 LIVE_INTERVAL = 55  # The existing 30-second shell heartbeat yields one check/minute.
-RECOVERY_LIMIT = 2
 TERMINAL_CONNECTION_ERRORS = {"configuration", "authentication", "tls", "select"}
 
 
@@ -48,7 +47,10 @@ def formatted_date(value, user):
 class Workspace:
     def __init__(self, state, user, imap_config, smtp_config, *, imap=None, smtp=None, registry=None, progress=None):
         self.state, self.user, self.config, self.smtp_config = state, user, imap_config, smtp_config
-        self.imap, self.smtp = imap or ImapProvider(imap_config), smtp or SMTPProvider(smtp_config)
+        if imap is None:
+            from support_email_reads import AsyncInbox
+            imap = AsyncInbox(imap_config)
+        self.imap, self.smtp = imap, smtp or SMTPProvider(smtp_config)
         self.registry = registry or SEND_REGISTRY
         self.progress = progress
         for key, default in {"cache": {}, "processed": set(), "limit": 50, "query": "", "field": "TEXT",
@@ -90,9 +92,14 @@ class Workspace:
 
     def _unavailable(self, message, *, code="temporary", retry_after=0):
         s = self.state
+        if code == 'pending':
+            s.update(read_pending=True, recovery_state='waiting',load_retry_at=time.monotonic()+1,
+                     connection_message='Syncing…', connection_code='pending')
+            return
+        s['read_pending'] = False
         s["load_failures"] = min(4, s.get("load_failures", 0) + 1)
         s["load_retry_at"] = time.monotonic() + max(retry_after, min(120, 15 * 2 ** (s["load_failures"] - 1)))
-        stopped = code in TERMINAL_CONNECTION_ERRORS or s.get("recovery_attempts", 0) >= RECOVERY_LIMIT
+        stopped = code in TERMINAL_CONNECTION_ERRORS
         s.update(recovery_state="stopped" if stopped else "waiting", connection_code=code)
         s["connection_message"] = (message if code in TERMINAL_CONNECTION_ERRORS else
                                   "Mailbox connection unavailable." if stopped else "Reconnecting mailbox…")
@@ -109,15 +116,12 @@ class Workspace:
         if s.get("notice") == s.pop("connection_notice", None):
             s["notice"] = ""
         s.update(error="", live_error="", recovery_state="", recovery_attempts=0,
-                 connection_code="", connection_message="", load_failures=0, load_retry_at=0)
+                 connection_code="", connection_message="", load_failures=0, load_retry_at=0, read_pending=False)
 
     def reconnect(self):
         """Bounded UI recovery. Only authoritative reads; never replay an action."""
         s = self.state
         if s.get("recovery_state") != "waiting" or time.monotonic() < s.get("load_retry_at", 0):
-            return
-        if s.get("recovery_attempts", 0) >= RECOVERY_LIMIT:
-            self._unavailable("Mailbox connection unavailable.", code=s.get("connection_code", "temporary"))
             return
         s["recovery_attempts"] = s.get("recovery_attempts", 0) + 1
         LOGGER.info("email_workspace_reconnect_started attempt=%d", s["recovery_attempts"])
@@ -127,7 +131,7 @@ class Workspace:
             if key[0] == "headers":
                 self.cache.pop(key, None)
         s.pop("folder_failure", None)
-        self.load(previews=False)
+        self.load(previews=False, defer_body=hasattr(self.imap,'reads'))
         if s.get("recovery_state"):
             LOGGER.warning("email_workspace_reconnect_failed code=%s stopped=%s",
                            s.get("connection_code"), s["recovery_state"] == "stopped")
@@ -148,7 +152,7 @@ class Workspace:
                 self.state.update(settings=settings, preference=preference, settings_available=True)
             except Exception:
                 self.state["settings_available"] = False
-        folders = None if force else self.state.get("folder_cache")
+        folders = None if force or hasattr(self.imap,'reads') else self.state.get("folder_cache")
         failure = self.state.get("folder_failure", {})
         if failure.get("expires", 0) > time.monotonic():
             return
@@ -266,6 +270,9 @@ class Workspace:
             LOGGER.info("Email selected body fetched duration_ms=%.1f", (time.monotonic()-started)*1000)
         except Exception as error:
             LOGGER.info("Email body read unavailable (%s)", type(error).__name__)
+            if isinstance(error, MailboxError) and error.code == 'pending':
+                self.state.update(body_pending=reference_key(message), body_loading=True)
+                return None
             if isinstance(error, MailboxError) and (error.retryable or error.code in
                     TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}):
                 self._unavailable(str(error), code=error.code, retry_after=error.retry_after)
@@ -283,6 +290,7 @@ class Workspace:
                 LOGGER.info("Email HTML fallback used")
         if not self.bodies.put(key, content):
             raise MailboxError("This message exceeds the display cache limit. Open it in your mail client.")
+        self.state['body_loading'] = False
         return body
 
     def _select_thread(self, thread):
@@ -305,8 +313,10 @@ class Workspace:
             raise MailboxError("This conversation is no longer in the current list.")
         # First paint needs only the requested MIME, never historical searches.
         message = self._select_thread(thread)
-        self._body(message)
-        self._read_visible(message)
+        if self._body(message) is not None:
+            self._read_visible(message)
+        else:
+            self.state['body_mark_read'] = reference_key(message)
 
     def _read_visible(self, message):
         if message.get("unread"):
@@ -560,7 +570,9 @@ class Workspace:
             elif action == "load_visible_body":
                 key = self.state.pop("body_pending", None)
                 if key and key == self.state.get("active_message") and key == event.get("message_key"):
-                    self._body(self._header(key))  # Initial paint does not mark the message read.
+                    message = self._header(key)
+                    if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
+                        self._read_visible(message)  # Only the prior explicit Open action permits this.
             elif action == "reconnect":
                 self.reconnect()
             elif action == "retry_connection":
@@ -1084,6 +1096,8 @@ class Workspace:
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
             "initial_load_pending": bool(s.get("initial_load_pending")),
+            "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
+            "sync_health": (dict(self.imap.reads.health) if hasattr(self.imap,'reads') else {}),
             "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),

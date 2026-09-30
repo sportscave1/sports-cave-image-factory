@@ -63,6 +63,12 @@ def review(shop,store,editor,env=None):
     cfg=store.render_settings(env)
     checks=production_checks(doc,cfg,env)
     blockers=[k for k,v in checks.items() if not v]
+    tracking_ok=False
+    if editor.get('id'):
+        try:
+            validate_tracking(doc,cfg,editor['id'])
+            tracking_ok=True
+        except ValueError:blockers.append('Sports Cave OS tracking validation failed')
     from crm_campaign_schedule import plan
     from crm_logic import now
     schedule={}
@@ -70,7 +76,14 @@ def review(shop,store,editor,env=None):
     except ValueError as exc:blockers.append(str(exc))
     from crm_campaign_snapshot import create
     snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
-    return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg}
+    return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok}
+
+
+def validate_tracking(doc,cfg,campaign_id):
+    from crm_campaign_content import render_campaign
+    from crm_tracking import send_identity
+    return render_campaign(doc,cfg,production=True,unsubscribe_url='https://www.sportscaveshop.com/account/unsubscribe',
+                           campaign_id=campaign_id,send_id=send_identity(campaign_id))
 
 def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     """One explicit submission confirms reviewed copy; all backend guards still run."""
@@ -110,6 +123,8 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     if cfg!=reviewed['render_settings']:raise ValueError('Sender or rendering settings changed; review again.')
     blocked=[k for k,v in production_checks(doc,cfg,env).items() if not v]
     if blocked:raise ValueError('Campaign blocked: '+ '; '.join(blocked))
+    validate_tracking(doc,cfg,identity)
+    from crm_tracking import send_identity
     from crm_catalogue import Catalogue, refresh_catalogues
     if any(s['type']=='catalogue' and s['visible'] for s in doc.get('middle_sections',[])):
         current=refresh_catalogues(doc,Catalogue(shop),fresh=True)
@@ -154,9 +169,9 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
         conn.execute("INSERT INTO crm_templates(id,template_key,name,kind,content) VALUES(%s,%s,%s,'Campaign',%s::jsonb)",(template,'campaign-delivery:'+identity,saved['name'],json.dumps(snapshot)))
         conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,1,%s::jsonb)',(template,json.dumps(snapshot)))
         conn.execute('''INSERT INTO crm_campaigns(id,name,template_id,template_version,segment_definition_id,status,
-          snapshot_at,audience_snapshot_id,campaign_key,scheduled_at,sending_started_at,locked_at,final_recipient_count)
-          VALUES(%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s,now(),%s)''',
-          (identity,saved['name'],template,segment['id'],status,reviewed['created_at'],snapshot_id,doc['campaign_key'],
+          snapshot_at,audience_snapshot_id,campaign_key,campaign_send_id,scheduled_at,sending_started_at,locked_at,final_recipient_count)
+          VALUES(%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)''',
+          (identity,saved['name'],template,segment['id'],status,reviewed['created_at'],snapshot_id,doc['campaign_key'],send_identity(identity),
            min(j['due_at'] for j in schedule.values()) if schedule else None,now() if not schedule else None,
            len(state['recipients'])-len(blocked_recipients)))
         for recipient in state['recipients']:

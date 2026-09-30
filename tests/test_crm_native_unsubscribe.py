@@ -86,8 +86,10 @@ class NativeUnsubscribeTests(unittest.TestCase):
         # Enable only a synthetic Config object; process/deployment flags are untouched.
         cfg=Config({**ENV,'CRM_MARKETING_ENABLED':'true','CRM_MARKETING_SEND_ENABLED':'true'})
         row={'id':str(uuid.uuid4()),'test_send':False,'enrollment_id':None,'shopify_customer_id':customer['id'],
-             'recipient_hash':recipient_hash(customer['email']),'template_id':'fixture','template_version':1,'idempotency_key':'fixture'}
+             'recipient_hash':recipient_hash(customer['email']),'template_id':'fixture','template_version':1,'idempotency_key':'fixture','campaign_id':str(uuid.uuid4())}
         store=Mock();store.connect=None;store.claim_send.return_value=row;store.suppressed.return_value=False;store.begin_send.return_value=True
+        from crm_tracking import send_identity
+        store.q.return_value={'campaign_send_id':send_identity(row['campaign_id'])}
         store.template.return_value={'format':'campaign_delivery_v1','document':sectioned(),'render_settings':settings(ENV)}
         shop=Mock();shop.customer.return_value=customer
         delivery=Mock();delivery.suppressed.return_value=False;delivery.send.return_value='mock-message'

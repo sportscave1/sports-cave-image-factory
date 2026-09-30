@@ -9,11 +9,10 @@ SHOPIFY_TOPICS={
  'customers/create':'CUSTOMERS_CREATE','customers/update':'CUSTOMERS_UPDATE','customers/delete':'CUSTOMERS_DELETE',
  'customers_email_marketing_consent/update':'CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE',
  'segments/create':'SEGMENTS_CREATE','segments/update':'SEGMENTS_UPDATE','segments/delete':'SEGMENTS_DELETE',
- 'orders/create':'ORDERS_CREATE','orders/updated':'ORDERS_UPDATED','orders/cancelled':'ORDERS_CANCELLED',
+ 'orders/create':'ORDERS_CREATE','orders/updated':'ORDERS_UPDATED','orders/paid':'ORDERS_PAID','orders/cancelled':'ORDERS_CANCELLED',
  'checkouts/create':'CHECKOUTS_CREATE','checkouts/update':'CHECKOUTS_UPDATE','checkouts/delete':'CHECKOUTS_DELETE',
 }
-# Existing orders/paid fulfillment registration/handler is untouched. orders/updated
-# re-queries fullyPaid to start CRM post-purchase, deduplicated by order ID.
+# The existing paid fulfillment endpoint forwards its signed event to this ledger.
 
 def receive_shopify(store,topic,event_id,payload,occurred_at):
     if topic not in SHOPIFY_TOPICS and topic!='customers/redact':raise ValueError('Unsupported CRM topic.')
@@ -48,6 +47,16 @@ def receive_resend(store,event_id,payload):
     # delivery or suppress anyone until a locally stored provider receipt matches.
     records.reconcile_events(provider_id)
     return bool(result)
+
+
+def forward_paid_order(payload,event_id,occurred_at):
+    """Reuse the existing paid endpoint; fulfillment success is independent of CRM."""
+    try:
+        from crm_store import Store
+        receive_shopify(Store(),'orders/paid',event_id,payload,occurred_at)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning('crm_paid_event_delayed; bounded reconciliation will retry')
 
 def unsubscribe(store,config,token,shop=None):
     send_id=config.verify_token(token)

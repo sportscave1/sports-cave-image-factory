@@ -312,6 +312,8 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
     with editor_area:editor_loading=shell('Campaigns')
     if loading:loading.empty()
     with st.container(key='crm-recent-campaigns'):
+        from crm_tracking_health import control as tracking_health_control
+        tracking_health_control(shop,drafts,actions.user)
         with stage('Campaigns','list_render'):
             recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
     with editor_area:

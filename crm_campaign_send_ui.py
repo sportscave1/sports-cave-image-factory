@@ -81,7 +81,7 @@ def review_dialog(shop,store,user,editor,key):
     summary.caption('Preheader: '+doc['content']['preheader'])
     summary.caption('From: '+(delivery['sender'] or 'Not configured'))
     summary.caption('Reply-to: '+(delivery['reply_to'] or 'Not configured'))
-    summary.caption('Tracking: Sports Cave OS Email · '+doc.get('campaign_key',''))
+    summary.caption('Tracking · ✓ Sports Cave OS tracking attached' if result.get('tracking_ok') else 'Tracking · validation required')
     with preview:
         from crm_preview_cache import preview as render_preview
         st.iframe(render_preview(st.session_state,doc,result.get('render_settings'))['html'],height=240)

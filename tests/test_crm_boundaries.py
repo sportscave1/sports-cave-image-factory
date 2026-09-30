@@ -37,6 +37,12 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.client.post('/webhooks/shopify/crm',content=raw,headers=headers).status_code,403)
         self.assertEqual(self.client.post('/webhooks/shopify/crm',content=b'x'*(2*1024*1024+1)).status_code,400)
         self.store.webhook.assert_not_called()
+    def test_order_topics_share_raw_hmac_boundary(self):
+        raw=b'{"id":123,"customer":{"id":456}}'
+        for topic in ('orders/create','orders/updated','orders/paid'):
+            headers={**self.headers(raw),'x-shopify-topic':topic}
+            self.assertEqual(self.client.post('/webhooks/shopify/crm',content=raw,headers=headers).status_code,200)
+            self.assertEqual(self.client.post('/webhooks/shopify/crm',content=raw+b' ',headers=headers).status_code,401)
     def test_database_failure_generic_retryable(self):
         self.store.webhook.side_effect=RuntimeError('private-secret');raw=b'{"id":1}'
         response=self.client.post('/webhooks/shopify/crm',content=raw,headers=self.headers(raw))

@@ -129,7 +129,7 @@ def fingerprint(doc, cfg):
     return hashlib.sha256(json.dumps({'document':doc,'footer':cfg},sort_keys=True).encode()).hexdigest()
 
 
-def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False, test_tracking=False):
+def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False, test_tracking=False, campaign_id=None, send_id=None):
     cfg=settings() if cfg is None else cfg
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
@@ -191,11 +191,15 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
             p=urlsplit(url);pairs=parse_qsl(p.query,keep_blank_values=True)
             from crm_tracking import campaign_link
             block_key=dict(pairs).get('utm_content') or 'link_'+hashlib.sha256(url.encode()).hexdigest()[:12]
-            return campaign_link(url,doc.get('campaign_key',''),block_key,test=test_tracking)
+            return campaign_link(url,doc.get('campaign_key',''),block_key,test=test_tracking,campaign_id=campaign_id,send_id=send_id)
         html=re.sub(r'href="([^"]*)"',lambda m:'href="'+e(live_url(unescape(m[1])))+'"',html)
         text=re.sub(r'https://[^\s<>]+',lambda m:live_url(m[0]),text)
         html=html.replace('CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED','')
         text=text.replace('CAMPAIGN TEST / PREVIEW — live marketing disabled','').replace('CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED','').strip()
+    if production and not test_tracking and (campaign_id or send_id):
+        from crm_tracking import validate_links
+        errors=validate_links(html,campaign_id,send_id,unsubscribe_url)
+        if errors:raise ValueError('Tracking validation failed: '+'; '.join(errors))
     return {'subject':('' if production else '[CAMPAIGN TEST] ')+c['subject'],'html':html,'text':text}
 
 

@@ -42,14 +42,14 @@ class EvidenceTests(unittest.TestCase):
                 'clicked_url':campaign_link('https://www.sportscaveshop.com/products/art',key,'product',test=False)}
     def test_exact_utm_beats_more_recent_other_campaign_click(self):
         result=choose(self.order,self.campaigns,[self.click('sc_b',10),self.click('sc_a',30)])
-        self.assertEqual((result['campaign']['id'],result['method']),('a','SHOPIFY_UTM'))
+        self.assertEqual((result['campaign']['id'],result['method']),('a','SHOPIFY_UTM_EXACT'))
         self.assertEqual(result['click_at'],self.at-timedelta(minutes=30))
     def test_latest_matching_click_needs_supporting_utm(self):
         v=self.order['customerJourneySummary']['lastVisit'];v.update(utmParameters={'source':'sports_cave_os','medium':'email'},landingPage='https://www.sportscaveshop.com/?utm_source=sports_cave_os&utm_medium=email',occurredAt=(self.at-timedelta(minutes=1)).isoformat())
         result=choose(self.order,self.campaigns,[self.click('sc_a',30),self.click('sc_b',10)])
-        self.assertEqual((result['campaign']['id'],result['method']),('b','EMAIL_CLICK_PLUS_UTM'))
+        self.assertEqual((result['campaign']['id'],result['method']),('b','RESEND_CLICK_MATCH'))
         v['landingPage']='https://www.sportscaveshop.com/';v['utmParameters']={}
-        self.assertIsNone(choose(self.order,self.campaigns,[self.click('sc_a',30)]))
+        self.assertEqual(choose(self.order,self.campaigns,[self.click('sc_a',30)])['method'],'RESEND_CLICK_MATCH')
     def test_unrelated_test_unready_pre_send_and_outside_window_not_attributed(self):
         for change in ('test','unready','old','unknown','before_send'):
             value=deepcopy(self.order);campaigns=deepcopy(self.campaigns)
@@ -176,11 +176,11 @@ class ProductionSqlTests(unittest.TestCase):
         row=self.store.receipt(row['id']);self.store.finish_send(row,'ACCEPTED',provider_id=provider)
         self.assertEqual(self.store.q('SELECT send_id FROM crm_delivery_events WHERE provider_id=%s',(provider,),True)['send_id'],row['id'])
     def test_attributed_order_rollups_refunds_and_one_order_one_campaign(self):
-        rows=self.accepted();campaign=self.campaign();key=campaign['campaign_key'];created=now()+timedelta(hours=2)
-        link=campaign_link('https://www.sportscaveshop.com/products/art',key,'product',test=False)
+        rows=self.accepted();campaign=self.campaign();key=str(campaign['campaign_send_id']);created=now()+timedelta(hours=2)
+        link=campaign_link('https://www.sportscaveshop.com/products/art',key,'product',test=False,campaign_id=campaign['id'],send_id=key)
         self.event(rows[0],'email.delivered');self.event(rows[0],'email.clicked',created-timedelta(hours=1),link=link)
         order=order_fixture(key,rows[0]['shopify_customer_id'],created)
-        match=record(self.store,order);self.assertEqual(match['method'],'SHOPIFY_UTM');record(self.store,order)
+        match=record(self.store,order);self.assertEqual(match['method'],'SHOPIFY_UTM_EXACT');record(self.store,order)
         result=next(r for r in sent_page(self.store,limit=200) if r['id']==campaign['id'])
         self.assertEqual(result['orders'],1);self.assertEqual(Decimal(result['revenue_per_recipient']['AUD']),60)
         self.assertEqual(Decimal(result['revenue_per_click']['AUD']),180)
@@ -193,16 +193,16 @@ class ProductionSqlTests(unittest.TestCase):
         order['cancelledAt']=created.isoformat();record(self.store,order)
         self.assertFalse(self.store.q('SELECT eligible FROM crm_order_attribution WHERE shopify_order_id=%s',(order['id'],),True)['eligible'])
     def test_mirror_scoped_optional_idempotent_and_failure_does_not_erase_attribution(self):
-        rows=self.accepted();order=order_fixture(self.campaign()['campaign_key'],rows[0]['shopify_customer_id']);match=record(self.store,order)
+        rows=self.accepted();order=order_fixture(str(self.campaign()['campaign_send_id']),rows[0]['shopify_customer_id']);match=record(self.store,order)
         with patch.dict(os.environ,{'CRM_EMAIL_ATTRIBUTION_MIRROR_ENABLED':'true'}),patch('shopify_sync.fetch_metafields',return_value={'metafields':[]}),patch('shopify_sync.metafields_set',side_effect=RuntimeError('missing scope')) as write:
             mirror(self.store,order,match);self.assertEqual(write.call_args.args[0][0]['namespace'],'sports_cave_os')
             self.assertEqual(write.call_args.args[0][0]['key'],'email_attribution')
         saved=self.store.q('SELECT * FROM crm_order_attribution WHERE shopify_order_id=%s',(order['id'],),True)
-        self.assertTrue(saved['eligible']);self.assertEqual(saved['mirror_status'],'UNAVAILABLE')
+        self.assertTrue(saved['eligible']);self.assertEqual(saved['mirror_status'],'FAILED')
         with patch.dict(os.environ,{'CRM_EMAIL_ATTRIBUTION_MIRROR_ENABLED':'false'}),patch('shopify_sync.metafields_set') as write:
             mirror(self.store,order,match);write.assert_not_called()
     def test_background_scan_is_bounded_and_cached_between_cycles(self):
-        rows=self.accepted();order=order_fixture(self.campaign()['campaign_key'],rows[0]['shopify_customer_id'])
+        rows=self.accepted();order=order_fixture(str(self.campaign()['campaign_send_id']),rows[0]['shopify_customer_id'])
         self.store.set_state('email_attribution_scan',{})
         page={'nodes':[{'id':order['id']}],'pageInfo':{'hasNextPage':False}}
         with patch('crm_attribution_shopify.updated',return_value=page) as listing,patch('crm_attribution_shopify.order',return_value=order) as full:
@@ -314,7 +314,7 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
         row=self.store.draft(self.editor['id']);self.store.archive(ADMIN,row['id'],row['version'])
         self.assertEqual(self.store.history_counts(),{'drafts':before['drafts']-1,'sent':before['sent']})
     def test_older_order_response_cannot_restore_refunded_revenue(self):
-        sends=self.accepted();order=order_fixture(self.campaign()['campaign_key'],sends[0]['shopify_customer_id'])
+        sends=self.accepted();order=order_fixture(str(self.campaign()['campaign_send_id']),sends[0]['shopify_customer_id'])
         order['updatedAt']=order['createdAt'];old=deepcopy(order)
         record(self.store,order)
         order['netPaymentSet']=bag(0);order['updatedAt']=(date(order['createdAt'])+timedelta(hours=1)).isoformat()

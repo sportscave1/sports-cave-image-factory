@@ -190,3 +190,6 @@ COLUMNS['crm_campaigns']+=('audience_snapshot_id','campaign_key','campaign_send_
 COLUMNS['crm_delivery_events']+=('clicked_url',)
 COLUMNS['crm_order_attribution']+=('campaign_send_id','order_name','customer_id','click_at','method','products','mirror_status','source_updated_at')
 INDEXES+=('crm_campaign_snapshots_campaign','crm_campaign_tracking_key','crm_campaign_send_identity','crm_campaign_sent','crm_delivery_events_send_type','crm_attribution_checked')
+
+COLUMNS['crm_order_attribution']+=('attribution_status','evidence','gross_revenue','refund_amount','retry_at','attempts','mirror_error','created_at','updated_at')
+INDEXES+=('crm_attribution_retry',)

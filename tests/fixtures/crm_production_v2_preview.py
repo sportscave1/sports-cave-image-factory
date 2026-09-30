@@ -72,7 +72,8 @@ with (patch('requests.sessions.Session.request',side_effect=AssertionError('Exte
                 for event in (['email.sent','email.delivered','email.opened','email.clicked'] if i==0 else ['email.sent','email.delivered']):
                     receive_resend(store,'fixture_'+uuid.uuid4().hex,{'type':event,'created_at':now().isoformat(),'data':{'email_id':provider}})
             store.q("UPDATE crm_campaigns SET status='SENT',sent_at=now() WHERE id=%s",(row['id'],))
-            record(store,order_fixture(row['document']['campaign_key'],sends[0]['shopify_customer_id']))
+            from crm_tracking import send_identity
+            record(store,order_fixture(send_identity(row['id']),sends[0]['shopify_customer_id']))
         draft=store.save(ADMIN,'Australia · Spring collectors',document())
         st.session_state['v2_draft']=draft;st.session_state['v2_seeded']=True
         open_editor(draft)
