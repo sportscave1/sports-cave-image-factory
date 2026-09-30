@@ -311,7 +311,7 @@ class LivePageTests(unittest.TestCase):
 
     def test_failed_refresh_labels_prior_live_campaigns_stale(self):
         self.overview.side_effect=meta.MetaAdsApiError('Unavailable'); self.refresh()
-        self.assertTrue(any('STALE CACHED META' in c.value for c in self.at.markdown))
+        self.assertTrue(any('stale cached Meta results' in c.value for c in self.at.error))
         self.assertTrue(self.at.dataframe); self.old.assert_not_called()
 
     def test_full_details_expand_on_creative_row(self):

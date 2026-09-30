@@ -52,13 +52,13 @@ class ReportingWindowTests(unittest.TestCase):
         with patch.object(meta,'get_meta_config',return_value=CONFIG),patch.object(live,'load_overview',return_value=data) as read,patch.object(page.recency,'load',return_value={'available':False}):
             app=AppTest.from_string('import ads_meta_review_page as p\np.render_page()').run()
             today=datetime.now(ZoneInfo('Australia/Sydney')).date()
-            self.assertEqual(read.call_args.args[1:],(today-timedelta(days=1),today))
+            self.assertEqual(read.call_args.args[1:],page.campaign_search.reporting_default(today))
             period=(date(2026,9,13),date(2026,9,14))
             app.date_input[0].set_value(period).run()
             app.button[0].click().run()
             self.assertEqual(read.call_args.args[1:],period)
-            self.assertTrue(any('13 Sep 2026 – 14 Sep 2026 · AUD' in m.value for m in app.markdown))
-            self.assertTrue(any('Last refreshed' in c.value for c in app.caption))
+            self.assertEqual(app.date_input[0].label,'Reporting period')
+            self.assertFalse(any('Last refreshed' in c.value for c in app.caption))
             self.assertFalse(app.exception)
 
 

@@ -13,6 +13,7 @@ import meta_review_store as store
 import meta_review_sync as sync_service
 import meta_review_live as live
 import meta_review_tables as tables
+import meta_review_search as campaign_search
 import meta_review_benchmarks as benchmarks
 import meta_review_recency as recency
 import meta_review_handoff as handoff
@@ -357,8 +358,20 @@ def render_campaign_details(config, campaign, since, until):
 
 
 def render_page():
+    st.markdown('<span class="meta-review-page-marker"></span>',unsafe_allow_html=True)
     st.title('Meta Review')
     st.markdown("""<style>
+    .stMainBlockContainer:has(.meta-review-page-marker) { padding-top:calc(var(--sc-topbar-height, 0px) + .75rem) !important; padding-inline:clamp(20px,2vw,32px); max-width:none; }
+    .stMainBlockContainer:has(.meta-review-page-marker) > [data-testid="stVerticalBlock"] { gap:.65rem; }
+    [data-testid="stElementContainer"]:has(.meta-review-page-marker) { display:none; }
+    .stMainBlockContainer:has(.meta-review-page-marker) h1 { padding-top:0; padding-bottom:.4rem; font-size:1.8rem; }
+    .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { gap:.65rem; align-items:end; }
+    .st-key-meta-review-toolbar button, .st-key-meta-review-toolbar input { min-height:38px; }
+    .st-key-meta-review-toolbar button[kind="primary"] { background:#b99448; border-color:#b99448; color:#171510; white-space:nowrap; }
+    @media (max-width:1100px) {
+      .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
+      .st-key-meta-review-toolbar [data-testid="stColumn"] { min-width:220px; flex:1 1 40%; }
+    }
     div[role="dialog"]:has(.meta-review-modal-marker) {
         width:min(96vw,1680px); max-width:96vw; max-height:92vh; overflow-y:auto;
     }
@@ -370,19 +383,14 @@ def render_page():
         cache.clear()
         st.session_state['meta-review-live-scope']=account_scope
         dismiss_campaign()
-    controls=st.columns([1,1,4],vertical_alignment='bottom')
-    if controls[0].button('Refresh From Meta',disabled=not config.get('configured')):
-        live.invalidate(cache,account_scope)
-        dismiss_campaign()
-    sort_by=controls[1].selectbox('Sort By',tables.SORT_OPTIONS)
     today=datetime.now(ZoneInfo('Australia/Sydney')).date()
-    period=controls[2].date_input('Reporting period (Australia/Sydney)',
-        value=(today-timedelta(days=1),today),max_value=today,format='DD/MM/YYYY')
+    period=st.session_state.get('meta-review-period',campaign_search.reporting_default(today))
     if len(period)!=2:
-        st.info('Select both the start and end of the reporting period.')
+        render_campaign_list([],config,account_scope,period,today)
         return
     since,until=period
     if not config.get('configured'):
+        render_campaign_list([],config,account_scope,period,today)
         st.caption('Meta connection unavailable · Configure the existing account connection.')
         st.dataframe([],column_order=['Campaign','Status','Started']+[label for label,_ in tables.METRICS],hide_index=True,width='stretch',placeholder='—')
         return
@@ -392,26 +400,43 @@ def render_page():
             lambda:live.load_overview(config,since,until))
     data=entry['data']
     account=(data or {}).get('account',{})
-    refreshed=datetime.fromisoformat(entry['refreshed_at']).astimezone(ZoneInfo('Australia/Sydney')).strftime('%d %b %I:%M %p') if entry.get('refreshed_at') else 'not yet refreshed'
-    source='STALE CACHED META' if entry['stale'] else 'LIVE META'
-    st.markdown(f"**{source} · {since:%d %b %Y} – {until:%d %b %Y} · {account.get('currency') or 'Currency unavailable'}**")
-    st.caption(f"{account.get('name') or 'Meta account'} · {'Unavailable' if entry['error'] else 'Connected'} · Last refreshed {refreshed} · Account attribution settings")
-    if entry['error']: st.error('LIVE META UNAVAILABLE · '+entry['error'])
-    if data is None: return
-    if not data['campaigns']:
-        st.info('No live campaigns returned.')
+    if entry['error']: st.error('LIVE META UNAVAILABLE · '+entry['error']+(' · Showing stale cached Meta results.' if entry['stale'] else ''))
+    if data is None or not data['campaigns']:
+        render_campaign_list([],config,account_scope,period,today)
         return
     sale_entry=live.cached_read(cache,(account_scope,'last-sale-campaigns'),
         lambda:recency.load(config,config['ad_account_id'],'campaign',account.get('timezone_name') or 'Australia/Sydney'))
     for row in data['campaigns']:
         row['recency']=recency.signal(row,sale_entry['data'])
         row['account_timezone']=account.get('timezone_name') or 'Australia/Sydney'
-    rows=tables.sort_campaigns(data['campaigns'],sort_by)
-    if not rows:
-        st.info('No live campaigns returned.')
+    render_campaign_list(data['campaigns'],config,account_scope,period,today)
+
+
+@st.fragment
+def render_campaign_list(campaigns,config,account_scope,period,today):
+    with st.container(key='meta-review-toolbar'):
+        controls=st.columns([1.1,2.5,1.1,1.8],vertical_alignment='bottom',gap='small')
+        refresh=controls[0].button('Refresh From Meta',type='primary',disabled=not config.get('configured'))
+        query=controls[1].text_input('Search campaigns',placeholder='Search campaigns…',label_visibility='collapsed',key='meta-review-search')
+        sort_by=controls[2].selectbox('Sort By',tables.SORT_OPTIONS,key='meta-review-sort')
+        selected_period=controls[3].date_input('Reporting period',value=campaign_search.reporting_default(today),max_value=today,format='DD/MM/YYYY',key='meta-review-period')
+    if refresh:
+        live.invalidate(st.session_state['meta-review-live-cache'],account_scope)
+        dismiss_campaign()
+        st.rerun()
+    if tuple(selected_period)!=tuple(period):
+        dismiss_campaign()
+        st.rerun()
+    if len(selected_period)!=2:
+        st.info('Select both the start and end of the reporting period.')
         return
-    st.caption('Select a campaign row to inspect its creatives and choose a winner.')
-    key=f"meta-review-campaign-table-{sort_by}-{since}-{until}-{st.session_state.get('meta-review-table-epoch',0)}"
+    since,until=selected_period
+    rows=campaign_search.search_campaigns(tables.sort_campaigns(campaigns,sort_by),query)
+    if not rows:
+        st.info('No matching campaigns.' if query.strip() else 'No live campaigns returned.')
+        return
+    search_key='-'+hashlib.sha256(query.encode()).hexdigest()[:12] if query else ''
+    key=f"meta-review-campaign-table-{sort_by}-{since}-{until}-{st.session_state.get('meta-review-table-epoch',0)}{search_key}"
     event=st.dataframe(tables.va_styled(tables.va_campaign_rows(rows),rows),hide_index=True,width='stretch',placeholder='—',
         height=min(660,40+32*len(rows)),row_height=32,on_select='rerun',selection_mode=['single-row','single-cell'],key=key,
         column_config={'Campaign':st.column_config.TextColumn(width=280,pinned=True),
