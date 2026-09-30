@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 import time
+from uuid import UUID
 
 from crm_campaign_recovery import checkpoint, save_checkpoint
 from crm_campaign_send import review
@@ -28,7 +29,12 @@ class TimedReads:
 
 
 def identity(editor):
-    return hashlib.sha256(json.dumps([editor.get('id'),editor.get('version'),checkpoint(editor)],sort_keys=True).encode()).hexdigest()
+    # psycopg returns UUID columns as UUID objects; browser/session fixtures may
+    # carry strings. Normalize only this database identity, not campaign content.
+    campaign_id = editor.get('id')
+    if isinstance(campaign_id, UUID):
+        campaign_id = str(campaign_id)
+    return hashlib.sha256(json.dumps([campaign_id,editor.get('version'),checkpoint(editor)],sort_keys=True).encode()).hexdigest()
 
 
 class ReviewJob:

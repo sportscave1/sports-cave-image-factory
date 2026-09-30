@@ -3,8 +3,11 @@ from copy import deepcopy
 from pathlib import Path
 import threading
 import unittest
+import json
+import hashlib
+from uuid import UUID
 from unittest.mock import Mock, patch
-from crm_campaign_review import start_review, identity
+from crm_campaign_review import start_review, identity, ReviewJob
 from tests.test_crm_simple_editor import document
 
 
@@ -12,6 +15,81 @@ class ReviewModalTests(unittest.TestCase):
     def setUp(self):
         self.editor={'id':'fixture','version':1,'name':'Fixture','document':document(),'archived_at':None}
         self.saved=deepcopy(self.editor)
+
+    def test_uuid_identity_matches_existing_string_hash_and_preserves_none(self):
+        from crm_campaign_recovery import checkpoint
+        value=UUID('47bb53bc-9a37-4f99-a840-e775073dbce5')
+        self.editor['id']=str(value)
+        expected=hashlib.sha256(json.dumps([str(value),1,checkpoint(self.editor)],sort_keys=True).encode()).hexdigest()
+        self.assertEqual(identity(self.editor),expected)
+        self.editor['id']=value
+        self.assertEqual(identity(self.editor),expected)
+        self.assertIs(self.editor['id'],value)
+        self.editor['id']=None
+        expected=hashlib.sha256(json.dumps([None,1,checkpoint(self.editor)],sort_keys=True).encode()).hexdigest()
+        self.assertEqual(identity(self.editor),expected)
+        self.assertNotIn('id',checkpoint(self.editor))
+
+    def test_identity_does_not_hide_unsupported_checkpoint_or_id_types(self):
+        self.editor['document']['unexpected']=UUID(int=1)
+        with self.assertRaises(TypeError):identity(self.editor)
+        del self.editor['document']['unexpected']
+        self.editor['id']=object()
+        with self.assertRaises(TypeError):identity(self.editor)
+
+    def test_uuid_job_and_string_reopen_reuse_one_review_without_save(self):
+        value=UUID('47bb53bc-9a37-4f99-a840-e775073dbce5')
+        self.editor['id']=value;self.saved['id']=value
+        gate=threading.Event()
+        def finalize(*args):
+            gate.wait(3)
+            return {'snapshot_id':'one'}
+        with patch('crm_campaign_review.review',side_effect=finalize) as review,patch('crm_campaign_review.save_checkpoint') as save:
+            job=ReviewJob(Mock(),Mock(),{},self.editor,self.saved)
+            try:
+                string_editor={**self.editor,'id':str(value)}
+                self.assertIs(start_review(job,Mock(),Mock(),{},string_editor,self.saved),job)
+            finally:gate.set()
+            job.future.result(3)
+            self.assertIs(start_review(job,Mock(),Mock(),{},string_editor,self.saved),job)
+            review.assert_called_once();save.assert_not_called()
+
+    def test_unsaved_review_accepts_saved_draft_uuid_without_mutating_original(self):
+        from crm_campaign_recovery import checkpoint
+        self.editor['id']=None;self.editor['version']=None
+        saved={**deepcopy(self.editor),'id':UUID(int=42),'version':1}
+        with patch('crm_campaign_review.save_checkpoint',return_value=saved) as save,patch('crm_campaign_review.review',return_value={'snapshot_id':'one'}):
+            job=start_review(None,Mock(),Mock(),{},self.editor,None)
+            job.future.result(3)
+            save.assert_called_once()
+            self.assertIsInstance(job.editor['id'],UUID)
+            self.assertEqual(identity(job.editor),identity({**saved,'id':str(saved['id'])}))
+            json.dumps(checkpoint(job.editor))
+            self.assertIsNone(self.editor['id'])
+
+    def test_production_shaped_uuid_opens_actual_streamlit_review_dialog(self):
+        from streamlit.testing.v1 import AppTest
+        app=AppTest.from_string('''
+import streamlit as st
+from uuid import UUID
+from copy import deepcopy
+from crm_campaign_send_ui import review_dialog
+from tests.test_crm_simple_editor import document
+if 'campaign_editor' not in st.session_state:
+ st.session_state.campaign_editor={'id':UUID('47bb53bc-9a37-4f99-a840-e775073dbce5'),'version':1,'name':'UUID fixture','document':document(),'archived_at':None}
+ st.session_state.campaign_saved=deepcopy(st.session_state.campaign_editor)
+if st.button('Open review'):
+ review_dialog(None,None,{},st.session_state.campaign_editor,'uuid_fixture_')
+''')
+        result={'counts':{'eligible':3,'excluded':{}},'blockers':[],'snapshot_id':'one','tracking_ok':True}
+        with patch('crm_campaign_review.review',return_value=result) as review,patch('crm_campaign_review.save_checkpoint') as save,patch('crm_campaign_send_ui.queue_campaign',side_effect=AssertionError('Never send')) as send:
+            app.run();app.button[0].click().run()
+            self.assertFalse(app.exception)
+            job=app.session_state['uuid_fixture_review_job'];job.future.result(3)
+            app.run();next(b for b in app.button if b.label=='Open review').click().run()
+            self.assertFalse(app.exception)
+            self.assertIs(app.session_state['uuid_fixture_review_job'],job)
+            review.assert_called_once();save.assert_not_called();send.assert_not_called()
 
     def test_shell_returns_before_finalization_and_reopening_coalesces(self):
         gate=threading.Event()

@@ -42,7 +42,7 @@ def test_control(store,user,editor,key,available=True):
             if st.session_state.get(key+'test_busy'):return
             # A fragment can retain an older argument after a component rerun.
             current=st.session_state.get('campaign_editor',editor)
-            if current is not editor and current.get('id')!=editor.get('id'):
+            if current is not editor and str(current.get('id'))!=str(editor.get('id')):
                 st.error('Campaign changed. Reopen Send test.');return
             editor=current
             # Identical content/recipient retries retain their durable operation ID.
