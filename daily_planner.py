@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 import logging
 import time
@@ -16,7 +17,13 @@ import top_bar_security
 
 BASE_DIR = Path(__file__).resolve().parent
 CLIENT_PATH = BASE_DIR / "components" / "daily_planner" / "index.html"
-CLIENT_SOURCE = CLIENT_PATH.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _client_source():
+    return CLIENT_PATH.read_text(encoding="utf-8")
+
+
 PLANNER_WINDOW_PATH = "/daily-planner"
 PLANNER_BOOTSTRAP_PATH = "/api/os/daily-planner/bootstrap"
 PLANNER_MUTATION_PATH = "/api/os/daily-planner/mutate"
@@ -189,7 +196,7 @@ def _load_sheet_bundle(user, selected_date):
 
 async def planner_window(_request: Request):
     return HTMLResponse(
-        CLIENT_SOURCE,
+        _client_source(),
         headers={
             "Cache-Control": "public, max-age=300",
             "Content-Security-Policy": (

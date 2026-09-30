@@ -60,3 +60,18 @@ def render_panel(st_module, components, user):
     )
     components.html(component_html(compact_planner_config(user)), height=0, width=0)
     return True
+
+
+def render_status(st_module, user, local_now):
+    """Render only local markup; the shell supplies its existing timer mirror."""
+    from html import escape
+
+    hour = local_now.hour
+    greeting = "Good morning" if 5 <= hour < 12 else "Good afternoon" if 12 <= hour < 17 else "Good night"
+    name = str((user or {}).get("display_name") or "").strip()
+    markup = f'<div id="sc-home-greeting" class="sc-home-greeting">{escape(greeting + ", " + name) if name else ""}</div>'
+    if os_accounts.is_admin(user):
+        markup += ('<button id="sc-home-active-planner" class="sc-home-active-planner" type="button" hidden>'
+                   '<span class="sc-home-active-task"></span><span class="sc-home-active-time"></span>'
+                   '<span>Open Planner</span></button>')
+    st_module.markdown(markup, unsafe_allow_html=True)

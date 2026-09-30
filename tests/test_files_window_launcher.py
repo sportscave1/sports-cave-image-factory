@@ -44,14 +44,14 @@ class FilesWindowLauncherLifecycleTests(unittest.TestCase):
         source = (ROOT/'app.py').read_text(encoding='utf-8')
         start = source.index('def render_sidebar():')
         growth = source.index('_render_sidebar_create_growth(', start)
-        gate = source.index('if "Files" in allowed_routes:', growth)
-        launcher = source.index('files_window_launcher.render(', gate)
-        reporting = source.index('reporting_overview_allowed =', launcher)
+        reporting = source.index('reporting_overview_allowed =', growth)
         accounts = source.index('"Accounts & Access"', reporting)
-        self.assertLess(growth, gate)
-        self.assertLess(gate, launcher)
-        self.assertLess(launcher, reporting)
+        self.assertLess(growth, reporting)
         self.assertLess(reporting, accounts)
+        self.assertNotIn('files_window_launcher.render(', source)
+        self.assertNotIn('files-window-launcher-slot', source)
+        config = (ROOT/'top_bar.py').read_text(encoding='utf-8')
+        self.assertIn('"filesEnabled": "Files" in allowed_routes', config)
 
     def test_real_production_route_recovers_after_bare_declaration_and_runtime_reset(self):
         from starlette.applications import Starlette

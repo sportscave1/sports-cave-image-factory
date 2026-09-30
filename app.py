@@ -46,7 +46,6 @@ import app_branding
 import ads_navigation as ads_nav
 import analytics_navigation as analytics_nav
 import dropbox_integration
-import files_window_launcher
 import mockup_storage
 import navigation_runtime
 import os_accounts
@@ -2213,47 +2212,6 @@ def inject_styles():
             max-width: 100%;
             overflow: hidden;
             width: 100% !important;
-        }
-
-        .st-key-files-window-launcher-slot {
-            margin: 0;
-            padding: 0;
-        }
-
-        .sc-files-window-launcher-label {
-            clip: rect(0, 0, 0, 0);
-            clip-path: inset(50%);
-            height: 1px;
-            overflow: hidden;
-            position: absolute;
-            white-space: nowrap;
-            width: 1px;
-        }
-
-        .st-key-files-window-launcher-slot iframe {
-            border: 0;
-            display: block;
-            min-height: 38px;
-            width: 100%;
-        }
-
-        .sc-files-window-launcher-fallback {
-            align-items: center;
-            border: 1px solid transparent;
-            border-radius: 6px;
-            color: #202124 !important;
-            display: flex;
-            font: 400 14px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-            height: 38px;
-            padding: 0 12px;
-            text-decoration: none !important;
-            width: 100%;
-        }
-
-        .sc-files-window-launcher-fallback:hover,
-        .sc-files-window-launcher-fallback:focus-visible {
-            background: #e9eaec;
-            border-color: #dcdee1;
         }
 
         .st-key-planner-data-refresh-bridge {
@@ -9387,13 +9345,6 @@ def render_sidebar():
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
-    if "Files" in allowed_routes:
-        st.sidebar.markdown(
-            '<span class="sc-files-window-launcher-label">Files</span>',
-            unsafe_allow_html=True,
-        )
-        with st.sidebar.container(key="files-window-launcher-slot"):
-            files_window_launcher.render(st, get_components_module())
     reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
     reporting_daily_allowed = os_accounts.can_access_page(user, os_accounts.DAILY_PLANNER_ROUTE)
     reporting_weekly_allowed = os_accounts.can_access_page(user, os_accounts.WEEKLY_REVIEW_ROUTE)
@@ -14730,7 +14681,7 @@ def render_lightweight_dashboard_page():
     today = sports_sales_calendar.sydney_date(local_now)
     events = sports_cave_dashboard.load_calendar_events()
     with st.container(key="home-ops-dashboard"):
-        home_daily_planner.render_panel(st, get_components_module(), user)
+        home_daily_planner.render_status(st, user, local_now)
         events_render_started = time.perf_counter()
         render_active_upcoming_events(events, today)
         safe_startup_print(

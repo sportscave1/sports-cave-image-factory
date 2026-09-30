@@ -3385,9 +3385,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
-        self.assertNotIn("Good morning", rendered)
-        self.assertNotIn("Good afternoon", rendered)
-        self.assertNotIn("Good night", rendered)
+        self.assertIn('id="sc-home-greeting"', rendered)
         self.assertNotIn(":)", rendered)
         self.assertNotIn("Sports Cave</div>", rendered)
         self.assertNotIn("Daily Execution", rendered)
@@ -3451,9 +3449,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
         self.assertIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
-        self.assertNotIn("Good morning", rendered)
-        self.assertNotIn("Good afternoon", rendered)
-        self.assertNotIn("Good night", rendered)
+        self.assertIn('id="sc-home-greeting"', rendered)
         self.assertNotIn(":)", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("Daily Execution Archive", rendered)
@@ -3945,11 +3941,11 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("def render_lightweight_dashboard_page") :
             source.index("\n\ndef page_uses_local_database")
         ]
-        self.assertIn("home_daily_planner.render_panel(st, get_components_module(), user)", render_body)
+        self.assertIn("home_daily_planner.render_status(st, user, local_now)", render_body)
         self.assertIn("render_active_upcoming_events(events, today)", render_body)
         self.assertIn("render_home_weekly_work(user, local_now)", render_body)
         self.assertLess(
-            render_body.index("home_daily_planner.render_panel(st, get_components_module(), user)"),
+            render_body.index("home_daily_planner.render_status(st, user, local_now)"),
             render_body.index("render_active_upcoming_events(events, today)"),
         )
         self.assertLess(
@@ -3980,7 +3976,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         style_source = source[
             source.index('div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard)') :
-            source.index(".st-key-files-window-launcher-slot")
+            source.index(".st-key-planner-data-refresh-bridge")
         ]
         events_source = source[
             source.index("def render_active_upcoming_events") :

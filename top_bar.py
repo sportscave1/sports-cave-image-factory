@@ -130,6 +130,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "dailyPlannerWindowUrl": PLANNER_WINDOW_PATH,
         "dailyPlannerTimerScope": planner_timer_scope,
         "dailyPlannerEnabled": planner_enabled,
+        "filesEnabled": "Files" in allowed_routes,
         "ordersEnabled": "Orders" in allowed_routes,
         "emailEnabled": "Email" in allowed_routes,
         "authToken": token,

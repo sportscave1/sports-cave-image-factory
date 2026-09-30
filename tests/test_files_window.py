@@ -1141,16 +1141,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertNotIn("fallbackTimer", self.launcher)
         self.assertNotIn("window.setTimeout", self.launcher)
         self.assertNotIn("Sports Cave Desktop did not open", self.launcher)
-        start = self.app.index('if "Files" in allowed_routes:')
-        branch = self.app[
-            start : self.app.index(
-                "reporting_overview_allowed =",
-                start,
-            )
-        ]
-        self.assertIn("files_window_launcher.render", branch)
-        self.assertNotIn("declare_component", branch)
-        self.assertNotIn("set_current_page", branch)
+        self.assertNotIn("files_window_launcher.render", self.app)
+        source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="sc-os-files"', source)
+        self.assertIn('parentWindow.open("/files-window", "sports-cave-files-window"', source)
 
     def test_files_window_opens_validated_relative_folder_directly(self):
         self.assertIn('query.get("relative_path")', self.client)
