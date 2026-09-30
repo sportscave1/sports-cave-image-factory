@@ -32,7 +32,7 @@ class ReliabilityTests(unittest.TestCase):
         wires[0].connect.side_effect = TimeoutError('fixture-secret')
         wires[1].connect.side_effect = OSError(errno.ENETUNREACH, 'fixture-secret')
         with patch('socket.getaddrinfo', return_value=addresses), patch('socket.socket', side_effect=wires), \
-             self.assertLogs('support_email_transport', 'WARNING') as logs, self.assertRaises(OSError):
+             self.assertLogs('support_email_transport', 'WARNING') as logs, self.assertRaises(TimeoutError):
             connect_tcp('fixture.invalid', 993, 8)
         self.assertIn('family=ipv4 type=TimeoutError', str(logs.output))
         self.assertIn(f'family=ipv6 type=OSError errno={errno.ENETUNREACH}', str(logs.output))

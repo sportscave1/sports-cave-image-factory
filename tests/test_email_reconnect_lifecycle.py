@@ -110,15 +110,14 @@ class WorkspaceRecoveryTests(unittest.TestCase):
         self.assertFalse(self.w.model()['live_error'])
         self.smtp.submit.assert_not_called()
 
-    def test_outage_stops_after_two_delayed_attempts_and_manual_retry_recovers(self):
+    def test_transient_outage_keeps_retrying_with_backoff_and_recovers(self):
         self.imap.fail = True;self.event('refresh')
-        for _ in range(2):self.due()
-        self.assertEqual(self.w.model()['recovery']['state'], 'stopped')
+        for _ in range(4):self.due()
+        self.assertEqual(self.w.model()['recovery']['state'], 'waiting')
         count = len(self.imap.calls)
-        for _ in range(5):
-            self.due();self.event('live_check');self.w.load()
+        for _ in range(5):self.event('live_check');self.w.load()
         self.assertEqual(len(self.imap.calls), count)
-        self.imap.fail = False;self.event('retry_connection')
+        self.imap.fail = False;self.due()
         self.assertFalse(self.w.model()['recovery']['state'])
         self.assertTrue(self.w.model()['threads'])
 
@@ -194,12 +193,12 @@ class WorkspaceRecoveryTests(unittest.TestCase):
         self.imap.fail=False;self.due()
         self.assertFalse(self.w.model()['error'])
 
-    def test_manual_retry_restores_body_after_automatic_body_recovery_exhausted(self):
+    def test_manual_retry_restores_body_during_automatic_recovery_backoff(self):
         key=self.state['threads'][3]['thread_key']
         with patch.object(self.imap,'read_message',side_effect=provider.MailboxError('Timed out',code='timeout',retryable=True)):
             self.event('open_thread',thread_key=key)
             self.due();self.due()
-        self.assertEqual(self.w.model()['recovery']['state'],'stopped')
+        self.assertEqual(self.w.model()['recovery']['state'],'waiting')
         self.event('retry_connection')
         model=self.w.model()
         self.assertFalse(model['recovery']['state'] or model['notice'])

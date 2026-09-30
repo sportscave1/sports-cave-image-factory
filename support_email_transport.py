@@ -25,13 +25,17 @@ def connect_tcp(host, port, timeout):
     except OSError as error:
         failed(error, 'dns', started)
         raise
-    last_error = None
+    last_error = timeout_error = None
+    deadline = time.monotonic() + timeout
     for family, kind, protocol, _, address in addresses:
         wire = None
         started = time.monotonic()
         try:
+            remaining = deadline - started
+            if remaining <= 0:
+                raise timeout_error or TimeoutError('Mailbox connect deadline exceeded')
             wire = socket.socket(family, kind, protocol)
-            wire.settimeout(timeout)
+            wire.settimeout(remaining)
             wire.connect(address)
             return wire
         except BaseException as error:
@@ -41,6 +45,9 @@ def connect_tcp(host, port, timeout):
                 raise
             failed(error, 'tcp', started, 'ipv6' if family == socket.AF_INET6 else 'ipv4')
             last_error = error
+            if isinstance(error, TimeoutError):timeout_error = error
+    if timeout_error is not None:
+        raise timeout_error  # Do not mask IPv4 timeout with the final unroutable IPv6 address.
     if last_error is not None:
         raise last_error
     raise OSError('No resolved mailbox endpoints')

@@ -535,9 +535,12 @@ class ImapProvider:
             stage = "connect"
             LOGGER.debug("email_imap_check_started")
             conn = self.connection_factory(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=cfg.timeout)
+            LOGGER.info('email_stage stage=connect duration_ms=%.1f', (time.monotonic()-started)*1000)
             conn.debug = 0
             stage = "authentication"
+            auth_started = time.monotonic()
             self._ok(conn.login(cfg.address, cfg.password), stage=stage)
+            LOGGER.info('email_stage stage=authentication duration_ms=%.1f', (time.monotonic()-auth_started)*1000)
             LOGGER.debug("email_imap_connection_opened")
             count, uidvalidity = 0, ""
             if argument is not None:
@@ -566,6 +569,8 @@ class ImapProvider:
         finally:
             if conn is not None:
                 try:
+                    sock = vars(conn).get('sock')
+                    if sock is not None:sock.settimeout(1)  # Cleanup must not add another 8s after failure.
                     conn.logout()  # Never CLOSE/EXPUNGE, even after a write.
                 except Exception:
                     pass

@@ -34,7 +34,7 @@ class ReadService:
         self.thread = None
         self.epoch = 0
 
-    def request(self, key, loader, ttl=20):
+    def request(self, key, loader, ttl=20, *, wait=False):
         with self.lock:
             now = self.clock()
             job = self.jobs.get(key)
@@ -47,12 +47,18 @@ class ReadService:
                         self.jobs.pop(old)
                 if len(self.jobs) >= 24:
                     raise MailboxError('Loading selected message…', code='pending', retry_after=1)
-                future = self.pool.submit(loader)
+                def timed():
+                    started = self.clock()
+                    try:return loader()
+                    finally:LOGGER.info('email_read stage=%s duration_ms=%.1f',key[0],(self.clock()-started)*1000)
+                future = self.pool.submit(timed)
                 job = (future, now + ttl)
                 self.jobs[key] = job
-            if not job[0].done():
+            if not job[0].done() and not wait:
                 raise MailboxError('Loading mailbox…', code='pending', retry_after=1)
-            return deepcopy(job[0].result())
+        try:return deepcopy(job[0].result(timeout=25 if wait else 0))
+        except TimeoutError:
+            raise MailboxError('Message loading timed out.',code='timeout',retryable=True) from None
 
     def start(self):
         with self.lock:
@@ -71,6 +77,7 @@ class ReadService:
             # Do not cancel or duplicate an active read/connection.
             self.jobs = OrderedDict((k,v) for k,v in self.jobs.items() if not v[0].done())
             self.health['retry_at'] = 0
+            self.health['state'] = 'SYNCING'
         self.wake.set()
 
     def sync(self):
@@ -126,6 +133,7 @@ class ReadService:
         while not self.stop.is_set():
             self.wake.clear()
             if self.clock() >= self.health['retry_at']:self.sync()
+            if self.stop.is_set():break
             delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else 60
             self.wake.wait(delay)
 
@@ -161,7 +169,13 @@ class AsyncInbox:
     @contextmanager
     def interactive_refresh(self):
         self.reads.refresh()
-        yield
+        with self.provider.interactive_refresh():yield
+
+    def read_body_for_action(self, message):
+        # Compose/download keep their existing bounded synchronous semantics and
+        # reuse an in-flight read instead of opening a second socket.
+        key = ('read_message',repr((message,)),repr([]))
+        return self.reads.request(key,lambda:self.provider.read_message(deepcopy(message)),wait=True)
 
     def __getattr__(self,name):
         method = getattr(self.provider,name)

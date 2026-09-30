@@ -48,8 +48,10 @@ class Workspace:
     def __init__(self, state, user, imap_config, smtp_config, *, imap=None, smtp=None, registry=None, progress=None):
         self.state, self.user, self.config, self.smtp_config = state, user, imap_config, smtp_config
         if imap is None:
-            from support_email_reads import AsyncInbox
-            imap = AsyncInbox(imap_config)
+            imap = ImapProvider(imap_config)
+            if type(imap).__module__ == 'support_email_provider':
+                from support_email_reads import AsyncInbox
+                imap = AsyncInbox(imap_config)
         self.imap, self.smtp = imap, smtp or SMTPProvider(smtp_config)
         self.registry = registry or SEND_REGISTRY
         self.progress = progress
@@ -227,7 +229,7 @@ class Workspace:
                     if defer_body:
                         self.state["body_pending"] = reference_key(message)
                     else:
-                        self._body(message)
+                        self._body(message, defer=True)
             except MailboxError as error:
                 connection_failure = error.retryable or error.code in TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}
                 if not connection_failure:
@@ -259,14 +261,15 @@ class Workspace:
     def _content(self, message):
         return self.bodies.get(self._content_key(message))
 
-    def _body(self, message):
+    def _body(self, message, *, defer=False):
         key = self._content_key(message)
         existing = self.bodies.get(key)
         if existing is not None:
             return existing["body"]
         try:
             started = time.monotonic()
-            body = self.imap.read_message(message)
+            loader = self.imap.read_body_for_action if not defer and hasattr(self.imap,'reads') else self.imap.read_message
+            body = loader(message)
             LOGGER.info("Email selected body fetched duration_ms=%.1f", (time.monotonic()-started)*1000)
         except Exception as error:
             LOGGER.info("Email body read unavailable (%s)", type(error).__name__)
@@ -313,7 +316,7 @@ class Workspace:
             raise MailboxError("This conversation is no longer in the current list.")
         # First paint needs only the requested MIME, never historical searches.
         message = self._select_thread(thread)
-        if self._body(message) is not None:
+        if self._body(message, defer=True) is not None:
             self._read_visible(message)
         else:
             self.state['body_mark_read'] = reference_key(message)
@@ -379,6 +382,7 @@ class Workspace:
             return
         try:
             s = self.state
+            s['live_pending'] = False
             old = s["snapshot"]
             delta = self.imap.live_changes(s["folder"], {**old, "visible_messages": s.get("conversation", [])},
                                           limit=s["limit"], query=s["query"], field=s["field"])
@@ -435,6 +439,9 @@ class Workspace:
                 self._refresh_rows(membership_changed=membership_changed)
                 s["history_pending"] = False  # Polling never launches history searches.
         except Exception as error:
+            if isinstance(error, MailboxError) and error.code == 'pending':
+                self.state.update(live_pending=True,live_checked_at=0)
+                return
             if isinstance(error, MailboxError) and error.code == "busy":
                 return  # A skipped/coalesced poll says nothing about connection health.
             LOGGER.info("Email live check unavailable (%s)", type(error).__name__)
@@ -510,6 +517,9 @@ class Workspace:
                 all_messages.extend(self.imap.related_headers_many(folders, identifiers))
         except Exception as error:
             LOGGER.info("Email history unavailable (%s)", type(error).__name__)
+            if isinstance(error, MailboxError) and error.code == 'pending':
+                self.state['history_pending'] = True
+                return
             self.state["notice"] = "Message loaded. Older conversation history is temporarily unavailable."
             return
         unique = {}
@@ -567,11 +577,16 @@ class Workspace:
             if action == "load_initial_mailbox":
                 if self.state.pop("initial_load_pending", False):
                     self.load(defer_body=True)
+            elif action == 'sync_index':
+                for key in list(self.cache):
+                    if key[0] == 'headers':self.cache.pop(key,None)
+                self.load(previews=False,defer_body=True)
             elif action == "load_visible_body":
-                key = self.state.pop("body_pending", None)
+                key = self.state.get("body_pending")
                 if key and key == self.state.get("active_message") and key == event.get("message_key"):
+                    self.state.pop('body_pending',None)
                     message = self._header(key)
-                    if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
+                    if self._body(message, defer=True) is not None and self.state.pop('body_mark_read',None) == key:
                         self._read_visible(message)  # Only the prior explicit Open action permits this.
             elif action == "reconnect":
                 self.reconnect()
@@ -612,8 +627,10 @@ class Workspace:
                 message = self._header(event.get("message_key"))
                 self.state["active_message"] = reference_key(message)
                 self.state["expanded"].add(reference_key(message))
-                self._body(message)
-                self._read_visible(message)
+                if self._body(message, defer=True) is not None:
+                    self._read_visible(message)
+                else:
+                    self.state['body_mark_read'] = reference_key(message)
             elif action in {"mark_read", "mark_unread", "star", "unstar", "archive", "trash", "junk", "move", "copy"}:
                 self.message_action(action, self._header(event.get("message_key")), event.get("destination"))
             elif action == "download":
@@ -1090,13 +1107,14 @@ class Workspace:
                          "delay_ms": max(0, int((s.get("load_retry_at", 0) - time.monotonic()) * 1000))},
             "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],
             "idle_version": s.get("idle_version", ""),
-            "refreshed": formatted_date(s.get("refreshed_at"), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
+            "refreshed": formatted_date((s.get("snapshot", {}).get("refreshed_at") if hasattr(self.imap, 'reads') else s.get("refreshed_at")), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
             "initial_load_pending": bool(s.get("initial_load_pending")),
             "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
+            "live_pending": bool(s.get('live_pending')),
             "sync_health": (dict(self.imap.reads.health) if hasattr(self.imap,'reads') else {}),
             "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
