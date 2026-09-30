@@ -32,12 +32,19 @@ def test_control(store,user,editor,key,available=True):
           const observer=new MutationObserver(focus);observer.observe(document.documentElement,{childList:true,subtree:true});
           window.scCampaignTestFocus=observer;focus();
         })();</script>""",unsafe_allow_javascript=True)
+        from pathlib import Path
+        st.html('<script>'+Path(__file__).with_name('components').joinpath('campaign_recovery','test_flush.js').read_text(encoding='utf-8')+'</script>',unsafe_allow_javascript=True)
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
             recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Send test uses the real Shopify unsubscribe link for this customer.')
             submit=cols[1].form_submit_button('→',help='Send this test email',disabled=bool(st.session_state.get(key+'test_busy')))
         if submit:
             if st.session_state.get(key+'test_busy'):return
+            # A fragment can retain an older argument after a component rerun.
+            current=st.session_state.get('campaign_editor',editor)
+            if current is not editor and current.get('id')!=editor.get('id'):
+                st.error('Campaign changed. Reopen Send test.');return
+            editor=current
             # Identical content/recipient retries retain their durable operation ID.
             doc={k:v for k,v in editor['document'].items() if k!='copy_reviewed'}
             digest=hashlib.sha256(json.dumps([doc,recipient.strip().casefold()],sort_keys=True).encode()).hexdigest()

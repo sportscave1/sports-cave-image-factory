@@ -26,6 +26,9 @@ class Provider(MailboxFixture):
 
 class InboxReliability(unittest.TestCase):
     def setUp(self):
+        from support_email_db_guard import SNAPSHOT_DB
+        SNAPSHOT_DB.until = 0
+        self.addCleanup(setattr, SNAPSHOT_DB, "until", 0)
         self.mail = Provider(60)
         self.store = Mock()
         self.store.read_index.return_value = {}

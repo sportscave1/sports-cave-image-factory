@@ -33,10 +33,11 @@ class SnapshotStore(SignalStore):
     def save_index(self, config, value):
         # Explicitly retain only metadata produced by header reads.
         allowed = {'uid','uidvalidity','folder','message_id','references','in_reply_to','subject',
-                   'sender','reply_to','to','cc','date','received_at','flags','unread','snippet','has_attachments'}
+                   'sender','reply_to','to','cc','date','received_at','flags','unread','has_attachments'}
         snapshot = value['snapshot']
         data = {'snapshot': {k: snapshot[k] for k in ('total','matched','uidvalidity','live_uid','refreshed_at','has_more')},
-                'folders': value.get('folders'), 'synced_at': value['synced_at']}
+                'folders': value.get('folders'), 'synced_at': value['synced_at'],
+                'observed_at': value.get('observed_at', value['synced_at'])}
         data['snapshot']['messages'] = [{k:v for k,v in m.items() if k in allowed} for m in snapshot['messages'][-50:]]
         serialized = encode(data)
         if len(serialized.encode()) > 512*1024:
@@ -45,5 +46,6 @@ class SnapshotStore(SignalStore):
             cur.execute('''INSERT INTO support_email_inbox_snapshot(mailbox_key,snapshot,updated_at)
                 VALUES(%s,%s::jsonb,now()) ON CONFLICT(mailbox_key) DO UPDATE
                 SET snapshot=EXCLUDED.snapshot,updated_at=now()
-                WHERE (support_email_inbox_snapshot.snapshot->>'synced_at')::numeric <= %s''',
-                (identity(config), serialized, value['synced_at']))
+                WHERE COALESCE(support_email_inbox_snapshot.snapshot->>'observed_at',
+                               support_email_inbox_snapshot.snapshot->>'synced_at')::numeric < %s''',
+                (identity(config), serialized, data['observed_at']))

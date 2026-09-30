@@ -255,14 +255,15 @@ class ModularPersistenceTests(unittest.TestCase):
             # already accepted operation send again.
             facts.edition_reader.side_effect=lambda **kw:[{**edition(),'next_edition_number':42}]
             self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=operation,env=ENV,session=wire)
-        wire.post.assert_called_once();self.assertEqual(facts.shop.query.call_count,0)
+        wire.post.assert_called_once();self.assertEqual(facts.shop.query.call_count,1)
         history=self.store.q("SELECT after_value FROM crm_campaign_history WHERE campaign_id=%s AND action='campaign_test_snapshot'",(row['id'],))
         self.assertEqual(history[-1]['after_value']['outbound_snapshot']['sections'][-1]['products'][0]['edition']['next'],37)
 
-    def test_test_send_does_not_refresh_products_or_editions(self):
+    def test_test_send_blocks_when_fresh_products_cannot_be_verified(self):
         doc=catalogue_doc();row=self.store.save(ADMIN,'Saved facts',doc,env=ENV)
         wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         with patch('crm_catalogue.refresh_catalogues',side_effect=AssertionError('No product refresh')) as refresh,patch('crm_resend_marketing._audit',return_value=True):
-            self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV,session=wire)
-        refresh.assert_not_called();wire.post.assert_called_once()
+            with self.assertRaisesRegex(ValueError,'live facts could not be verified'):
+                self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=ENV,session=wire)
+        refresh.assert_called_once();wire.post.assert_not_called()
         self.assertEqual(self.store.draft(row['id'])['document'],doc)

@@ -12,7 +12,7 @@ import uuid
 
 from support_email_idle_store import SignalStore
 from support_email_provider import load_configuration, _ManagedSSL, _failure
-from support_email_runtime import RUNTIME
+from support_email_runtime import RUNTIME, Deferred
 
 LOGGER = logging.getLogger(__name__)
 RENEW_IDLE_SECONDS = 20 * 60
@@ -82,6 +82,8 @@ def invalidate_display(value):
         # Seed a real STATUS snapshot; notification and browsing share it.
         RUNTIME.put(cfg.scope, ('status', 'INBOX'), {k: value[k] for k in
                     ('uidvalidity', 'uidnext', 'unseen', 'messages')}, RUNTIME.generation(cfg.scope))
+        from support_email_reads import wake_index
+        wake_index(cfg)
         invalidate()
 
 
@@ -89,9 +91,10 @@ HUB = SignalHub(invalidate_display)
 
 
 class MailboxWatcher:
-    def __init__(self, cfg, *, store=None, hub=None, factory=client_factory, clock=time.monotonic):
+    def __init__(self, cfg, *, store=None, hub=None, factory=client_factory, clock=time.monotonic, runtime=None):
         self.cfg, self.store, self.hub = cfg, store or SignalStore(), hub or HUB
         self.factory, self.clock = factory, clock
+        self.runtime = runtime or RUNTIME
         self.stop = threading.Event()
         self.owner = str(uuid.uuid4())
         self.thread = None
@@ -136,11 +139,17 @@ class MailboxWatcher:
         client = None
         try:
             self.check_lease()
-            self.stage = "connect"
-            client = self.factory(self.cfg)
-            self.check_lease()
-            self.stage = "authentication"
-            client.login(self.cfg.address, self.cfg.password)
+            # Admission covers establishment only; a healthy long-lived IDLE
+            # socket must not hold the foreground read slot for twenty minutes.
+            with self.runtime.connection(self.cfg.scope, background=True):
+                try:
+                    self.stage = "connect"
+                    client = self.factory(self.cfg)
+                    self.check_lease()
+                    self.stage = "authentication"
+                    client.login(self.cfg.address, self.cfg.password)
+                except Exception as error:
+                    raise _failure(error, self.stage) from None
             self.check_lease()
             self.stage = "capability"
             if not idle_supported(client):
@@ -216,11 +225,14 @@ class MailboxWatcher:
                         self.hub.accept(self.store.read(self.cfg.address))
                         self.stop.wait(1)
                     wait = 0
+            except Deferred:
+                wait = max(5, self.runtime.recovery(self.cfg.scope)['retry_after'])
             except Exception as error:
                 RUNTIME.watcher(self.cfg.scope, "reconnecting")
                 self.failures = min(4, self.failures + 1)
                 wait = min(120, 15 * 2 ** (self.failures - 1))
                 failure = _failure(error, self.stage)
+                if failure.code in {'configuration', 'authentication', 'tls'}:wait = 900
                 LOGGER.warning('email_idle_reconnect stage=%s code=%s type=%s errno=%s delay=%d',
                                failure.stage, failure.code, type(error).__name__,
                                getattr(error, 'errno', None) if isinstance(getattr(error, 'errno', None), int) else None, wait)

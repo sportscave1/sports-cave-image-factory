@@ -110,8 +110,10 @@ class PollRecoveryTests(unittest.TestCase):
                 with self.assertRaises(MailboxError):
                     world.adapter(True).get_unread_count()
             self.assertEqual(world.attempts, count)
-            self.assertEqual(world.runtime.states[CONFIG.scope]["retry_at"], world.now + delay)
-            world.now += delay
+            retry_at = world.runtime.states[CONFIG.scope]["retry_at"]
+            self.assertGreaterEqual(retry_at, world.now + delay)
+            self.assertLessEqual(retry_at, world.now + delay * 1.1)
+            world.now = retry_at
         world.fail = False
         world.adapter(True).get_unread_count()
         self.assertEqual(world.runtime.states[CONFIG.scope]["failures"], 0)

@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import time
+import json
 from unittest.mock import Mock,patch
 import streamlit as st
 from support_email_reads import ReadService
@@ -28,16 +29,28 @@ class SlowMail(Provider):
         return super().read_message(*a,**kw)
 
 @st.cache_resource
-def fixture():
+def fixture(mode):
     mail=SlowMail(60)
     store=Mock();store.read_index.return_value={}
-    return ReadService(mail,store)
+    reads = ReadService(mail,store)
+    if mode == 'Cold persisted outage':
+        from support_email_snapshot import encode, decode
+        reads.sync()
+        store.read_index.return_value = decode(json.loads(encode(reads.value)))
+        reads.close()
+        reads = ReadService(mail, store)
+    mail.fail = mode != 'Healthy'
+    return reads
 
 st.set_page_config(layout='wide',page_title='Inbox reliability · offline fixture')
 st.html('<style>[data-testid="stHeader"]{display:none}</style>')
 st.sidebar.caption('OFFLINE FIXTURE · no live mailbox or database')
-reads=fixture()
-outage=st.sidebar.checkbox('Simulate mailbox outage')
+mode=st.sidebar.selectbox('Startup fixture', ['Healthy', 'Cold persisted outage', 'Cold empty outage'])
+if st.session_state.get('fixture_mode') != mode:
+    st.session_state.pop('support_email_workspace', None)
+    st.session_state['fixture_mode'] = mode
+reads=fixture(mode)
+outage=st.sidebar.checkbox('Simulate mailbox outage',value=mode!='Healthy',key='outage-'+mode)
 if outage!=reads.provider.fail:
     reads.provider.fail=outage;reads.refresh()
 st.sidebar.caption('500 ms headers · 800 ms message body')

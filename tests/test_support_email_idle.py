@@ -7,6 +7,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+from support_email_runtime import MailboxRuntime
 from support_email_idle import MailboxWatcher, SignalHub, IdleLifecycle, idle_supported, client_factory
 from support_email_events import event_stream, email_events
 from tests.test_support_email import CONFIG
@@ -65,7 +66,7 @@ class World:
         self.store=MemorySignals(lambda:self.now)
         self.values=[]; self.hub=SignalHub(lambda v:self.values.append(v))
         self.on_tick=lambda:None
-        self.watch=MailboxWatcher(CONFIG,store=self.store,hub=self.hub,factory=self.connect,clock=lambda:self.now)
+        self.watch=MailboxWatcher(CONFIG,store=self.store,hub=self.hub,factory=self.connect,clock=lambda:self.now,runtime=MailboxRuntime(lambda:self.now))
         self.watch.stop=ClockStop(self)
 
     def connect(self, cfg):

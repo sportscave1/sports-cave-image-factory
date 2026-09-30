@@ -103,7 +103,9 @@ def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
     checks=preflight(doc,env,store.render_settings(env))
     failed=[k for k,v in checks['test'].items() if not v]
-    if failed:raise ValueError('Complete before testing: '+ '; '.join(failed))
+    if failed:
+        from crm_campaign_issues import preflight_error
+        raise ValueError(preflight_error(checks))
     saved=store.draft(editor['id']) if editor.get('id') else None
     if not saved or saved['document']!=doc or saved['name']!=editor['name']:
         saved=store.save(user,editor['name'],doc,editor.get('id'),editor.get('version'),env=env)

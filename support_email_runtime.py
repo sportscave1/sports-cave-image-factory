@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from copy import deepcopy
 import threading
 import time
+import random
 
 POLL_SECONDS = 60
 _BACKGROUND = ContextVar("email_background", default=False)
@@ -136,8 +137,11 @@ class MailboxRuntime:
         background = background or _BACKGROUND.get()
         with self.condition:
             state = self._state(scope)
-            if self.clock() < state["retry_at"] and not _FORCE.get():
+            forced = _FORCE.get() and self.clock() >= state.get('forced_at', 0)
+            if self.clock() < state["retry_at"] and not forced:
                 raise Deferred("Connection interrupted. Reconnecting automatically.", reason="backoff")
+            if forced:
+                state['forced_at'] = self.clock() + 15
             if background:
                 # Reserve capacity for clicks; background checks never queue sockets.
                 if self.active >= 1 or self.background_active or self.foreground_waiting:
@@ -153,6 +157,9 @@ class MailboxRuntime:
                 try:
                     if not self.condition.wait_for(lambda: self.active < 1, timeout=timeout):
                         raise Deferred("Mailbox is busy. Try again shortly.", reason="connection_budget_timeout")
+                    # A preceding operation may have opened the circuit while we waited.
+                    if self.clock() < state['retry_at'] and not forced:
+                        raise Deferred('Mailbox reconnect is backing off.', reason='backoff')
                 finally:
                     self.foreground_waiting -= 1
             self.active += 1
@@ -166,10 +173,11 @@ class MailboxRuntime:
                         "status", "refused", "network", "reset", "bye", "limit", "protocol"}:
                 with self.condition:
                     state = self._state(scope)
-                    state["failures"] = min(4, state["failures"] + 1)
+                    state["failures"] = min(6, state["failures"] + 1)
                     state.update(last_failure_at=time.time(), failure_code=code, failure_stage=getattr(error, "stage", "operation"),
                                  fallback_state="backoff")
-                    state["retry_at"] = self.clock() + min(120, 15 * 2 ** (state["failures"] - 1))
+                    delay = 900 if code in {'tls', 'authentication'} else min(300, 15 * 2 ** (state['failures'] - 1))
+                    state["retry_at"] = self.clock() + delay + random.uniform(0, delay * .1)
                     self.invalidate(scope)
             raise
         else:

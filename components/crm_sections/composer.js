@@ -8,6 +8,20 @@ const areas=new Map(),histories=new Map();let historyScope='',deleted=null,delet
 
 const height=()=>parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:document.body.scrollHeight+4},'*');
 const emit=(type,extra={})=>{if(pending){if(type!=='html')queue.push([type,{...extra,edits:{...drafts,...extra.edits}}]);return;}pending=true;inFlight=crypto.randomUUID();parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{event:inFlight,base:args.sections.map(s=>s.id),type,...extra,edits:Object.fromEntries(Object.entries({...extra.edits,...drafts}).filter(([id])=>args.sections.some(s=>s.id===id)))}},'*');};
+// Send test must wait for the server acknowledgement, not merely textarea blur.
+const flushSections=()=>new Promise((resolve,reject)=>{
+ const started=Date.now(),scope=historyScope;
+ const check=()=>{
+  if(scope!==historyScope||Date.now()-started>10000)return reject(new Error('Section changes could not be synchronized. Retry after saving.'));
+  for(const area of areas.values())clearTimeout(area.saveTimer);
+  const entry=Object.entries(drafts)[0];
+  if(!pending&&entry)emit('html',{id:entry[0],html:entry[1]});
+  if(!pending&&!entry&&!queue.length&&!Object.keys(settingsDrafts).length)return resolve();
+  setTimeout(check,30);
+ };check();
+});
+parent.scCampaignFlushSections=flushSections;
+addEventListener('pagehide',()=>{if(parent.scCampaignFlushSections===flushSections)delete parent.scCampaignFlushSections;});
 const el=(tag,text='',cls='')=>{let n=document.createElement(tag);n.textContent=text;n.className=cls;return n;};
 function button(text,label,fn,cls=''){let n=el('button',text,cls);n.type='button';n.title=label;n.setAttribute('aria-label',label);n.onclick=fn;return n;}
 function placeCards(ids){ids.forEach((id,index)=>{const card=[...root.children].find(c=>c.dataset.id===id);if(card&&root.children[index]!==card){if(root.moveBefore)root.moveBefore(card,root.children[index]||null);else root.insertBefore(card,root.children[index]||null);}});}

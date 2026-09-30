@@ -7,6 +7,7 @@ import re
 import psycopg
 import manual_certificate_schema
 import crm_schema
+import support_email_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,7 +54,12 @@ CRM_MIGRATIONS = (
     '20260930031755_crm_campaigns_production_v2.sql',
     '20260930051803_crm_email_attribution_hardening.sql',
 )
+EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20260927020406_customer_support_workflow.sql': 'cee29c8f0e6ba41ca22dc444edf11545a131862e9313cac8a33a55319beb5757',
+    '20260927025319_customer_support_email_settings.sql': '3d56ce51148c47de111e8518fbef0532ea5189893a93a1f56637dad302ef4761',
+    '20260930055619_support_email_inbox_snapshot.sql': 'b00ecb32fb880b9937f83c352f49f1dd12b876e5cdb57aaaba00b64a6ba4ac4e',
+
     '20260930051803_crm_email_attribution_hardening.sql': 'c40326b111b3ad7309d051bfba750776a7941d3346dd37420429ff2d5ca4fdc4',
     "20260930031755_crm_campaigns_production_v2.sql": "9721b3f855906d8b2c4f226134ef7af6379792257a63cabba105aaaae329961a",
     "20260927093818_crm_marketing_v1.sql": "8deb23e7d7f4d635244315b15e233bf68d40d431f72a7fec9f8a5851207e8704",
@@ -84,6 +90,7 @@ DEPLOYMENT_MIGRATIONS = (
     "20260927221221_edition_design_tracking.sql",
     "20260927223857_edition_design_tracking_spreadsheet.sql",
     *CRM_MIGRATIONS,
+    *EMAIL_MIGRATIONS,
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
@@ -397,7 +404,7 @@ def run_deployment_migrations(*, check=False):
                     cur.execute(_migration_body(sql))
                 cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
                 applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
         conn.commit()
@@ -405,7 +412,7 @@ def run_deployment_migrations(*, check=False):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
                           options='-c default_transaction_read_only=on') as conn:
         with conn.cursor() as cur:
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
             cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')
@@ -457,6 +464,53 @@ def run_crm_migrations(*, check=False, verify=False):
         print('READY CRM schema and migration ledger verified; source=' + source)
 
 
+def run_email_migrations(*, check=False, verify=False):
+    """Targeted Email dependency chain, atomic DDL + ledger, same deployment lock."""
+    import support_email_schema
+    selected = [(MIGRATIONS_DIR / name, (MIGRATIONS_DIR / name).read_text(encoding='utf-8')) for name in EMAIL_MIGRATIONS]
+    for path, sql in selected:
+        if not reviewed_migration_sql(path, sql):
+            raise RuntimeError('Email migration is not SHA-reviewed: ' + path.name)
+    if check:
+        print('READY Email migration manifest: ' + ', '.join(EMAIL_MIGRATIONS))
+        return
+    database_url, source = get_database_url()
+    if not database_url:
+        raise RuntimeError('Email migration failed: database URL is missing')
+    from psycopg.rows import dict_row
+    with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15, prepare_threshold=None) as conn:
+        with conn.cursor() as cur:
+            if verify:
+                cur.execute('SET TRANSACTION READ ONLY')
+            else:
+                cur.execute("SET LOCAL lock_timeout='60s'")
+                cur.execute("SET LOCAL statement_timeout='120s'")
+                cur.execute("SET LOCAL search_path=public")
+                cur.execute('SELECT pg_advisory_xact_lock(731948321)')
+                cur.execute('CREATE TABLE IF NOT EXISTS public.schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())')
+                for path, sql in selected:
+                    cur.execute('SELECT filename FROM public.schema_migrations WHERE filename=%s', (path.name,))
+                    if cur.fetchone():
+                        continue
+                    cur.execute(_migration_body(sql))
+                    cur.execute('INSERT INTO public.schema_migrations(filename) VALUES (%s)', (path.name,))
+            issues = support_email_schema.schema_issues(cur)
+            cur.execute("SELECT to_regclass('public.schema_migrations') AS name")
+            ledger = cur.fetchone()['name']
+            recorded = set()
+            if ledger:
+                cur.execute('SELECT filename FROM public.schema_migrations WHERE filename=ANY(%s)', (list(EMAIL_MIGRATIONS),))
+                recorded = {r['filename'] for r in cur.fetchall()}
+            issues.extend('missing migration ledger entry ' + name for name in EMAIL_MIGRATIONS if name not in recorded)
+            if issues:
+                raise RuntimeError('Email schema incompatible: ' + '; '.join(issues))
+        conn.commit()
+    if not verify:
+        run_email_migrations(verify=True)
+    else:
+        print('READY Email schema and migration ledger verified; source=' + source)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply reviewed Sports Cave database migrations.")
     parser.add_argument("--only", help="Apply one migration filename from the migrations directory.")
@@ -474,8 +528,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Read-only verification of optional marketplace diagnostic columns and indexes.",
     )
+    parser.add_argument('--email', action='store_true', help='Apply only SHA-reviewed private Email migrations.')
+    parser.add_argument('--verify-email-schema', action='store_true', help='Read-only private Email schema/ledger verification.')
     args = parser.parse_args()
-    if args.crm or args.verify_crm_schema:
+    if args.email or args.verify_email_schema:
+        if args.only or args.deploy or args.crm or args.verify_crm_schema or args.verify_required_schema or args.verify_marketplace_schema or (args.email and args.verify_email_schema) or (args.verify_email_schema and args.check):
+            parser.error('choose one migration selection or verification mode')
+        run_email_migrations(check=args.check, verify=args.verify_email_schema)
+    elif args.crm or args.verify_crm_schema:
         if args.only or args.deploy or args.verify_required_schema or args.verify_marketplace_schema or (args.crm and args.verify_crm_schema) or (args.verify_crm_schema and args.check):
             parser.error('choose one migration selection or verification mode')
         run_crm_migrations(check=args.check, verify=args.verify_crm_schema)

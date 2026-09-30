@@ -4,6 +4,8 @@ Run in the deployment environment; prints only fixed stage/category labels and
 timings. Uses one socket, verified TLS, EXAMINE and STATUS; never fetches mail.
 """
 import imaplib
+from datetime import datetime, timezone
+import os
 from pathlib import Path
 import socket
 import ssl
@@ -12,6 +14,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from support_email_provider import load_configuration, _failure, _close_resources
+from support_email_transport import connect_tcp
 
 
 def check(configuration=None, emit=print):
@@ -42,7 +45,7 @@ def check(configuration=None, emit=print):
 
         def _create_socket(self, timeout):
             stage("dns", lambda: socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM))
-            raw = stage("tcp", lambda: socket.create_connection((self.host, self.port), timeout))
+            raw = stage("tcp", lambda: connect_tcp(self.host, self.port, timeout))
             try:
                 return stage("tls", lambda: self.ssl_context.wrap_socket(raw, server_hostname=self.host))
             except BaseException:
@@ -60,6 +63,7 @@ def check(configuration=None, emit=print):
         if not cfg.configured:
             emit("FAIL configuration category=configuration duration_ms=0")
             return 1
+        emit(f"CHECK utc={datetime.now(timezone.utc).isoformat()} host={cfg.host} port={cfg.port} service={os.getenv('RENDER_SERVICE_ID', 'local')} region={os.getenv('RENDER_REGION', 'unknown')}")
         stage("configuration", lambda: True)
         conn = DiagnosticSSL()
         capabilities = stage("capability", lambda: ok(conn.capability()))
@@ -69,6 +73,7 @@ def check(configuration=None, emit=print):
         stage("status", lambda: ok(conn.status('"INBOX"', "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)")))
     except Exception as error:
         emit(f"FAIL {current} category={_failure(error, current).code} duration_ms={int((time.monotonic()-started)*1000)}")
+        if current == "tcp":emit("EXTERNAL CONNECTIVITY BLOCKER: failed before authentication; see per-family transport diagnostics.")
         result = 1
     finally:
         if conn is not None:

@@ -265,7 +265,9 @@ def preflight(doc, env=None, cfg=None):
         checks.update(block_checks(doc['blocks'],doc['market']))
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']
     live['Fresh complete eligible audience']=bool(recent and counts.get('complete') and counts.get('eligible',0)>0)
-    return {'test':checks,'live':live,'test_ready':all(checks.values()),'live_ready':False,
+    from crm_campaign_issues import document_issues
+    issues = document_issues(doc, cfg) if doc.get('content_mode') == 'HTML' and not all(checks.values()) else []
+    return {'test':checks,'live':live,'issues':issues,'test_ready':all(checks.values()),'live_ready':False,
             'marketing_enabled':delivery['marketing_enabled'],'policy':POLICIES[doc['market']]}
 
 

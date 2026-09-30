@@ -364,6 +364,14 @@ class Workspace:
 
     def live_check(self, signal_version=None):
         """Heartbeat or validated push invokes this; selections/reruns do not."""
+        if (hasattr(self.imap, 'reads') and self.state.get('folder', 'INBOX') == 'INBOX'
+                and self.state['limit'] == 50 and not self.state['query']):
+            # The index worker owns Inbox refresh. Heartbeats consume it, never
+            # start a competing remote delta read for every browser session.
+            for key in list(self.cache):
+                if key[0] == 'headers':self.cache.pop(key, None)
+            self._load(previews=False, defer_body=True)
+            return
         if self.state.get("recovery_state"):
             self.reconnect()
             return

@@ -316,8 +316,9 @@
       toolbarStamp=toolbarKey;
     }
     const health=model.sync_health||{}, reconnecting=Boolean(model.error||model.live_error||model.recovery?.state==='stopped'||health.state==='RECONNECTING');
-    const status=!model.configured?'Not configured':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||health.state==='SYNCING'?'Syncing…':'Connected';
-    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${reconnecting||!model.configured?'off':''}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${model.recovery?.state==='stopped'?recoveryFeedback(model):esc(model.recovery?.state||model.live_error?'':model.notice||'')}</span>`;
+    const attention=['authentication','configuration','tls'].includes(health.category)||model.recovery?.state==='stopped';
+    const status=!model.configured?'Not configured':attention?'Mailbox connection needs attention':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||health.state==='SYNCING'?'Syncing…':'Connected';
+    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${reconnecting||!model.configured?'off':''}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · Last synced: '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${attention?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':esc(model.recovery?.state||model.live_error?'':model.notice||'')}</span>`;
     scheduleReconnect();
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder,model.initial_load_pending]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}

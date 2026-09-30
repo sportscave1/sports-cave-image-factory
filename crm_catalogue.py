@@ -273,3 +273,20 @@ def refresh_catalogues(doc, catalogue, *, fresh=True):
     for s in sections:
         if s['type']=='catalogue' and s['visible']: s['products'] = [deepcopy(facts[p['id']]) for p in s['products']]
     return result
+
+
+def verify_catalogues(doc, catalogue):
+    """Verify current facts before a new test operation; never rewrite the draft."""
+    try:
+        current = refresh_catalogues(doc, catalogue, fresh=True)
+    except Exception:
+        raise ValueError('Catalogue live facts could not be verified. Refresh catalogue and retry before testing.') from None
+    changed = []
+    for old, new in zip(doc.get('middle_sections', []), current.get('middle_sections', [])):
+        if old['type'] != 'catalogue' or not old['visible']: continue
+        for before, after in zip(old['products'], new['products']):
+            if before != after:
+                changed.append('Catalogue [' + old['id'] + '] · ' + before['title'][:120])
+    if changed:
+        raise ValueError('; '.join(changed) + ': live Shopify/edition facts changed — refresh catalogue before testing.')
+    return current

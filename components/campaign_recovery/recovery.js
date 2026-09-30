@@ -27,13 +27,22 @@
   if(!args)return;const {id,html,cta}=e.detail||{};
   const source=(args.editor.document.middle_sections||[]).find(s=>s.id===id);if(!source)return;
   ensure();const target=record.editor.document.middle_sections.find(s=>s.id===id);if(!target)return;
-  if(typeof html==='string'&&target.type==='html'){
+  if(typeof html==='string'&&['html','image'].includes(target.type)){
    target.html=html;if(target.html_number===1)record.editor.document.custom_html=html;
   }
   if(typeof cta==='string'&&target.type==='catalogue')target.settings.cta=cta;
   record.editor.document.copy_reviewed=false;changed();
  };
  const flush=()=>{clearTimeout(timer);if(record){persist();emit();}};
+ const waitForRecovery=()=>new Promise((resolve,reject)=>{
+  const started=Date.now();flush();
+  const check=()=>{
+   if(stopped||Date.now()-started>10000)return reject(new Error('Draft changes could not be synchronized. Retry after saving.'));
+   if(!record&&!inflight)return resolve();
+   setTimeout(check,30);
+  };check();
+ });
+ parent.scCampaignFlushRecovery=waitForRecovery;
  const discard=()=>{clearTimeout(timer);record=null;inflight=null;inflightCopy=null;stopped=true;try{sessionStorage.removeItem(storageKey);}catch{}};
  parent.addEventListener('sc-campaign-discard',discard);
  const visible=()=>{if(parent.document.hidden)flush();else if(record&&!stopped)emit();};
@@ -44,6 +53,7 @@
  parent.addEventListener('sc-recovery-flush',flush);
  parent.addEventListener('blur',flush);
  addEventListener('pagehide',()=>{
+  if(parent.scCampaignFlushRecovery===waitForRecovery)delete parent.scCampaignFlushRecovery;
   flush();parent.removeEventListener('sc-campaign-discard',discard);parent.document.removeEventListener('input',input,true);
   parent.removeEventListener('sc-campaign-pending',section);
   parent.document.removeEventListener('visibilitychange',visible);

@@ -12,7 +12,8 @@ for node in ast.walk(tree):
 print(json.dumps(out))`;
 const queries=JSON.parse(execFileSync('.venv/Scripts/python.exe',['-c',python],{encoding:'utf8'}));
 const db=new PGlite();
-await db.exec('CREATE ROLE anon; CREATE ROLE authenticated;');
+await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE unprivileged; CREATE TABLE os_users(id uuid primary key); CREATE TABLE shopify_orders(shopify_order_id text primary key);');
+for(const name of ['20260927020406_customer_support_workflow.sql','20260927025319_customer_support_email_settings.sql']){const text=readFileSync('migrations/'+name,'utf8');await db.exec(text);await db.exec(text);}
 const migration=readFileSync('migrations/20260930055619_support_email_inbox_snapshot.sql','utf8');
 await db.exec(migration);await db.exec(migration);
 const query=(name,args)=>{let n=0;return db.query(queries[name][0].replace(/%s/g,()=>'$'+(++n)),args);};
@@ -20,7 +21,10 @@ await query('save_index',['scope',JSON.stringify({synced_at:20,snapshot:{message
 await query('save_index',['scope',JSON.stringify({synced_at:10,snapshot:{messages:[]}}),10]);
 assert.equal((await query('read_index',['scope'])).rows[0].snapshot.snapshot.messages[0].uid,'8');
 assert.equal((await query('read_index',['another-scope'])).rows.length,0);
-for(const role of ['anon','authenticated']){
+assert.equal((await db.query("SELECT count(*)::int AS n FROM pg_indexes WHERE tablename='support_email_inbox_snapshot'")).rows[0].n,1);
+await query('save_index',['scope',JSON.stringify({observed_at:15,synced_at:100,snapshot:{messages:[]}}),15]);
+assert.equal((await query('read_index',['scope'])).rows[0].snapshot.snapshot.messages[0].uid,'8');
+for(const role of ['anon','authenticated','unprivileged']){
  await db.exec('SET ROLE '+role);
  await assert.rejects(()=>db.query('SELECT * FROM support_email_inbox_snapshot'),/permission denied/);
  await db.exec('RESET ROLE');

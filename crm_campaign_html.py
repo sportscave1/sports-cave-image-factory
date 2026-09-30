@@ -114,6 +114,10 @@ class EmailHTML(HTMLParser):
 
 
 def import_html(source, *, images_off=False, campaign_key="", template_links=()):
-    parser=EmailHTML(images_off,campaign_key,template_links);parser.feed(source);parser.close()
+    parser=EmailHTML(images_off,campaign_key,template_links);parser.feed(source)
+    # Incomplete image tags remain buffered until close() treats them as text.
+    if re.match(r'<\s*img(?:\s|$)', parser.rawdata, re.I):
+        parser.checks['HTML contains only safe email markup']=False
+    parser.close()
     markup=''.join(parser.parts)+''.join('</'+t+'>' for t in reversed(parser.stack))
     return markup, ''.join(parser.plain).strip(), parser.checks

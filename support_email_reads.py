@@ -14,6 +14,8 @@ import time
 
 from support_email_provider import ImapProvider, MailboxError
 from support_email_snapshot import SnapshotStore
+from support_email_db_guard import SNAPSHOT_DB
+from support_email_runtime import operation
 
 LOGGER = logging.getLogger(__name__)
 READS = {'discover_folders','list_headers','read_message','related_headers_many','live_changes'}
@@ -33,6 +35,8 @@ class ReadService:
         self.wake = threading.Event()
         self.thread = None
         self.epoch = 0
+        self.sync_lock = threading.Lock()
+        self.manual_refresh = False
 
     def request(self, key, loader, ttl=20, *, wait=False):
         with self.lock:
@@ -78,10 +82,25 @@ class ReadService:
             self.jobs = OrderedDict((k,v) for k,v in self.jobs.items() if not v[0].done())
             self.health['retry_at'] = 0
             self.health['state'] = 'SYNCING'
+            self.manual_refresh = True
         self.wake.set()
 
     def sync(self):
+        # One index owner, including manual refresh and tests/admin callers.
+        if not self.sync_lock.acquire(blocking=False):
+            return
+        try:
+            with self.lock:
+                forced, self.manual_refresh = self.manual_refresh, False
+            with operation(background=True, force=forced):
+                self._sync()
+        finally:
+            self.sync_lock.release()
+
+    def _sync(self):
         started = self.clock()
+        observed_at = time.time()  # Fence by read start, never late completion.
+        with self.lock: epoch = self.epoch
         try:
             with self.lock:old = deepcopy(self.value)
             if old.get('snapshot'):
@@ -97,9 +116,10 @@ class ReadService:
                     refreshed_at=datetime.fromtimestamp(delta['checked_at'],timezone.utc))
             else:
                 snap = self.provider.list_headers(50,'INBOX',previews=False)
-            value = dict(old,snapshot=snap,synced_at=time.time())
+            value = dict(old,snapshot=snap,synced_at=time.time(),observed_at=observed_at)
             # Publish the useful list BEFORE optional folder discovery/database writes.
             with self.lock:
+                if epoch != self.epoch or self.stop.is_set():return
                 self.value = value
                 self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0,
                     last_success_at=value['synced_at'],duration_ms=round((self.clock()-started)*1000,1),
@@ -110,9 +130,11 @@ class ReadService:
                     value['folders_at'] = time.time()
                 except Exception:
                     pass  # Folder discovery cannot discard a valid Inbox snapshot.
-            try:self.store.save_index(self.config,value)
-            except Exception as error:LOGGER.warning('email_snapshot_write category=DATABASE type=%s',type(error).__name__)
-            with self.lock:self.value = value
+            if SNAPSHOT_DB.ready():
+                try:self.store.save_index(self.config,value)
+                except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_write')
+            with self.lock:
+                if epoch == self.epoch:self.value = value
             LOGGER.info('email_index_sync duration_ms=%.1f headers=%d', (self.clock()-started)*1000,len(snap['messages']))
         except Exception as error:
             code = getattr(error,'code','unknown')
@@ -126,16 +148,23 @@ class ReadService:
             LOGGER.warning('email_index_sync category=%s retry_seconds=%d duration_ms=%.1f',code,delay,(self.clock()-started)*1000)
 
     def run(self):
-        try:
-            cached = self.store.read_index(self.config)
-            with self.lock:self.value = cached
-        except Exception as error:LOGGER.warning('email_snapshot_read category=DATABASE type=%s',type(error).__name__)
         while not self.stop.is_set():
             self.wake.clear()
+            if not self.value.get('snapshot'):self.restore()
             if self.clock() >= self.health['retry_at']:self.sync()
             if self.stop.is_set():break
             delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else 60
             self.wake.wait(delay)
+
+    def restore(self):
+        if not SNAPSHOT_DB.ready():return
+        try:
+            cached = self.store.read_index(self.config)
+            with self.lock:
+                if not self.value.get('snapshot') and cached.get('snapshot'):
+                    self.value = cached
+                    self.health['last_success_at'] = cached.get('synced_at')
+        except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_read')
 
     def index(self):
         self.start()
@@ -149,6 +178,13 @@ class ReadService:
 
 _SERVICES = {}
 _LOCK = threading.Lock()
+
+
+def wake_index(config):
+    """A validated IDLE signal wakes the existing owner without bypassing backoff."""
+    with _LOCK:
+        reads = _SERVICES.get(config.scope)
+        if reads:reads.wake.set()
 
 
 def service(config):

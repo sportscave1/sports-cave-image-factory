@@ -30,10 +30,15 @@ def connect_tcp(host, port, timeout):
     for family, kind, protocol, _, address in addresses:
         wire = None
         started = time.monotonic()
+        remaining = deadline - started
+        if remaining <= 0:
+            # No socket attempt occurred for this address. Do not mislabel a
+            # consumed shared deadline as an independent IPv6 route failure.
+            LOGGER.info('email_imap_transport_skipped stage=tcp family=%s reason=deadline',
+                        'ipv6' if family == socket.AF_INET6 else 'ipv4')
+            last_error = timeout_error or TimeoutError('Mailbox connect deadline exceeded')
+            break
         try:
-            remaining = deadline - started
-            if remaining <= 0:
-                raise timeout_error or TimeoutError('Mailbox connect deadline exceeded')
             wire = socket.socket(family, kind, protocol)
             wire.settimeout(remaining)
             wire.connect(address)

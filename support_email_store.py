@@ -10,6 +10,7 @@ import json
 import re
 
 import os_accounts
+from support_email_db_guard import METADATA_DB
 from support_email_logic import STATUSES
 
 LOGGER = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ class SupportStorageError(RuntimeError):
 
 @contextmanager
 def cursor(write=False):
+    if not METADATA_DB.ready():
+        raise SupportStorageError("Support metadata is temporarily unavailable.")
     try:
         import supabase_backend
         with supabase_backend.connect() as conn:
@@ -34,7 +37,7 @@ def cursor(write=False):
     except SupportStorageError:
         raise
     except Exception as error:
-        LOGGER.warning("Support metadata unavailable (%s)", type(error).__name__)
+        METADATA_DB.failed(error, 'support_metadata')
         raise SupportStorageError("Support metadata is unavailable. The live mailbox is still available.") from None
 
 

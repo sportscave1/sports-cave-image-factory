@@ -123,7 +123,10 @@ class CampaignStore(WorkspaceRecords):
         operation=str(uuid.UUID(str(operation_id)))
         if row['version']!=version or row['archived_at']: raise ValueError('Reload the current editable campaign before testing.')
         cfg=self.render_settings(env)
-        if not preflight(row['document'],env,cfg)['test_ready']: raise ValueError('Resolve the test preflight items first.')
+        checks=preflight(row['document'],env,cfg)
+        if not checks['test_ready']:
+            from crm_campaign_issues import preflight_error
+            raise ValueError(preflight_error(checks))
         digest=fingerprint(row['document'],cfg)
         from crm_resend_marketing import get_resend_marketing_config_status
         delivery=get_resend_marketing_config_status(env)
@@ -134,6 +137,10 @@ class CampaignStore(WorkspaceRecords):
         prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True)
         if prior:
             return self._test_receipt(prior,identity,version,digest,recipient)
+        if catalogue_sections:
+            from crm_catalogue import Catalogue, verify_catalogues
+            from crm_shopify import Shopify
+            verify_catalogues(row['document'], Catalogue(shop or Shopify()))
         from crm_test_recipient import test_recipient_url
         unsubscribe_url=test_recipient_url(self,recipient,shop=shop)
         rendered=render_campaign(row['document'],cfg,unsubscribe_url=unsubscribe_url,production=True,test_tracking=True)
