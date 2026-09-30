@@ -68,7 +68,8 @@ class RefreshWorkflowTests(unittest.TestCase):
         self.assertEqual(state['ads_category'], 'Football')
         self.assertEqual(state['ads_country'], 'Australia')
         self.assertEqual(state['ads_campaign_type'], 'Single Image / Video')
-        self.assertEqual(state[meta.ACTIVE], source)
+        self.assertEqual({k: v for k, v in state[meta.ACTIVE].items() if k != "campaign_type_resolution"}, source)
+        self.assertTrue(state[meta.ACTIVE]["campaign_type_resolution"]["confirmed"])
         self.assertEqual(state[ads.ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY], source['components']['primary_text']['value'])
 
     def test_three_slots_and_same_five_carousel_slots(self):

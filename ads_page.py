@@ -14413,7 +14413,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.caption(product_url_state["message"])
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
-    if not is_google:
+    if is_creative_refresh:
+        from ads_refresh_reference import render_product_image_link
+        render_product_image_link(st)
+    elif not is_google:
         render_product_artwork_reference(product_selection, product_url)
     campaign_moment = render_campaign_moment_section()
     creative_refresh_context = None

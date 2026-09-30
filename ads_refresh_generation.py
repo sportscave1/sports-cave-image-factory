@@ -43,7 +43,7 @@ Source evidence (factual context, not customer copy):
 Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
 
 ATTACHMENT 1 — WINNING META AD IMAGE
-Winning image: attached as reference image 1. Download original winning image from Sports Cave OS.
+Winning image: attached as reference image 1. Copy the winning image from Sports Cave OS and paste it into ChatGPT.
 Use this to understand the successful visual direction, composition, mood, framing, room styling,
 hook, hierarchy, collector presentation and creative approach. It is not the artwork authority.
 

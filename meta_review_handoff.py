@@ -36,6 +36,69 @@ def archive_image(url):
     return store.save_media(bytes(data),mime)
 
 
+def resolve_campaign_type(source, ad=None):
+    """Resolve only explicit saved/Meta format evidence; never inspect image content."""
+    from meta_review_benchmarks import ad_format
+
+    source, ad = source or {}, ad or {}
+    aliases = {
+        'SINGLE IMAGE / VIDEO': 'Single Image / Video', 'SINGLE IMAGE': 'Single Image / Video',
+        'SINGLE VIDEO': 'Single Image / Video', 'IMAGE': 'Single Image / Video', 'VIDEO': 'Single Image / Video',
+        'CAROUSEL': 'Carousel', 'INSTANT EXPERIENCE': 'Instant Experience', 'CANVAS': 'Instant Experience',
+    }
+    def known(value):
+        return aliases.get(str(value or '').strip().upper().replace('_', ' ').replace('-', ' '))
+    def result(value, origin, confirmed=True):
+        return {'campaign_type': value, 'confirmed': confirmed, 'source': origin}
+    for label, record in (('saved_source', source), ('source_ad', ad)):
+        for key in ('campaign_type', 'ad_type', 'format', 'source_campaign_type'):
+            value = known(record.get(key))
+            if value:
+                return result(value, label + '.' + key)
+    # The selected ad's benchmark already derives its format from Graph metadata.
+    value = known((ad.get('benchmark') or {}).get('format'))
+    if value:
+        return result(value, 'source_ad.benchmark.format')
+    metadata = [ad.get('creative_metadata'), (ad.get('raw') or {}).get('creative'),
+                source.get('creative_metadata'), source.get('creative'), source.get('raw')]
+    for raw in metadata:
+        if not isinstance(raw, dict):
+            continue
+        raw = raw.get('creative') or raw
+        if not isinstance(raw, dict):
+            continue
+        value = known(ad_format(raw))
+        spec = raw.get('object_story_spec') or {}
+        formats = (raw.get('asset_feed_spec') or {}).get('ad_formats') or []
+        resolved = {known(item) for item in formats}
+        resolved.discard(None)
+        if value == 'Instant Experience':
+            return result(value, 'source_creative.metadata')
+        if len(resolved) > 1:
+            return result('Single Image / Video', 'ambiguous_creative_formats', False)
+        if value:
+            return result(value, 'source_creative.metadata')
+        if len(resolved) == 1:
+            return result(resolved.pop(), 'source_creative.ad_formats')
+        if not formats and (spec.get('video_data') or raw.get('video_id') or raw.get('image_url') or (spec.get('link_data') or {}).get('image_hash')):
+            return result('Single Image / Video', 'source_creative.single_asset')
+    # Legacy handoffs retained destination metadata and carousel presence only.
+    if ad_format({'url': source.get('destination_url')}) == 'INSTANT EXPERIENCE':
+        return result('Instant Experience', 'source_destination')
+    if source.get('carousel') or (ad.get('assets') or {}).get('carousel'):
+        return result('Carousel', 'source_creative.carousel')
+    for key in ('posting_mapping', 'ad_mapping', 'product_mapping'):
+        mapping = source.get(key) or {}
+        for field in ('campaign_type', 'ad_type', 'format'):
+            value = known(mapping.get(field))
+            if value:
+                return result(value, key + '.' + field)
+    prior = source.get('campaign_type_resolution') or {}
+    if prior.get('confirmed') and known(prior.get('campaign_type')):
+        return result(known(prior['campaign_type']), prior.get('source') or 'durable_handoff')
+    return result('Single Image / Video', 'legacy_default', False)
+
+
 def build_package(ad,selections,context,mode):
     if mode not in ('complete_ad','best_components'):
         raise ValueError('Unknown refresh mode.')
@@ -45,7 +108,7 @@ def build_package(ad,selections,context,mode):
             raise ValueError('Select original image, primary text and headline before refreshing.')
         if mode=='complete_ad' and str(item['ad_id'])!=str(ad['ad_id']):
             raise ValueError('Complete-ad mode must use assets from the same ad.')
-    return {**deepcopy(context),'mode':mode,'ad_id':ad['ad_id'],'ad_name':ad.get('ad_name'),
+    package = {**deepcopy(context),'mode':mode,'ad_id':ad['ad_id'],'ad_name':ad.get('ad_name'),
             'adset_id':ad.get('adset_id'),'creative_name':ad.get('creative_name') or ((ad.get('raw') or {}).get('creative') or {}).get('name'),
             'product_destination_urls':[item['value'] for item in ad['assets']['url']],
             'creative_id':ad['assets']['creative_id'],'components':deepcopy(selections),
@@ -54,6 +117,10 @@ def build_package(ad,selections,context,mode):
             'description':next(iter(ad['assets']['description']),{}).get('value',''),
             'cta':next(iter(ad['assets']['cta']),{}).get('value',''),
             'destination_url':next(iter(ad['assets']['url']),{}).get('value','')}
+    package['campaign_type_resolution'] = resolve_campaign_type(package, ad)
+    if package['campaign_type_resolution']['confirmed']:
+        package['source_campaign_type'] = package['campaign_type_resolution']['campaign_type']
+    return package
 
 
 def queue(package,state,actor='sports_cave_os'):
@@ -103,9 +170,9 @@ def hydrate(state):
     market={'AU':'Australia','US':'USA','GB':'UK','CA':'Canada','NZ':'New Zealand'}.get(package.get('market'),package.get('market'))
     if market in ads_page.COUNTRY_OPTIONS:
         state['ads_country']=market
-    url=package.get('destination_url','')
-    state['ads_campaign_type']='Instant Experience' if package.get('format')=='INSTANT EXPERIENCE' else 'Carousel' if package.get('format')=='CAROUSEL' or package.get('carousel') else 'Instant Experience' if '/canvas/' in url or 'canvas_id=' in url else 'Single Image / Video'
-    state[ACTIVE]=deepcopy(package)
+    resolution = resolve_campaign_type(package)
+    state['ads_campaign_type'] = resolution['campaign_type']
+    state[ACTIVE] = {**deepcopy(package), 'campaign_type_resolution': resolution}
     state.pop(PENDING,None)
     for key in ('ads-refresh-previous-campaign','ads-refresh-winning-candidate','ads-refresh-applied-winner'):
         state.pop(key,None)
@@ -194,21 +261,10 @@ def render_source(st):
             data,mime=store.load_media(source['image_sha256'])
             if data:
                 st.image(data,width=320)
-                st.download_button('Download original winning image',data,file_name='meta-winning-reference.'+('png' if mime=='image/png' else 'jpg'),mime=mime)
-                st.caption('Permanent original reference. Attach it with the canonical artwork in the existing ChatGPT prompt workflow.')
+                from ads_refresh_reference import render_winning_image_copy
+                render_winning_image_copy(data, mime)
             else:
                 st.error('Stored winner image unavailable. Repeat the handoff from Meta Review.')
         except Exception:
             st.error('Winner image could not be read from Supabase. Retry when the database is available.')
-        with st.expander('Source evidence'):
-            st.dataframe([{'Metric':k.replace('_',' ').title(),'Value':v} for k,v in (source.get('metrics') or {}).items() if v is not None],hide_index=True)
-            st.caption(f"Ad {source['ad_id']} · Creative {source['creative_id']} · {source['decision']['confidence']} confidence")
-        if st.button('Choose a different winner'):
-            # Keep the current winner and draft until a new selection is actually handed off.
-            from ads_navigation import META_REVIEW_ROUTE, META_REVIEW_PAGE_KEY
-            st.query_params.pop('handoff_id', None)
-            st.session_state['current_page'] = META_REVIEW_ROUTE
-            st.session_state['selected_page'] = META_REVIEW_ROUTE
-            st.query_params['page'] = META_REVIEW_PAGE_KEY
-            st.rerun()
     return True
