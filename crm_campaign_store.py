@@ -8,6 +8,13 @@ from crm_campaign_content import new_document, validate_document, preflight, set
 
 
 class CampaignStore(WorkspaceRecords):
+    def history_counts(self):
+        """One local aggregate for history badges; never reads audience/provider data."""
+        return self.q("""SELECT count(*) FILTER(WHERE c.status IS DISTINCT FROM 'SENT') AS drafts,
+          count(*) FILTER(WHERE c.status='SENT') AS sent
+          FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
+          WHERE d.archived_at IS NULL""",one=True)
+
     def render_settings(self,env=None):
         cfg=super().render_settings(env)
         cfg['email_defaults']=self.default_sections(cfg)

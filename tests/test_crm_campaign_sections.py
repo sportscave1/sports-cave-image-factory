@@ -135,7 +135,7 @@ class SectionPersistenceTests(unittest.TestCase):
         from tests.test_crm_ui import SCRIPT
         at = AppTest.from_string(SCRIPT); at.session_state['route']='CRM Campaigns'; at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs], ['Settings','Editor','Templates','Drafts','Sent'])
+        self.assertEqual([t.label for t in at.tabs], ['Settings','Editor','Templates'])
         # Hidden Editor content is now deferred until the tab is selected.
         at.session_state[at.session_state['campaign_edit_key']+'panel']='Editor'
         at.run(timeout=20)

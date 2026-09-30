@@ -94,7 +94,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
         at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates','Drafts','Sent'])
+        self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates'])
         iframe=next(e for e in at.get('iframe') if 'A collector moment' in e.proto.srcdoc)
         self.assertIn('Unsubscribe',iframe.proto.srcdoc)
         next(b for b in at.button if str(b.key).endswith('device_Mobile')).click().run()
@@ -125,7 +125,7 @@ class SqlWorkspaceTests(unittest.TestCase):
         labels={b.label for b in at.button}
         self.assertTrue(labels.isdisjoint({'Campaigns','Flows','Refresh','+ New Campaign','Preview'}))
         self.assertFalse(any(t.label=='Search campaigns' for t in at.text_input))
-        self.assertTrue(any('Drafts' in m.value for m in at.markdown))
+        self.assertTrue(any('Campaigns' in m.value for m in at.markdown))
         from crm_middle_sections import apply_event
         apply_event(at.session_state['campaign_editor']['document'], {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
         next(t for t in at.text_input if t.label=='Subject').set_value('Saved subject')

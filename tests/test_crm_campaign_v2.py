@@ -171,7 +171,7 @@ class SimplifiedUiTests(unittest.TestCase):
         at=self.app()
         with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':True,'error':False}),patch.object(CampaignStore,'html_library',side_effect=AssertionError('Library must be lazy')),patch('crm_settings_page.campaign_settings_panel',side_effect=AssertionError('Removed settings must not load')):
             at.run(timeout=20);self.assertFalse(at.exception)
-            self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates','Drafts','Sent'])
+            self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates'])
             calls=len(at.session_state['wire'].calls)
             next(t for t in at.text_input if t.label=='Subject').set_value('Typing').run(timeout=20)
             self.assertEqual(len(at.session_state['wire'].calls),calls)

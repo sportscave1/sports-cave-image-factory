@@ -264,7 +264,9 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('No pr
  sent_table(CampaignStore(connect),ADMIN)
 '''
         at=AppTest.from_string(script).run(timeout=20);self.assertFalse(at.exception)
-        self.assertEqual(len(at.dataframe),1);self.assertFalse(at.metric)
+        self.assertFalse(at.dataframe);self.assertFalse(at.metric)
+        self.assertTrue(any(b.label=='View analytics' for b in at.button))
+        self.assertTrue(any('Recipients' in e.proto.body for e in at.get('html')))
     def test_open_analytics_pauses_table_timer_and_preview_is_lazy(self):
         from streamlit.testing.v1 import AppTest
         self.accepted()
@@ -282,19 +284,35 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
         self.assertFalse(at.exception);self.assertFalse(at.get('iframe'))
         next(b for b in at.button if b.label=='Email preview').click().run(timeout=20)
         self.assertFalse(at.exception);self.assertTrue(at.get('iframe'))
-    def test_sent_tab_unmounts_editor_and_restores_draft_without_provider_reads(self):
+    def test_sent_switch_keeps_editor_and_draft_state(self):
         from streamlit.testing.v1 import AppTest
         from tests.test_crm_ui import SCRIPT
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns'
         at.session_state['campaign_editor']=deepcopy(self.editor);at.run(timeout=20)
-        key='campaign_lists_'+str(at.session_state.filtered_state.get('campaign_tabs_generation',0))
+        next(t for t in at.text_input if t.label=='Subject').set_value('Keep my unsent subject').run(timeout=20)
         before=deepcopy(at.session_state['campaign_editor']['document'])
-        at.session_state[key]='Sent'
-        with patch.object(CampaignStore,'render_settings',side_effect=AssertionError('No editor settings in Sent')),patch('crm_segment_counts.COUNTS.display',side_effect=AssertionError('No Shopify counts in Sent')):
-            at.run(timeout=20);self.assertFalse(at.exception)
-        self.assertFalse(any(t.label=='Subject' for t in at.text_input))
-        at.session_state[key]='Drafts';at.run(timeout=20);self.assertFalse(at.exception)
+        edit_key=at.session_state['campaign_edit_key']
+        at.radio(key='campaign_history_view').set_value('Sent').run(timeout=20)
+        self.assertFalse(at.exception)
+        self.assertEqual(next(t for t in at.text_input if t.label=='Subject').value,'Keep my unsent subject')
+        self.assertTrue(any(b.label=='Save draft' for b in at.button))
+        self.assertEqual(at.session_state['campaign_edit_key'],edit_key)
         self.assertEqual(at.session_state['campaign_editor']['document'],before)
+        at.radio(key='campaign_history_view').set_value('Drafts').run(timeout=20);self.assertFalse(at.exception)
+        self.assertEqual(at.session_state['campaign_editor']['document'],before)
+        with patch('crm_campaign_analytics_ui.sent_page',return_value=[]):
+            at.radio(key='campaign_history_view').set_value('Sent').run(timeout=20)
+        self.assertFalse(at.exception)
+        self.assertTrue(any('No sent campaigns yet.' in e.proto.body for e in at.get('html')))
+        self.assertEqual(next(t for t in at.text_input if t.label=='Subject').value,'Keep my unsent subject')
+        self.assertEqual(at.session_state['campaign_editor']['document'],before)
+
+    def test_history_counts_move_between_drafts_sent_and_archive(self):
+        before=self.store.history_counts()
+        self.accepted()
+        self.assertEqual(self.store.history_counts(),{'drafts':before['drafts']-1,'sent':before['sent']+1})
+        row=self.store.draft(self.editor['id']);self.store.archive(ADMIN,row['id'],row['version'])
+        self.assertEqual(self.store.history_counts(),{'drafts':before['drafts']-1,'sent':before['sent']})
     def test_older_order_response_cannot_restore_refunded_revenue(self):
         sends=self.accepted();order=order_fixture(self.campaign()['campaign_key'],sends[0]['shopify_customer_id'])
         order['updatedAt']=order['createdAt'];old=deepcopy(order)

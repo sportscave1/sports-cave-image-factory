@@ -31,7 +31,7 @@ timing_control(doc, 'fixture')
             at.session_state['route'] = 'CRM Campaigns'
             at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs], ['Settings', 'Editor', 'Templates', 'Drafts', 'Sent'])
+        self.assertEqual([t.label for t in at.tabs], ['Settings', 'Editor', 'Templates'])
         self.assertFalse(any('Marketing delivery ON' in c.value for c in at.caption))
         self.assertEqual(next(b for b in at.button if b.label == 'Save draft').proto.type, 'secondary')
         self.assertEqual(next(b for b in at.button if b.label == 'Send now').proto.type, 'primary')

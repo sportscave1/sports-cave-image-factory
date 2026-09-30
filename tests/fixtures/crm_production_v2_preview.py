@@ -5,6 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from copy import deepcopy
 from unittest.mock import patch
 import uuid
+from threading import Timer
 import streamlit as st
 from crm_campaign_store import CampaignStore
 from crm_campaign_send import review,queue_campaign
@@ -33,11 +34,25 @@ def isolate_fixture_process():
     return guards
 
 isolate_fixture_process()
+
+@st.cache_resource
+def preview_shop():
+    shop=authority([profile(8801),profile(8802),profile(8803)])
+    shop.campaign_segment_counts.return_value={'AU':3,'Global':3,'US':0,'UK':0,'CA':0,'NZ':0}
+    return shop
+
 st.set_page_config(layout='wide',page_title='Campaigns V2 · offline fixture')
 st.sidebar.caption('Offline fixtures · no live delivery or Shopify writes')
 store=CampaignStore(connect)
-shop=authority([profile(8801),profile(8802),profile(8803)])
-shop.campaign_segment_counts.return_value={'AU':3,'Global':3,'US':0,'UK':0,'CA':0,'NZ':0}
+shop=preview_shop()
+if st.sidebar.button('Simulate subscriber in 15 seconds'):
+    def subscribe():
+        from crm_webhooks import receive_shopify
+        counts=dict(shop.campaign_segment_counts.return_value)
+        counts['AU']+=1;counts['Global']+=1
+        shop.campaign_segment_counts.return_value=counts
+        receive_shopify(store,'customers/update','fixture-'+uuid.uuid4().hex,{'id':8804},now())
+    timer=Timer(15,subscribe);timer.daemon=True;timer.start()
 with (patch('requests.sessions.Session.request',side_effect=AssertionError('External HTTP forbidden')),
       patch('supabase_backend.connect',side_effect=AssertionError('Production DB forbidden')),
       patch('crm_service.audit'),patch.object(CampaignStore,'render_settings',return_value=deepcopy(CFG)),
