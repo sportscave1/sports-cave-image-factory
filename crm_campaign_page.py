@@ -380,7 +380,7 @@ def _selected_campaign(shop,store,actions,navigate,drafts,loading):
     with buttons.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-campaign-actions'):
         save=st.button('Save draft',type='secondary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
-        test_control(drafts,actions.user,editor,key,available)
+        test_control(drafts,actions.user,editor,key,available,cfg=cfg)
         from crm_campaign_send_ui import send_control
         send_control(shop,drafts,actions.user,editor,key,cfg,available)
     new_requested=False

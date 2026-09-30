@@ -286,7 +286,9 @@ def verify_catalogues(doc, catalogue):
         if old['type'] != 'catalogue' or not old['visible']: continue
         for before, after in zip(old['products'], new['products']):
             if before != after:
-                changed.append('Catalogue [' + old['id'] + '] · ' + before['title'][:120])
+                changed.append(dict(section_id=old['id'],section_type='catalogue',display_label='Catalogue',editable=True,
+                    issue_type='stale_catalogue',count=1,message=before['title'][:120]+': live Shopify/edition facts changed — refresh catalogue before testing.'))
     if changed:
-        raise ValueError('; '.join(changed) + ': live Shopify/edition facts changed — refresh catalogue before testing.')
+        from crm_campaign_issues import CampaignValidationError
+        raise CampaignValidationError({'test':{'Catalogue product facts valid':False},'section_issues':changed})
     return current

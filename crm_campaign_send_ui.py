@@ -20,20 +20,35 @@ def safe_error(exc):
 
 
 @st.fragment
-def test_control(store,user,editor,key,available=True):
-    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover'):
+def test_control(store,user,editor,key,available=True,cfg=None):
+    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover',on_change='rerun'):
+        from crm_campaign_test_ui import test_styles, readiness
+        from crm_campaign_issues import CampaignValidationError
+        from crm_campaign_content import preflight
+        test_styles()
+        st.caption('SEND TEST')
+        checks=None
+        current=st.session_state.get('campaign_editor',editor)
+        if str(current.get('id'))==str(editor.get('id')):editor=current
+        try:
+            review_doc=deepcopy(editor['document']);review_doc['copy_reviewed']=True
+            checks=preflight(review_doc,cfg=cfg if cfg is not None else store.render_settings())
+        except Exception as exc:
+            st.caption('Readiness unavailable · '+safe_error(exc))
+        from pathlib import Path
+        scripts=Path(__file__).with_name('components')/'campaign_recovery'
+        controls_js='\n'.join(scripts.joinpath(name).read_text(encoding='utf-8') for name in ('test_flush.js','test_sections.js'))
         # Native popovers do not focus Streamlit inputs automatically. This small
         # observer is scoped to this labelled popover; no data leaves the browser.
         st.html("""<script>(()=>{
           if(window.scCampaignTestFocus)return;
           const seen=new WeakSet();
-          const focus=()=>{const input=document.querySelector('[role="dialog"] input[aria-label="Send test email"]');
+          const focus=()=>{const input=document.querySelector('[data-testid="stPopoverBody"] input[aria-label="Send test email"]');
             if(input&&input.getClientRects().length&&!seen.has(input)){seen.add(input);requestAnimationFrame(()=>input.focus({preventScroll:true}));}};
           const observer=new MutationObserver(focus);observer.observe(document.documentElement,{childList:true,subtree:true});
           window.scCampaignTestFocus=observer;focus();
-        })();</script>""",unsafe_allow_javascript=True)
-        from pathlib import Path
-        st.html('<script>'+Path(__file__).with_name('components').joinpath('campaign_recovery','test_flush.js').read_text(encoding='utf-8')+'</script>',unsafe_allow_javascript=True)
+        })();
+        """+controls_js+'</script>',unsafe_allow_javascript=True)
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
             recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Send test uses the real Shopify unsubscribe link for this customer.')
@@ -57,8 +72,10 @@ def test_control(store,user,editor,key,available=True):
                 st.session_state['campaign_saved']=deepcopy(editor)
                 st.success('Test email sent to '+recipient.strip())
                 if not result['audit_saved']:st.warning('Provider accepted the test; receipt storage needs review. Do not resend.')
+            except CampaignValidationError as exc:checks=exc.checks
             except Exception as exc:st.error('Test email could not be sent — '+safe_error(exc))
             finally:st.session_state[key+'test_busy']=False
+        if checks is not None:readiness(checks)
 
 
 @st.fragment

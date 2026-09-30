@@ -125,8 +125,8 @@ class CampaignStore(WorkspaceRecords):
         cfg=self.render_settings(env)
         checks=preflight(row['document'],env,cfg)
         if not checks['test_ready']:
-            from crm_campaign_issues import preflight_error
-            raise ValueError(preflight_error(checks))
+            from crm_campaign_issues import CampaignValidationError
+            raise CampaignValidationError(checks)
         digest=fingerprint(row['document'],cfg)
         from crm_resend_marketing import get_resend_marketing_config_status
         delivery=get_resend_marketing_config_status(env)

@@ -104,8 +104,8 @@ def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     checks=preflight(doc,env,store.render_settings(env))
     failed=[k for k,v in checks['test'].items() if not v]
     if failed:
-        from crm_campaign_issues import preflight_error
-        raise ValueError(preflight_error(checks))
+        from crm_campaign_issues import CampaignValidationError
+        raise CampaignValidationError(checks)
     saved=store.draft(editor['id']) if editor.get('id') else None
     if not saved or saved['document']!=doc or saved['name']!=editor['name']:
         saved=store.save(user,editor['name'],doc,editor.get('id'),editor.get('version'),env=env)

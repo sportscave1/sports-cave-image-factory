@@ -98,8 +98,9 @@ class TestPreflightIssues(unittest.TestCase):
         def resolve(*a,**kw):
             products=old(*a,**kw);products[0]['price']='99.00';return products
         changed.resolve=resolve
-        with self.assertRaisesRegex(ValueError,'Artwork 1.*refresh catalogue'):
+        with self.assertRaises(ValueError) as failure:
             verify_catalogues(self.doc,changed)
+        self.assertIn('Artwork 1',failure.exception.checks['section_issues'][0]['message'])
         self.assertEqual(self.doc,before)
 
 

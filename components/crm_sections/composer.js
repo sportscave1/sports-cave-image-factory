@@ -4,6 +4,17 @@ if(typeof module!=='undefined')module.exports={moveId};
 if(typeof document!=='undefined'){
 let args={sections:[]},opened={},pending=false,inFlight=null,drag=null,typing=null,drafts={},queue=[],settingsDrafts={};
 const root=document.getElementById('sections');
+const goToSection=id=>{
+ if(!args.sections.some(s=>s.id===id))return false;
+ opened[id]=true;render();
+ requestAnimationFrame(()=>{
+  const card=[...root.children].find(c=>c.dataset.id===id);
+  card?.scrollIntoView({block:'center'});
+  card?.querySelector('.title')?.focus({preventScroll:true});
+ });return true;
+};
+parent.scCampaignGoToSection=goToSection;
+addEventListener('pagehide',()=>{if(parent.scCampaignGoToSection===goToSection)delete parent.scCampaignGoToSection;});
 const areas=new Map(),histories=new Map();let historyScope='',deleted=null,deleteTimer=null;
 
 const height=()=>parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:document.body.scrollHeight+4},'*');
