@@ -3,8 +3,7 @@ import time
 from crm_logic import marketing_state, eligibility
 from crm_logic import recipient_hash, now
 
-MARKET_LABELS={'AU':'AUSTRALIA','US':'USA','UK':'UK','Global':'ALL SUBSCRIBERS'}
-COUNTRIES={'AU':'AU','US':'US','UK':'GB'}
+from crm_campaign_segments import LABELS as MARKET_LABELS, COUNTRIES, sources
 
 def country(customer):
     address=customer.get('defaultAddress') or {}
@@ -12,17 +11,23 @@ def country(customer):
     return {'AUSTRALIA':'AU','AUS':'AU','USA':'US','UNITED STATES':'US','UNITED STATES OF AMERICA':'US','UK':'GB','UNITED KINGDOM':'GB','GREAT BRITAIN':'GB','GBR':'GB'}.get(raw,raw)
 
 def audience(market):
+    # Legacy document compatibility only. With market_audience=True the stable
+    # market key resolves native Shopify membership in calculate(), never these
+    # former default-address rules. Existing non-market drafts retain their rules.
     rules=[{'field':'consent','op':'eq','value':'SUBSCRIBED'}]
     if market in COUNTRIES:rules.append({'field':'country','op':'eq','value':COUNTRIES[market]})
     return {'kind':'Rules','name':'Subscribed · '+MARKET_LABELS[market],'rules':{'all':rules}}
 
-def calculate(shop,store,hours=16,*,clock=time.monotonic):
-    """One paginated authority pass for all four markets, including consent conflicts.
+def calculate(shop,store,hours=16,*,clock=time.monotonic,market=None):
+    """Native segment membership plus fresh profiles, including consent conflicts.
 
     All profiles must be checked for conflicting consent; only eligible recipients
     are returned. Raw profiles remain transient and never enter draft storage.
     """
     start=clock();cursor=None;profiles={};seen=set()
+    definitions=sources(shop,store)
+    markets=[market] if market else list(MARKET_LABELS)
+    membership={m:shop.campaign_member_ids(definitions[m]['query']) for m in markets}
     while True:
         if clock()-start>30:raise ValueError('Subscriber counts timed out. Review again before sending.')
         page=shop.campaign_subscribers(after=cursor)
@@ -40,18 +45,18 @@ def calculate(shop,store,hours=16,*,clock=time.monotonic):
     groups={}
     for c in profiles.values():
         h=recipient_hash(c.get('email'))
-        groups.setdefault(h,[]).append((c,country(c)))
+        groups.setdefault(h,[]).append(c)
     results={m:{'members':0,'eligible':0,'excluded':{},'diagnostics':{'conflicting_profiles':0},
-        'recipients':[],'profiles':{},'complete':True,'checked_at':now().isoformat()} for m in MARKET_LABELS}
-    reverse={code:m for m,code in COUNTRIES.items()}
+        'recipients':[],'profiles':{},'complete':True,'checked_at':now().isoformat()} for m in markets}
+    if any(ids-set(profiles) for ids in membership.values()):raise ValueError('Shopify member profiles are incomplete.')
     for h,rows in groups.items():
-        conflict=len({marketing_state(c) for c,_ in rows})>1
+        conflict=len({marketing_state(c) for c in rows})>1
         accepted=set()
-        for c,code in rows:
+        for c in rows:
             ok,reason=eligibility(c,h in suppressed or c['id'] in ids)
             if conflict:reason='conflicting_consent'
             elif ok and h in recent:reason='smart_sending'
-            for market in (['Global',reverse[code]] if code in reverse else ['Global']):
+            for market in (m for m in markets if c['id'] in membership[m]):
                 result=results[market];result['members']+=1
                 why=reason or ('duplicate' if market in accepted else '')
                 if why:result['excluded'][why]=result['excluded'].get(why,0)+1

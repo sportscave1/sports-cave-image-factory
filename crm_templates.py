@@ -59,7 +59,7 @@ def render(content,context,unsubscribe_url,logo_url,campaign_key):
     def text(key):
         return re.sub(r'{{\s*(.*?)\s*}}',lambda m:str(context.get(m[1]) or ('there' if m[1]=='first_name' else '')),content[key])
     doc=new_document();doc['campaign_key']='sc_'+hashlib.sha256(str(campaign_key).encode()).hexdigest()[:32]
-    cta=campaign_link(text('cta_url'),doc['campaign_key'],'b_primary',test=False)
+    cta=campaign_link(text('cta_url'),doc['campaign_key'],'b_primary',test=False,legacy=True)
     if not safe_url(cta):raise ValueError('Current message has no valid CTA URL.')
     doc['content'].update(subject=text('subject'),preheader=text('preview'))
     doc['blocks']=[block('heading',text=text('headline')),block('text',text=text('body'))]

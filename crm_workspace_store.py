@@ -165,5 +165,11 @@ class WorkspaceRecords(BrandTemplates):
             conn.execute('UPDATE crm_delivery_events e SET test_id=t.id FROM crm_internal_tests t WHERE e.provider_id=%s AND t.provider_id=e.provider_id AND e.send_id IS NULL',(provider_id,))
             conn.execute('UPDATE crm_delivery_events e SET send_id=s.id FROM crm_marketing_sends s WHERE e.provider_id=%s AND s.provider_email_id=e.provider_id AND s.test_send=false AND e.test_id IS NULL',(provider_id,))
             conn.execute('INSERT INTO crm_marketing_events(event_id,provider_email_id,event_type,recipient_hash,occurred_at) SELECT e.event_id,e.provider_id,e.event_type,s.recipient_hash,e.occurred_at FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id WHERE e.provider_id=%s ON CONFLICT DO NOTHING',(provider_id,))
-            rows=conn.execute("SELECT s.recipient_hash,s.shopify_customer_id,e.event_type,e.hard_bounce FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id WHERE e.provider_id=%s AND (e.event_type='email.complained' OR e.hard_bounce)",(provider_id,)).fetchall()
-        for row in rows:self.suppress(row['recipient_hash'],row['shopify_customer_id'],'spam_complaint' if row['event_type']=='email.complained' else 'hard_bounce','resend_verified')
+            rows=conn.execute("SELECT s.recipient_hash,s.shopify_customer_id,e.event_type,e.hard_bounce FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id WHERE e.provider_id=%s AND (e.event_type IN ('email.complained','email.suppressed') OR e.hard_bounce)",(provider_id,)).fetchall()
+        changed=False
+        for row in rows:
+            if self.suppressed(row['shopify_customer_id'],row['recipient_hash']):continue
+            reason='spam_complaint' if row['event_type']=='email.complained' else 'suppressed' if row['event_type']=='email.suppressed' else 'hard_bounce'
+            self.suppress(row['recipient_hash'],row['shopify_customer_id'],reason,'resend_verified')
+            changed=True
+        if changed:self.invalidate()

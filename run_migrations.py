@@ -50,8 +50,10 @@ CRM_MIGRATIONS = (
     '20260927093818_crm_marketing_v1.sql',
     '20260928020740_crm_campaign_workspace_v1.sql',
     '20260928024722_crm_campaigns_first_workspace.sql',
+    '20260930031755_crm_campaigns_production_v2.sql',
 )
 REVIEWED_MIGRATION_SHA256 = {
+    "20260930031755_crm_campaigns_production_v2.sql": "9721b3f855906d8b2c4f226134ef7af6379792257a63cabba105aaaae329961a",
     "20260927093818_crm_marketing_v1.sql": "8deb23e7d7f4d635244315b15e233bf68d40d431f72a7fec9f8a5851207e8704",
     "20260928020740_crm_campaign_workspace_v1.sql": "62f28ae7930478bb102910afccce60d8a3e8420f9022fdd870da70646f8f22bf",
     "20260928024722_crm_campaigns_first_workspace.sql": "497139e3833ee34e14fea0e6f646d17273f4ec70afafbf47e8677b3852b11ca3",

@@ -79,6 +79,10 @@ def schedule_gate(store,enabled,at):
     store.set_state('campaign_schedule_health',{'enabled':bool(enabled),'checked_at':at.isoformat()})
 
 def overdue_reason(snapshot,row,at):
+    # Native reviewed queues are admitted by schedule_gate on every worker tick.
+    # Its OFF/outage checks still fail closed, but a healthy worker's own backlog
+    # must not discard the tail of a large campaign five minutes after it starts.
+    if snapshot.get('audience_snapshot_id'):return ''
     job=snapshot.get('schedule',{}).get(row['recipient_hash'])
     if job and at-datetime.fromisoformat(job['due_at'])>timedelta(minutes=5):return 'schedule_missed'
     return ''

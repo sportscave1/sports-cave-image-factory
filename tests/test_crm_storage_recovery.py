@@ -19,7 +19,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('CRM Settings',os_accounts.allowed_navigation_routes(dict(worker,page_permissions=[])))
 
     def test_manifest_is_reviewed_and_check_never_connects(self):
-        self.assertEqual(run_migrations.DEPLOYMENT_MIGRATIONS[-3:],run_migrations.CRM_MIGRATIONS)
+        self.assertEqual(run_migrations.DEPLOYMENT_MIGRATIONS[-len(run_migrations.CRM_MIGRATIONS):],run_migrations.CRM_MIGRATIONS)
         with patch('run_migrations.psycopg.connect',side_effect=AssertionError('No DB in check mode')):
             run_migrations.run_crm_migrations(check=True)
         for name in run_migrations.CRM_MIGRATIONS:

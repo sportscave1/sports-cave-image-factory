@@ -1,5 +1,6 @@
 """Synthetic Shopify GraphQL authority used only by local acceptance tests."""
 from copy import deepcopy
+import re
 from datetime import timedelta
 from crm_logic import now
 import crm_shopify as q
@@ -17,6 +18,14 @@ def native_customer(customer):
 def page(nodes,after=None,size=50):
     offset=int(after or 0);end=min(len(nodes),offset+size)
     return {'nodes':deepcopy(nodes[offset:end]),'pageInfo':{'hasNextPage':end<len(nodes),'endCursor':str(end)}}
+
+def segment_rows(rows,query):
+    result=[c for c in rows if c['emailMarketingConsent']['marketingState']=='SUBSCRIBED']
+    codes=re.findall(r"customer_countries CONTAINS '([A-Z]{2})'",query or '')
+    if codes:
+        code=codes[0]
+        result=[c for c in result if (c.get('defaultAddress') or {}).get('countryCodeV2')==code or 'SC_COUNTRY_'+code in c.get('tags',[])]
+    return result
 
 class ShopifyFixture:
     def __init__(self,count=73):
@@ -40,6 +49,7 @@ class ShopifyFixture:
     def __call__(self,doc,v):
         self.calls.append((doc,v.copy()))
         if self.fail:raise self.fail
+        if doc.startswith('query CrmCampaignCounts('):return {f'm{i}':{'totalCount':len(segment_rows(self.customers,query))} for i,query in enumerate(v.values())}
         if doc==q.CAMPAIGN_SUBSCRIBERS:return {'customers':page([native_customer(c) for c in self.customers],v.get('after'),250)}
         if doc==q.CUSTOMERS:
             rows=self.customers;query=v.get('query') or ''
@@ -70,8 +80,8 @@ class ShopifyFixture:
         if doc==q.CAMPAIGN_ORDERS:return {'orders':page([])}
         if doc==q.SEGMENTS:return {'segments':page(self.segments,v.get('after'))}
         if doc==q.SEGMENT:return {'segment':deepcopy(next((s for s in self.segments if s['id']==v['id']),None))}
-        if doc==q.MEMBERS:
-            rows=[c for c in self.customers if c['emailMarketingConsent']['marketingState']=='SUBSCRIBED'];p=page(rows,v.get('after'))
+        if doc in (q.MEMBERS,q.CAMPAIGN_MEMBER_IDS):
+            rows=segment_rows(self.customers,v.get('query'));p=page(rows,v.get('after'),250 if doc==q.CAMPAIGN_MEMBER_IDS else 50)
             return {'customerSegmentMembers':{'edges':[{'node':{'id':c['id'].replace('/Customer/','/CustomerSegmentMember/')}} for c in p['nodes']],'pageInfo':p['pageInfo'],'totalCount':len(rows)}}
         if doc==q.MEMBERSHIPS:return {'customerSegmentMembership':{'memberships':[{'segmentId':s,'isMember':True} for s in v['segments']]}}
         if doc==q.CHECKOUTS:return {'abandonedCheckouts':page(self.checkouts,v.get('after'),25)}

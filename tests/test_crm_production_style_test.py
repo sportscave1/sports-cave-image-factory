@@ -111,7 +111,7 @@ class ProductionStyleTestTests(unittest.TestCase):
             self.send(op);self.send(op)
         audience.assert_not_called();self.wire.post.assert_called_once();self.assertEqual(len(self.shop.calls),1)
         payload=self.wire.post.call_args.kwargs['json']
-        expected=render_campaign(self.editor['document'],CFG,production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
+        expected=render_campaign(self.editor['document'],CFG,production=True,test_tracking=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
         self.assertEqual(payload['html'],expected['html']);self.assertEqual(payload['text'],expected['text'])
         self.assertEqual(payload['headers'],{'List-Unsubscribe':'<'+TEST_UNSUBSCRIBE_URL+'>'})
         self.assertEqual(payload['to'],['one@example.test']);self.assertIn('[CAMPAIGN TEST]',payload['subject'])

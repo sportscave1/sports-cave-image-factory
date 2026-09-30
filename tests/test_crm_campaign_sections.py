@@ -120,7 +120,7 @@ class SectionPersistenceTests(unittest.TestCase):
         self.store.save_setting(ADMIN, 'sending', {'internal_recipients':['manual@example.test'], 'smart_hours':16}, sending['version'])
         wire = Mock(); wire.post.return_value = Mock(status_code=200, json=lambda:{'id':str(uuid.uuid4())})
         operation = str(uuid.uuid4())
-        expected = render_campaign(row['document'], self.store.render_settings(ENV),production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
+        expected = render_campaign(row['document'], self.store.render_settings(ENV),production=True,test_tracking=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
         with patch('requests.sessions.Session.request', side_effect=AssertionError('External network forbidden')), patch('crm_resend_marketing._audit', return_value=True):
             for _ in range(2):
                 self.store.test_campaign(ADMIN, row['id'], row['version'], recipient='manual@example.test', confirmed=True, operation_id=operation, env=ENV, session=wire)
@@ -135,7 +135,7 @@ class SectionPersistenceTests(unittest.TestCase):
         from tests.test_crm_ui import SCRIPT
         at = AppTest.from_string(SCRIPT); at.session_state['route']='CRM Campaigns'; at.run(timeout=20)
         self.assertFalse(at.exception)
-        self.assertEqual([t.label for t in at.tabs], ['Settings','Editor','Templates'])
+        self.assertEqual([t.label for t in at.tabs], ['Settings','Editor','Templates','Drafts','Sent'])
         # Hidden Editor content is now deferred until the tab is selected.
         at.session_state[at.session_state['campaign_edit_key']+'panel']='Editor'
         at.run(timeout=20)

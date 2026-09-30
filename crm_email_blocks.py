@@ -71,7 +71,7 @@ def block_checks(blocks,market):
                 checks['All design placeholders replaced'] &= bool(p.get('title') and public_https(p.get('url')))
                 checks['Images use durable public JPEG/PNG URLs'] &= asset_url(p.get('image',''))
                 checks['Image alt text complete'] &= bool(p.get('alt','').strip())
-                checks['Market-specific product prices verified'] &= not p.get('price') or (p.get('market')==market and p.get('currency')=={'AU':'AUD','US':'USD','UK':'GBP'}.get(market))
+                checks['Market-specific product prices verified'] &= not p.get('price') or (p.get('market')==market and p.get('currency')=={'AU':'AUD','US':'USD','UK':'GBP','CA':'CAD','NZ':'NZD'}.get(market))
     return checks
 
 

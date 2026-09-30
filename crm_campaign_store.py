@@ -13,7 +13,7 @@ class CampaignStore(WorkspaceRecords):
         cfg['email_defaults']=self.default_sections(cfg)
         return cfg
 
-    def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False):
+    def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False, working=False):
         fields="d.id,d.name,d.version,d.status,d.archived_at,d.updated_at,d.last_tested_at,jsonb_build_object('market',d.document->'market','send_timing',d.document->'send_timing') AS document" if metadata else 'd.*'
         return self.q("""SELECT """+fields+""",c.status AS delivery_status,
           (SELECT s.error_code FROM crm_marketing_sends s WHERE s.campaign_id=d.id
@@ -21,7 +21,8 @@ class CampaignStore(WorkspaceRecords):
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
           WHERE (d.archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(d.name))>0
           AND (%s='All' OR d.status=%s) AND (%s='All' OR d.document->>'market'=%s)
-          ORDER BY d.updated_at DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,min(200,max(1,int(limit))),max(0,int(offset))))
+          AND (NOT %s OR c.status IS DISTINCT FROM 'SENT')
+          ORDER BY d.updated_at DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,working,min(200,max(1,int(limit))),max(0,int(offset))))
 
     def draft(self, identity):
         row=self.q('SELECT * FROM crm_campaign_drafts WHERE id=%s',(identity,),True)
@@ -75,6 +76,8 @@ class CampaignStore(WorkspaceRecords):
         with self.db() as conn:
             before=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
             if not before or before['version']!=version: raise ValueError('Campaign changed elsewhere. Reload before archiving.')
+            if conn.execute("SELECT 1 FROM crm_campaigns WHERE id=%s AND status<>'SENT'",(identity,)).fetchone():
+                raise ValueError('A scheduled or sending campaign cannot be archived.')
             row=conn.execute("UPDATE crm_campaign_drafts SET archived_at=now(),status='ARCHIVED',version=version+1,updated_at=now() WHERE id=%s RETURNING *",(identity,)).fetchone()
             self._history(conn,row,'campaign_archived',str(user.get('id','')),before)
 
@@ -109,6 +112,7 @@ class CampaignStore(WorkspaceRecords):
         from crm_resend_marketing import _send_admin_email, single_email, DeliveryError
         if not os_accounts.is_admin(user): raise PermissionError('Only an administrator can send a campaign test.')
         row=self.draft(identity)
+        if self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
         if confirmed is not True:raise DeliveryError('confirmation_required')
         operation=str(uuid.UUID(str(operation_id)))
@@ -127,7 +131,7 @@ class CampaignStore(WorkspaceRecords):
             return self._test_receipt(prior,identity,version,digest,recipient)
         from crm_test_recipient import test_recipient_url
         unsubscribe_url=test_recipient_url(self,recipient,shop=shop)
-        rendered=render_campaign(row['document'],cfg,unsubscribe_url=unsubscribe_url,production=True)
+        rendered=render_campaign(row['document'],cfg,unsubscribe_url=unsubscribe_url,production=True,test_tracking=True)
         # Production-authentic content, still a manual TEST transport and receipt.
         rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
         rendered['unsubscribe_url']=unsubscribe_url

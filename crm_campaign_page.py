@@ -22,6 +22,7 @@ from crm_campaign_recovery import autosaving, flush_current, activate, restore
 
 
 def open_editor(row):
+    st.session_state['campaign_show_drafts']=True
     st.session_state['campaign_list_generation']=st.session_state.get('campaign_list_generation',0)+1
     from crm_html_workspace import html_document
     st.session_state['campaign_editor']=deepcopy(row)
@@ -139,9 +140,29 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
 
 
 def recent_campaigns(drafts,key,user):
+    if st.session_state.pop('campaign_show_drafts',False):
+        st.session_state['campaign_tabs_generation']=st.session_state.get('campaign_tabs_generation',0)+1
+    generation=st.session_state.get('campaign_tabs_generation',0)
+    draft_tab,sent_tab=st.tabs(['Drafts','Sent'],key='campaign_lists_'+str(generation),on_change='rerun')
+    sent_open=bool(sent_tab.open)
+    previous=st.session_state.get('campaign_sent_view',sent_open)
+    st.session_state['campaign_sent_view']=sent_open
+    if previous!=sent_open:
+        # A full mode transition unregisters the outgoing view's timer fragments.
+        st.rerun()
+    with draft_tab:
+        if draft_tab.open:working_campaigns(drafts,key,user)
+    with sent_tab:
+        if sent_tab.open:
+            from crm_campaign_analytics_ui import sent_table
+            sent_table(drafts,user)
+    return sent_open
+
+
+def working_campaigns(drafts,key,user):
     from crm_campaign_markets import MARKET_LABELS
     with st.container(horizontal=True,vertical_alignment='center'):
-        st.markdown('#### Recent campaigns')
+        st.markdown('#### Drafts')
         if st.button('+ New campaign'):st.session_state['campaign_pending_open']='new'
     with st.expander('View all campaigns / archived'):
         archived=st.checkbox('Archived campaigns',key='recent_archived')
@@ -152,7 +173,7 @@ def recent_campaigns(drafts,key,user):
     offset=st.session_state.get('recent_offset',0)
     from email_loading import stage
     with stage('Campaigns','list_query'):
-        rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True)
+        rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True,working=True)
     if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
     for row in rows[:6]:
         identity=str(row['id'])
@@ -243,6 +264,8 @@ def continue_campaign_leave(drafts,navigate):
 @st.fragment
 def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
     from email_loading import stage, shell
+    from crm_html_workspace import composer_styles
+    composer_styles()
     drafts=CampaignStore(store.connect)
     editor=st.session_state.get('campaign_editor')
     if editor and dirty(editor) and (st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open')):
@@ -251,15 +274,30 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
         return
     # Keep the established layout, but stream the lightweight list before restoring
     # the selected composer and its settings. The editor occupies its own slot.
-    st.html('<style>.st-key-crm-selected-campaign:has(.sc-email-loading){min-height:780px}</style>')
+    st.html('''<style>
+      .st-key-crm-selected-campaign:has(.sc-email-loading){min-height:780px}
+      [data-testid="stMainBlockContainer"]:has(.st-key-crm-recent-campaigns){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
+      .st-key-crm-recent-campaigns [role="tab"]{color:#706f69 !important;min-height:36px}
+      .st-key-crm-recent-campaigns [role="tab"][aria-selected="true"]{color:#242424 !important;font-weight:600}
+      .st-key-crm-recent-campaigns [data-baseweb="tab-highlight"],.st-key-crm-recent-campaigns .react-aria-SelectionIndicator{background:var(--sc-gold,#c9a33f) !important;height:2px}
+      .st-key-crm-recent-campaigns [role="tab"]:focus-visible{outline:2px solid var(--sc-gold,#c9a33f);outline-offset:2px}
+    </style>''')
     editor_area=st.container(key='crm-selected-campaign')
     with editor_area:editor_loading=shell('Campaigns')
     if loading:loading.empty()
+    show_sent=False
     with st.container(key='crm-recent-campaigns'):
         with stage('Campaigns','list_render'):
-            try:recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
+            try:show_sent=recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
             except StoreUnavailable:st.caption('Campaign list temporarily unavailable.')
     with editor_area:
+        if show_sent:
+            # Sent is a compact read-only list. Keep the draft in session, without
+            # mounting its tall editor or loading audience/settings behind it.
+            editor_loading.empty()
+            if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
+                continue_campaign_leave(drafts,navigate)
+            return
         try:_selected_campaign(shop,store,actions,navigate,drafts,editor_loading)
         finally:editor_loading.empty()
 
@@ -283,12 +321,28 @@ def _selected_campaign(shop,store,actions,navigate,drafts,loading):
         try:
             explicit=st.query_params.get('campaign')
             recovered=restore(drafts,actions.user,explicit)
+            if not recovered and explicit:
+                try:identity=str(uuid.UUID(str(explicit)))
+                except ValueError:identity=None
+                if identity and drafts.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):
+                    recovered=drafts.draft(identity)
             if recovered:open_editor(recovered)
             else:new_compose(defaults['smart_hours'],cfg,cfg.get('email_defaults'))
         except StoreUnavailable as exc:
             st.error(str(exc));return
 
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
+    delivery=drafts.q('SELECT * FROM crm_campaigns WHERE id=%s',(editor['id'],),True) if available and editor.get('id') else None
+    if delivery:
+        # Frozen preview bypasses all authoring/autosave widgets and recovery writes.
+        from crm_campaign_analytics_ui import locked_campaign
+        loading.empty();composer_styles()
+        editor['recovery_readonly']=True
+        st.session_state['campaign_saved']=deepcopy(editor)
+        locked_campaign(drafts,actions.user,delivery)
+        if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
+            continue_campaign_leave(drafts,navigate)
+        return
     from crm_campaign_markets import audience
     doc['market_audience']=True
     selected_audience=audience(doc['market'])

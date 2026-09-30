@@ -122,7 +122,7 @@ class EmailDefaultsTests(unittest.TestCase):
             self.store.test_campaign(ADMIN,row['id'],row['version'],recipient='manual@example.test',confirmed=True,operation_id=str(uuid.uuid4()),env=env,session=wire)
         payload=wire.post.call_args.kwargs['json']
         self.assertIn('Latest test header',payload['html']);self.assertIn(TEST_UNSUBSCRIBE_URL,payload['html'])
-        self.assertEqual(payload['html'],render_campaign(row['document'],self.store.render_settings(env),production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
+        self.assertEqual(payload['html'],render_campaign(row['document'],self.store.render_settings(env),production=True,test_tracking=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
 
     def test_ui_has_only_global_edit_actions_and_preserves_body(self):
         from streamlit.testing.v1 import AppTest

@@ -43,11 +43,11 @@ class TokenAndTransportTests(unittest.TestCase):
         class Queue:
             def submit(self,fn,*args):self.job=lambda:fn(*args)
         queue=Queue();clock=[0];store=Mock();store.state.return_value={'version':'before'}
-        counts={m:{'eligible':1} for m in ['AU','US','UK','Global']};loader=Mock(return_value=counts)
+        counts={m:{'subscribed':1} for m in ['AU','US','UK','Global']};loader=Mock(return_value=counts)
         cache=SegmentCounts(clock=lambda:clock[0],executor=queue,loader=loader);shop=Mock()
         cache.display(shop,store);queue.job()
         cache.display(shop,store);self.assertEqual(loader.call_count,1)
-        clock[0]=11;store.state.return_value={'version':'after'};loader.return_value={m:{'eligible':0} for m in counts}
+        clock[0]=11;store.state.return_value={'version':'after'};loader.return_value={m:{'subscribed':0} for m in counts}
         cache.display(shop,store);queue.job()
         self.assertEqual(cache.display(shop,store)['counts']['Global'],0)
         self.assertEqual(loader.call_count,2)

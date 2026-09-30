@@ -184,3 +184,9 @@ COLUMNS = {'crm_automation_enrollments': ('automation_id',
                         'test_context'),
  'crm_workspace_settings': ('key', 'updated_at', 'updated_by', 'value', 'version')}
 INDEXES = ('crm_enrollment_due_idx', 'crm_enrollment_customer_idx', 'crm_enrollment_trigger_idx', 'crm_campaign_status_idx', 'crm_send_due_idx', 'crm_send_customer_idx', 'crm_event_provider_idx', 'crm_event_date_idx', 'crm_suppression_customer_idx', 'crm_webhook_pending_idx', 'crm_campaign_drafts_updated_idx', 'crm_campaign_history_campaign_idx', 'crm_internal_tests_campaign', 'crm_delivery_events_provider', 'crm_website_events_campaign', 'crm_website_events_received', 'crm_order_attribution_campaign')
+
+COLUMNS['crm_campaign_snapshots']=('id','campaign_id','campaign_version','document','render_settings','counts','recipients','schedule','created_at')
+COLUMNS['crm_campaigns']+=('audience_snapshot_id','campaign_key','campaign_send_id','sending_started_at','sent_at','locked_at','final_recipient_count')
+COLUMNS['crm_delivery_events']+=('clicked_url',)
+COLUMNS['crm_order_attribution']+=('campaign_send_id','order_name','customer_id','click_at','method','products','mirror_status','source_updated_at')
+INDEXES+=('crm_campaign_snapshots_campaign','crm_campaign_tracking_key','crm_campaign_send_identity','crm_campaign_sent','crm_delivery_events_send_type','crm_attribution_checked')

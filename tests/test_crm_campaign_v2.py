@@ -24,18 +24,21 @@ def profile(i,code='AU',state='NSW',consent='SUBSCRIBED',address=None):
       'emailMarketingConsent':{'marketingState':consent},'defaultAddress':address or {'countryCodeV2':code,'provinceCode':state}}
 
 def authority(rows):
-    from tests.crm_fixtures import native_customer
-    shop=Mock();shop.campaign_subscribers.return_value={'nodes':[native_customer(c) for c in rows],'pageInfo':{'hasNextPage':False}}
+    from tests.crm_fixtures import native_customer,segment_rows
+    shop=Mock(namespace='fixture');shop.segments.return_value={'nodes':[],'pageInfo':{}};shop.campaign_subscribers.return_value={'nodes':[native_customer(c) for c in rows],'pageInfo':{'hasNextPage':False}}
+    shop.campaign_member_ids.side_effect=lambda query:{c['id'] for c in segment_rows(shop.campaign_subscribers.return_value['nodes'],query)}
+    shop.customer.side_effect=lambda identity,**kwargs:next((c for c in shop.campaign_subscribers.return_value['nodes'] if c['id']==identity),None)
+    shop.customer_batch.side_effect=lambda ids,**kwargs:[c for c in shop.campaign_subscribers.return_value['nodes'] if c['id'] in ids]
     return shop
 
 class MarketAndTimezoneTests(unittest.TestCase):
     def test_countries_counts_exclusions_and_final_audience_share_logic(self):
         rows=[profile(1),profile(2,'US','NY'),profile(3,'GB',''),profile(4,'NZ',''),profile(5,consent='UNSUBSCRIBED'),profile(6),profile(7),profile(8)]
         rows[5]['email']=rows[0]['email'];rows[6]['validEmailAddress']=False
-        store=Mock();store.active_suppression_hashes.return_value=({recipient_hash(rows[7]['email'])},set());store.recent_marketing_hashes.return_value=set()
+        store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=({recipient_hash(rows[7]['email'])},set());store.recent_marketing_hashes.return_value=set()
         shop=authority(rows);result=calculate(shop,store)
-        self.assertEqual({m:r['eligible'] for m,r in result.items()},{'AU':1,'US':1,'UK':1,'Global':4})
-        self.assertEqual(sum(result['AU']['excluded'].values()),4)
+        self.assertEqual({m:r['eligible'] for m,r in result.items()},{'AU':1,'US':1,'UK':1,'Global':4,'CA':0,'NZ':1})
+        self.assertEqual(sum(result['AU']['excluded'].values()),3)
         doc=document();doc.update(market_audience=True,market='US',audience=audience('US'))
         self.assertEqual(final_audience(shop,store,doc)['recipients'],result['US']['recipients'])
         for value,expected in [('Australia','AU'),('USA','US'),('United Kingdom','GB'),('UK','GB')]:
@@ -43,7 +46,7 @@ class MarketAndTimezoneTests(unittest.TestCase):
     def test_conflicting_consent_outside_market_and_frequency(self):
         rows=[profile(1),profile(2,'US',consent='UNSUBSCRIBED'),profile(3)]
         rows[1]['email']=rows[0]['email']
-        store=Mock();store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value={recipient_hash(rows[2]['email'])}
+        store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value={recipient_hash(rows[2]['email'])}
         result=calculate(authority(rows),store)['AU']
         self.assertEqual(result['eligible'],0);self.assertEqual(result['excluded'],{'smart_sending':1,'conflicting_consent':1})
     def test_timezone_priority_states_and_fallback(self):
@@ -116,7 +119,10 @@ class PersistenceAndSchedulingTests(unittest.TestCase):
         saved=self.store.save(ADMIN,'Scheduled '+uuid.uuid4().hex,doc)
         shop=authority([profile(5001,'US','NY'),profile(5002,'US','CA')])
         with patch.object(self.store,'render_settings',return_value=CFG),patch.object(self.store,'active_suppression_hashes',return_value=(set(),set())),patch.object(self.store,'recent_marketing_hashes',return_value=set()):
-            result=queue_campaign(shop,self.store,ADMIN,saved,str(uuid.uuid4()),env={**LIVE,'CRM_MARKET_REVIEW_VERIFIED':'US'})
+            from crm_campaign_send import review
+            env={**LIVE,'CRM_MARKET_REVIEW_VERIFIED':'US'}
+            reviewed=review(shop,self.store,saved,env)
+            result=queue_campaign(shop,self.store,ADMIN,saved,str(uuid.uuid4()),env=env,snapshot_id=reviewed['snapshot_id'])
         return saved,result
     def test_schedule_durable_different_timezones_idempotent_and_delete_guard(self):
         saved,result=self.queued();rows=self.store.q('SELECT * FROM crm_marketing_sends WHERE campaign_id=%s ORDER BY due_at',(saved['id'],))
@@ -165,7 +171,7 @@ class SimplifiedUiTests(unittest.TestCase):
         at=self.app()
         with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':True,'error':False}),patch.object(CampaignStore,'html_library',side_effect=AssertionError('Library must be lazy')),patch('crm_settings_page.campaign_settings_panel',side_effect=AssertionError('Removed settings must not load')):
             at.run(timeout=20);self.assertFalse(at.exception)
-            self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates'])
+            self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates','Drafts','Sent'])
             calls=len(at.session_state['wire'].calls)
             next(t for t in at.text_input if t.label=='Subject').set_value('Typing').run(timeout=20)
             self.assertEqual(len(at.session_state['wire'].calls),calls)
@@ -174,7 +180,7 @@ class SimplifiedUiTests(unittest.TestCase):
     def test_market_and_timing_save_reload_and_no_hidden_copy_confirmation(self):
         at=self.app();at.run(timeout=20)
         market=next(s for s in at.selectbox if s.label=='Segment')
-        self.assertEqual([s.split(' · ')[0] for s in market.options],['AUSTRALIA','USA','UK','ALL SUBSCRIBERS'])
+        self.assertEqual([s.split(' · ')[0] for s in market.options],['AUSTRALIA','USA','UK','ALL SUBSCRIBERS','CANADA','NEW ZEALAND'])
         market.set_value('US').run(timeout=20)
         next(r for r in at.radio if r.label=='Send timing').set_value('Schedule').run(timeout=20)
         self.assertEqual(len(at.date_input),1);self.assertEqual(len(at.time_input),1)
@@ -189,6 +195,6 @@ class SimplifiedUiTests(unittest.TestCase):
         with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':False,'error':True}):
             at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,['AUSTRALIA · —','USA · —','UK · —','ALL SUBSCRIBERS · —'])
-            self.assertTrue(any('counts unavailable' in c.value for c in at.caption))
+            self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,['AUSTRALIA · —','USA · —','UK · —','ALL SUBSCRIBERS · —','CANADA · —','NEW ZEALAND · —'])
+            self.assertTrue(any('Audience refresh delayed' in c.value for c in at.caption))
             self.assertFalse(any('SECRET' in c.value for c in at.caption))

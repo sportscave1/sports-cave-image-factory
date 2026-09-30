@@ -77,7 +77,7 @@ class Engine:
                 late=overdue_reason(content,row,self.clock())
                 if late:
                     self.store.finish_send(row,'BLOCKED',late);return True
-                if content['document'].get('market_audience'):
+                if content['document'].get('market_audience') and not content.get('audience_snapshot_id'):
                     from crm_campaign_markets import country,COUNTRIES
                     market=content['document']['market']
                     if market!='Global' and country(c)!=COUNTRIES[market]:
@@ -86,7 +86,7 @@ class Engine:
                 from crm_campaign_content import render_campaign
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
-                if not all(production_checks(content['document'],content['render_settings']).values()):
+                if not all(production_checks(content['document'],content['render_settings'],reviewed_audience=bool(content.get('audience_snapshot_id'))).values()):
                     self.store.finish_send(row,'BLOCKED','production_readiness');return True
                 message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True)
                 message['unsubscribe_url']=unsubscribe
@@ -176,6 +176,10 @@ class Engine:
             for a in automations:
                 if a['trigger_type']=='welcome':self.store.enroll(a,c['id'],c['id'],c['id']+':'+changed.isoformat(),changed)
         elif topic.startswith('orders/'):
+            # The signed existing order event expedites the bounded attribution
+            # scan. Order/automation processing keeps its existing semantics.
+            scan=self.store.state('email_attribution_scan');scan.pop('next_at',None)
+            self.store.set_state('email_attribution_scan',scan)
             order=self.shop.order(event['object_id'],fresh=True)
             if order and not order.get('cancelledAt') and order.get('customer'):
                 customer_id=order['customer']['id']
@@ -224,7 +228,8 @@ class Engine:
                 for a in self.store.list('automations'):
                     if a['status']=='ACTIVE':
                         self.hold_lease();self.reconcile(a)
-                campaigns=self.store.q("SELECT * FROM crm_campaigns WHERE status='BUILDING' OR (status='SCHEDULED' AND scheduled_at<=now()) ORDER BY created_at LIMIT 1")
+                self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
+                campaigns=self.store.q("SELECT * FROM crm_campaigns WHERE audience_snapshot_id IS NULL AND (status='BUILDING' OR (status='SCHEDULED' AND scheduled_at<=now())) ORDER BY created_at LIMIT 1")
                 for campaign in campaigns:self.hold_lease();self.campaign_page(campaign)
                 due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() ORDER BY e.next_due_at LIMIT 20")
                 for e in due:
@@ -233,7 +238,20 @@ class Engine:
                     except Exception:self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes' WHERE id=%s",(e['id'],))
             for _ in range(5):
                 if not self.store.lease(owner) or not self.send_one():break
-            self.store.q("UPDATE crm_campaigns c SET status='SENT',updated_at=now() WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))")
+            self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
+              final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.first_submitted_at IS NOT NULL)
+              WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
+            # Read-side analytics continues with marketing OFF and cannot submit
+            # email. A Shopify outage must not interrupt delivery/consent handling.
+            try:
+                self.hold_lease()
+                from crm_campaign_attribution import reconcile as reconcile_attribution
+                reconcile_attribution(self.store,self.shop,self.clock)
+            except Exception as exc:
+                logging.getLogger(__name__).warning('crm_attribution_delayed type=%s',type(exc).__name__)
+                state=self.store.state('email_attribution_scan')
+                state.update(next_at=(self.clock()+timedelta(minutes=5)).isoformat(),error='source_unavailable')
+                self.store.set_state('email_attribution_scan',state)
             # Provider suppression writes are separate from send permissions; local stop-state already applies.
             from crm_consent_sync import reconcile_pending
             reconcile_pending(self.store,self.shop)

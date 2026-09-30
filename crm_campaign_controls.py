@@ -14,7 +14,12 @@ def market_control(shop,store,doc,key):
     selected=audience(doc['market'])
     if doc.get('audience')!=selected:doc['counts']={}
     doc['audience']=selected;doc['market_audience']=True
-    if state['error'] and not counts:st.caption('Subscriber counts unavailable. Editing and test sending remain available.')
+    st.caption('Shopify subscribed segment size. Eligible recipients and exclusions are checked before sending.')
+    if state['error']:st.caption('Audience refresh delayed. Last available counts are shown; sending still requires current eligibility.')
+    if st.button('Refresh audiences',key=key+'refresh_audiences'):
+        COUNTS.refresh(shop,store)
+        doc['counts']={}
+        st.rerun(scope='fragment')
     if doc['market']!=previous:
         doc['copy_reviewed']=False
         from crm_campaign_recovery import flush_current

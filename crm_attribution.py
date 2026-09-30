@@ -32,11 +32,11 @@ def refresh_page(store,shop,campaign,start,end,after=None):
         row,reason=association(order,campaign['document'].get('campaign_key',''))
         reasons[reason]=reasons.get(reason,0)+1
         if row:
-            store.q('INSERT INTO crm_order_attribution(shopify_order_id,campaign_id,campaign_key,order_created_at,visit_at,amount,currency,eligible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(shopify_order_id) DO UPDATE SET campaign_id=excluded.campaign_id,campaign_key=excluded.campaign_key,order_created_at=excluded.order_created_at,visit_at=excluded.visit_at,amount=excluded.amount,currency=excluded.currency,eligible=excluded.eligible,checked_at=now()',
+            store.q('INSERT INTO crm_order_attribution(shopify_order_id,campaign_id,campaign_key,order_created_at,visit_at,amount,currency,eligible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(shopify_order_id) DO UPDATE SET campaign_id=excluded.campaign_id,campaign_key=excluded.campaign_key,order_created_at=excluded.order_created_at,visit_at=excluded.visit_at,amount=excluded.amount,currency=excluded.currency,eligible=excluded.eligible,checked_at=now() WHERE crm_order_attribution.method IS NULL',
                     (row['order_id'],campaign['id'],row['campaign_key'],row['created_at'],row['visit_at'],row['amount'],row['currency'],row['eligible']))
         else:
             # An order losing its association cannot retain stale revenue.
-            store.q('UPDATE crm_order_attribution SET eligible=false,checked_at=now() WHERE shopify_order_id=%s AND campaign_id=%s',(order['id'],campaign['id']))
+            store.q('UPDATE crm_order_attribution SET eligible=false,checked_at=now() WHERE shopify_order_id=%s AND campaign_id=%s AND method IS NULL',(order['id'],campaign['id']))
     more=page['pageInfo'].get('hasNextPage');cursor=page['pageInfo'].get('endCursor')
     if more and (not cursor or cursor==after):raise ValueError('Order pagination did not advance.')
     return {'cursor':cursor if more else None,'complete':not more,'reasons':reasons,'scanned':len(page['nodes'])}

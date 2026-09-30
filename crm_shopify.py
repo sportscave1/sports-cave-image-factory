@@ -68,6 +68,7 @@ MEMBERS = '''query CrmMembers($id:ID,$query:String,$after:String) {
  customerSegmentMembers(segmentId:$id,query:$query,first:50,after:$after) {
  edges { node { id } } totalCount '''+PAGE+' } }'
 COUNT = 'query CrmCount($query:String) { customerSegmentMembers(query:$query,first:1) { totalCount } }'
+CAMPAIGN_MEMBER_IDS = MEMBERS.replace('CrmMembers','CrmCampaignMemberIds').replace('first:50','first:250')
 MEMBERSHIPS = 'query CrmMemberships($id:ID!,$segments:[ID!]!) { customerSegmentMembership(customerId:$id,segmentIds:$segments) { memberships { segmentId isMember } } }'
 TOTAL = 'query CrmTotal { customersCount { count precision } }'
 CHECKOUT_LINES_FIELDS = '''id title quantity variant { id product { id } } image { url }
@@ -202,8 +203,34 @@ class Shopify:
     def collections(self, product_id, after=None, fresh=False):
         data = self.query(COLLECTIONS, {'id':product_id, 'after':after}, 'products', 180, fresh).get('product')
         return data['collections'] if data else {'nodes':[], 'pageInfo':{}}
-    def segments(self, after=None):
-        return self.query(SEGMENTS, {'after':after}, 'segments', 90)['segments']
+    def segments(self, after=None, fresh=False):
+        return self.query(SEGMENTS, {'after':after}, 'segments', 90, fresh)['segments']
+    def campaign_segment_counts(self, definitions):
+        # One logical batch, no customer nodes, body enrichment or profile scan.
+        keys=list(definitions)
+        variables={f'q{i}':definitions[m]['query'] for i,m in enumerate(keys)}
+        declarations=','.join(f'$q{i}:String!' for i in range(len(keys)))
+        fields=' '.join(f'm{i}:customerSegmentMembers(query:$q{i},first:1) {{ totalCount }}' for i in range(len(keys)))
+        data=self.query('query CrmCampaignCounts('+declarations+') {'+fields+'}',variables,'campaign segment counts',0,True)
+        counts={m:data[f'm{i}']['totalCount'] for i,m in enumerate(keys)}
+        if any(type(n) is not int or n<0 for n in counts.values()):raise ValueError('Incomplete Shopify counts.')
+        return counts
+    def campaign_member_ids(self, query):
+        """Full native membership only for explicit audience review/send."""
+        cursor=None;seen=set();ids=set()
+        while True:
+            data=self.query(CAMPAIGN_MEMBER_IDS,{'id':None,'query':query,'after':cursor},'campaign membership',0,True)['customerSegmentMembers']
+            for edge in data['edges']:
+                identity=gid(edge['node']['id'].rsplit('/',1)[-1])
+                if not identity:raise ValueError('Invalid Shopify member identity.')
+                ids.add(identity)
+            if len(ids)>20000:raise ValueError('Audience calculation limit reached.')
+            if not data['pageInfo'].get('hasNextPage'):break
+            cursor=data['pageInfo'].get('endCursor')
+            if not cursor or cursor in seen:raise ValueError('Member pagination did not advance.')
+            seen.add(cursor)
+        if len(ids)!=data['totalCount']:raise ValueError('Shopify membership changed during calculation; review again.')
+        return ids
     def segment(self, segment_id, fresh=False):
         return self.query(SEGMENT, {'id':segment_id}, 'segments', 90, fresh).get('segment')
     def members(self, segment_id=None, query=None, after=None, fresh=False):
@@ -259,12 +286,12 @@ class Shopify:
         return self.query(CAMPAIGN_VARIANTS,{'id':product_id,'after':after},'product variants',60)['product']['variants']
 
     def campaign_price(self,variant_id,market):
-        country={'AU':'AU','US':'US','UK':'GB'}.get(market)
+        country={'AU':'AU','US':'US','UK':'GB','CA':'CA','NZ':'NZ'}.get(market)
         if not country:return None
         data=self.query(CAMPAIGN_PRICE,{'id':variant_id,'country':country},'market product price',60,True).get('productVariant')
         price=((data or {}).get('contextualPricing') or {}).get('price')
         # Missing market pricing may fall back to shop currency. Never show that fallback.
-        return price if price and price.get('currencyCode')=={'AU':'AUD','US':'USD','UK':'GBP'}[market] else None
+        return price if price and price.get('currencyCode')=={'AU':'AUD','US':'USD','UK':'GBP','CA':'CAD','NZ':'NZD'}[market] else None
 
     def campaign_orders(self,start,end,after=None):
         from crm_logic import date

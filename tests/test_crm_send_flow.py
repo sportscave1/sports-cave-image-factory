@@ -50,7 +50,7 @@ class SendFlowTests(unittest.TestCase):
         self.provider.post.assert_called_once();self.assertEqual(first['message_id'],second['message_id'])
         payload=self.provider.post.call_args.kwargs
         self.assertEqual(payload['timeout'],15);self.assertEqual(payload['json']['to'],['internal@example.test'])
-        self.assertEqual(payload['json']['html'],render_campaign(e['document'],CFG,production=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
+        self.assertEqual(payload['json']['html'],render_campaign(e['document'],CFG,production=True,test_tracking=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)['html'])
         self.assertEqual(self.count('crm_marketing_sends'),before)
     def test_invalid_multiple_and_nonadmin_test_never_calls_provider(self):
         for address,user in [('bad',ADMIN),('first@example.test,second@example.test',ADMIN),('internal@example.test',{**ADMIN,'role':'worker'})]:
@@ -114,7 +114,8 @@ class SendFlowTests(unittest.TestCase):
     def test_real_queue_once_and_existing_worker_delivers_snapshot_with_mock_provider(self):
         e=self.saved();operation=str(uuid.uuid4())
         with patch.dict(os.environ,LIVE):
-            result=queue_campaign(self.shop,self.store,ADMIN,e,operation,env=LIVE)
+            reviewed=review(self.shop,self.store,e,LIVE)
+            result=queue_campaign(self.shop,self.store,ADMIN,e,operation,env=LIVE,snapshot_id=reviewed['snapshot_id'])
             repeat=queue_campaign(self.shop,self.store,ADMIN,e,str(uuid.uuid4()),env=LIVE)
             self.assertTrue(repeat['already_started'])
             rows=self.store.q('SELECT * FROM crm_marketing_sends WHERE campaign_id=%s',(e['id'],))
@@ -137,7 +138,8 @@ class SendFlowTests(unittest.TestCase):
             self.assertNotIn('sc_test=1',message['text'])
     def test_native_queue_requires_no_custom_secret_and_missing_url_creates_no_jobs(self):
         env={k:v for k,v in LIVE.items() if k not in ('CRM_UNSUBSCRIBE_SECRET','CRM_PUBLIC_BASE_URL','CRM_ONE_CLICK_UNSUBSCRIBE_VERIFIED')}
-        result=queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env=env)
+        saved=self.saved();reviewed=review(self.shop,self.store,saved,env)
+        result=queue_campaign(self.shop,self.store,ADMIN,saved,str(uuid.uuid4()),env=env,snapshot_id=reviewed['snapshot_id'])
         self.assertGreater(result['recipients'],0)
         from tests.crm_fixtures import native_customer
         for i,c in enumerate(self.wire.customers):
@@ -145,7 +147,7 @@ class SendFlowTests(unittest.TestCase):
             self.wire.customers[i]=c
         before=self.count('crm_marketing_sends')
         with self.assertRaisesRegex(ValueError,'Missing Shopify marketing unsubscribe URL'):
-            queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env=env)
+            review(self.shop,self.store,self.saved(),env)
         self.assertEqual(self.count('crm_marketing_sends'),before)
         self.provider.post.assert_not_called()
 

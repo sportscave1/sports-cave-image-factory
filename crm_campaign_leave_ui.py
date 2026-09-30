@@ -44,7 +44,7 @@ def leave_dialog(user,continue_leave):
           try{sessionStorage.removeItem(SCOPE);}catch{}
         }
       },{capture:true,signal:abort.signal});
-      observer.observe(document.body,{childList:true,subtree:true});
+      observer.observe(document.documentElement,{childList:true,subtree:true});
     })();</script>'''.replace('SCOPE',scope),unsafe_allow_javascript=True)
     st.write('You have unsaved campaign changes.')
     discard,save=st.columns(2,gap='small')

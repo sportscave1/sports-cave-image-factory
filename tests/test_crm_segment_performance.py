@@ -23,7 +23,7 @@ class CacheTests(unittest.TestCase):
     def setUp(self):
         self.t=[0];self.queue=Queue();self.shop=Mock(namespace='account');self.store=Mock(connect=None)
         self.store.state.return_value={'version':'one'}
-        self.loader=Mock(return_value={m:{'eligible':i} for i,m in enumerate(MARKET_LABELS)})
+        self.loader=Mock(return_value={m:{'subscribed':i} for i,m in enumerate(MARKET_LABELS)})
         self.cache=SegmentCounts(clock=lambda:self.t[0],executor=self.queue,loader=self.loader)
     def view(self):return self.cache.display(self.shop,self.store)
     def test_initial_returns_placeholder_without_io_and_single_flight(self):
@@ -43,9 +43,9 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(state['counts']['Global'],3);self.assertTrue(state['error']);self.assertNotIn('SECRET',str(state))
         self.assertEqual(len(self.queue.jobs),0)
         self.t[0]+=FAILURE_BACKOFF+1;self.view();self.assertEqual(len(self.queue.jobs),1)
-    def test_account_and_hours_are_separate(self):
+    def test_accounts_are_separate_but_hours_share_counts(self):
         self.view();self.cache.display(Mock(namespace='another'),self.store);self.cache.display(self.shop,self.store,24)
-        self.assertEqual(len(self.queue.jobs),3)
+        self.assertEqual(len(self.queue.jobs),2)
     def test_suppression_changes_during_refresh_do_not_publish_stale_values(self):
         self.store.state.side_effect=[{'version':'one'},{'version':'two'}]
         self.view();self.queue.run();self.assertEqual(self.view()['counts'],{})
@@ -53,7 +53,7 @@ class CacheTests(unittest.TestCase):
         from crm_campaign_send import final_audience
         doc=document();doc['market_audience']=True
         source=authority([profile(1)])
-        store=Mock();store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value=set()
+        store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value=set()
         with patch('crm_segment_counts.COUNTS.display',side_effect=AssertionError('Send cannot use display cache')):
             self.assertEqual(final_audience(source,store,doc)['eligible'],1)
             source.campaign_subscribers.return_value['nodes'][0]['emailMarketingConsent']['marketingState']='UNSUBSCRIBED'
@@ -69,12 +69,12 @@ class EligibilityTests(unittest.TestCase):
     def test_once_per_profile_and_worldwide_includes_other_country(self):
         rows=[profile(1),profile(2,'US'),profile(3,'GB'),profile(4,'NZ'),profile(5,'CA'),profile(6,consent='UNSUBSCRIBED'),profile(7),profile(8)]
         rows[7]['email']=rows[0]['email']
-        store=Mock();store.active_suppression_hashes.return_value=({recipient_hash(rows[6]['email'])},set());store.recent_marketing_hashes.return_value=set()
+        store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=({recipient_hash(rows[6]['email'])},set());store.recent_marketing_hashes.return_value=set()
         from crm_logic import eligibility
         with patch('crm_campaign_markets.country',wraps=country) as normalize,patch('crm_campaign_markets.eligibility',wraps=eligibility) as evaluate:
             result=calculate(authority(rows),store)
-        self.assertEqual(normalize.call_count,len(rows));self.assertEqual(evaluate.call_count,len(rows))
-        self.assertEqual({k:v['eligible'] for k,v in result.items()},{'AU':1,'US':1,'UK':1,'Global':5})
+        self.assertEqual(normalize.call_count,0);self.assertEqual(evaluate.call_count,len(rows))
+        self.assertEqual({k:v['eligible'] for k,v in result.items()},{'AU':1,'US':1,'UK':1,'Global':5,'CA':1,'NZ':1})
     def test_matches_previous_policy_for_cross_country_duplicates_conflicts_and_suppression(self):
         import random
         rng=random.Random(42)
@@ -83,12 +83,12 @@ class EligibilityTests(unittest.TestCase):
             c['email']=f'p{i//3}@example.test'
             if i%17==0:c['validEmailAddress']=False
         suppressed={recipient_hash(rows[12]['email'])};ids={rows[50]['id']};recent={recipient_hash(rows[36]['email'])}
-        store=Mock();store.active_suppression_hashes.return_value=(suppressed,ids);store.recent_marketing_hashes.return_value=recent
+        store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=(suppressed,ids);store.recent_marketing_hashes.return_value=recent
         actual=calculate(authority(rows),store);states={}
         for c in rows:states.setdefault(recipient_hash(c['email']),set()).add(c['emailMarketingConsent']['marketingState'])
         conflicts={h for h,s in states.items() if len(s)>1}
         for market in MARKET_LABELS:
-            subset=[c for c in rows if market=='Global' or country(c)==COUNTRIES[market]]
+            subset=[c for c in rows if c['emailMarketingConsent']['marketingState']=='SUBSCRIBED' and (market=='Global' or country(c)==COUNTRIES[market])]
             safe=[c for c in subset if recipient_hash(c['email']) not in conflicts]
             previous=evaluate_profiles(safe,set(),set(),suppressed,ids,recent,recipients=True)
             if len(subset)>len(safe):previous['excluded']['conflicting_consent']=len(subset)-len(safe)
@@ -102,14 +102,14 @@ class ComposerTests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         from tests.test_crm_ui import SCRIPT
         entered=threading.Event();release=threading.Event()
-        def slow(*args):entered.set();release.wait(20);return {m:{'eligible':4} for m in MARKET_LABELS}
+        def slow(*args):entered.set();release.wait(20);return {m:{'subscribed':4} for m in MARKET_LABELS}
         executor=ThreadPoolExecutor(max_workers=1);cache=SegmentCounts(executor=executor,loader=Mock(side_effect=slow))
         try:
             with patch('crm_segment_counts.COUNTS',cache):
                 at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"));at.session_state['route']='CRM Campaigns';at.run(timeout=10)
                 self.assertFalse(at.exception);self.assertTrue(entered.wait(2));self.assertFalse(release.is_set())
                 self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,
-                    ['AUSTRALIA · …','USA · …','UK · …','ALL SUBSCRIBERS · …'])
+                    ['AUSTRALIA · …','USA · …','UK · …','ALL SUBSCRIBERS · …','CANADA · …','NEW ZEALAND · …'])
                 self.assertTrue({'Save draft','Send now'}.issubset({b.label for b in at.button}))
                 for label in ['Subject','Preview text','Campaign name']:
                     next(t for t in at.text_input if t.label==label).set_value('Edited '+label).run(timeout=10)

@@ -169,7 +169,7 @@ class Catalogue:
         ids = list(dict.fromkeys(ids))
         if not ids: return []
         if len(ids)>50 or any(product_id(i)!=i for i in ids): raise ValueError('Invalid catalogue selection.')
-        country = {'AU':'AU','US':'US','UK':'GB','Global':'AU'}[market]
+        country = {'AU':'AU','US':'US','UK':'GB','Global':'AU','CA':'CA','NZ':'NZ'}[market]
         nodes = self.shop.query(FACTS_QUERY, {'ids':ids,'country':country}, 'catalogue products', 60, fresh)['nodes']
         products = []
         for n in nodes:

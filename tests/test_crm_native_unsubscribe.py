@@ -67,18 +67,19 @@ class NativeUnsubscribeTests(unittest.TestCase):
             bad=deepcopy(c);bad[field]['marketingState']='UNSUBSCRIBED'
             self.assertEqual(eligibility(bad),(False,'consent_unsubscribed'))
 
-    def test_all_markets_see_native_optout_without_extra_requests(self):
+    def test_all_markets_see_native_optout_with_one_profile_pass(self):
         wire=ShopifyFixture(4)
         for i,code in enumerate(('AU','US','GB','NZ'),1):
             c=self.customer(i);c['defaultAddress']={'countryCodeV2':code}
             wire.customers[i-1]=c
-        shop=Shopify(wire);store=Mock();store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value=set()
+        shop=Shopify(wire);store=Mock();store.state.return_value={};store.active_suppression_hashes.return_value=(set(),set());store.recent_marketing_hashes.return_value=set()
         before=calculate(shop,store)
         self.assertEqual(before['Global']['eligible'],4)
-        self.assertEqual(len(wire.calls),1)
+        from crm_shopify import CAMPAIGN_SUBSCRIBERS
+        self.assertEqual(sum(doc==CAMPAIGN_SUBSCRIBERS for doc,_ in wire.calls),1)
         for c in wire.customers:c['defaultEmailAddress']['marketingState']='UNSUBSCRIBED'
         after=calculate(shop,store)
-        self.assertEqual(len(wire.calls),2)
+        self.assertEqual(sum(doc==CAMPAIGN_SUBSCRIBERS for doc,_ in wire.calls),2)
         for market in ('AU','US','UK','Global'):self.assertEqual(after[market]['eligible'],0)
 
     def worker(self,customer):

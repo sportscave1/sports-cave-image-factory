@@ -37,7 +37,7 @@ def test_control(store,user,editor,key,available=True):
           const seen=new WeakSet();
           const focus=()=>{const input=document.querySelector('[role="dialog"] input[aria-label="Send test email"]');
             if(input&&input.getClientRects().length&&!seen.has(input)){seen.add(input);requestAnimationFrame(()=>input.focus({preventScroll:true}));}};
-          const observer=new MutationObserver(focus);observer.observe(document.body,{childList:true,subtree:true});
+          const observer=new MutationObserver(focus);observer.observe(document.documentElement,{childList:true,subtree:true});
           window.scCampaignTestFocus=observer;focus();
         })();</script>""",unsafe_allow_javascript=True)
         with st.form(key+'single_test',clear_on_submit=False,border=False):
@@ -62,7 +62,7 @@ def test_control(store,user,editor,key,available=True):
             finally:st.session_state[key+'test_busy']=False
 
 
-@st.dialog('Review campaign',width='small')
+@st.dialog('Review campaign',width='large')
 def review_dialog(shop,store,user,editor,key):
     delivery=get_resend_marketing_config_status()
     token=key+'send_review'
@@ -75,8 +75,16 @@ def review_dialog(shop,store,user,editor,key):
             if st.button('Cancel'):st.rerun()
             return
     result=st.session_state[token];doc=result['document'];counts=result['counts']
-    st.write('**Campaign**  '+editor['name'])
-    st.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
+    summary,preview=st.columns(2)
+    summary.write('**Campaign**  '+editor['name'])
+    summary.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
+    summary.caption('Preheader: '+doc['content']['preheader'])
+    summary.caption('From: '+(delivery['sender'] or 'Not configured'))
+    summary.caption('Reply-to: '+(delivery['reply_to'] or 'Not configured'))
+    summary.caption('Tracking: Sports Cave OS Email · '+doc.get('campaign_key',''))
+    with preview:
+        from crm_preview_cache import preview as render_preview
+        st.iframe(render_preview(st.session_state,doc,result.get('render_settings'))['html'],height=240)
     from crm_campaign_markets import MARKET_LABELS
     st.caption('Segment: '+MARKET_LABELS[doc['market']]+' · Audience: '+doc['audience']['name'])
     st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
@@ -100,6 +108,8 @@ def review_dialog(shop,store,user,editor,key):
         operation=st.session_state.setdefault(key+'production_operation',str(uuid.uuid4()))
         try:
             with st.spinner('Preparing delivery…'):
-                sent=queue_campaign(shop,store,user,editor,operation)
+                sent=queue_campaign(shop,store,user,editor,operation,snapshot_id=result.get('snapshot_id'))
             st.success('Campaign already queued.' if sent['already_started'] else 'Campaign queued for '+str(sent['recipients'])+' recipients.')
+            if sent.get('skipped_after_review'):st.caption(str(sent['skipped_after_review'])+' recipients became ineligible after review and were skipped.')
+            st.rerun()
         except Exception as exc:st.error(safe_error(exc))

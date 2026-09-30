@@ -13,7 +13,7 @@ from crm_tracking import public_https, asset_url
 RENDER_VERSION = 1
 TYPES = PURPOSES + ('Product Launch','New Collector Edition','Best Sellers','Sport / Collection Spotlight',
          'Offer / Promotion','Newsletter','Seasonal','Custom')
-MARKETS = ('AU','US','Global','UK')
+MARKETS = ('AU','US','Global','UK','CA','NZ')
 OBJECTIVES = ('Launch','Purchase','Engagement','Cross-sell','Collector urgency','Announcement')
 FIELDS = ('subject','preheader','hero_url','hero_alt','eyebrow','headline','intro','body','product_block',
           'cta_label','cta_url','secondary','ps')
@@ -23,6 +23,8 @@ POLICIES = {
     'US': 'Explicit Shopify subscription; accurate sender and subject, postal business address and easy free opt-out.',
     'Global': 'Strict common baseline: explicit subscription, contact identity, postal address and immediate suppression.',
     'UK': 'Placeholder only: strict common baseline applies; UK/EU legal review is not implemented.',
+    'CA': 'Strict common baseline: explicit subscription, contact identity, postal address and immediate suppression.',
+    'NZ': 'Strict common baseline: explicit subscription, contact identity, postal address and immediate suppression.',
 }
 
 
@@ -127,7 +129,7 @@ def fingerprint(doc, cfg):
     return hashlib.sha256(json.dumps({'document':doc,'footer':cfg},sort_keys=True).encode()).hexdigest()
 
 
-def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False):
+def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False, test_tracking=False):
     cfg=settings() if cfg is None else cfg
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
@@ -187,10 +189,9 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
         def live_url(url):
             if url==unsubscribe_url:return url  # Never rewrite provider-signed opt-out URLs.
             p=urlsplit(url);pairs=parse_qsl(p.query,keep_blank_values=True)
-            if ('utm_source','sports_cave') in pairs and ('utm_campaign',doc.get('campaign_key','')) in pairs:
-                pairs=[(k,v) for k,v in pairs if k!='sc_test']
-                return urlunsplit((p.scheme,p.netloc,p.path,urlencode(pairs),p.fragment))
-            return url
+            from crm_tracking import campaign_link
+            block_key=dict(pairs).get('utm_content') or 'link_'+hashlib.sha256(url.encode()).hexdigest()[:12]
+            return campaign_link(url,doc.get('campaign_key',''),block_key,test=test_tracking)
         html=re.sub(r'href="([^"]*)"',lambda m:'href="'+e(live_url(unescape(m[1])))+'"',html)
         text=re.sub(r'https://[^\s<>]+',lambda m:live_url(m[0]),text)
         html=html.replace('CAMPAIGN TEST / PREVIEW · LIVE MARKETING DISABLED','')
