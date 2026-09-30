@@ -356,7 +356,7 @@ class TopBarComponentTests(unittest.TestCase):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
 
         self.assertEqual(1, source.count('id="sc-os-refresh"'))
-        self.assertIn('aria-label="Refresh Sports Cave OS"', source)
+        self.assertIn('aria-label="Refresh"', source)
         self.assertIn('refreshButton.addEventListener("click"', source)
         self.assertIn("parentWindow.location.reload();", source)
 
