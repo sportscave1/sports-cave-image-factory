@@ -5,7 +5,7 @@ import os
 import uuid
 import unittest
 from unittest.mock import Mock,patch
-from crm_campaign_send import send_test,review,queue_campaign,production_checks,ATTESTATIONS,OFF
+from crm_campaign_send import send_test,review,queue_campaign,production_checks,OFF
 from crm_resend import Config,MarketingDisabled
 from crm_resend_marketing import DeliveryError
 from crm_campaign_content import settings,render_campaign
@@ -20,7 +20,7 @@ from tests.test_crm import ADMIN
 
 LIVE={**ENV,'CRM_MARKETING_ENABLED':'true','CRM_MARKETING_SEND_ENABLED':'true',
       'CRM_UNSUBSCRIBE_SECRET':'x'*40,'CRM_PUBLIC_BASE_URL':'https://example.test',
-      **{v:'true' for v in ATTESTATIONS.values()},'CRM_MARKET_REVIEW_VERIFIED':'AU'}
+      'CRM_MARKET_REVIEW_VERIFIED':'AU'}
 CFG={**settings(ENV),'postal':'Configured fixture address','postal_verified':True,'domain_verified':True,'identity_confirmed':True}
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
@@ -154,6 +154,54 @@ class SendFlowTests(unittest.TestCase):
     def test_master_flag_alone_does_not_bypass_readiness(self):
         with self.assertRaises((ValueError,MarketingDisabled)):
             queue_campaign(self.shop,self.store,ADMIN,self.saved(),str(uuid.uuid4()),env={**ENV,'CRM_MARKETING_ENABLED':'true'})
+
+    def campaign_user(self):
+        return {**ADMIN,'id':'campaign-user-'+uuid.uuid4().hex,'role':'worker','page_permissions':['crm_campaigns_manage']}
+
+    def test_campaign_user_test_without_manual_verification_or_marketing(self):
+        user=self.campaign_user();editor=self.editor();before=self.count('crm_marketing_sends')
+        with patch.object(self.store,'render_settings',return_value={**CFG,'postal_verified':False,'domain_verified':False,'identity_confirmed':False}):
+            result=send_test(self.store,user,editor,'internal@example.test',str(uuid.uuid4()),env={**ENV,'CRM_MARKETING_ENABLED':'false'},session=self.provider)
+        self.assertTrue(result['message_id']);self.provider.post.assert_called_once()
+        self.assertEqual(self.count('crm_marketing_sends'),before)
+        self.assertNotEqual(self.store.draft(editor['id'])['status'],'SENT')
+
+    def test_campaign_user_can_queue_and_schedule_without_attestations(self):
+        user=self.campaign_user()
+        env={k:v for k,v in LIVE.items() if not k.endswith('_VERIFIED')}
+        cfg={**CFG,'postal_verified':False,'domain_verified':False,'identity_confirmed':False}
+        for timing,status in [({'mode':'now'},'SENDING'),({'mode':'schedule','date':'2099-10-05','time':'07:00'},'SCHEDULED')]:
+            with self.subTest(status=status),patch.object(self.store,'render_settings',return_value=cfg):
+                editor=self.editor();editor['document']['send_timing']=timing
+                editor=self.store.save(user,editor['name'],editor['document'],env=env)
+                checked=review(self.shop,self.store,editor,env)
+                self.assertEqual(checked['blockers'],[]);self.assertTrue(checked['snapshot_id'])
+                result=queue_campaign(self.shop,self.store,user,editor,str(uuid.uuid4()),env=env,snapshot_id=checked['snapshot_id'])
+                self.assertEqual(result['status'],status)
+                again=queue_campaign(self.shop,self.store,user,editor,str(uuid.uuid4()),env=env,snapshot_id=checked['snapshot_id'])
+                self.assertTrue(again['already_started'])
+
+    def test_no_campaign_permission_or_inactive_user_blocked_at_both_boundaries(self):
+        for user in ({},{**self.campaign_user(),'is_active':False},{**self.campaign_user(),'page_permissions':[]}):
+            with self.subTest(user=user),self.assertRaises(PermissionError):
+                send_test(self.store,user,self.editor(),'internal@example.test',str(uuid.uuid4()),env=ENV,session=self.provider)
+            with self.assertRaises(PermissionError):
+                queue_campaign(self.shop,self.store,user,self.editor(),str(uuid.uuid4()),env=LIVE)
+        self.provider.post.assert_not_called()
+
+    def test_campaign_user_still_requires_master_switch_and_snapshot(self):
+        user=self.campaign_user();editor=self.saved()
+        with self.assertRaises(MarketingDisabled):
+            queue_campaign(self.shop,self.store,user,editor,str(uuid.uuid4()),env={**LIVE,'CRM_MARKETING_ENABLED':'false'})
+        with self.assertRaises(ValueError):
+            queue_campaign(self.shop,self.store,user,editor,str(uuid.uuid4()),env=LIVE)
+
+    def test_manual_flags_do_not_replace_real_configuration(self):
+        editor=self.saved();checked=review(self.shop,self.store,editor,LIVE)
+        checks=production_checks(checked['document'],{**CFG,'postal':''},LIVE)
+        self.assertFalse(checks['Business postal address configured'])
+        checks=production_checks(checked['document'],CFG,{**LIVE,'RESEND_MARKETING_API_KEY':''})
+        self.assertFalse(checks['Resend marketing API configured'])
     def test_changed_draft_and_empty_audience_never_queue(self):
         e=self.saved();e['document']['content']['subject']='Unsaved'
         with self.assertRaises(ValueError):queue_campaign(self.shop,self.store,ADMIN,e,str(uuid.uuid4()),env=LIVE)
@@ -170,13 +218,14 @@ class SendFlowUiTests(unittest.TestCase):
     def app(self):
         from streamlit.testing.v1 import AppTest
         from tests.test_crm_ui import SCRIPT
-        at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"))
+        at=AppTest.from_string(SCRIPT)  # Campaign-authorized worker, not admin.
         at.session_state['route']='CRM Campaigns';return at
     def test_single_popover_no_test_accordion_and_lazy_settings(self):
         at=self.app()
         with patch('crm_settings_page.campaign_settings_panel') as panel:
             at.run(timeout=20);self.assertFalse(at.exception)
             self.assertEqual(sum(p.proto.popover.label=='Send test' for p in at.get('popover')),1)
+            self.assertFalse(next(p for p in at.get('popover') if p.proto.popover.label=='Send test').proto.popover.disabled)
             self.assertFalse(any(b.label in ('Settings','Send internal test','Send Test Email') for b in at.button))
             self.assertNotIn('Test',[e.label for e in at.expander])
             panel.assert_not_called()
@@ -210,7 +259,10 @@ class SendFlowUiTests(unittest.TestCase):
             at.run(timeout=20)
             next(b for b in at.button if b.label=='Send now').click().run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertTrue(any('recipients' in m.value and 'excluded' in m.value for m in at.markdown))
+            self.assertTrue(any('Finalizing audience' in m.value or ('recipients' in m.value and 'excluded' in m.value) for m in at.markdown))
             self.assertTrue(any(OFF in s.value for s in at.info))
             self.assertEqual(sum((b.key or '').endswith('confirm_send') for b in at.button),1)
+            self.assertTrue(next(b for b in at.button if (b.key or '').endswith('confirm_send')).disabled)
+            job=next(v for k,v in at.session_state.filtered_state.items() if k.endswith('review_job'))
+            job.future.result(timeout=20)
         self.assertEqual(store.q('SELECT count(*) n FROM crm_marketing_sends',one=True)['n'],before)
