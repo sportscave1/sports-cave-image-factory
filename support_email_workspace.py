@@ -74,7 +74,7 @@ class Workspace:
         except Exception as error:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
-    def load(self, *, force=False, previews=True):
+    def load(self, *, force=False, previews=True, defer_body=False):
         if not force and (self.state.get("recovery_state") == "stopped" or
                           time.monotonic() < self.state.get("load_retry_at", 0)):
             if self.state.get("snapshot_view") != (self.state.get("folder"), self.state["query"], self.state["field"]):
@@ -85,7 +85,7 @@ class Workspace:
             self.state.update(recovery_attempts=0, recovery_state="", load_failures=0, load_retry_at=0)
         refresh = getattr(self.imap, "interactive_refresh", None)
         with refresh() if force and refresh else nullcontext():
-            self._load(force=force, previews=previews, recovering=recovering)
+            self._load(force=force, previews=previews, recovering=recovering, defer_body=defer_body)
 
     def _unavailable(self, message, *, code="temporary", retry_after=0):
         s = self.state
@@ -131,7 +131,7 @@ class Workspace:
             LOGGER.warning("email_workspace_reconnect_failed code=%s stopped=%s",
                            s.get("connection_code"), s["recovery_state"] == "stopped")
 
-    def _load(self, *, force=False, previews=True, recovering=False):
+    def _load(self, *, force=False, previews=True, recovering=False, defer_body=False):
         if not self.config.configured:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
@@ -174,8 +174,10 @@ class Workspace:
         if self.state.get("folder") not in names:
             self.state["folder"] = self.roles.get("inbox", names[0])
         key = ("headers", self.state["folder"], self.state["limit"], self.state["query"], self.state["field"])
+        list_started = time.monotonic()
         entry = cached_read(self.cache, key, lambda: self.imap.list_headers(self.state["limit"], self.state["folder"],
                             query=self.state["query"], field=self.state["field"], previews=previews))
+        LOGGER.info("Email list ready duration_ms=%.1f", (time.monotonic()-list_started)*1000)
         if entry["error"]:
             self.cache.pop(key, None)  # Retry timing belongs to backoff, never a failed data cache.
             self._unavailable(entry["error"], code=entry.get("error_code", "temporary"), retry_after=entry.get("retry_after", 0))
@@ -217,7 +219,10 @@ class Workspace:
                             if reference_key(m) == self.state.get("active_message")), None)
             try:
                 if message and reference_key(message) in self.state["expanded"]:
-                    self._body(message)
+                    if defer_body:
+                        self.state["body_pending"] = reference_key(message)
+                    else:
+                        self._body(message)
             except MailboxError as error:
                 connection_failure = error.retryable or error.code in TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}
                 if not connection_failure:
@@ -255,7 +260,9 @@ class Workspace:
         if existing is not None:
             return existing["body"]
         try:
+            started = time.monotonic()
             body = self.imap.read_message(message)
+            LOGGER.info("Email selected body fetched duration_ms=%.1f", (time.monotonic()-started)*1000)
         except Exception as error:
             LOGGER.info("Email body read unavailable (%s)", type(error).__name__)
             if isinstance(error, MailboxError) and (error.retryable or error.code in
@@ -265,11 +272,20 @@ class Workspace:
             raise MailboxError("Could not open this message. Refresh and try again.")
         text, quote = split_quote(body["text"])
         content = {"body": body, "html": readable_html(text), "quote": readable_html(quote)}
+        if body.get("html"):
+            from support_email_render import sanitize_received_html, reader_document
+            try:
+                render_started = time.monotonic()
+                content["reader_document"] = reader_document(sanitize_received_html(body["html"],body.get("inline_images")))
+                LOGGER.info("Email HTML sanitized duration_ms=%.1f", (time.monotonic()-render_started)*1000)
+            except (ValueError, TypeError, RecursionError):
+                LOGGER.info("Email HTML fallback used")
         if not self.bodies.put(key, content):
             raise MailboxError("This message exceeds the display cache limit. Open it in your mail client.")
         return body
 
     def _select_thread(self, thread):
+        self.state.pop("body_pending", None)
         self.state.update(selected=thread["thread_key"], expanded=set(), view="mail", context={})
         resolved = self.resolved_threads.get((self.state["mailbox_version"], thread["thread_key"]))
         messages = resolved if resolved is not None else thread["messages"]
@@ -537,7 +553,11 @@ class Workspace:
             action = event.get("action")
             if action not in {"request_delete_forever", "confirm_delete_forever", "cancel_delete_forever", "live_check", "resolve_thread"}:
                 self.state.pop("delete_confirmation", None)
-            if action == "reconnect":
+            if action == "load_visible_body":
+                key = self.state.pop("body_pending", None)
+                if key and key == self.state.get("active_message") and key == event.get("message_key"):
+                    self._body(self._header(key))  # Initial paint does not mark the message read.
+            elif action == "reconnect":
                 self.reconnect()
             elif action == "retry_connection":
                 self.load(force=True)
@@ -1028,7 +1048,7 @@ class Workspace:
                     "own": m["sender"]["email"].casefold() == self.config.address.casefold(), "unread": m["unread"],
                     "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
                 if body:
-                    row.update(html=content["html"], quote=content["quote"], warnings=body.get("warnings", []),
+                    row.update(html=content["html"], reader_document=content.get("reader_document", ""), quote=content["quote"], warnings=body.get("warnings", []),
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
                 if body and key == s.get("active_message") and s.get("view") == "compose" and (s.get("draft") or {}).get("mode") == "reply":
                     from support_email_reply_prompts import build_reply_prompts
@@ -1059,7 +1079,7 @@ class Workspace:
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
-            "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
+            "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),

@@ -179,10 +179,12 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(any("BODY.PEEK[2]" in str(c) for c in server.calls))
         self.assertFalse(any("BODY.PEEK[1]" in str(c) for c in server.calls))
 
-    def test_alternative_prefers_plain_and_mixed_keeps_distinct_html(self):
+    def test_alternative_prefers_html_and_mixed_uses_one_body(self):
         adapter, server, _ = self.adapter(structure=ALTERNATIVE)
-        self.assertEqual(adapter.read_message(header())["text"], "Hello José")
-        self.assertFalse(any("PEEK[2]" in str(c) for c in server.calls))
+        import base64
+        server.parts["2"] = base64.b64encode(b'<p><b>Hello</b></p>')
+        self.assertEqual(adapter.read_message(header())["html"], '<p><b>Hello</b></p>')
+        self.assertFalse(any("PEEK[1]" in str(c) for c in server.calls))
         adapter, server, _ = self.adapter(structure=b'(' + PLAIN + HTML + b' "MIXED" NIL NIL)')
         import base64
         server.parts["2"] = base64.b64encode(b"<p>Additional text</p><img src='https://tracker.invalid/pixel'>")
@@ -455,15 +457,16 @@ class PageTests(unittest.TestCase):
     def app(self, user=USER):
         return AppTest.from_string(f"import support_email_page\nsupport_email_page.render_page({user!r})").run()
 
-    def test_desktop_page_initial_load_opens_first_inbox_body(self):
+    def test_desktop_page_initial_load_defers_first_body_until_shell_visible(self):
         app = self.app()
         self.assertFalse(app.exception)
         self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
-        self.fake.read_message.assert_called_once()
+        self.fake.read_message.assert_not_called()
         model = self.component.call_args.kwargs["model"]
         self.assertEqual(len(model["threads"]), 50)
         self.assertEqual(model["selected"], model["threads"][0]["key"])
-        self.assertTrue(model["messages"][0]["expanded"])
+        self.assertFalse(model["messages"][0]["expanded"])
+        self.assertEqual(model["body_pending"],model["active_message"])
         self.assertNotIn(CONFIG.password, str(model))
 
     def test_not_configured_and_not_authorized_do_not_connect(self):

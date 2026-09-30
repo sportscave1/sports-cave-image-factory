@@ -1,6 +1,7 @@
 """Lazy desktop mail workspace using the OS's existing custom-component pattern."""
 import html
 import logging
+import time
 from pathlib import Path
 from threading import Lock
 
@@ -75,6 +76,7 @@ def rerun_email():
 
 @st.fragment
 def _render_workspace(user):
+    started = time.monotonic()
     config, smtp = load_configuration(), load_smtp_configuration()
     scope = (config.scope, str(user.get("id")))
     if st.session_state.get("support_email_scope") != scope:
@@ -87,7 +89,7 @@ def _render_workspace(user):
         if ((not state.get("loaded") and not state.get("recovery_state"))
                 or state.get("navigation_epoch") != epoch):
             with st.spinner("Refreshing inbox…" if state.get("loaded") else "Loading inbox…"):
-                workspace.load(force=bool(state.get("loaded")))
+                workspace.load(force=bool(state.get("loaded")), defer_body=not state.get("loaded"))
             state["navigation_epoch"] = epoch
         target = {key: str(st.query_params.get("email_" + key, ""))[:998]
                   for key in ("uid", "uidvalidity", "message_id")}
@@ -96,6 +98,7 @@ def _render_workspace(user):
             state["notification_target"] = identity
             with st.spinner("Loading message…"):
                 workspace.open_notification(target)
+        LOGGER.info("Email shell/list ready duration_ms=%.1f", (time.monotonic()-started)*1000)
         event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
         if event and workspace.handle(event):
             rerun_email()

@@ -58,6 +58,9 @@
     if(!recovery.state)return '';
     return `<span role="status">${esc(recovery.message)}</span>${recovery.state==='stopped'?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':''}`;
   }
+  function receivedBody(message) {
+    return message.reader_document ? `<iframe class="email-document" title="Email content" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(message.reader_document)}"></iframe>` : `<div class="message-body">${message.html||''}</div>`;
+  }
   function replyPromptControls(mode) {
     if(mode!=='reply')return '';
     return `<div class="reply-tools"><button type="button" data-action="reply_prompts" aria-haspopup="menu" aria-expanded="false" aria-controls="reply-prompts-popup">Prompts ▾</button><button type="button" class="reply-prompt-help" data-action="reply_prompt_help" aria-label="How prompts work" aria-expanded="false" aria-controls="reply-prompts-popup">?</button><div id="reply-prompts-popup" class="reply-prompt-popup" hidden></div><div id="reply-prompt-feedback" class="reply-prompt-feedback" role="status" aria-live="polite" hidden></div></div>`;
@@ -70,7 +73,7 @@
       return {ok:true,message:'✓ Prompt copied — paste into ChatGPT'};
     } catch (_) {return {ok:false,message:'Could not copy the prompt. Allow clipboard access and try again.'};}
   }
-  if (typeof module !== 'undefined') {module.exports={replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
+  if (typeof module !== 'undefined') {module.exports={receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -142,7 +145,7 @@
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
     if (busy) {
-      if(selecting || ['open_thread','open_message','resolve_thread','auto_check_sent','live_check'].includes(pendingAction)){
+      if(selecting || ['open_thread','open_message','resolve_thread','load_visible_body','auto_check_sent','live_check'].includes(pendingAction)){
         queued={action,values};
         if(selecting) optimistic(action,values);
       }
@@ -153,8 +156,8 @@
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
-    else if(!['resolve_thread','auto_check_sent','live_check','reconnect'].includes(action)){root.classList.add('busy');freeze();}
-    if (!selecting && !['resolve_thread','auto_check_sent','live_check'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
+    else if(!['resolve_thread','load_visible_body','auto_check_sent','live_check','reconnect'].includes(action)){root.classList.add('busy');freeze();}
+    if (!selecting && !['resolve_thread','load_visible_body','auto_check_sent','live_check'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Opening attachment…':action==='refresh'?'Refreshing…':'Working…';
     if(['reconnect','retry_connection'].includes(action)&&$('notice'))$('notice').innerHTML=recoveryFeedback(model,true);
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
@@ -223,7 +226,7 @@
     const rows=model.messages||[], active=rows.find(m=>m.key===model.active_message)||rows[rows.length-1];
     const selectedThread=(model.threads||[]).find(t=>t.key===model.selected);
     if (!active) return `<div class="reading-scroll empty">${model.error?esc(model.error):'Select a conversation to read it.'}${model.draft?'<p class="attachments">'+button('Resume draft','resume_composer')+'</p>':''}</div>`;
-    return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Star / unstar"')}${button('Junk','junk','',!model.roles.junk)}${button('⋯','message_menu','title="More message actions" aria-label="More message actions"')}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span><small>${esc(m.time)}</small></div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div></button>${m.expanded?`<div class="message-body">${m.html}</div>${m.quote?`<details><summary>Show quoted text</summary><div class="quote">${m.quote}</div></details>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="Download directly from mailbox"`)).join('')}</div>`:''}</article>`).join('')}</div></div>`;
+    return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Star / unstar"')}${button('Junk','junk','',!model.roles.junk)}${button('⋯','message_menu','title="More message actions" aria-label="More message actions"')}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span><small>${esc(m.time)}</small></div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div></button>${m.expanded?`${receivedBody(m)}${m.quote&&!m.reader_document?`<details><summary>Show quoted text</summary><div class="quote">${m.quote}</div></details>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="Download directly from mailbox"`)).join('')}</div>`:''}</article>`).join('')}</div></div>`;
   }
   function formatBar(target='editor') {
     return `<div class="format-bar" data-editor="${target}">${[['B','bold'],['I','italic'],['U','underline'],['↗ Link','createLink'],['• List','insertUnorderedList'],['1. List','insertOrderedList']].map(([label,cmd])=>`<button type="button" data-command="${cmd}" title="${cmd}" ${target==='editor'&&locked(model)?'disabled':''}>${label}</button>`).join('')}</div>`;
@@ -257,8 +260,20 @@
     const pane=root.querySelector('.reading');if(!pane)return;
     if(force||stamp!==readingStamp){
       const old=pane.querySelector('.reading-scroll,.compose-scroll,.panel-scroll');const top=reset?0:old?.scrollTop||0;
+      pane.querySelectorAll('.email-document').forEach(frame=>frame._emailObserver?.disconnect());
       pane.innerHTML=model.view==='compose'?composer():model.view==='settings'?settings():model.view==='context'?contextPanel():messages();
       const scroll=pane.querySelector('.reading-scroll,.compose-scroll,.panel-scroll');if(scroll)scroll.scrollTop=top;
+      pane.querySelectorAll('.email-document').forEach(frame=>{
+        frame.onload=()=>{
+          try {
+            const body=frame.contentDocument.body;
+            const resize=()=>{if(frame.isConnected)frame.style.height=Math.max(60,body.scrollHeight)+'px';};
+            resize();const observer=new ResizeObserver(resize);observer.observe(body);
+            frame._emailObserver=observer;
+            body.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.alt=img.alt||'Image unavailable';resize();},{once:true}));
+          } catch(_) {frame.style.height='480px';}
+        };
+      });
       readingStamp=stamp;
       selectionControlsDisabled=false;
     }
@@ -269,7 +284,7 @@
     const liveUpdate=['live_check','reconnect'].includes(pendingAction);
     if(liveUpdate)snapshot(); // Keep edits made while the network read was in flight.
     const oldFolder=model.folder, oldQuery=model.query;
-    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','auto_check_sent','live_check','reconnect'].includes(pendingAction);
+    const wasFrozen=busy&&!['open_thread','open_message','resolve_thread','load_visible_body','auto_check_sent','live_check','reconnect'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
     if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
@@ -333,7 +348,10 @@
       const a=document.createElement('a'); a.href=url;a.download=model.download.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }
     clearTimeout(historyTimer);
-    if(model.history_pending&&model.view==='mail'&&!model.error){
+    if(model.body_pending&&model.view==='mail'&&!model.error){
+      const message_key=model.body_pending;
+      historyTimer=setTimeout(()=>{if(!busy&&model.active_message===message_key)emit('load_visible_body',{message_key});},0);
+    } else if(model.history_pending&&model.view==='mail'&&!model.error){
       const key=model.selected,version=model.mailbox_version;
       // Yield first paint. This fetches headers only, never speculative bodies or attachments.
       historyTimer=setTimeout(()=>{if(!busy&&model.selected===key&&model.mailbox_version===version)emit('resolve_thread',{thread_key:key,mailbox_version:version});},120);

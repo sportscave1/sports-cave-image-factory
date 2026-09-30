@@ -345,7 +345,8 @@ def mime_parts(tree, prefix="", inherited_attachment=False, alternative_group=""
     return [{"section": prefix or "1", "content_type": content_type,
              "charset": params.get("charset", "utf-8"), "encoding": str(tree[5] or "7bit"),
              "encoded_size": int(tree[6]), "filename": filename or (f"attachment-{prefix or '1'}" if attachment else ""),
-             "attachment": attachment, "alternative_group": alternative_group}]
+             "attachment": attachment, "alternative_group": alternative_group,
+             "content_id": str(tree[3] or "").strip("<>")}]
 
 
 def decode_part(raw, part):
@@ -1065,30 +1066,47 @@ class ImapProvider:
             if len(parts) > 100:
                 raise MailboxError("This message has too many MIME parts. Open it in your existing mail client.")
             text_parts = [p for p in parts if not p["attachment"]]
-            # Prefer plain text within each multipart/alternative; retain distinct mixed text parts.
-            plain_parents = {p["alternative_group"] for p in text_parts
-                             if p["content_type"] == "text/plain" and p["alternative_group"]}
-            chosen = [p for p in text_parts if p["content_type"] == "text/plain" or
-                      p["alternative_group"] not in plain_parents]
-            result, warnings = [], []
-            deadline = time.monotonic() + 20
-            for part in chosen[:12]:
-                if time.monotonic() > deadline:
-                    warnings.append("Message read time limit reached. Open remaining content in your mail client.")
-                    break
+            # One preferred body, not an attachment or a concatenation of alternatives.
+            from support_email_render import referenced_cids, IMAGE_TYPES
+            import base64
+            started = time.monotonic()
+            chosen = sorted(text_parts, key=lambda p: p["content_type"] != "text/html")
+            text, markup, warnings, inline = "", "", [], {}
+            for part in chosen:
                 if part["encoded_size"] > MAX_TEXT_BYTES:
                     warnings.append("A large text part was omitted. Open it in your existing mail client.")
                     continue
-                raw = self._part(conn, header["uid"], part, MAX_TEXT_BYTES)
                 try:
-                    text = raw.decode(part["charset"], "replace")
-                except LookupError:
-                    text = raw.decode("utf-8", "replace")
-                result.append(html_to_text(text) if part["content_type"] == "text/html" else text)
-            if len(chosen) > 12:
-                warnings.append("Additional text parts are available in your existing mail client.")
-            return {"text": "\n\n".join(result), "attachments": [p for p in parts if p["attachment"]],
-                    "warnings": warnings}
+                    raw = self._part(conn, header["uid"], part, MAX_TEXT_BYTES)
+                    try: value = raw.decode(part["charset"], "replace")
+                    except LookupError: value = raw.decode("utf-8", "replace")
+                    if not value.strip(): continue
+                    if part["content_type"] == "text/html":
+                        markup, text = value, html_to_text(value)
+                    else: text = value
+                    break
+                except MailboxError as error:
+                    if error.retryable or error.code in {"authentication", "tls", "select", "configuration"}:
+                        raise
+                    warnings.append("A body part could not be opened; using available content.")
+            wanted = referenced_cids(markup)
+            budget = 8 * 1024 * 1024
+            for part in parts:
+                cid = part.get("content_id")
+                if not cid or cid not in wanted or part["content_type"] not in IMAGE_TYPES: continue
+                maximum = min(budget, 2 * 1024 * 1024)
+                if part["encoded_size"] > maximum or time.monotonic()-started > 20:
+                    warnings.append("An inline image was omitted because of its size or load time.")
+                    continue
+                try:
+                    payload = self._part(conn, header["uid"], part, maximum)
+                    budget -= part["encoded_size"]
+                    inline[cid] = 'data:'+part['content_type']+';base64,'+base64.b64encode(payload).decode('ascii')
+                except MailboxError:
+                    warnings.append("An inline image could not be opened.")
+            LOGGER.info("Email MIME/body parse complete duration_ms=%.1f parts=%d inline=%d", (time.monotonic()-started)*1000, len(parts), len(inline))
+            return {"text": text, "html": markup, "inline_images": inline,
+                    "attachments": [p for p in parts if p["attachment"]], "warnings": warnings}
 
     @_retry_read
     def read_attachment(self, header, section):
