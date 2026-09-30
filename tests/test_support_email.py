@@ -457,9 +457,19 @@ class PageTests(unittest.TestCase):
     def app(self, user=USER):
         return AppTest.from_string(f"import support_email_page\nsupport_email_page.render_page({user!r})").run()
 
+    def load_initial(self, app):
+        import uuid
+        self.component.return_value={"id":str(uuid.uuid4()),"action":"load_initial_mailbox"}
+        app.run()
+        self.component.return_value=None
+        return app
+
     def test_desktop_page_initial_load_defers_first_body_until_shell_visible(self):
         app = self.app()
         self.assertFalse(app.exception)
+        self.fake.list_headers.assert_not_called()
+        self.assertTrue(self.component.call_args.kwargs['model']['initial_load_pending'])
+        self.load_initial(app)
         self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
         self.fake.read_message.assert_not_called()
         model = self.component.call_args.kwargs["model"]
@@ -474,6 +484,9 @@ class PageTests(unittest.TestCase):
             app = self.app()
             self.assertFalse(app.exception)
             self.assertFalse(self.component.call_args.kwargs["model"]["configured"])
+            self.load_initial(app)
+            self.assertFalse(self.component.call_args.kwargs['model']['initial_load_pending'])
+            app.run()
             self.fake.list_headers.assert_not_called()
         self.app({**WORKER, "page_permissions": []})
         self.fake.list_headers.assert_not_called()
@@ -481,11 +494,13 @@ class PageTests(unittest.TestCase):
     def test_database_failure_does_not_block_inbox(self):
         with patch.object(store, "load_email_settings", side_effect=RuntimeError("db failure")):
             app = self.app()
+            self.load_initial(app)
         self.assertFalse(app.exception)
         self.assertEqual(len(self.component.call_args.kwargs["model"]["threads"]), 50)
 
     def test_changed_navigation_epoch_rereads_real_provider(self):
         app = self.app()
+        self.load_initial(app)
         app.session_state["navigation_epoch"] = 9
         app.run()
         self.assertEqual(self.fake.list_headers.call_count, 2)
@@ -507,6 +522,7 @@ class PageTests(unittest.TestCase):
                 self.assertEqual(app.session_state["current_page"], route)
                 if route != "Email":
                     self.fake.list_headers.assert_not_called()
+            self.load_initial(app)
             self.fake.list_headers.assert_called_once_with(50, "INBOX", query="", field="TEXT", previews=True)
         self.imap.assert_not_called()
 

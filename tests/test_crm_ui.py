@@ -60,7 +60,12 @@ class UiTests(unittest.TestCase):
         self.assertTrue(any(s.label=='Segment' for s in at.selectbox));self.assertFalse(at.exception)
         self.assertFalse(any(e.label=='Audience' for e in at.expander))
     def test_automation_activation_fails_closed(self):
-        at=self.app('CRM Automations');next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')
+        at=self.app('CRM Automations')
+        from streamlit.proto.WidgetStates_pb2 import WidgetStates
+        panel=next(e for e in at.expander if e.label=='Workflow configuration')
+        state=WidgetStates();state.widgets.add(id=panel.proto.id,bool_value=True)
+        at._run(state,timeout=20)
+        next(s for s in at.selectbox if s.label=='Status').set_value('ACTIVE')
         next(b for b in at.button if b.label=='Save workflow').click().run()
         self.assertTrue(any('disabled' in w.value for w in at.caption));self.assertFalse(at.exception)
 

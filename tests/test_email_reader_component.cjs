@@ -7,6 +7,8 @@ assert.ok(rich.includes('srcdoc="&lt;html&gt;'));assert.ok(rich.includes('referr
 assert.equal(receivedBody({html:'<p>Plain fallback</p>'}),'<div class="message-body"><p>Plain fallback</p></div>');
 const source=fs.readFileSync('components/support_email/mail.js','utf8');
 assert.ok(source.includes("emit('load_visible_body',{message_key})"));
+assert.ok(source.includes("emit('load_initial_mailbox')"));
+assert.ok(source.includes("model.initial_load_pending?'Loading mailbox…'"));
 assert.ok(source.includes('frame._emailObserver?.disconnect()'));
 assert.ok(source.includes('new ResizeObserver(resize)'));
 console.log('Received reader sandbox, escaping, fallback, deferred body and resize checks passed.');

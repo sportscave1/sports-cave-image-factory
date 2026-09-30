@@ -86,21 +86,23 @@ def _render_workspace(user):
     workspace = Workspace(state, user, config, smtp)
     try:
         epoch = st.session_state.get("navigation_epoch", 0)
-        if ((not state.get("loaded") and not state.get("recovery_state"))
-                or state.get("navigation_epoch") != epoch):
-            with st.spinner("Refreshing inbox…" if state.get("loaded") else "Loading inbox…"):
+        if not state.get("initial_load_attempted") and not state.get("loaded") and not state.get("recovery_state"):
+            state["initial_load_pending"] = True
+        elif state.get("navigation_epoch") != epoch:
+            with st.spinner("Refreshing inbox…"):
                 workspace.load(force=bool(state.get("loaded")), defer_body=not state.get("loaded"))
             state["navigation_epoch"] = epoch
         target = {key: str(st.query_params.get("email_" + key, ""))[:998]
                   for key in ("uid", "uidvalidity", "message_id")}
         identity = tuple(target.values())
-        if target["uid"] and state.get("notification_target") != identity:
+        if not state.get("initial_load_pending") and target["uid"] and state.get("notification_target") != identity:
             state["notification_target"] = identity
             with st.spinner("Loading message…"):
                 workspace.open_notification(target)
         LOGGER.info("Email shell/list ready duration_ms=%.1f", (time.monotonic()-started)*1000)
         event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
         if event and workspace.handle(event):
+            state["navigation_epoch"] = epoch
             rerun_email()
     except Exception as error:
         LOGGER.warning("Email workspace unavailable (%s)", type(error).__name__)

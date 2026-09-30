@@ -243,7 +243,8 @@ def automations_page(store,actions,shop=None):
 
 
 def legacy_flow_configuration(store,actions,row):
-    template_names=[t['template_key'] for t in store.list('templates')]
+    # Only names are needed for these selectors, never every template body.
+    template_names=[t['template_key'] for t in store.q("SELECT template_key FROM crm_templates WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY name LIMIT 500")]
     with st.form('crm_automation_'+str(row['id'])):
         steps=[]
         for i,step in enumerate(row['steps']):
@@ -333,18 +334,19 @@ def reports_page(store):
             st.caption('Uncertain submissions are never retried automatically. Check the provider receipt before any manual follow-up.')
 
 
-def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config=None):
+def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config=None,loading=None):
     require(user,PAGE_KEYS[route])
     shop=shop or Shopify();store=store or Store();actions=Actions(store,user,config)
     if route=='CRM Campaigns':
         from crm_campaign_page import campaign_workspace
         from crm_resend_marketing import DeliveryError
-        try: campaign_workspace(shop,store,actions,navigate)
+        try: campaign_workspace(shop,store,actions,navigate,loading=loading)
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
     left,right=st.columns([9,1])
     left.markdown('### EMAIL · '+('CAMPAIGN SETTINGS' if route=='CRM Settings' else LABELS[route].upper()))
     left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
+    if loading:loading.empty()
     if right.button('Refresh',key='crm_refresh'):CACHE.invalidate();st.rerun()
     import os_accounts
     from crm_navigation import SETTINGS_ALIASES
@@ -382,4 +384,14 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
 def render_page(route,user,navigate=lambda _:None,**dependencies):
     st.html('<style>[data-testid="stMainBlockContainer"]:has(.st-key-crm-workspace){padding-top:4rem} .st-key-crm-workspace [data-testid="stForm"]{padding:.65rem} .st-key-crm-workspace h3{font-size:1.3rem}</style>')
     with st.container(key='crm-workspace'):
-        _render_page(route,user,navigate,**dependencies)
+        if route not in ('CRM Campaigns','CRM Automations'):
+            _render_page(route,user,navigate,**dependencies)
+            return
+        from email_loading import shell, stage
+        require(user,PAGE_KEYS[route])
+        loading = shell(LABELS[route])
+        try:
+            with stage(route, 'render'):
+                _render_page(route,user,navigate,loading=loading,**dependencies)
+        finally:
+            if loading: loading.empty()

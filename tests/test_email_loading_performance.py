@@ -43,7 +43,10 @@ class LoadingFeedbackTests(unittest.TestCase):
                  patch.object(page,'load_configuration',return_value=Mock(scope='fixture')), \
                  patch.object(page,'load_smtp_configuration'),patch.object(page,'get_component',return_value=Mock(return_value=None)):
                 page._render_workspace.__wrapped__({'id':'fixture'})
-            self.assertEqual(seen,[[label]])
+            if loaded:self.assertEqual(seen,[[label]])
+            else:
+                self.assertEqual(seen,[])
+                self.assertTrue(state['support_email_workspace']['initial_load_pending'])
             self.assertFalse(active)
 
 

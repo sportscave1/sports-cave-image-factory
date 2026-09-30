@@ -150,7 +150,9 @@ def recent_campaigns(drafts,key,user):
     if st.session_state.get('recent_filters')!=filters:
         st.session_state['recent_filters']=filters;st.session_state['recent_offset']=0
     offset=st.session_state.get('recent_offset',0)
-    rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True)
+    from email_loading import stage
+    with stage('Campaigns','list_query'):
+        rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True)
     if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
     for row in rows[:6]:
         identity=str(row['id'])
@@ -200,7 +202,8 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
                     market_control(shop,drafts,doc,key)
                     timing_control(doc,key)
             with html_tab:
-                section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
+                if html_tab.open:
+                    section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
             with templates_tab:
                 if templates_tab.open and available:
                     from crm_brand_template_ui import brand_templates_settings
@@ -238,16 +241,35 @@ def continue_campaign_leave(drafts,navigate):
 
 
 @st.fragment
-def campaign_workspace(shop,store,actions,navigate=lambda _:None):
-    from crm_html_workspace import composer_canvas,composer_styles,section_editor
-    drafts=CampaignStore(store.connect);available=True
+def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
+    from email_loading import stage, shell
+    drafts=CampaignStore(store.connect)
     editor=st.session_state.get('campaign_editor')
     if editor and dirty(editor) and (st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open')):
         from crm_campaign_leave_ui import leave_dialog
         leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))
         return
+    # Keep the established layout, but stream the lightweight list before restoring
+    # the selected composer and its settings. The editor occupies its own slot.
+    st.html('<style>.st-key-crm-selected-campaign:has(.sc-email-loading){min-height:780px}</style>')
+    editor_area=st.container(key='crm-selected-campaign')
+    with editor_area:editor_loading=shell('Campaigns')
+    if loading:loading.empty()
+    with st.container(key='crm-recent-campaigns'):
+        with stage('Campaigns','list_render'):
+            try:recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
+            except StoreUnavailable:st.caption('Campaign list temporarily unavailable.')
+    with editor_area:
+        try:_selected_campaign(shop,store,actions,navigate,drafts,editor_loading)
+        finally:editor_loading.empty()
+
+
+def _selected_campaign(shop,store,actions,navigate,drafts,loading):
+    from crm_html_workspace import composer_styles
+    from email_loading import stage
+    available=True
     try:
-        with st.spinner('Loading campaign…'):
+        with stage('Campaigns','selected_detail'):
             defaults=drafts.setting('sending')['value'];cfg=drafts.render_settings()
             choices=None
     except StoreUnavailable as exc:
@@ -273,6 +295,7 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if doc['audience']!=selected_audience:doc['audience']=selected_audience;doc['counts']={}
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
+    loading.empty()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
     title,buttons=st.columns([5,4],vertical_alignment='center')
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
@@ -285,13 +308,12 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         send_now=st.button('Send now',type='primary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
-    if save and flush_current(force=True):st.toast('Draft saved')
+    if save and flush_current(force=True):
+        st.toast('Draft saved');st.rerun()
     if send_now:
         from crm_campaign_send_ui import review_dialog
         st.session_state.pop(key+'send_review',None)
         review_dialog(shop,drafts,actions.user,editor,key)
-    if available:
-        with st.container(key='crm-recent-campaigns'):recent_campaigns(drafts,key,actions.user)
     if new_requested:st.session_state['campaign_pending_open']='new'
     target=st.session_state.get('crm_requested_route');pending=st.session_state.get('campaign_pending_open')
     if target or pending:

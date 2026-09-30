@@ -75,6 +75,7 @@ class Workspace:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
     def load(self, *, force=False, previews=True, defer_body=False):
+        self.state.update(initial_load_pending=False, initial_load_attempted=True)
         if not force and (self.state.get("recovery_state") == "stopped" or
                           time.monotonic() < self.state.get("load_retry_at", 0)):
             if self.state.get("snapshot_view") != (self.state.get("folder"), self.state["query"], self.state["field"]):
@@ -553,7 +554,10 @@ class Workspace:
             action = event.get("action")
             if action not in {"request_delete_forever", "confirm_delete_forever", "cancel_delete_forever", "live_check", "resolve_thread"}:
                 self.state.pop("delete_confirmation", None)
-            if action == "load_visible_body":
+            if action == "load_initial_mailbox":
+                if self.state.pop("initial_load_pending", False):
+                    self.load(defer_body=True)
+            elif action == "load_visible_body":
                 key = self.state.pop("body_pending", None)
                 if key and key == self.state.get("active_message") and key == event.get("message_key"):
                     self._body(self._header(key))  # Initial paint does not mark the message read.
@@ -1079,6 +1083,7 @@ class Workspace:
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
+            "initial_load_pending": bool(s.get("initial_load_pending")),
             "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),

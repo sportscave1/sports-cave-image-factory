@@ -26,7 +26,7 @@ for(const changed of [{view:'compose'},{folder:'INBOX'},{selected:null},{delete_
 ok(trashDeleteTarget(model,key(),true)===null);
 
 const listeners={},events=[];
-const ctx={model,busy:false,menu:null,document:{addEventListener(type,fn){listeners[type]=fn;}},
+const ctx={model,busy:false,menu:null,$(){return null;},document:{addEventListener(type,fn){listeners[type]=fn;}},
   window:{parent:{document:{addEventListener(){}}},addEventListener(){}},AbortController,
   root:{addEventListener(type,fn){listeners[type]=fn;}},trashDeleteTarget,
   emit(action,data){events.push({action,data});ctx.busy=true;},

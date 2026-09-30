@@ -189,13 +189,13 @@ class SignatureTests(unittest.TestCase):
         import app_branding
         self.assertEqual(brand.LOGO_PATH,app_branding.STATIC_ROOT/'branding'/'sports-cave-os-icon-192-v2.png')
 
-    def test_preview_csp_allows_data_logo_and_styles_but_never_remote_images(self):
+    def test_reader_csp_allows_data_logo_and_https_images_without_active_content(self):
         html=(Path(__file__).resolve().parents[1]/'components/support_email/index.html').read_text()
-        self.assertIn("img-src data:;",html)
+        self.assertIn("img-src data: https:;",html)
         self.assertIn("style-src-attr 'unsafe-inline';",html)
         self.assertIn("script-src 'self';",html)
         self.assertIn("connect-src 'none';",html)
-        self.assertNotIn('img-src https:',html)
+        self.assertNotIn('img-src *',html)
 
 
 class WorkspaceSignatureTests(unittest.TestCase):

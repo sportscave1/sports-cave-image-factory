@@ -71,9 +71,12 @@ class CampaignSettingsNavigationTests(unittest.TestCase):
                         {'type':'html','base':['html-1'],'id':'html-1','html':'<p>Keep source</p>'})
             at.session_state['campaign_settings_open']=True;at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertEqual([t.label for t in at.tabs],['Campaign Settings','Editor','Templates'])
+            self.assertEqual([t.label for t in at.tabs],['Settings','Editor','Templates'])
             self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],'<p>Keep source</p>')
-            self.assertIsNone(editor['id'])
+            # Existing autosave checkpoints meaningful edits; navigation must retain them.
+            from crm_campaign_store import CampaignStore
+            from tests.crm_db_fixture import connect
+            self.assertEqual(CampaignStore(connect).draft(editor['id'])['document']['custom_html'],'<p>Keep source</p>')
             self.assertFalse(any(b.label=='Save internal-test settings' for b in at.button))
             self.assertNotIn('Campaign settings',[e.label for e in at.expander])
             self.assertNotIn('SECRET-SENTINEL',str(at))

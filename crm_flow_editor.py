@@ -35,9 +35,10 @@ def save_flow_email(store,user,flow,index,doc,template_version):
 
 
 def flow_workspace(shop,store,actions):
+    from email_loading import stage
     from crm_campaign_page import test_panel,perform_test
     workspace_styles();drafts=CampaignStore(store.connect)
-    with st.spinner('Loading automations…'):
+    with stage('Automations', 'list_query'):
         rows=store.list('automations')
     if not rows:
         st.info('No draft flows yet.')
@@ -52,7 +53,7 @@ def flow_workspace(shop,store,actions):
     identity=str(row['id'])+':'+str(index)
     record_key='flow_html_'+identity
     if record_key not in st.session_state:
-        with st.spinner('Loading automation email…'):
+        with stage('Automations', 'selected_detail'):
             template=drafts.q('SELECT * FROM crm_templates WHERE template_key=%s',(row['steps'][index]['template'],),True)
             if not template:st.warning('The selected email template is unavailable.');return
             st.session_state[record_key]={'document':html_document(drafts.template_document(template)),'saved':None,'version':template['version'],'flow':deepcopy(row)}
@@ -100,10 +101,10 @@ def flow_workspace(shop,store,actions):
                 discard=st.checkbox('Discard unsaved email changes',key=key+'discard') if doc!=state['saved'] else True
                 if st.button('Reload saved email',disabled=not discard):
                     st.session_state.pop(record_key,None);st.rerun()
-                with st.expander('Workflow configuration'):
+                with st.expander('Workflow configuration',on_change='rerun',key='flow_config_'+identity) as configuration:
                     # Existing step editing stays available but no longer occupies the canvas.
                     from crm_page import legacy_flow_configuration
-                    legacy_flow_configuration(store,actions,row)
+                    if configuration.open:legacy_flow_configuration(store,actions,row)
         with st.container(width='stretch'):canvas(doc,drafts.render_settings(),key)
     if save:
         try:
