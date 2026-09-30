@@ -73,7 +73,7 @@ class ModularTests(unittest.TestCase):
         event(doc,'visible',id='html-1',visible=True)
         self.assertIn('A collector moment',render_campaign(doc)['html'])
         for action in ({'type':'order','ids':['header',*ids,'footer']},{'type':'visible','id':'footer','visible':False},
-                       {'type':'remove','id':'html-1','confirmed':True},{'type':'add','kind':'footer'}):
+                       {'type':'remove','id':'header','confirmed':True},{'type':'add','kind':'footer'}):
             with self.assertRaises(ValueError):apply_event(doc,{'base':[s['id'] for s in doc['middle_sections']],**action})
 
     def test_existing_large_html_budget_is_not_halved_by_compatibility_mirror(self):

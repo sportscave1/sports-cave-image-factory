@@ -57,3 +57,14 @@ small{font-size:11px;color:var(--editor-muted);white-space:nowrap}
 .image-popover{position:fixed;margin:0;width:min(300px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;padding:12px;border:1px solid var(--editor-line);border-radius:7px;background:#faf9f6;color:var(--editor-text);font:12px/1.45 Arial,sans-serif;box-shadow:0 4px 14px #25251e12}
 .image-popover ol{padding-left:18px;margin:8px 0}.image-popover p{color:var(--editor-muted);margin-bottom:0}
 .image-copy-fallback textarea{width:100%;height:120px;font-size:11px}
+.section-delete{display:grid;place-items:center;border:0;background:transparent;padding:4px;width:28px;min-height:28px;color:var(--editor-muted)}
+.section-delete svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.section-delete:hover,.section-delete:focus-visible{color:#943d32;background:#f4eae5}
+.section-confirm{position:fixed;margin:0;padding:12px;border:1px solid var(--editor-line);border-radius:6px;background:#faf9f6;color:var(--editor-text);font:13px/1.5 Arial,sans-serif;box-shadow:0 4px 16px #2222}
+.section-confirm>div{margin-bottom:8px}.section-confirm button{margin-right:6px}
+.section-toast{position:fixed;right:8px;z-index:10;display:flex;gap:12px;align-items:center;background:#25251f;color:#faf9f6;padding:6px 10px;border-radius:6px;font-size:12px}
+.section-toast button{background:transparent;color:#e2ba68;border:0;padding:2px 6px}
+.history-tools{display:flex;justify-content:flex-end;gap:2px;margin-top:-8px;margin-bottom:3px}
+.history-button{border:0;background:transparent;color:var(--editor-muted);font-size:17px;min-height:26px;padding:0 6px}
+.drag-active{opacity:.75;box-shadow:0 3px 12px #25251e25;background:#f5f3ed;cursor:grabbing}
+.drop-before{box-shadow:0 -2px var(--editor-gold)}.drop-after{box-shadow:0 2px var(--editor-gold)}

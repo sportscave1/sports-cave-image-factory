@@ -8,33 +8,27 @@ const original=['1','2'];moveId(original,'2','1');assert.deepEqual(original,['1'
 const vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('components/crm_sections/composer.js','utf8');
 const handlers={},reorders=[];
-let target=null;
-const ctx=vm.createContext({drag:null,addEventListener:(name,fn)=>handlers[name]=fn,document:{addEventListener:(name,fn)=>handlers[name]=fn,
- querySelectorAll:()=>[],elementFromPoint:()=>target},reorder:(...args)=>reorders.push(args)});
-vm.runInContext(source.slice(source.indexOf("document.addEventListener('pointerdown'"),source.indexOf("addEventListener('message'")),ctx);
-const handle={dataset:{drag:'cat',section:''},setPointerCapture(){}};
-const down=()=>handlers.pointerdown({target:{closest:()=>handle},clientX:10,clientY:10,pointerId:1});
-const move=()=>handlers.pointermove({clientX:10,clientY:60});
-const up=()=>handlers.pointerup({clientX:10,clientY:60});
-down();target={closest:()=>({dataset:{id:'html-1'},classList:{add(){}}})};move();up();
-assert.deepEqual(reorders.pop(),[null,'cat','html-1']);
-// Header/footer are outside the middle component and cannot be drop targets.
-down();target=null;move();up();assert.equal(reorders.length,0);
-handle.dataset.section='cat';handle.dataset.drag='p2';down();
-target={closest:()=>({dataset:{parent:'cat',product:'p1'},classList:{add(){}}})};move();up();
-assert.deepEqual(reorders.pop(),['cat','p2','p1']);
-down();target={closest:()=>({dataset:{parent:'another-cat',product:'p1'},classList:{add(){}}})};move();up();
-assert.equal(reorders.length,0);
-// A handle click without a drag must not reorder.
+const card=(id,top,parent)=>({classes:new Set(),dataset:{id,product:id,parent},getBoundingClientRect:()=>({top,bottom:top+100,height:100}),classList:{add(...names){names.forEach(n=>cards.find(c=>c.classList===this)?.classes.add(n));},remove(...names){names.forEach(n=>cards.find(c=>c.classList===this)?.classes.delete(n));}}});
+const cards=[card('html-1',0),card('cat',100),card('html-2',200)];
+const root={addEventListener:(name,fn)=>handlers[name]=fn,querySelectorAll:()=>cards,setPointerCapture(){},hasPointerCapture:()=>true,releasePointerCapture(){}};
+const ctx=vm.createContext({drag:null,root,render(){},addEventListener:(name,fn)=>handlers[name]=fn,document:{querySelectorAll:()=>[]},reorder:(...args)=>reorders.push(args)});
+vm.runInContext(source.slice(source.indexOf('function clearDrag'),source.indexOf("document.addEventListener('visibilitychange'")),ctx);
+const handle={dataset:{drag:'cat',section:''},focus(){}};
+const down=()=>handlers.pointerdown({target:{closest:()=>handle},button:0,clientX:10,clientY:110,pointerId:1,preventDefault(){}});
+const move=y=>handlers.pointermove({clientX:10,clientY:y});
+const up=()=>handlers.pointerup({pointerId:1});
+down();move(5);assert.ok(cards[0].classes.has('drop-before'));assert.ok(cards[1].classes.has('drag-active'));up();assert.deepEqual(reorders.pop(),[null,'cat','html-1',false]);
+down();move(299);up();assert.deepEqual(reorders.pop(),[null,'cat','html-2',true]);
 down();up();assert.equal(reorders.length,0);
+handlers.pointerdown({target:{closest:()=>null},button:0});move(10);up();assert.equal(reorders.length,0);
 down();handlers.blur();assert.equal(vm.runInContext('drag',ctx),null);
 down();handlers.pointercancel();assert.equal(vm.runInContext('drag',ctx),null);
-console.log('11 section/product ordering, pointer boundary and resume cleanup checks passed');
+console.log('Mouse before/after targets, handle-only initiation and cancellation passed');
 const messages=[],listeners={};let sequence=0;
 const parent={postMessage:msg=>messages.push(msg.value)};
 const bridge=vm.createContext({parent,crypto:{randomUUID:()=>String(++sequence)},
  addEventListener:(name,fn)=>listeners[name]=fn,render(){}});
-vm.runInContext("let args={sections:[{id:'html-1',html:''}]},pending=false,inFlight=null,drafts={},queue=[],settingsDrafts={};"+
+vm.runInContext("let historyScope,areas=new Map(),histories=new Map(),drag=null;let args={sections:[{id:'html-1',html:''}]},pending=false,inFlight=null,drafts={},queue=[],settingsDrafts={};"+
  source.slice(source.indexOf('const emit='),source.indexOf('const el='))+
  source.slice(source.indexOf("addEventListener('message'"),source.indexOf('new ResizeObserver'))+
  ';this.send=emit;this.drafts=drafts;',bridge);
@@ -83,3 +77,9 @@ assert.equal(menu.open,false);assert.equal(templateEvents[0].template_id,'two');
 menuContext.args.templates=[];menuContext.renderTemplates();assert.equal(menuNodes.length,0);
 assert.ok(!fs.readFileSync('components/crm_sections/index.html','utf8').includes('Add Template'));
 console.log('Direct template menu, safe labels, selected version, empty state checks passed');
+
+// Queue captures local text even when a pending HTML acknowledgement precedes deletion.
+bridge.drafts['html-1']='Latest not yet acknowledged';bridge.send('remove',{id:'html-1',confirmed:true});delete bridge.drafts['html-1'];
+listeners.message({source:parent,data:{type:'streamlit:render',args:{sections:[{id:'html-1',html:'Older'}],ack:messages[3].event}}});
+assert.equal(messages.at(-1).edits['html-1'],'Latest not yet acknowledged');
+console.log('Queued structural action retains unacknowledged content');

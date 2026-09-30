@@ -65,8 +65,10 @@ def apply_event(doc, event):
     if kind == 'add':
         identity = uuid.uuid4().hex
         if event.get('kind') == 'html':
+            reserved = event.get('reserved_html_number', 0)
+            if type(reserved) is not int or not 0 <= reserved <= 10000: raise ValueError('Invalid reserved section number.')
             sections.append(dict(id=identity, type='html', visible=True,
-                html_number=max((s.get('html_number', 0) for s in sections), default=0)+1, html=''))
+                html_number=max(reserved,max((s.get('html_number', 0) for s in sections), default=0))+1, html=''))
         elif event.get('kind') == 'image':
             sections.append(dict(id=identity, type='image', visible=True, html=''))
         elif event.get('kind') == 'catalogue':
