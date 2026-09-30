@@ -12,8 +12,8 @@ def middle_sections(doc):
 
 
 def validate_middle(sections):
-    if not isinstance(sections, list) or not 1 <= len(sections) <= 20:
-        raise ValueError('Use 1–20 middle sections.')
+    if not isinstance(sections, list) or not 0 <= len(sections) <= 20:
+        raise ValueError('Use up to 20 middle sections.')
     ids, numbers = set(), set()
     for s in sections:
         if not isinstance(s, dict) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', str(s.get('id', ''))) or s['id'] in ids:
@@ -25,6 +25,9 @@ def validate_middle(sections):
             if set(s) != common | {'html_number', 'html'} or type(s['html_number']) is not int or not 1 <= s['html_number'] <= 10000 or s['html_number'] in numbers or not isinstance(s['html'], str):
                 raise ValueError('Invalid HTML section.')
             numbers.add(s['html_number'])
+        elif s.get('type') == 'image':
+            if set(s) != common | {'html'} or not isinstance(s['html'], str):
+                raise ValueError('Invalid Image section.')
         elif s.get('type') == 'catalogue':
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
@@ -35,8 +38,7 @@ def validate_middle(sections):
             products = s['products']
             if not isinstance(products, list) or len(products) > 12 or len({p.get('id') for p in products if isinstance(p, dict)}) != len(products): raise ValueError('Select up to 12 unique products per catalogue.')
             for p in products: validate_snapshot(p)
-        else: raise ValueError('Only HTML and Catalogue can appear between Header and Footer.')
-    if 1 not in numbers: raise ValueError('HTML Section 1 must remain; hide it instead.')
+        else: raise ValueError('Only HTML, Image and Catalogue can appear between Header and Footer.')
     if len({p['id'] for s in sections if s['type']=='catalogue' for p in s['products']}) > 50:
         raise ValueError('Use up to 50 unique products per campaign.')
 
@@ -45,12 +47,19 @@ def commit_middle(doc, sections):
     validate_middle(sections)
     doc['middle_sections'] = deepcopy(sections)
     # Compatibility mirror, never a second rendering source once sections exist.
-    doc['custom_html'] = next(s['html'] for s in sections if s.get('html_number') == 1)
+    doc['custom_html'] = next((s['html'] for s in sections if s.get('html_number') == 1), '')
 
 
 def apply_event(doc, event):
     sections = middle_sections(doc)
     if not isinstance(event, dict) or event.get('base') != [s['id'] for s in sections]: raise ValueError('Sections changed. Try again.')
+    # Structural actions include unsaved textarea edits in the same transaction.
+    edits = event.get('edits', {})
+    if not isinstance(edits, dict): raise ValueError('Invalid pending edits.')
+    for identity, html in edits.items():
+        target = next((s for s in sections if s['id'] == identity and s['type'] in ('html','image')), None)
+        if target is None or not isinstance(html,str): raise ValueError('Invalid pending edit.')
+        target['html'] = html
     kind = event.get('type')
     selected = next((s for s in sections if s['id'] == event.get('id')), None)
     if kind == 'add':
@@ -58,6 +67,8 @@ def apply_event(doc, event):
         if event.get('kind') == 'html':
             sections.append(dict(id=identity, type='html', visible=True,
                 html_number=max((s.get('html_number', 0) for s in sections), default=0)+1, html=''))
+        elif event.get('kind') == 'image':
+            sections.append(dict(id=identity, type='image', visible=True, html=''))
         elif event.get('kind') == 'catalogue':
             sections.append(dict(id=identity, type='catalogue', visible=True, products=[],
                 settings={'columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
@@ -66,12 +77,18 @@ def apply_event(doc, event):
         ids = event.get('ids')
         if not isinstance(ids, list) or len(ids) != len(sections) or set(ids) != {s['id'] for s in sections}: raise ValueError('Invalid section order.')
         by_id = {s['id']:s for s in sections}; sections = [by_id[i] for i in ids]
+    elif kind == 'restore_section':
+        restored = deepcopy(event.get('section'))
+        position = event.get('position')
+        if not isinstance(restored,dict) or any(s['id']==restored.get('id') for s in sections) or type(position) is not int or position<0:
+            raise ValueError('Section cannot be restored here.')
+        sections.insert(min(position,len(sections)),restored)
     elif selected is None: raise ValueError('Section not found.')
     elif kind == 'visible': selected['visible'] = event.get('visible')
-    elif kind == 'html' and selected['type'] == 'html': selected['html'] = event.get('html')
+    elif kind == 'html' and selected['type'] in ('html', 'image'): selected['html'] = event.get('html')
     elif kind == 'settings' and selected['type'] == 'catalogue': selected['settings'] = deepcopy(event.get('settings'))
     elif kind == 'remove':
-        if selected.get('html_number') == 1 or event.get('confirmed') is not True: raise ValueError('Confirm section removal. HTML Section 1 can only be hidden.')
+        if event.get('confirmed') is not True: raise ValueError('Confirm section removal.')
         sections.remove(selected)
     elif kind in ('product_order', 'product_remove') and selected['type'] == 'catalogue':
         products = selected['products']; ids = event.get('ids')
@@ -90,10 +107,13 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     present = False
     for s in middle_sections(doc):
         if not s['visible']: continue
-        source = s['html'] if s['type'] == 'html' else catalogue_html(s, campaign_key=campaign_key)
+        source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,
-            campaign_key=campaign_key if s['type'] == 'html' else '')
+            campaign_key=campaign_key if s['type'] in ('html', 'image') else '')
+        if s['type'] == 'image':
+            from crm_image_prompt import has_image
+            result['HTML content present'] |= has_image(markup)
         if s['type'] == 'catalogue':
             # sc-stack is the renderer's own allowlisted responsive class.
             result['Catalogue product facts valid'] = bool(s['products']) and not any(product_issues(p, s['settings']) for p in s['products'])

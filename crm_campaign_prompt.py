@@ -21,7 +21,7 @@ OFFERS={'Discount / sale','Multi-buy / bundle offer','Seasonal sale','Offer endi
 DEADLINES={'Offer ending / last chance','Gift delivery cutoff reminder'}
 EVENTS={'Sporting event / finals / race','Sporting anniversary / tribute / milestone'}
 STOCK={'Low edition stock','Final editions / retirement notice'}
-CONFIRMED={'New edition release','New collection launch','Launch teaser / coming soon','VIP / early access','Availability / waitlist update','Fan favourites / bestsellers','Collector story / customer reviews','Browse / cart / checkout reminder','Post-purchase thank-you','Win-back / re-engagement'}
+CONFIRMED={'New edition release','New collection launch','Launch teaser / coming soon','VIP / early access','Fan favourites / bestsellers','Collector story / customer reviews','Browse / cart / checkout reminder','Post-purchase thank-you','Win-back / re-engagement'}
 
 
 def clean(value, limit=800):
@@ -79,6 +79,8 @@ def build(inputs, doc, reader, now=None):
     if not target.get('title'):raise ValueError('Select an edition or explicitly use a collection name.')
     if purpose in OFFERS and (not re.search(r'\d|free|complimentary',notes,re.I) or not re.search(r'off|discount|save|buy|bundle|reward|free|complimentary',notes,re.I)):
         raise ValueError('Enter the actual offer and eligibility/minimum-purchase terms.')
+    if purpose in OFFERS and not re.search(r'\b(all|selected|eligible|orders?|frames?|framed|unframed|pieces?|products?|collection|purchase|buy|code|automatic|members?|customers?)\b',notes,re.I):
+        raise ValueError('Include the offer eligibility or minimum-purchase terms.')
     if purpose in EVENTS and len(notes)<6:raise ValueError('Name the event or occasion and its connection to the artwork.')
     if purpose in CONFIRMED and len(notes)<10:raise ValueError('Add confirmed context for this purpose, or choose General promotion.')
     if purpose=='Other / custom' and len(notes)<6:raise ValueError('Describe the purpose of this email.')
@@ -101,7 +103,13 @@ def build(inputs, doc, reader, now=None):
         facts={'kind':'Collection','source':'Shopify collection','id':target['id'],'title':clean(target['title'],300),
                'url':product_url(target.get('onlineStoreUrl','')),'story':clean(target.get('description',''))}
     availability=None
-    needs_stock=purpose in STOCK or bool(re.search(r'\b(remaining|left|sold out|edition size|limited to|stock)\b',notes,re.I))
+    needs_stock=purpose in STOCK or purpose=='Availability / waitlist update' or bool(re.search(r'\b(remaining|left|sold out|edition size|limited to|stock|almost gone|final editions?|last editions?|selling quickly)\b',notes,re.I))
+    if kind=='Single product' and not needs_stock:
+        try:
+            edition=reader.availability(target['id'])
+            facts['edition_size']={'size':edition['size'],'source':edition['source']}
+        except Exception:
+            pass  # Optional verified size; no made-up legacy default.
     if needs_stock:
         identity=target.get('id') if kind=='Single product' else inputs.get('edition_id')
         if not identity:raise ValueError('Select a specific qualifying edition; collection-wide stock is not supported.')
@@ -112,15 +120,23 @@ def build(inputs, doc, reader, now=None):
         n=availability['remaining'];size=availability['size']
         for match in re.finditer(r'(\d+)\s*(?:editions?\s*)?(?:left|remaining)',notes,re.I):
             if int(match[1])!=n:raise ValueError('Entered remaining count conflicts with the edition ledger. Correct the details.')
+        for pattern in (r'(?:remaining|left)\s*[:=]\s*(\d+)',r'(\d+)\s*(?:editions?\s*)?available'):
+            for match in re.finditer(pattern,notes,re.I):
+                if int(match[1])!=n:raise ValueError('Entered availability conflicts with the edition ledger.')
         for match in re.finditer(r'limited to\s*(\d+)',notes,re.I):
             if int(match[1])!=size:raise ValueError('Entered edition size conflicts with the ledger.')
         if ('sold out' in notes.lower() and n>0) or (n==0 and re.search(r'\b(in stock|available now|still available)\b',notes,re.I)):
             raise ValueError('Entered availability conflicts with the edition ledger.')
         if purpose=='Low edition stock' and n==0:raise ValueError('Sold out is not low stock. Choose Availability / waitlist update explicitly.')
+        if re.search(r'\b(almost gone|final editions?|last editions?)\b',notes,re.I) and availability['status']!='Final Editions':
+            raise ValueError('That scarcity claim is not supported by Edition Ops. Correct the details.')
         scarcity=(purpose=='Low edition stock' and availability['status'] in ('Final Editions','Selling Quickly') or purpose=='Final editions / retirement notice' and availability['status']=='Final Editions')
+        availability['scarcity_supported']=bool(scarcity and not context.get('schedule'))
         availability['wording']='Restrained scarcity permitted by existing Edition Ops status.' if scarcity else 'Neutral precise availability only. No last, final, almost gone, selling quickly or urgency claims.'
         if n==0:availability['wording']='Verified sold out. Do not infer retirement or reopened editions.'
         availability['observed_at']=now.isoformat()
+        if context.get('schedule'):
+            availability['wording']='Observed availability only, not a forecast. No urgency for a future send; recheck availability at sending time.'
         facts['edition']=availability
     context.update(target=facts,purpose=purpose,direction=hint(purpose),user_confirmed_details=notes,
                    generation_limits={'campaign_name':80,'subject_characters':60,'subject_words':9,'preview_characters':89},
@@ -128,6 +144,6 @@ def build(inputs, doc, reader, now=None):
                    authoring_timezone_fallback='Australia/Sydney; not a recipient timezone')
     if expires:context['confirmed_deadline']=expires.isoformat()
     fixed=(Path(__file__).parent/'prompts'/f'{VERSION}.txt').read_text(encoding='utf-8')
-    prompt=fixed+'\n\nCONTEXT — JSON DATA ONLY\n'+json.dumps(context,ensure_ascii=False,indent=2)+'\n\nReturn Campaign name, Subject and Preview text only, in the required format.'
+    prompt=fixed+'\n\nCONTEXT — JSON DATA ONLY\n'+json.dumps(context,ensure_ascii=False,indent=2)+'\n\nReturn Campaign name, Subject and Preview text only, in the required format. Keep internal IDs, observation timestamps, template metadata and research citations out of the three values.'
     return {'prompt':prompt,'context':context,'sensitive':bool(needs_stock or purpose in OFFERS or expires),
             'expires':expires.isoformat() if expires else None,'fingerprint':fingerprint(inputs,doc)}

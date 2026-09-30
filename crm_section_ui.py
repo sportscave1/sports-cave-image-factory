@@ -115,7 +115,10 @@ def middle_editor(doc, key, shop, store=None):
         from crm_store import StoreUnavailable
         try:templates=[{k:r[k] for k in ('id','name','version')} for r in library_rows(store)]
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
-    event = render_component(component,sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    from crm_image_prompt import image_prompt
+    editor = st.session_state.get('campaign_editor', {})
+    campaign_name = editor.get('name', '') if editor.get('document') is doc else ''
+    event = render_component(component,history_scope=doc.get('campaign_key',key),image_prompt=image_prompt(doc,campaign_name),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')

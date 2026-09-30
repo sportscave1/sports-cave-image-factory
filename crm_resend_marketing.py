@@ -112,7 +112,10 @@ def send_resend_test_email(*, user, recipient, confirmed, operation_id, env=None
 
 def _send_admin_email(*, user, recipient, confirmed, operation_id, message, env=None, session=None, campaign=None):
     """Internal single-recipient transport shared by vetted renderers, never audiences."""
-    if not os_accounts.is_admin(user):
+    if campaign:
+        from crm_navigation import require
+        require(user,'crm_campaigns_manage')
+    elif not os_accounts.is_admin(user):
         raise PermissionError('Only an active administrator can send a Resend test.')
     if confirmed is not True:
         raise DeliveryError('confirmation_required')

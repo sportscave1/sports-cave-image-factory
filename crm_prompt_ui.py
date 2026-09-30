@@ -18,7 +18,22 @@ def prompt_control(shop, editor, key):
     .st-key-crm-autofill-trigger{gap:4px;min-height:28px;margin-top:-8px}
     .st-key-crm-autofill-trigger button{font-size:12px!important;min-height:28px!important;padding:2px 6px!important;background:transparent!important;border:0!important}
     .st-key-crm-autofill-trigger button p{font-size:12px!important}
-    </style>''')
+    </style><script>(()=>{
+      if(window.scPromptScrollGuard)return;window.scPromptScrollGuard=true;
+      let anchor=null,wasOpen=false;
+      document.addEventListener('click',event=>{
+        const button=event.target.closest('.st-key-crm-autofill-trigger button');
+        if(button?.textContent.trim()!=='Auto fill prompt')return;
+        anchor={button,positions:[...document.querySelectorAll('[data-testid="stMain"],[data-testid="stSidebarContent"],.st-key-crm-composer-controls')].map(e=>[e,e.scrollTop,e.scrollLeft])};
+      },true);
+      const restore=()=>{anchor?.positions.forEach(([e,y,x])=>{if(e.isConnected){e.scrollTop=y;e.scrollLeft=x;}});};
+      new MutationObserver(()=>{
+        const open=!!document.querySelector('[role="dialog"] .st-key-crm-autofill-body');
+        if(open===wasOpen)return;wasOpen=open;if(!anchor)return;
+        restore();requestAnimationFrame(restore);
+        if(!open)anchor.button?.focus({preventScroll:true});
+      }).observe(document.body,{childList:true,subtree:true});
+    })();</script>''',unsafe_allow_javascript=True)
     if opened:
         state=st.session_state.setdefault(key+'prompt_helper',{})
         if (state.get('ready') or {}).get('sensitive'):state.pop('ready',None)
@@ -51,20 +66,21 @@ def picker(reader, kind, key):
                           key=key+'pick_'+str(state.get('offset',0))+'_'+str(len(state.get('cursors',[])))+'_'+query+'_'+str(state.get('choice_epoch',0)))
     if identity:st.session_state[key+'selected']=deepcopy(options[identity])
     if not rows:st.caption('No matching results.' if 'rows' in page else 'No cached options.')
-    a,b,c=st.columns(3)
     back=state.get('offset',0)>0 if kind=='Single product' else len(state.get('cursors',[None]))>1
-    if a.button('Previous',disabled=not back,key=key+'previous'):
-        if kind=='Single product':state['offset']-=8
-        else:state['cursors'].pop()
-        st.rerun(scope='fragment')
-    if b.button('Next',disabled=not page.get('more'),key=key+'next'):
-        if kind=='Single product':state['offset']=state.get('offset',0)+8
-        else:
-            cursor=page.get('cursor')
-            if not cursor or cursor in state['cursors']:st.error('Pagination unavailable. Retry.');return None
-            state['cursors'].append(cursor)
-        st.rerun(scope='fragment')
-    c.button('Retry',key=key+'retry')
+    if back or page.get('more'):
+        a,b=st.columns(2)
+        if a.button('Previous',disabled=not back,key=key+'previous'):
+            if kind=='Single product':state['offset']-=8
+            else:state['cursors'].pop()
+            st.rerun(scope='fragment')
+        if b.button('Next',disabled=not page.get('more'),key=key+'next'):
+            if kind=='Single product':state['offset']=state.get('offset',0)+8
+            else:
+                cursor=page.get('cursor')
+                if not cursor or cursor in state['cursors']:st.error('Pagination unavailable. Retry.');return None
+                state['cursors'].append(cursor)
+            st.rerun(scope='fragment')
+    if 'rows' not in page:st.button('Retry',key=key+'retry')
     if kind=='Collection' and query.strip():
         if st.button('Use “'+query.strip()+'”',key=key+'manual'):
             st.session_state[key+'selected']={'source':'manual','title':query.strip()}
@@ -74,7 +90,7 @@ def picker(reader, kind, key):
             st.rerun(scope='fragment')
         elif identity:state['manual']=False
     chosen=st.session_state.get(key+'selected')
-    if chosen:st.caption('Selected: '+chosen['title']+(' · manual' if chosen.get('source')=='manual' else ''))
+    if chosen and chosen.get('source')=='manual':st.caption('Using: '+chosen['title']+' · manual')
     return chosen
 
 
@@ -98,10 +114,13 @@ def prompt_dialog(shop,editor,key):
     # Native dialog supplies focus containment, Escape and X. No page rerun.
     state=st.session_state.setdefault(key.rstrip('_'),{})
     st.html('''<style>
-    [role="dialog"]:has(.st-key-crm-autofill-body){width:min(490px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto}
-    .st-key-crm-autofill-body [data-testid="stVerticalBlock"]{gap:6px}
+    [role="dialog"]:has(.st-key-crm-autofill-body){width:min(490px,calc(100vw - 32px));max-height:calc(100dvh - 96px);overflow:auto;margin:16px auto!important;box-sizing:border-box}
+    .st-key-crm-autofill-body,.st-key-crm-autofill-body [data-testid="stVerticalBlock"]{gap:6px!important}
     .st-key-crm-autofill-body label p{font-size:13px}
     .st-key-crm-autofill-body button{min-height:30px}
+    .st-key-crm-autofill-body button[kind="primary"]{background:#242424;border-color:#242424;color:#fff}
+    .st-key-crm-autofill-body button[kind="segmented_controlActive"]{color:#242424;border-color:#b49450;background:#f2eddf}
+    .st-key-crm-autofill-body button:focus-visible,.st-key-crm-autofill-body input:focus-visible{outline:2px solid #b49450;outline-offset:2px}
     </style>''')
     with st.container(key='crm-autofill-body'):
         kind=st.segmented_control('What are you promoting?',('Single product','Collection'),key=key+'kind')
@@ -115,7 +134,7 @@ def prompt_dialog(shop,editor,key):
             target=picker(reader,kind,key+kind)
         purpose=st.selectbox('What type of email is this?',PURPOSES,index=None,key=key+'purpose',placeholder='Choose an email type')
         edition_id=None
-        if kind=='Collection' and purpose in STOCK:
+        if kind=='Collection' and (purpose in STOCK or purpose=='Availability / waitlist update'):
             st.caption('Select one qualifying edition in this collection. No collection-wide stock claim.')
             edition=picker(reader,'Single product',key+'collectionedition')
             edition_id=(edition or {}).get('id')
@@ -124,14 +143,23 @@ def prompt_dialog(shop,editor,key):
                            placeholder=hint(purpose),key=key+'details')
         inputs={'kind':kind,'target':target,'purpose':purpose,'details':notes,'edition_id':edition_id}
         stamp=fingerprint(inputs,editor['document'])
-        if (state.get('ready') or {}).get('fingerprint')!=stamp:state.pop('ready',None)
+        if state.get('input_stamp')!=stamp:
+            state.pop('ready',None);state.pop('error',None);state['input_stamp']=stamp
         if st.button('Submit',key=key+'submit',type='primary'):
+            state.pop('error',None)
             try:
                 state['ready']=build(inputs,editor['document'],reader)
-            except ValueError as exc:state.pop('ready',None);st.caption(str(exc))
+            except ValueError as exc:
+                state.pop('ready',None);state['error']=str(exc)
             except Exception as exc:
-                state.pop('ready',None);st.caption('Public context unavailable. Retry Submit.')
+                state.pop('ready',None);state['error']='Public context unavailable. Retry Submit.'
                 logging.getLogger(__name__).warning('campaign_prompt_context_unavailable type=%s',type(exc).__name__)
+        if state.get('error'):
+            st.caption(state['error'])
+            if state['error'].startswith('Sold out is not low stock'):
+                def switch_to_availability():
+                    st.session_state[key+'purpose']='Availability / waitlist update'
+                st.button('Use Availability / waitlist update',key=key+'sold_out_switch',on_click=switch_to_availability)
         ready=state.get('ready')
         if ready:st.caption('Prompt ready')
         if st.button('Copy prompt',key=key+'copy',disabled=not ready):
@@ -143,8 +171,10 @@ def prompt_dialog(shop,editor,key):
                 for context in (old,new):(context['target'].get('edition') or {}).pop('observed_at',None)
                 if old!=new:raise ValueError('Context changed. Submit again before copying.')
                 copy_result(current['prompt'])
-            except ValueError as exc:state.pop('ready',None);st.caption(str(exc))
-            except Exception:state.pop('ready',None);st.caption('Unable to recheck facts. Submit again.')
+            except ValueError as exc:
+                state.pop('ready',None);state['error']=str(exc);st.rerun(scope='fragment')
+            except Exception:
+                state.pop('ready',None);state['error']='Unable to recheck facts. Submit again.';st.rerun(scope='fragment')
         if state.get('ready'):
             with st.expander('View prompt'):st.code(state['ready']['prompt'],language=None)
     interaction_bridge()
@@ -158,9 +188,15 @@ def interaction_bridge():
         if(input.dataset.promptBound)return;input.dataset.promptBound='1';
         input.addEventListener('input',()=>{
           root.querySelectorAll('button').forEach(b=>{if(b.textContent.trim()==='Copy prompt')b.disabled=true;});
+          root.querySelectorAll('p').forEach(p=>{if(p.textContent.trim()==='Prompt ready')p.hidden=true;});
+          const copied=root.querySelector('#crm-prompt-copy-result');if(copied)copied.hidden=true;
           if(!['Search editions','Select or type a collection'].includes(input.getAttribute('aria-label')))return;
           clearTimeout(input.promptTimer);input.promptTimer=setTimeout(()=>{
-            if(input.isConnected)input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));
+            if(input.isConnected&&document.activeElement===input){
+              const start=input.selectionStart,end=input.selectionEnd;
+              input.blur(); // Existing Streamlit text-input commit; never submits a form.
+              requestAnimationFrame(()=>{if(input.isConnected){input.focus({preventScroll:true});input.setSelectionRange(start,end);}});
+            }
           },250);
         });
       });

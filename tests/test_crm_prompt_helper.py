@@ -74,6 +74,38 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(clean('<b>Happy</b><script>steal()</script>'),'Happy')
         self.assertEqual(len(clean('x'*1000,100)),100)
 
+    def test_dialog_manual_fallback_does_not_save_or_change_campaign(self):
+        from streamlit.testing.v1 import AppTest
+        app=AppTest.from_string('''
+import streamlit as st
+from unittest.mock import patch
+from copy import deepcopy
+from tests.test_crm_prompt_helper import DOC, Reader
+from crm_prompt_ui import prompt_dialog
+class Offline(Reader):
+ def collections(self,*a,**k):raise RuntimeError('offline')
+st.session_state.setdefault('editor',{'name':'Unsaved fixture','document':deepcopy(DOC)})
+with patch('crm_prompt_readers.PromptReader',return_value=Offline()):
+ prompt_dialog(None,st.session_state.editor,'helper_')
+''')
+        app.session_state['helper_kind']='Collection'
+        app.run();self.assertFalse(app.exception)
+        original=deepcopy(app.session_state['editor'])
+        next(t for t in app.text_input if t.label=='Select or type a collection').set_value('Custom heroes').run()
+        # Native fragment rerun is simulated explicitly by AppTest.
+        from unittest.mock import patch
+        with patch('streamlit.rerun'):
+            next(b for b in app.button if b.label=='Use “Custom heroes”').click().run()
+        app.run()
+        next(s for s in app.selectbox if s.label=='What type of email is this?').select('Collection showcase').run()
+        next(b for b in app.button if b.label=='Submit').click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any(c.value=='Prompt ready' for c in app.caption))
+        self.assertEqual(app.session_state['helper']['ready']['context']['target']['source'],'manual')
+        next(t for t in app.text_area if t.label=='Details to include').set_value('A fresh angle').run()
+        self.assertTrue(next(b for b in app.button if b.label=='Copy prompt').disabled)
+        self.assertEqual(app.session_state['editor'],original)
+
     def test_readers_paginate_both_collection_types_and_use_exact_ledger_read(self):
         shop=Mock(namespace='fixture-pages');shop.query.side_effect=[
             {'collections':{'nodes':[{'id':'1','title':'Manual'}],'pageInfo':{'hasNextPage':True,'endCursor':'next'}}},

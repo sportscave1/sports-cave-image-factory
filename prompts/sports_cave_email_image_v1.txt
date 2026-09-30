@@ -1,0 +1,288 @@
+SPORTS CAVE — EMAIL IMAGE BUILDER
+
+I am attaching an image that I want to use inside a Sports Cave marketing email.
+
+Complete the entire image preparation and email HTML workflow for me.
+
+IMPORTANT:
+I want a finished result that I can paste directly into the Sports Cave email editor.
+
+STEP 1 — REVIEW AND OPTIMISE THE IMAGE
+
+Inspect the attached image.
+
+Prepare it specifically for use inside a marketing email.
+
+Preserve the original visual appearance and aspect ratio.
+
+Do not:
+- stretch the image
+- distort it
+- crop important artwork
+- unnecessarily reduce quality
+- add text
+- add borders
+- add effects
+- redesign the image
+
+Choose the most appropriate email-compatible image format.
+
+For normal Sports Cave photography/artwork prefer a high-quality JPEG unless PNG is genuinely required.
+
+Do not use SVG.
+
+Avoid WebP or AVIF if they could reduce compatibility across email clients.
+
+The Sports Cave email body has a maximum width of approximately 600px.
+
+Prepare the source image at an appropriate resolution for this.
+
+A source width around 1200px may be suitable for sharp high-density displays where appropriate, while the email itself should render it at a maximum of approximately 600px.
+
+Do not leave the uploaded image unnecessarily huge.
+
+Compress it intelligently.
+
+Aim for a lightweight image suitable for email delivery.
+
+Ideally keep it around or below approximately 250 KB where visual quality allows.
+
+Do not destroy the quality of Sports Cave artwork purely to meet an arbitrary file-size target.
+
+Avoid multi-megabyte email images wherever practical.
+
+STEP 2 — CREATE THE BEST IMAGE FILE NAME
+
+Create the best possible SEO-friendly file name for this exact image.
+
+The filename must:
+
+- accurately describe the image
+- use lowercase
+- use hyphens between words
+- contain no meaningless numbers
+- contain no keyword stuffing
+- not use generic names such as image1.jpg
+- be appropriate for Sports Cave
+- be appropriate for Shopify
+- be appropriate for SEO
+
+STEP 3 — WRITE ALT TEXT
+
+Create professional image ALT text.
+
+The ALT text must:
+
+- accurately describe the image
+- identify the athlete, team, sport, moment or artwork where appropriate
+- be concise
+- sound natural
+- prioritise accessibility
+- also be search-friendly where natural
+- contain no keyword stuffing
+- make no unsupported claims
+
+STEP 4 — UPLOAD THE IMAGE TO SHOPIFY
+
+Upload the optimised image to the connected Sports Cave Shopify store/files.
+
+Use the SEO-friendly filename where the available Shopify workflow allows it.
+
+I need the REAL permanent Shopify CDN HTTPS URL.
+
+IMPORTANT:
+
+Do not invent a Shopify URL.
+
+Do not use a placeholder.
+
+Do not guess the CDN address.
+
+Only continue with the final HTML once the real Shopify-hosted image URL is available.
+
+If Shopify is not connected or you genuinely cannot upload the image, tell me rather than fabricating a URL.
+
+STEP 5 — CREATE PRODUCTION EMAIL HTML
+
+Using the REAL Shopify HTTPS CDN image URL, create one finished HTML snippet that I can paste directly into a Sports Cave marketing email.
+
+The image must render correctly across:
+
+- desktop
+- mobile
+- approximately 320px screens
+- 375px screens
+- 390px screens
+- 430px screens
+- tablets
+- Apple Mail
+- iPhone Mail
+- iPad Mail
+- Gmail mobile
+- Gmail desktop/web
+- Android email clients
+- Samsung Mail where practical
+- Outlook web
+- Outlook desktop where practical
+- Yahoo Mail
+- other mainstream email clients
+
+Use conservative production email HTML.
+
+The Sports Cave email container is approximately 600px maximum width.
+
+The image must:
+
+- scale down responsively
+- never exceed its container
+- never cause horizontal scrolling
+- preserve its natural aspect ratio
+- remain sharp on high-density displays
+- work when images are remotely loaded
+- use the actual Shopify HTTPS CDN URL
+
+Use table-based email markup.
+
+Use:
+
+<table role="presentation">
+
+with:
+
+cellspacing="0"
+cellpadding="0"
+border="0"
+
+Use inline CSS.
+
+Do not depend on:
+
+- JavaScript
+- external CSS
+- CSS frameworks
+- scripts
+- forms
+- base64 images
+- data URIs
+- unsupported background-image techniques
+
+The <img> element should include appropriate email-safe attributes and styles including:
+
+- src using the real Shopify HTTPS URL
+- approved alt text
+- border="0"
+- appropriate numeric width attribute
+- display:block
+- width:100%
+- max-width appropriate to the Sports Cave email
+- height:auto
+- border:0
+- outline:none
+- text-decoration:none
+- -ms-interpolation-mode:bicubic where useful for Outlook
+
+Make the image responsive without stretching it.
+
+Do not create a layout wider than 600px.
+
+Do not add unnecessary decorative wrappers.
+
+SPORTS CAVE BRAND DIRECTION
+
+The email design should remain:
+
+- premium
+- minimal
+- collector-focused
+- black
+- warm white
+- muted grey
+- restrained gold accents
+- clean
+- professional
+
+Do not add cheap promotional styling.
+
+Do not add unnecessary:
+
+- coloured backgrounds
+- shadows
+- cards
+- borders
+- rounded containers
+
+Let the artwork remain the focus.
+
+CLICKABLE IMAGE
+
+If a genuine Sports Cave product or campaign destination URL is ALREADY known in this conversation, the image may be wrapped in a safe:
+
+<a href="..." target="_blank">
+
+If the correct destination URL is not genuinely known:
+
+DO NOT invent one.
+
+Leave the image unlinked.
+
+EMAIL STRUCTURE
+
+Return only the HTML required for this image section.
+
+Do not include:
+
+<html>
+<head>
+<body>
+
+The result must be a self-contained snippet designed to sit inside an existing Sports Cave email body.
+
+STEP 6 — FINAL QUALITY CHECK
+
+Before returning the HTML verify:
+
+- Shopify image URL is real
+- URL uses HTTPS
+- no fake URL
+- no placeholder image URL
+- no base64 image
+- no data URI
+- valid alt text
+- SEO-friendly filename
+- appropriate image dimensions
+- reasonable image file size
+- responsive sizing
+- aspect ratio preserved
+- no horizontal overflow
+- table-based email structure
+- inline CSS
+- no JavaScript
+- no unsupported layout dependency
+- practical Outlook compatibility
+- suitable for desktop and mobile
+- suitable inside a 600px email container
+
+OUTPUT FORMAT
+
+Return:
+
+SHOPIFY FILE
+
+Filename:
+Alt text:
+Shopify CDN URL:
+Optimised file size:
+Image dimensions:
+
+Then:
+
+EMAIL HTML
+
+```html
+[ONE finished production-ready HTML snippet]
+```
+
+Do not give me multiple HTML options.
+Give me one final recommended version.
+Do not use placeholders.
+If anything required is unavailable, tell me exactly what is missing instead of inventing it.

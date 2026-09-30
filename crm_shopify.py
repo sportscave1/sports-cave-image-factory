@@ -42,6 +42,7 @@ FIRST_ORDER = '''query CrmFirstOrder($id:ID!) { customer(id:$id) {
 PRODUCT_FIELDS = '''id title productType tags onlineStoreUrl featuredImage { url }
  collections(first:5) { nodes { id title handle } '''+PAGE+' }'
 PRODUCTS = 'query CrmProducts($ids:[ID!]!) { nodes(ids:$ids) { ... on Product { '+PRODUCT_FIELDS+' } } }'
+PRODUCT_PUBLIC_CONTEXT = PRODUCTS.replace('CrmProducts(', 'CrmProductPublicContext(').replace('productType tags','description productType tags')
 CAMPAIGN_CONNECTION='''query CrmCampaignConnection {
  shop { id } currentAppInstallation { accessScopes { handle } }
 }'''
@@ -197,9 +198,9 @@ class Shopify:
         doc, root = (ORDER_LINES, 'order') if kind == 'order' else (CHECKOUT_LINES, 'node')
         data = self.query(doc, {'id':object_id, 'after':after}, kind, 30, fresh).get(root)
         return data['lineItems'] if data else {'nodes':[], 'pageInfo':{}}
-    def products(self, ids, fresh=False):
+    def products(self, ids, fresh=False, *, public_context=False):
         if not ids:return []
-        return [p for p in self.query(PRODUCTS, {'ids':sorted(set(ids))[:50]}, 'products', 180, fresh)['nodes'] if p]
+        return [p for p in self.query(PRODUCT_PUBLIC_CONTEXT if public_context else PRODUCTS, {'ids':sorted(set(ids))[:50]}, 'products', 180, fresh)['nodes'] if p]
     def collections(self, product_id, after=None, fresh=False):
         data = self.query(COLLECTIONS, {'id':product_id, 'after':after}, 'products', 180, fresh).get('product')
         return data['collections'] if data else {'nodes':[], 'pageInfo':{}}

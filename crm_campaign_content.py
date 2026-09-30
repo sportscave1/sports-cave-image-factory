@@ -70,7 +70,7 @@ def validate_document(doc):
         from crm_middle_sections import validate_middle
         validate_middle(doc['middle_sections'])
         if doc.get('content_mode') != 'HTML': raise ValueError('Middle sections require HTML content mode.')
-        if doc.get('custom_html','') != next(s['html'] for s in doc['middle_sections'] if s.get('html_number')==1):
+        if doc.get('custom_html','') != next((s['html'] for s in doc['middle_sections'] if s.get('html_number')==1), ''):
             raise ValueError('HTML Section 1 and the compatibility source must match.')
         if sum(len(s.get('html','').encode('utf-8')) for s in doc['middle_sections']) + sum(len(v.encode('utf-8')) for v in doc.get('html_sections',{}).values()) > 95000:
             raise ValueError('Combined HTML sections must be at most 95 KB.')
