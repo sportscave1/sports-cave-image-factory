@@ -58,11 +58,24 @@
     if(!recovery.state)return '';
     return `<span role="status">${esc(recovery.message)}</span>${recovery.state==='stopped'?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':''}`;
   }
-  if (typeof module !== 'undefined') {module.exports={esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
+  function replyPromptControls(mode) {
+    if(mode!=='reply')return '';
+    return `<div class="reply-tools"><button type="button" data-action="reply_prompts" aria-haspopup="menu" aria-expanded="false" aria-controls="reply-prompts-popup">Prompts ▾</button><button type="button" class="reply-prompt-help" data-action="reply_prompt_help" aria-label="How prompts work" aria-expanded="false" aria-controls="reply-prompts-popup">?</button><div id="reply-prompts-popup" class="reply-prompt-popup" hidden></div><div id="reply-prompt-feedback" class="reply-prompt-feedback" role="status" aria-live="polite" hidden></div></div>`;
+  }
+  async function copyReplyPrompt(prompt,clipboard) {
+    if(!prompt?.text || prompt.error)return {ok:false,message:prompt?.error||'5-star rating could not be confirmed for this email.'};
+    try {
+      if(!clipboard?.writeText)throw new Error('Clipboard unavailable');
+      await clipboard.writeText(prompt.text);
+      return {ok:true,message:'✓ Prompt copied — paste into ChatGPT'};
+    } catch (_) {return {ok:false,message:'Could not copy the prompt. Allow clipboard access and try again.'};}
+  }
+  if (typeof module !== 'undefined') {module.exports={replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
   let selectionControlsDisabled=false;
+  let replyPromptFeedbackTimer=null;
   const views=createViewCache();
   const submitted=new Set();
   let lastLiveCheck=Date.now(), menu=null, menuTarget=null, focusSearch=false;
@@ -225,7 +238,7 @@
     if (!model.draft) return messages();
     const draft={...model.draft,...(localDraft?.id===model.draft.id?localDraft:{})}, lock=locked(model), status=model.send_result?.status;
     const forwarded=draft.mode==='forward'?(model.messages||[]).flatMap(m=>m.attachments.map(a=>({...a,message_key:m.key}))):[];
-    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${button('Close · Esc','close_composer','','','plain')}</div><div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true">${sendStatus(model)}</div>${['accepted','unknown'].includes(status)&&model.sent_result?.status!=='present'?button('Check Sent copy','check_sent'):status==='rejected'?button('Try again','retry_rejected'):''}<div class="row wrap">${status==='accepted'?button('Close','close_composer','','','primary'):button('Send','send','title="Ctrl+Enter"',lock||status==='rejected'||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
+    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><div class="reply-heading"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${replyPromptControls(draft.mode)}</div>${button('Close · Esc','close_composer','','','plain')}</div><div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true">${sendStatus(model)}</div>${['accepted','unknown'].includes(status)&&model.sent_result?.status!=='present'?button('Check Sent copy','check_sent'):status==='rejected'?button('Try again','retry_rejected'):''}<div class="row wrap">${status==='accepted'?button('Close','close_composer','','','primary'):button('Send','send','title="Ctrl+Enter"',lock||status==='rejected'||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
   }
   function settings() {
     const s=model.settings;
@@ -335,6 +348,41 @@
     const id=model.draft.operation_id;if(submitted.has(id))return;
     submitted.add(id);emit('send',{operation_id:id});
   }
+  function closeReplyPrompts() {
+    const popup=$('reply-prompts-popup');
+    if(popup)popup.hidden=true;
+    root.querySelectorAll('[data-action="reply_prompts"],[data-action="reply_prompt_help"]').forEach(b=>b.setAttribute('aria-expanded','false'));
+  }
+  function positionReplyPopup(popup,anchor) {
+    const rect=anchor.getBoundingClientRect();
+    popup.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-popup.offsetWidth-8))+'px';
+    popup.style.top=Math.max(8,Math.min(rect.bottom+7,window.innerHeight-popup.offsetHeight-8))+'px';
+  }
+  function showReplyPrompts(button,help=false) {
+    const popup=$('reply-prompts-popup');if(!popup)return;
+    const feedback=$('reply-prompt-feedback');if(feedback)feedback.hidden=true;
+    clearTimeout(replyPromptFeedbackTimer);
+    const wasOpen=!popup.hidden&&popup.dataset.kind===(help?'help':'menu');
+    closeReplyPrompts();if(wasOpen)return;
+    popup.dataset.kind=help?'help':'menu';
+    popup.setAttribute('role',help?'note':'menu');
+    popup.innerHTML=help?`<strong>HOW PROMPTS WORK</strong><p>Choose a reply prompt and Sports Cave OS will add the customer, product and message details automatically.</p><p>Copy the prompt into ChatGPT, then paste ChatGPT's finished reply back into this email.</p>`:
+      (model.reply_prompts?.length?model.reply_prompts:[{id:'five_star_review',label:'5-star review response'}]).map(p=>`<button type="button" role="menuitem" data-action="copy_reply_prompt" data-prompt="${esc(p.id)}">${esc(p.label)}</button>`).join('');
+    popup.hidden=false;button.setAttribute('aria-expanded','true');positionReplyPopup(popup,button);
+    if(!help)popup.querySelector('button')?.focus();
+  }
+  async function copySelectedReplyPrompt(id) {
+    const prompt=(model.reply_prompts||[]).find(p=>p.id===id);
+    const feedback=$('reply-prompt-feedback'),anchor=root.querySelector('[data-action="reply_prompts"]');
+    closeReplyPrompts();
+    const result=await copyReplyPrompt(prompt,navigator.clipboard);
+    if(!feedback?.isConnected)return;
+    feedback.textContent=result.message;feedback.hidden=false;feedback.dataset.error=String(!result.ok);
+    positionReplyPopup(feedback,anchor);clearTimeout(replyPromptFeedbackTimer);
+    replyPromptFeedbackTimer=setTimeout(()=>{feedback.hidden=true;},result.ok?4000:6500);
+  }
+  document.addEventListener('pointerdown',e=>{if(!e.target.closest('.reply-tools'))closeReplyPrompts();});
+  window.addEventListener('resize',closeReplyPrompts);
   function wire(){
     $('search-form').onsubmit=e=>{e.preventDefault();emit('search',{query:$('search').value});};
     root.onclick=e=>{
@@ -348,6 +396,9 @@
         document.execCommand(b.dataset.command,false,value);snapshot();return;
       }
       const action=b.dataset.action;if(!action)return;
+      if(action==='reply_prompts'){showReplyPrompts(b);return;}
+      if(action==='reply_prompt_help'){showReplyPrompts(b,true);return;}
+      if(action==='copy_reply_prompt'){void copySelectedReplyPrompt(b.dataset.prompt);return;}
       if(action==='collapse'){collapsed=!collapsed;snapshot();render(model);return;}
       if(action==='back'){mobileReading=false;snapshot();render(model);return;}
       if(action==='compose'){compose(b.dataset.mode);return;}
@@ -448,6 +499,13 @@
       if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();return;}
       if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const items=[...menu.querySelectorAll('button:not(:disabled)')];const at=items.indexOf(document.activeElement);items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}
       if(e.key==='Enter'){e.preventDefault();document.activeElement?.click();return;}
+    }
+    const promptPopup=$('reply-prompts-popup');
+    if(e.key==='Escape'&&promptPopup&&!promptPopup.hidden){
+      e.preventDefault();e.stopPropagation();closeReplyPrompts();root.querySelector('[data-action="reply_prompts"]')?.focus();return;
+    }
+    if(promptPopup&&!promptPopup.hidden&&['ArrowDown','ArrowUp'].includes(e.key)){
+      const items=[...promptPopup.querySelectorAll('button')];if(items.length){e.preventDefault();const at=items.indexOf(document.activeElement);items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}
     }
     if(e.ctrlKey&&e.key==='Enter'&&model.view==='compose'){e.preventDefault();send();}
     if(e.key==='Escape'&&model.view==='compose'){e.preventDefault();emit('close_composer');}

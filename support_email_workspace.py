@@ -1017,6 +1017,7 @@ class Workspace:
             s["list_model"] = self._list_model()
         threads = s["list_model"] if not s.get("error") else []
         conversation = []
+        reply_prompts = []
         if not s.get("error"):
             for m in s.get("conversation", []):
                 key = reference_key(m)
@@ -1029,6 +1030,9 @@ class Workspace:
                 if body:
                     row.update(html=content["html"], quote=content["quote"], warnings=body.get("warnings", []),
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
+                if body and key == s.get("active_message") and s.get("view") == "compose" and (s.get("draft") or {}).get("mode") == "reply":
+                    from support_email_reply_prompts import build_reply_prompts
+                    reply_prompts = build_reply_prompts(m, {"html": content["html"], "review": body.get("review")})
                 conversation.append(row)
         draft = s.get("draft")
         public_draft = None
@@ -1055,7 +1059,7 @@ class Workspace:
             "selected": s.get("selected"), "messages": conversation, "active_message": s.get("active_message"),
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
-            "view": s["view"], "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
+            "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),

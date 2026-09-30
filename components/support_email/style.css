@@ -28,3 +28,8 @@
 .trash-delete-dialog p{line-height:1.5;overflow-wrap:anywhere}
 .trash-delete-dialog .row{justify-content:flex-end;gap:8px;margin-top:18px}
 .trash-delete-dialog [data-delete="confirm"]{color:#8c2922;border-color:#caa39e}
+/* Reply prompt tools are clipboard-only and occupy the existing header row. */
+.reply-heading{display:flex;align-items:center;gap:22px;min-width:0}.reply-tools{display:flex;align-items:center;gap:6px}.reply-tools>button{font-size:11px;padding:5px 8px}.reply-tools>.reply-prompt-help{border-radius:50%;padding:0;width:22px;height:22px;color:var(--muted)}
+.reply-prompt-popup,.reply-prompt-feedback{position:fixed;z-index:1000;background:var(--paper);border:1px solid var(--line);border-radius:7px;box-shadow:0 5px 18px #0002;padding:12px;width:max-content;max-width:min(300px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;white-space:normal;font-size:12px;line-height:1.5;box-sizing:border-box}
+.reply-prompt-popup[hidden],.reply-prompt-feedback[hidden]{display:none}.reply-prompt-popup strong{font-size:10px;letter-spacing:.6px}.reply-prompt-popup p{margin:8px 0 0}.reply-prompt-popup[role="menu"]{padding:5px}.reply-prompt-popup button{display:block;width:100%;border:0;text-align:left;font-size:12px}.reply-prompt-feedback{font-size:11px}.reply-prompt-feedback[data-error="true"]{color:#94352d}
+@media(max-width:1150px){.reply-heading{gap:14px}.panel-head:has(.reply-tools){padding-left:12px;padding-right:12px;gap:8px}.panel-head:has(.reply-tools)>button{font-size:11px;padding:5px}.reply-tools{gap:4px}}

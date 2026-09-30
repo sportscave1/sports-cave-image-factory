@@ -1,0 +1,24 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const {replyPromptControls,copyReplyPrompt}=require('../components/support_email/mail.js');
+const html=replyPromptControls('reply');
+assert.match(html,/Prompts ▾/);assert.match(html,/How prompts work/);assert.match(html,/aria-haspopup="menu"/);
+for(const mode of ['new','forward','reply_all'])assert.equal(replyPromptControls(mode),'');
+const source=fs.readFileSync('components/support_email/mail.js','utf8');
+assert.match(source,/HOW PROMPTS WORK/);assert.match(source,/Copy the prompt into ChatGPT/);
+assert.match(source,/<strong>\$\{\{new:[\s\S]*?<\/strong>\$\{replyPromptControls\(draft.mode\)\}/);
+const handlers=source.slice(source.indexOf("if(action==='reply_prompts')"),source.indexOf("if(action==='collapse')"));
+assert.doesNotMatch(handlers,/emit\(|send\(|snapshot\(|localDraft|editor/);
+const copy=source.slice(source.indexOf('async function copySelectedReplyPrompt'),source.indexOf("document.addEventListener('pointerdown'"));
+assert.doesNotMatch(copy,/emit\(|send\(|snapshot\(|localDraft|editor|draft\./);
+assert.match(copy,/4000:6500/);assert.match(source,/closeReplyPrompts\(\);root.querySelector/);
+(async()=>{
+  const prompt={id:'five_star_review',text:'Exact complete prompt',error:''};const before=JSON.stringify(prompt);let copied;
+  assert.deepEqual(await copyReplyPrompt(prompt,{writeText:async text=>copied=text}),{ok:true,message:'✓ Prompt copied — paste into ChatGPT'});
+  assert.equal(copied,prompt.text);assert.equal(JSON.stringify(prompt),before);
+  assert.equal((await copyReplyPrompt(prompt,{writeText:async()=>{throw Error('denied');}})).ok,false);
+  assert.equal((await copyReplyPrompt(prompt,undefined)).ok,false);
+  let called=false;
+  const result=await copyReplyPrompt({error:'5-star rating could not be confirmed for this email.'},{writeText:async()=>called=true});
+  assert.equal(called,false);assert.equal(result.ok,false);assert.match(result.message,/could not be confirmed/);
+  console.log('Reply prompt UI and clipboard checks passed; no draft or mail actions in prompt handlers.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
