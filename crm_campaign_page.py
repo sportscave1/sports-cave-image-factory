@@ -295,8 +295,8 @@ def continue_campaign_leave(drafts,navigate):
 
 
 @st.fragment
-def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
-    from email_loading import stage, shell
+def campaign_workspace(shop,store,actions,navigate=lambda _:None):
+    from email_loading import stage
     from crm_html_workspace import composer_styles
     composer_styles()
     drafts=CampaignStore(store.connect)
@@ -308,23 +308,19 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None,loading=None):
     # Keep the established layout, but stream the lightweight list before restoring
     # the selected composer and its settings. The editor occupies its own slot.
     st.html('''<style>
-      .st-key-crm-selected-campaign:has(.sc-email-loading){min-height:780px}
       [data-testid="stMainBlockContainer"]:has(.st-key-crm-recent-campaigns){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
     </style>''')
     editor_area=st.container(key='crm-selected-campaign')
-    with editor_area:editor_loading=shell('Campaigns')
-    if loading:loading.empty()
     with st.container(key='crm-recent-campaigns'):
         from crm_tracking_health import control as tracking_health_control
         tracking_health_control(shop,drafts,actions.user)
         with stage('Campaigns','list_render'):
             recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
     with editor_area:
-        try:_selected_campaign(shop,store,actions,navigate,drafts,editor_loading)
-        finally:editor_loading.empty()
+        _selected_campaign(shop,store,actions,navigate,drafts)
 
 
-def _selected_campaign(shop,store,actions,navigate,drafts,loading):
+def _selected_campaign(shop,store,actions,navigate,drafts):
     from crm_html_workspace import composer_styles
     from email_loading import stage
     available=True
@@ -358,7 +354,7 @@ def _selected_campaign(shop,store,actions,navigate,drafts,loading):
     if delivery:
         # Frozen preview bypasses all authoring/autosave widgets and recovery writes.
         from crm_campaign_analytics_ui import locked_campaign
-        loading.empty();composer_styles()
+        composer_styles()
         editor['recovery_readonly']=True
         st.session_state['campaign_saved']=deepcopy(editor)
         locked_campaign(drafts,actions.user,delivery)
@@ -371,7 +367,6 @@ def _selected_campaign(shop,store,actions,navigate,drafts,loading):
     if doc['audience']!=selected_audience:doc['audience']=selected_audience;doc['counts']={}
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
-    loading.empty()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
     title,buttons=st.columns([5,4],vertical_alignment='center')
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])

@@ -1,4 +1,4 @@
-"""Small streamed placeholders and stage timings for the three Email workspaces."""
+"""Streamed Inbox/Automations placeholders and shared Email stage timings."""
 from contextlib import contextmanager
 import logging
 import time
@@ -22,7 +22,6 @@ def shell(page):
     """Emit before remote reads. No clients, queries, scripts or persisted state."""
     slot = st.empty()
     controls = {'Inbox': '+ New mail　　Search mail　　Refresh',
-                'Campaigns': '+ New campaign　　Find campaign　　Refresh',
                 'Automations': 'Flow　　Email　　Refresh'}[page]
     sidebar = ('<aside>Inbox<br>Drafts<br>Sent<br>Archive<br>Junk<br>Trash<br>Flagged</aside>'
                if page == 'Inbox' else '')

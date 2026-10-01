@@ -340,7 +340,7 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
     if route=='CRM Campaigns':
         from crm_campaign_page import campaign_workspace
         from crm_resend_marketing import DeliveryError
-        try: campaign_workspace(shop,store,actions,navigate,loading=loading)
+        try: campaign_workspace(shop,store,actions,navigate)
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
     left,right=st.columns([9,1])
@@ -389,6 +389,10 @@ def render_page(route,user,navigate=lambda _:None,**dependencies):
             return
         from email_loading import shell, stage
         require(user,PAGE_KEYS[route])
+        if route == 'CRM Campaigns':
+            with stage(route, 'render'):
+                _render_page(route,user,navigate,**dependencies)
+            return
         loading = shell(LABELS[route])
         try:
             with stage(route, 'render'):
