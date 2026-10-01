@@ -1,21 +1,32 @@
-const {execFileSync}=require('node:child_process');
-const vm=require('node:vm');
-const assert=require('node:assert/strict');
-const html=JSON.parse(execFileSync('.venv/Scripts/python',['-c',
- `import json; from unittest.mock import patch; from crm_prompt_ui import copy_result
-with patch('streamlit.html') as out:
- copy_result('fixture </script> prompt'); print(json.dumps(out.call_args.args[0]))`],{encoding:'utf8'}));
-const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
-async function check(clipboard){
- const status={textContent:'Copying…'},fallback={hidden:true,value:''};
- vm.runInNewContext(source,{navigator:{clipboard},document:{getElementById:id=>id.includes('fallback')?fallback:status}});
- await new Promise(resolve=>setImmediate(resolve));return {status,fallback};
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync('ui_components/prompt_copy/clipboard.js','utf8');
+async function check(api,legacy){
+ let selected='',removed=false,calls=0,reads=0;
+ const active={focus(){}};
+ const area={style:{},setAttribute(){},focus(){},select(){selected=this.value;},setSelectionRange(){},remove(){removed=true;}};
+ const context={isSecureContext:true,navigator:{clipboard:{writeText:api,readText(){reads++;}}},document:{activeElement:active,body:{appendChild(){}},createElement:()=>area,execCommand(){calls++;return legacy;}}};
+ vm.runInNewContext(source,context);const ok=await context.scCopyText('fixture </script> λ');
+ assert.equal(reads,0);return {ok,calls,selected,removed};
 }
 (async()=>{
- let text;let r=await check({writeText:async value=>{text=value;}});
- assert.equal(text,'fixture </script> prompt');assert.equal(r.status.textContent,'Copied');assert.equal(r.fallback.hidden,true);
- for(const clipboard of [undefined,{writeText:async()=>{throw Error('denied');}}]){
-  r=await check(clipboard);assert.notEqual(r.status.textContent,'Copied');assert.equal(r.fallback.hidden,false);assert.equal(r.fallback.value,'fixture </script> prompt');
+ let actual;let r=await check(async s=>{actual=s;},false);assert.equal(r.ok,true);assert.equal(r.calls,0);assert.equal(actual,'fixture </script> λ');
+ for(const api of [undefined,async()=>{throw Error('denied');}]){
+  r=await check(api,true);assert.equal(r.ok,true);assert.equal(r.calls,1);assert.equal(r.selected,'fixture </script> λ');assert.equal(r.removed,true);
+  r=await check(api,false);assert.equal(r.ok,false);assert.equal(r.calls,1);
  }
- console.log('Actual clipboard script: success, unsupported, denial and escaped payload passed.');
+ const html=fs.readFileSync('ui_components/prompt_copy/index.html','utf8');
+ const js=html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+ const button={style:{},setAttribute(){},addEventListener(t,f){this[t]=f;}},status={};let listener;const messages=[];
+ const parent={postMessage:m=>messages.push(m)};
+ const ctx={window:{parent,addEventListener(t,f){listener=f;},setTimeout(){},scCopyText:async()=>true},document:{body:{scrollHeight:58},getElementById:id=>id==='copy-button'?button:status},crypto:{randomUUID:()=> 'nonce'}};
+ vm.runInNewContext(js,ctx);
+ const render=args=>listener({source:parent,data:{type:'streamlit:render',args}});
+ render({validation_mode:true,compact:true,label:'Copy email prompt',prompt_text:''});button.click({preventDefault(){}});
+ assert.equal(messages.at(-1).value.type,'prepare');
+ render({validation_mode:true,compact:true,label:'Copy email prompt',prompt_text:'verified',response_id:'nonce'});
+ await new Promise(r=>setImmediate(r));assert.equal(messages.find(m=>m.value?.type==='copied').value.event,'nonce');
+ const count=messages.filter(m=>m.value?.type==='copied').length;render({validation_mode:true,compact:true,prompt_text:'verified',response_id:'nonce'});
+ await new Promise(r=>setImmediate(r));assert.equal(messages.filter(m=>m.value?.type==='copied').length,count);
+ render({prompt_text:'ads',label:'Copy Prompt'});button.click({preventDefault(){}});await new Promise(r=>setImmediate(r));assert.equal(messages.at(-2).value,true);
+ console.log('Clipboard API, rejection fallback, unsupported fallback, both-failed, no reads, safe literal payload, CRM preflight/ack/no loop and Ads boolean contract passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

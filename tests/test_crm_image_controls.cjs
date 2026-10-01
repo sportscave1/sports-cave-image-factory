@@ -12,7 +12,7 @@ class Node{
  for(const fail of [false,true]){
   const timers=[],writes=[],row=new Node('div');
   const ctx=vm.createContext({document:{createElement:tag=>new Node(tag)},crypto:{randomUUID:()=> 'fixture'},innerWidth:500,innerHeight:700,
-   navigator:{clipboard:{writeText:async text=>{if(fail)throw Error('Denied');writes.push(text);}}},setTimeout:(fn,ms)=>timers.push({fn,ms})});
+   window:{addEventListener(){},scCopyText:async text=>{if(fail)return false;writes.push(text);return true;}},setTimeout:(fn,ms)=>timers.push({fn,ms})});
   vm.runInContext(source,ctx);ctx.imageControls(row,prompt);
   const [copy,help,popup]=row.children;
   assert.equal(copy.type,'button');assert.equal(help.type,'button');assert.equal(popup.attrs.popover,'auto');
@@ -20,7 +20,7 @@ class Node{
   row.events.keydown({key:'Escape',preventDefault(){}});assert.equal(popup.open,false);assert.equal(help.focused.preventScroll,true);
   await copy.onclick();
   if(fail){assert.equal(copy.textContent,'Copy prompt');const fallback=popup.children.at(-1);assert.equal(fallback.hidden,false);assert.equal(fallback.children[1].value,prompt);assert.equal(fallback.children[1].readOnly,true);}
-  else{assert.deepEqual(writes,[prompt]);assert.equal(copy.textContent,'✓ Copied');assert.equal(timers[0].ms,1800);timers[0].fn();assert.equal(copy.textContent,'Copy prompt');}
+  else{assert.deepEqual(writes,[prompt]);assert.equal(copy.textContent,'✓ Prompt copied');assert.equal(timers[0].ms,1800);timers[0].fn();assert.equal(copy.textContent,'Copy prompt');}
  }
  // Actual advice function with parsed-attribute fixtures; browser covers native DOMParser.
  const image=attrs=>({getAttribute:k=>attrs[k]??null,hasAttribute:k=>k in attrs,alt:attrs.alt||'',style:{width:'100%',maxWidth:'600px',height:'auto'}});

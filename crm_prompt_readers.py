@@ -8,6 +8,16 @@ COLLECTION_PAGE = '''query CampaignPromptCollections($query:String,$after:String
  nodes { id title description handle }
  pageInfo { hasNextPage endCursor } }
  shop { primaryDomain { url } } }'''
+COLLECTION = '''query CampaignPromptCollection($id:ID!) {
+ collection(id:$id) { id title description handle }
+ shop { primaryDomain { url } } }'''
+
+
+def reference_image(value):
+    from urllib.parse import urlsplit
+    from crm_campaign_html import email_image_url
+    value=product_url(value or '')
+    return email_image_url(value) if value and urlsplit(value).hostname=='cdn.shopify.com' else ''
 
 
 class PromptReader:
@@ -46,6 +56,8 @@ class PromptReader:
         if not row:raise ValueError('Edition is no longer available. Select it again.')
         facts={'kind':'Single product','source':'Shopify public product','id':identity,
                'title':clean(row['title'],300),'url':product_url(row.get('onlineStoreUrl','')),
+               'handle':clean(row.get('handle',''),150),
+               'reference_image_url':reference_image((row.get('featuredImage') or {}).get('url')),
                'sport_or_product_type':clean(row.get('productType',''),100),
                'story':clean(row.get('description',''),800)}
         # Only explicit public taxonomy tags; never infer identity from a title.
@@ -53,6 +65,17 @@ class PromptReader:
             values=[clean(t.split(':',1)[1],100) for t in row.get('tags',[]) if t.casefold().startswith(label+':')]
             if values:facts[label]=', '.join(values)[:200]
         return facts
+
+    def collection(self, identity):
+        from crm_campaign_prompt import clean
+        from urllib.parse import quote
+        data=self.shop.query(COLLECTION,{'id':identity},'prompt collection',0,True)
+        row=data.get('collection')
+        if not row or row.get('id')!=identity:raise ValueError('Collection is no longer available. Select it again.')
+        domain=product_url(((data.get('shop') or {}).get('primaryDomain') or {}).get('url','')).rstrip('/')
+        return {'kind':'Collection','source':'Shopify collection','id':identity,'title':clean(row['title'],300),
+                'url':domain+'/collections/'+quote(row['handle'],safe='') if domain and row.get('handle') else '',
+                'story':clean(row.get('description',''))}
 
     def availability(self, identity):
         rows=self.editions(product_ids=[identity],limit=10)

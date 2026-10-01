@@ -55,11 +55,13 @@
       <button id="copy-button" type="button" aria-describedby="copy-status"></button>
       <div id="copy-status" class="status" role="status" aria-live="polite"></div>
     </div>
+    <script src="clipboard.js"></script>
     <script>
       (() => {
         const button = document.getElementById("copy-button");
         const status = document.getElementById("copy-status");
         let args = {};
+        let pending=null,handled=null,busy=false;
 
         function sendMessage(type, extra = {}) {
           window.parent.postMessage(
@@ -69,7 +71,7 @@
         }
 
         function setFrameHeight() {
-          sendMessage("streamlit:setFrameHeight", { height: 68 });
+          sendMessage("streamlit:setFrameHeight", { height: args.compact ? Math.max(58,document.body.scrollHeight || 0) : 68 });
         }
 
         function setComponentValue(value) {
@@ -84,49 +86,40 @@
           button.textContent = args.label || "Copy Prompt";
           button.className = args.primary ? "primary" : "";
           button.disabled = Boolean(args.disabled);
+          if(args.disabled)pending=null;
           button.setAttribute("aria-label", button.textContent);
-          status.textContent = "";
+          if(!args.validation_mode)status.textContent = "";
+          if(args.compact){button.style.cssText='padding:6px 10px;font-size:13px;border-radius:6px';}
+          if(args.validation_mode&&args.response_id&&args.response_id===pending&&handled!==pending){
+            handled=pending;performCopy(args.response_id);
+          }
           setFrameHeight();
         }
 
-        async function copyPrompt(event) {
-          event.preventDefault();
-          if (button.disabled) return;
-          const promptText = String(args.prompt_text || "");
-          const originalLabel = args.label || "Copy Prompt";
-          try {
-            if (navigator.clipboard && window.isSecureContext) {
-              await navigator.clipboard.writeText(promptText);
-            } else {
-              const textarea = document.createElement("textarea");
-              textarea.value = promptText;
-              textarea.style.position = "fixed";
-              textarea.style.opacity = "0";
-              document.body.appendChild(textarea);
-              textarea.focus();
-              textarea.select();
-              const copied = document.execCommand("copy");
-              document.body.removeChild(textarea);
-              if (!copied) throw new Error("Clipboard command failed");
-            }
-            const confirmation = args.success_label || "Prompt copied";
-            button.textContent = confirmation;
-            status.textContent = confirmation;
-            setComponentValue(Boolean(args.prompt_text));
-          } catch (_error) {
-            button.textContent = "Copy failed";
-            status.textContent = "Copy failed — use the prompt preview to copy manually.";
+        async function performCopy(requestId=null){
+          if(busy)return;busy=true;
+          const text=String(args.prompt_text||'');
+          const copied=await window.scCopyText(text);
+          const confirmation=args.success_label||'Prompt copied';
+          button.textContent=copied?confirmation:'Copy failed';
+          status.textContent=copied?confirmation:(args.compact?'Copy failed — open View prompt and copy manually.':'Copy failed — use the prompt preview to copy manually.');
+          if(args.validation_mode){
+            setComponentValue({type:copied?'copied':'failed',event:requestId});pending=null;
+          }else if(copied)setComponentValue(Boolean(args.prompt_text));
+          busy=false;setFrameHeight();
+          if(!args.compact)window.setTimeout(()=>{button.textContent=args.label||'Copy Prompt';status.textContent='';setFrameHeight();},1400);
+        }
+        function copyPrompt(event){
+          event.preventDefault();if(button.disabled||busy||pending)return;
+          if(args.validation_mode){
+            pending=crypto.randomUUID();status.textContent='Checking current facts…';
+            setComponentValue({type:'prepare',event:pending});return;
           }
-          setFrameHeight();
-          window.setTimeout(() => {
-            button.textContent = originalLabel;
-            status.textContent = "";
-            setFrameHeight();
-          }, 1400);
+          performCopy();
         }
 
         window.addEventListener("message", (event) => {
-          if (event.data && event.data.type === "streamlit:render") {
+          if (event.source === window.parent && event.data && event.data.type === "streamlit:render") {
             render(event.data.args);
           }
         });

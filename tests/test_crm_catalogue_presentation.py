@@ -88,20 +88,19 @@ class CataloguePresentationTests(unittest.TestCase):
 
     def test_compact_styles_survive_renderer_without_distorting_images(self):
         result = render_campaign(self.doc)['html']
-        for style in ('max-height:200px', 'width:auto', 'height:auto', 'margin:8px 0 4px',
-                      'line-height:23px', 'padding:9px 13px', 'background:#171717', 'color:#faf8f1'):
+        for style in ('width:100%', 'height:auto', 'font-size:21px', 'padding:12px 18px', 'background:#111111', 'color:#faf6eb'):
             self.assertIn(style, result)
         self.assertNotIn('object-fit', result)
         self.assertNotIn('text-transform:uppercase">Artwork', result)
 
     def test_layouts_share_renderer_and_preserve_responsive_hook(self):
-        for columns, height in ((1, 300), (2, 200)):
-            with self.subTest(columns=columns):
-                self.section['settings']['columns'] = columns
-                html = render_campaign(self.doc)['html']
-                self.assertIn('class="sc-stack" width="' + str(100 // columns) + '%"', html)
-                self.assertIn('max-height:' + str(height) + 'px', html)
-                self.assertIn('@media only screen and (max-width:480px)', html)
+        for columns in (1,2):
+            self.section['settings']['columns']=columns
+            html=render_campaign(self.doc)['html']
+            self.assertNotIn('class="sc-stack"',html)
+            self.assertIn('width="552"',html)
+            self.assertNotIn('max-height:300px',html)
+            self.assertIn('@media only screen and (max-width:480px)',html)
 
     def test_missing_editions_and_display_toggles_keep_valid_customer_output(self):
         self.p['edition'] = None

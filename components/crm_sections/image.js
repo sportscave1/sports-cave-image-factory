@@ -34,7 +34,7 @@ function imageControls(row,prompt){
  const message=document.createElement('span');message.textContent='Clipboard unavailable. Select and copy the prompt below.';
  const text=document.createElement('textarea');text.readOnly=true;text.value=prompt;text.setAttribute('aria-label','Image prompt for manual copying');fallback.append(message,text);
  copy.setAttribute('aria-live','polite');
- copy.onclick=async()=>{try{await navigator.clipboard.writeText(prompt);copy.textContent='✓ Copied';setTimeout(()=>{copy.textContent='Copy prompt';},1800);}catch{fallback.hidden=false;show();}};
+ copy.onclick=async()=>{const copied=await window.scCopyText(prompt);if(copied){fallback.hidden=true;copy.textContent='✓ Prompt copied';setTimeout(()=>{copy.textContent='Copy prompt';},1800);}else{fallback.hidden=false;show();}};
  popup.append(fallback);row.append(copy,help,popup);
 }
 if(typeof window!=='undefined')window.addEventListener('blur',()=>document.querySelectorAll('.image-popover:popover-open').forEach(p=>p.hidePopover()));

@@ -12,6 +12,7 @@ PRODUCT={'id':'gid://shopify/Product/1','title':'Six Laps Ahead Peter Brock Wall
 class Reader:
     def __init__(self,n=4):self.n=n
     def product(self,identity):return {'kind':'Single product','source':'Shopify public product','id':identity,'title':PRODUCT['title'],'url':'https://www.sportscaveshop.com/products/brock','sport_or_product_type':'Motorsport'}
+    def collection(self,identity):return {'kind':'Collection','source':'Shopify collection','id':identity,'title':'Racing','url':'https://www.sportscaveshop.com/collections/racing'}
     def availability(self,identity):return {'size':100,'remaining':self.n,'status':'Sold Out Archive' if self.n==0 else 'Final Editions' if self.n<=5 else 'Limited Edition','source':'Edition Ops read-only ledger'}
     def belongs(self,*args):return True
 
@@ -103,7 +104,7 @@ with patch('crm_prompt_readers.PromptReader',return_value=Offline()):
         self.assertTrue(any(c.value=='Prompt ready' for c in app.caption))
         self.assertEqual(app.session_state['helper']['ready']['context']['target']['source'],'manual')
         next(t for t in app.text_area if t.label=='Details to include').set_value('A fresh angle').run()
-        self.assertTrue(next(b for b in app.button if b.label=='Copy prompt').disabled)
+        self.assertIsNone(app.session_state['helper'].get('ready'))
         self.assertEqual(app.session_state['editor'],original)
 
     def test_readers_paginate_both_collection_types_and_use_exact_ledger_read(self):

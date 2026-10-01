@@ -1,7 +1,5 @@
 """Campaign-scoped manual ChatGPT helper; no editor writes or send actions."""
 from copy import deepcopy
-from html import escape
-import json
 import logging
 import uuid
 import streamlit as st
@@ -94,19 +92,17 @@ def picker(reader, kind, key):
     return chosen
 
 
-def copy_result(value):
-    # Native click has already revalidated context and fresh ledger facts. No
-    # draft mutation. Clipboard denial reveals read-only selectable text.
-    payload=json.dumps(value,ensure_ascii=True).replace('<','\\u003c')
-    st.html('''<div id="crm-prompt-copy-result" role="status">Copying…</div>
-    <textarea id="crm-prompt-copy-fallback" aria-label="Manual copy prompt" readonly hidden style="width:100%;height:120px"></textarea>
-    <script>(()=>{const text='''+payload+''';
-      const status=document.getElementById('crm-prompt-copy-result');
-      const fallback=document.getElementById('crm-prompt-copy-fallback');
-      const fail=()=>{status.textContent='Clipboard unavailable. Select and copy the text below.';fallback.hidden=false;fallback.value=text;};
-      if(!navigator.clipboard?.writeText){fail();return;}
-      navigator.clipboard.writeText(text).then(()=>{status.textContent='Copied';}).catch(fail);
-    })();</script>'''.replace('<script>','<script>/* '+uuid.uuid4().hex+' */'),unsafe_allow_javascript=True)
+def reference_control(context):
+    from crm_prompt_readers import reference_image
+    target=(context or {}).get('target') or {}
+    product=target.get('reference_product') or target
+    image=reference_image(product.get('reference_image_url'))
+    if image:
+        a,b=st.columns([1,4])
+        a.image(image,width=72)
+        b.caption(product.get('title','Product reference'))
+        b.link_button('Open reference image',image,type='tertiary')
+    else:st.caption('Attach the exact product reference image in ChatGPT before proceeding.')
 
 
 @st.dialog('Auto fill prompt',width='small',on_dismiss='ignore')
@@ -162,19 +158,23 @@ def prompt_dialog(shop,editor,key):
                 st.button('Use Availability / waitlist update',key=key+'sold_out_switch',on_click=switch_to_availability)
         ready=state.get('ready')
         if ready:st.caption('Prompt ready')
-        if st.button('Copy prompt',key=key+'copy',disabled=not ready):
-            try:
-                # Fresh authoritative recheck, no invented stock TTL. If facts
-                # changed, invalidate and require an explicit new Submit.
-                current=build(inputs,editor['document'],reader)
-                old=deepcopy(ready['context']);new=deepcopy(current['context'])
-                for context in (old,new):(context['target'].get('edition') or {}).pop('observed_at',None)
-                if old!=new:raise ValueError('Context changed. Submit again before copying.')
-                copy_result(current['prompt'])
-            except ValueError as exc:
-                state.pop('ready',None);state['error']=str(exc);st.rerun(scope='fragment')
-            except Exception:
-                state.pop('ready',None);state['error']='Unable to recheck facts. Submit again.';st.rerun(scope='fragment')
+        if ready:reference_control(ready['context'])
+        def revalidate():
+            current=build(inputs,editor['document'],reader)
+            old=deepcopy(ready['context']);new=deepcopy(current['context'])
+            for context in (old,new):(context['target'].get('edition') or {}).pop('observed_at',None)
+            if old!=new:raise ValueError('Context changed. Submit again before copying.')
+            from crm_email_prompt import retain
+            retain(st.session_state,editor,inputs,current)
+            state['ready']=current
+            return current['prompt']
+        from crm_prompt_copy import copy_prompt
+        try:copy_prompt(ready['prompt'] if ready else '',key+'copy',revalidate=revalidate)
+        except ValueError as exc:
+            state.pop('ready',None);state['error']=str(exc);st.rerun(scope='fragment')
+        except Exception as exc:
+            logging.getLogger(__name__).warning('campaign_prompt_recheck_failed type=%s',type(exc).__name__)
+            state.pop('ready',None);state['error']='Unable to recheck facts. Submit again.';st.rerun(scope='fragment')
         if state.get('ready'):
             with st.expander('View prompt'):st.code(state['ready']['prompt'],language=None)
     interaction_bridge()

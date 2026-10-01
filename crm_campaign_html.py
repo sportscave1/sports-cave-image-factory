@@ -12,7 +12,7 @@ from crm_tracking import public_https, asset_url, campaign_link
 TAGS = set('table tbody thead tfoot tr td th div p span font h1 h2 h3 h4 strong b em i u s br hr a img ul ol li blockquote center'.split())
 VOID = {'br', 'hr', 'img'}
 TEMPLATE_LINK_TOKENS = frozenset({'{{UNSUBSCRIBE_URL}}', '{{WEBSITE_URL}}', '{{CONTACT_URL}}', '{{PRIVACY_URL}}'})
-CSS = set('color background background-color font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform vertical-align display padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-color border-width border-style border-radius border-collapse border-spacing width max-width min-width height max-height'.split())
+CSS = set('color background background-color font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform vertical-align display padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-color border-width border-style border-radius border-collapse border-spacing width max-width min-width height max-height table-layout word-wrap'.split())
 
 
 def email_image_url(value):
@@ -30,8 +30,9 @@ def email_image_url(value):
 
 
 class EmailHTML(HTMLParser):
-    def __init__(self, images_off=False, campaign_key="", template_links=()):
+    def __init__(self, images_off=False, campaign_key="", template_links=(), trusted_catalogue=False):
         super().__init__(convert_charrefs=True)
+        self.trusted_catalogue=trusted_catalogue
         self.parts=[]; self.plain=[]; self.stack=[]; self.skipped=[]
         self.images_off=images_off; self.campaign_key=campaign_key; self.links=0
         self.template_links=frozenset(template_links) & TEMPLATE_LINK_TOKENS
@@ -68,6 +69,7 @@ class EmailHTML(HTMLParser):
                 safe.append(('style',';'.join(styles)))
             elif name in {'width','height','cellpadding','cellspacing','colspan','rowspan','border'} and re.fullmatch(r'\d{1,4}%?',value): safe.append((name,value))
             elif name in {'align','valign','alt','title','role'}: safe.append((name,value))
+            elif name=='class' and self.trusted_catalogue and tag=='table' and value in {'sc-cat-item sc-cat-2','sc-cat-item sc-cat-3','sc-cat-item sc-cat-4'}:safe.append((name,value))
             elif name=='class' and value=='sc-stack' and tag=='td': safe.append((name,value))
             elif name in {'bgcolor','color'} and (name=='bgcolor' or tag=='font') and re.fullmatch(r'#[a-fA-F0-9]{3}(?:[a-fA-F0-9]{3})?|[a-zA-Z]{1,25}',value):safe.append((name,value))
             elif tag=='font' and name=='face' and re.fullmatch(r'[a-zA-Z0-9 ,\'"-]{1,200}',value):safe.append((name,value))
@@ -107,14 +109,18 @@ class EmailHTML(HTMLParser):
                 if end==tag:break
         if tag in {'p','div','tr','h1','h2','li'}:self.plain.append('\n')
 
+    def handle_comment(self,data):
+        if self.trusted_catalogue and data in ('[if mso]><table role="presentation" width="100%"><tr><![endif]', '[if mso]><td width="50%" valign="top"><![endif]', '[if mso]></td><![endif]', '[if mso]></tr></table><![endif]'):
+            self.parts.append('<!--'+data+'-->')
+
     def handle_data(self, data):
         if not self.skipped:
             self.parts.append(escape(data));self.plain.append(data)
             self.checks['HTML content present'] |= bool(data.strip())
 
 
-def import_html(source, *, images_off=False, campaign_key="", template_links=()):
-    parser=EmailHTML(images_off,campaign_key,template_links);parser.feed(source)
+def import_html(source, *, images_off=False, campaign_key="", template_links=(), trusted_catalogue=False):
+    parser=EmailHTML(images_off,campaign_key,template_links,trusted_catalogue);parser.feed(source)
     # Incomplete image tags remain buffered until close() treats them as text.
     if re.match(r'<\s*img(?:\s|$)', parser.rawdata, re.I):
         parser.checks['HTML contains only safe email markup']=False

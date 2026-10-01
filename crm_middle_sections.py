@@ -7,8 +7,12 @@ DISPLAY = ('image', 'title', 'price', 'limit', 'next', 'remaining', 'cta')
 
 
 def middle_sections(doc):
-    return deepcopy(doc.get('middle_sections', [dict(id='html-1', type='html', html_number=1,
+    result=deepcopy(doc.get('middle_sections', [dict(id='html-1', type='html', html_number=1,
                     visible=True, html=doc.get('custom_html', ''))]))
+    for s in result:
+        if s.get('type')=='catalogue':
+            s['settings'].setdefault('headline','');s['settings'].setdefault('subtext','')
+    return result
 
 
 def validate_middle(sections):
@@ -32,9 +36,11 @@ def validate_middle(sections):
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
             cfg = s['settings']
-            if not isinstance(cfg, dict) or set(cfg) != {'columns', 'display', 'cta'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
+            if not isinstance(cfg, dict) or not {'columns','display','cta'} <= set(cfg) or set(cfg)-{'columns','display','cta','headline','subtext'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
             if not isinstance(cfg['display'], dict) or set(cfg['display']) != set(DISPLAY) or any(type(v) is not bool for v in cfg['display'].values()): raise ValueError('Invalid catalogue display settings.')
             if not isinstance(cfg['cta'], str) or not 1 <= len(cfg['cta'].strip()) <= 60: raise ValueError('Use a short CTA label.')
+            for field,limit in (('headline',80),('subtext',180)):
+                if not isinstance(cfg.get(field,''),str) or len(cfg.get(field,''))>limit:raise ValueError('Invalid catalogue '+field+'.')
             products = s['products']
             if not isinstance(products, list) or len(products) > 12 or len({p.get('id') for p in products if isinstance(p, dict)}) != len(products): raise ValueError('Select up to 12 unique products per catalogue.')
             for p in products: validate_snapshot(p)
@@ -73,7 +79,7 @@ def apply_event(doc, event):
             sections.append(dict(id=identity, type='image', visible=True, html=''))
         elif event.get('kind') == 'catalogue':
             sections.append(dict(id=identity, type='catalogue', visible=True, products=[],
-                settings={'columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
+                settings={'headline':'','subtext':'','columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
         else: raise ValueError('Unknown section type.')
     elif kind == 'order':
         ids = event.get('ids')
@@ -112,7 +118,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,
-            campaign_key=campaign_key if s['type'] in ('html', 'image') else '')
+            campaign_key=campaign_key if s['type'] in ('html', 'image') else '',trusted_catalogue=s['type']=='catalogue')
         if s['type'] == 'image':
             from crm_image_prompt import has_image
             result['HTML content present'] |= has_image(markup)

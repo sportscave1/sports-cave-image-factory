@@ -162,7 +162,8 @@ class FastReviewTests(unittest.TestCase):
 
     def test_synthetic_before_after_store_scan(self):
         namespace={}
-        old=subprocess.check_output(['git','show','HEAD:crm_campaign_markets.py']).decode('utf-8')
+        from pathlib import Path
+        old=Path('tests/fixtures/crm_market_scan_baseline.py').read_text(encoding='utf-8')
         exec(compile(old,'<baseline>','exec'),namespace)
         rows=[profile(i,'NZ' if i<=4 else 'AU') for i in range(1,1001)]
         baseline=authority(rows);baseline.campaign_subscribers.side_effect=lambda after=None:page([native_customer(c) for c in rows],after,250)

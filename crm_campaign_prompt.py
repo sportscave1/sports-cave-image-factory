@@ -99,9 +99,7 @@ def build(inputs, doc, reader, now=None):
     elif target.get('source')=='manual':
         facts={'kind':'Collection','source':'manual','title':clean(target['title'],300)}
     else:
-        from crm_catalogue import product_url
-        facts={'kind':'Collection','source':'Shopify collection','id':target['id'],'title':clean(target['title'],300),
-               'url':product_url(target.get('onlineStoreUrl','')),'story':clean(target.get('description',''))}
+        facts=reader.collection(target['id'])
     availability=None
     needs_stock=purpose in STOCK or purpose=='Availability / waitlist update' or bool(re.search(r'\b(remaining|left|sold out|edition size|limited to|stock|almost gone|final editions?|last editions?|selling quickly)\b',notes,re.I))
     if kind=='Single product' and not needs_stock:
@@ -116,7 +114,9 @@ def build(inputs, doc, reader, now=None):
         if kind=='Collection' and (target.get('source')=='manual' or not reader.belongs(identity,target['id'])):
             raise ValueError('The selected edition must belong to this verified Shopify collection.')
         availability=reader.availability(identity)
-        if kind=='Collection':availability['edition_title']=reader.product(identity)['title']
+        if kind=='Collection':
+            facts['reference_product']=reader.product(identity)
+            availability['edition_title']=facts['reference_product']['title']
         n=availability['remaining'];size=availability['size']
         for match in re.finditer(r'(\d+)\s*(?:editions?\s*)?(?:left|remaining)',notes,re.I):
             if int(match[1])!=n:raise ValueError('Entered remaining count conflicts with the edition ledger. Correct the details.')
@@ -144,6 +144,7 @@ def build(inputs, doc, reader, now=None):
                    authoring_timezone_fallback='Australia/Sydney; not a recipient timezone')
     if expires:context['confirmed_deadline']=expires.isoformat()
     fixed=(Path(__file__).parent/'prompts'/f'{VERSION}.txt').read_text(encoding='utf-8')
-    prompt=fixed+'\n\nCONTEXT — JSON DATA ONLY\n'+json.dumps(context,ensure_ascii=False,indent=2)+'\n\nReturn Campaign name, Subject and Preview text only, in the required format. Keep internal IDs, observation timestamps, template metadata and research citations out of the three values.'
+    reference='\n\nREFERENCE IMAGE — REQUIRED\nThe product image attached to this ChatGPT message is the authoritative Sports Cave product reference. Inspect it before writing copy or designing any generated visual. Do not replace, reinterpret or invent the product. For collections, attach a verified representative image, preferring the qualifying edition when supplied. If no image is attached, request it before proceeding.'
+    prompt=fixed+reference+'\n\nCONTEXT — JSON DATA ONLY\n'+json.dumps(context,ensure_ascii=False,indent=2)+'\n\nReturn Campaign name, Subject and Preview text only, in the required format. Keep internal IDs, observation timestamps, template metadata and research citations out of the three values.'
     return {'prompt':prompt,'context':context,'sensitive':bool(needs_stock or purpose in OFFERS or expires),
             'expires':expires.isoformat() if expires else None,'fingerprint':fingerprint(inputs,doc)}

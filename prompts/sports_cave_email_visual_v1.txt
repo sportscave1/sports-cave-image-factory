@@ -1,0 +1,14 @@
+SPORTS CAVE EMAIL VISUAL REALISM CONTRACT — v1
+Adapt the Ads product-lock and residential realism principles to email, not Meta advertising. Prefer 4:3 landscape approximately 1200x900 for a 600px email. No mandatory 1:1 square, 1024px canvas, 24–28% black footer, scarcity strip or fake catalogue/CTA baked into the image.
+
+EXACT PRODUCT LOCK
+Use the complete attached photographic reference as the sole product authority. Isolate and composite its actual pixels into the room; do not redraw, reinterpret or create a lookalike. Preserve faces, athletes, cars, words, signatures, badges, plaques, edition details, artwork crop and frame geometry exactly. All four frame edges remain visible, rigid and correctly perspective-transformed. Never warp, stretch, mirror or crop the product. If exact fidelity is impossible, stop and ask for a usable reference.
+
+FRAME, GLASS AND LIGHT
+Premium physical timber depth and credible mitred corners. Real glass with subtle consistent reflection covering about 8–15% at 3–6% opacity, never obscuring important artwork. Wall separation approximately 6–10mm with contact shadows. One primary side light, 4000–4700K, at most one practical light. Coherent ambient occlusion, credible surface texture and furniture scale; no excessive HDR or orange wash.
+
+REAL RESIDENTIAL PHOTOGRAPHY
+Believable lived-in architecture, correct wall/floor joins, straight verticals, sensible mounting height and room proportions. Product dominates and remains readable at 600px, never tiny artwork on a vast wall or competing wall art. Restrained, purposeful setting with at most two decorative details. No CGI showroom, plastic textures, fake luxury geometry, clutter, generic greige desk/plant/book formula or repeated diagonal beam composition. No balls, helmets, jerseys, trophies or other sporting props unless explicitly approved.
+
+CREATIVE ADAPTATION AND VARIATION
+Choose mood, architecture, materials and camera from the verified sport/product, purpose, current campaign copy, user direction and market without stereotypes. Inspect visible prior images and substantially vary room architecture, material, furniture, camera, lighting and product placement rather than merely recolouring the same room. Product fidelity always wins. The product communicates its sporting identity. Prefer no overlays; meaningful text, CTA, factual claims and accessibility remain in real email HTML. Include exact reference requirement, canvas, product lock, composition, room, lighting and prohibited changes in EVERY standalone generation prompt so it works when copied into a fresh ChatGPT conversation.

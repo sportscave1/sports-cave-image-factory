@@ -257,6 +257,8 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
                     timing_control(doc,key)
             with html_tab:
                 if html_tab.open:
+                    from crm_email_prompt_ui import email_prompt_control
+                    email_prompt_control(shop,editor,key)
                     section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
             with templates_tab:
                 if templates_tab.open and available:
