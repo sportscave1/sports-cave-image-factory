@@ -57,7 +57,12 @@ def production_checks(doc,cfg,env=None,*,reviewed_audience=False):
     live['Business contact identity configured']=bool(cfg.get('business') and single_email(cfg.get('contact','')) and https(cfg.get('website','')))
     from crm_campaign_footer import has_unsubscribe_link
     live['Visible unsubscribe footer / functional production link']=bool(not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer']))
-    return {**checks['test'],**live,'Marketing delivery enabled':Config(env).enabled}
+    from crm_email_size import campaign_size,LIMIT_BYTES,SIZE_ERROR
+    test=dict(checks['test'])
+    test.pop('HTML size reviewed / below 95 KB',None)  # Production uses final tracked HTML.
+    try:live[SIZE_ERROR]=campaign_size(doc,cfg)['html_bytes']<=LIMIT_BYTES
+    except Exception:live['Production email size can be measured']=False
+    return {**test,**live,'Marketing delivery enabled':Config(env).enabled}
 
 def review(shop,store,editor,env=None):
     from email_loading import stage
@@ -85,14 +90,15 @@ def review(shop,store,editor,env=None):
     from crm_campaign_snapshot import create
     with stage('Campaign review','snapshot_creation'):
         snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
-    return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok}
+    from crm_email_size import campaign_size
+    try:email_size=campaign_size(doc,cfg,editor.get('id'))
+    except Exception:email_size=None
+    return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok,'email_size':email_size}
 
 
 def validate_tracking(doc,cfg,campaign_id):
-    from crm_campaign_content import render_campaign
-    from crm_tracking import send_identity
-    return render_campaign(doc,cfg,production=True,unsubscribe_url='https://www.sportscaveshop.com/account/unsubscribe',
-                           campaign_id=campaign_id,send_id=send_identity(campaign_id))
+    from crm_email_size import render_production
+    return render_production(doc,cfg,campaign_id)
 
 def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     """One explicit submission confirms reviewed copy; all backend guards still run."""
@@ -130,6 +136,8 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     doc=reviewed['document'];state={'recipients':reviewed['recipients']}
     cfg=store.render_settings(env)
     if cfg!=reviewed['render_settings']:raise ValueError('Sender or rendering settings changed; review again.')
+    from crm_email_size import render_production,validate_rendered_email
+    validate_rendered_email(render_production(doc,cfg,identity))
     blocked=[k for k,v in production_checks(doc,cfg,env).items() if not v]
     if blocked:raise ValueError('Campaign blocked: '+ '; '.join(blocked))
     validate_tracking(doc,cfg,identity)

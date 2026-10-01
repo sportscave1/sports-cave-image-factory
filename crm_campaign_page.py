@@ -382,11 +382,15 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
-    title,buttons=st.columns([5,4],vertical_alignment='center')
+    title,buttons=st.columns([4,5],vertical_alignment='center')
     title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
     if not get_resend_marketing_config_status()['marketing_enabled']:
         title.caption('● Marketing delivery OFF · Tests only')
     with buttons.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-campaign-actions'):
+        from crm_email_size_ui import size_meter
+        st.session_state[key+'review_preview_settings']=cfg
+        st.session_state[key+'editor_emitted']=False
+        size_meter(editor,key,cfg)
         save=st.button('Save draft',type='secondary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
         test_control(drafts,actions.user,editor,key,available,cfg=cfg)
@@ -394,6 +398,7 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
         send_control(shop,drafts,actions.user,editor,key,cfg,available)
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
+    st.session_state[key+'editor_emitted']=True
     if save and flush_current(force=True):
         st.toast('Draft saved');st.rerun()
     if new_requested:st.session_state['campaign_pending_open']='new'

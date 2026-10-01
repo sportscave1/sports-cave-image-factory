@@ -92,6 +92,10 @@ class Engine:
                 if not campaign:raise ValueError('Campaign send identity missing.')
                 message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True,
                                         campaign_id=str(row['campaign_id']),send_id=str(campaign['campaign_send_id']))
+                from crm_email_size import validate_rendered_email
+                try:validate_rendered_email(message)
+                except ValueError:
+                    self.store.finish_send(row,'BLOCKED','email_size_limit');return True
                 message['unsubscribe_url']=unsubscribe
             else:
                 optout=self.config.test_unsubscribe_url() if row['test_send'] else unsubscribe

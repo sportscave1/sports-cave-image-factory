@@ -151,6 +151,9 @@ def review_finalization(shop,store,user,editor,key,job,delivery):
             counts=result['counts']
             st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
             st.caption('✓ Final audience ready')
+            if result.get('email_size'):
+                from crm_email_size import size_line
+                st.caption(size_line(result['email_size']))
             st.caption('Tracking · ✓ Sports Cave OS tracking attached' if result.get('tracking_ok') else 'Tracking · validation required')
             if counts['excluded']:
                 with st.expander('Excluded'):

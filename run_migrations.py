@@ -259,6 +259,7 @@ def _verify_schema(*, issue_loader, ready_message, failure_message):
         autocommit=True,
         row_factory=dict_row,
         options="-c default_transaction_read_only=on",
+        prepare_threshold=None,
     ) as conn:
         with conn.cursor() as cur:
             issues = issue_loader(cur)
@@ -318,7 +319,7 @@ def run_migrations(*, only=None, check=False):
 
     applied = []
     skipped = []
-    with psycopg.connect(database_url, autocommit=False) as conn:
+    with psycopg.connect(database_url, autocommit=False, prepare_threshold=None) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -410,7 +411,7 @@ def run_deployment_migrations(*, check=False):
         conn.commit()
     # Independently verify committed schema. No application listener starts first.
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
-                          options='-c default_transaction_read_only=on') as conn:
+                          options='-c default_transaction_read_only=on', prepare_threshold=None) as conn:
         with conn.cursor() as cur:
             issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur)
             if issues:

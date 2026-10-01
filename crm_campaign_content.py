@@ -204,9 +204,10 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
 
 
 def html_budget(html):
-    size=len(html.encode('utf-8'))
-    return {'bytes':size,'review_required':size>95000,'warning':size>=85000,
-            'label':f'{size/1000:.1f} KB HTML · target <80 KB; warn at 85 KB; review above 95 KB. Images measured separately.'}
+    from crm_email_size import analyze_rendered_email,SAFE_BYTES,LIMIT_BYTES
+    report=analyze_rendered_email(html,'');size=report['html_bytes']
+    return {'bytes':size,'review_required':size>LIMIT_BYTES,'warning':size>SAFE_BYTES,
+            'label':f'{size/1024:.1f} KB HTML · {report["status"]} · 95 KB send limit. Images measured separately.'}
 
 
 def preflight(doc, env=None, cfg=None):

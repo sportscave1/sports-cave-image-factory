@@ -131,7 +131,7 @@ class WorkspaceUnitTests(unittest.TestCase):
         doc=ready();self.assertTrue(preflight(doc,ENV)['test_ready']);self.assertFalse(preflight(doc,ENV)['live_ready'])
         doc['blocks']=starter('New Editions');self.assertFalse(preflight(doc,ENV)['test_ready'])
         doc=ready();doc['blocks'].append(block('image',url='https://example.test/a.jpg'));self.assertFalse(preflight(doc,ENV)['test_ready'])
-        self.assertTrue(html_budget('x'*96000)['review_required']);self.assertTrue(html_budget('x'*85000)['warning'])
+        self.assertTrue(html_budget('x'*(95*1024+1))['review_required']);self.assertTrue(html_budget('x'*85000)['warning'])
 
     def test_urls_and_utm_are_safe_stable_and_contextual(self):
         key='sc_'+uuid.uuid4().hex
