@@ -10,8 +10,10 @@ from crm_campaign_content import new_document, validate_document, preflight, set
 class CampaignStore(WorkspaceRecords):
     def history_counts(self):
         """One local aggregate for history badges; never reads audience/provider data."""
-        return self.q("""SELECT count(*) FILTER(WHERE c.status IS DISTINCT FROM 'SENT') AS drafts,
-          count(*) FILTER(WHERE c.status='SENT') AS sent
+        return self.q("""SELECT count(*) FILTER(WHERE c.status IS DISTINCT FROM 'SENT') AS active,
+          count(*) FILTER(WHERE c.status='SENT') AS sent,
+          COALESCE(bool_or(c.status IN ('BUILDING','SENDING') OR
+            (c.status='SCHEDULED' AND c.scheduled_at<=now()+interval '1 minute')),false) AS polling_active
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
           WHERE d.archived_at IS NULL""",one=True)
 
@@ -23,13 +25,14 @@ class CampaignStore(WorkspaceRecords):
     def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False, working=False):
         fields="d.id,d.name,d.version,d.status,d.archived_at,d.updated_at,d.last_tested_at,jsonb_build_object('market',d.document->'market','send_timing',d.document->'send_timing') AS document" if metadata else 'd.*'
         return self.q("""SELECT """+fields+""",c.status AS delivery_status,
+          GREATEST(d.updated_at,c.updated_at) AS activity_at,
           (SELECT s.error_code FROM crm_marketing_sends s WHERE s.campaign_id=d.id
            AND s.error_code IN ('schedule_missed','marketing_off_schedule') LIMIT 1) AS schedule_error
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
           WHERE (d.archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(d.name))>0
           AND (%s='All' OR d.status=%s) AND (%s='All' OR d.document->>'market'=%s)
           AND (NOT %s OR c.status IS DISTINCT FROM 'SENT')
-          ORDER BY d.updated_at DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,working,min(200,max(1,int(limit))),max(0,int(offset))))
+          ORDER BY GREATEST(d.updated_at,c.updated_at) DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,working,min(200,max(1,int(limit))),max(0,int(offset))))
 
     def draft(self, identity):
         row=self.q('SELECT * FROM crm_campaign_drafts WHERE id=%s',(identity,),True)

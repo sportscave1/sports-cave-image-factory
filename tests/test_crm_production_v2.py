@@ -217,10 +217,10 @@ class ProductionSqlTests(unittest.TestCase):
         at.run(timeout=20);self.assertFalse(at.exception)
         self.assertFalse(any(b.label in ('Send now','Save draft') for b in at.button))
         self.assertFalse(any(t.label=='Subject' for t in at.text_input))
-        self.assertTrue(any(b.label=='Duplicate campaign' for b in at.button))
+        self.assertTrue(any(b.label=='Back to campaigns' for b in at.button))
         fresh=AppTest.from_string(SCRIPT);fresh.session_state['route']='CRM Campaigns'
         fresh.query_params['campaign']=str(self.editor['id']);fresh.run(timeout=20)
-        self.assertFalse(fresh.exception);self.assertTrue(any('SENT' in m.value for m in fresh.markdown))
+        self.assertFalse(fresh.exception);self.assertTrue(any('Campaign sent' in m.value for m in fresh.markdown))
         self.assertFalse(any(t.label=='Subject' for t in fresh.text_input))
     def test_scheduled_worker_lifecycle_without_page_and_no_replay(self):
         from crm_engine import Engine
@@ -298,7 +298,7 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
         self.assertTrue(any(b.label=='Save draft' for b in at.button))
         self.assertEqual(at.session_state['campaign_edit_key'],edit_key)
         self.assertEqual(at.session_state['campaign_editor']['document'],before)
-        at.radio(key='campaign_history_view').set_value('Drafts').run(timeout=20);self.assertFalse(at.exception)
+        at.radio(key='campaign_history_view').set_value('Active').run(timeout=20);self.assertFalse(at.exception)
         self.assertEqual(at.session_state['campaign_editor']['document'],before)
         with patch('crm_campaign_analytics_ui.sent_page',return_value=[]):
             at.radio(key='campaign_history_view').set_value('Sent').run(timeout=20)
@@ -310,9 +310,9 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
     def test_history_counts_move_between_drafts_sent_and_archive(self):
         before=self.store.history_counts()
         self.accepted()
-        self.assertEqual(self.store.history_counts(),{'drafts':before['drafts']-1,'sent':before['sent']+1})
+        self.assertEqual({k:v for k,v in self.store.history_counts().items() if k!='polling_active'},{'active':before['active']-1,'sent':before['sent']+1})
         row=self.store.draft(self.editor['id']);self.store.archive(ADMIN,row['id'],row['version'])
-        self.assertEqual(self.store.history_counts(),{'drafts':before['drafts']-1,'sent':before['sent']})
+        self.assertEqual({k:v for k,v in self.store.history_counts().items() if k!='polling_active'},{'active':before['active']-1,'sent':before['sent']})
     def test_older_order_response_cannot_restore_refunded_revenue(self):
         sends=self.accepted();order=order_fixture(str(self.campaign()['campaign_send_id']),sends[0]['shopify_customer_id'])
         order['updatedAt']=order['createdAt'];old=deepcopy(order)

@@ -153,9 +153,12 @@ def recent_campaigns(drafts,key,user):
     else:_live_campaign_history(drafts,key,user)
 
 
-@st.fragment(run_every='30s')
+@st.fragment
 def _live_campaign_history(drafts,key,user):
     _history_content(drafts,key,user)
+    if not st.session_state.get('sent_analytics_id') and not st.session_state.get('campaign_delete_dialog_id'):
+        from crm_campaign_progress_ui import poll
+        poll('crm-history-poll',3 if st.session_state.get('campaign_history_polling_active') else 30)
 
 
 def _history_content(drafts,key,user):
@@ -165,16 +168,18 @@ def _history_content(drafts,key,user):
 
 def _campaign_history(drafts,key,user):
     if st.session_state.pop('campaign_show_drafts',False):
-        st.session_state['campaign_history_view']='Drafts'
+        st.session_state['campaign_history_view']='Active'
+    if st.session_state.get('campaign_history_view')=='Drafts':st.session_state['campaign_history_view']='Active'
     counts=drafts.history_counts()
+    st.session_state['campaign_history_polling_active']=bool(counts.get('polling_active'))
     with st.container(horizontal=True,vertical_alignment='center',key='crm-history-heading'):
         st.markdown('#### Campaigns')
         if st.button('+ New campaign',key='history_new_campaign'):
             st.session_state['campaign_pending_open']='new';st.rerun()
     with st.container(key='crm-history-selector'):
-        selected=st.radio('Campaign history',('Drafts','Sent'),horizontal=True,label_visibility='collapsed',
+        selected=st.radio('Campaign history',('Active','Sent'),horizontal=True,label_visibility='collapsed',
             format_func=lambda name:name+'  '+format(counts[name.lower()],','),key='campaign_history_view')
-    if selected=='Drafts':working_campaigns(drafts,key,user)
+    if selected=='Active':working_campaigns(drafts,key,user)
     else:
         from crm_campaign_analytics_ui import _sent_table
         _sent_table(drafts,user)
@@ -194,6 +199,9 @@ def working_campaigns(drafts,key,user):
     with stage('Campaigns','list_query'):
         rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True,working=True)
     if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
+    from crm_campaign_progress import load_progress
+    identities=[str(row['id']) for row in rows[:6] if row.get('delivery_status') in ('BUILDING','SENDING')]
+    progress=load_progress(drafts,st.session_state,identities) if identities else {}
     widths=[4,1.7,1.5,1.7,1.2]
     history_header(('Campaign','Status','Market','Updated','Actions'),widths)
     for row in rows[:6]:
@@ -205,9 +213,12 @@ def working_campaigns(drafts,key,user):
             st.session_state['campaign_pending_open']=identity;st.rerun()
         error=row.get('schedule_error')
         status={'marketing_off_schedule':'Delivery blocked — marketing is OFF','schedule_missed':'Schedule missed — reschedule required'}.get(error)
-        if not status:status=('SCHEDULED' if row.get('delivery_status')=='SENDING' and (row['document'].get('send_timing') or {}).get('mode')=='schedule' else row.get('delivery_status')) or row['status']
+        if not status:status=row.get('delivery_status') or row['status']
+        if identity in progress:
+            p=progress[identity]
+            status+=' · '+str(p['submitted'])+'/'+str(p['total'])+' submitted'+(' · needs attention' if p['attention'] else '')
         columns[1].html(history_cell(status,pill=True));columns[2].html(history_cell(MARKET_LABELS[row['document']['market']]))
-        columns[3].html(history_cell(history_date(row['updated_at'])))
+        columns[3].html(history_cell(history_date(row.get('activity_at',row.get('updated_at')))))
         with columns[4].popover('Actions'):
             st.caption('Last test: '+(str(row['last_tested_at'])[:16] if row['last_tested_at'] else '—'))
             if st.button('View' if row.get('delivery_status') else 'Edit',key='recent_edit_'+identity):
@@ -330,6 +341,8 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     with st.container(key='crm-recent-campaigns'):
         with stage('Campaigns','history_render'):
             recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
+    from crm_campaign_progress_ui import status_tray
+    status_tray(drafts)
 
 
 def _selected_campaign(shop,store,actions,navigate,drafts):
@@ -369,11 +382,11 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
         delivery=drafts.q('SELECT * FROM crm_campaigns WHERE id=%s',(editor['id'],),True) if available and editor.get('id') else None
     if delivery:
         # Frozen preview bypasses all authoring/autosave widgets and recovery writes.
-        from crm_campaign_analytics_ui import locked_campaign
+        from crm_campaign_progress_ui import operational_view
         composer_styles()
         editor['recovery_readonly']=True
         st.session_state['campaign_saved']=deepcopy(editor)
-        locked_campaign(drafts,actions.user,delivery)
+        operational_view(drafts,actions.user,delivery)
         if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
             continue_campaign_leave(drafts,navigate)
         return

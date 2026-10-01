@@ -10,6 +10,7 @@ from crm_campaign_send import send_test, review, queue_campaign, OFF
 from crm_resend_marketing import DeliveryError, get_resend_marketing_config_status
 from crm_store import StoreUnavailable
 from crm_resend import MarketingDisabled
+from crm_campaign_progress_ui import dismiss as dismiss_send_status
 
 
 def safe_error(exc):
@@ -84,7 +85,7 @@ def send_control(shop,store,user,editor,key,cfg,available=True):
         review_dialog(shop,store,user,editor,key,cfg)
 
 
-@st.dialog('Review & send',width='large',on_dismiss='ignore')
+@st.dialog('Review & send',width='large',on_dismiss=dismiss_send_status)
 def review_dialog(shop,store,user,editor,key,cfg=None):
     # This shell performs no draft/history/audience/provider reads.
     import time
@@ -104,7 +105,8 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
     @media(max-width:640px){.st-key-crm-send-review-summary [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
     .st-key-crm-send-review-summary [data-testid="stColumn"]{flex:1 1 100%;width:100%;min-width:0}}
     </style>""")
-    with st.container(key='crm-send-review-summary'):
+    summary_slot=st.empty()
+    with summary_slot.container(),st.container(key='crm-send-review-summary'):
         summary,preview=st.columns([42,58],gap='small')
         summary.write('**Campaign**  '+editor['name'])
         summary.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
@@ -134,11 +136,24 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
     token=key+'review_job'
     job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg)
     st.session_state[token]=job
-    review_finalization(shop,store,user,editor,key,job,delivery)
+    review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg)
 
 
 @st.fragment
-def review_finalization(shop,store,user,editor,key,job,delivery):
+def review_finalization(shop,store,user,editor,key,job,delivery,summary_slot=None,cfg=None):
+    body=st.empty()
+    with body.container():
+        _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body)
+
+
+def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body):
+    receipt=st.session_state.get(key+'queued_receipt')
+    if receipt:
+        if summary_slot is not None:summary_slot.empty()
+        from crm_campaign_progress_ui import status_content
+        # Same open overlay, now a tiny DB-only status region. Never rerun the page.
+        status_content(store,str(receipt['id']))
+        return
     job=st.session_state.get(key+'review_job',job)
     if job.closed:return
     from crm_campaign_review import identity
@@ -200,16 +215,43 @@ def review_finalization(shop,store,user,editor,key,job,delivery):
     final_count=result['counts']['eligible'] if result else None
     scheduled=editor['document'].get('send_timing',{}).get('mode')=='schedule'
     action=('Schedule for ' if scheduled else 'Send to ')+str(final_count)+' recipients' if final_count is not None else ('Schedule' if scheduled else 'Send now')
-    if b.button(action,key=key+'confirm_send',disabled=not ready,type='primary') and ready:
+    with b:action_slot=st.empty()
+    if action_slot.button(action,key=key+'confirm_send',disabled=not ready or bool(st.session_state.get(key+'queue_busy')),type='primary') and ready:
         operation=st.session_state.setdefault(key+'production_operation',str(uuid.uuid4()))
+        st.session_state[key+'queue_busy']=True
+        action_slot.button('Preparing campaign…',disabled=True,key=key+'preparing_send')
         try:
-            with st.spinner('Preparing send…'):
-                sent=queue_campaign(shop,store,user,editor,operation,snapshot_id=result['snapshot_id'])
-            job.closed=True
-            st.success('Campaign already queued.' if sent['already_started'] else 'Campaign queued for '+str(sent['recipients'])+' recipients.')
-            if sent.get('skipped_after_review'):st.caption(str(sent['skipped_after_review'])+' recipients became ineligible after review and were skipped.')
-            st.rerun()  # Only a successful durable queue transaction changes the page lifecycle.
-        except Exception as exc:st.error(safe_error(exc))
+            sent=queue_campaign(shop,store,user,editor,operation,snapshot_id=result['snapshot_id'])
+        except Exception as exc:
+            st.error(safe_error(exc))
+            if st.button('Retry preparing campaign',key=key+'queue_retry'):st.rerun(scope='fragment')
+            return
+        finally:st.session_state[key+'queue_busy']=False
+        # Nothing below owns delivery; the receipt exists only after commit.
+        job.closed=True
+        st.session_state[key+'queued_receipt']=sent
+        from crm_campaign_progress import track
+        track(st.session_state,sent,editor['name'])
+        st.session_state['campaign_history_polling_active']=True
+        # Replace only the sent editor. Never replace a newer, independent draft.
+        current=st.session_state.get('campaign_editor',editor)
+        if str(current.get('id'))==str(sent['id']):
+            from crm_campaign_page import new_compose
+            context=st.session_state.pop('campaign_recovery_context',None)
+            try:new_compose(editor['document'].get('smart_hours',16),cfg)
+            finally:
+                if context:st.session_state['campaign_recovery_context']=context
+        if summary_slot is not None:summary_slot.empty()
+        body.empty()
+        with body.container():
+            from crm_campaign_progress_ui import status_content
+            status_content(store,str(sent['id']))
+            # Wake only the history fragment once; its own DB result chooses the
+            # subsequent cadence. No full-page rerun or composer event.
+            st.html('''<script>/* '''+uuid.uuid4().hex+''' */setTimeout(()=>{
+              document.querySelector('.st-key-crm-history-poll button')?.click();
+            },0);</script>''',unsafe_allow_javascript=True)
+        return
     if pending:
         # A one-shot native fragment event stops naturally on ready/error/dismiss.
         # Unlike run_every it cannot keep polling a closed review indefinitely.

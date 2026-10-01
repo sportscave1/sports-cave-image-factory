@@ -56,8 +56,8 @@ class HistoryPresentationTests(unittest.TestCase):
 
     def test_history_counts_are_one_aggregate_without_document_reads(self):
         store=CampaignStore(Mock())
-        with patch.object(store,'q',return_value={'drafts':2,'sent':14}) as query:
-            self.assertEqual(store.history_counts(),{'drafts':2,'sent':14})
+        with patch.object(store,'q',return_value={'active':2,'sent':14}) as query:
+            self.assertEqual(store.history_counts(),{'active':2,'sent':14})
         query.assert_called_once()
         sql=query.call_args.args[0]
         self.assertIn('archived_at IS NULL',sql);self.assertIn('FILTER',sql)
@@ -72,12 +72,12 @@ store=Mock();store.history_counts.return_value=st.session_state['counts']
 with patch('crm_campaign_page.working_campaigns',side_effect=lambda *a:st.caption('Draft rows')), patch('crm_campaign_analytics_ui._sent_table',side_effect=lambda *a:st.caption('Sent rows')), patch('crm_campaign_page._selected_campaign',side_effect=AssertionError('History does not repaint editor')):
  recent_campaigns(store,'test',{})
 '''
-        at=AppTest.from_string(script);at.session_state['counts']={'drafts':2,'sent':14};at.run()
+        at=AppTest.from_string(script);at.session_state['counts']={'active':2,'sent':14};at.run()
         self.assertFalse(at.exception)
         at.radio(key='campaign_history_view').set_value('Sent').run()
-        at.session_state['counts']={'drafts':3,'sent':15};at.run()
+        at.session_state['counts']={'active':3,'sent':15};at.run()
         self.assertFalse(at.exception);self.assertEqual(at.radio(key='campaign_history_view').value,'Sent')
-        self.assertEqual(at.radio(key='campaign_history_view').options,['Drafts  3','Sent  15'])
+        self.assertEqual(at.radio(key='campaign_history_view').options,['Active  3','Sent  15'])
         self.assertEqual([c.value for c in at.caption],['Sent rows'])
 
     def test_automatic_count_refresh_preserves_every_draft_field(self):
