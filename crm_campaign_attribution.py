@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 from datetime import timedelta
 from decimal import Decimal,InvalidOperation
 from urllib.parse import parse_qs,urlsplit
@@ -236,22 +237,46 @@ def reconcile(store,shop,clock=now):
     A bounded updated-at window includes recent changes to older refunded orders.
     """
     from crm_attribution_shopify import updated,order as fetch_order
+    from crm_shopify import CapabilityUnavailable
+    from crm_store import StoreUnavailable
+    from psycopg import Error as DatabaseError
     at=clock()
     # Retry ledger work independently of the incremental account scan watermark.
     due=store.q('SELECT shopify_order_id FROM crm_order_attribution WHERE retry_at<=%s ORDER BY retry_at LIMIT 2',(at,))
     processed=set()
     def process(identity):
-        store.q("""INSERT INTO crm_order_attribution(shopify_order_id,attribution_status,retry_at)
-          VALUES(%s,'UNCHECKED',now()) ON CONFLICT(shopify_order_id) DO NOTHING""",(identity,))
+        stage='record_evidence';attempt=1;database_setup=True
         try:
+            store.q("""INSERT INTO crm_order_attribution(shopify_order_id,attribution_status,retry_at)
+              VALUES(%s,'UNCHECKED',now()) ON CONFLICT(shopify_order_id) DO NOTHING""",(identity,))
+            prior=store.q('SELECT attempts FROM crm_order_attribution WHERE shopify_order_id=%s',(identity,),True)
+            attempt=int((prior or {}).get('attempts',0))+1
+            database_setup=False
+            stage='fetch_order'
             value=fetch_order(shop,identity)
             if value:
-                mirror(store,value,record(store,value))
+                stage='record_evidence'
+                match=record(store,value)
+                stage='mirror'
+                mirror(store,value,match)
+                stage='record_evidence'
                 store.set_state('email_journey_health',{'verified_at':at.isoformat()})
             else:
+                stage='record_evidence'
                 store.q("UPDATE crm_order_attribution SET retry_at=now()+interval '1 hour' WHERE shopify_order_id=%s",(identity,))
-        except Exception:
+        except Exception as exc:
+            # Only explicit evidence/parsing errors are order-local. Unknown
+            # failures fail closed; source and database errors always propagate.
+            individual=(not database_setup and
+                        isinstance(exc,(ValueError,KeyError,TypeError,AttributeError,InvalidOperation)) and
+                        not isinstance(exc,(CapabilityUnavailable,StoreUnavailable,DatabaseError)))
+            safe_identity=str(identity)
+            if not re.fullmatch(r'(?:gid://shopify/Order/)?[0-9]+',safe_identity):safe_identity='invalid_order_id'
+            logging.getLogger(__name__).warning(
+                'crm_attribution_order_failed order_id=%s stage=%s exception_type=%s retry_attempt=%s',
+                safe_identity,stage,type(exc).__name__,attempt)
             store.q("UPDATE crm_order_attribution SET retry_at=now()+interval '15 minutes',attempts=attempts+1 WHERE shopify_order_id=%s",(identity,))
+            if individual:return
             store.set_state('email_journey_health',{'error':'source_unavailable','checked_at':at.isoformat()})
             raise
     for row in due:
@@ -280,21 +305,13 @@ def reconcile(store,shop,clock=now):
         cursor=page['pageInfo'].get('endCursor');more=page['pageInfo'].get('hasNextPage')
         if more and (not cursor or cursor==state.get('cursor')):raise ValueError('Attribution order pagination did not advance.')
         state.update(pending=[o['id'] for o in page['nodes']],cursor=cursor,more=more)
-    incomplete=False
     for identity in state['pending'][:2]:
-        try:
-            if identity not in processed:process(identity)
-        except (ValueError,KeyError,TypeError,InvalidOperation) as exc:
-            # One malformed order cannot starve all later orders. The rolling
-            # reconciliation window retries it without logging customer content.
-            logging.getLogger(__name__).warning('crm_attribution_evidence_incomplete type=%s',type(exc).__name__)
-            incomplete=True
+        if identity not in processed:process(identity)
         state['pending'].remove(identity)
         store.set_state(key,state)
     if not state['pending'] and not state['more']:
         error=state.get('error')
         state={'watermark':state['end'],'next_at':(at+timedelta(minutes=15)).isoformat()}
         if error:state['error']=error
-    if incomplete:state['error']='source_unavailable'
     store.set_state(key,state)
-    if not incomplete:completed()
+    completed()
