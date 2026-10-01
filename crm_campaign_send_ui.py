@@ -84,7 +84,7 @@ def send_control(shop,store,user,editor,key,cfg,available=True):
         review_dialog(shop,store,user,editor,key,cfg)
 
 
-@st.dialog('Review campaign',width='large',on_dismiss='ignore')
+@st.dialog('Review & send',width='large',on_dismiss='ignore')
 def review_dialog(shop,store,user,editor,key,cfg=None):
     # This shell performs no draft/history/audience/provider reads.
     import time
@@ -92,31 +92,47 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
     delivery=get_resend_marketing_config_status()
     doc=editor['document']
     st.html("""<style>
-    [role="dialog"]:has(.st-key-crm-send-review-summary){max-height:92vh;overflow:auto}
-    .st-key-crm-send-review-summary{min-height:255px}
+    [role="dialog"]:has(.st-key-crm-send-review-summary){max-height:90vh;max-width:1000px;width:calc(100vw - 32px);overflow:auto}
+    .st-key-crm-send-review-summary [data-testid="stVerticalBlock"],
+    .st-key-crm-send-review-final [data-testid="stVerticalBlock"]{gap:6px}
+    .st-key-crm-send-review-summary p,.st-key-crm-send-review-final p{margin-bottom:2px}
+    .st-key-crm-review-actions{position:sticky;bottom:0;background:#fffdf8;padding-top:8px;border-top:1px solid #e5e1d8;z-index:2}
+    .st-key-crm-review-actions [data-testid="stHorizontalBlock"]{flex-wrap:nowrap}
+    .st-key-crm-review-actions [data-testid="stColumn"]{min-width:0;flex:1 1 0}
+    .st-key-crm-review-actions [data-testid="stColumn"]:last-child > [data-testid="stVerticalBlock"]{align-items:flex-end}
+    .st-key-crm-review-actions button[kind="primary"]{background:#171714;color:#fffdf8;border-color:#b59b65}
+    @media(max-width:640px){.st-key-crm-send-review-summary [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
+    .st-key-crm-send-review-summary [data-testid="stColumn"]{flex:1 1 100%;width:100%;min-width:0}}
     </style>""")
     with st.container(key='crm-send-review-summary'):
-        summary,preview=st.columns(2)
+        summary,preview=st.columns([42,58],gap='small')
         summary.write('**Campaign**  '+editor['name'])
         summary.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
-        summary.caption('Preheader: '+doc['content']['preheader'])
         summary.caption('From: '+(delivery['sender'] or 'Not configured'))
         summary.caption('Reply-to: '+(delivery['reply_to'] or 'Not configured'))
         from crm_campaign_markets import MARKET_LABELS
         summary.caption('Segment: '+MARKET_LABELS[doc['market']])
         if (doc.get('counts') or {}).get('eligible') is not None:
-            summary.caption('Last known eligible audience: '+str(doc['counts']['eligible'])+' · final check pending')
+            summary.caption(str(doc['counts']['eligible'])+' recipients · last known',help='The final recipient count is verified below before sending.')
         from crm_tracking import send_identity
-        if editor.get('id'):summary.caption('Tracking ID: '+send_identity(editor['id']))
+        if editor.get('id'):summary.caption('Tracking · ON',help='Tracking ID: '+send_identity(editor['id']))
+        cached=st.session_state.get(key+'size_cache')
+        if cached:
+            from crm_email_size import analyze_rendered_email,size_line
+            import hashlib
+            token=hashlib.sha256(json.dumps([editor.get('id'),doc,st.session_state.get(key+'review_preview_settings',cfg)],sort_keys=True,default=str).encode()).hexdigest()
+            if cached.get('token')==token:
+                message=cached['message']
+                summary.caption(size_line(analyze_rendered_email(message['html'],message['text'])))
         with preview:
             from crm_preview_cache import preview as render_preview
             if cfg is not None:st.iframe(render_preview(st.session_state,doc,st.session_state.get(key+'review_preview_settings',cfg))['html'],height=240)
         timing=doc.get('send_timing',{'mode':'now'})
-        st.caption('Delivery: '+('Scheduled · '+timing['date']+' · '+timing['time']+' recipient local time' if timing['mode']=='schedule' else 'Send now'))
+        summary.caption('Delivery: '+('Scheduled · '+timing['date']+' · '+timing['time']+' recipient local time' if timing['mode']=='schedule' else 'Send now'))
     logging.getLogger(__name__).info('campaign_review stage=modal_shell duration_ms=%.1f',(time.monotonic()-started)*1000)
     from crm_campaign_review import start_review
     token=key+'review_job'
-    job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'))
+    job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg)
     st.session_state[token]=job
     review_finalization(shop,store,user,editor,key,job,delivery)
 
@@ -128,7 +144,11 @@ def review_finalization(shop,store,user,editor,key,job,delivery):
     from crm_campaign_review import identity
     result=None;error=None
     pending=not job.future.done()
-    if not pending:
+    current=st.session_state.get('campaign_editor',editor)
+    if identity(current)!=identity(editor):
+        error='Draft changed during review. Close and review the current draft.'
+        pending=False
+    if not pending and not error:
         try:
             result=job.future.result()
             if not job.applied:
@@ -139,33 +159,29 @@ def review_finalization(shop,store,user,editor,key,job,delivery):
             elif identity(editor)!=job.identity:
                 raise ValueError('Draft changed during review. Close and review the current draft.')
         except Exception as exc:error=safe_error(exc);result=None
-    with st.container(key='crm-send-review-final',height=240,border=False):
+    with st.container(key='crm-send-review-final',border=False):
         if error:
-            st.error('Unable to finalize audience. '+error)
+            st.caption('⚠ Audience verification failed · '+error)
             if st.button('Retry',key=key+'review_retry'):
                 from crm_campaign_review import start_review
-                replacement=start_review(None,shop,store,user,editor,st.session_state.get('campaign_saved'))
+                replacement=start_review(None,shop,store,user,editor,st.session_state.get('campaign_saved'),getattr(job,'requested_settings',None))
                 st.session_state[key+'review_job']=replacement
                 st.rerun(scope='fragment')
         elif result:
             counts=result['counts']
             st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
-            st.caption('✓ Final audience ready')
             if result.get('email_size'):
                 from crm_email_size import size_line
                 st.caption(size_line(result['email_size']))
-            st.caption('Tracking · ✓ Sports Cave OS tracking attached' if result.get('tracking_ok') else 'Tracking · validation required')
-            if counts['excluded']:
-                with st.expander('Excluded'):
-                    for reason,total in counts['excluded'].items():st.caption(reason.replace('_',' ').capitalize()+': '+str(total))
-            if result['blockers']:st.warning('Production delivery issue: '+ '; '.join(result['blockers']))
-            else:st.caption('Production delivery ready ✓')
+            st.caption('Tracking ✓ · Delivery ✓' if result.get('tracking_ok') and not result['blockers'] else 'Tracking · '+('✓' if result.get('tracking_ok') else 'validation required'))
+            if result['blockers']:st.caption('⚠ '+ '; '.join(result['blockers']))
+            else:st.caption(':green[✓ Ready to send]')
         else:
-            st.write('Finalizing audience…')
-            st.caption('Checking current consent, suppressions, exclusions and production readiness.')
-        if not delivery['marketing_enabled']:st.info(OFF)
-        st.caption('Confirming Send now confirms review of this campaign’s copy and subject.')
-    a,b=st.columns(2)
+            count=(editor['document'].get('counts') or {}).get('eligible')
+            st.write('Verifying '+(str(count)+' recipients…' if count is not None else 'recipients…'))
+        if not delivery['marketing_enabled']:st.caption(OFF)
+    with st.container(key='crm-review-actions'):
+        a,b=st.columns([1,2])
     with a,st.container(key='crm-review-dismiss'):
         st.button('Cancel',key=key+'cancel_send')
     # Cancel is the same native, client-only dismissal as X/Escape. Intercept only
@@ -181,7 +197,10 @@ def review_finalization(shop,store,user,editor,key,job,delivery):
     }
     })();</script>'''.replace('<script>','<script>/* '+uuid.uuid4().hex+' */'),unsafe_allow_javascript=True)
     ready=bool(result and not result['blockers'] and result.get('snapshot_id') and editor.get('id') and delivery['marketing_enabled'])
-    if b.button('Send now',key=key+'confirm_send',disabled=not ready) and ready:
+    final_count=result['counts']['eligible'] if result else None
+    scheduled=editor['document'].get('send_timing',{}).get('mode')=='schedule'
+    action=('Schedule for ' if scheduled else 'Send to ')+str(final_count)+' recipients' if final_count is not None else ('Schedule' if scheduled else 'Send now')
+    if b.button(action,key=key+'confirm_send',disabled=not ready,type='primary') and ready:
         operation=st.session_state.setdefault(key+'production_operation',str(uuid.uuid4()))
         try:
             with st.spinner('Preparing send…'):

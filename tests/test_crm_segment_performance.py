@@ -58,7 +58,8 @@ class CacheTests(unittest.TestCase):
             self.assertEqual(final_audience(source,store,doc)['eligible'],1)
             source.campaign_subscribers.return_value['nodes'][0]['emailMarketingConsent']['marketingState']='UNSUBSCRIBED'
             self.assertEqual(final_audience(source,store,doc)['eligible'],0)
-        self.assertEqual(source.campaign_subscribers.call_count,2)
+        source.campaign_subscribers.assert_not_called()
+        self.assertEqual(source.customer_batch.call_count,1)  # Empty membership needs no profiles.
     def test_html_preview_segment_only_change_reuses_safe_html(self):
         doc=document();state={}
         with patch('crm_preview_cache.render_campaign',wraps=__import__('crm_campaign_content').render_campaign) as render:

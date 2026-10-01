@@ -106,7 +106,7 @@ class AudienceSyncTests(unittest.TestCase):
         self.assertEqual(result['members'],2251);self.assertEqual(result['eligible'],2249)
         self.assertEqual(result['excluded'],{'local_suppression':1,'duplicate':1})
         self.assertEqual(sum(d==CAMPAIGN_MEMBER_IDS for d,v in self.wire.calls),10)
-        self.assertEqual(sum(d==CAMPAIGN_SUBSCRIBERS for d,v in self.wire.calls),10)
+        self.assertEqual(sum(d==CAMPAIGN_SUBSCRIBERS for d,v in self.wire.calls),0)
         self.wire.customers[2]['emailMarketingConsent']['marketingState']='UNSUBSCRIBED'
         self.assertEqual(calculate(self.shop,self.store,market='AU')['AU']['eligible'],2248)
     def test_draft_count_is_not_a_source(self):

@@ -48,6 +48,37 @@ def evaluate_profiles(profiles,excluded_ids,excluded_hashes,suppressed_hashes,su
     return result
 
 
+def native_selection(shop, store, audience, smart_hours=16):
+    """Authoritative native unions/exclusions without unrelated profile scans."""
+    from crm_campaign_review_reads import timed, selected_reads
+    validate_selection(audience)
+    included = set(); excluded = set(); definitions = {}
+    with timed('segment_resolution'):
+        for source in audience['include'] + audience['exclude']:
+            if source['id'] not in definitions:
+                definition = shop.segment(source['id'], fresh=True)
+                if not definition or definition.get('id') != source['id']:
+                    raise ValueError('Selected Shopify segment is unavailable.')
+                definitions[source['id']] = definition['query']
+    with timed('membership'):
+        membership = {identity: shop.campaign_member_ids(query) for identity, query in definitions.items()}
+        for source in audience['include']:included.update(membership[source['id']])
+        for source in audience['exclude']:excluded.update(membership[source['id']])
+    profiles, conflicts, suppressed, ids, recent = selected_reads(shop, store, included | excluded, smart_hours)
+    excluded_hashes = {recipient_hash(profiles[cid].get('email')) for cid in excluded}
+    selected = [profiles[cid] for cid in sorted(included)]
+    with timed('eligibility'):
+        safe = [c for c in selected if recipient_hash(c.get('email')) not in conflicts]
+        result = evaluate_profiles(safe, excluded, excluded_hashes, suppressed, ids, recent, recipients=True)
+        for c in selected:
+            if recipient_hash(c.get('email')) in conflicts:
+                reason = 'excluded_segment' if c['id'] in excluded or recipient_hash(c.get('email')) in excluded_hashes else 'conflicting_consent'
+                result['excluded'][reason] = result['excluded'].get(reason, 0) + 1
+        result['members'] = len(selected)
+        result['diagnostics']['conflicting_profiles'] = len(selected) - len(safe)
+    return {**result, 'profiles': {c['id']: c for c in selected}, 'complete': True, 'checked_at': now().isoformat()}
+
+
 def selection_page(shop,store,audience,previous=None,*,smart_hours=16,recipients=False):
     """One bounded Shopify page per click; only aggregates leave session memory.
 

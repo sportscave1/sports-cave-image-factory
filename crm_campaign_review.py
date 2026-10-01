@@ -38,9 +38,10 @@ def identity(editor):
 
 
 class ReviewJob:
-    def __init__(self, shop, store, user, editor, saved):
+    def __init__(self, shop, store, user, editor, saved, cfg=None):
         self.editor = deepcopy(editor)
         self.identity = identity(editor)
+        self.requested_settings = deepcopy(cfg)
         self.started = time.monotonic()
         self.future = Future()
         self.closed = False
@@ -62,16 +63,16 @@ class ReviewJob:
             except Exception as exc:
                 self.future.set_exception(exc)
             finally:
-                LOG.info('campaign_review stage=finalization duration_ms=%.1f',(time.monotonic()-self.started)*1000)
+                LOG.info('campaign_review stage=total duration_ms=%.1f',(time.monotonic()-self.started)*1000)
                 _SLOTS.release()
         threading.Thread(target=work,name='campaign-review',daemon=True).start()
 
 
-def start_review(previous, shop, store, user, editor, saved):
+def start_review(previous, shop, store, user, editor, saved, cfg=None):
     # Reopening the same in-flight or just-completed review never duplicates a snapshot.
-    if previous and previous.identity == identity(editor):
+    if previous and previous.identity == identity(editor) and getattr(previous,'requested_settings',None) == cfg:
         reusable = not previous.future.done() or (previous.future.exception() is None and time.monotonic()-previous.started < 30)
         if reusable:
             previous.closed = False
             return previous
-    return ReviewJob(shop,store,user,editor,saved)
+    return ReviewJob(shop,store,user,editor,saved,cfg)

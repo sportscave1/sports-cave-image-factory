@@ -161,7 +161,7 @@ review_finalization(None,None,{},st.session_state.editor,'test_',st.session_stat
 ''')
         app.run()
         self.assertFalse(app.exception)
-        self.assertIn('Unable to finalize audience',app.error[0].value)
+        self.assertTrue(any('Audience verification failed' in c.value for c in app.caption))
         self.assertTrue(next(b for b in app.button if b.label=='Send now').disabled)
         original=deepcopy(app.session_state['editor'])
         done=Future();done.set_result({'counts':{'eligible':3,'excluded':{}},'blockers':[],'snapshot_id':'frozen','tracking_ok':True})
@@ -172,8 +172,8 @@ review_finalization(None,None,{},st.session_state.editor,'test_',st.session_stat
             rerun.assert_called_once_with(scope='fragment')
         app.run()  # AppTest does not simulate fragment-scoped timer reruns.
         self.assertFalse(app.exception)
-        self.assertFalse(next(b for b in app.button if b.label=='Send now').disabled)
-        self.assertTrue(any('Production delivery ready' in c.value for c in app.caption))
+        self.assertFalse(next(b for b in app.button if b.label=='Send to 3 recipients').disabled)
+        self.assertTrue(any('Ready to send' in c.value for c in app.caption))
         self.assertFalse(any('administrator verification' in w.value.lower() for w in app.warning))
         self.assertEqual(app.session_state['editor'],original)
 

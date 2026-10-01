@@ -19,6 +19,9 @@ def final_audience(shop,store,doc,*,clock=time.monotonic):
         return verified_native_audience(calculate(shop,store,doc.get('smart_hours',16),clock=clock,market=doc['market'])[doc['market']])
     audience=doc['audience']
     selection=audience if audience['kind']=='Selection' else {'kind':'Selection','name':audience['name'],'include':[audience],'exclude':[]}
+    if all(source['kind']=='Shopify' for source in selection['include']+selection['exclude']):
+        from crm_audience import native_selection
+        return verified_native_audience(native_selection(shop,store,selection,doc.get('smart_hours',16)))
     started=clock();state=None
     while state is None or not state['complete']:
         if clock()-started>30:raise ValueError('Audience calculation timed out. Narrow the audience and review again.')
@@ -32,7 +35,7 @@ def verified_native_audience(state):
     return state
 
 
-def production_checks(doc,cfg,env=None,*,reviewed_audience=False):
+def production_checks(doc,cfg,env=None,*,reviewed_audience=False,email_size=None):
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
     env=os.environ if env is None else env
@@ -60,39 +63,38 @@ def production_checks(doc,cfg,env=None,*,reviewed_audience=False):
     from crm_email_size import campaign_size,LIMIT_BYTES,SIZE_ERROR
     test=dict(checks['test'])
     test.pop('HTML size reviewed / below 95 KB',None)  # Production uses final tracked HTML.
-    try:live[SIZE_ERROR]=campaign_size(doc,cfg)['html_bytes']<=LIMIT_BYTES
+    try:live[SIZE_ERROR]=(email_size if email_size is not None else campaign_size(doc,cfg))['html_bytes']<=LIMIT_BYTES
     except Exception:live['Production email size can be measured']=False
     return {**test,**live,'Marketing delivery enabled':Config(env).enabled}
 
 def review(shop,store,editor,env=None):
     from email_loading import stage
+    from crm_campaign_review_reads import timed
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
     with stage('Campaign review','authoritative_audience'):
         state=final_audience(shop,store,doc)
     doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
     with stage('Campaign review','render_settings'):
         cfg=store.render_settings(env)
-    with stage('Campaign review','production_validation'):
-        checks=production_checks(doc,cfg,env)
-    blockers=[k for k,v in checks.items() if not v]
-    tracking_ok=False
-    if editor.get('id'):
+    tracking_ok=False;email_size=None
+    with timed('render_validation'):
+        from crm_email_size import analyze_rendered_email
         try:
-            with stage('Campaign review','tracking_validation'):
-                validate_tracking(doc,cfg,editor['id'])
-            tracking_ok=True
-        except ValueError:blockers.append('Sports Cave OS tracking validation failed')
+            rendered=validate_tracking(doc,cfg,editor.get('id'))
+            email_size=analyze_rendered_email(rendered['html'],rendered['text'])
+            tracking_ok=bool(editor.get('id'))
+        except ValueError:pass
+        checks=production_checks(doc,cfg,env,email_size=email_size)
+    blockers=[k for k,v in checks.items() if not v]
+    if editor.get('id') and not tracking_ok:blockers.append('Sports Cave OS tracking validation failed')
     from crm_campaign_schedule import plan
     from crm_logic import now
     schedule={}
     try:schedule=plan(doc,state,now())
     except ValueError as exc:blockers.append(str(exc))
     from crm_campaign_snapshot import create
-    with stage('Campaign review','snapshot_creation'):
+    with timed('snapshot'):
         snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
-    from crm_email_size import campaign_size
-    try:email_size=campaign_size(doc,cfg,editor.get('id'))
-    except Exception:email_size=None
     return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok,'email_size':email_size}
 
 

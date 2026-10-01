@@ -29,6 +29,7 @@ def authority(rows):
     shop.campaign_member_ids.side_effect=lambda query:{c['id'] for c in segment_rows(shop.campaign_subscribers.return_value['nodes'],query)}
     shop.customer.side_effect=lambda identity,**kwargs:next((c for c in shop.campaign_subscribers.return_value['nodes'] if c['id']==identity),None)
     shop.customer_batch.side_effect=lambda ids,**kwargs:[c for c in shop.campaign_subscribers.return_value['nodes'] if c['id'] in ids]
+    shop.campaign_email_profiles.side_effect=lambda addresses:[c for c in shop.campaign_subscribers.return_value['nodes'] if c['email'].strip().casefold() in addresses]
     return shop
 
 class MarketAndTimezoneTests(unittest.TestCase):

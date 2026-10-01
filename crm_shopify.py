@@ -168,6 +168,47 @@ class Shopify:
     def campaign_subscribers(self, after=None):
         return self.query(CAMPAIGN_SUBSCRIBERS,{'after':after},'campaign subscribers',0,True)['customers']
 
+    def campaign_email_profiles(self, addresses):
+        """Fresh, paginated OR searches for relevant email identities only.
+
+        No consent filter: unsubscribed duplicates must remain visible. Shopify
+        phrase search can return broader matches; compare normalized emails locally.
+        """
+        from crm_logic import email
+        addresses = sorted({email(value) for value in addresses} - {''})
+        document = CAMPAIGN_SUBSCRIBERS.replace('CrmCampaignSubscribers($after:String)',
+            'CrmCampaignEmailProfiles($after:String,$query:String!)').replace(
+            'sortKey:UPDATED_AT,reverse:true', 'sortKey:ID,query:$query')
+        result = {}
+        deadline = time.monotonic() + 30
+        for start in range(0, len(addresses), 25):
+            wanted = set(addresses[start:start + 25])
+            quoted = lambda value: '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+            query = ' OR '.join('email:' + quoted(value) for value in sorted(wanted))
+            cursor = None; seen = set(); page_ids = set()
+            while True:
+                if time.monotonic() > deadline:
+                    raise ValueError('Email identity verification timed out. Review again.')
+                page = self.query(document, {'after':cursor,'query':query}, 'campaign email identity verification', 0, True)['customers']
+                if page.get('complete') is False:
+                    raise ValueError('Email identity verification is incomplete.')
+                if type(page['pageInfo'].get('hasNextPage')) is not bool:
+                    raise ValueError('Email identity pagination is incomplete.')
+                for customer in page['nodes']:
+                    identity = customer['id']
+                    if identity in page_ids:
+                        raise ValueError('Email identity pagination changed. Review again.')
+                    page_ids.add(identity)
+                    if email(customer.get('email')) in wanted:result[identity] = customer
+                if len(page_ids) > 20000:
+                    raise ValueError('Email identity verification limit reached.')
+                if not page['pageInfo'].get('hasNextPage'):break
+                cursor = page['pageInfo'].get('endCursor')
+                if not cursor or cursor in seen:
+                    raise ValueError('Email identity pagination did not advance.')
+                seen.add(cursor)
+        return list(result.values())
+
     def customers(self, after=None, query=None, fresh=False):
         return self.query(CUSTOMERS, {'after':after, 'query':query}, 'customers', 45, fresh)['customers']
     def customer(self, customer_id, fresh=False):
@@ -218,12 +259,16 @@ class Shopify:
         return counts
     def campaign_member_ids(self, query):
         """Full native membership only for explicit audience review/send."""
-        cursor=None;seen=set();ids=set()
+        cursor=None;seen=set();ids=set();total=None
         while True:
             data=self.query(CAMPAIGN_MEMBER_IDS,{'id':None,'query':query,'after':cursor},'campaign membership',0,True)['customerSegmentMembers']
+            if type(data['totalCount']) is not int or data['totalCount'] < 0 or (total is not None and total != data['totalCount']):
+                raise ValueError('Shopify membership changed during calculation; review again.')
+            total=data['totalCount']
             for edge in data['edges']:
                 identity=gid(edge['node']['id'].rsplit('/',1)[-1])
                 if not identity:raise ValueError('Invalid Shopify member identity.')
+                if identity in ids:raise ValueError('Shopify membership pagination changed; review again.')
                 ids.add(identity)
             if len(ids)>20000:raise ValueError('Audience calculation limit reached.')
             if not data['pageInfo'].get('hasNextPage'):break

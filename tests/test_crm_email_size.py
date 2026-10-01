@@ -211,7 +211,7 @@ with patch('crm_campaign_send_ui.queue_campaign',side_effect=AssertionError('No 
         app=AppTest.from_string(script).run()
         self.assertFalse(app.exception)
         self.assertTrue(any('Email size' in c.value and 'TOO LARGE' in c.value for c in app.caption))
-        self.assertTrue(next(b for b in app.button if b.label=='Send now').disabled)
+        self.assertTrue(next(b for b in app.button if b.key=='confirm_send' or str(b.key).endswith('confirm_send')).disabled)
 
     def test_ui_unknown_state_has_no_payload_or_exception_logging(self):
         script='''
