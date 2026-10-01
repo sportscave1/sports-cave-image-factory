@@ -55,6 +55,15 @@ class PremiumCatalogueTests(unittest.TestCase):
    self.assertIn('Ryan Fox',text);self.assertIn('LIMITED TO 100',text);self.assertIn('#037 / 100',text);self.assertIn('64 REMAINING',text)
    self.assertIn('https://',text);self.assertTrue(all(checks.values()))
    print('Catalogue bytes count=%s old=%s new=%s'%(n,len(old.encode()),len(h.encode())))
+ def test_render_is_local_and_toggles_remain_authoritative(self):
+  from unittest.mock import patch
+  s=self.section(1)
+  with patch('requests.sessions.Session.request',side_effect=AssertionError('No network')),patch('crm_catalogue.Catalogue.resolve',side_effect=AssertionError('No fresh reads')):
+   for field,absent in (('image','<img'),('title','Ryan Fox'),('price','A$85'),('limit','LIMITED TO'),('next','#037'),('remaining','REMAINING'),('cta','View the Edition')):
+    cfg=deepcopy(s);cfg['settings']['display'][field]=False
+    h=catalogue_html(cfg)
+    if field=='title':h=import_html(h,images_off=True)[1]
+    self.assertNotIn(absent,h)
  def test_no_unsupported_features_and_wrapper_rules(self):
   doc=catalogue_doc();doc['middle_sections'][-1]=self.section(4);h=render_campaign(doc)['html']
   self.assertIn('(min-width:540px)',h);self.assertIn('.sc-cat-4{width:25%',h);self.assertIn('.sc-stack{display:block',h)

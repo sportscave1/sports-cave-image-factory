@@ -83,3 +83,18 @@ bridge.drafts['html-1']='Latest not yet acknowledged';bridge.send('remove',{id:'
 listeners.message({source:parent,data:{type:'streamlit:render',args:{sections:[{id:'html-1',html:'Older'}],ack:messages[3].event}}});
 assert.equal(messages.at(-1).edits['html-1'],'Latest not yet acknowledged');
 console.log('Queued structural action retains unacknowledged content');
+
+// Optional catalogue copy stays bounded and flushes before section acknowledgement.
+const copyInputs=[],copyChanges=[],copyPending=new Map(),copyTimers=new Map();let copyTimer=0;
+const copyContext=vm.createContext({s:{id:'catalogue',settings:{}},content:{append(){}},
+ el:()=>({append(){}}),document:{createElement:()=>{const n={setAttribute(){}};copyInputs.push(n);return n;}},
+ parent:{dispatchEvent(){}},CustomEvent:class{},pendingCopyInputs:copyPending,
+ changeSettings:(s,p)=>copyChanges.push(p),setTimeout:f=>{copyTimers.set(++copyTimer,f);return copyTimer;},clearTimeout:id=>copyTimers.delete(id)});
+vm.runInContext(source.slice(source.indexOf(' const copyFields='),source.indexOf(' const labels=')),copyContext);
+assert.deepEqual(copyInputs.map(n=>n.maxLength),[80,180]);
+copyInputs[0].value='Own The Moment';copyInputs[0].oninput();copyInputs[1].value='Collector tribute';copyInputs[1].oninput();
+assert.equal(copyChanges.length,0);assert.equal(copyPending.size,2);
+for(const commit of [...copyPending.values()])commit();
+assert.equal(copyChanges[0].headline,'Own The Moment');assert.equal(copyChanges[1].subtext,'Collector tribute');assert.equal(copyPending.size,0);assert.equal(copyTimers.size,0);
+assert.ok(source.includes('for(const commit of [...pendingCopyInputs.values()])commit();'));
+console.log('Catalogue headline/subtext limits, debounce, and pre-send pending-copy flush passed');

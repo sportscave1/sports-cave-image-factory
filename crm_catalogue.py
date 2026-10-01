@@ -217,7 +217,8 @@ def desktop_columns(products):
 
 
 def image_alt(p):
-    value=' '.join((p.get('image_alt') or '').split())
+    from crm_campaign_html import import_html
+    value=' '.join(import_html(p.get('image_alt') or '')[1].split())
     return value if value.casefold() not in ('','image','product image','wall art image') else p['title']
 
 
