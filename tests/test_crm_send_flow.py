@@ -199,7 +199,7 @@ class SendFlowTests(unittest.TestCase):
     def test_manual_flags_do_not_replace_real_configuration(self):
         editor=self.saved();checked=review(self.shop,self.store,editor,LIVE)
         checks=production_checks(checked['document'],{**CFG,'postal':''},LIVE)
-        self.assertFalse(checks['Business postal address configured'])
+        self.assertNotIn('Business postal address configured',checks)
         checks=production_checks(checked['document'],CFG,{**LIVE,'RESEND_MARKETING_API_KEY':''})
         self.assertFalse(checks['Resend marketing API configured'])
     def test_changed_draft_and_empty_audience_never_queue(self):

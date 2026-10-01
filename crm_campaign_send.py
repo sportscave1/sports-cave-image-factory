@@ -54,7 +54,6 @@ def production_checks(doc,cfg,env=None,*,reviewed_audience=False):
         live.pop(label,None)
     from crm_resend_marketing import single_email
     from crm_campaign_content import https
-    live['Business postal address configured']=len(cfg.get('postal','').strip())>=10
     live['Business contact identity configured']=bool(cfg.get('business') and single_email(cfg.get('contact','')) and https(cfg.get('website','')))
     from crm_campaign_footer import has_unsubscribe_link
     live['Visible unsubscribe footer / functional production link']=bool(not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer']))

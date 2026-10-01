@@ -152,10 +152,8 @@ def compliance_page(store,user):
         with st.form('compliance_settings'):
             a,b=st.columns(2)
             v['business']=a.text_input('Business / legal display name',v['business'])
-            v['postal']=a.text_input('Business postal address',v['postal'])
             v['contact']=a.text_input('Business contact email',v['contact'])
             v['website']=b.text_input('Website',v['website']);v['privacy']=b.text_input('Confirmed privacy-policy URL',v['privacy'])
-            v['postal_verified']=b.checkbox('Nathan confirmed this business postal address',v['postal_verified'])
             v['identity_confirmed']=b.checkbox('Nathan confirmed this contact identity',v['identity_confirmed'])
             saved=st.form_submit_button('Save compliance details')
         if saved:store.save_setting(user,'compliance',v,row['version']);st.success('Business details saved.');st.rerun()
