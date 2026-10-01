@@ -256,12 +256,22 @@ def reconcile(store,shop,clock=now):
             raise
     for row in due:
         process(row['shopify_order_id']);processed.add(row['shopify_order_id'])
-    store.set_state('email_reconcile_health',{'last_run':at.isoformat()})
+    def completed():
+        # Clear only after all work for this bounded pass has succeeded, including
+        # due-order retries when no incremental scan is needed yet.
+        scan=store.state('email_attribution_scan')
+        if 'error' in scan:
+            scan.pop('error')
+            store.set_state('email_attribution_scan',scan)
+        store.set_state('email_reconcile_health',{'last_run':at.isoformat()})
     active=store.q("SELECT min(sending_started_at) AS first FROM crm_campaigns WHERE campaign_key IS NOT NULL AND status IN ('SENDING','SENT')",one=True)['first']
-    if not active:return
+    if not active:
+        completed();return
     key='email_attribution_scan';state=store.state(key)
-    if date(state.get('next_at')) and at<date(state['next_at']):return
-    state.pop('error',None)
+    if date(state.get('next_at')) and at<date(state['next_at']):
+        # An idle backoff tick has not verified recovery from a scan outage.
+        if processed or not state.get('error'):completed()
+        return
     if not state.get('end'):
         start=max(date(active),at-timedelta(days=window_days()+1))
         state.update(start=start.isoformat(),end=at.isoformat(),cursor=None,pending=[])
@@ -270,6 +280,7 @@ def reconcile(store,shop,clock=now):
         cursor=page['pageInfo'].get('endCursor');more=page['pageInfo'].get('hasNextPage')
         if more and (not cursor or cursor==state.get('cursor')):raise ValueError('Attribution order pagination did not advance.')
         state.update(pending=[o['id'] for o in page['nodes']],cursor=cursor,more=more)
+    incomplete=False
     for identity in state['pending'][:2]:
         try:
             if identity not in processed:process(identity)
@@ -277,8 +288,13 @@ def reconcile(store,shop,clock=now):
             # One malformed order cannot starve all later orders. The rolling
             # reconciliation window retries it without logging customer content.
             logging.getLogger(__name__).warning('crm_attribution_evidence_incomplete type=%s',type(exc).__name__)
+            incomplete=True
         state['pending'].remove(identity)
         store.set_state(key,state)
     if not state['pending'] and not state['more']:
+        error=state.get('error')
         state={'watermark':state['end'],'next_at':(at+timedelta(minutes=15)).isoformat()}
+        if error:state['error']=error
+    if incomplete:state['error']='source_unavailable'
     store.set_state(key,state)
+    if not incomplete:completed()
