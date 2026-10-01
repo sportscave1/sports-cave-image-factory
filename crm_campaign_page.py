@@ -301,23 +301,33 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     composer_styles()
     drafts=CampaignStore(store.connect)
     editor=st.session_state.get('campaign_editor')
+    explicit=st.query_params.get('campaign')
+    if editor and explicit and str(editor.get('id') or '')!=explicit:
+        try:identity=str(uuid.UUID(explicit))
+        except ValueError:
+            st.warning('Invalid campaign identity.');return
+        st.session_state['campaign_pending_open']=identity
+        # Keep the current route while the existing leave dialog protects edits.
+        # Opening the target sets its URL; cancelling leaves the current URL.
+        if editor.get('id'):st.query_params['campaign']=str(editor['id'])
+        else:del st.query_params['campaign']
     if editor and dirty(editor) and (st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open')):
         from crm_campaign_leave_ui import leave_dialog
         leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))
         return
-    # Keep the established layout, but stream the lightweight list before restoring
-    # the selected composer and its settings. The editor occupies its own slot.
+    if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
+        continue_campaign_leave(drafts,navigate)
+        return
+    # Emit the active composer before any secondary history reads or widgets.
     st.html('''<style>
       [data-testid="stMainBlockContainer"]:has(.st-key-crm-recent-campaigns){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
     </style>''')
-    editor_area=st.container(key='crm-selected-campaign')
+    with st.container(key='crm-selected-campaign'):
+        with stage('Campaigns','editor_render'):
+            _selected_campaign(shop,store,actions,navigate,drafts)
     with st.container(key='crm-recent-campaigns'):
-        from crm_tracking_health import control as tracking_health_control
-        tracking_health_control(shop,drafts,actions.user)
-        with stage('Campaigns','list_render'):
+        with stage('Campaigns','history_render'):
             recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
-    with editor_area:
-        _selected_campaign(shop,store,actions,navigate,drafts)
 
 
 def _selected_campaign(shop,store,actions,navigate,drafts):
@@ -325,11 +335,11 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
     from email_loading import stage
     available=True
     try:
-        with stage('Campaigns','selected_detail'):
-            defaults=drafts.setting('sending')['value'];cfg=drafts.render_settings()
+        with stage('Campaigns','selected_config'):
+            cfg=drafts.render_settings()
             choices=None
     except StoreUnavailable as exc:
-        available=False;defaults={'smart_hours':16};cfg=settings()
+        available=False;cfg=settings()
         st.error(str(exc));st.caption('Persistence unavailable. Your compose state stays in this session; saves and tests are disabled.')
     st.session_state['campaign_persistence_unavailable']=not available
     if available:st.session_state['campaign_recovery_context']=(drafts,actions.user)
@@ -338,19 +348,23 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
         if not available:return  # Never replace an unavailable saved draft with defaults.
         try:
             explicit=st.query_params.get('campaign')
-            recovered=restore(drafts,actions.user,explicit)
+            with stage('Campaigns','selected_restore'):
+                recovered=restore(drafts,actions.user,explicit)
             if not recovered and explicit:
                 try:identity=str(uuid.UUID(str(explicit)))
                 except ValueError:identity=None
                 if identity and drafts.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):
                     recovered=drafts.draft(identity)
             if recovered:open_editor(recovered)
-            else:new_compose(defaults['smart_hours'],cfg,cfg.get('email_defaults'))
+            else:
+                defaults=drafts.setting('sending')['value']
+                new_compose(defaults['smart_hours'],cfg,cfg.get('email_defaults'))
         except StoreUnavailable as exc:
             st.error(str(exc));return
 
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
-    delivery=drafts.q('SELECT * FROM crm_campaigns WHERE id=%s',(editor['id'],),True) if available and editor.get('id') else None
+    with stage('Campaigns','selected_delivery'):
+        delivery=drafts.q('SELECT * FROM crm_campaigns WHERE id=%s',(editor['id'],),True) if available and editor.get('id') else None
     if delivery:
         # Frozen preview bypasses all authoring/autosave widgets and recovery writes.
         from crm_campaign_analytics_ui import locked_campaign

@@ -24,7 +24,7 @@ drafts.setting.return_value={'value':{'smart_hours':16}}
 drafts.render_settings.return_value=settings({})
 drafts.q.return_value=None
 if st.session_state.get('mode') == 'detail_error':
- drafts.setting.side_effect=StoreUnavailable('Campaign storage unavailable')
+ drafts.render_settings.side_effect=StoreUnavailable('Campaign storage unavailable')
 else:
  st.session_state['campaign_editor']={'id':None,'version':None,'name':'Fixture',
    'status':'DRAFT','archived_at':None,'document':document()}
@@ -33,7 +33,8 @@ with ExitStack() as stack:
  stack.enter_context(patch('requests.sessions.Session.request',side_effect=AssertionError('No HTTP')))
  stack.enter_context(patch('crm_campaign_page.CampaignStore',return_value=drafts))
  stack.enter_context(patch('email_loading.shell',side_effect=AssertionError('Campaigns must not emit shell')))
- stack.enter_context(patch('crm_tracking_health.control'))
+ stack.enter_context(patch('crm_tracking_health.control',side_effect=AssertionError('No tracking UI')))
+ stack.enter_context(patch('crm_tracking_health.verify',side_effect=AssertionError('No tracking verification')))
  if st.session_state.get('mode') == 'list_error':
   stack.enter_context(patch('crm_campaign_page._campaign_history',side_effect=StoreUnavailable('Campaign storage unavailable')))
  else:
@@ -59,6 +60,9 @@ class CampaignLoadingTests(unittest.TestCase):
                          'Find campaign', 'Refresh', '780px'):
             self.assertNotIn(obsolete, html)
         self.assertFalse(app.get('empty'))
+        for label in ('Tracking health','Verify tracking setup'):
+            self.assertNotIn(label,[button.label for button in app.button])
+            self.assertNotIn(label,[popover.label for popover in app.get('popover')])
 
     def test_success_renders_real_editor_actions_tabs_and_preview(self):
         app=AppTest.from_string(SCRIPT).run()
