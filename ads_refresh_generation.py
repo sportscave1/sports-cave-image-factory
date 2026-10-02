@@ -4,6 +4,61 @@ import json
 import ads_refresh_plan as plan
 
 
+IE_REFRESH_FOOTER_HEADLINES = (
+    'ONLY 100 WILL EVER EXIST',
+    'LIMITED TO 100 EDITIONS',
+    'JUST 100 EDITIONS WORLDWIDE',
+    'ONE OF ONLY 100',
+    'STRICTLY 100 EDITIONS',
+    'ONLY 100 CAN BE CLAIMED',
+    'WHEN 100 GO, IT ENDS',
+    'A 100 EDITION RELEASE',
+    '100 WORLDWIDE. NO MORE',
+    'CLAIM BEFORE 100 ARE GONE',
+)
+IE_REFRESH_FOOTER_SUPPORT = (
+    'Once they’re gone, they’re gone for good.',
+    'A collector release that won’t be repeated.',
+    'No second run after sellout.',
+    'Secure yours before the edition closes.',
+    'A short-run release made for collectors.',
+    'Miss this release and it stays missed.',
+    'The edition retires once the run is gone.',
+    'Own it before the collector window closes.',
+    'Built as a limited run, not a mass release.',
+    'When this release is claimed out, it’s finished.',
+)
+
+
+def ie_refresh_image_rules():
+    """Prompt-only refinement; no change to New Ads, carousel or generation flow."""
+    return '''IE WINNER REFINEMENT — PREMIUM PRODUCT / REAL CUSTOMER WALL / FOMO FOOTER
+WINNER_IE supplies the winning creative DNA, collector/scarcity persuasion, product prominence and established footer hierarchy. Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle. The winner is a creative reference, not the product/frame authority.
+CANONICAL_PRODUCT — the uploaded canonical black-framed website product image — is the absolute authority for exact artwork, black frame thickness, frame depth, outer proportions, bevel profile, frame geometry and glazing relationship. The winning ad must NOT override canonical frame proportions. Preserve the same frame thickness consistently across all three outputs, allowing only physically correct perspective of the whole rigid frame.
+Match the canonical black frame thickness and depth exactly. Do not visually thin, thicken, simplify, flatten or reinterpret the frame.
+The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. If depth/glazing cannot be established from the supplied source, request an additional canonical reference rather than invent construction details.
+
+PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM — include these requirements explicitly in EACH final image prompt:
+Premium real-glass glazing with subtle but visible room-based reflections, physically believable highlight falloff on the glazing, realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glass. Keep reflections restrained and consistent with actual windows/lamps and camera angle; printed artwork text/details remain clear. If the canonical product is explicitly verified as unglazed, preserve that construction instead of adding glass.
+Use real interior photography, believable wall texture/materials and room proportions, tasteful premium furniture, physically credible lighting sources and high-end but lived-in interior credibility. Product remains the dominant mobile-readable hero on a real customer's wall.
+The final result must feel like a genuine premium lifestyle photograph taken in a real home, not a rendered showroom, not an AI room, and not a flat composited mockup.
+Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
+
+IE REFRESH ON-IMAGE FOOTER COPY — apply to ALL THREE covers, not just the first:
+The main/top footer headline must ALWAYS be scarcity/FOMO-led, selected from the approved headline patterns below. Never use Legends On The Wall, Two Names One Standard, Framed Greatness, For Real Fans or a similar generic/conceptual brand headline as the main footer headline. The second footer line must add restrained collector urgency or a distinct scarcity/finality layer; the supporting line must not repeat the headline. CTA remains collector-led within the existing approved CTA bank.
+All 3 outputs must use distinct scarcity/support pairings: three different headlines AND three different supporting lines, with no duplicate footer copy. Do not treat synonym swaps as meaningful variation. If the headline states only 100/100 editions, do not repeat the quantity or worldwide edition statement in its support line. If the headline already expresses sellout finality, support it with collector ownership/limited-run urgency rather than another gone-for-good statement. Avoid pairing two versions of the same finality claim. Preserve the winner's winning scarcity logic across all three while refreshing the rooms substantially.
+Premium, restrained, concise collector tone; no cheap hype, pressure countdowns or invented demand. Keep the established opaque footer, gold separator, safe margins, hierarchy and typography unchanged. Headline: exactly one line, at most 6 words/28 characters. Support: exactly one line, at most 12 words/70 characters. CTA: exactly one line, at most 4 words/24 characters. Shorten copy within the scarcity strategy instead of shrinking fonts or wrapping.
+Evidence gate: 100 in this bank is a pattern example, NOT a product fact. Use 100 only when the canonical artwork or supplied verified product facts confirm that limit; substitute another verified limit and recheck fit. Never infer edition size, remaining stock, exclusivity, no reprint, retirement or a closing deadline from the winner alone. Use no-second-run/finality/support patterns only when that policy is verified. If necessary edition facts are missing, request them before generating final footer copy; do not fall back to a generic non-FOMO headline or fabricate scarcity.
+
+APPROVED IE CREATIVE REFRESH FOOTER HEADLINE BANK
+''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_HEADLINES) + '''
+
+APPROVED IE CREATIVE REFRESH SUPPORTING-LINE BANK
+''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_SUPPORT) + '''
+
+Before returning each standalone image prompt, include the complete winner/canonical authority roles, exact frame-thickness/depth instruction, premium glass and wall-mount realism, real-room lifestyle-photography requirement, FOMO-only headline rule, non-repeating support rule and three-output distinct-pair rule. Resolve the exact permitted headline/support/CTA text for that cover in its own prompt; do not leave a choice bank or an instruction to consult another brief. Check all three selected pairs together for duplicate ideas and copy before returning them.'''
+
+
 def source_context(source=None):
     source = deepcopy(source or {})
     return {"source_winner": source} if source else {}
@@ -41,7 +96,7 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
         briefs.append(plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
                      role=reference.get('role', ''), style=style, detail=carousel and 'detail' in reference.get('role', '').casefold(),
                      dimensions='1024 x 1024' if ie else '1080 x 1080')
-                      + ('\n\n' + ads.build_instant_experience_fixed_opaque_footer_rules() + '\n\n' + ads.build_instant_experience_on_image_copy_fit_rules() if ie else ''))
+                      + ('\n\n' + ads.build_instant_experience_fixed_opaque_footer_rules() + '\n\n' + ads.build_instant_experience_on_image_copy_fit_rules() + '\n\n' + ie_refresh_image_rules() if ie else ''))
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
 {'INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS' if ie else ''}

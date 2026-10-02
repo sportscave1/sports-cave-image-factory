@@ -11,6 +11,7 @@ import ads_posting_page as posting
 import ads_posting_handoff as handoff
 import ads_refresh_winners as winners
 import ads_target_relevance as relevance
+import ads_refresh_generation as generation
 import supabase_backend as backend
 from posting_import_csv import parse_posting_import_csv
 from tests.test_ads_posting_handoff import completed_ad, save_locally
@@ -18,6 +19,58 @@ from tests.test_posting_import_csv import product_records
 
 
 class WinnerRefinementTests(unittest.TestCase):
+    def test_ie_refresh_all_three_briefs_include_premium_fomo_rules(self):
+        prompt=ads.build_instant_experience_winner_refinement_prompt('Collector edition','NBA','USA',
+            'https://example.test/products/collector',{'winning_primary_text':'Collector release','winning_headline':'Own the moment'})
+        contracts=prompt.split('STANDALONE EXECUTION CONTRACTS')[1].split('EXECUTION NOTES')[0]
+        self.assertEqual(contracts.count(generation.ie_refresh_image_rules()),3)
+        for phrase in ('Match the canonical black frame thickness and depth exactly.',
+                       'The winning ad must NOT override canonical frame proportions.',
+                       'Premium real-glass glazing','physically believable highlight falloff',
+                       'soft contact shadow where frame meets wall','ambient occlusion behind/under the frame',
+                       'genuine premium lifestyle photograph taken in a real home',
+                       'main/top footer headline must ALWAYS be scarcity/FOMO-led',
+                       'supporting line must not repeat the headline',
+                       'three different headlines AND three different supporting lines',
+                       'No second run after sellout.'):
+            self.assertEqual(contracts.count(phrase),3,phrase)
+        self.assertIn('three genuinely different environments',prompt)
+        self.assertIn('exactly one square 1024 x 1024 cover',prompt)
+        self.assertEqual(contracts.count(ads.build_instant_experience_fixed_opaque_footer_rules()),3)
+        self.assertEqual(contracts.count(ads.build_instant_experience_on_image_copy_fit_rules()),3)
+
+    def test_approved_footer_banks_are_distinct_and_fit_existing_typography(self):
+        self.assertEqual(len(generation.IE_REFRESH_FOOTER_HEADLINES),10)
+        self.assertEqual(len(generation.IE_REFRESH_FOOTER_SUPPORT),10)
+        for bank,words,characters in ((generation.IE_REFRESH_FOOTER_HEADLINES,6,28),
+                                      (generation.IE_REFRESH_FOOTER_SUPPORT,12,70)):
+            self.assertEqual(len(bank),len(set(bank)))
+            for line in bank:
+                self.assertLessEqual(len(line.split()),words,line)
+                self.assertLessEqual(len(line),characters,line)
+                self.assertNotIn('\n',line)
+        for headline in generation.IE_REFRESH_FOOTER_HEADLINES:
+            self.assertTrue(ads.instant_experience_on_image_headline_is_valid(headline),headline)
+
+    def test_ie_rules_preserve_truth_and_prohibit_generic_footer_and_mockups(self):
+        rules=generation.ie_refresh_image_rules()
+        for phrase in ('Legends On The Wall','Two Names One Standard','Framed Greatness','For Real Fans',
+                       '100 in this bank is a pattern example, NOT a product fact',
+                       'only when that policy is verified','If necessary edition facts are missing, request them',
+                       'explicitly verified as unglazed','fake shiny CGI glare','floating artwork',
+                       'frame edge distortion','washed-out glazing','rather than invent construction details'):
+            self.assertIn(phrase,rules)
+
+    def test_non_ie_refresh_prompts_do_not_use_new_ie_rules(self):
+        with patch.object(generation,'ie_refresh_image_rules',side_effect=AssertionError('IE-only rules')):
+            for campaign in ('Carousel','Single Image / Video'):
+                prompt=generation.build_prompt(ads,'Collector edition','NBA','USA',campaign,
+                    'https://example.test/products/collector',{'winning_primary_text':'Reference copy','winning_headline':'Reference'})
+                self.assertNotIn('APPROVED IE CREATIVE REFRESH FOOTER HEADLINE BANK',prompt)
+        with patch.object(generation,'ie_refresh_image_rules',side_effect=AssertionError('Not New Ads')):
+            prompt=ads.build_ads_prompt('Collector edition','NBA','USA','Instant Experience')
+            self.assertNotIn('IE WINNER REFINEMENT — PREMIUM PRODUCT',prompt)
+
     def test_prompt_single_pair_and_winner_style_contract(self):
         prompt = ads.build_ads_prompt(
             "Michael Jordan", "NBA", "USA", "Instant Experience",
