@@ -88,10 +88,7 @@ def send_control(shop,store,user,editor,key,cfg,available=True):
 @st.dialog('Review & send',width='large',on_dismiss=dismiss_send_status)
 def review_dialog(shop,store,user,editor,key,cfg=None):
     # This shell performs no draft/history/audience/provider reads.
-    import time
-    started=time.monotonic()
     delivery=get_resend_marketing_config_status()
-    doc=editor['document']
     st.html("""<style>
     [role="dialog"]:has(.st-key-crm-send-review-summary){max-height:90vh;max-width:1000px;width:calc(100vw - 32px);overflow:auto}
     .st-key-crm-send-review-summary [data-testid="stVerticalBlock"],
@@ -105,8 +102,12 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
     @media(max-width:640px){.st-key-crm-send-review-summary [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
     .st-key-crm-send-review-summary [data-testid="stColumn"]{flex:1 1 100%;width:100%;min-width:0}}
     </style>""")
-    summary_slot=st.empty()
-    with summary_slot.container(),st.container(key='crm-send-review-summary'):
+    review_finalization(shop,store,user,editor,key,None,delivery,cfg=cfg)
+
+
+def _review_summary(editor,key,delivery,cfg):
+    doc=editor['document']
+    with st.container(key='crm-send-review-summary'):
         summary,preview=st.columns([42,58],gap='small')
         summary.write('**Campaign**  '+editor['name'])
         summary.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
@@ -131,19 +132,29 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
             if cfg is not None:st.iframe(render_preview(st.session_state,doc,st.session_state.get(key+'review_preview_settings',cfg))['html'],height=240)
         timing=doc.get('send_timing',{'mode':'now'})
         summary.caption('Delivery: '+('Scheduled · '+timing['date']+' · '+timing['time']+' recipient local time' if timing['mode']=='schedule' else 'Send now'))
-    logging.getLogger(__name__).info('campaign_review stage=modal_shell duration_ms=%.1f',(time.monotonic()-started)*1000)
-    from crm_campaign_review import start_review
-    token=key+'review_job'
-    job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg)
-    st.session_state[token]=job
-    review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg)
+
 
 
 @st.fragment
-def review_finalization(shop,store,user,editor,key,job,delivery,summary_slot=None,cfg=None):
+def review_finalization(shop,store,user,editor,key,job,delivery,cfg=None):
+    # Both slots belong to this fragment, including the initial summary.
+    # Never mutate a placeholder supplied by the surrounding dialog.
+    summary_slot=st.empty()
+    if not st.session_state.get(key+'queued_receipt'):
+        if job is None:
+            import time
+            started=time.monotonic()
+            with summary_slot.container():
+                _review_summary(editor,key,delivery,cfg)
+            logging.getLogger(__name__).info('campaign_review stage=modal_shell duration_ms=%.1f',(time.monotonic()-started)*1000)
+            from crm_campaign_review import start_review
+            token=key+'review_job'
+            job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg)
+            st.session_state[token]=job
     body=st.empty()
     with body.container():
         _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body)
+
 
 
 def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body):

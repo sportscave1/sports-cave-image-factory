@@ -145,6 +145,44 @@ class ProgressTests(unittest.TestCase):
         self.assertIn(ID,app.session_state['campaign_send_progress'])
         self.assertTrue(app.session_state['job'].closed)
 
+    def test_post_queue_ui_failure_preserves_receipt_and_reruns_never_queue_again(self):
+        app=AppTest.from_string(QUEUE_SCRIPT).run()
+        # Simulate the worker finishing before the UI status render fails.
+        durable=row('SENT',ACCEPTED=4)
+        with patch('crm_campaign_progress_ui.status_content',side_effect=RuntimeError('UI fixture failure')):
+            next(b for b in app.button if b.label=='Send to 4 recipients').click().run()
+        self.assertTrue(app.exception)
+        self.assertEqual(app.session_state['fixture_queued_receipt']['id'],ID)
+        self.assertEqual(app.session_state['queue_calls'],1)
+        for _ in range(3):
+            with patch('crm_campaign_progress_ui.load_progress',return_value={ID:summarize(durable)}):
+                app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state['queue_calls'],1)
+            self.assertTrue(any('Campaign sent' in m.value for m in app.markdown))
+            self.assertIn('Close',[b.label for b in app.button])
+            self.assertNotIn('Cancel',[b.label for b in app.button])
+            self.assertFalse(any('Send to' in b.label or 'Preparing' in b.label for b in app.button))
+
+    def test_review_fragment_owns_every_mutated_placeholder(self):
+        import ast
+        source=Path('crm_campaign_send_ui.py').read_text(encoding='utf-8')
+        functions={n.name:n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef)}
+        dialog=ast.get_source_segment(source,functions['review_dialog'])
+        fragment=ast.get_source_segment(source,functions['review_finalization'])
+        self.assertNotIn('st.empty()',dialog)
+        self.assertNotIn('summary_slot',dialog)
+        self.assertNotIn('summary_slot',[a.arg for a in functions['review_finalization'].args.args])
+        self.assertIn('summary_slot=st.empty()',fragment)
+        self.assertIn('body=st.empty()',fragment)
+        self.assertLess(fragment.index('_review_summary('),fragment.index('start_review('))
+        page=Path('crm_campaign_page.py').read_text(encoding='utf-8').split('def _selected_campaign')[1]
+        self.assertLess(page.index('if delivery:'),page.index('send_control('))
+        locked=page.split('if delivery:')[1].split('from crm_campaign_markets')[0]
+        self.assertIn('operational_view(',locked)
+        self.assertIn('return',locked)
+
+
     def test_queue_failure_preserves_editor_url_and_operation(self):
         app=AppTest.from_string(QUEUE_SCRIPT);app.session_state['queue_fail']=True;app.run()
         next(b for b in app.button if b.label=='Send to 4 recipients').click().run()
@@ -233,6 +271,12 @@ class SQLProgressTests(unittest.TestCase):
         self.assertNotIn(identity,[str(r['id']) for r in flow.store.list_drafts(working=True)])
         self.assertGreaterEqual(flow.store.history_counts()['sent'],1)
         self.assertEqual(flow.store.draft(identity),draft_before)
+        # A later UI exception cannot roll back the already committed send.
+        with patch.dict(os.environ,LIVE):
+            again=queue_campaign(flow.shop,flow.store,ADMIN,editor,str(uuid.uuid4()),env=LIVE,snapshot_id=result['snapshot_id'])
+        self.assertEqual(again['status'],'SENT')
+        self.assertTrue(again['already_started'])
+
         self.assertEqual(flow.store.q('SELECT count(*) n FROM crm_marketing_sends WHERE campaign_id=%s',(identity,),True)['n'],4)
         indexes=flow.store.q("SELECT indexdef FROM pg_indexes WHERE tablename='crm_marketing_sends'")
         self.assertTrue(any('UNIQUE INDEX' in r['indexdef'] and '(campaign_id,' in r['indexdef'] for r in indexes))

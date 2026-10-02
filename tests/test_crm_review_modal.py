@@ -131,7 +131,10 @@ if st.button('Open review'):
         control=source.split('@st.fragment\ndef send_control')[1].split('@st.dialog')[0]
         self.assertNotIn('st.rerun',control);self.assertNotIn('history',control)
         shell=source.split('def review_dialog')[1].split('@st.fragment')[0]
-        self.assertLess(shell.index('summary.write'),shell.index('start_review('))
+        self.assertNotIn('summary_slot',shell)
+        fragment=source.split('def review_finalization')[1].split('def _review_finalization')[0]
+        self.assertLess(fragment.index('_review_summary('),fragment.index('start_review('))
+        self.assertIn('summary_slot=st.empty()',fragment)
         self.assertNotIn('render_settings(',shell)
         self.assertIn('disabled=not ready',source)
         self.assertIn("result.get('snapshot_id')",source)
