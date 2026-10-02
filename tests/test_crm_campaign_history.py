@@ -93,8 +93,10 @@ with patch('crm_segment_counts.COUNTS.display',return_value={'counts':st.session
     def test_dialog_open_suspends_home_timer(self):
         from pathlib import Path
         source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
-        self.assertIn("not st.session_state.get('sent_analytics_id')",source)
-        self.assertIn("not st.session_state.get('campaign_delete_dialog_id')",source)
+        # Actual mounted dialogs own the pause; stale session visibility flags
+        # must not strand the Home controller after native dismissal.
+        self.assertIn('document.querySelector("[role=dialog]")',source)
+        self.assertIn('if(document.hidden)',source)
 
 
 if __name__=='__main__':unittest.main()

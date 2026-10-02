@@ -257,8 +257,6 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if view=='CAMPAIGNS_HOME':
         from crm_campaign_home import home
         home(drafts,actions.user)
-        from crm_campaign_progress_ui import status_tray
-        status_tray(drafts)
         return
     st.html('''<style>
       [data-testid="stMainBlockContainer"]:has(.st-key-crm-selected-campaign){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
@@ -268,8 +266,6 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     with st.container(key='crm-selected-campaign'):
         with stage('Campaigns','editor_render'):
             _selected_campaign(shop,store,actions,navigate,drafts)
-    from crm_campaign_progress_ui import status_tray
-    status_tray(drafts)
 
 
 def _selected_campaign(shop,store,actions,navigate,drafts):

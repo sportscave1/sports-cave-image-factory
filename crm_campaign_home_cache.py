@@ -11,7 +11,7 @@ MAX_ENTRIES = 24
 SUMMARY_GROUPS = ('counts', 'delivery', 'attribution')
 
 
-def job(state, store, key, load):
+def job(state, store, key, load, *, ttl=TTL):
     cache = state.setdefault('campaign_home_cache', {})
     identity = (store.connect, key)
     entry = cache.get(identity)
@@ -22,7 +22,7 @@ def job(state, store, key, load):
         if not future.done(): return future
         if entry[0] is None:
             entry = cache[identity] = (monotonic(), future)
-        if monotonic() - entry[0] < TTL: return future
+        if monotonic() - entry[0] < ttl: return future
     if not CAPACITY.acquire(blocking=False): return None
     def work():
         started = perf_counter()

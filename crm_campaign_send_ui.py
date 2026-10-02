@@ -161,13 +161,20 @@ def review_finalization(shop,store,user,editor,key,job,delivery,cfg=None):
 
 
 
+def _accepted_navigation(receipt,editor):
+    from crm_campaign_home_progress import accepted_home
+    from crm_campaign_home import return_home
+    accepted_home(st.session_state,receipt,editor)
+    return_home()
+    # A single full-app navigation closes the review dialog. Delivery already
+    # belongs to the worker; retain the original composer and durable receipt.
+    st.rerun()
+
+
 def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body):
     receipt=st.session_state.get(key+'queued_receipt')
     if receipt:
-        if summary_slot is not None:summary_slot.empty()
-        from crm_campaign_progress_ui import status_content
-        # Same open overlay, now a tiny DB-only status region. Never rerun the page.
-        status_content(store,str(receipt['id']))
+        _accepted_navigation(receipt,editor)
         return
     job=st.session_state.get(key+'review_job',job)
     if job.closed:return
@@ -259,27 +266,7 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
         # Nothing below owns delivery; the receipt exists only after commit.
         job.closed=True
         st.session_state[key+'queued_receipt']=sent
-        from crm_campaign_progress import track
-        track(st.session_state,sent,editor['name'])
-        st.session_state['campaign_history_polling_active']=True
-        # Replace only the sent editor. Never replace a newer, independent draft.
-        current=st.session_state.get('campaign_editor',editor)
-        if str(current.get('id'))==str(sent['id']):
-            from crm_campaign_page import new_compose
-            context=st.session_state.pop('campaign_recovery_context',None)
-            try:new_compose(editor['document'].get('smart_hours',16),cfg)
-            finally:
-                if context:st.session_state['campaign_recovery_context']=context
-        if summary_slot is not None:summary_slot.empty()
-        body.empty()
-        with body.container():
-            from crm_campaign_progress_ui import status_content
-            status_content(store,str(sent['id']))
-            # Wake only the history fragment once; its own DB result chooses the
-            # subsequent cadence. No full-page rerun or composer event.
-            st.html('''<script>/* '''+uuid.uuid4().hex+''' */setTimeout(()=>{
-              document.querySelector('.st-key-crm-history-poll button')?.click();
-            },0);</script>''',unsafe_allow_javascript=True)
+        _accepted_navigation(sent,editor)
         return
     if pending:
         # A one-shot native fragment event stops naturally on ready/error/dismiss.

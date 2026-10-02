@@ -54,6 +54,9 @@ class DispatchTests(unittest.TestCase):
             reviewed=review(shop,self.store,editor,LIVE)
             result=queue_campaign(shop,self.store,ADMIN,editor,str(uuid.uuid4()),env=LIVE,snapshot_id=reviewed['snapshot_id'])
         self.ids.append(editor['id']);self.assertEqual(result['recipients'],count)
+        # PGlite's clock can trail Python by a few milliseconds. These immediate
+        # send fixtures are due already; do not let clock skew select an older job.
+        self.store.q("UPDATE crm_marketing_sends SET due_at=now()-interval '1 second' WHERE campaign_id=%s",(editor['id'],))
         return editor['id']
     def states(self,identity):
         return self.store.q("SELECT value FROM crm_runtime_state WHERE value->>'campaign_id'=%s AND key LIKE 'campaign-batch:%%' ORDER BY (value->>'batch_index')::integer",(str(identity),))
@@ -148,6 +151,30 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(row['submitted'],2);self.assertEqual(row['planned'],2)
         self.assertEqual(row['delivered'],0)
         self.assertIn('2 / 2 submitted',row_html(row));self.assertIn('Sending',row_html(row))
+    def test_durable_1095_progress_survives_client_loss_and_reopen(self):
+        identity=self.queue(1095)
+        from crm_campaign_progress import read_progress
+        import crm_campaign_dispatch as module
+        initial=read_progress(self.store,[identity])[str(identity)]
+        self.assertEqual((initial['total'],initial['processed']),(1095,0))
+        values=[];original=module.finish
+        def finish(*args):
+            original(*args)
+            # New connection/session: no browser state is needed to read truth.
+            progress=read_progress(CampaignStore(connect),[identity])[str(identity)]
+            values.append(progress['processed'])
+            self.assertIsNotNone(progress['worker_started_at'])
+            self.assertIsNotNone(progress['last_progress_at'])
+            self.assertLessEqual(progress['processed'],progress['total'])
+        with patch.object(module,'finish',side_effect=finish):dispatch(self.engine)
+        self.assertEqual(values,[100,200,300,400,500,600,700,800,900,1000,1095])
+        with patch.object(self.store,'list',return_value=[]),patch('crm_campaign_attribution.reconcile'),patch('crm_consent_sync.reconcile_pending'):
+            self.engine.tick(uuid.uuid4().hex)
+        reopened=read_progress(CampaignStore(connect),[identity])[str(identity)]
+        self.assertEqual((reopened['status'],reopened['processed']),('SENT',1095))
+        self.assertEqual(len(self.transport.calls),11)
+        dispatch(self.engine)
+        self.assertEqual(len(self.transport.calls),11)
     def test_marketing_off_no_dispatch(self):
         self.queue(1);self.engine.config.enabled=False
         self.assertFalse(dispatch(self.engine));self.assertFalse(self.transport.calls)

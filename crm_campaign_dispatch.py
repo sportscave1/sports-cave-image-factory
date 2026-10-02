@@ -68,7 +68,7 @@ def prepare(engine,campaign,content,provider_blocked):
             if state['status'] not in ('SUBMITTING','RETRY'):continue
             if (state['attempt_count'] and at-date(state['request_started_at'])>=RETRY_WINDOW) or state['attempt_count']>=MAX_ATTEMPTS:
                 state['status']='HELD';state['error']='retry_window_exhausted';persist(conn,entry['key'],state)
-                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_retry_exhausted' WHERE id=ANY(%s)",(state['recipient_ids'],));continue
+                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_retry_exhausted',updated_at=now() WHERE id=ANY(%s)",(state['recipient_ids'],));continue
             if date(state.get('retry_at')) and date(state['retry_at'])>at:continue
             rows=conn.execute('SELECT * FROM crm_marketing_sends WHERE id=ANY(%s)',(state['recipient_ids'],)).fetchall()
             if len(rows)!=len(state['recipient_ids']) or any(r['status']!='SUBMITTING' for r in rows):
@@ -76,7 +76,7 @@ def prepare(engine,campaign,content,provider_blocked):
             reasons=stop_state(conn,campaign,rows,content['document']['smart_hours'],at)
             if any(r['reason'] for r in reasons) or any(r['recipient_hash'] in provider_blocked for r in rows):
                 state['status']='HELD';state['error']='stop_state_changed';persist(conn,entry['key'],state)
-                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_stop_state_changed' WHERE id=ANY(%s)",(state['recipient_ids'],));continue
+                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_stop_state_changed',updated_at=now() WHERE id=ANY(%s)",(state['recipient_ids'],));continue
             state['_payloads']=[payload(common,r,sender) for r in state['recipients']]
             digest=hashlib.sha256(json.dumps(state['_payloads'],sort_keys=True).encode()).hexdigest()
             if digest!=state['request_hash']:raise ValueError('Frozen batch payload changed.')
@@ -135,9 +135,9 @@ def attempt(engine,transport,key,state,content):
         if blocked:
             if state['attempt_count']:
                 state['status']='HELD';state['error']='stop_state_changed';persist(conn,key,state)
-                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_stop_state_changed',lease_until=NULL WHERE id=ANY(%s)",(state['recipient_ids'],))
+                conn.execute("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='batch_stop_state_changed',lease_until=NULL,updated_at=now() WHERE id=ANY(%s)",(state['recipient_ids'],))
                 return None
-            conn.execute("UPDATE crm_marketing_sends SET status='BLOCKED',error_code='dispatch_stop_state',lease_until=NULL WHERE id=ANY(%s)",(blocked,))
+            conn.execute("UPDATE crm_marketing_sends SET status='BLOCKED',error_code='dispatch_stop_state',lease_until=NULL,updated_at=now() WHERE id=ANY(%s)",(blocked,))
             indexes=[n for n,i in enumerate(state['recipient_ids']) if i not in blocked]
             for field in ('recipient_ids','recipients','_payloads'):state[field]=[state[field][n] for n in indexes]
             state['request_hash']=hashlib.sha256(json.dumps(state['_payloads'],sort_keys=True).encode()).hexdigest()
@@ -147,7 +147,7 @@ def attempt(engine,transport,key,state,content):
         state['attempt_count']+=1;state['status']='SUBMITTING'
         state['last_request_started_at']=engine.clock().isoformat()
         persist(conn,key,state)
-        conn.execute("UPDATE crm_marketing_sends SET attempts=attempts+1,first_submitted_at=COALESCE(first_submitted_at,now()),lease_until=now()+interval '5 minutes' WHERE id=ANY(%s)",(state['recipient_ids'],))
+        conn.execute("UPDATE crm_marketing_sends SET attempts=attempts+1,first_submitted_at=COALESCE(first_submitted_at,now()),lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=ANY(%s)",(state['recipient_ids'],))
     state['_claim_ms']=(time.monotonic()-claim_started)*1000
     def send():
         started=time.monotonic()
@@ -226,6 +226,15 @@ def dispatch(engine):
             for key,state,future in pending:
                 result,error,duration=future.result();finish(engine,key,state,result,error,duration)
                 if result:accepted+=len(result['ids'])
+            # Read back committed truth once per bounded wave. Diagnostics cannot
+            # change dispatch or mask an existing provider/persistence failure.
+            try:
+                from crm_campaign_progress import read_progress
+                progress=read_progress(engine.store,[campaign['id']])[str(campaign['id'])]
+                LOG.info('campaign_progress campaign_id=%s send_id=%s job_status=%s total=%s processed=%s submitted=%s skipped=%s failed=%s held=%s worker_started_at=%s last_progress_at=%s completed_at=%s provider_batches=%s',
+                    campaign['id'],campaign['campaign_send_id'],progress['status'],progress['total'],progress['processed'],progress['submitted'],progress['skipped'],progress['failed'],progress['held'],progress.get('worker_started_at'),progress.get('last_progress_at'),progress.get('sent_at'),index+len(wave))
+            except Exception as exc:
+                LOG.warning('campaign_progress read_failure=%s',type(exc).__name__)
             index+=width
             if any(state.get('status')=='RETRY' for _,state in wave):break
     elapsed=time.monotonic()-started

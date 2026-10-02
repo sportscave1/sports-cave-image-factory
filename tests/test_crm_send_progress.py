@@ -54,7 +54,9 @@ def queue(*args,**kwargs):
  if st.session_state.get('queue_fail'):raise ValueError('Review again')
  return {'id':ID,'status':'SENDING','recipients':4,'already_started':False}
 with patch('crm_campaign_review.start_review',return_value=st.session_state['job']), patch('crm_campaign_send_ui.queue_campaign',side_effect=queue), patch('crm_preview_cache.preview',return_value={'html':'<p>Offline preview</p>'}), patch('crm_campaign_send_ui.get_resend_marketing_config_status',return_value={'marketing_enabled':True,'sender':'fixture','reply_to':'fixture'}),patch('requests.sessions.Session.request',side_effect=AssertionError('No HTTP')):
- review_dialog(None,store,{},st.session_state['campaign_editor'],'fixture_',CFG)
+ if st.session_state.get('campaign_view')=='CAMPAIGNS_HOME':
+  st.caption('Campaigns Home')
+ else:review_dialog(None,store,{},st.session_state['campaign_editor'],'fixture_',CFG)
 '''
 
 
@@ -127,7 +129,7 @@ class ProgressTests(unittest.TestCase):
             app.session_state['row']=row(status,**counts);app.run();self.assertFalse(app.exception)
             self.assertIn(expected,[c.value for c in app.caption]);self.assertEqual(app.session_state['query_count'],1)
             self.assertEqual(app.session_state['campaign_editor'],editor)
-        self.assertIn('Done',[b.label for b in app.button]);self.assertIn('View analytics',[b.label for b in app.button])
+        self.assertNotIn('Minimise',[b.label for b in app.button]);self.assertNotIn('Close',[b.label for b in app.button])
         self.assertTrue(any('3 submitted · 1 skipped · 0 failed · 0 held'==c.value for c in app.caption))
 
     def test_held_does_not_show_success_or_analytics(self):
@@ -140,28 +142,24 @@ class ProgressTests(unittest.TestCase):
         next(b for b in app.button if b.label=='Send to 4 recipients').click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['queue_calls'],1)
-        self.assertEqual(app.session_state['campaign_editor']['name'],'Untitled campaign')
-        self.assertIsNone(app.session_state['campaign_editor']['id']);self.assertNotIn('campaign',app.query_params)
-        self.assertIn(ID,app.session_state['campaign_send_progress'])
+        self.assertEqual(app.session_state['campaign_editor']['name'],'Collector edition')
+        self.assertEqual(app.session_state['campaign_editor']['id'],ID);self.assertNotIn('campaign',app.query_params)
+        self.assertEqual(app.session_state['campaign_view'],'CAMPAIGNS_HOME')
+        self.assertNotIn('campaign_send_progress',app.session_state)
         self.assertTrue(app.session_state['job'].closed)
 
     def test_post_queue_ui_failure_preserves_receipt_and_reruns_never_queue_again(self):
         app=AppTest.from_string(QUEUE_SCRIPT).run()
-        # Simulate the worker finishing before the UI status render fails.
-        durable=row('SENT',ACCEPTED=4)
-        with patch('crm_campaign_progress_ui.status_content',side_effect=RuntimeError('UI fixture failure')):
+        with patch('crm_campaign_send_ui._accepted_navigation',side_effect=RuntimeError('UI fixture failure')):
             next(b for b in app.button if b.label=='Send to 4 recipients').click().run()
         self.assertTrue(app.exception)
         self.assertEqual(app.session_state['fixture_queued_receipt']['id'],ID)
         self.assertEqual(app.session_state['queue_calls'],1)
         for _ in range(3):
-            with patch('crm_campaign_progress_ui.load_progress',return_value={ID:summarize(durable)}):
-                app.run()
+            app.run()
             self.assertFalse(app.exception)
             self.assertEqual(app.session_state['queue_calls'],1)
-            self.assertTrue(any('Campaign sent' in m.value for m in app.markdown))
-            self.assertIn('Close',[b.label for b in app.button])
-            self.assertNotIn('Cancel',[b.label for b in app.button])
+            self.assertEqual(app.session_state['campaign_view'],'CAMPAIGNS_HOME')
             self.assertFalse(any('Send to' in b.label or 'Preparing' in b.label for b in app.button))
 
     def test_review_fragment_owns_every_mutated_placeholder(self):
@@ -194,8 +192,7 @@ class ProgressTests(unittest.TestCase):
         source=Path('crm_campaign_progress_ui.py').read_text(encoding='utf-8')
         for name in ('queue_campaign(', 'Shopify(', 'send_test(', 'render_production(', 'validate_tracking(', 'customer_batch(', 'focus('):
             self.assertNotIn(name,source)
-        tray=source.split('def status_tray')[1].split('def operational_view')[0]
-        self.assertNotIn('campaign_editor',tray);self.assertIn("st.rerun(scope='fragment')",tray)
+        self.assertNotIn('def status_tray',source);self.assertNotIn('@st.dialog',source)
         history=Path('crm_campaign_page.py').read_text(encoding='utf-8')
         self.assertNotIn('recent_campaigns(drafts,st.session_state',history)
         home=Path('crm_campaign_home.py').read_text(encoding='utf-8')
@@ -203,17 +200,12 @@ class ProgressTests(unittest.TestCase):
         self.assertIn('arm_home_poll()',home)
         self.assertNotIn('locked_campaign(',history)
 
-    def test_minimise_and_close_only_affect_status_visibility(self):
-        for label in ('Minimise','Close'):
-            app=AppTest.from_string(STATUS_SCRIPT)
-            app.session_state['row']=row(PENDING=4)
-            app.session_state['campaign_send_progress']={ID:{'name':'A'}}
-            app.session_state['campaign_send_dialog_id']=ID
-            app.session_state['campaign_editor']={'name':'B','unsaved':'retained'}
-            app.run();next(b for b in app.button if b.label==label).click().run()
-            self.assertFalse(app.exception);self.assertNotIn('campaign_send_dialog_id',app.session_state)
-            self.assertEqual(app.session_state['campaign_editor'],{'name':'B','unsaved':'retained'})
-            self.assertEqual(bool(app.session_state['campaign_send_progress']),label=='Minimise')
+    def test_old_status_surfaces_are_removed(self):
+        source=Path('crm_campaign_progress_ui.py').read_text(encoding='utf-8')
+        page=Path('crm_campaign_page.py').read_text(encoding='utf-8')
+        self.assertNotIn('status_tray',page)
+        for obsolete in ('def progress_dialog','def status_tray','Minimise','position:fixed'):
+            self.assertNotIn(obsolete,source)
 
     def test_unavailable_db_is_compact_without_exception_secrets(self):
         from crm_store import StoreUnavailable
@@ -222,26 +214,6 @@ class ProgressTests(unittest.TestCase):
         self.assertFalse(app.exception);self.assertFalse(app.error)
         captions=' '.join(c.value for c in app.caption)
         self.assertIn('background delivery continues',captions);self.assertNotIn('secret',captions)
-
-    def test_multiple_statuses_escape_names_and_remain_read_only(self):
-        script='''
-import streamlit as st
-from unittest.mock import Mock,patch
-from crm_campaign_progress_ui import status_tray
-from tests.test_crm_send_progress import ID,row
-from crm_campaign_progress import summarize
-with patch('crm_campaign_progress_ui.load_progress',return_value={ID:summarize(row(PENDING=4)),'second':summarize(row(ACCEPTED=1,PENDING=3))}):
- status_tray(Mock())
-'''
-        app=AppTest.from_string(script)
-        app.session_state['campaign_send_progress']={ID:{'name':'<script>unsafe</script>'},'second':{'name':'B'}}
-        app.session_state['campaign_editor']={'name':'C','dirty':True};app.run()
-        self.assertFalse(app.exception);self.assertEqual(sum(b.label=='Open' for b in app.button),2)
-        html=' '.join(h.proto.body for h in app.get('html'))
-        self.assertIn('&lt;script&gt;unsafe',html);self.assertNotIn('<script>unsafe',html)
-        self.assertIn('position:fixed',html);self.assertIn('max-height:180px',html)
-        self.assertEqual(app.session_state['campaign_editor'],{'name':'C','dirty':True})
-
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class SQLProgressTests(unittest.TestCase):

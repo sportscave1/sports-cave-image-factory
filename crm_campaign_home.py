@@ -34,6 +34,7 @@ def arm_home_poll():
         'window.scCampaignTimers??={};clearTimeout(window.scCampaignTimers[key]);'+
         'const tick=()=>{const b=document.querySelector(".st-key-"+key+" button");'+
         'if(!b||!b.isConnected)return;'+
+        'if(document.hidden){window.scCampaignTimers[key]=setTimeout(tick,30000);return;}'+
         'if(b.disabled||document.querySelector("[role=dialog]")){window.scCampaignTimers[key]=setTimeout(tick,delay);return;}b.click();};'+
         'window.scCampaignTimers[key]=setTimeout(tick,delay);})();</script>',unsafe_allow_javascript=True)
 
@@ -86,6 +87,9 @@ STYLE = '''<style>
  .sc-home-placeholder{display:grid;place-items:center;font-size:22px;color:#b48e32}
  .sc-home-pill{display:inline-block;padding:4px 7px;border-radius:6px;background:#f3f3f0;font-size:11px;white-space:nowrap}
  .sc-home-pill.sent,.sc-home-pill.active,.sc-home-pill.sending,.sc-home-pill.scheduled{background:#edf6ee;color:#28763a}.sc-home-pill.draft{background:#edf3fa;color:#396796}
+ .sc-col-status .sc-home-pill{white-space:normal;max-width:100%;box-sizing:border-box}
+ .sc-home-pill.stalled,.sc-home-pill.failed,.sc-home-pill.needs{background:#fff4e7;color:#8a5021}
+ .sc-home-send-bar{height:4px;background:#eee9df;margin-top:4px;border-radius:2px;overflow:hidden}.sc-home-send-bar span{display:block;height:100%;background:#bc9639}
  .st-key-crm-home-table [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;gap:8px}
  .st-key-crm-home-table [data-testid="stColumn"]{min-width:0}
  .st-key-crm-home-table [data-testid="stColumn"]:last-child{flex:0 0 76px!important;width:76px!important}
@@ -151,6 +155,19 @@ def row_html(row):
     status='Archived' if row.get('archived_at') else {'DRAFT':'Draft','NEEDS_REVIEW':'Draft','TEST_READY':'Draft','BUILDING':'Active'}.get(row['status'],row['status'].title())
     destination='?'+urlencode({'page':'CRM Campaigns','campaign':str(row['id'])})
     submission=('<small>'+format(row['submitted'],',')+' / '+format(row['planned'],',')+' submitted</small>') if row['status']=='SENDING' and row.get('submitted') is not None and row.get('planned') is not None else ''
+    progress=row.get('progress')
+    if progress:
+        detail=' · '.join(str(progress[f])+' '+f for f in ('submitted','skipped','failed','held'))
+        if progress.get('stalled'):status='Stalled'
+        elif progress['held']:status='Needs attention'
+        elif progress['complete'] and progress['failed']:status='Sent with issues'
+        elif row['status']=='SENDING' and not progress.get('worker_started_at') and not progress['processed']:status='Queued'
+        if row['status'] in ('SENDING','QUEUED','BUILDING'):
+            submission='<small title="'+escape(detail,quote=True)+'">'+format(progress['processed'],',')+' / '+format(progress['total'],',')+'</small>'
+            submission+='<div class="sc-home-send-bar" role="progressbar" aria-label="Campaign processing" aria-valuenow="'+str(progress['processed'])+'" aria-valuemin="0" aria-valuemax="'+str(progress['total'])+'"><span style="width:'+str(progress['percent']*100)+'%"></span></div>'
+        else:submission='<small title="'+escape(detail,quote=True)+'">Needs attention</small>' if progress['attention'] else ''
+    if row['status']=='SCHEDULED' and (progress or {}).get('scheduled_at'):
+        submission='<small>'+escape(date(progress['scheduled_at']).strftime('%d %b %H:%M UTC'))+'</small>'
     cells=['<div class="sc-home-identity">'+thumbnail(row)+'<div><a href="'+escape(destination,quote=True)+'" target="_self"><strong>'+escape(row['name'])+'</strong></a><small>'+escape(row.get('subject') or '')+'</small><small class="sc-home-mobile-summary">'+escape(metric('delivered')+' delivered · '+metric('clicks')+' clicked')+'</small></div></div>',
       escape(row.get('market') or '—'),stamp.strftime('%d %b %Y')+'<small>'+stamp.strftime('%H:%M UTC')+'</small>' if stamp else '—',
       metric('recipients'),metric('delivered','delivery_rate'),metric('opens','open_rate'),metric('clicks','click_rate'),metric('orders'),
@@ -266,18 +283,16 @@ def campaign_table(store,user):
             st.session_state['campaign_home_filters']=filters;st.session_state['campaign_home_offset']=0
         offset=st.session_state.get('campaign_home_offset',0)
         key=('table',filters,offset)
-        # Only the visible sending table uses the existing live-progress cadence.
-        # Keep KPI caches and last-good rows stable during these refreshes.
-        cache_identity=(store.connect,key)
-        previous=st.session_state.get('campaign_home_resolved',{}).get(cache_identity) or []
-        cached=st.session_state.get('campaign_home_cache',{}).get(cache_identity)
-        from crm_campaign_progress import POLL_SECONDS
-        if any(r['status']=='SENDING' for r in previous) and cached and cached[1].done() and cached[0] is not None and monotonic()-cached[0]>=POLL_SECONDS:
-            st.session_state['campaign_home_cache'].pop(cache_identity,None)
         # One bounded projection for this visible tab; no top-performer waterfall.
         future=_job(st.session_state,store,key,lambda:rows(store,tab=tab,search=search,market=market,status=status,oldest=sort=='Oldest first',offset=offset))
         items,state=resolve(st.session_state,store,key,future)
-        st.session_state['campaign_home_dispatch_active']=any(r['status']=='SENDING' and r.get('in_page') for r in (items or []))
+        accepted=st.session_state.get('campaign_home_accepted')
+        if accepted and any(str(r['id'])==str(accepted['id']) for r in (items or [])):
+            st.session_state.pop('campaign_home_accepted',None)
+        elif accepted and filters==('All campaigns','','All','All','Newest first') and offset==0:
+            items=[accepted,*(items or [])]
+        from crm_campaign_home_progress import live_rows
+        if items is not None:items=live_rows(st.session_state,store,items)
         st.session_state.setdefault('campaign_home_activity',{})['table']=state
         with st.container(key='crm-home-table'):
             left,menu=st.columns([30,1],gap='small')
@@ -296,6 +311,8 @@ def campaign_table(store,user):
                 if st.button('Retry list',key='home_retry_list'):
                     st.session_state.get('campaign_home_cache',{}).pop((store.connect,key),None);st.rerun(scope='fragment')
             elif state in ('UNRESOLVED','LOADING','REFRESHING'):st.caption('Loading campaigns…' if items is None else 'Refreshing campaigns…')
+            if st.session_state.get('campaign_home_activity',{}).get('progress')=='ERROR':
+                st.caption('Live status temporarily unavailable · last recorded progress retained.')
             if offset or len(page)>PAGE_SIZE:
                 prev,next_=st.columns(2)
                 if prev.button('Previous',disabled=offset==0,key='home_prev'):
@@ -315,6 +332,8 @@ def home(store,user):
     st.session_state['campaign_home_rendering']=True
     try:
         st.html(STYLE)
+        notice=st.session_state.pop('campaign_home_notice',None)
+        if notice:st.toast(notice,icon=':material/check_circle:')
         with st.container(key='crm-campaign-home'):
             title,new=st.columns([4,1],vertical_alignment='center')
             title.html('<h1>Campaigns</h1><p style="color:#73747c">Create, review and send email campaigns.</p>')
