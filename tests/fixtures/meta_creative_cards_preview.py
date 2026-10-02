@@ -24,5 +24,6 @@ for card in value['cards']:
     card['image_sha256'] = f"fixture-{card['position']}"
     card['image_url'] = ''  # No external URL requests in this browser fixture.
     images[card['image_sha256']] = (out.getvalue(), 'image/png')
-with patch.object(store, 'load_media', side_effect=lambda digest: images[digest]):
-    creative.render_cards(st, value, archived=True)
+# Keep fixture lookup alive across real browser fragment-only arrow reruns.
+store.load_media=lambda digest: images[digest]
+creative.render_cards(st, value, archived=True)

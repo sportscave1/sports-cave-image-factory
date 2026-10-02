@@ -78,10 +78,8 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertIn('OS has not analysed winner pixels', prompt)
 
     def test_partial_reference_keeps_its_original_position(self):
-        refs=plan.reference_map('Carousel',{'carousel_cards':[{'position':3,'image_sha256':'actual-card-three'}]})
-        self.assertEqual(refs[2]['image_sha256'],'actual-card-three')
-        self.assertFalse(refs[0]['image_sha256'])
-        self.assertFalse(refs[1]['image_sha256'])
+        with self.assertRaisesRegex(ValueError,'Complete source carousel'):
+            plan.reference_map('Carousel',{'carousel_cards':[{'position':3,'image_sha256':'actual-card-three'}]})
 
     def test_canonical_authority_exact_in_every_standalone(self):
         value = fixture()

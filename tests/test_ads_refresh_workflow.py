@@ -25,6 +25,7 @@ def winner(carousel=False):
     return {'ad_id': 'fixture-ad', 'adset_id': 'fixture-adset', 'campaign_id': 'fixture-campaign',
             'creative_id': 'fixture-creative', 'image_sha256': 'fixture-archive', 'market': 'AU',
             'format': 'CAROUSEL' if carousel else 'SINGLE IMAGE', 'carousel': carousel,
+            'carousel_cards': [{'position':i,'image_url':f'https://example.fbcdn.net/card{i}.jpg'} for i in range(1,6)] if carousel else [],
             'mode': 'complete_ad', 'product_mapping': products.canonical(ROW),
             'components': {'primary_text': {'value': 'Two legends. One unforgettable rivalry.'},
                            'headline': {'value': 'Legends Never Die'},

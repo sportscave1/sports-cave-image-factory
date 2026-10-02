@@ -64,6 +64,62 @@ def source_context(source=None):
     return {"source_winner": source} if source else {}
 
 
+IE_CRITICAL_PRODUCT_REALISM = '''CRITICAL PRODUCT REALISM — PASS/FAIL
+Before designing the room, establish the Sports Cave framed product as a real physical object.
+The image FAILS and must be regenerated if any of these are missing:
+1. EXACT CANONICAL FRAME
+Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
+2. CLEAR REAL GLASS
+The artwork must visibly sit behind genuine transparent glazing. Show restrained but clearly visible room-based reflections across part of the glass, following the flat glass plane and actual room windows/lights with realistic highlight falloff. Keep reflections subtle without obscuring artwork details. Never a matte, frameless, digitally pasted or flat poster look.
+3. PREMIUM FRAME BEVEL LIGHTING
+Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
+4. WALL SEPARATION
+The frame sits physically in front of the wall: believable mounting depth, subtle gap/separation and ambient occlusion immediately behind it. Never painted directly onto the wall.
+5. CONTACT SHADOW
+Show a soft but clearly visible contact shadow behind/below the frame. Direction, softness and intensity must match the room's primary light source.
+6. PRODUCT FIRST
+Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, visible real glass, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
+
+IE_FINAL_PRODUCT_REALISM_GATE = '''FINAL PRODUCT REALISM REJECTION GATE
+Before returning the generated image, reject and regenerate it if ANY of these are true:
+- glass cannot be visually identified
+- artwork looks like a flat matte print
+- frame looks like a flat black border
+- canonical frame thickness has changed
+- frame depth is missing where perspective should reveal it
+- frame bevel lighting is absent
+- mounting separation from the wall is not believable
+- contact shadow is missing
+- ambient occlusion behind the frame is missing
+- glass reflection conflicts with room lighting
+- glass reflection washes out artwork details
+- frame geometry is distorted
+- product appears digitally pasted onto the wall
+- product appears to float
+- image looks CGI-rendered or obviously AI-generated rather than genuine interior photography'''
+
+
+def ie_refresh_standalone_brief(ads, product, *, style):
+    """Prioritise product physics only for Creative Refresh IE contracts."""
+    base = plan.standalone_brief(product, 'WINNER_IE', style=style, dimensions='1024 x 1024')
+    header, _, execution = base.partition(plan.AUTHORITY)
+    shared = plan.build_sports_cave_image_realism_rules(include_product_lock=True)
+    execution = execution.removesuffix(shared).strip()
+    # Keep the shared rules and existing footer contract intact, emitted once.
+    authority, separator, rules = ie_refresh_image_rules().partition('PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM')
+    goal = 'Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle.'
+    authority = authority.replace(goal+' ', '')
+    header = header.replace('PRODUCT: '+product, 'PRODUCT: '+product+'\nOutput: square 1024 x 1024')
+    execution = execution.replace('Output: square 1024 x 1024; ', '')
+    return '\n\n'.join((header.strip(), plan.AUTHORITY, authority.strip(),
+                        IE_CRITICAL_PRODUCT_REALISM, goal, execution,
+                        ads.build_instant_experience_fixed_opaque_footer_rules(),
+                        ads.build_instant_experience_on_image_copy_fit_rules(),
+                        separator + rules,
+                        'Preserve this order in each final standalone image prompt: product/output size, winner and canonical authorities, CRITICAL PRODUCT REALISM — PASS/FAIL, refresh goal and room, product placement, footer copy, full product-lock/realism rules, FINAL PRODUCT REALISM REJECTION GATE last.',
+                        shared, IE_FINAL_PRODUCT_REALISM_GATE))
+
+
 def build_prompt(ads, product, category, country, campaign_type, url, context,
                  *, campaign_moment=None, product_metadata=None):
     winner = ads.normalize_creative_refresh_context(context)
@@ -93,10 +149,9 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
     for i in range(n if carousel else 3):
         reference = refs[i] if carousel else refs[0]
         style = {} if carousel else refresh_plan['styles'][i]
-        briefs.append(plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
+        briefs.append(ie_refresh_standalone_brief(ads, product, style=style) if ie else plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
                      role=reference.get('role', ''), style=style, detail=carousel and 'detail' in reference.get('role', '').casefold(),
-                     dimensions='1024 x 1024' if ie else '1080 x 1080')
-                      + ('\n\n' + ads.build_instant_experience_fixed_opaque_footer_rules() + '\n\n' + ads.build_instant_experience_on_image_copy_fit_rules() + '\n\n' + ie_refresh_image_rules() if ie else ''))
+                     dimensions='1080 x 1080'))
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
 {'INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS' if ie else ''}

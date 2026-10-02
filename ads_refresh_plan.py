@@ -77,7 +77,10 @@ def reference_map(campaign_type, source=None):
     cards = source.get('carousel_cards') or source.get('cards') or []
     cards = cards if isinstance(cards, list) else []
     if campaign_type == 'Carousel':
-        count = len(cards) if len(cards) >= 2 else max([5, len(cards)] + [int(c.get('position', i)) for i, c in enumerate(cards, 1) if isinstance(c, dict) and str(c.get('position', i)).isdigit()])
+        if cards or source.get('creative_format') in ('CAROUSEL','DYNAMIC_CAROUSEL') or source.get('carousel'):
+            if len(cards)<2 or any(not isinstance(c,dict) or c.get('position')!=i or not (c.get('image_url') or c.get('image_sha256')) or c.get('image_unavailable') for i,c in enumerate(cards,1)):
+                raise ValueError('Complete source carousel images are required. Reload the winner from Meta Review.')
+        count = len(cards) if cards else 5  # Existing manual New Ads default only.
         by_position = {}
         for index, card in enumerate(cards, 1):
             if not isinstance(card, dict):

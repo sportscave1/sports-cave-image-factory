@@ -82,8 +82,11 @@ class FormatTests(unittest.TestCase):
         raw = inline()
         raw['asset_feed_spec'] = {'ad_formats': ['CAROUSEL'], 'images': [{'hash': 'one'}, {'hash': 'two'}]}
         value = creative.normalize(raw)
-        self.assertEqual(value['creative_format'], 'DYNAMIC')
-        self.assertEqual(value['cards'], [])
+        self.assertEqual(value['creative_format'], 'DYNAMIC_CAROUSEL')
+        self.assertEqual(len(value['cards']),5)
+        raw['object_story_spec']['link_data'].pop('child_attachments')
+        self.assertEqual(creative.normalize(raw)['creative_format'],'DYNAMIC')
+        self.assertEqual(creative.normalize(raw)['cards'],[])
 
     def test_carousel_destination_does_not_replace_cover_format(self):
         raw = inline()
@@ -188,10 +191,11 @@ class SourceUITests(unittest.TestCase):
             with patch.object(live.meta, '_request', side_effect=AssertionError('network')), patch.object(handoff.requests, 'get', side_effect=AssertionError('download')):
                 at = AppTest.from_function(app, args=(n,)).run()
             self.assertFalse(at.exception)
-            self.assertEqual(len([c for c in at.caption if c.value.startswith('CARD ')]), n)
-            self.assertEqual(len([b for b in at.button if b.label == 'Copy winning image']), n)
-            self.assertTrue(any(t.value == f'Headline {n}' for t in at.text))
-            self.assertTrue(any(t.value == f'Description {n}' for t in at.text))
+            self.assertEqual(len([c for c in at.caption if c.value.startswith('CARD ')]), 1)
+            self.assertEqual(len([b for b in at.button if b.label == 'Copy winning image']), 0)
+            for _ in range(n-1):next(b for b in at.button if b.label=='Next card').click().run()
+            self.assertTrue(any(t.value == f'Headline: Headline {n}' for t in at.text))
+            self.assertTrue(any(t.value == f'Description: Description {n}' for t in at.text))
 
     def test_missing_card_warning_keeps_all_positions(self):
         from streamlit.testing.v1 import AppTest
@@ -205,7 +209,8 @@ class SourceUITests(unittest.TestCase):
         at = AppTest.from_function(app).run()
         self.assertFalse(at.exception)
         self.assertIn('1 of 5', at.warning[0].value)
-        self.assertTrue(any('Card 3 — source image unavailable' == c.value for c in at.caption))
+        for _ in range(2):next(b for b in at.button if b.label=='Next card').click().run()
+        self.assertTrue(any('Card 3 — image unavailable from Meta' == c.value for c in at.caption))
 
     def test_selected_resolution_and_rerender_reuse_cache(self):
         from streamlit.testing.v1 import AppTest
@@ -292,11 +297,11 @@ class HandoffTests(unittest.TestCase):
             if 'card3.' in url:
                 raise ValueError('unavailable')
             return 'hash-' + url
-        with patch.object(handoff.products, 'enrich', side_effect=lambda p: p), patch.object(handoff, 'archive_image', side_effect=archive) as read, patch.object(handoff.store, 'save_selection', return_value=1):
-            handoff.queue(value, state)
-        self.assertEqual(read.call_count, 6)
-        self.assertEqual(len(state[handoff.PENDING]['carousel_cards']), 6)
-        self.assertTrue(state[handoff.PENDING]['carousel_cards'][2]['image_unavailable'])
+        with patch.object(handoff.products, 'enrich', side_effect=lambda p: p), patch.object(handoff, 'archive_image', side_effect=archive) as read, patch.object(handoff.store, 'save_selection', return_value=1) as save:
+            with self.assertRaisesRegex(ValueError,'card 3'):handoff.queue(value, state)
+            save.assert_not_called()
+        self.assertNotIn(handoff.PENDING,state)
+        self.assertEqual(len(value['carousel_cards']),6)
 
 
 class DynamicRefreshTests(unittest.TestCase):

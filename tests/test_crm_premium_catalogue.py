@@ -32,6 +32,25 @@ class PremiumCatalogueTests(unittest.TestCase):
    p['image_alt']=alt;img=Markup(catalogue_html(s)).images[0][0]
    self.assertEqual(img['alt'],expected);self.assertIn('height:auto',img['style']);self.assertNotIn('height',img)
    self.assertNotIn('object-fit',img['style']);validate_snapshot(p)
+ def test_images_are_flush_without_surround_in_shared_and_final_renderers(self):
+  for count in (1,2,4,12):
+   section=self.section(count);doc=catalogue_doc();doc['middle_sections']=[section];doc['custom_html']=''
+   for html in (catalogue_html(section),render_campaign(doc)['html']):
+    markup=Markup(html)
+    self.assertEqual(len(markup.images),count)
+    for index,(tag,attrs) in enumerate(markup.tags):
+     if tag!='img':continue
+     cell=next(a for t,a in reversed(markup.tags[:index]) if t=='td')
+     self.assertEqual(cell['bgcolor'],'#151515')
+     self.assertEqual(cell['style'],'padding:0')
+     self.assertIn('width:100%',attrs['style']);self.assertIn('height:auto',attrs['style'])
+     self.assertIn('border:0',attrs['style'])
+     for forbidden in ('object-fit','border-radius','box-shadow','padding','margin'):
+      self.assertNotIn(forbidden,attrs['style'])
+   # Preserve the information-panel spacing and outer grid gutters.
+   raw=catalogue_html(section)
+   self.assertIn('padding:'+('20px 16px' if count==1 else '12px 8px'),raw)
+   if count>1:self.assertIn('<td style="padding:4px">',raw)
  def test_optional_copy_escaping_runtime_defaults_no_mutation(self):
   doc=catalogue_doc();before=deepcopy(doc);s=middle_sections(doc)[-1]
   self.assertEqual(s['settings']['headline'],'');self.assertEqual(s['settings']['subtext'],'');self.assertEqual(doc,before)

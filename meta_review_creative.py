@@ -1,5 +1,4 @@
 """GET-only, lazy creative resolution. Fixed cards are never asset-feed alternatives."""
-from copy import deepcopy
 import hashlib
 import json
 import logging
@@ -83,6 +82,7 @@ def canvas_evidence(value, path='creative'):
 def normalize(raw, story=None, images=None):
     raw, story, images = obj(raw), obj(story), images or {}
     spec = obj(raw.get('object_story_spec'))
+    feed = obj(raw.get('asset_feed_spec'))
     link = obj(spec.get('link_data'))
     children, source = source_cards(raw, story)
     attachments = rows(obj(story.get('attachments')).get('data'))
@@ -147,7 +147,7 @@ def normalize(raw, story=None, images=None):
             'creative_format_confidence': 'deterministic' if fmt != 'UNKNOWN' else 'unconfirmed',
             'cards': cards if fmt in CAROUSEL_FORMATS else [],
             'carousel_structure_source': source, 'source_card_count': len(children),
-            'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or '',
+            'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or (obj(rows(feed.get('bodies'))[0]).get('text') if len(rows(feed.get('bodies')))==1 else '') or '',
             'shared_message': link.get('message') or story.get('message') or '',
             'shared_headline': link.get('name') or raw.get('title') or '',
             'shared_cta': obj(link.get('call_to_action')).get('type') or raw.get('call_to_action_type') or '',
@@ -190,6 +190,9 @@ def resolve(config, creative_id):
         except Exception:
             warnings.append('Some source image hashes could not be resolved.')
     result = normalize(raw, story, images)
+    if result['creative_format']=='DYNAMIC' and (rows(obj(raw.get('asset_feed_spec')).get('carousels')) or
+            'CAROUSEL' in rows(obj(raw.get('asset_feed_spec')).get('ad_formats'))):
+        warnings.append('Ordered carousel source is unavailable or ambiguous. The representative thumbnail is not the complete carousel.')
     result['warnings'] = warnings
     result['raw'] = raw
     log_resolution(result)
@@ -204,6 +207,7 @@ def log_resolution(value, ad_id='', handoff_count=0):
 
 def label(value):
     fmt = value.get('creative_format', 'UNKNOWN')
+    if fmt=='DYNAMIC': return 'Dynamic / Unknown'
     return (('Dynamic Carousel' if fmt=='DYNAMIC_CAROUSEL' else 'Carousel') + ' · ' + str(len(value.get('cards') or [])) + ' cards' if fmt in CAROUSEL_FORMATS
             else fmt.replace('_', ' ').title())
 
@@ -240,7 +244,7 @@ def render_cards(st, value, *, archived=False, key_prefix="source"):
     key='meta-card-index-'+identity
     index=min(max(int(st.session_state.get(key,0)),0),len(cards)-1)
     with st.container(key='meta-source-cards-'+identity):
-        st.html('<style>[class*="st-key-meta-source-cards-"] [data-testid="stImage"] img{max-height:320px;max-width:100%;width:auto!important;object-fit:contain} [class*="st-key-meta-source-cards-"] [data-testid="stImage"]{margin:auto;max-width:100%} [class*="st-key-meta-source-cards-"] button{min-height:40px}</style>')
+        st.html('<style>[class*="st-key-meta-source-cards-"]{max-width:560px;margin-left:auto;margin-right:auto} [class*="st-key-meta-source-cards-"] [data-testid="stImage"] img{max-height:320px;max-width:100%;width:auto!important;object-fit:contain} [class*="st-key-meta-source-cards-"] [data-testid="stImage"]{margin:auto;max-width:100%} [class*="st-key-meta-source-cards-"] button{min-height:40px;min-width:40px;color:#9b7727} [class*="st-key-meta-source-cards-"] button p{font-size:0} [class*="st-key-meta-source-cards-"] [data-testid="stColumn"]:nth-child(2){text-align:center}</style>')
         left,counter,right=st.columns([1,3,1],vertical_alignment='center')
         if left.button('Previous card',icon=':material/chevron_left:',disabled=index==0,key=key+'-previous'): index-=1
         if right.button('Next card',icon=':material/chevron_right:',disabled=index==len(cards)-1,key=key+'-next'): index+=1

@@ -235,7 +235,7 @@ def catalogue_html(section, *, campaign_key=''):
         link='href="'+e(destination)+'" target="_blank" rel="noopener noreferrer"'
         parts=[]
         if display['image']:
-            parts.append('<tr><td align="center" bgcolor="#f5f1e7" style="padding:'+('12px' if single else '6px')+'"><a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="'+('552' if single else '260')+'" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a></td></tr>')
+            parts.append('<tr><td align="center" bgcolor="#151515" style="padding:0"><a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="'+('552' if single else '260')+'" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a></td></tr>')
         info=[]
         if display['title']:
             info.append(paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(p['title'])+'</a>',
