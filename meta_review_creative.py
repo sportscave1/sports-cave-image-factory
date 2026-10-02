@@ -2,6 +2,7 @@
 from copy import deepcopy
 import hashlib
 import json
+import logging
 from urllib.parse import urlparse
 
 CREATIVE_FIELDS = ('id,name,object_story_id,effective_object_story_id,object_story_spec,'
@@ -14,7 +15,38 @@ def obj(value):
 
 
 def rows(value):
-    return value if isinstance(value, list) else []
+    return value if isinstance(value, list) else obj(value).get('data', []) if isinstance(obj(value).get('data'), list) else []
+
+
+CAROUSEL_FORMATS = ('CAROUSEL', 'DYNAMIC_CAROUSEL')
+
+
+def source_cards(raw, story=None):
+    """Ordered authored structures only; never infer cards from an image pool."""
+    link=obj(obj(raw.get('object_story_spec')).get('link_data'))
+    children=rows(link.get('child_attachments'))
+    if children: return children,'object_story_spec.link_data.child_attachments'
+    attachments=rows(obj(story).get('attachments'))
+    groups=[a for a in attachments if rows(obj(a).get('subattachments'))]
+    if len(groups)==1: return rows(obj(groups[0]).get('subattachments')),'effective_object_story_id.attachments.subattachments'
+    if len(attachments)>1 and all(obj(a).get('type') in ('photo','image') for a in attachments):
+        return attachments,'effective_object_story_id.attachments'
+    feed=obj(raw.get('asset_feed_spec'))
+    groups=rows(feed.get('carousels'))
+    if len(groups)!=1: return [],'unconfirmed_ordered_structure'
+    def asset(label, collection):
+        name=obj(label).get('name')
+        matches=[a for a in rows(feed.get(collection)) if name and any(obj(l).get('name')==name for l in rows(obj(a).get('adlabels')))]
+        return obj(matches[0]) if len(matches)==1 else {}
+    cards=[]
+    for child in rows(obj(groups[0]).get('child_attachments')):
+        child=obj(child);image=asset(child.get('image_label'),'images')
+        cards.append({**child,'image_hash':image.get('hash'),'image_url':image.get('url'),
+            'name':asset(child.get('title_label'),'titles').get('text'),
+            'description':asset(child.get('description_label'),'descriptions').get('text'),
+            'link':asset(child.get('link_url_label'),'link_urls').get('website_url'),
+            'video_id':asset(child.get('video_label'),'videos').get('video_id')})
+    return cards,'asset_feed_spec.carousels.child_attachments'
 
 
 def public_image(value):
@@ -52,14 +84,8 @@ def normalize(raw, story=None, images=None):
     raw, story, images = obj(raw), obj(story), images or {}
     spec = obj(raw.get('object_story_spec'))
     link = obj(spec.get('link_data'))
-    children = rows(link.get('child_attachments'))
-    source = 'object_story_spec.link_data.child_attachments'
+    children, source = source_cards(raw, story)
     attachments = rows(obj(story.get('attachments')).get('data'))
-    if not children:
-        groups = [a for a in attachments if rows(obj(obj(a).get('subattachments')).get('data'))]
-        if len(groups) == 1:
-            children = rows(obj(groups[0].get('subattachments')).get('data'))
-            source = 'effective_object_story_id.attachments.subattachments'
     cards = []
     genuine = 0
     for original_position, item in enumerate(children, 1):
@@ -71,7 +97,7 @@ def normalize(raw, story=None, images=None):
                 and original_position == len(children) and item.get('type') in ('profile', 'page')):
             continue
         genuine += bool(any(item.get(key) for key in ('id', 'image_hash', 'image_url', 'picture',
-                                                      'name', 'title', 'link', 'url', 'media', 'target')))
+                                                      'name', 'title', 'link', 'url', 'media', 'target','image_label','video_label')))
         media, target = obj(item.get('media')), obj(item.get('target'))
         cta = obj(item.get('call_to_action'))
         destination = item.get('link') or item.get('url') or target.get('url') or obj(cta.get('value')).get('link') or ''
@@ -84,6 +110,9 @@ def normalize(raw, story=None, images=None):
         cards.append({'position': position, 'source_position': original_position,
                       'source_id': source_id, 'identity': f"{raw.get('id', '')}:{original_position}:{source_id}",
                       'image_hash': image_hash, 'image_url': best,
+                      'high_resolution_image_url': best, 'source_creative_id': str(raw.get('id') or ''),
+                      'source_attachment_id': str(item.get('id') or target.get('id') or ''),
+                      'role': item.get('role') or '',
                       'video_id': str(item.get('video_id') or ''),
                       'thumbnail_url': public_image(item.get('thumbnail_url')) or public_image(item.get('picture')) or best,
                       'headline': item.get('name') or item.get('title') or '',
@@ -95,10 +124,10 @@ def normalize(raw, story=None, images=None):
                       'image_unavailable': not bool(best)})
     ie = canvas_evidence(raw) or canvas_evidence(story, 'story')
     fmt, reason = 'UNKNOWN', 'insufficient_creative_evidence'
-    if obj(raw.get('asset_feed_spec')):
+    if genuine > 1:
+        fmt, reason = ('DYNAMIC_CAROUSEL' if obj(raw.get('asset_feed_spec')) else 'CAROUSEL'), source
+    elif obj(raw.get('asset_feed_spec')):
         fmt, reason = 'DYNAMIC', 'asset_feed_spec'
-    elif genuine > 1:
-        fmt, reason = 'CAROUSEL', source
     elif ie:
         fmt, reason = 'INSTANT_EXPERIENCE', ie
     elif raw.get('video_id') or obj(spec.get('video_data')).get('video_id'):
@@ -116,7 +145,8 @@ def normalize(raw, story=None, images=None):
             'creative_format': fmt,
             'creative_format_source': reason,
             'creative_format_confidence': 'deterministic' if fmt != 'UNKNOWN' else 'unconfirmed',
-            'cards': cards if fmt == 'CAROUSEL' else [],
+            'cards': cards if fmt in CAROUSEL_FORMATS else [],
+            'carousel_structure_source': source, 'source_card_count': len(children),
             'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or '',
             'shared_message': link.get('message') or story.get('message') or '',
             'shared_headline': link.get('name') or raw.get('title') or '',
@@ -137,7 +167,7 @@ def resolve(config, creative_id):
     story, warnings = {}, []
     link = obj(obj(raw.get('object_story_spec')).get('link_data'))
     story_id = raw.get('effective_object_story_id') or raw.get('object_story_id')
-    if story_id and not rows(link.get('child_attachments')) and not obj(raw.get('asset_feed_spec')):
+    if story_id and not source_cards(raw)[0]:
         try:
             story = reader.get(str(story_id), {'fields': 'id,message,attachments{type,title,description,url,target,media,subattachments.limit(100){type,title,description,url,target,media}}'})
             if not isinstance(story, dict) or not isinstance(obj(story.get('attachments')).get('data'), list):
@@ -149,7 +179,7 @@ def resolve(config, creative_id):
         except Exception:
             story = {}
             warnings.append('Story attachments unavailable; format/card completeness could not be confirmed.')
-    hashes = {str(c.get('image_hash')) for c in rows(link.get('child_attachments')) if obj(c).get('image_hash') and not obj(c).get('image_url')}
+    hashes = {str(obj(c).get('image_hash')) for c in source_cards(raw,story)[0] if obj(c).get('image_hash') and not obj(c).get('image_url')}
     if raw.get('image_hash') and not raw.get('image_url'):
         hashes.add(str(raw['image_hash']))
     images = {}
@@ -162,12 +192,19 @@ def resolve(config, creative_id):
     result = normalize(raw, story, images)
     result['warnings'] = warnings
     result['raw'] = raw
+    log_resolution(result)
     return result
+
+
+def log_resolution(value, ad_id='', handoff_count=0):
+    logging.getLogger(__name__).info('meta_creative creative_id=%s ad_id=%s detected_format=%s carousel_structure_source=%s source_card_count=%d normalized_card_count=%d resolved_card_count=%d fallback_card_count=0 handoff_card_count=%d',
+        value.get('creative_id',''),ad_id,value.get('creative_format','UNKNOWN'),value.get('carousel_structure_source',''),value.get('source_card_count',0),
+        len(value.get('cards') or value.get('carousel_cards') or []),sum(bool(c.get('image_url')) and not c.get('image_unavailable',False) for c in value.get('cards') or value.get('carousel_cards') or []),handoff_count)
 
 
 def label(value):
     fmt = value.get('creative_format', 'UNKNOWN')
-    return ('Carousel · ' + str(len(value.get('cards') or [])) + ' cards' if fmt == 'CAROUSEL'
+    return (('Dynamic Carousel' if fmt=='DYNAMIC_CAROUSEL' else 'Carousel') + ' · ' + str(len(value.get('cards') or [])) + ' cards' if fmt in CAROUSEL_FORMATS
             else fmt.replace('_', ' ').title())
 
 
@@ -181,65 +218,50 @@ def fingerprint(value):
 
 
 def render_image_actions(st, url, identity, key_prefix='source'):
-    """Download bytes only after a copy request, using the existing bounded verifier."""
-    cache = st.session_state.setdefault('meta-review-image-copy-cache', {})
-    key = fingerprint([identity, url])
-    if st.button('Copy winning image', key=key_prefix + '-copy-source-' + key):
-        try:
-            from meta_review_handoff import reference_image_bytes
-            cache[key] = reference_image_bytes(url)
-            while len(cache) > 12:
-                del cache[next(iter(cache))]
-        except ValueError:
-            st.caption('Source image unavailable for copying.')
-    if key in cache:
-        from ads_refresh_reference import render_winning_image_copy
-        render_winning_image_copy(*cache[key])
+    """Meta Review links only. Copy/download remains in Creative Refresh."""
     st.link_button('Open full-resolution image', url)
 
 
+import streamlit as _streamlit
+
+
+@_streamlit.fragment
 def render_cards(st, value, *, archived=False, key_prefix="source"):
-    """Shared source viewer; remote images load in the browser, not during Graph reads."""
+    """Fragment-owned viewer: arrow navigation never re-reads Meta or the parent."""
     cards = value.get('cards') or value.get('carousel_cards') or []
     st.caption(label({**value, 'cards': cards}))
     if not cards:
         st.warning('Source cards were not retained in this legacy handoff. Reload the winner from Meta Review.')
         return
-    missing = sum(c.get('image_unavailable', False) or (not c.get('image_url') and not c.get('image_sha256')) for c in cards)
-    if missing:
-        st.warning(f'{missing} of {len(cards)} source cards could not be retrieved.')
-    if value.get('multi_share_optimized'):
-        st.caption('Meta may reorder delivery; source creative order is retained.')
-    with st.container(height=460, border=False, key='meta-source-cards-' + key_prefix):
-        for start in range(0, len(cards), 2):
-            columns = st.columns(2)
-            for column, card in zip(columns, cards[start:start+2]):
-                with column:
-                    st.caption(f"CARD {card['position']}")
-                    data, mime = None, None
-                    if archived and card.get('image_sha256'):
-                        try:
-                            import meta_review_store
-                            data, mime = meta_review_store.load_media(card['image_sha256'])
-                        except Exception:
-                            pass
-                    if data:
-                        st.image(data, width=200)
-                        from ads_refresh_reference import render_winning_image_copy
-                        render_winning_image_copy(data, mime)
-                    elif card.get('image_url'):
-                        st.image(card.get('thumbnail_url') or card['image_url'], width=200)
-                        if archived:
-                            st.caption('Copy image unavailable; use the full-resolution source link.')
-                    else:
-                        st.caption(f"Card {card['position']} — source image unavailable")
-                    if not archived and card.get('image_url'):
-                        render_image_actions(st, card['image_url'], card.get('identity') or
-                                             f"{value.get('creative_id')}:{card['position']}", key_prefix)
-                    elif card.get('image_url'):
-                        st.link_button('Open full-resolution image', card['image_url'])
-                    for field in ('headline', 'description', 'cta'):
-                        if card.get(field):
-                            st.text(card[field])
-                    if card.get('destination_url'):
-                        st.text(card['destination_url'])
+    missing=sum(c.get('image_unavailable',False) or not (c.get('image_url') or c.get('image_sha256')) for c in cards)
+    if missing: st.warning(f'{missing} of {len(cards)} source cards could not be retrieved.')
+    if value.get('multi_share_optimized'): st.caption('Meta may reorder delivery; source creative order is retained.')
+    identity=key_prefix+'-'+fingerprint([value.get('creative_id'),[(c.get('identity'),c.get('position')) for c in cards]])[:12]
+    key='meta-card-index-'+identity
+    index=min(max(int(st.session_state.get(key,0)),0),len(cards)-1)
+    with st.container(key='meta-source-cards-'+identity):
+        st.html('<style>[class*="st-key-meta-source-cards-"] [data-testid="stImage"] img{max-height:320px;max-width:100%;width:auto!important;object-fit:contain} [class*="st-key-meta-source-cards-"] [data-testid="stImage"]{margin:auto;max-width:100%} [class*="st-key-meta-source-cards-"] button{min-height:40px}</style>')
+        left,counter,right=st.columns([1,3,1],vertical_alignment='center')
+        if left.button('Previous card',icon=':material/chevron_left:',disabled=index==0,key=key+'-previous'): index-=1
+        if right.button('Next card',icon=':material/chevron_right:',disabled=index==len(cards)-1,key=key+'-next'): index+=1
+        st.session_state[key]=index
+        counter.caption(f'{index+1} / {len(cards)}')
+        card=cards[index]
+        st.caption(f"CARD {index+1} OF {len(cards)}")
+        data,mime=None,None
+        if archived and card.get('image_sha256'):
+            try:
+                import meta_review_store
+                data,mime=meta_review_store.load_media(card['image_sha256'])
+            except Exception: pass
+        if data:
+            st.image(data,width=320)
+            from ads_refresh_reference import render_winning_image_copy
+            render_winning_image_copy(data,mime)
+        elif card.get('image_url'):
+            st.image(card.get('thumbnail_url') or card['image_url'],width=320)
+        else: st.caption(f"Card {card['position']} — image unavailable from Meta")
+        if card.get('image_url'):
+            st.link_button('Open full-resolution image',card.get('high_resolution_image_url') or card['image_url'])
+        for field,title in (('headline','Headline'),('description','Description'),('cta','CTA'),('destination_url','Destination')):
+            if card.get(field): st.text(title+': '+card[field])

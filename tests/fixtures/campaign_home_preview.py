@@ -24,6 +24,7 @@ for i,(name,status,market) in enumerate((('Ryan Fox Open Championship — Produc
     row=record();row.update(id='00000000-0000-0000-0000-'+str(i+1).zfill(12),name=name,market=market,status=status)
     row['thumbnail']='';row['subject']='Local visual fixture · collector campaign'
     if status=='SENT':row.update(delivery_status='SENT',sent_at=row['updated_at'],recipients=4,delivered=4,opens=2,clicks=1,orders=1,revenue={'NZD':'125'},delivery_rate=100.,open_rate=50.,click_rate=25.)
+    row['deletable']=status=='DRAFT'
     items.append(row)
 store=Mock();store.connect=None;store.q.return_value=None;store.render_settings.return_value=settings({})
 store.setting.return_value={'value':{'smart_hours':16}};store.default_sections.return_value=[]
@@ -32,11 +33,12 @@ mode=st.query_params.get('mode','normal')
 def job(state,store,key,load):
     # Captured test values only; background loaders never access Streamlit state.
     outage=bool(state.get('fixture_delivery_outage'))
+    visible=[r for r in items if r['id'] not in state.get('fixture_deleted',[])]
     if key[0] in ('counts','delivery','attribution'):
-        value=dict(all_count=4,drafts=2,active=0,sent=2,archived=0,sent_emails=8,revenue={'NZD':'250'},orders=2,click_rate=25.)
+        value=dict(all_count=len(visible),drafts=sum(r['status']=='DRAFT' for r in visible),active=0,sent=2,archived=0,sent_emails=8,orders=2,click_rate=25.,bounce_rate=0.)
     else:
         tab,search,market,status,sort=key[1]
-        page=[r for r in items if (tab=='All campaigns' or tab==('Sent' if r['status']=='SENT' else 'Drafts')) and search.casefold() in r['name'].casefold() and (market=='All' or market==r['market'])]
+        page=[r for r in visible if (tab=='All campaigns' or tab==('Sent' if r['status']=='SENT' else 'Drafts')) and search.casefold() in r['name'].casefold() and (market=='All' or market==r['market'])]
         value=[{**r,'in_page':True} for r in page]
     if mode=='slow':
         def read():
@@ -51,6 +53,11 @@ def job(state,store,key,load):
 # stay installed for the lifetime of this dedicated preview process.
 import crm_campaign_home,crm_campaign_page,requests
 crm_campaign_home._job=job
+def fixture_delete(store,user,identity,version,*,confirmed):
+    assert confirmed and next(r for r in items if r['id']==identity)['deletable']
+    st.session_state.setdefault('fixture_deleted',[]).append(identity)
+    return {'deleted':True}
+crm_campaign_home.delete_campaign=fixture_delete
 crm_campaign_page.CampaignStore=lambda _:store
 crm_campaign_page.activate=Mock()
 requests.sessions.Session.request=Mock(side_effect=AssertionError('No external requests'))

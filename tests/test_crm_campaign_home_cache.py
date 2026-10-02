@@ -115,7 +115,7 @@ class CacheTests(unittest.TestCase):
         window=reporting_window()
         self.assertEqual((window[1]-window[0]).total_seconds(),30*86400)
         delivery_summary(self.store,window);attribution_summary(self.store,window)
-        self.assertEqual(self.store.q.call_args_list[0].args[1],(*window,*window))
+        self.assertEqual(self.store.q.call_args_list[0].args[1],(*window,*window,*window,*window))
         self.assertEqual(self.store.q.call_args_list[1].args[1],window)
         sql=' '.join(c.args[0] for c in self.store.q.call_args_list)
         for required in ('s.status=\'ACCEPTED\'','NOT s.test_send','delivered AND clicked','a.eligible','order_created_at<%s','sent_at<%s'):

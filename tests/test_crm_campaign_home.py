@@ -16,7 +16,7 @@ ID='47bb53bc-9a37-4f99-a840-e775073dbce5'
 
 def record():
     return dict(id=ID,name='Real fixture campaign',version=1,draft_status='DRAFT',status='DRAFT',archived_at=None,
-      last_tested_at=None,market='NZ',subject='Verified fixture subject',thumbnail='https://cdn.shopify.com/s/files/fixture.jpg',
+      last_tested_at=None,deletable=True,market='NZ',subject='Verified fixture subject',thumbnail='https://cdn.shopify.com/s/files/fixture.jpg',
       updated_at='2026-10-02T06:40:00Z',sent_at=None,delivery_status=None,recipients=None,delivered=None,opens=None,
       clicks=None,orders=0,revenue={},delivery_rate=None,open_rate=None,click_rate=None,in_page=True)
 
@@ -45,7 +45,7 @@ def job(state,store,key,load):
  if key[0] in ('counts','delivery','attribution') and st.session_state.get('stats_error'):
   from crm_store import StoreUnavailable
   f.set_exception(StoreUnavailable('Private diagnostic fixture'));return f
- if key[0] in ('counts','delivery','attribution'):f.set_result({'all_count':st.session_state.get('fixture_count',1),'drafts':1,'active':0,'sent':0,'archived':0,'sent_emails':0,'revenue':{},'orders':0,'click_rate':None})
+ if key[0] in ('counts','delivery','attribution'):f.set_result({'all_count':st.session_state.get('fixture_count',1),'drafts':1,'active':0,'sent':0,'archived':0,'sent_emails':0,'revenue':{},'orders':0,'click_rate':None,'bounce_rate':None})
  else:f.set_result([record()])
  return f
 def composer(*args):
@@ -143,7 +143,7 @@ class HomeTests(unittest.TestCase):
         self.assertIn('+ New campaign',[b.label for b in app.button])
         self.assertEqual(app.session_state['load_stages'],['counts','delivery','attribution','table'])
         html=' '.join(e.proto.body for e in app.get('html'))
-        for label in ('Campaigns','RECIPIENTS','REVENUE','sc-home-kpis'):self.assertIn(label,html)
+        for label in ('Campaigns','RECIPIENTS','Bounce rate (30 days)','sc-home-kpis'):self.assertIn(label,html)
         self.assertNotIn('sc-email-loading',html)
 
     def test_failed_totals_keep_cards_and_do_not_block_campaign_rows(self):
@@ -189,8 +189,8 @@ class HomeTests(unittest.TestCase):
         html=row_html(row)
         self.assertNotIn('<script>',html);self.assertIn('&lt;script&gt;',html)
         self.assertIn('width=80',html);self.assertIn('loading="lazy"',html)
-        self.assertIn('NZ$10.00',html);self.assertIn('A$20.00',html)
-        self.assertIn('—',kpis({'click_rate':None}))
+        self.assertNotIn('NZ$10.00',html);self.assertNotIn('A$20.00',html)
+        self.assertIn('—',kpis({'click_rate':None,'bounce_rate':None}))
         source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
         for width in (1500,1200,700):self.assertIn('max-width:'+str(width)+'px',source)
         for mock in ('8,432','$3,280','4.8%'):self.assertNotIn(mock,source)
@@ -272,11 +272,11 @@ class HomeSQLTests(unittest.TestCase):
             self.assertEqual(query.call_count,5)
         row=next(r for r in items if str(r['id'])==identity)
         old=next(r for r in sent_page(store,limit=200) if str(r['id'])==identity)
-        for field in ('recipients','delivered','opens','clicks','orders','revenue','delivery_rate','open_rate','click_rate'):
+        for field in ('recipients','delivered','opens','clicks','orders','delivery_rate','open_rate','click_rate'):
             self.assertEqual(row[field],old[field],field)
         self.assertEqual(row['delivered'],1);self.assertEqual(row['clicks'],1)
         from decimal import Decimal
-        self.assertEqual(row['orders'],2);self.assertEqual(Decimal(str(row['revenue']['NZD'])),Decimal('130'))
+        self.assertEqual(row['orders'],2);self.assertNotIn('revenue',row)
         self.assertIsNotNone(top)
         outside=rows(store,search='no matching campaign name',detail=identity)
         self.assertEqual(len(outside),1);self.assertFalse(outside[0]['in_page'])

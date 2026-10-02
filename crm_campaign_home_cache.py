@@ -69,7 +69,7 @@ def resolve(state, store, key, future, *, fields=None):
             if not isinstance(value, dict) or not all(f in value for f in fields):
                 raise ValueError('Incomplete summary')
             value = {field:value[field] for field in fields}
-            if any(v is None for field,v in value.items() if field != 'click_rate'):
+            if any(v is None for field,v in value.items() if field not in ('click_rate','bounce_rate')):
                 raise ValueError('Incomplete summary')
         elif not isinstance(value, list):
             raise ValueError('Incomplete campaign list')

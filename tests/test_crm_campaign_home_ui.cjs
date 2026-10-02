@@ -15,7 +15,7 @@ const path=require('node:path');
    await page.waitForFunction(()=>document.querySelectorAll('.sc-home-row').length===4);
    assert.equal(await page.getByTestId('stException').count(),0);
    const bounds=await page.evaluate(()=>({body:document.documentElement.scrollWidth,
-     breadcrumb:document.querySelector('.sc-home-breadcrumb').getBoundingClientRect().top,
+     title:document.querySelector('.st-key-crm-campaign-home h1').getBoundingClientRect().top,
      main:document.querySelector('.st-key-crm-campaign-home').getBoundingClientRect().toJSON(),
      table:document.querySelector('.st-key-crm-home-table').getBoundingClientRect().toJSON(),
      cards:getComputedStyle(document.querySelector('.sc-home-kpis')).gridTemplateColumns.split(' ').length,
@@ -32,7 +32,10 @@ const path=require('node:path');
    assert.equal(bounds.cards,width>1200?5:width>700?3:2);
    if(width>=1366){
     assert(bounds.table.width>bounds.main.width*.94,'Table uses available width');
-    assert(bounds.breadcrumb<100,'Compact top gutter');
+    assert(bounds.title<115,'Compact top gutter');
+    assert.equal(await page.locator('.sc-home-breadcrumb').count(),0);
+    assert.equal(await page.getByRole('button',{name:'Delete campaign',exact:true}).count(),2);
+    assert(!(await page.locator('.sc-home-kpis').innerText()).includes('Revenue'));
     const filter=page.getByRole('button',{name:'Filter',exact:false});
     assert((await filter.boundingBox()).width>=90,'Filter remains readable');
    }
@@ -45,8 +48,24 @@ const path=require('node:path');
    await page.getByPlaceholder('Search campaigns…').fill('');await page.getByPlaceholder('Search campaigns…').press('Enter');
    await page.waitForFunction(()=>document.querySelectorAll('.sc-home-row').length===4);
    if(process.env.CAMPAIGN_HOME_EVIDENCE_DIR)await page.screenshot({path:path.join(process.env.CAMPAIGN_HOME_EVIDENCE_DIR,'campaign-home-after-'+width+'.png'),fullPage:true});
-   console.log(width+': contained, '+bounds.cards+' KPIs across; gutter '+bounds.breadcrumb.toFixed(1)+'px; full-width table, no nested scroll; stable search');
+   console.log(width+': contained, '+bounds.cards+' KPIs across; gutter '+bounds.title.toFixed(1)+'px; full-width table, no nested scroll; stable search');
   }
+  await page.getByRole('button',{name:'Delete campaign',exact:true}).first().click();
+  await page.getByRole('dialog').waitFor();
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  assert.equal(await page.locator('.sc-home-row').count(),4,'Cancel retains all rows');
+  const beforeDelete=await page.locator('.sc-home-kpis').innerText();
+  await page.getByRole('button',{name:'Delete campaign',exact:true}).first().click();
+  await page.getByRole('dialog').waitFor();
+  await page.getByRole('button',{name:'Delete',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.waitForFunction(()=>document.querySelectorAll('.sc-home-row').length===3);
+  assert.equal(await page.locator('.sc-home-kpis').innerText(),beforeDelete,'Draft deletion preserves KPIs');
+  assert((await page.locator('.st-key-crm-home-tabs').innerText()).includes('All campaigns 3'));
+  assert((await page.locator('.st-key-crm-home-tabs').innerText()).includes('Drafts 1'));
+  assert.equal(await page.getByTestId('stException').count(),0);
+  console.log('Compact delete dialog: Cancel retains row; Delete closes dialog, removes row, updates counts, retains KPIs.');
   await page.close();page=await context.newPage();
   await page.setViewportSize({width:1366,height:768});
   const started=Date.now();await page.goto('http://127.0.0.1:8531/?mode=slow');
@@ -55,7 +74,7 @@ const path=require('node:path');
   await page.locator('.sc-home-kpis').waitFor();
   assert(await page.locator('.sc-home-unresolved').count()>0,'Shell emitted before slow reads finish');
   await page.locator('.sc-home-row').first().waitFor();const rows=Date.now()-started;
-  await page.waitForFunction(()=>document.querySelector('.sc-home-kpis').textContent.includes('NZ$250.00'));
+  await page.waitForFunction(()=>document.querySelectorAll('.sc-home-unresolved').length===0);
   const complete=Date.now()-started;
   const good=await page.locator('.sc-home-kpis').innerText();
   await page.getByRole('button',{name:'Simulate delivery outage',exact:true}).click();

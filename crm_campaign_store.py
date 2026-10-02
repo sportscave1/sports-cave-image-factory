@@ -4,6 +4,7 @@ import json
 import uuid
 from crm_workspace_store import WorkspaceRecords
 from crm_navigation import require
+from crm_campaign_delete import VISIBLE
 from crm_campaign_content import new_document, validate_document, preflight, settings, fingerprint, render_campaign
 
 
@@ -15,7 +16,7 @@ class CampaignStore(WorkspaceRecords):
           COALESCE(bool_or(c.status IN ('BUILDING','SENDING') OR
             (c.status='SCHEDULED' AND c.scheduled_at<=now()+interval '1 minute')),false) AS polling_active
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
-          WHERE d.archived_at IS NULL""",one=True)
+          WHERE d.archived_at IS NULL AND """+VISIBLE,one=True)
 
     def render_settings(self,env=None):
         cfg=super().render_settings(env)
@@ -29,7 +30,7 @@ class CampaignStore(WorkspaceRecords):
           (SELECT s.error_code FROM crm_marketing_sends s WHERE s.campaign_id=d.id
            AND s.error_code IN ('schedule_missed','marketing_off_schedule') LIMIT 1) AS schedule_error
           FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
-          WHERE (d.archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(d.name))>0
+          WHERE """+VISIBLE+""" AND (d.archived_at IS NOT NULL)=%s AND position(lower(%s) in lower(d.name))>0
           AND (%s='All' OR d.status=%s) AND (%s='All' OR d.document->>'market'=%s)
           AND (NOT %s OR c.status IS DISTINCT FROM 'SENT')
           ORDER BY GREATEST(d.updated_at,c.updated_at) DESC,d.id LIMIT %s OFFSET %s""",(archived,search,status,status,market,market,working,min(200,max(1,int(limit))),max(0,int(offset))))

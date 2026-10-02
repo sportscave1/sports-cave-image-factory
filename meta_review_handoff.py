@@ -48,7 +48,7 @@ def resolve_campaign_type(source, ad=None):
     source, ad = source or {}, ad or {}
     detected = source.get('creative_format') or (ad.get('winning_creative') or {}).get('creative_format')
     if detected:
-        types = {'CAROUSEL': 'Carousel', 'INSTANT_EXPERIENCE': 'Instant Experience', 'SINGLE_IMAGE': 'Single Image / Video'}
+        types = {'CAROUSEL': 'Carousel', 'DYNAMIC_CAROUSEL': 'Carousel', 'INSTANT_EXPERIENCE': 'Instant Experience', 'SINGLE_IMAGE': 'Single Image / Video'}
         return {'campaign_type': types.get(detected, 'Single Image / Video'), 'confirmed': detected in types,
                 'source': source.get('creative_format_source') or 'resolved_creative', 'creative_format': detected}
     aliases = {
@@ -138,7 +138,11 @@ def build_package(ad,selections,context,mode):
     # payloads or a second copy of the complete creative in persistence/prompts.
     package.update({key: deepcopy(value) for key, value in resolved.items() if key not in ('raw', 'cards')})
     package['carousel_cards'] = deepcopy(resolved.get('cards') or [])
-    package['carousel'] = resolved.get('creative_format') == 'CAROUSEL'
+    package['carousel'] = resolved.get('creative_format') in creative.CAROUSEL_FORMATS
+    if package['carousel']:
+        require_complete_carousel(package)
+        for card in package['carousel_cards']: card['source_ad_id']=str(ad['ad_id'])
+        creative.log_resolution(package,str(ad['ad_id']),len(package['carousel_cards']))
     package['source_fingerprint'] = creative.fingerprint(package)
     package['campaign_type_resolution'] = resolve_campaign_type(package, ad)
     if package['campaign_type_resolution']['confirmed']:
@@ -146,7 +150,16 @@ def build_package(ad,selections,context,mode):
     return package
 
 
+def require_complete_carousel(package):
+    cards=package.get('carousel_cards') or []
+    if len(cards)<2 or [c.get('position') for c in cards]!=list(range(1,len(cards)+1)):
+        raise ValueError('Reload the complete ordered carousel before applying Creative Refresh.')
+    missing=[str(c['position']) for c in cards if c.get('image_unavailable') or not c.get('image_url')]
+    if missing: raise ValueError('Missing source carousel cards: '+', '.join(missing)+'. Reload from Meta before refreshing.')
+
+
 def queue(package,state,actor='sports_cave_os'):
+    if package.get('carousel'): require_complete_carousel(package)
     package=products.enrich(package)
     package['image_sha256']=archive_image(package['components']['image']['value'])
     archived = {package['components']['image']['value']: package['image_sha256']}
@@ -157,8 +170,7 @@ def queue(package,state,actor='sports_cave_os'):
                 try:
                     archived[url] = archive_image(url)
                 except ValueError:
-                    card['image_unavailable'] = True
-                    continue
+                    raise ValueError('Source carousel card '+str(card['position'])+' could not be archived. No complete handoff was saved.') from None
             card['image_sha256'] = archived[url]
     package['decision_id']=store.save_selection(package,actor,'meta_review_handoff')
     state[PENDING]=package

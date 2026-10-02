@@ -121,7 +121,7 @@ def apply_resolved(ad, resolved):
     ad['winning_creative'] = resolved
     ad['creative_metadata'] = resolved['raw']
     ad['assets'] = analysis.creative_assets(resolved['raw'])
-    if resolved['creative_format'] == 'CAROUSEL':
+    if resolved['creative_format'] in creative.CAROUSEL_FORMATS:
         ad['assets']['carousel'] = True
         ad['assets']['image'] = [{'value': c['image_url'], 'id': c['identity'], 'carousel': True}
                                  for c in resolved['cards'] if c['image_url']]
@@ -140,7 +140,7 @@ def resolve_selected(ad, config=None):
     if not str(identity or '').isdigit():
         return ad
     cache = st.session_state.setdefault('meta-review-live-cache', {})
-    entry = live.cached_read(cache, (live.scope(config), 'creative', identity),
+    entry = live.cached_read(cache, (live.scope(config), 'creative-v2', identity),
                              lambda: creative.resolve(config, identity))
     if entry.get('error'):
         ad['winning_creative'] = {**ad.get('winning_creative', {}), 'creative_format': 'UNKNOWN',
@@ -159,7 +159,7 @@ def ad_card(ad):
     with st.container(border=True):
         st.subheader(ad.get('ad_name') or ad['ad_id'])
         st.caption(f"{ad.get('adset_name') or 'Ad set unavailable'} · {ad.get('effective_status') or ad.get('status') or 'Unknown'} · Ad {ad['ad_id']} · Creative {ad['assets']['creative_id']}")
-        if ad.get('winning_creative', {}).get('creative_format') == 'CAROUSEL':
+        if ad.get('winning_creative', {}).get('creative_format') in creative.CAROUSEL_FORMATS:
             creative.render_cards(st, ad['winning_creative'])
             if ad['winning_creative'].get('shared_primary_text'):
                 st.text(ad['winning_creative']['shared_primary_text'])
@@ -289,7 +289,7 @@ def simple_winner(ads,history,context):
         resolve_selected(selected)
         resolved = selected.get('winning_creative') or {}
         st.caption(creative.label(resolved))
-        if resolved.get('creative_format') == 'CAROUSEL':
+        if resolved.get('creative_format') in creative.CAROUSEL_FORMATS:
             with st.expander('Original winning carousel', expanded=True):
                 creative.render_cards(st, resolved, key_prefix='winner')
         st.caption('Selected Winner: '+str(selected.get('ad_name') or selected['ad_id']))
@@ -297,7 +297,7 @@ def simple_winner(ads,history,context):
             candidates=[c for c in analysis.component_candidates(ads,kind,history['assets']) if str(c['ad_id'])==str(selected['ad_id'])]
             # The carrier image is for the existing archive contract only. Every
             # fixed carousel card/copy pair is already in the resolved creative.
-            if candidates and resolved.get('creative_format') == 'CAROUSEL': complete[kind]=candidates[0]
+            if candidates and resolved.get('creative_format') in creative.CAROUSEL_FORMATS: complete[kind]=candidates[0]
             elif len(candidates)==1: complete[kind]=candidates[0]
             elif candidates:
                 choice=st.selectbox('Choose original '+kind.replace('_',' '),[c['key'] for c in candidates],
