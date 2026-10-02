@@ -96,7 +96,7 @@ class RefreshWorkflowTests(unittest.TestCase):
                      'ATTACHMENT 1', 'ATTACHMENT 2', 'ATTACHMENT 3', 'BLACK-FRAME', 'THREE refreshed',
                      'Signals inconclusive', 'Do not describe inconclusive', 'Collector wall art', 'SHOP_NOW'):
             self.assertIn(text, prompt)
-        self.assertIn('FIVE-CARD', result(True)['master_prompt'])
+        self.assertIn('5-CARD', result(True)['master_prompt'])
 
     def test_same_parser_schema_valid_import_and_invalid_atomicity(self):
         value, workflow = completed_single()

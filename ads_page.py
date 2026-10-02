@@ -7485,6 +7485,8 @@ def _render_refresh_winner_picker():
 
 def validate_creative_refresh_context(context=None):
     normalized = normalize_creative_refresh_context(context)
+    if (normalized.get("source_winner") or {}).get("creative_format") in ("DYNAMIC", "VIDEO"):
+        return "This Meta format has no supported deterministic creative refresh mapping."
     missing = []
     if not normalized["winning_primary_text"]:
         missing.append("Winning primary text")
@@ -9676,7 +9678,7 @@ def _compact_instant_experience_slots(workflow):
 
 
 def _ads_image_slot_specs_for_render(result, workflow):
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slot_specs = _result_image_slots(result)
     if not _is_instant_experience_result(result):
         return slot_specs
     _compact_instant_experience_slots(workflow)
@@ -9686,7 +9688,7 @@ def _ads_image_slot_specs_for_render(result, workflow):
 def _ads_image_valid_slots(result, workflow):
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slot_specs = _result_image_slots(result)
     slots = workflow.get("slots") or {}
     return [
         slot
@@ -9698,7 +9700,7 @@ def _ads_image_valid_slots(result, workflow):
 def _ads_image_saved_count(result, workflow):
     slot_ids = {
         slot["id"]
-        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+        for slot in _result_image_slots(result)
     }
     return sum(
         1
@@ -9710,7 +9712,7 @@ def _ads_image_saved_count(result, workflow):
 def _ads_image_failed_count(result, workflow):
     slot_ids = {
         slot["id"]
-        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+        for slot in _result_image_slots(result)
     }
     return sum(
         1
@@ -9720,7 +9722,7 @@ def _ads_image_failed_count(result, workflow):
 
 
 def _ads_image_required_count(result):
-    return len(ads_image_workflow.campaign_image_slots(result.get("campaign_type")))
+    return len(_result_image_slots(result))
 
 
 def _remove_ads_image_slot(result, slot_id):
@@ -9831,7 +9833,7 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
 
 def ads_images_ready(result, workflow=None):
     workflow = workflow or _ads_image_workflow(result)
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slot_specs = _result_image_slots(result)
     slots = workflow.get("slots") or {}
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
@@ -10200,8 +10202,19 @@ def _normalise_carousel_variations(raw_values, *, paragraph_mode=False):
     return values[:CAROUSEL_COPY_VARIATION_COUNT]
 
 
+def _refresh_carousel_count(result):
+    context = (result or {}).get('creative_refresh_context') or {}
+    source = context.get('source_winner') or {}
+    return len(source.get('carousel_cards') or source.get('cards') or []) or CAROUSEL_CARD_COUNT
+
+
+def _result_image_slots(result):
+    return ads_image_workflow.campaign_image_slots((result or {}).get('campaign_type'),
+        carousel_count=_refresh_carousel_count(result))
+
+
 def _blank_carousel_card(position):
-    slot = ads_image_workflow.campaign_image_slots("Carousel")[int(position) - 1]
+    slot = {"id": f"carousel-{int(position):02d}"}
     return {
         "position": int(position),
         "slot_id": slot["id"],
@@ -10252,7 +10265,7 @@ def _carousel_copy_notes_from_workflow(result, workflow):
     raw_cards = list(raw_cards) if isinstance(raw_cards, (list, tuple)) else []
     cards = []
     for position, slot in enumerate(
-        ads_image_workflow.campaign_image_slots("Carousel"),
+        _result_image_slots(result),
         start=1,
     ):
         raw_card = raw_cards[position - 1] if position <= len(raw_cards) else {}
@@ -10306,7 +10319,8 @@ def _carousel_copy_notes_with_widget_state(result, workflow):
     return carousel
 
 
-def _store_carousel_copy_notes(workflow, carousel):
+def _store_carousel_copy_notes(workflow, carousel, result=None):
+    count = _refresh_carousel_count(result)
     clean = {
         "headlines": _normalise_carousel_variations(carousel.get("headlines")),
         "descriptions": _normalise_carousel_variations(carousel.get("descriptions")),
@@ -10316,13 +10330,13 @@ def _store_carousel_copy_notes(workflow, carousel):
         "cards": [
             _normalise_carousel_card(card, position)
             for position, card in enumerate(
-                list(carousel.get("cards") or ())[:CAROUSEL_CARD_COUNT],
+                list(carousel.get("cards") or ())[:count],
                 start=1,
             )
         ],
         "setup_notes": _preserve_multiline_text(carousel.get("setup_notes")),
     }
-    while len(clean["cards"]) < CAROUSEL_CARD_COUNT:
+    while len(clean["cards"]) < count:
         clean["cards"].append(_blank_carousel_card(len(clean["cards"]) + 1))
     notes = dict((workflow or {}).get("ad_notes") or {})
     notes["carousel"] = clean
@@ -10353,6 +10367,7 @@ def build_carousel_copy_csv(
     template=False,
     carousel_notes=None,
 ):
+    count = _refresh_carousel_count(result)
     if carousel_notes is None:
         carousel_notes = (
             {
@@ -10372,7 +10387,7 @@ def build_carousel_copy_csv(
                         "cta": "Shop Now",
                         "setup_notes": "",
                     }
-                    for index in range(1, 6)
+                    for index in range(1, count + 1)
                 ],
                 "setup_notes": "Example overall carousel setup notes.",
             }
@@ -10386,13 +10401,13 @@ def build_carousel_copy_csv(
         "cards": [
             _normalise_carousel_card(card, position)
             for position, card in enumerate(
-                list(carousel_notes.get("cards") or ())[:CAROUSEL_CARD_COUNT],
+                list(carousel_notes.get("cards") or ())[:count],
                 start=1,
             )
         ],
         "setup_notes": _preserve_multiline_text(carousel_notes.get("setup_notes")),
     }
-    while len(normalized["cards"]) < CAROUSEL_CARD_COUNT:
+    while len(normalized["cards"]) < count:
         normalized["cards"].append(_blank_carousel_card(len(normalized["cards"]) + 1))
 
     rows = []
@@ -10442,6 +10457,7 @@ def build_carousel_copy_csv(
 
 
 def parse_carousel_copy_csv(data, result=None):
+    count = _refresh_carousel_count(result)
     source_bytes = bytes(data or b"")
     if not source_bytes:
         raise CarouselCopyCSVError("Choose a Carousel CSV file.")
@@ -10499,18 +10515,18 @@ def parse_carousel_copy_csv(data, result=None):
 
     expected_keys = {
         *((row_type, position) for row_type in ("headline", "description", "primary_text") for position in range(1, 6)),
-        *(("card", position) for position in range(1, 6)),
+        *(("card", position) for position in range(1, count + 1)),
         ("setup_notes", 0),
     }
     parsed = {
         "headlines": [""] * CAROUSEL_COPY_VARIATION_COUNT,
         "descriptions": [""] * CAROUSEL_COPY_VARIATION_COUNT,
         "primary_texts": [""] * CAROUSEL_COPY_VARIATION_COUNT,
-        "cards": [_blank_carousel_card(position) for position in range(1, 6)],
+        "cards": [_blank_carousel_card(position) for position in range(1, count + 1)],
         "setup_notes": "",
     }
     seen = set()
-    slot_specs = ads_image_workflow.campaign_image_slots("Carousel")
+    slot_specs = _result_image_slots(result or {"campaign_type": "Carousel"})
     group_by_type = {
         "headline": ("headlines", "headline"),
         "description": ("descriptions", "description"),
@@ -10542,11 +10558,11 @@ def parse_carousel_copy_csv(data, result=None):
                 position = int(raw_position)
             except ValueError as error:
                 raise CarouselCopyCSVError(
-                    f"CSV row {row_number} position must be a number from 1 to 5."
+                    f"CSV row {row_number} position must be a number from 1 to {count if row_type == 'card' else CAROUSEL_COPY_VARIATION_COUNT}."
                 ) from error
-            if position not in range(1, CAROUSEL_COPY_VARIATION_COUNT + 1):
+            if position not in range(1, (count if row_type == "card" else CAROUSEL_COPY_VARIATION_COUNT) + 1):
                 raise CarouselCopyCSVError(
-                    f"CSV row {row_number} position must be a number from 1 to 5."
+                    f"CSV row {row_number} position must be a number from 1 to {count if row_type == 'card' else CAROUSEL_COPY_VARIATION_COUNT}."
                 )
         row_key = (row_type, position)
         if row_key in seen:
@@ -10591,7 +10607,7 @@ def parse_carousel_copy_csv(data, result=None):
     if missing or unexpected or len(rows) != len(expected_keys):
         raise CarouselCopyCSVError(
             "The Carousel CSV must contain exactly five headline rows, five description rows, "
-            "five primary_text rows, five card rows and one setup_notes row."
+            f"five primary_text rows, {count} card rows and one setup_notes row."
         )
     return parsed
 
@@ -10620,10 +10636,10 @@ def apply_carousel_copy_csv(result, workflow, data):
 
     for widget_key, value in widget_updates.items():
         st.session_state[widget_key] = value
-    _store_carousel_copy_notes(workflow, parsed)
+    _store_carousel_copy_notes(workflow, parsed, result)
     return {
         "carousel_notes": parsed,
-        "row_count": 21,
+        "row_count": 16 + _refresh_carousel_count(result),
         "field_count": len(widget_updates),
     }
 
@@ -11476,7 +11492,7 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     notes = _ads_notes_for_workflow(workflow)
     campaign_type = str(result.get("campaign_type") or "")
     image_outcomes = dict(image_outcomes or (workflow or {}).get("outcomes") or {})
-    slot_specs = ads_image_workflow.campaign_image_slots(campaign_type)
+    slot_specs = _result_image_slots(result)
     lines = [
         "Sports Cave Ad Setup Notes",
         "",
@@ -12010,10 +12026,10 @@ def _carousel_text_input(label, value, *, key, placeholder=""):
 def _render_carousel_setup_notes(result, workflow):
     carousel = _carousel_copy_notes_with_widget_state(result, workflow)
     context_key = str(result.get("context_key") or "")
-    slot_specs = ads_image_workflow.campaign_image_slots("Carousel")
+    slot_specs = _result_image_slots(result or {"campaign_type": "Carousel"})
     with st.container(key="ads-setup-notes"):
         st.caption(
-            "Edit the five ad-copy variations and the five card records. "
+            f"Edit the five ad-copy variations and the {_refresh_carousel_count(result)} card records. "
             "Every card remains permanently mapped to its numbered image slot. "
             f"Carousel always uses {META_DEFAULT_CTA.replace('_', ' ').title()}."
         )
@@ -12136,12 +12152,12 @@ def _render_carousel_setup_notes(result, workflow):
             height=120,
             placeholder="Overall Carousel or final Meta ad setup notes.",
         )
-    _store_carousel_copy_notes(workflow, carousel)
+    _store_carousel_copy_notes(workflow, carousel, result)
     st.session_state[_ads_image_state_key()] = workflow
 
 
 def _render_ads_setup_notes(result, workflow):
-    if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
+    if not _result_image_slots(result):
         return
     if _is_instant_experience_result(result):
         return
@@ -12729,7 +12745,7 @@ def _ads_saved_source_signature(result, workflow):
                 key: ((workflow.get("slots") or {}).get(slot["id"]) or {}).get(key)
                 for key in ("valid", "data", "source_hash", "original_name")
             }}
-            for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+            for slot in _result_image_slots(result)
         ],
     })
 
@@ -12739,7 +12755,7 @@ def _retain_saved_posting_package(result, workflow, outcomes, items, folder):
     try:
         saved_workflow = {**workflow, "outcomes": outcomes}
         assets, files = [], []
-        specs = {slot["id"]: slot for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))}
+        specs = {slot["id"]: slot for slot in _result_image_slots(result)}
         copy_csv = b""
         for item in items:
             receipt = outcomes.get(item["slot_id"]) or {}
@@ -12787,6 +12803,8 @@ def _retain_saved_posting_package(result, workflow, outcomes, items, folder):
             else workflow.get("standard_ads", []) if result.get("campaign_type") == "Single Image / Video"
             else _carousel_copy_notes_from_workflow(result, saved_workflow)
         )
+        if result.get("campaign_type") == "Carousel" and _refresh_carousel_count(result) != 5:
+            raise posting_handoff.SavedPackageError("All refreshed cards can be saved/exported. POST NOW currently supports five-card carousels only; no cards will be dropped.")
         workflow[posting_handoff.SAVED_PACKAGE_KEY] = posting_handoff.build_saved_package(
             result={**result, "refresh_executions": (workflow.get("ad_notes") or {}).get("refresh_executions") or []}, source_signature=_ads_saved_source_signature(result, saved_workflow),
             source_copy=source_copy, copy_csv=copy_csv, assets=assets, files=files, folder=folder,
@@ -12819,7 +12837,7 @@ def _restore_saved_carousel_posting_package(result, workflow):
     items = [
         {"slot_id": slot["id"], "kind": "image",
          "data": ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data", b"")}
-        for slot in ads_image_workflow.campaign_image_slots("Carousel")
+        for slot in _result_image_slots(result)
     ] + [
         {"slot_id": "_ad_setup_notes", "data": notes_bytes},
         {"slot_id": "_carousel_copy_csv", "data": copy_csv},
@@ -12875,7 +12893,7 @@ def save_ads_images_to_dropbox(
     workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
     workflow.pop("posting_package_error", None)
     if result.get("campaign_type") == "Carousel":
-        _store_carousel_copy_notes(workflow, _carousel_copy_notes_with_widget_state(result, workflow))
+        _store_carousel_copy_notes(workflow, _carousel_copy_notes_with_widget_state(result, workflow), result)
     elif _is_instant_experience_result(result):
         workflow.setdefault("ad_notes", {})["instant_experience_concepts"] = (
             _instant_experience_copy_notes_with_widget_state(result, workflow)
@@ -12914,7 +12932,7 @@ def save_ads_images_to_dropbox(
                 slot_data.update({key: value for key, value in converted.items()
                                   if key.startswith("output_") or key in {"data", "content_type"}})
                 slot_data["new_ads_jpeg_ready"] = True
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slot_specs = _result_image_slots(result)
     valid_slot_ids = {slot["id"] for slot in _ads_image_valid_slots(result, workflow)}
     outcomes = dict(workflow.get("outcomes") or {})
     pending_slots = [
@@ -13392,7 +13410,7 @@ def _render_instant_experience_package_save(result, workflow):
 
 
 def _render_ads_image_save(result, workflow):
-    if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
+    if not _result_image_slots(result):
         return
     issues = creative_refresh_quality_issues(result, workflow)
     if issues:
@@ -13542,7 +13560,7 @@ def _render_ads_image_save(result, workflow):
             )
             slot_ids = {
                 slot["id"]
-                for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+                for slot in _result_image_slots(result)
             }
             successful = [
                 row
@@ -13589,7 +13607,7 @@ def _render_ads_image_save(result, workflow):
     outcomes = workflow.get("outcomes") or {}
     slot_ids = {
         slot["id"]
-        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+        for slot in _result_image_slots(result)
     }
     successful = [
         row
@@ -14249,7 +14267,7 @@ def render_supported_result(result, *, source_matches=True):
     _render_ads_image_save(result, workflow)
     _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
     if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        st.caption("Review the imported copy and five images, Save, then use POST NOW to continue in Posting.")
+        st.caption(f"Review the imported copy and {_refresh_carousel_count(result)} images, then Save.")
         render_meta_url_parameters_section(3)
         return
     st.caption("Upload them to Meta in this exact order before adding the carousel copy.")

@@ -11,7 +11,8 @@ import meta_review_benchmarks as benchmarks
 
 CAMPAIGN_FIELDS = 'id,name,status,effective_status,objective,created_time,updated_time,start_time,stop_time'
 AD_FIELDS = ('id,name,status,effective_status,adset_id,creative{id,name,thumbnail_url,'
-             'image_url,object_story_spec,asset_feed_spec},created_time,updated_time')
+             'image_url,image_hash,video_id,link_url,object_story_id,effective_object_story_id,'
+             'object_story_spec,asset_feed_spec},created_time,updated_time')
 INSIGHT_FIELDS = ('date_start,date_stop,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,'
                   'spend,impressions,reach,frequency,clicks,ctr,cpc,cpm,inline_link_clicks,'
                   'inline_link_click_ctr,cost_per_inline_link_click,outbound_clicks,outbound_clicks_ctr,'

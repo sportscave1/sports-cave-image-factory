@@ -13,7 +13,7 @@ PENDING = 'meta-review-refresh-pending'
 ACTIVE = 'meta-review-refresh-source'
 
 
-def archive_image(url):
+def reference_image_bytes(url):
     parsed = urlparse(str(url))
     host = parsed.hostname or ''
     if parsed.scheme != 'https' or not any(host.endswith('.'+domain) for domain in ('fbcdn.net','fbsbx.com')):
@@ -33,7 +33,12 @@ def archive_image(url):
         mime=Image.MIME.get(image.format,'image/jpeg')
     except (requests.RequestException,OSError):
         raise ValueError('Winner image could not be verified. Sync again or select another real image.') from None
-    return store.save_media(bytes(data),mime)
+    return bytes(data), mime
+
+
+def archive_image(url):
+    data, mime = reference_image_bytes(url)
+    return store.save_media(data, mime)
 
 
 def resolve_campaign_type(source, ad=None):
@@ -41,6 +46,11 @@ def resolve_campaign_type(source, ad=None):
     from meta_review_benchmarks import ad_format
 
     source, ad = source or {}, ad or {}
+    detected = source.get('creative_format') or (ad.get('winning_creative') or {}).get('creative_format')
+    if detected:
+        types = {'CAROUSEL': 'Carousel', 'INSTANT_EXPERIENCE': 'Instant Experience', 'SINGLE_IMAGE': 'Single Image / Video'}
+        return {'campaign_type': types.get(detected, 'Single Image / Video'), 'confirmed': detected in types,
+                'source': source.get('creative_format_source') or 'resolved_creative', 'creative_format': detected}
     aliases = {
         'SINGLE IMAGE / VIDEO': 'Single Image / Video', 'SINGLE IMAGE': 'Single Image / Video',
         'SINGLE VIDEO': 'Single Image / Video', 'IMAGE': 'Single Image / Video', 'VIDEO': 'Single Image / Video',
@@ -117,18 +127,19 @@ def build_package(ad,selections,context,mode):
             'description':next(iter(ad['assets']['description']),{}).get('value',''),
             'cta':next(iter(ad['assets']['cta']),{}).get('value',''),
             'destination_url':next(iter(ad['assets']['url']),{}).get('value','')}
-    # Preserve original carousel order separately from deduplicated asset candidates.
+    import meta_review_creative as creative
     raw = (ad.get('raw') or {}).get('creative') or ad.get('creative_metadata') or {}
-    link = (raw.get('object_story_spec') or {}).get('link_data') or {}
-    children = link.get('child_attachments') or []
+    resolved = deepcopy(ad.get('winning_creative') or creative.normalize(raw))
     if mode == 'best_components' and str(selections['image']['ad_id']) != str(ad['ad_id']):
-        children = []  # Mixed-ad image evidence cannot silently certify this ad's five cards.
-    if isinstance(children, list) and children:
-        package['carousel_cards'] = [
-            {'position': i, 'image_url': child.get('picture') or child.get('image_url') or '',
-             'headline': child.get('name') or '', 'description': child.get('description') or '',
-             'destination_url': child.get('link') or ''}
-            for i, child in enumerate([c if isinstance(c, dict) else {} for c in children[:5]], 1)]
+        resolved = {**resolved, 'creative_format': 'UNKNOWN', 'cards': [],
+                    'creative_format_source': 'mixed_ad_components'}
+    # The existing handoff itself is the normalized winning creative. Retain
+    # carousel_cards for downstream compatibility, without duplicating raw Graph
+    # payloads or a second copy of the complete creative in persistence/prompts.
+    package.update({key: deepcopy(value) for key, value in resolved.items() if key not in ('raw', 'cards')})
+    package['carousel_cards'] = deepcopy(resolved.get('cards') or [])
+    package['carousel'] = resolved.get('creative_format') == 'CAROUSEL'
+    package['source_fingerprint'] = creative.fingerprint(package)
     package['campaign_type_resolution'] = resolve_campaign_type(package, ad)
     if package['campaign_type_resolution']['confirmed']:
         package['source_campaign_type'] = package['campaign_type_resolution']['campaign_type']
@@ -139,11 +150,15 @@ def queue(package,state,actor='sports_cave_os'):
     package=products.enrich(package)
     package['image_sha256']=archive_image(package['components']['image']['value'])
     archived = {package['components']['image']['value']: package['image_sha256']}
-    for card in (package.get('carousel_cards') or [])[:5]:
+    for card in (package.get('carousel_cards') or []):
         if card.get('image_url'):
             url = card['image_url']
             if url not in archived:
-                archived[url] = archive_image(url)
+                try:
+                    archived[url] = archive_image(url)
+                except ValueError:
+                    card['image_unavailable'] = True
+                    continue
             card['image_sha256'] = archived[url]
     package['decision_id']=store.save_selection(package,actor,'meta_review_handoff')
     state[PENDING]=package
@@ -276,23 +291,14 @@ def render_source(st):
             st.caption('Product matched: '+source['product_mapping']['product_title']+' · '+str(source.get('product_match_method') or 'canonical mapping'))
         if source.get('mode')=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
-        if resolve_campaign_type(source)['campaign_type'] == 'Carousel':
-            from ads_refresh_plan import reference_map
-            cards = reference_map('Carousel', source)[:5]
-            from ads_refresh_reference import render_winning_image_copy
-            with st.expander('Five winner card references', expanded=False):
-                for position in range(1, 6):
-                    card = cards[position-1] if len(cards) >= position else {}
-                    st.caption(f'WINNER_CARD_{position} — card from the selected carousel')
-                    try:
-                        data, mime = store.load_media(card['image_sha256']) if card.get('image_sha256') else (None, None)
-                        if data:
-                            st.image(data, width=240)
-                            render_winning_image_copy(data, mime)
-                        else:
-                            st.caption(f'Missing WINNER_CARD_{position}: attach the original card manually in ChatGPT.')
-                    except Exception:
-                        st.caption(f'WINNER_CARD_{position} unavailable: attach the original card manually in ChatGPT.')
+        resolution = resolve_campaign_type(source)
+        if not resolution['confirmed']:
+            st.warning('Creative format could not be confirmed from Meta. Choose a supported refresh type manually.')
+        if source.get('creative_format') in ('DYNAMIC', 'VIDEO'):
+            st.warning('This source format has no deterministic fixed-card refresh mapping.')
+        if resolution['campaign_type'] == 'Carousel':
+            from meta_review_creative import render_cards
+            render_cards(st, source, archived=True)
             return True
         try:
             data,mime=store.load_media(source['image_sha256'])

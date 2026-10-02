@@ -16,11 +16,13 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
     identity = {"product_name": product, "category": category, "country": country,
                 "campaign_type": campaign_type, "product_url": url}
     carousel = campaign_type == "Carousel"
+    n = len(source.get("carousel_cards") or source.get("cards") or []) or 5
+    identity["creative_refresh_context"] = winner
     template = (ads.build_carousel_copy_csv(identity, template=True) if carousel
                 else ads.build_standard_ads_csv(product_name=product))
-    count = ("Create ONE refreshed FIVE-CARD carousel (Card 1 through Card 5). Preserve the useful "
+    count = (f"Create ONE refreshed {n}-CARD carousel (Card 1 through Card {n}). Preserve the useful "
              "sequence/storytelling principle of the reference. Use the exact existing New Ads card fields, "
-             "five headline options, five descriptions and five primary texts in the supplied template."
+             "five shared-copy options and one new headline/description per source card in the supplied template."
              if carousel else "Create THREE refreshed creative directions, REFRESH 1, REFRESH 2 and REFRESH 3. "
              "Each needs primary text, headline, description, CTA guidance and a standalone image prompt.")
     ie = campaign_type == "Instant Experience"
@@ -30,10 +32,10 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
         count = "Create THREE refreshed creatives: exactly one square 1024 x 1024 cover and ONE copy pair per permanent slot, variation=1, output_mode=winner_refinement. No nine-copy combinations."
     refresh_plan = plan.current_plan(winner, campaign_type, product, category, 'direct-prompt')
     refs = refresh_plan['references']
-    attachment_rules = ("ATTACHMENT 1–5 — WINNER_CARD_1, WINNER_CARD_2, WINNER_CARD_3, WINNER_CARD_4, WINNER_CARD_5 in original order. ATTACHMENT 6 — CANONICAL_PRODUCT."
+    attachment_rules = ("ATTACH TO CHATGPT: " + ", ".join(f"ATTACHMENT {i} — WINNER_CARD_{i}" for i in range(1, n+1)) + f" in original order. ATTACHMENT {n+1} — CANONICAL_PRODUCT."
                         if carousel else "ATTACHMENT 1 — WINNER_IE (or WINNER_AD for single-image). ATTACHMENT 2 — CANONICAL_PRODUCT — CANONICAL BLACK-FRAME WEBSITE PRODUCT IMAGE (canonical Sports Cave product image).")
     briefs = []
-    for i in range(5 if carousel else 3):
+    for i in range(n if carousel else 3):
         reference = refs[i] if carousel else refs[0]
         style = {} if carousel else refresh_plan['styles'][i]
         briefs.append(plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
@@ -68,7 +70,7 @@ CSV TEMPLATE — separate non-image attachment (legacy ATTACHMENT 3 for single-i
 The PRINTED internal artwork background is immutable. Ignore the canonical image's external wall, room, furniture, camera and shadows. Never reconstruct artwork from a winner.
 Reference map (metadata, NOT completed pixel analysis):
 {json.dumps(refs, ensure_ascii=False)}
-Missing references: before proceeding, list every missing labelled image explicitly; stop incomplete visual generation. One winning image cannot stand in for five carousel cards. Do not claim all five were reviewed without all five images.
+Missing references: before proceeding, list every missing labelled image explicitly; stop incomplete visual generation. One winning image cannot stand in for {n} carousel cards. Do not claim all {n} were reviewed without all {n} images.
 Analyse each actual attached winner: visible scene/category, card role, defining objects, product attention, strengths/clutter, mood/contrast, copy hook/tone/structure and emotional appeal. Return concise Keep / Change / Improvement rationale in existing notes/context, separate from customer copy. Treat effectiveness as a hypothesis unless performance evidence supports it. A carousel card is a card from a winning carousel, never independently sales-proven.
 
 OBJECTIVE
@@ -76,7 +78,7 @@ Analyse the selected reference and identify the visual/copy principle that appea
 Preserve the winning creative DNA. Evolve it rather than discard it. Create NEW executions that
 prevent creative fatigue, recognisably related to the reference but not duplicates or unrelated styles.
 Preserve concept and advertising principles, not literal room/composition/wall/crop. Redesign architecture/layout, wall palette/material, camera composition plus at least two other scene dimensions. Never only recolour or move the camera.
-Carousel: original card N maps refreshed card N. Keep all five scene categories, roles, defining objects and sequence; do not apply the IE style library to carousel. Preserve a supported detail-card function.
+Carousel: original card N maps refreshed card N. Keep all {n} scene categories, roles, defining objects and sequence; do not apply the IE style library to carousel. Preserve a supported detail-card function.
 IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left CSV identities are compatibility IDs, not three camera angles in one room. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
 Do not describe inconclusive signals or mixed components as a statistically proven winner.
 Only use actual supplied evidence; no invented performance claims, offers, scarcity or endorsements.
@@ -84,10 +86,10 @@ Only use actual supplied evidence; no invented performance claims, offers, scarc
 {count}
 
 {ads.build_country_language_guidance(country)}
-{ads.build_carousel_card_copy_rules() if carousel else 'Use the exact supplied three-row IE contract with one copy pair per cover.' if ie else ads.build_standard_ads_output_contract()}
+{ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:') if carousel else 'Use the exact supplied three-row IE contract with one copy pair per cover.' if ie else ads.build_standard_ads_output_contract()}
 
 COPY AND IMAGE OUTPUT
-Refresh all required CSV copy fields substantially while retaining the winner's underlying emotional/collector appeal. Distinct openings, supporting arguments and headlines per sibling; reject synonym swaps, reordered openings, repeated descriptions and one-word headline changes. Fixed verified facts, product names and required CTAs may repeat. Carousel tells one connected five-card story aligned to its scenes. Do not invent stock, demand, discounts, delivery, endorsements or personally signed claims.
+Refresh all required CSV copy fields substantially while retaining the winner's underlying emotional/collector appeal. Distinct openings, supporting arguments and headlines per sibling; reject synonym swaps, reordered openings, repeated descriptions and one-word headline changes. Fixed verified facts, product names and required CTAs may repeat. Carousel tells one connected {n}-card story aligned to its scenes. Do not invent stock, demand, discounts, delivery, endorsements or personally signed claims.
 Return the copy in the supplied CSV with matching standalone briefs, one per creative/card. Generate images only when requested.
 Every final image prompt must be standalone, name {product}, identify its exact winner label and CANONICAL_PRODUCT, and contain the COMPLETE shared realism block below, not a marker or reference to rules above.
 Generate square {'1024 x 1024' if ie else '1080 x 1080'} images with premium photorealistic collector presentation, accurate frame geometry and legible mobile composition.
@@ -115,7 +117,7 @@ EXECUTION NOTES — return a JSON array alongside the CSV; no new CSV columns.
 Exactly one record per output in permanent order with position (integer), winner_reference (WINNER_CARD_N/WINNER_IE/WINNER_AD), reference_inspected and canonical_inspected (true only after viewing both actual attachments), observations (object with scene_category, ad_role, defining_objects, composition, product_attention, strengths, clutter, mood_contrast, copy_hook, tone, structure, emotional_appeal; include observed execution dimensions where visible, label unknowns honestly), scene, role, keep, change, improvement, style_id (IE/single-image only), execution (object with architecture, layout, wall_palette, wall_material, camera and at least two of furniture, lighting, flooring, background, product_placement; for a supported intentional detail card use camera, lighting and product_placement without forcing room architecture), image_prompt (complete final standalone prompt). These go into existing internal ad notes, never customer ad copy. Include concrete architecture/layout, wall treatment, camera, furniture/materials, product placement, coherent light/glass and overlays in each image_prompt. Reuse actual supplied output/safe-area conventions; preserve deterministic branding separately from immutable artwork.
 
 FINAL BATCH CHECK
-Check exact role map, 5 carousel or 3 IE outputs, order, all copy fields, explicit keep/change/new execution, full shared rules in EACH final brief, distinct rooms and substantive copy. Revise near-duplicates. Do not claim visual product fidelity was verified without viewing the actual output images.
+Check exact role map, {n} carousel or 3 IE outputs, order, all copy fields, explicit keep/change/new execution, full shared rules in EACH final brief, distinct rooms and substantive copy. Revise near-duplicates. Do not claim visual product fidelity was verified without viewing the actual output images.
 
 EXACT CSV TEMPLATE
 {template.decode('utf-8-sig')}

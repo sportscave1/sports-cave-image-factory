@@ -182,6 +182,7 @@ COUNTS.add('Sales')
 
 def va_campaign_rows(rows):
     return [{'Campaign':r.get('campaign_name') or r['campaign_id'],
+             'Format':str(r.get('creative_format') or 'UNKNOWN').replace('_',' ').title(),
              'Status':r.get('effective_status') or r.get('status') or '—',
              **{label:(r.get('metrics') or {}).get(key) for label,key in VA_CAMPAIGN_METRICS},
              'Last Sale':r.get('recency',{}).get('text','Unavailable'),
@@ -189,7 +190,8 @@ def va_campaign_rows(rows):
 
 
 def va_ad_rows(rows):
-    return [{'Creative':next(iter(r['assets']['image']),{}).get('value'),'Ad':r.get('ad_name') or r['ad_id'],
+    from meta_review_creative import label
+    return [{'Format':label(r.get('winning_creative') or {}), 'Creative':next(iter(r['assets']['image']),{}).get('value'),'Ad':r.get('ad_name') or r['ad_id'],
              **{label:r.get('benchmark_metrics',r['metrics']).get(key) for label,key in VA_METRICS if label!='Spend'},
              'Last Sale':r.get('recency',{}).get('text','Unavailable'),
              'Action':r.get('recency',{}).get('action',(r.get('benchmark') or {}).get('recommendation','NO DATA'))} for r in rows]

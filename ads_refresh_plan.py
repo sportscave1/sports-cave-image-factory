@@ -77,6 +77,7 @@ def reference_map(campaign_type, source=None):
     cards = source.get('carousel_cards') or source.get('cards') or []
     cards = cards if isinstance(cards, list) else []
     if campaign_type == 'Carousel':
+        count = len(cards) if len(cards) >= 2 else max([5, len(cards)] + [int(c.get('position', i)) for i, c in enumerate(cards, 1) if isinstance(c, dict) and str(c.get('position', i)).isdigit()])
         by_position = {}
         for index, card in enumerate(cards, 1):
             if not isinstance(card, dict):
@@ -85,14 +86,16 @@ def reference_map(campaign_type, source=None):
                 position = int(card.get('position', index))
             except (TypeError, ValueError):
                 continue
-            if 1 <= position <= 5 and position not in by_position:
+            if 1 <= position <= count and position not in by_position:
                 by_position[position] = card
         refs = []
-        for i in range(1, 6):
+        for i in range(1, count + 1):
             card = by_position.get(i, {})
             refs.append({'label': f'WINNER_CARD_{i}', 'position': i,
                          'image_sha256': card.get('image_sha256', ''),
                          'image_url': card.get('image_url') or card.get('picture') or '',
+                         'headline': card.get('headline') or '', 'description': card.get('description') or '',
+                         'source_id': card.get('source_id') or '',
                          'scene': card.get('scene') or '', 'role': card.get('role') or '',
                          'evidence': 'metadata only; inspect attachment in ChatGPT'})
     else:
@@ -123,7 +126,7 @@ def build_plan(context, campaign_type, product, category, seed, history=()):
 def current_plan(context, campaign_type, product, category, seed, history=()):
     saved = (context or {}).get('refresh_plan') or {}
     refs = saved.get('references') or []
-    expected = 6 if campaign_type == 'Carousel' else 2
+    expected = len(reference_map(campaign_type, (context or {}).get('source_winner'))) if campaign_type == 'Carousel' else 2
     structural = (isinstance(refs, list) and len(refs) == expected
                   and all(isinstance(r, dict) for r in refs)
                   and refs[-1].get('label') == 'CANONICAL_PRODUCT'
@@ -210,7 +213,7 @@ def asset_issues(slots, source_hashes=()):
 
 def execution_issues(executions, refresh_plan, product, campaign_type):
     """Validate declared plans only. This does not certify rendered image fidelity."""
-    count = 5 if campaign_type == 'Carousel' else 3
+    count = len(refresh_plan.get('references') or []) - 1 if campaign_type == 'Carousel' else 3
     if not isinstance(executions, list) or len(executions) != count:
         return [f'Paste {count} final execution records in refresh notes before marking ready.']
     issues = []

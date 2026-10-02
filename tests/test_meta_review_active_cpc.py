@@ -44,7 +44,8 @@ class ActiveCpcTests(unittest.TestCase):
             with self.subTest(value=value),patch.object(meta,'_request',side_effect=response),patch.object(meta,'_post') as write:
                 rows=live.load_overview(CONFIG,date(2026,9,1),date(2026,9,14))['campaigns']
                 rendered=tables.va_styled(tables.va_campaign_rows(rows),rows)
-                self.assertEqual(rendered._display_funcs[(0,7)](rendered.data.iloc[0,7]),expected)
+                column = list(rendered.data).index('CPC')
+                self.assertEqual(rendered._display_funcs[(0,column)](rendered.data.iloc[0,column]),expected)
                 self.assertEqual(rows[0]['metrics']['cost_per_link_click'],None if value is None else float(value))
                 write.assert_not_called()
 

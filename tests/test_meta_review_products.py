@@ -80,7 +80,7 @@ class ResolutionTests(unittest.TestCase):
 class PersistenceHydrationTests(unittest.TestCase):
     def test_all_fields_cross_tab_and_original_assets_unchanged(self):
         package=DurableHandoffTests().package()
-        package.update(PACKAGE,components=package['components'],market='AU',format='CAROUSEL')
+        package.update(PACKAGE,components=package['components'],market='AU',format='CAROUSEL',creative_format='CAROUSEL')
         saved={}
         with patch.object(catalogue,'load_live_edition_product_rows',return_value=CATALOGUE),patch.object(store,'product_mapping_context',return_value=[{'ad_id':'ad1','product_handle':CATALOGUE[0]['product_handle']}]),patch.object(store,'save_selection',side_effect=lambda p,*a:(saved.update(copy.deepcopy(p)) or 7)),patch.object(handoff,'archive_image',return_value='original-sha'):
             handoff.queue_link(package)
@@ -101,7 +101,7 @@ class PersistenceHydrationTests(unittest.TestCase):
         product=products.canonical(CATALOGUE[2])
         self.assertEqual(product['product_url'],'https://www.sportscaveshop.com/products/greatest-dynasty-michael-jordan')
         self.assertEqual(product['category'],'NBA')
-        package=DurableHandoffTests().package(); package.update(product_mapping=product,format='INSTANT EXPERIENCE',carousel=True)
+        package=DurableHandoffTests().package(); package.update(product_mapping=product,format='INSTANT EXPERIENCE',creative_format='INSTANT_EXPERIENCE',carousel=True)
         state={handoff.PENDING:package}; handoff.hydrate(state)
         self.assertEqual(state['ads_campaign_type'],'Instant Experience')
 

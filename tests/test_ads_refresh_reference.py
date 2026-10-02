@@ -40,9 +40,10 @@ class ReferenceCleanupTests(unittest.TestCase):
             self.assertEqual(state[handoff.ACTIVE]['components'],source['components'])
 
     def test_actual_meta_creative_formats_in_advanced_handoff(self):
+        from tests.test_meta_review_creative import inline
         for creative,expected in [(CREATIVE,'Single Image / Video'),
-          ({'object_story_spec':{'link_data':{'child_attachments':[{},{}]}}},'Carousel'),
-          ({'object_story_spec':{'link_data':{'child_attachments':[{},{}],'canvas_id':'canvas-fixture'}}},'Instant Experience')]:
+          (inline(5),'Carousel'),
+          ({'object_story_spec':{'link_data':{'link':'https://www.facebook.com/canvas/123'}}},'Instant Experience')]:
             selected=ad();selected['raw']={'creative':copy.deepcopy(creative)}
             choices={k:analysis.component_candidates([selected],k)[0] for k in ('image','primary_text','headline')}
             package=handoff.build_package(selected,choices,{},'complete_ad')
@@ -55,7 +56,9 @@ class ReferenceCleanupTests(unittest.TestCase):
         choices={k:analysis.component_candidates([selected],k)[0] for k in ('image','primary_text','headline')}
         package=handoff.build_package(selected,choices,{},'complete_ad')
         state={handoff.PENDING:package};handoff.hydrate(state)
-        self.assertEqual(state['ads_campaign_type'],'Instant Experience')
+        self.assertEqual(state['ads_campaign_type'],'Single Image / Video')
+        self.assertFalse(state[handoff.ACTIVE]['campaign_type_resolution']['confirmed'])
+        self.assertEqual(selected['benchmark']['format'], 'INSTANT EXPERIENCE')
         self.assertEqual(handoff.resolve_campaign_type({'ad_mapping':{'ad_type':'Carousel'}})['campaign_type'],'Carousel')
         self.assertEqual(handoff.resolve_campaign_type({'format':'Instant Experience','carousel':True})['campaign_type'],'Instant Experience')
 

@@ -66,7 +66,7 @@ class RefreshPlanTests(unittest.TestCase):
         prompt = value['master_prompt']
         self.assertIn('ATTACHMENT 6 — CANONICAL_PRODUCT', prompt)
         self.assertNotIn('ATTACHMENT 2 — CANONICAL', prompt)
-        self.assertIn('ONE refreshed FIVE-CARD', prompt)
+        self.assertIn('ONE refreshed 5-CARD', prompt)
 
     def test_missing_refs_never_assume_card_one_for_all(self):
         refs = plan.reference_map('Carousel', {'image_sha256': 'only-one'})
@@ -74,7 +74,7 @@ class RefreshPlanTests(unittest.TestCase):
         prompt = ads.build_ads_prompt(TITLE, 'Football', 'Australia', 'Carousel',
                                      creative_refresh_context={'winning_primary_text': 'Copy', 'winning_headline': 'Title'})
         self.assertIn('list every missing labelled image', prompt)
-        self.assertIn('One winning image cannot stand in for five', prompt)
+        self.assertIn('One winning image cannot stand in for 5', prompt)
         self.assertIn('OS has not analysed winner pixels', prompt)
 
     def test_partial_reference_keeps_its_original_position(self):

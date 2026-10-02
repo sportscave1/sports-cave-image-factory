@@ -123,7 +123,7 @@ class ScoringTests(unittest.TestCase):
         self.assertNotIn('cpc',b.evaluate(metrics(),'UNKNOWN','AU')['cells'])
 
     def test_individual_ads_score_independently_without_mutating_winner_data(self):
-        h=history(); h['currency']='AUD'; h['country_delivery']=[{'ad_id':a['ad_id'],'country':'AU','spend':'55'} for a in h['ads']]
+        h=copy.deepcopy(history()); h['currency']='AUD'; h['country_delivery']=[{'ad_id':a['ad_id'],'country':'AU','spend':'55'} for a in h['ads']]
         for c in h['creatives']: c['raw']['object_story_spec']['link_data']['link']='https://facebook.com/canvas/123'
         before=copy.deepcopy(h)
         ads=page.build_ads(h)

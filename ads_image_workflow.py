@@ -60,7 +60,7 @@ class AdsImageValidationError(ValueError):
     pass
 
 
-def campaign_image_slots(campaign_type):
+def campaign_image_slots(campaign_type, *, carousel_count=5):
     if campaign_type == "Carousel":
         return tuple(
             {
@@ -68,7 +68,7 @@ def campaign_image_slots(campaign_type):
                 "label": f"Carousel {index}",
                 "position": index,
             }
-            for index in range(1, 6)
+            for index in range(1, carousel_count + 1)
         )
     if campaign_type == "Instant Experience":
         return tuple(
