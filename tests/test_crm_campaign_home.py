@@ -40,13 +40,13 @@ actions=Mock();actions.user=ADMIN
 st.session_state['load_stages']=[]
 def job(state,store,key,load):
  st.session_state['load_stages'].append(key[0])
- f=Future()
+ f=Future();state.setdefault('campaign_home_cache',{})[(store.connect,key)]=(None,f)
  if st.session_state.get('pending'):return f
- if key[0]=='summary' and st.session_state.get('stats_error'):
+ if key[0] in ('counts','delivery','attribution') and st.session_state.get('stats_error'):
   from crm_store import StoreUnavailable
   f.set_exception(StoreUnavailable('Private diagnostic fixture'));return f
- if key[0]=='summary':f.set_result({'all_count':1,'drafts':1,'active':0,'sent':0,'archived':0,'sent_emails':0,'revenue':{},'orders':0,'click_rate':None})
- else:f.set_result((None,[record()]))
+ if key[0] in ('counts','delivery','attribution'):f.set_result({'all_count':st.session_state.get('fixture_count',1),'drafts':1,'active':0,'sent':0,'archived':0,'sent_emails':0,'revenue':{},'orders':0,'click_rate':None})
+ else:f.set_result([record()])
  return f
 def composer(*args):
  if 'campaign_editor' not in st.session_state:st.session_state['campaign_editor']=deepcopy(draft)
@@ -61,6 +61,54 @@ st.session_state['draft_calls']=store.draft.call_args_list
 
 
 class HomeTests(unittest.TestCase):
+    def test_resolved_cards_and_rows_remain_during_refresh(self):
+        app=AppTest.from_string(SCRIPT).run()
+        before=' '.join(e.proto.body for e in app.get('html'))
+        self.assertIn('Real fixture campaign',before)
+        app.session_state['pending']=True;app.run()
+        self.assertFalse(app.exception)
+        after=' '.join(e.proto.body for e in app.get('html'))
+        self.assertIn('Real fixture campaign',after)
+        self.assertNotIn('sc-home-unresolved"',after)
+        self.assertIn('Refreshing campaigns…',[c.value for c in app.caption])
+
+    def test_failed_refresh_retains_resolved_totals(self):
+        app=AppTest.from_string(SCRIPT).run()
+        app.session_state['stats_error']=True;app.run()
+        self.assertFalse(app.exception)
+        html=' '.join(e.proto.body for e in app.get('html'))
+        self.assertIn('Real fixture campaign',html)
+        self.assertNotIn('sc-home-unresolved"',html)
+        self.assertNotIn('Private diagnostic',html)
+
+    def test_tabs_are_text_controls_with_gold_active_style_and_no_large_rail(self):
+        app=AppTest.from_string(SCRIPT).run()
+        self.assertFalse(app.radio)
+        app.get('button_group')[0].set_value('Sent').run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.get('button_group')[0].value,'Sent')
+        app.session_state['fixture_count']=2;app.run()
+        self.assertEqual(app.get('button_group')[0].value,'Sent')
+        app.get('button_group')[0].set_value(None).run()
+        self.assertEqual(app.get('button_group')[0].value,'Sent')
+        source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
+        self.assertIn('segmented_controlActive',source)
+        self.assertNotIn('top_identity(',source)
+        self.assertNotIn('Turn collectors into lifelong fans',source)
+        self.assertNotIn('min-width:1045px',source)
+        self.assertNotIn('height=240',source)
+
+    def test_refresh_controller_is_single_owned_and_waits_for_render_completion(self):
+        import ast
+        source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
+        functions={n.name:n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef)}
+        poll=ast.get_source_segment(source,functions['arm_home_poll'])
+        self.assertIn("if st.session_state.get('campaign_home_rendering'): return",poll)
+        self.assertIn('uuid4().hex',poll)
+        self.assertNotIn('st.rerun(',poll)
+        self.assertNotIn('.empty(',poll)
+        self.assertEqual(source.count("key='crm-home-poll_tick'"),1)
+
     def test_home_default_real_rows_no_editor(self):
         app=AppTest.from_string(SCRIPT).run();self.assertFalse(app.exception)
         self.assertEqual(app.session_state['campaign_view'],'CAMPAIGNS_HOME')
@@ -68,7 +116,7 @@ class HomeTests(unittest.TestCase):
         self.assertIn('Real fixture campaign',html);self.assertIn('Verified fixture subject',html)
         self.assertNotIn('Existing composer:',str([c.value for c in app.caption]))
         self.assertNotIn('Send now',[b.label for b in app.button])
-        self.assertEqual(app.radio(key='campaign_home_tab').value,'All campaigns')
+        self.assertEqual(app.get('button_group')[0].value,'All campaigns')
 
     def test_new_existing_editor_and_back_are_exclusive(self):
         app=AppTest.from_string(SCRIPT).run()
@@ -93,7 +141,7 @@ class HomeTests(unittest.TestCase):
         app=AppTest.from_string(SCRIPT);app.session_state['pending']=True;app.run()
         self.assertFalse(app.exception)
         self.assertIn('+ New campaign',[b.label for b in app.button])
-        self.assertEqual(app.session_state['load_stages'],['summary','table'])
+        self.assertEqual(app.session_state['load_stages'],['counts','delivery','attribution','table'])
         html=' '.join(e.proto.body for e in app.get('html'))
         for label in ('Campaigns','RECIPIENTS','REVENUE','sc-home-kpis'):self.assertIn(label,html)
         self.assertNotIn('sc-email-loading',html)
@@ -104,7 +152,7 @@ class HomeTests(unittest.TestCase):
         html=' '.join(e.proto.body for e in app.get('html'))
         self.assertIn('sc-home-kpis',html);self.assertIn('Real fixture campaign',html)
         self.assertNotIn('Private diagnostic',html)
-        self.assertIn('Campaign totals temporarily unavailable.',[c.value for c in app.caption])
+        self.assertIn('Some totals are temporarily unavailable · last resolved values retained.',[c.value for c in app.caption])
 
     def test_templates_enters_existing_templates_tab(self):
         app=AppTest.from_string(SCRIPT).run()
@@ -142,15 +190,15 @@ class HomeTests(unittest.TestCase):
         self.assertNotIn('<script>',html);self.assertIn('&lt;script&gt;',html)
         self.assertIn('width=80',html);self.assertIn('loading="lazy"',html)
         self.assertIn('NZ$10.00',html);self.assertIn('A$20.00',html)
-        self.assertIn('—',kpis())
+        self.assertIn('—',kpis({'click_rate':None}))
         source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
         for width in (1500,1200,700):self.assertIn('max-width:'+str(width)+'px',source)
         for mock in ('8,432','$3,280','4.8%'):self.assertNotIn(mock,source)
 
     def test_summary_queries_bounded_and_no_payload_or_n_plus_one(self):
-        store=Mock();store.q.side_effect=[{},None,[]]
+        store=Mock();store.q.side_effect=[{},{},{},None,[]]
         summary(store);top_identity(store);rows(store)
-        self.assertEqual(store.q.call_count,3)
+        self.assertEqual(store.q.call_count,5)
         sql=' '.join(c.args[0] for c in store.q.call_args_list)
         for forbidden in ('d.*','document AS','custom_html','audience_snapshot','template.content'):self.assertNotIn(forbidden,sql)
         self.assertIn('LIMIT %s OFFSET %s',sql);self.assertIn('NOT s.test_send',sql)
@@ -187,7 +235,7 @@ class HomeSQLTests(unittest.TestCase):
         self.assertEqual(app.session_state[app.session_state['campaign_edit_key']+'panel'],'Templates')
         self.assertTrue(any('template' in b.label.lower() for b in app.button))
 
-    def test_real_metadata_metrics_match_existing_reporting_and_three_queries(self):
+    def test_real_metadata_metrics_match_existing_reporting_and_grouped_queries(self):
         import uuid
         from crm_campaign_store import CampaignStore
         from tests.crm_db_fixture import connect
@@ -221,7 +269,7 @@ class HomeSQLTests(unittest.TestCase):
         store=CampaignStore(connect)
         with patch.object(store,'q',wraps=store.q) as query:
             totals=summary(store);top=top_identity(store);items=rows(store,search=editor['name'],top=top)
-            self.assertEqual(query.call_count,3)
+            self.assertEqual(query.call_count,5)
         row=next(r for r in items if str(r['id'])==identity)
         old=next(r for r in sent_page(store,limit=200) if str(r['id'])==identity)
         for field in ('recipients','delivered','opens','clicks','orders','revenue','delivery_rate','open_rate','click_rate'):

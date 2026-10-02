@@ -1,20 +1,40 @@
 """Read-only home projections. Persisted analytics only; no campaign bodies or APIs."""
 from crm_campaign_analytics import rate
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 TTL = 20
 PAGE_SIZE = 12
 
 
 def invalidate(state):
+    # Detach in-flight reads without discarding last-good display values. An old
+    # future can finish, but only the newly registered future may be published.
     state.pop('campaign_home_cache', None)
+    state.pop('campaign_home_window', None)
+    state.pop('campaign_home_reported_errors', None)
 
 
-def summary(store):
-    return store.q("""WITH base AS (
-      SELECT d.archived_at,c.status FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
-    ), recent AS (
-      SELECT id FROM crm_campaigns WHERE status='SENT' AND sent_at>=now()-interval '30 days'
+def reporting_window():
+    """One UTC [start, end) window shared by every 30-day summary group."""
+    end = datetime.now(timezone.utc)
+    return end - timedelta(days=30), end
+
+
+def counts(store):
+    return store.q("""SELECT count(*) AS all_count,
+      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status IS NULL) AS drafts,
+      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status IS NOT NULL AND c.status<>'SENT') AS active,
+      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status='SENT') AS sent,
+      count(*) FILTER(WHERE d.archived_at IS NOT NULL) AS archived
+      FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id""", one=True)
+
+
+def delivery_summary(store, window):
+    # Provider facts come from the verified Resend webhook ledger, counted once
+    # per production recipient. Preserve the existing mean campaign click rate.
+    return store.q("""WITH recent AS (
+      SELECT id FROM crm_campaigns WHERE status='SENT' AND sent_at>=%s AND sent_at<%s
     ), recipients AS (
       SELECT s.campaign_id,s.id,bool_or(e.event_type='email.delivered') AS delivered,
         bool_or(e.event_type='email.clicked') AS clicked
@@ -24,22 +44,26 @@ def summary(store):
     ), rates AS (
       SELECT campaign_id,100.0*count(*) FILTER(WHERE delivered AND clicked)/
         NULLIF(count(*) FILTER(WHERE delivered),0) AS rate FROM recipients GROUP BY campaign_id
-    ), revenue AS (
-      SELECT a.currency,sum(a.amount) AS amount FROM crm_order_attribution a
+    ) SELECT (SELECT count(*) FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id
+      WHERE NOT s.test_send AND s.status='ACCEPTED' AND s.first_submitted_at>=%s AND s.first_submitted_at<%s) AS sent_emails,
+      (SELECT avg(rate) FROM rates) AS click_rate""", (*window, *window), one=True)
+
+
+def attribution_summary(store, window):
+    # Eligible Shopify-derived attribution is the canonical app record, not a
+    # fresh Shopify order scan. Aggregate the bounded period once for both cards.
+    return store.q("""WITH amounts AS (
+      SELECT a.currency,sum(a.amount) AS amount,count(*) AS orders FROM crm_order_attribution a
       JOIN crm_campaigns c ON c.id=a.campaign_id WHERE a.eligible
-      AND a.order_created_at>=now()-interval '30 days' GROUP BY a.currency
-    ) SELECT count(*) AS all_count,
-      count(*) FILTER(WHERE archived_at IS NULL AND status IS NULL) AS drafts,
-      count(*) FILTER(WHERE archived_at IS NULL AND status IS NOT NULL AND status<>'SENT') AS active,
-      count(*) FILTER(WHERE archived_at IS NULL AND status='SENT') AS sent,
-      count(*) FILTER(WHERE archived_at IS NOT NULL) AS archived,
-      (SELECT count(*) FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id
-        WHERE NOT s.test_send AND s.status='ACCEPTED' AND s.first_submitted_at>=now()-interval '30 days') AS sent_emails,
-      (SELECT avg(rate) FROM rates) AS click_rate,
-      COALESCE((SELECT jsonb_object_agg(currency,amount) FROM revenue),'{}') AS revenue,
-      (SELECT count(*) FROM crm_order_attribution a JOIN crm_campaigns c ON c.id=a.campaign_id
-        WHERE a.eligible AND a.order_created_at>=now()-interval '30 days') AS orders
-      FROM base""", one=True)
+      AND a.order_created_at>=%s AND a.order_created_at<%s GROUP BY a.currency
+    ) SELECT COALESCE(jsonb_object_agg(currency,amount),'{}') AS revenue,
+      COALESCE(sum(orders),0)::bigint AS orders FROM amounts""", window, one=True)
+
+
+def summary(store):
+    """Compatibility projection; the Home UI schedules these groups independently."""
+    window = reporting_window()
+    return {**counts(store), **delivery_summary(store, window), **attribution_summary(store, window)}
 
 
 def top_identity(store):

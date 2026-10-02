@@ -1,0 +1,420 @@
+{
+  "synthetic_read_delay_ms": 80,
+  "old_visible_table_median_ms": 160.9,
+  "new_visible_table_median_ms": 80.7,
+  "old_cold_read_count": 3,
+  "new_cold_read_count": 4,
+  "old_table_change_read_count": 2,
+  "new_table_change_read_count": 1,
+  "note": "Synthetic scheduling only; no live latency or production data.",
+  "loopback_sql_plans": [
+    {
+      "duration_including_explain_ms": 68.66,
+      "execution_ms": 0.152,
+      "nodes": [
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_campaign_drafts",
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 10,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_campaigns",
+          "rows": 10,
+          "loops": 1
+        }
+      ]
+    },
+    {
+      "duration_including_explain_ms": 19.78,
+      "execution_ms": 0.489,
+      "nodes": [
+        {
+          "type": "Result",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Nested Loop",
+          "relation": null,
+          "rows": 21,
+          "loops": 1
+        },
+        {
+          "type": "Index Scan",
+          "relation": "crm_marketing_sends",
+          "rows": 21,
+          "loops": 1
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "crm_campaigns",
+          "rows": 1,
+          "loops": 21
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 6,
+          "loops": 1
+        },
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 24,
+          "loops": 1
+        },
+        {
+          "type": "Subquery Scan",
+          "relation": null,
+          "rows": 24,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 24,
+          "loops": 1
+        },
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 44,
+          "loops": 1
+        },
+        {
+          "type": "Nested Loop",
+          "relation": null,
+          "rows": 44,
+          "loops": 1
+        },
+        {
+          "type": "Nested Loop",
+          "relation": null,
+          "rows": 24,
+          "loops": 1
+        },
+        {
+          "type": "Index Scan",
+          "relation": "crm_campaigns",
+          "rows": 6,
+          "loops": 1
+        },
+        {
+          "type": "Index Scan",
+          "relation": "crm_marketing_sends",
+          "rows": 4,
+          "loops": 6
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "crm_delivery_events",
+          "rows": 1,
+          "loops": 24
+        }
+      ]
+    },
+    {
+      "duration_including_explain_ms": 17.63,
+      "execution_ms": 0.101,
+      "nodes": [
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 1,
+          "loops": 1
+        },
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Nested Loop",
+          "relation": null,
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_order_attribution",
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "crm_campaigns",
+          "rows": 1,
+          "loops": 4
+        }
+      ]
+    },
+    {
+      "duration_including_explain_ms": 68.35,
+      "execution_ms": 1.223,
+      "nodes": [
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_campaign_drafts",
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 10,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_campaigns",
+          "rows": 10,
+          "loops": 1
+        },
+        {
+          "type": "Limit",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Append",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 0,
+          "loops": 0
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_campaign_drafts",
+          "rows": 25,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Subquery Scan",
+          "relation": null,
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 4,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 16,
+          "loops": 1
+        },
+        {
+          "type": "Nested Loop",
+          "relation": null,
+          "rows": 16,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 16,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_marketing_sends",
+          "rows": 40,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "crm_delivery_events",
+          "rows": 0,
+          "loops": 16
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Subquery Scan",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Aggregate",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Sort",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Hash Join",
+          "relation": null,
+          "rows": 0,
+          "loops": 1
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "crm_order_attribution",
+          "rows": 8,
+          "loops": 1
+        },
+        {
+          "type": "Hash",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        },
+        {
+          "type": "CTE Scan",
+          "relation": null,
+          "rows": 13,
+          "loops": 1
+        }
+      ]
+    }
+  ]
+}
