@@ -16,7 +16,8 @@ FIELDS = ('campaign','market','updated','recipients','delivered','opened','click
 
 def refresh_delay():
     states=st.session_state.get('campaign_home_activity',{}).values()
-    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else TTL
+    from crm_campaign_progress import POLL_SECONDS
+    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else TTL
 
 
 def arm_home_poll():
@@ -148,10 +149,11 @@ def row_html(row):
         return ('—' if value is None else format(value,','))+('<small>'+str(row[rate_field])+'%</small>' if rate_field and row.get(rate_field) is not None else '')
     status='Archived' if row.get('archived_at') else {'DRAFT':'Draft','NEEDS_REVIEW':'Draft','TEST_READY':'Draft','BUILDING':'Active'}.get(row['status'],row['status'].title())
     destination='?'+urlencode({'page':'CRM Campaigns','campaign':str(row['id'])})
+    submission=('<small>'+format(row['submitted'],',')+' / '+format(row['planned'],',')+' submitted</small>') if row['status']=='SENDING' and row.get('submitted') is not None and row.get('planned') is not None else ''
     cells=['<div class="sc-home-identity">'+thumbnail(row)+'<div><a href="'+escape(destination,quote=True)+'" target="_self"><strong>'+escape(row['name'])+'</strong></a><small>'+escape(row.get('subject') or '')+'</small><small class="sc-home-mobile-summary">'+escape(metric('delivered')+' delivered · '+metric('clicks')+' clicked')+'</small></div></div>',
       escape(row.get('market') or '—'),stamp.strftime('%d %b %Y')+'<small>'+stamp.strftime('%H:%M UTC')+'</small>' if stamp else '—',
       metric('recipients'),metric('delivered','delivery_rate'),metric('opens','open_rate'),metric('clicks','click_rate'),metric('orders'),
-      escape(money(row.get('revenue') or {})), '<span class="sc-home-pill '+status.lower()+'">'+escape(status)+'</span>']
+      escape(money(row.get('revenue') or {})), '<span class="sc-home-pill '+status.lower()+'">'+escape(status)+'</span>'+submission]
     return '<div class="sc-home-row">'+''.join('<div class="sc-col-'+field+'">'+value+'</div>' for field,value in zip(FIELDS,cells))+'</div>'
 
 
@@ -244,9 +246,18 @@ def campaign_table(store,user):
         offset=st.session_state.get('campaign_home_offset',0)
         detail=st.session_state.get('sent_analytics_id')
         key=('table',filters,offset,detail)
+        # Only the visible sending table uses the existing live-progress cadence.
+        # Keep KPI caches and last-good rows stable during these refreshes.
+        cache_identity=(store.connect,key)
+        previous=st.session_state.get('campaign_home_resolved',{}).get(cache_identity) or []
+        cached=st.session_state.get('campaign_home_cache',{}).get(cache_identity)
+        from crm_campaign_progress import POLL_SECONDS
+        if any(r['status']=='SENDING' for r in previous) and cached and cached[1].done() and cached[0] is not None and monotonic()-cached[0]>=POLL_SECONDS:
+            st.session_state['campaign_home_cache'].pop(cache_identity,None)
         # One bounded projection for this visible tab; no top-performer waterfall.
         future=_job(st.session_state,store,key,lambda:rows(store,tab=tab,search=search,market=market,status=status,oldest=sort=='Oldest first',offset=offset,detail=detail))
         items,state=resolve(st.session_state,store,key,future)
+        st.session_state['campaign_home_dispatch_active']=any(r['status']=='SENDING' and r.get('in_page') for r in (items or []))
         st.session_state.setdefault('campaign_home_activity',{})['table']=state
         with st.container(key='crm-home-table'):
             left,menu=st.columns([30,1],gap='small')

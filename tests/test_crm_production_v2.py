@@ -235,14 +235,21 @@ class ProductionSqlTests(unittest.TestCase):
         self.assertFalse(self.store.q("SELECT 1 FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id WHERE c.id=%s AND c.status='SENDING'",(self.editor['id'],)))
         self.store.set_state('campaign_schedule_health',{'enabled':True,'checked_at':now().isoformat()})
         provider=Mock();provider.suppressed.return_value=False;provider.send.side_effect=lambda *args:str(uuid.uuid4())
+        from tests.test_crm_batch_dispatch import Transport
+        provider.batch_transport=Transport()
         engine=Engine(self.store,self.shop,provider,Config(LIVE))
+        # This shared disposable database contains queues from other tests;
+        # isolate the worker lifecycle being asserted here.
+        self.store.q("UPDATE crm_campaigns SET status='PAUSED' WHERE id<>%s AND status='SENDING'",(self.editor['id'],))
         def claim(**kwargs):
             return self.store.q("""UPDATE crm_marketing_sends SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes'
               WHERE id=(SELECT s.id FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id
                 WHERE s.campaign_id=%s AND s.status='PENDING' AND c.status='SENDING' AND s.due_at<=now() ORDER BY s.id LIMIT 1) RETURNING *""",(self.editor['id'],),True)
         with patch.dict(os.environ,LIVE),patch.object(self.store,'claim_send',side_effect=claim),patch.object(self.store,'list',return_value=[]),patch.object(engine,'campaign_page'),patch('crm_campaign_attribution.reconcile'),patch('crm_consent_sync.reconcile_pending'):
             engine.tick('fixture-'+uuid.uuid4().hex);engine.tick('fixture-'+uuid.uuid4().hex)
-        self.assertEqual(provider.send.call_count,3)
+        provider.send.assert_not_called()
+        self.assertEqual(len(provider.batch_transport.calls),1)
+        self.assertEqual(len(provider.batch_transport.calls[0][1]),3)
         self.assertEqual(self.campaign()['status'],'SENT');self.assertEqual(self.campaign()['final_recipient_count'],3)
         self.assertIsNotNone(self.campaign()['sent_at'])
     def test_concurrent_confirmations_share_one_queue(self):
@@ -296,7 +303,7 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
         self.assertEqual(at.session_state['campaign_view'],'CAMPAIGNS_HOME')
         self.assertFalse(any(b.label=='Save draft' for b in at.button))
         for tab in ('Sent','Drafts'):
-            at.radio(key='campaign_home_tab').set_value(tab).run(timeout=20)
+            at.button_group(key='campaign_home_tab').set_value(tab).run(timeout=20)
             self.assertFalse(at.exception)
             self.assertEqual(at.session_state['campaign_editor']['document'],before)
         at.session_state['campaign_pending_open']=str(self.editor['id']);at.run(timeout=20)

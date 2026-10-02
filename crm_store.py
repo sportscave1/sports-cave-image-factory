@@ -125,13 +125,14 @@ class Store:
          (key,customer_id,hashed,template['id'],template['version'],campaign_id,enrollment_id,step_index,bool(test_recipient),test_recipient),True)
     def claim_send(self,allow_customer=True,allow_test=True):
         # A crash after submission is never automatically replayed outside provider protection.
-        self.q("UPDATE crm_marketing_sends SET status='UNCERTAIN',error_code='interrupted_submission',updated_at=now() WHERE status='SUBMITTING' AND lease_until<now()")
+        self.q("UPDATE crm_marketing_sends s SET status='UNCERTAIN',error_code='interrupted_submission',updated_at=now() WHERE status='SUBMITTING' AND lease_until<now() AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')")
         return self.q('''WITH due AS (SELECT s.id FROM crm_marketing_sends s
          LEFT JOIN crm_campaigns c ON c.id=s.campaign_id LEFT JOIN crm_automation_enrollments e ON e.id=s.enrollment_id
          LEFT JOIN crm_automations a ON a.id=e.automation_id
          WHERE (s.status='PENDING' OR (s.status='CLAIMED' AND s.lease_until<now())) AND s.due_at<=now()
          AND ((s.test_send AND %s) OR (NOT s.test_send AND %s))
          AND (s.campaign_id IS NULL OR c.status='SENDING') AND (s.enrollment_id IS NULL OR (e.status='ACTIVE' AND a.status='ACTIVE'))
+         AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')
          ORDER BY s.due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1)
          UPDATE crm_marketing_sends s SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes',attempts=attempts+1
          FROM due WHERE s.id=due.id RETURNING s.*''',(allow_test,allow_customer),one=True)

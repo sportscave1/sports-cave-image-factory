@@ -6,6 +6,9 @@ import threading
 import uuid
 
 def main(argv=None):
+    logging.basicConfig(level=logging.WARNING,format='%(asctime)s %(levelname)s %(message)s')
+    # Enable only the safe batch counters/timings, not third-party debug output.
+    logging.getLogger('crm_campaign_dispatch').setLevel(logging.INFO)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once',action='store_true');parser.add_argument('--seed',action='store_true',help='Insert draft definitions only; requires applied migration.')
     args=parser.parse_args(argv)

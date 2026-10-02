@@ -122,19 +122,19 @@ class SendFlowTests(unittest.TestCase):
             self.assertEqual(len(rows),result['recipients']);self.assertGreater(len(rows),0)
             self.assertEqual(len({r['recipient_hash'] for r in rows}),len(rows))
             from crm_engine import Engine
-            delivery=Mock();delivery.suppressed.return_value=False;delivery.send.return_value=str(uuid.uuid4())
+            from tests.test_crm_batch_dispatch import Transport
+            from types import SimpleNamespace
+            from crm_campaign_dispatch import dispatch
+            transport=Transport();delivery=SimpleNamespace(batch_transport=transport)
             store=Store(connect)
-            with patch.object(store,'claim_send',return_value=rows[0]) as claim:
-                # Exercise normal SQL claim first so begin_send verifies its lease.
-                claim.side_effect=None;claim.return_value=store.q("UPDATE crm_marketing_sends SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes' WHERE id=%s RETURNING *",(rows[0]['id'],),True)
-                from crm_workspace_store import WorkspaceRecords
-                with patch.object(WorkspaceRecords,'frequency_blocked',return_value=False):
-                    self.assertTrue(Engine(store,self.shop,delivery,Config(LIVE)).send_one())
-            delivery.send.assert_called_once()
-            message=delivery.send.call_args.args[1]
+            store.q("UPDATE crm_campaigns SET status='PAUSED' WHERE id<>%s AND status='SENDING'",(e['id'],))
+            self.assertTrue(dispatch(Engine(store,self.shop,delivery,Config(LIVE))))
+            self.assertEqual(len(transport.calls),1)
+            self.assertTrue(all(r['status']=='ACCEPTED' for r in store.q('SELECT status FROM crm_marketing_sends WHERE campaign_id=%s',(e['id'],))))
+            message=transport.calls[0][1][0]
             self.assertFalse(message['subject'].startswith('[CAMPAIGN TEST]'))
             self.assertNotIn('sc_test=1',message['html']);self.assertIn('/account/unsubscribe?token=fixture-',message['html'])
-            self.assertFalse(message['unsubscribe_one_click'])
+            self.assertNotIn('List-Unsubscribe-Post',message['headers'])
             self.assertNotIn('sc_test=1',message['text'])
     def test_native_queue_requires_no_custom_secret_and_missing_url_creates_no_jobs(self):
         env={k:v for k,v in LIVE.items() if k not in ('CRM_UNSUBSCRIBE_SECRET','CRM_PUBLIC_BASE_URL','CRM_ONE_CLICK_UNSUBSCRIBE_VERIFIED')}

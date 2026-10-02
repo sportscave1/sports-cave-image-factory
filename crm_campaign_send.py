@@ -162,9 +162,11 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     if schedule and min(__import__('crm_logic').date(j['due_at']) for j in schedule.values())<=now():
         raise ValueError('Schedule missed; choose a future time and review again.')
     # Only remove newly unsafe recipients. Never add/recalculate a different audience.
-    from crm_logic import eligibility,recipient_hash
+    from crm_logic import eligibility,recipient_hash,email as normalized_email
     from crm_native_unsubscribe import native_unsubscribe_url
+    from crm_email_size import REPRESENTATIVE_UNSUBSCRIBE
     blocked_recipients={}
+    delivery_recipients={}
     from crm_campaign_review_reads import bounded_reads,batches
     with timed('queue_suppression_reads'):
         suppressed=store.q('''SELECT recipient_hash,shopify_customer_id FROM crm_suppressions
@@ -186,10 +188,19 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
                 if valid and recipient_hash(customer.get('email'))!=recipient['hash']:reason='recipient_changed'
                 if valid and not reason and not native_unsubscribe_url(customer):reason='missing_shopify_marketing_unsubscribe_url'
                 if reason:blocked_recipients[recipient['hash']]=reason
+                else:
+                    # Delivery-only immutable values, captured by the existing fresh
+                    # authority check. Never reconstruct an audience in the worker.
+                    optout=native_unsubscribe_url(customer)
+                    if len(optout)>len(REPRESENTATIVE_UNSUBSCRIBE):
+                        blocked_recipients[recipient['hash']]='unsubscribe_url_size'
+                    else:delivery_recipients[recipient['hash']]={'address':normalized_email(customer['email']),'unsubscribe_url':optout}
     template=str(uuid.uuid5(uuid.UUID(identity),'campaign-delivery-snapshot'))
     # Same queue and worker, immutable template snapshot; no new storage architecture.
     snapshot={'format':'campaign_delivery_v1','document':doc,'render_settings':cfg,'operation_id':operation,
-              'schedule':schedule,'audience_snapshot_id':snapshot_id}
+              'schedule':schedule,'audience_snapshot_id':snapshot_id,
+              'dispatch':{'version':1,'message':rendered,'recipients':delivery_recipients,
+                          'sender':config.sender,'reply_to':config.reply_to}}
     status='SCHEDULED' if schedule else 'SENDING'
     with store.db() as conn:
         row=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()

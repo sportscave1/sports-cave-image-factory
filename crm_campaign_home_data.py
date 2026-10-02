@@ -96,14 +96,14 @@ def rows(store, *, tab='All campaigns', search='', market='All', status='All', o
       SELECT *,true AS in_page FROM page
       UNION ALL SELECT *,false AS in_page FROM base WHERE id=ANY(%s::uuid[]) AND id NOT IN (SELECT id FROM page)
     ), recipients AS (
-      SELECT s.campaign_id,s.id,bool_or(e.event_type='email.delivered') AS delivered,
+      SELECT s.campaign_id,s.id,s.status AS send_status,bool_or(e.event_type='email.delivered') AS delivered,
         bool_or(e.event_type='email.opened') AS opened,bool_or(e.event_type='email.clicked') AS clicked,
         bool_or(e.event_type='email.bounced') AS bounced,bool_or(e.event_type='email.complained') AS complained,
         bool_or(e.event_type='email.suppressed') AS suppressed
       FROM crm_marketing_sends s JOIN selected c ON c.id=s.campaign_id
-      LEFT JOIN crm_delivery_events e ON e.send_id=s.id WHERE NOT s.test_send GROUP BY s.campaign_id,s.id
+      LEFT JOIN crm_delivery_events e ON e.send_id=s.id WHERE NOT s.test_send GROUP BY s.campaign_id,s.id,s.status
     ), totals AS (
-      SELECT campaign_id,count(*) AS planned,count(*) FILTER(WHERE delivered) AS delivered,
+      SELECT campaign_id,count(*) AS planned,count(*) FILTER(WHERE send_status='ACCEPTED') AS submitted,count(*) FILTER(WHERE delivered) AS delivered,
         count(*) FILTER(WHERE delivered AND opened) AS opens,count(*) FILTER(WHERE delivered AND clicked) AS clicks,
         count(*) FILTER(WHERE bounced) AS bounces,count(*) FILTER(WHERE complained) AS complaints,
         count(*) FILTER(WHERE suppressed) AS suppressed FROM recipients GROUP BY campaign_id
@@ -115,6 +115,7 @@ def rows(store, *, tab='All campaigns', search='', market='All', status='All', o
     ) SELECT c.*,d.document->'content'->>'subject' AS subject,
       jsonb_path_query_first(d.document,'$.middle_sections[*] ? (@.type == "catalogue" && @.visible == true).products[*].image') #>> '{}' AS thumbnail,
       CASE WHEN delivery_status IS NOT NULL THEN COALESCE(final_recipient_count,t.planned,0) END AS recipients,
+      COALESCE(t.submitted,0) AS submitted,COALESCE(t.planned,0) AS planned,
       CASE WHEN delivery_status IS NOT NULL THEN COALESCE(t.delivered,0) END AS delivered,
       CASE WHEN delivery_status IS NOT NULL THEN COALESCE(t.opens,0) END AS opens,
       CASE WHEN delivery_status IS NOT NULL THEN COALESCE(t.clicks,0) END AS clicks,

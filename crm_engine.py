@@ -1,4 +1,4 @@
-"""DB-driven marketing execution. Uses fresh Shopify state before every send."""
+"""DB-driven delivery: frozen native campaigns and fresh automation validation."""
 import hashlib
 import json
 import logging
@@ -245,10 +245,14 @@ class Engine:
                     self.hold_lease()
                     try:self.advance(e)
                     except Exception:self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes' WHERE id=%s",(e['id'],))
+            # Native reviewed campaigns consume the frozen delivery snapshot in
+            # batches. Automation/legacy template tests retain their own path.
+            from crm_campaign_dispatch import dispatch
+            dispatch(self)
             for _ in range(5):
                 if not self.store.lease(owner) or not self.send_one():break
             self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
-              final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.first_submitted_at IS NOT NULL)
+              final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
               WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
             # Read-side analytics continues with marketing OFF and cannot submit
             # email. A Shopify outage must not interrupt delivery/consent handling.
