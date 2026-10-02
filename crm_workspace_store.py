@@ -138,6 +138,16 @@ class WorkspaceRecords(BrandTemplates):
         if len(rows)>100000:raise ValueError('Suppression set exceeds interactive limit; production worker review required.')
         return {r['recipient_hash'] for r in rows},{r['shopify_customer_id'] for r in rows if r['shopify_customer_id']}
 
+    def selected_suppression_state(self,identities,hashes,hours=16):
+        """Same eligibility policy, restricted to this selected audience."""
+        rows=self.q('''SELECT recipient_hash,shopify_customer_id FROM crm_suppressions WHERE active=true
+          AND (recipient_hash=ANY(%s) OR shopify_customer_id=ANY(%s))''',(hashes,identities))
+        recent=self.q('''SELECT DISTINCT recipient_hash FROM crm_marketing_sends
+          WHERE recipient_hash=ANY(%s) AND test_send=false AND status='ACCEPTED'
+          AND provider_email_id IS NOT NULL AND first_submitted_at>=%s''',(hashes,now()-timedelta(hours=hours)))
+        return ({r['recipient_hash'] for r in rows},{r['shopify_customer_id'] for r in rows if r['shopify_customer_id']},
+                {r['recipient_hash'] for r in recent})
+
     def manual_suppression(self,user,address,reason='manual_unsubscribe'):
         admin(user)
         if not single_email(address) or reason not in ('manual_unsubscribe','admin_suppression'):raise ValueError('Enter one valid mailbox and suppression reason.')

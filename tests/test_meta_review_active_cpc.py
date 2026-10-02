@@ -6,6 +6,8 @@ from streamlit.testing.v1 import AppTest
 import meta_review_tables as tables
 import meta_review_live as live
 import meta_ads_client as meta
+import ads_meta_review_page as page
+from tests.test_meta_review import history
 from tests.test_meta_review_live import CONFIG
 
 
@@ -48,6 +50,44 @@ class ActiveCpcTests(unittest.TestCase):
                 self.assertEqual(rendered._display_funcs[(0,column)](rendered.data.iloc[0,column]),expected)
                 self.assertEqual(rows[0]['metrics']['cost_per_link_click'],None if value is None else float(value))
                 write.assert_not_called()
+
+    def test_campaign_modal_reuses_campaign_metrics_and_shared_format_without_requests(self):
+        since,until=date(2026,9,1),date(2026,9,14)
+        for value,expected in [(1.2345,'$1.23'),(0.87,'$0.87'),(None,'—')]:
+            campaign={'campaign_id':'cam','campaign_name':'Current','metrics':{
+                'spend':100,'purchases':4,'roas':2,'cpa':25,'cost_per_link_click':value}}
+            before=copy.deepcopy(campaign['metrics'])
+            data=copy.deepcopy(history())
+            captured=[]
+            original=tables.va_styled
+            def capture(rows,evidence):
+                styled=original(rows,evidence); captured.append(styled); return styled
+            with self.subTest(value=value),patch.object(live,'load_campaign',return_value=data) as load, \
+                    patch.object(page,'_load_preferences',return_value={'selections':[],'mapping':[]}), \
+                    patch.object(page.recency,'load',return_value={'available':False,'latest':{}}), \
+                    patch.object(page,'winner_board'),patch.object(tables,'va_styled',side_effect=capture), \
+                    patch.object(meta,'_request',side_effect=AssertionError('Unexpected Graph request')) as network, \
+                    patch.object(meta,'_post',side_effect=AssertionError('Unexpected Meta write')) as write:
+                app=AppTest.from_string(
+                    'import ads_meta_review_page as p\nfrom tests.test_meta_review_live import CONFIG\n'
+                    'from datetime import date\n'
+                    f'p.render_campaign_details(CONFIG,{campaign!r},date(2026,9,1),date(2026,9,14))').run()
+                self.assertFalse(app.exception)
+                summary=app.dataframe[0].value
+                self.assertEqual(list(summary),['Spend','Sales','ROAS','CPA','CPC','Last Sale','Action'])
+                self.assertEqual(summary.iloc[0][['Spend','Sales','ROAS','CPA']].tolist(),[100,4,2,25])
+                styled=captured[0]; column=list(styled.data).index('CPC')
+                self.assertEqual(styled._display_funcs[(0,column)](styled.data.iloc[0,column]),expected)
+                expected_ads=tables.va_ad_rows(page.build_ads(data,'cam'))
+                self.assertEqual(list(app.dataframe[1].value),list(expected_ads[0]))
+                for label in ('Sales','ROAS','CPA','CTR','ATC','Checkout'):
+                    self.assertEqual(app.dataframe[1].value[label].tolist(),[row[label] for row in expected_ads])
+                load.assert_called_once_with(CONFIG,'cam',since,until)
+                app.run()
+                self.assertFalse(app.exception)
+                load.assert_called_once()
+                network.assert_not_called(); write.assert_not_called()
+                self.assertEqual(campaign['metrics'],before)
 
     def test_active_cell_style_and_label_only(self):
         rows=campaigns()

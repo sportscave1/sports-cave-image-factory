@@ -60,7 +60,7 @@ class ShopifyFixture:
             elif query.startswith('"'):rows=[c for c in rows if query.strip('"').lower() in (c['firstName']+' '+c['lastName']+' '+c['email']).lower()]
             return {'customers':page([native_customer(c) for c in rows],v.get('after'))}
         if doc==q.CUSTOMER:return {'customer':native_customer(next((c for c in self.customers if c['id']==v['id']),None))}
-        if doc==q.CUSTOMER_BATCH:return {'nodes':[native_customer(c) for c in self.customers if c['id'] in v['ids']]}
+        if doc in (q.CUSTOMER_BATCH,q.CAMPAIGN_CUSTOMER_BATCH):return {'nodes':[native_customer(c) for c in self.customers if c['id'] in v['ids']]}
         if doc==q.TOTAL:return {'customersCount':{'count':len(self.customers),'precision':'EXACT'}}
         if doc==q.COUNT:
             query=v.get('query','')

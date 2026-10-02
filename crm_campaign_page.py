@@ -341,6 +341,9 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
     st.session_state[key+'editor_emitted']=True
+    if available and not editor.get('archived_at') and not editor.get('recovery_readonly'):
+        from crm_campaign_audience_prepare import prepare_session
+        prepare_session(st.session_state,shop,drafts,editor,key,cfg)
     if save and flush_current(force=True):
         st.toast('Draft saved');st.rerun()
     if new_requested:st.session_state['campaign_pending_open']='new'

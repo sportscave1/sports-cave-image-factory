@@ -383,8 +383,10 @@ def render_campaign_details(config, campaign, since, until):
         lambda:recency.load(config,cid,'ad',campaign.get('account_timezone','Australia/Sydney')))
     for ad in ads: ad['recency']=recency.signal({**ad,'metrics':ad.get('benchmark_metrics',ad['metrics'])},sale_entry['data'])
     summary=tables.va_campaign_rows([campaign])[0]
-    summary={k:summary[k] for k in ('Spend','Sales','ROAS','CPA','Last Sale','Action')}
-    st.dataframe(tables.va_styled([summary],[campaign]),hide_index=True,placeholder='—',width='stretch',height=72,row_height=30)
+    summary={k:summary[k] for k in ('Spend','Sales','ROAS','CPA','CPC','Last Sale','Action')}
+    st.dataframe(tables.va_styled([summary],[campaign]),hide_index=True,placeholder='—',width='stretch',height=72,row_height=30,
+        column_config={**{k:st.column_config.Column(width='small',help=tables.HELP.get(k)) for k in ('Spend','Sales','ROAS','CPA','CPC')},
+            'Last Sale':st.column_config.Column(width='medium'),'Action':st.column_config.Column(width='medium')})
     # Enrich only this brief live overview cache with already-read format evidence.
     for key,cached in cache.items():
         if key[:2]==(live.scope(config),'overview') and cached.get('data'):

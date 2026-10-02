@@ -51,9 +51,10 @@ def calculate(shop,store,hours=16,*,clock=time.monotonic,market=None):
     # Segment-local dedup preserves existing country semantics when two profiles
     # share an address across countries; worldwide dedup still counts it once.
     groups={}
-    for c in profiles.values():
-        h=recipient_hash(c.get('email'))
-        groups.setdefault(h,[]).append(c)
+    with timed('dedupe'):
+        for c in profiles.values():
+            h=recipient_hash(c.get('email'))
+            groups.setdefault(h,[]).append(c)
     results={m:{'members':0,'eligible':0,'excluded':{},'diagnostics':{'conflicting_profiles':0},
         'recipients':[],'profiles':{},'complete':True,'checked_at':now().isoformat()} for m in markets}
     if any(ids-set(profiles) for ids in membership.values()):raise ValueError('Shopify member profiles are incomplete.')

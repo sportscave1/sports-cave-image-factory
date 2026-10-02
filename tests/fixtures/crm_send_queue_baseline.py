@@ -9,7 +9,6 @@ from crm_audience import selection_page
 from crm_navigation import require
 from crm_resend import Config, MarketingDisabled
 from crm_resend_marketing import single_email
-from crm_campaign_review_reads import timed
 
 OFF='Marketing delivery is currently OFF. No emails were sent.'
 
@@ -68,17 +67,12 @@ def production_checks(doc,cfg,env=None,*,reviewed_audience=False,email_size=None
     except Exception:live['Production email size can be measured']=False
     return {**test,**live,'Marketing delivery enabled':Config(env).enabled}
 
-def review(shop,store,editor,env=None,*,audience_job=None):
+def review(shop,store,editor,env=None):
     from email_loading import stage
     from crm_campaign_review_reads import timed
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
     with stage('Campaign review','authoritative_audience'):
-        if audience_job is not None:
-            from crm_campaign_audience_prepare import fingerprint
-            if audience_job.identity != fingerprint(shop,doc,audience_job.settings):
-                raise ValueError('Audience changed; review again.')
-            state=audience_job.result()
-        else:state=final_audience(shop,store,doc)
+        state=final_audience(shop,store,doc)
     doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
     with stage('Campaign review','render_settings'):
         cfg=store.render_settings(env)
@@ -125,7 +119,6 @@ def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     editor.update(deepcopy(saved))
     return store.test_campaign(user,saved['id'],saved['version'],recipient=recipient,confirmed=True,operation_id=operation_id,env=env,session=session)
 
-@timed('queue_total')
 def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=None):
     require(user,'crm_campaigns_manage')
     env=os.environ if env is None else env
@@ -145,12 +138,11 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     doc=reviewed['document'];state={'recipients':reviewed['recipients']}
     cfg=store.render_settings(env)
     if cfg!=reviewed['render_settings']:raise ValueError('Sender or rendering settings changed; review again.')
-    from crm_email_size import validate_rendered_email
-    with timed('queue_content_validation'):
-        rendered=validate_tracking(doc,cfg,identity)
-        email_size=validate_rendered_email(rendered)
-    blocked=[k for k,v in production_checks(doc,cfg,env,email_size=email_size).items() if not v]
+    from crm_email_size import render_production,validate_rendered_email
+    validate_rendered_email(render_production(doc,cfg,identity))
+    blocked=[k for k,v in production_checks(doc,cfg,env).items() if not v]
     if blocked:raise ValueError('Campaign blocked: '+ '; '.join(blocked))
+    validate_tracking(doc,cfg,identity)
     from crm_tracking import send_identity
     from crm_catalogue import Catalogue, refresh_catalogues
     if any(s['type']=='catalogue' and s['visible'] for s in doc.get('middle_sections',[])):
@@ -165,27 +157,15 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     from crm_logic import eligibility,recipient_hash
     from crm_native_unsubscribe import native_unsubscribe_url
     blocked_recipients={}
-    from crm_campaign_review_reads import bounded_reads,batches
-    with timed('queue_suppression_reads'):
-        suppressed=store.q('''SELECT recipient_hash,shopify_customer_id FROM crm_suppressions
-          WHERE recipient_hash=ANY(%s) OR shopify_customer_id=ANY(%s)''',
-          ([r['hash'] for r in state['recipients']],[r['id'] for r in state['recipients']])) or []
-        hashes={s['recipient_hash'] for s in suppressed};ids={s['shopify_customer_id'] for s in suppressed}
-    def fresh_batch(batch):
-        method=getattr(type(shop),'campaign_customer_batch',None)
-        rows=method(shop,[r['id'] for r in batch]) if callable(method) else shop.customer_batch([r['id'] for r in batch],fresh=True)
-        profiles={c['id']:c for c in rows}
-        if len(rows)!=len(profiles) or set(profiles)-{r['id'] for r in batch}:
-            raise ValueError('Shopify recipient identities changed. Review again.')
-        return batch,profiles
-    with timed('queue_profile_fetch'):
-        for batch,profiles in bounded_reads(fresh_batch,batches(state['recipients'],50)):
-            for recipient in batch:
-                customer=profiles.get(recipient['id'])
-                valid,reason=eligibility(customer,recipient['hash'] in hashes or recipient['id'] in ids)
-                if valid and recipient_hash(customer.get('email'))!=recipient['hash']:reason='recipient_changed'
-                if valid and not reason and not native_unsubscribe_url(customer):reason='missing_shopify_marketing_unsubscribe_url'
-                if reason:blocked_recipients[recipient['hash']]=reason
+    for start in range(0,len(state['recipients']),50):
+        batch=state['recipients'][start:start+50]
+        profiles={c['id']:c for c in shop.customer_batch([r['id'] for r in batch],fresh=True)}
+        for recipient in batch:
+            customer=profiles.get(recipient['id'])
+            valid,reason=eligibility(customer,store.suppressed(recipient['id'],recipient['hash']))
+            if valid and recipient_hash(customer.get('email'))!=recipient['hash']:reason='recipient_changed'
+            if valid and not reason and not native_unsubscribe_url(customer):reason='missing_shopify_marketing_unsubscribe_url'
+            if reason:blocked_recipients[recipient['hash']]=reason
     template=str(uuid.uuid5(uuid.UUID(identity),'campaign-delivery-snapshot'))
     # Same queue and worker, immutable template snapshot; no new storage architecture.
     snapshot={'format':'campaign_delivery_v1','document':doc,'render_settings':cfg,'operation_id':operation,
@@ -213,17 +193,10 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
           (identity,saved['name'],template,segment['id'],status,reviewed['created_at'],snapshot_id,doc['campaign_key'],send_identity(identity),
            min(j['due_at'] for j in schedule.values()) if schedule else None,now() if not schedule else None,
            len(state['recipients'])-len(blocked_recipients)))
-        jobs=[]
-        due_now=now().isoformat()
         for recipient in state['recipients']:
             reason=blocked_recipients.get(recipient['hash'],'')
-            jobs.append({'idempotency_key':'campaign:'+identity+':'+recipient['hash'],'shopify_customer_id':recipient['id'],
-                'recipient_hash':recipient['hash'],'due_at':schedule.get(recipient['hash'],{}).get('due_at') or due_now,
-                'status':'BLOCKED' if reason else 'PENDING','error_code':reason})
-        conn.execute('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,due_at,status,error_code)
-          SELECT j.idempotency_key,j.shopify_customer_id,j.recipient_hash,%s,1,%s,j.due_at,j.status,j.error_code
-          FROM jsonb_to_recordset(%s::jsonb) AS j(idempotency_key text,shopify_customer_id text,recipient_hash text,
-            due_at timestamptz,status text,error_code text) ON CONFLICT DO NOTHING''',(template,identity,json.dumps(jobs)))
+            conn.execute('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,due_at,status,error_code)
+             VALUES(%s,%s,%s,%s,1,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',('campaign:'+identity+':'+recipient['hash'],recipient['id'],recipient['hash'],template,identity,schedule.get(recipient['hash'],{}).get('due_at') or now(),'BLOCKED' if reason else 'PENDING',reason))
         store._history(conn,{**row,'send_snapshot':{'operation_id':operation,'document':doc,'render_settings':cfg,'recipients':len(state['recipients'])}},'campaign_delivery_queued',str(user.get('id','')),row)
     return {'id':identity,'status':status,'recipients':len(state['recipients'])-len(blocked_recipients),
             'skipped_after_review':len(blocked_recipients),'already_started':False}

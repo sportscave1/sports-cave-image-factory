@@ -149,14 +149,14 @@ class FastReviewTests(unittest.TestCase):
         def execute(sql,args):
             result=Mock();result.fetchall.return_value=[]
             result.fetchone.return_value=editor if 'FOR UPDATE' in sql else ({'id':'segment'} if 'INSERT INTO crm_segment_definitions' in sql else None)
-            if 'INSERT INTO crm_marketing_sends' in sql:writes.append(args)
+            if 'INSERT INTO crm_marketing_sends' in sql:writes.extend(__import__('json').loads(args[2]))
             return result
         conn.execute.side_effect=execute
         with patch('crm_campaign_snapshot.load',return_value=snapshot),patch('crm_campaign_send.production_checks',return_value={'safe':True}):
             result=queue_campaign(shop,db,ADMIN,editor,'47bb53bc-9a37-4f99-a840-e775073dbce5',env=LIVE,snapshot_id='one')
         self.assertEqual(result['recipients'],1);self.assertEqual(result['skipped_after_review'],1)
-        self.assertEqual({r[1] for r in writes},{c['id'] for c in rows[:2]})
-        self.assertEqual([r[6] for r in writes],['PENDING','BLOCKED'])
+        self.assertEqual({r['shopify_customer_id'] for r in writes},{c['id'] for c in rows[:2]})
+        self.assertEqual([r['status'] for r in writes],['PENDING','BLOCKED'])
         self.assertTrue(shop.customer_batch.call_args.kwargs['fresh'])
         shop.campaign_member_ids.assert_not_called();shop.campaign_subscribers.assert_not_called()
 
@@ -240,4 +240,5 @@ if st.button('Open'):
         self.assertIn('st.columns([42,58]',shell)
         self.assertIn('@media(max-width:640px)',source)
         self.assertIn('.st-key-crm-review-actions{position:sticky',source)
-        self.assertLess(shell.index('summary.write'),shell.index('start_review('))
+        fragment=source.split('def review_finalization')[1].split('def _review_finalization')[0]
+        self.assertLess(fragment.index('_review_summary('),fragment.index('start_review('))

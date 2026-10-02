@@ -28,6 +28,7 @@ UNSUBSCRIBE = '''mutation CrmUnsubscribe($input:CustomerEmailMarketingConsentUpd
  userErrors { field message }
  } }'''
 CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { '+CUSTOMER_FIELDS+' } } }'
+CAMPAIGN_CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { id email validEmailAddress emailMarketingConsent { marketingState } '+EMAIL_ADDRESS_FIELDS+' defaultAddress { countryCodeV2 provinceCode zip timeZone } } } }'
 ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus
  customer { id } totalPriceSet { shopMoney { amount currencyCode } }
  lineItems(first:10) { nodes { id title variantTitle quantity product { id } }
@@ -227,6 +228,10 @@ class Shopify:
     def customer_batch(self, ids, fresh=False):
         if not ids:return []
         return [n for n in self.query(CUSTOMER_BATCH, {'ids':[gid(i) for i in ids[:50]]}, 'customers', 45, fresh)['nodes'] if n]
+    def campaign_customer_batch(self, ids):
+        if len(ids)>50:raise ValueError('Campaign profile batch exceeds the safe limit.')
+        if not ids:return []
+        return [n for n in self.query(CAMPAIGN_CUSTOMER_BATCH,{'ids':[gid(i) for i in ids]},'campaign profiles',0,True)['nodes'] if n]
     def orders(self, customer_id, after=None, fresh=False):
         data = self.query(ORDERS, {'id':gid(customer_id), 'after':after}, 'orders', 45, fresh).get('customer')
         return data['orders'] if data else {'nodes':[], 'pageInfo':{}}

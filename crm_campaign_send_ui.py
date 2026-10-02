@@ -149,7 +149,11 @@ def review_finalization(shop,store,user,editor,key,job,delivery,cfg=None):
             logging.getLogger(__name__).info('campaign_review stage=modal_shell duration_ms=%.1f',(time.monotonic()-started)*1000)
             from crm_campaign_review import start_review
             token=key+'review_job'
-            job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg)
+            audience_job=None
+            if shop is not None and store is not None:
+                from crm_campaign_audience_prepare import prepare_session
+                audience_job=prepare_session(st.session_state,shop,store,editor,key,cfg)
+            job=start_review(st.session_state.get(token),shop,store,user,editor,st.session_state.get('campaign_saved'),cfg,audience_job)
             st.session_state[token]=job
     body=st.empty()
     with body.container():
@@ -190,12 +194,19 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
             st.caption('⚠ Audience verification failed · '+error)
             if st.button('Retry',key=key+'review_retry'):
                 from crm_campaign_review import start_review
-                replacement=start_review(None,shop,store,user,editor,st.session_state.get('campaign_saved'),getattr(job,'requested_settings',None))
+                audience_job=None
+                if shop is not None and store is not None:
+                    from crm_campaign_audience_prepare import prepare_session
+                    st.session_state.pop(key+'audience_job',None)
+                    audience_job=prepare_session(st.session_state,shop,store,editor,key,cfg)
+                replacement=start_review(None,shop,store,user,editor,st.session_state.get('campaign_saved'),getattr(job,'requested_settings',None),audience_job)
                 st.session_state[key+'review_job']=replacement
                 st.rerun(scope='fragment')
         elif result:
             counts=result['counts']
             st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
+            if counts['excluded']:
+                st.caption('Exclusions',help=' · '.join(str(n)+' '+reason.replace('_',' ') for reason,n in sorted(counts['excluded'].items())))
             if result.get('email_size'):
                 from crm_email_size import size_line
                 st.caption(size_line(result['email_size']))
@@ -203,8 +214,15 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
             if result['blockers']:st.caption('⚠ '+ '; '.join(result['blockers']))
             else:st.caption(':green[✓ Ready to send]')
         else:
-            count=(editor['document'].get('counts') or {}).get('eligible')
-            st.write('Verifying '+(str(count)+' recipients…' if count is not None else 'recipients…'))
+            prepared=st.session_state.get(key+'audience_job')
+            known=prepared.display() if prepared else None
+            if known:
+                st.write(str(known['eligible'])+' eligible · '+str(sum(known['excluded'].values()))+' excluded')
+                st.caption('Checking for recent changes…' if not prepared.valid() else '✓ Audience verified · Checking delivery…')
+            else:
+                count=(editor['document'].get('counts') or {}).get('eligible')
+                if count is not None:st.write(str(count)+' recipients · last known')
+                st.write('Verifying recipients…')
         if not delivery['marketing_enabled']:st.caption(OFF)
     with st.container(key='crm-review-actions'):
         a,b=st.columns([1,2])
