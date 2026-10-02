@@ -28,6 +28,8 @@ def dismiss():
 
 def _analytics(identity):
     dismiss()
+    from crm_campaign_home import return_home
+    return_home()
     st.session_state.pop('campaign_show_drafts',None)
     st.session_state['sent_analytics_id'] = identity
     st.session_state['campaign_history_view'] = 'Sent'
@@ -125,8 +127,8 @@ def operational_view(store,user,delivery):
     operational_status(store,str(delivery['id']))
     with st.container(horizontal=True):
         if st.button('Back to campaigns',key='operational_back'):
-            from crm_campaign_page import new_compose
-            cfg=store.render_settings();new_compose(cfg=cfg);st.rerun()
+            from crm_campaign_home import return_home
+            return_home();st.rerun()
         if st.button('Duplicate',key='operational_duplicate'):
             from crm_campaign_page import open_editor
             open_editor(store.duplicate(user,delivery['id']));st.rerun()

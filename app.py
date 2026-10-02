@@ -4038,7 +4038,7 @@ def set_current_page(page, *, source="user", sync_query=True, force=False):
     if not route:
         raise ValueError(f"Unknown Sports Cave page: {page}")
     current_route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
-    if not force and not os_accounts.crm_navigation.navigation_allowed(st.session_state, current_route, route):
+    if not force and not os_accounts.crm_navigation.navigation_allowed(st.session_state, current_route, route, source=source):
         return current_route
     current_query = page_query_param_value()
     if not force and current_route == route and (

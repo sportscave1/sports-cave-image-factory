@@ -63,22 +63,12 @@ class HistoryPresentationTests(unittest.TestCase):
         self.assertIn('archived_at IS NULL',sql);self.assertIn('FILTER',sql)
         self.assertNotIn('document',sql)
 
-    def test_count_label_updates_do_not_change_selected_history(self):
-        script='''
-import streamlit as st
-from unittest.mock import Mock,patch
-from crm_campaign_page import recent_campaigns
-store=Mock();store.history_counts.return_value=st.session_state['counts']
-with patch('crm_campaign_page.working_campaigns',side_effect=lambda *a:st.caption('Draft rows')), patch('crm_campaign_analytics_ui._sent_table',side_effect=lambda *a:st.caption('Sent rows')), patch('crm_campaign_page._selected_campaign',side_effect=AssertionError('History does not repaint editor')):
- recent_campaigns(store,'test',{})
-'''
-        at=AppTest.from_string(script);at.session_state['counts']={'active':2,'sent':14};at.run()
-        self.assertFalse(at.exception)
-        at.radio(key='campaign_history_view').set_value('Sent').run()
-        at.session_state['counts']={'active':3,'sent':15};at.run()
-        self.assertFalse(at.exception);self.assertEqual(at.radio(key='campaign_history_view').value,'Sent')
-        self.assertEqual(at.radio(key='campaign_history_view').options,['Active  3','Sent  15'])
-        self.assertEqual([c.value for c in at.caption],['Sent rows'])
+    def test_history_compatibility_entry_is_home_only(self):
+        from crm_campaign_page import recent_campaigns
+        store=Mock()
+        with patch('crm_campaign_home.home') as home:
+            recent_campaigns(store,'unused',{})
+        home.assert_called_once_with(store,{})
 
     def test_automatic_count_refresh_preserves_every_draft_field(self):
         script='''
@@ -100,19 +90,11 @@ with patch('crm_segment_counts.COUNTS.display',return_value={'counts':st.session
         self.assertEqual(at.session_state['doc'],before)
         self.assertFalse(any(b.label=='Refresh audiences' for b in at.button))
 
-    def test_open_analytics_pauses_the_history_timer(self):
-        script='''
-import streamlit as st
-from unittest.mock import Mock,patch
-from crm_campaign_page import recent_campaigns
-st.session_state['sent_analytics_id']='fixture'
-with patch('crm_campaign_page._live_campaign_history',side_effect=AssertionError('No timer while dialog owns widgets')), patch('crm_campaign_page._campaign_history',side_effect=lambda *a:st.caption('Analytics history')):
- recent_campaigns(Mock(),'fixture',{})
-'''
-        at=AppTest.from_string(script).run();self.assertFalse(at.exception)
-        self.assertEqual(at.caption[0].value,'Analytics history')
-        at=AppTest.from_string(script.replace("['sent_analytics_id']","['campaign_delete_dialog_id']")).run()
-        self.assertFalse(at.exception);self.assertEqual(at.caption[0].value,'Analytics history')
+    def test_dialog_open_suspends_home_timer(self):
+        from pathlib import Path
+        source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
+        self.assertIn("not st.session_state.get('sent_analytics_id')",source)
+        self.assertIn("not st.session_state.get('campaign_delete_dialog_id')",source)
 
 
 if __name__=='__main__':unittest.main()

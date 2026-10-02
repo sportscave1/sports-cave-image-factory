@@ -5,6 +5,8 @@ from crm_campaign_markets import MARKET_LABELS
 from crm_store import StoreUnavailable
 
 def _close_analytics():
+    from crm_campaign_home_data import invalidate
+    invalidate(st.session_state)
     st.session_state.pop('sent_analytics_id',None)
     st.session_state.pop('sent_preview_id',None)
 

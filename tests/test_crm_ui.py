@@ -13,6 +13,8 @@ from crm_store import Store
 from crm_resend import Config
 from tests.crm_db_fixture import connect
 from tests.crm_fixtures import ShopifyFixture
+# This shared fixture exercises the existing composer explicitly. Home has its own fixture.
+st.session_state.setdefault('campaign_view','CAMPAIGN_EDITOR')
 wire=st.session_state.setdefault('wire',ShopifyFixture())
 store=Store(connect);store.seed()
 import uuid

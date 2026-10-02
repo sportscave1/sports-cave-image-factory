@@ -284,28 +284,24 @@ with patch('crm_campaign_analytics_ui._live_sent_table',side_effect=AssertionErr
         self.assertFalse(at.exception);self.assertFalse(at.get('iframe'))
         next(b for b in at.button if b.label=='Email preview').click().run(timeout=20)
         self.assertFalse(at.exception);self.assertTrue(at.get('iframe'))
-    def test_sent_switch_keeps_editor_and_draft_state(self):
+    def test_home_filter_switch_preserves_saved_editor_state(self):
         from streamlit.testing.v1 import AppTest
         from tests.test_crm_ui import SCRIPT
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns'
         at.session_state['campaign_editor']=deepcopy(self.editor);at.run(timeout=20)
         next(t for t in at.text_input if t.label=='Subject').set_value('Keep my unsent subject').run(timeout=20)
         before=deepcopy(at.session_state['campaign_editor']['document'])
-        edit_key=at.session_state['campaign_edit_key']
-        at.radio(key='campaign_history_view').set_value('Sent').run(timeout=20)
+        next(b for b in at.button if b.label=='← Campaigns').click().run(timeout=20)
+        self.assertFalse(at.exception)
+        self.assertEqual(at.session_state['campaign_view'],'CAMPAIGNS_HOME')
+        self.assertFalse(any(b.label=='Save draft' for b in at.button))
+        for tab in ('Sent','Drafts'):
+            at.radio(key='campaign_home_tab').set_value(tab).run(timeout=20)
+            self.assertFalse(at.exception)
+            self.assertEqual(at.session_state['campaign_editor']['document'],before)
+        at.session_state['campaign_pending_open']=str(self.editor['id']);at.run(timeout=20)
         self.assertFalse(at.exception)
         self.assertEqual(next(t for t in at.text_input if t.label=='Subject').value,'Keep my unsent subject')
-        self.assertTrue(any(b.label=='Save draft' for b in at.button))
-        self.assertEqual(at.session_state['campaign_edit_key'],edit_key)
-        self.assertEqual(at.session_state['campaign_editor']['document'],before)
-        at.radio(key='campaign_history_view').set_value('Active').run(timeout=20);self.assertFalse(at.exception)
-        self.assertEqual(at.session_state['campaign_editor']['document'],before)
-        with patch('crm_campaign_analytics_ui.sent_page',return_value=[]):
-            at.radio(key='campaign_history_view').set_value('Sent').run(timeout=20)
-        self.assertFalse(at.exception)
-        self.assertTrue(any('No sent campaigns yet.' in e.proto.body for e in at.get('html')))
-        self.assertEqual(next(t for t in at.text_input if t.label=='Subject').value,'Keep my unsent subject')
-        self.assertEqual(at.session_state['campaign_editor']['document'],before)
 
     def test_history_counts_move_between_drafts_sent_and_archive(self):
         before=self.store.history_counts()

@@ -19,13 +19,19 @@ EMAIL_DEFAULT_ROUTE='Email'
 SETTINGS_ALIASES={'CRM Customers':'Customers','CRM Segments':'Segments','CRM Templates':'Templates','CRM Reports':'Reports'}
 
 
-def navigation_allowed(state,current,target):
+def navigation_allowed(state,current,target,*,source='user'):
     """Metadata-only unsaved-draft guard; no DB/Shopify calls in the OS shell."""
     editor=state.get('campaign_editor');saved=state.get('campaign_saved') or {}
     pending=editor and (editor.get('document')!=saved.get('document') or editor.get('name')!=saved.get('name'))
     if current=='CRM Campaigns' and target!=current and pending:
         state['crm_requested_route']=target
         return False
+    if source=='user' and current and target=='CRM Campaigns' and (
+        current!='CRM Campaigns' or state.get('campaign_view')=='CAMPAIGN_EDITOR'):
+        # Explicit sidebar entry opens Home; a direct campaign URL still opens
+        # its existing editor on initial load/browser restoration.
+        state['campaign_pending_open']='home'
+        if current=='CRM Campaigns' and pending:return False
     return True
 
 

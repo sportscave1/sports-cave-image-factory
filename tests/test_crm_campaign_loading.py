@@ -19,6 +19,7 @@ from crm_campaign_content import settings
 from tests.test_crm import ADMIN
 from tests.test_crm_simple_editor import document
 
+st.session_state['campaign_view']='CAMPAIGN_EDITOR'
 drafts=Mock()
 drafts.setting.return_value={'value':{'smart_hours':16}}
 drafts.render_settings.return_value=settings({})
@@ -35,10 +36,7 @@ with ExitStack() as stack:
  stack.enter_context(patch('email_loading.shell',side_effect=AssertionError('Campaigns must not emit shell')))
  stack.enter_context(patch('crm_tracking_health.control',side_effect=AssertionError('No tracking UI')))
  stack.enter_context(patch('crm_tracking_health.verify',side_effect=AssertionError('No tracking verification')))
- if st.session_state.get('mode') == 'list_error':
-  stack.enter_context(patch('crm_campaign_page._campaign_history',side_effect=StoreUnavailable('Campaign storage unavailable')))
- else:
-  stack.enter_context(patch('crm_campaign_page.recent_campaigns',side_effect=lambda *a:st.caption('Campaign history fixture')))
+ stack.enter_context(patch('crm_campaign_page.recent_campaigns',side_effect=AssertionError('Editor has no campaign list')))
  stack.enter_context(patch('crm_campaign_send_ui.test_control',side_effect=lambda *a,**kw:st.button('Send test')))
  stack.enter_context(patch('crm_campaign_send_ui.send_control',side_effect=lambda *a,**kw:st.button('Send now')))
  stack.enter_context(patch('crm_campaign_page.flush_current',return_value=False))
@@ -87,10 +85,10 @@ class CampaignLoadingTests(unittest.TestCase):
                     self.assertEqual(len(messages),1)
                     self.assertEqual(messages[0].value,'Campaign storage unavailable')
                     self.assertFalse(app.tabs)
-                    self.assertFalse(app.button)
+                    self.assertEqual([b.label for b in app.button],['← Campaigns'])
                 else:
-                    self.assertIn('Campaign list temporarily unavailable.',
-                                  [caption.value for caption in app.caption])
+                    self.assertNotIn('Campaign list temporarily unavailable.',
+                                     [caption.value for caption in app.caption])
                     self.assertFalse(app.error)
                     self.assertFalse(app.warning)
                     self.assertEqual([tab.label for tab in app.tabs], ['Settings','Editor','Templates'])

@@ -197,7 +197,8 @@ class ProgressTests(unittest.TestCase):
         tray=source.split('def status_tray')[1].split('def operational_view')[0]
         self.assertNotIn('campaign_editor',tray);self.assertIn("st.rerun(scope='fragment')",tray)
         history=Path('crm_campaign_page.py').read_text(encoding='utf-8')
-        self.assertIn("3 if st.session_state.get('campaign_history_polling_active') else 30",history)
+        self.assertNotIn('recent_campaigns(drafts,st.session_state',history)
+        self.assertIn('crm-home-poll',Path('crm_campaign_home.py').read_text(encoding='utf-8'))
         self.assertNotIn('locked_campaign(',history)
 
     def test_minimise_and_close_only_affect_status_visibility(self):

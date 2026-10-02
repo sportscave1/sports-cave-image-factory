@@ -132,7 +132,7 @@ class RecoveryTests(unittest.TestCase):
         at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';at.run(timeout=20)
         with patch('crm_campaign_recovery.save_checkpoint',side_effect=StoreUnavailable('Fixture persistence unavailable')):
             next(w for w in at.text_input if w.label=='Subject').set_value('Do not discard').run(timeout=20)
-            next(b for b in at.button if b.label=='+ New campaign').click().run(timeout=20)
+            next(b for b in at.button if b.label=='← Campaigns').click().run(timeout=20)
             self.assertEqual(at.session_state['campaign_editor']['document']['content']['subject'],'Do not discard')
             self.assertEqual(at.session_state['campaign_save_status'],'Save failed')
             self.assertTrue(any(b.label=='Save draft and leave' for b in at.button))

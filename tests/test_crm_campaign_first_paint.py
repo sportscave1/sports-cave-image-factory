@@ -14,6 +14,7 @@ from time import perf_counter,sleep
 import streamlit as st
 from crm_campaign_page import campaign_workspace
 drafts=Mock();actions=Mock();actions.user={}
+st.session_state['campaign_view']='CAMPAIGN_EDITOR'
 events=[];started=perf_counter()
 def editor(*args):
  events.append(('editor',perf_counter()-started))
@@ -40,6 +41,7 @@ from tests.test_crm import ADMIN
 target={'id':'00000000-0000-0000-0000-000000000123','version':1,'name':'Restored campaign','status':'DRAFT','archived_at':None,'document':document()}
 old={**deepcopy(target),'id':'00000000-0000-0000-0000-000000000456','name':'Old campaign'}
 mode=st.session_state['mode']
+st.session_state['campaign_view']='CAMPAIGN_EDITOR'
 if 'initialized' not in st.session_state:
  st.session_state['initialized']=True
  if mode in ('switch','dirty_switch','url_switch','dirty_url','session'):
@@ -76,16 +78,16 @@ class FirstPaintTests(unittest.TestCase):
     def test_editor_is_emitted_before_delayed_history(self):
         app=AppTest.from_string(ORDER_SCRIPT).run()
         self.assertFalse(app.exception)
-        self.assertEqual([c.value for c in app.caption],['Selected composer','Campaign history'])
+        self.assertEqual([c.value for c in app.caption],['Selected composer'])
         events=app.session_state['events']
-        self.assertEqual([e[0] for e in events],['editor','history_start','history_end'])
-        self.assertGreaterEqual(events[2][1]-events[1][1],.05)
+        self.assertEqual([e[0] for e in events],['editor'])
 
     def test_real_composer_precedes_history_and_has_no_tracking_ui(self):
         app=AppTest.from_string(SCRIPT).run()
         self.assertFalse(app.exception)
         captions=[caption.value for caption in app.caption]
-        self.assertLess(captions.index('Preview fixture'),captions.index('Campaign history fixture'))
+        self.assertIn('Preview fixture',captions)
+        self.assertNotIn('Campaign history fixture',captions)
         self.assertEqual([t.label for t in app.tabs],['Settings','Editor','Templates'])
         for label in ('Save draft','Send test','Send now'):
             self.assertIn(label,[b.label for b in app.button])
@@ -99,7 +101,7 @@ class FirstPaintTests(unittest.TestCase):
                 app.session_state['mode']=mode;app.run()
                 self.assertFalse(app.exception)
                 self.assertEqual([c.value for c in app.caption if c.value.startswith(('Composer:','History'))],
-                                 ['Composer: '+name,'History'])
+                                 ['Composer: '+name])
                 self.assertEqual(app.session_state['campaign_editor']['name'],name)
                 if mode=='session':
                     self.assertEqual(app.session_state['restore_calls'],0)

@@ -22,6 +22,9 @@ from crm_campaign_recovery import autosaving, flush_current, activate, restore
 
 
 def open_editor(row):
+    from crm_campaign_home_data import invalidate
+    invalidate(st.session_state)
+    st.session_state['campaign_view']='CAMPAIGN_EDITOR'
     st.session_state['campaign_show_drafts']=True
     st.session_state['campaign_list_generation']=st.session_state.get('campaign_list_generation',0)+1
     from crm_html_workspace import html_document
@@ -130,6 +133,8 @@ def delete_dialog(store,user,editor):
             if str(st.session_state.get('campaign_editor',{}).get('id'))==str(editor['id']):
                 st.session_state.pop('campaign_editor',None);st.session_state.pop('campaign_saved',None)
             st.session_state['campaign_delete_notice']='Draft deleted.' if result['audit_saved'] else 'Draft deleted. Activity log could not be recorded.'
+            from crm_campaign_home_data import invalidate
+            invalidate(st.session_state)
             _close_delete_dialog()
             st.rerun()
         except (ValueError,StoreUnavailable) as exc:st.error(str(exc))
@@ -145,100 +150,9 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
 
 
 def recent_campaigns(drafts,key,user):
-    """History-only switching leaves composer widgets and active draft mounted."""
-    # One history fragment owns both tables. Nesting a separate Sent fragment
-    # leaves old Draft deltas behind when the selected table changes.
-    # Pause the timer while the existing lazy analytics dialog owns its widgets.
-    if st.session_state.get('sent_analytics_id') or st.session_state.get('campaign_delete_dialog_id'):_history_content(drafts,key,user)
-    else:_live_campaign_history(drafts,key,user)
-
-
-@st.fragment
-def _live_campaign_history(drafts,key,user):
-    _history_content(drafts,key,user)
-    if not st.session_state.get('sent_analytics_id') and not st.session_state.get('campaign_delete_dialog_id'):
-        from crm_campaign_progress_ui import poll
-        poll('crm-history-poll',3 if st.session_state.get('campaign_history_polling_active') else 30)
-
-
-def _history_content(drafts,key,user):
-    try:_campaign_history(drafts,key,user)
-    except StoreUnavailable:st.caption('Campaign list temporarily unavailable.')
-
-
-def _campaign_history(drafts,key,user):
-    if st.session_state.pop('campaign_show_drafts',False):
-        st.session_state['campaign_history_view']='Active'
-    if st.session_state.get('campaign_history_view')=='Drafts':st.session_state['campaign_history_view']='Active'
-    counts=drafts.history_counts()
-    st.session_state['campaign_history_polling_active']=bool(counts.get('polling_active'))
-    with st.container(horizontal=True,vertical_alignment='center',key='crm-history-heading'):
-        st.markdown('#### Campaigns')
-        if st.button('+ New campaign',key='history_new_campaign'):
-            st.session_state['campaign_pending_open']='new';st.rerun()
-    with st.container(key='crm-history-selector'):
-        selected=st.radio('Campaign history',('Active','Sent'),horizontal=True,label_visibility='collapsed',
-            format_func=lambda name:name+'  '+format(counts[name.lower()],','),key='campaign_history_view')
-    if selected=='Active':working_campaigns(drafts,key,user)
-    else:
-        from crm_campaign_analytics_ui import _sent_table
-        _sent_table(drafts,user)
-
-
-def working_campaigns(drafts,key,user):
-    from crm_campaign_markets import MARKET_LABELS
-    from crm_composer_style import history_cell,history_date,history_header
-    with st.popover('View all campaigns / archived'):
-        archived=st.checkbox('Archived campaigns',key='recent_archived')
-        search=st.text_input('Find campaign',key='recent_search')
-    filters=(archived,search)
-    if st.session_state.get('recent_filters')!=filters:
-        st.session_state['recent_filters']=filters;st.session_state['recent_offset']=0
-    offset=st.session_state.get('recent_offset',0)
-    from email_loading import stage
-    with stage('Campaigns','list_query'):
-        rows=drafts.list_drafts(archived,search=search,offset=offset,limit=7,metadata=True,working=True)
-    if not rows:st.caption('No saved campaigns yet. Save your draft above.');return
-    from crm_campaign_progress import load_progress
-    identities=[str(row['id']) for row in rows[:6] if row.get('delivery_status') in ('BUILDING','SENDING')]
-    progress=load_progress(drafts,st.session_state,identities) if identities else {}
-    widths=[4,1.7,1.5,1.7,1.2]
-    history_header(('Campaign','Status','Market','Updated','Actions'),widths)
-    for row in rows[:6]:
-        identity=str(row['id'])
-        with st.container(key='crm-history-row-draft-'+identity):
-            columns=st.columns(widths,vertical_alignment='center',gap='small')
-        deletable=row['status']=='DRAFT' and not row['archived_at'] and not row.get('last_tested_at') and not row.get('delivery_status')
-        if columns[0].button(row['name'],type='tertiary',help=row['name'],key='recent_open_'+identity):
-            st.session_state['campaign_pending_open']=identity;st.rerun()
-        error=row.get('schedule_error')
-        status={'marketing_off_schedule':'Delivery blocked — marketing is OFF','schedule_missed':'Schedule missed — reschedule required'}.get(error)
-        if not status:status=row.get('delivery_status') or row['status']
-        if identity in progress:
-            p=progress[identity]
-            status+=' · '+str(p['submitted'])+'/'+str(p['total'])+' submitted'+(' · needs attention' if p['attention'] else '')
-        columns[1].html(history_cell(status,pill=True));columns[2].html(history_cell(MARKET_LABELS[row['document']['market']]))
-        columns[3].html(history_cell(history_date(row.get('activity_at',row.get('updated_at')))))
-        with columns[4].popover('Actions'):
-            st.caption('Last test: '+(str(row['last_tested_at'])[:16] if row['last_tested_at'] else '—'))
-            if st.button('View' if row.get('delivery_status') else 'Edit',key='recent_edit_'+identity):
-                st.session_state['campaign_pending_open']=identity;st.rerun()
-            if st.button('Duplicate',key='recent_copy_'+identity) and flush_current():open_editor(drafts.duplicate(user,identity));st.rerun()
-            if st.button('History',key='recent_history_'+identity):st.session_state['campaign_revision_history_id']=identity
-            if st.session_state.get('campaign_revision_history_id')==identity:st.dataframe(drafts.history(identity),hide_index=True)
-            if not row.get('delivery_status'):
-                if row['archived_at']:
-                    if st.button('Restore',key='recent_restore_'+identity):drafts.restore(user,identity,row['version']);st.rerun()
-                elif st.button('Archive',key='recent_archive_'+identity):drafts.archive(user,identity,row['version']);st.rerun()
-            if st.button('Delete draft',disabled=not deletable,key='recent_delete_'+identity):
-                st.session_state['campaign_delete_dialog_id']=identity;st.rerun()
-    selected=next((row for row in rows[:6] if str(row['id'])==st.session_state.get('campaign_delete_dialog_id')),None)
-    if selected:delete_dialog(drafts,user,selected)
-    elif st.session_state.get('campaign_delete_dialog_id'):_close_delete_dialog()
-    if offset or len(rows)>6:
-        with st.container(horizontal=True):
-            if st.button('Previous',disabled=offset==0):st.session_state['recent_offset']=max(0,offset-6);st.rerun()
-            if st.button('Next',disabled=len(rows)<=6):st.session_state['recent_offset']=offset+6;st.rerun()
+    """Compatibility entry point; the only campaign list is now Home."""
+    from crm_campaign_home import home
+    home(drafts,user)
 
 
 @st.fragment(**({'key':COMPOSER_TARGET} if COMPOSER_TARGET else {}))
@@ -300,9 +214,14 @@ def continue_campaign_leave(drafts,navigate):
     target=st.session_state.pop('crm_requested_route',None)
     pending=st.session_state.pop('campaign_pending_open',None)
     if target:navigate(target)
+    elif pending=='home':
+        from crm_campaign_home import return_home
+        return_home()
     elif pending=='new':
         cfg=drafts.render_settings()
         new_compose(drafts.setting('sending')['value']['smart_hours'],cfg,drafts.default_sections(cfg))
+        if st.session_state.pop('campaign_open_templates',False):
+            st.session_state[st.session_state['campaign_edit_key']+'panel']='Templates'
     elif pending:open_editor(drafts.draft(pending))
     st.rerun()
 
@@ -331,16 +250,24 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
         continue_campaign_leave(drafts,navigate)
         return
-    # Emit the active composer before any secondary history reads or widgets.
+    view=st.session_state.setdefault('campaign_view','CAMPAIGNS_HOME')
+    if explicit:
+        view='CAMPAIGN_EDITOR'
+        st.session_state['campaign_view']=view
+    if view=='CAMPAIGNS_HOME':
+        from crm_campaign_home import home
+        home(drafts,actions.user)
+        from crm_campaign_progress_ui import status_tray
+        status_tray(drafts)
+        return
     st.html('''<style>
-      [data-testid="stMainBlockContainer"]:has(.st-key-crm-recent-campaigns){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
+      [data-testid="stMainBlockContainer"]:has(.st-key-crm-selected-campaign){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
     </style>''')
+    def back():st.session_state['campaign_pending_open']='home'
+    st.button('← Campaigns',key='campaign_back_home',type='tertiary',on_click=back)
     with st.container(key='crm-selected-campaign'):
         with stage('Campaigns','editor_render'):
             _selected_campaign(shop,store,actions,navigate,drafts)
-    with st.container(key='crm-recent-campaigns'):
-        with stage('Campaigns','history_render'):
-            recent_campaigns(drafts,st.session_state.get('campaign_edit_key',''),actions.user)
     from crm_campaign_progress_ui import status_tray
     status_tray(drafts)
 
