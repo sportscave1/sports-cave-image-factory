@@ -237,13 +237,11 @@ class RefreshPlanTests(unittest.TestCase):
             key = ads.ads_result_context_key(value['product_id'], TITLE, 'Football','Australia','Carousel', creative_refresh_context=changed)
             self.assertNotEqual(key, value['context_key'])
 
-    def test_failed_quality_checks_prevent_any_dropbox_work(self):
+    def test_optional_execution_notes_do_not_block_save(self):
         value, workflow = completed_single()
         workflow['ad_notes']['refresh_executions'] = []
-        with patch.object(ads.dropbox_integration, 'ensure_folder_path') as remote:
-            with self.assertRaisesRegex(ValueError, 'Creative Refresh checks'):
-                ads.save_ads_images_to_dropbox('fake','/approved','/approved',value,workflow)
-            remote.assert_not_called()
+        save_locally(value, workflow)
+        self.assertIn(handoff.SAVED_PACKAGE_KEY, workflow)
 
     def test_final_notes_and_plan_survive_save_and_package_hash(self):
         value, workflow = completed_single()
@@ -302,10 +300,10 @@ class RefreshPlanTests(unittest.TestCase):
             self.assertEqual(state[posting.PRIMARY_TEXT_KEYS[i]],text)
         self.assertEqual(package['refresh_executions'],workflow['ad_notes']['refresh_executions'])
 
-    def test_csv_standalone_brief_cannot_bypass_full_rules(self):
+    def test_optional_prompt_analysis_does_not_block_production_assets(self):
         value, workflow = completed_single()
         workflow['standard_ads'][0]['image_prompt'] = TITLE + '. Short incomplete brief.'
-        self.assertTrue(any('Standard CSV image prompts' in s for s in ads.creative_refresh_quality_issues(value,workflow)))
+        self.assertFalse(ads.creative_refresh_quality_issues(value,workflow))
 
     def test_declared_analysis_does_not_claim_pixel_fidelity(self):
         value = fixture('Instant Experience')

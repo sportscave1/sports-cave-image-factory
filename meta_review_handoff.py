@@ -246,8 +246,21 @@ def product_selector_rows(rows,state):
     source=state.get(ACTIVE) or {}
     mapping=source.get('product_mapping') or {}
     canonical=mapping.get('canonical_row')
+    if not canonical:
+        # Resolve authoritative identities only; fuzzy suggestions stay manual.
+        identity = mapping.get('product_id') or source.get('product_id')
+        handle = mapping.get('product_handle') or products.product_url_handle(mapping.get('product_url') or source.get('product_url'))
+        exact = [r for r in rows if (str(r.get('shopify_product_id') or r.get('product_id') or '') == str(identity) if identity else bool(handle) and str(r.get('product_handle') or r.get('shopify_handle') or '').lower() == handle.lower())]
+        if len(exact) == 1:
+            resolved = products.canonical(exact[0])
+            if resolved:
+                mapping = resolved
+                source['product_mapping'] = mapping
+                hydrate_product(state, mapping)
+                canonical = mapping['canonical_row']
     if not canonical: return rows
-    return [canonical if str(r.get('product_handle') or r.get('shopify_handle') or '')==mapping.get('product_handle') else r for r in rows]
+    result = [r for r in rows if str(r.get('product_handle') or r.get('shopify_handle') or '') != mapping.get('product_handle')]
+    return [canonical, *result]
 
 
 def rank_product_options(options,records,state):
@@ -294,13 +307,7 @@ def render_source(st):
         return False
     with st.container(border=True):
         st.subheader('Winner from Meta Review')
-        st.caption(f"{source.get('campaign_name')} · {source.get('ad_name')} · {source.get('date_range')} · {str(source.get('mode') or 'complete_ad').replace('_',' ')}")
-        st.write((source.get('decision') or {}).get('reason') or 'Selected reference creative; performance evidence not supplied.')
         if st.session_state.get('meta-review-product-error'): st.warning(st.session_state['meta-review-product-error'])
-        if not (source.get('product_mapping') or {}).get('canonical_row'):
-            st.warning('PRODUCT CONFIRMATION REQUIRED · Select the correct canonical Product name below. Suggested matches appear first; selection saves the mapping.')
-        else:
-            st.caption('Product matched: '+source['product_mapping']['product_title']+' · '+str(source.get('product_match_method') or 'canonical mapping'))
         if source.get('mode')=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
         resolution = resolve_campaign_type(source)

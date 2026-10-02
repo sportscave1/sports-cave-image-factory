@@ -9138,6 +9138,15 @@ def render_product_name_input(*, rows=None, result=None):
     records = build_ads_product_selector_records(rows)
     records_by_identity = {record["identity"]: record for record in records}
     prepare_ads_product_selector_state(rows, result=result)
+    if _active_ads_workflow_mode() == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        source = st.session_state.get('meta-review-refresh-source') or {}
+        mapped = (source.get('product_mapping') or {}).get('canonical_row')
+        if mapped:
+            identity = _edition_ops_product_selector_identity(mapped)
+            selection = resolve_ads_product_selector_value(identity, rows=rows, records=records)
+            st.caption('Product · ' + selection['selected_label'])
+            st.session_state[ADS_PRODUCT_NAME_KEY] = selection['selected_label']
+            return selection['selected_label'], selection
     if records:
         options=alphabetize_options(records_by_identity,label=lambda identity: records_by_identity.get(identity,{}).get('label') or identity)
         if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
@@ -12865,10 +12874,24 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True):
     if not source_matches or package.get("source_signature") != _ads_saved_source_signature(result, workflow):
         st.caption("This ad has unsaved changes. Save the updated package before POST NOW.")
         return
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        if not workflow.get('refresh_workspace_saved'):
+            st.caption('Save this refresh before POST NOW.')
+            return
+        import ads_refresh_saved
+        st.caption('Saved')
+        if not workflow.get('refresh_workspace_export'):
+            workflow['refresh_workspace_export'] = ads_refresh_saved.dumps(result, workflow)
+        st.download_button('Download saved refresh', workflow['refresh_workspace_export'],
+                           file_name=ads_refresh_saved.FILENAME, mime='application/json',
+                           key=f"ads-refresh-download::{result['context_key']}")
     if st.button("POST NOW", type="primary", key=f"ads-post-now::{result['context_key']}"):
         try:
+            if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+                _, saved_workflow = ads_refresh_saved.loads(workflow['refresh_workspace_export'])
+                package = saved_workflow[posting_handoff.SAVED_PACKAGE_KEY]
             posting_handoff.queue_saved_package(package, state=st.session_state)
-        except posting_handoff.SavedPackageError as error:
+        except (posting_handoff.SavedPackageError, ValueError) as error:
             st.error(str(error))
             return
         st.session_state["current_page"] = POSTING_ROUTE
@@ -12878,7 +12901,43 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True):
         st.rerun()
 
 
-def save_ads_images_to_dropbox(
+def save_ads_images_to_dropbox(access_token, root_path, destination, result, workflow, *, progress_callback=None):
+    """Use the existing Ads save; persist a reopenable refresh only after uploads."""
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        validation = validate_ads_inputs(result['product_name'], result['category'], result['country'],
+                                         result['campaign_type'], product_url=result['product_url'])
+        if validation:
+            raise ValueError(validation)
+        if not ads_images_ready(result, workflow):
+            raise ValueError('Complete all required generated images before saving this refresh.')
+        workflow['refresh_workspace_saved'] = False
+    outcomes = _save_ads_images_to_dropbox(access_token, root_path, destination, result, workflow,
+                                         progress_callback=progress_callback)
+    if result.get('workflow_mode') != ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return outcomes
+    if any(row.get('status') == 'failed' for row in outcomes.values()):
+        return outcomes
+    import ads_refresh_saved
+    workflow['outcomes'] = outcomes
+    workflow['refresh_workspace_saved'] = True
+    folder = workflow['saved_folder_path']
+    try:
+        data = ads_refresh_saved.dumps(result, workflow)
+        uploaded = dropbox_integration.upload_batch(access_token, folder,
+            [{'relative_path': ads_refresh_saved.FILENAME, 'data': data, 'size': len(data)}], conflict='replace')
+    except Exception as error:
+        workflow['refresh_workspace_saved'] = False
+        workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
+        raise ValueError('The saved refresh workspace could not be persisted. Save again before POST NOW.') from error
+    if not uploaded.get('successes') or uploaded.get('failures'):
+        workflow['refresh_workspace_saved'] = False
+        workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
+        raise ValueError('The saved refresh workspace could not be persisted. Save again before POST NOW.')
+    workflow['refresh_workspace_export'] = data
+    return outcomes
+
+
+def _save_ads_images_to_dropbox(
     access_token,
     root_path,
     destination,
@@ -13257,9 +13316,11 @@ def _render_instant_experience_package_save(result, workflow):
         )
     if not package_ready:
         st.caption("Complete all three covers and their single copy pairs before saving the package." if _refresh_copy_count(result) == 1 else "Complete all three covers and all nine description options before saving the package.")
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        package_saved = package_saved and bool(workflow.get('refresh_workspace_saved'))
 
     if st.button(
-        "Save Instant Experience Package",
+        ("Saved" if package_saved else "Save") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Instant Experience Package",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
@@ -13325,6 +13386,9 @@ def _render_instant_experience_package_save(result, workflow):
             )
             workflow["outcomes"] = outcomes
             workflow["destination_path"] = workflow.get("saved_folder_path") or destination
+            if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and workflow.get('refresh_workspace_saved'):
+                st.query_params['refresh_saved_folder'] = workflow['saved_folder_path']
+                st.query_params.pop('handoff_id', None)
             _save_ads_upload_metadata(
                 {
                     slot_id: outcome
@@ -13460,6 +13524,8 @@ def _render_ads_image_save(result, workflow):
         )
     images_saved = saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
     all_saved = images_saved and notes_saved and carousel_csv_saved and creative_refresh_csv_saved and ads_package_paths.saved_files_are_flat(workflow)
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        all_saved = all_saved and bool(workflow.get('refresh_workspace_saved'))
     if not has_valid_upload:
         st.caption(f"0 of {required_count} images ready.")
     elif not ready:
@@ -13467,13 +13533,14 @@ def _render_ads_image_save(result, workflow):
     else:
         st.caption(f"{len(valid_slots)} of {required_count} images ready.")
     if st.button(
-        "Save Images",
+        "Save" if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Images",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
         disabled=(
             bool(workflow.get("saving"))
             or all_saved
+            or (result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and not ready)
         ),
         use_container_width=True,
     ):
@@ -13550,6 +13617,9 @@ def _render_ads_image_save(result, workflow):
             )
             workflow["outcomes"] = outcomes
             workflow["destination_path"] = workflow.get("saved_folder_path") or destination
+            if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and workflow.get('refresh_workspace_saved'):
+                st.query_params['refresh_saved_folder'] = workflow['saved_folder_path']
+                st.query_params.pop('handoff_id', None)
             _save_ads_upload_metadata(
                 {
                     slot_id: outcome
@@ -14137,30 +14207,12 @@ def creative_refresh_quality_issues(result, workflow):
     plan = context.get("refresh_plan") or {}
     if plan.get("version") != ads_refresh_generation.plan.VERSION:
         return []  # Historical saved packages keep their existing compatibility contract.
-    notes = workflow.get("ad_notes") or {}
-    if notes.get("refresh_execution_error"):
-        return ["Correct the execution-notes JSON before marking this refresh ready."]
-    executions = notes.get("refresh_executions") or []
-    rows = workflow.get("standard_ads") or []
     if result.get("campaign_type") == "Carousel":
         carousel = _carousel_copy_notes_from_workflow(result, workflow)
-        rows = [{"primary_text": a, "headline": b} for a, b in zip(carousel["primary_texts"], carousel["headlines"])]
         if not all(str(v or '').strip() for field in ("primary_texts", "headlines", "descriptions") for v in carousel[field]) or not all(
             str(card.get(field) or '').strip() for card in carousel["cards"] for field in ("headline", "description", "destination_url")):
             return ["Complete all production carousel copy fields before saving."]
-    elif result.get("campaign_type") == "Instant Experience":
-        pairs = _instant_experience_concept_copy_notes_from_workflow(workflow)
-        rows = [pairs[c["id"]][0] for c in INSTANT_EXPERIENCE_CONCEPTS]
-    issues = ads_refresh_generation.plan.execution_issues(executions, plan, result["product_name"], result["campaign_type"])
-    limit = (result.get("product_metadata") or {}).get("edition_limit")
-    facts = (f"Limited to {limit}", f"{limit} worldwide") if limit else ()
-    issues += ads_refresh_generation.plan.copy_issues(rows, result["product_name"], context, facts)
-    if result.get("campaign_type") == "Single Image / Video":
-        full_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
-        for row in rows:
-            prompt = str(row.get("image_prompt") or '')
-            if full_rules not in prompt or ads_refresh_generation.plan.AUTHORITY not in prompt:
-                issues.append("Standard CSV image prompts must contain complete realism rules and canonical authority.")
+    issues = []  # Execution notes are optional audit data, never a Save/Posting gate.
     source_hashes = [r.get("image_sha256") for r in plan["references"] if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:
@@ -14169,42 +14221,36 @@ def creative_refresh_quality_issues(result, workflow):
     return list(dict.fromkeys(issues))
 
 
-def _render_refresh_execution_notes(result, workflow):
-    plan = (result.get("creative_refresh_context") or {}).get("refresh_plan")
-    if not plan:
-        return
-    notes = workflow.setdefault("ad_notes", {})
-    with st.expander("Refresh analysis & standalone briefs", expanded=False):
-        st.caption("Paste the final execution JSON returned with the CSV. Checks cover declarations and exact image duplicates; visual fidelity still requires inspection.")
-        raw = st.text_area("Execution notes", value=json.dumps(notes.get("refresh_executions") or [], ensure_ascii=False, indent=2),
-                           key=f"ads-refresh-executions::{result['context_key']}", height=100)
-        try:
-            parsed = json.loads(raw)
-            if not isinstance(parsed, list):
-                raise ValueError()
-            notes["refresh_executions"] = parsed
-            notes.pop("refresh_execution_error", None)
-            history = st.session_state.setdefault("ads-refresh-style-history", {}).setdefault(
-                f"{result['product_name']}::{result['campaign_type']}", [])
-            for entry in history:
-                if entry.get("run_id") == plan["run_id"]:
-                    final_styles = [str(e.get("style_id")) for e in parsed if isinstance(e, dict) and e.get("style_id")]
-                    if len(final_styles) == 3:
-                        entry["style_ids"] = final_styles
-        except (ValueError, TypeError):
-            notes["refresh_execution_error"] = True
-            st.caption("Use the execution JSON array returned by ChatGPT.")
-        issues = creative_refresh_quality_issues(result, workflow)
-        if issues:
-            st.caption(" · ".join(issues))
-        else:
-            st.caption("Metadata checks passed. Inspect finished images for exact product fidelity and genuine scene novelty.")
+def _render_ads_final_actions(result, workflow, *, source_matches=True):
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        save_col, post_col = st.columns(2)
+        with save_col:
+            _render_ads_image_save(result, workflow)
+        with post_col:
+            _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
+    else:
+        _render_ads_image_save(result, workflow)
+        _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
 
 
 def render_supported_result(result, *, source_matches=True):
     if google_ads.platform_for(result) == "google":
         import ads_google_ui
         ads_google_ui.render_result(result, source_matches=source_matches)
+        return
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        workflow = _ads_image_workflow(result)
+        st.subheader('1. Copy this ChatGPT prompt')
+        render_prompt_copy_button(result['master_prompt'], f"ads-prompt::{result['context_key']}")
+        if result['campaign_type'] == 'Instant Experience':
+            _render_instant_experience_concepts(result, workflow)
+        elif result['campaign_type'] == 'Single Image / Video':
+            ads_standard_workflow.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
+            return
+        else:
+            _render_ads_image_slots(result, workflow)
+            _render_ads_setup_notes(result, workflow)
+        _render_ads_final_actions(result, workflow, source_matches=source_matches)
         return
     product_name = result["product_name"]
     category = result["category"]
@@ -14213,10 +14259,6 @@ def render_supported_result(result, *, source_matches=True):
     render_generic_winner_pattern_note(category, campaign_type)
     master_prompt = result["master_prompt"]
     workflow = _ads_image_workflow(result)
-    if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        st.caption("Attach WINNER_CARD_1–5, then CANONICAL_PRODUCT; CSV separately." if campaign_type == "Carousel" else "Attach WINNER_IE (or WINNER_AD), then CANONICAL_PRODUCT; CSV separately.")
-        _render_refresh_execution_notes(result, workflow)
-
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
         render_prompt_copy_button(
@@ -14266,10 +14308,6 @@ def render_supported_result(result, *, source_matches=True):
     _render_ads_setup_notes(result, workflow)
     _render_ads_image_save(result, workflow)
     _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
-    if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        st.caption(f"Review the imported copy and {_refresh_carousel_count(result)} images, then Save.")
-        render_meta_url_parameters_section(3)
-        return
     st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
 
     st.subheader("2. Build it in Meta")
@@ -14277,7 +14315,6 @@ def render_supported_result(result, *, source_matches=True):
         st.markdown(f"{index}. {step}")
     st.caption("Review every fact before publishing. Remove anything that cannot be confirmed from the product or artwork.")
     render_meta_url_parameters_section(3)
-
 
 def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     import ads_google_ui
@@ -14410,7 +14447,32 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     if is_creative_refresh:
         st.title("Creative Refresh")
-        st.caption("Refresh a selected winner or reference creative while preserving its strongest principles.")
+        import ads_refresh_saved
+        if st.query_params.get('handoff_id') or st.session_state.get('meta-review-refresh-pending'):
+            st.query_params.pop('refresh_saved_folder', None)
+        folder = st.query_params.get('refresh_saved_folder')
+        restore_failed = False
+        if folder and not st.session_state.get(result_state_key):
+            try:
+                ads_refresh_saved.restore_folder(sys.modules[__name__], folder, st.session_state)
+            except Exception:
+                st.error('Saved refresh could not be opened. Retry or open its saved workspace file.')
+                restore_failed = True
+        with st.popover('Open saved refresh', icon=':material/folder_open:'):
+            saved_upload = st.file_uploader('Saved refresh workspace', type=['json'], key='ads-refresh-reopen', max_upload_size=100)
+            if saved_upload is not None:
+                digest = hashlib.sha256(saved_upload.getvalue()).hexdigest()
+                if st.session_state.get('ads-refresh-reopened') != digest:
+                    try:
+                        ads_refresh_saved.restore(saved_upload.getvalue(), st.session_state)
+                        st.session_state['ads-refresh-reopened'] = digest
+                        st.query_params.pop('handoff_id', None)
+                        st.query_params['refresh_saved_folder'] = st.session_state[_ads_image_state_key()].get('saved_folder_path', '')
+                        st.rerun()
+                    except ValueError as error:
+                        st.error(str(error))
+        if restore_failed:
+            return
         import meta_review_handoff
         if not meta_review_handoff.render_source(st):
             _render_refresh_winner_picker()
@@ -14429,30 +14491,31 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         else:
             st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
 
-    with st.expander("How to use", expanded=False):
-        if is_google:
-            ads_google_ui.how_to()
-        elif is_creative_refresh:
-            st.markdown(
-                "1. Review the product, sport, country and campaign type received from Meta Review; optionally add a Campaign Moment.\n"
-                "2. Paste the winning primary text and headline, then select Submit.\n"
-                "3. Upload the black-framed Sports Cave product WebP and attach the winning ad image to ChatGPT.\n"
-                "4. Copy and paste the generated master prompt.\n"
-                "5. ChatGPT will return the normal New Ads production package.\n"
-                "6. Import the completed CSV, add generated images, review and Save. Use POST NOW when the saved format is supported by Posting."
+    if not is_creative_refresh:
+        with st.expander("How to use", expanded=False):
+            if is_google:
+                ads_google_ui.how_to()
+            elif is_creative_refresh:
+                st.markdown(
+                    "1. Review the product, sport, country and campaign type received from Meta Review; optionally add a Campaign Moment.\n"
+                    "2. Paste the winning primary text and headline, then select Submit.\n"
+                    "3. Upload the black-framed Sports Cave product WebP and attach the winning ad image to ChatGPT.\n"
+                    "4. Copy and paste the generated master prompt.\n"
+                    "5. ChatGPT will return the normal New Ads production package.\n"
+                    "6. Import the completed CSV, add generated images, review and Save. Use POST NOW when the saved format is supported by Posting."
+                )
+            else:
+                st.markdown(
+                    "1. Enter the product and select the sport, country and campaign type.\n"
+                    "2. Select Submit.\n"
+                    "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
+                    "4. Copy and paste the generated master prompt.\n"
+                    "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
+                    "6. Generate and upload the images in the displayed order."
+                )
+            st.warning(
+                "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
             )
-        else:
-            st.markdown(
-                "1. Enter the product and select the sport, country and campaign type.\n"
-                "2. Select Submit.\n"
-                "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
-                "4. Copy and paste the generated master prompt.\n"
-                "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
-                "6. Generate and upload the images in the displayed order."
-            )
-        st.warning(
-            "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
-        )
 
     result = st.session_state.get(result_state_key)
     if (
@@ -14521,7 +14584,6 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                 placeholder="Paste the winning Meta headline",
                 key=ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY,
             )
-            st.caption("Attach WINNER_CARD_1–5 + CANONICAL_PRODUCT for Carousel; WINNER_IE + CANONICAL_PRODUCT for IE. CSV is separate. All references must be inspected in ChatGPT.")
         creative_refresh_context = normalize_creative_refresh_context(
             {
                 "winning_primary_text": winning_primary_text,
@@ -14533,6 +14595,13 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         plan_identity = json.dumps([product_name, product_url, category, country, campaign_type,
                                     campaign_moment, creative_refresh_context], sort_keys=True, default=str)
         deliberate_new = st.button("New refresh", key="ads-refresh-new-run")
+        if deliberate_new:
+            st.query_params.pop('refresh_saved_folder', None)
+        saved_context = (result or {}).get('creative_refresh_context') or {}
+        if not deliberate_new and saved_context.get('refresh_plan') and {
+            k:v for k,v in saved_context.items() if k != 'refresh_plan'
+        } == creative_refresh_context:
+            st.session_state.setdefault('ads-refresh-plans', {})[hashlib.sha256(plan_identity.encode()).hexdigest()] = saved_context['refresh_plan']
         creative_refresh_context["refresh_plan"] = ads_refresh_generation.plan.session_plan(
             st.session_state, plan_identity, creative_refresh_context, campaign_type, product_name,
             category, build_visual_variation_token, new=deliberate_new)
@@ -14713,7 +14782,8 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             (creative_refresh_context or None) == (result.get("creative_refresh_context") or None),
         ))
         render_supported_result(result, source_matches=source_matches)
-        _render_final_ad_review(result)
+        if not is_creative_refresh:
+            _render_final_ad_review(result)
 
 
 render_ads_page = render_page

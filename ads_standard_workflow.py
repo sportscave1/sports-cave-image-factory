@@ -53,6 +53,9 @@ def render(ads, result, workflow, *, source_matches=True):
         st.error(str(error))
         return
     ads._render_ads_image_slots(result, workflow)
+    if result.get('workflow_mode') == 'creative_refresh':
+        ads._render_ads_final_actions(result, workflow, source_matches=source_matches)
+        return
     ads._render_ads_image_save(result, workflow)
     st.caption("POST NOW opens the saved package in Posting for review. Standard single-image publishing is not yet supported there.")
     ads._render_saved_ad_post_now(result, workflow, source_matches=source_matches)

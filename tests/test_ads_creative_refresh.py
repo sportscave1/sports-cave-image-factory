@@ -346,7 +346,7 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         render_source = page_source[page_source.index("def render_page():") :]
         self.assertIn("ads_page.render_page(", render_source)
         self.assertIn("ADS_WORKFLOW_MODE_CREATIVE_REFRESH", render_source)
-        self.assertFalse(app_test.file_uploader)
+        self.assertEqual([uploader.label for uploader in app_test.file_uploader], ['Saved refresh workspace'])
         self.assertNotIn(
             "Meta performance CSV (optional)",
             [uploader.label for uploader in app_test.file_uploader],
