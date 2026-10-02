@@ -24,9 +24,9 @@ class WinnerRefinementTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/jordan",
             creative_refresh_context={"winning_primary_text": "The night Chicago believed.", "winning_headline": "Own the memory"},
         )
-        for value in ("The night Chicago believed.", "Own the memory", "controlled sibling evolutions", "exactly ONE Primary Text", "ONE Headline", "winner_refinement", "Michael Jordan", "NBA", "1024 x 1024"):
+        for value in ("The night Chicago believed.", "Own the memory", "three genuinely different environments", "ONE copy pair", "winner_refinement", "Michael Jordan", "NBA", "1024 x 1024"):
             self.assertIn(value, prompt)
-        for value in ("Scene Expansion", "Pattern Interrupt", "Description 2", "Description 3", "genuinely different customer's home"):
+        for value in ("Keep the winning room style and composition", "Make only a small improvement", "Description 2", "Description 3"):
             self.assertNotIn(value, prompt)
 
     def test_legacy_normalization_does_not_rewrite_saved_source(self):

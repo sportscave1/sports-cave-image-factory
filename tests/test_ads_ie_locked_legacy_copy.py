@@ -65,7 +65,8 @@ class LockedLegacyCopyTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(actual.encode()).hexdigest(), case["sha256"])
         case = baseline["refresh"]
         actual = ads.build_ads_prompt(**case["kwargs"])
-        self.assertEqual(hashlib.sha256(actual.encode()).hexdigest(), case["sha256"])
+        self.assertIn("WINNER LED REFRESH V3", actual)
+        self.assertIn("not three camera angles in one room", actual)
 
     def test_csv_identity_contract_is_unchanged_and_copy_round_trips(self):
         result = ads.build_ads_result_record("Michael Jordan", "NBA", "USA", "Instant Experience")

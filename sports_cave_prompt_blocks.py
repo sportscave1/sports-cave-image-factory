@@ -102,7 +102,7 @@ Mandatory final product inspection:
 - confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts"""
 
 
-def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True) -> str:
+def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, allow_intentional_detail_crop: bool = False) -> str:
     sections = [
         SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
         "AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES",
@@ -110,7 +110,16 @@ def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True) 
         SPORTS_CAVE_GLOBAL_PHOTOGRAPHIC_REALISM_BLOCK,
     ]
     if include_product_lock:
-        sections.append(SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK)
+        lock = SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK
+        if allow_intentional_detail_crop:
+            # Explicit detail-card mode only; all existing callers retain identical rules.
+            lock = lock.replace('do not crop, zoom, stretch', 'do not stretch')
+            lock = lock.replace('keep the complete outer frame visible whenever the product is shown as a framed product',
+                                'keep the complete outer frame visible except for the explicitly supported intentional detail-card crop')
+            lock = lock.replace('never make the product larger by cutting off its outer edges; move the camera closer while preserving the complete frame',
+                                'only the explicitly supported detail card may crop the source photograph; never alter the artwork pixels or frame geometry')
+            lock += '\n\nINTENTIONAL DETAIL CARD ONLY: retain the verified source detail and its advertising function. A photographic detail crop is permitted; never redraw, magnify printed pixels independently, invent details or force a lifestyle-room scene.'
+        sections.append(lock)
     else:
         sections.append(
             "ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION\n"

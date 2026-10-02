@@ -119,7 +119,11 @@ class CarouselDetailPromptTests(unittest.TestCase):
                     prompt = carousel_prompt_card_sections(visual_contract(ads_page.build_ads_prompt(**kwargs, campaign_type="Carousel")))[int(kind[-1])]
                 else:
                     prompt = ads_page.build_ads_prompt(**kwargs, campaign_type=kind)
-                self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
+                if kind.startswith("refresh_"):
+                    self.assertIn("WINNER LED REFRESH V3", prompt)
+                    self.assertIn("CANONICAL_PRODUCT", prompt)
+                else:
+                    self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
 
     def test_existing_new_ads_prompt_refreshes_without_changing_completed_copy_or_context(self):
         result = ads_page.build_ads_result_record("Collector Test", "Cricket", "Australia", "Carousel",
@@ -141,11 +145,13 @@ class CarouselDetailPromptTests(unittest.TestCase):
         for category in ads_page.CATEGORY_OPTIONS[1:]:
             for country in ads_page.COUNTRY_OPTIONS[1:]:
                 current = carousel_prompt_card_sections(visual_contract(final_prompt(category, country)))
-                unchanged = carousel_prompt_card_sections(visual_contract(final_prompt(category, country, creative_refresh_context=winner)))
+                refresh = final_prompt(category, country, creative_refresh_context=winner)
+                self.assertIn("WINNER LED REFRESH V3", refresh)
+                self.assertNotIn("RESOLVED CAROUSEL SCENE", refresh)
                 for index in (2, 3, 4):
                     with self.subTest(category=category, country=country, card=index):
                         self.assertIn("RESOLVED CAROUSEL SCENE", current[index])
-                        self.assertNotIn("RESOLVED CAROUSEL SCENE", unchanged[index])
+                        self.assertIn(f"WINNER_CARD_{index}", refresh)
 
     def test_visual_contract_upgrade_replaces_old_version_once(self):
         kwargs = dict(product_name="Collector Detail Test", category="Cricket", country="Australia", campaign_type="Carousel")

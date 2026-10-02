@@ -1,0 +1,633 @@
+SYNTHETIC FIXTURE — not a real winner or production image analysis.
+
+SPORTS CAVE — CREATIVE REFRESH
+INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS
+SPORTS CAVE CREATIVE REFRESH WINNER CONTEXT V3
+
+CURRENT WINNER / SELECTED REFERENCE CREATIVE
+Product: Legends Never Die Messi vs Ronaldo Wall Art
+Category: Football
+Market: Australia
+Campaign format: Instant Experience
+Product page URL: https://sportscave.com.au/products/legends-never-die-messi-vs-ronaldo-wall-art
+Winning primary text:
+Two legends. One unforgettable rivalry.
+Winning headline:
+Legends Never Die
+Winning description: Collector wall art
+Winning CTA: SHOP_NOW
+Source evidence (factual context, not customer copy):
+{"ad_id": "fixture-ad", "adset_id": "fixture-adset", "campaign_id": "fixture-campaign", "creative_id": "fixture-creative", "image_sha256": "fixture-archive", "market": "AU", "format": "SINGLE IMAGE", "carousel": false, "mode": "complete_ad", "product_mapping": {"product_id": "fixture-messi", "product_title": "Legends Never Die Messi vs Ronaldo Wall Art", "product_handle": "legends-never-die-messi-vs-ronaldo-wall-art", "product_url": "https://sportscave.com.au/products/legends-never-die-messi-vs-ronaldo-wall-art", "category": "Football", "sport": "Football", "canonical_row": {"shopify_product_id": "fixture-messi", "product_title": "Legends Never Die Messi vs Ronaldo Wall Art", "product_handle": "legends-never-die-messi-vs-ronaldo-wall-art", "collections": ["Football"], "online_store_url": "https://sportscave.com.au/products/legends-never-die-messi-vs-ronaldo-wall-art"}}, "components": {"primary_text": {"value": "Two legends. One unforgettable rivalry."}, "headline": {"value": "Legends Never Die"}, "image": {"value": "https://example.fbcdn.net/reference.jpg"}}, "decision": {"reason": "Signals inconclusive", "confidence": "LOW"}, "description": "Collector wall art", "cta": "SHOP_NOW", "date_range": "fixture-date-range", "carousel_cards": [{"position": 1, "image_url": "https://example.fbcdn.net/card1.png", "scene": "bar", "role": "recognition"}, {"position": 2, "image_url": "https://example.fbcdn.net/card2.png", "scene": "billiards", "role": "fan ownership"}, {"position": 3, "image_url": "https://example.fbcdn.net/card3.png", "scene": "office", "role": "collector identity"}, {"position": 4, "image_url": "https://example.fbcdn.net/card4.png", "scene": "lounge", "role": "display desire"}, {"position": 5, "image_url": "https://example.fbcdn.net/card5.png", "scene": "gallery", "role": "edition detail"}]}
+Verified product context: {"product_sport": "Football"}
+
+REFERENCE AUTHORITIES AND ATTACHMENT CHECKLIST
+ATTACHMENT 1 — WINNER_IE (or WINNER_AD for single-image). ATTACHMENT 2 — CANONICAL_PRODUCT — CANONICAL BLACK-FRAME WEBSITE PRODUCT IMAGE (canonical Sports Cave product image).
+CSV TEMPLATE — separate non-image attachment (legacy ATTACHMENT 3 for single-image workflow).
+The canonical black-framed product image supplies the exact artwork and black frame only. Its external background is not a creative reference. Analyse the separately supplied winning advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.
+The PRINTED internal artwork background is immutable. Ignore the canonical image's external wall, room, furniture, camera and shadows. Never reconstruct artwork from a winner.
+Reference map (metadata, NOT completed pixel analysis):
+[{"label": "WINNER_IE", "image_sha256": "fixture-archive", "image_url": "https://example.fbcdn.net/reference.jpg", "evidence": "metadata only; inspect attachment in ChatGPT"}, {"label": "CANONICAL_PRODUCT", "authority": "exact artwork and black frame only"}]
+Missing references: before proceeding, list every missing labelled image explicitly; stop incomplete visual generation. One winning image cannot stand in for five carousel cards. Do not claim all five were reviewed without all five images.
+Analyse each actual attached winner: visible scene/category, card role, defining objects, product attention, strengths/clutter, mood/contrast, copy hook/tone/structure and emotional appeal. Return concise Keep / Change / Improvement rationale in existing notes/context, separate from customer copy. Treat effectiveness as a hypothesis unless performance evidence supports it. A carousel card is a card from a winning carousel, never independently sales-proven.
+
+OBJECTIVE
+Analyse the selected reference and identify the visual/copy principle that appears to be working.
+Preserve the winning creative DNA. Evolve it rather than discard it. Create NEW executions that
+prevent creative fatigue, recognisably related to the reference but not duplicates or unrelated styles.
+Preserve concept and advertising principles, not literal room/composition/wall/crop. Redesign architecture/layout, wall palette/material, camera composition plus at least two other scene dimensions. Never only recolour or move the camera.
+Carousel: original card N maps refreshed card N. Keep all five scene categories, roles, defining objects and sequence; do not apply the IE style library to carousel. Preserve a supported detail-card function.
+IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left CSV identities are compatibility IDs, not three camera angles in one room. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
+Do not describe inconclusive signals or mixed components as a statistically proven winner.
+Only use actual supplied evidence; no invented performance claims, offers, scarcity or endorsements.
+
+Create THREE refreshed creatives: exactly one square 1024 x 1024 cover and ONE copy pair per permanent slot, variation=1, output_mode=winner_refinement. No nine-copy combinations.
+
+COUNTRY LANGUAGE AND LOCALISATION RULES
+
+Selected country: Australia
+
+COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA
+
+Write every customer-facing field in natural Australian English.
+
+Required spelling:
+- colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling
+
+Natural terminology and retail language:
+- delivery, free delivery, add to cart, shop, order, collector, limited edition, framed artwork, race day, and footy only when the selected sport and context make it genuinely appropriate
+
+Sports vocabulary:
+- For Australian motorsport, cricket, basketball, combat, golf, tennis, horse racing and other categories, use terminology Australian fans naturally expect. Motorsport may reference Bathurst, the Mountain, race day, touring-car heritage, Supercars, F1, MotoGP or NASCAR only when supported by the selected product. Cricket language should sound Australian rather than American. Association football should normally be called football or soccer according to the specific Australian audience and existing category naming.
+
+Prohibited mixed-market usage:
+- Do not force words such as mate, Aussie, bloody, legend or reckon. Do not use American spelling such as color, favorite, center, personalize, organize or license as a noun when licence is required. Do not use American retail terminology where it would feel unnatural.
+
+Global localisation instruction:
+- Write every customer-facing field in the natural spelling, terminology and phrasing expected in the selected country.
+- Do not mix Australian, American and British English in the same response.
+- Do not force stereotypes, fake accents, excessive slang or caricatured local phrases.
+- Country localisation controls language and terminology only. It must not invent product facts, local facts, delivery claims, shipping claims, edition quantities or scarcity claims.
+- Treat product names, athlete names, official event names, artwork text, URLs, handles, brand names and official competition names as protected content. Do not rewrite protected content merely to localise spelling.
+
+Before answering, proofread every customer-facing field for the selected country. Correct any spelling, terminology, sports vocabulary or retail language that belongs to a different market.
+
+Country-localisation quality check:
+- Every customer-facing field uses the selected country's spelling.
+- Every customer-facing field uses terminology natural to the selected market.
+- Sports terminology matches both the selected sport and selected country.
+- Retail and delivery terminology matches the selected country.
+- Australian, American and British English are not mixed.
+- No forced slang or market stereotypes are used.
+- No unsupported local facts or commercial claims are invented.
+- All existing campaign-specific character and formatting rules are still satisfied.
+- Australian spelling throughout. No accidental American spelling.
+Use the exact supplied three-row IE contract with one copy pair per cover.
+
+COPY AND IMAGE OUTPUT
+Refresh all required CSV copy fields substantially while retaining the winner's underlying emotional/collector appeal. Distinct openings, supporting arguments and headlines per sibling; reject synonym swaps, reordered openings, repeated descriptions and one-word headline changes. Fixed verified facts, product names and required CTAs may repeat. Carousel tells one connected five-card story aligned to its scenes. Do not invent stock, demand, discounts, delivery, endorsements or personally signed claims.
+Return the copy in the supplied CSV with matching standalone briefs, one per creative/card. Generate images only when requested.
+Every final image prompt must be standalone, name Legends Never Die Messi vs Ronaldo Wall Art, identify its exact winner label and CANONICAL_PRODUCT, and contain the COMPLETE shared realism block below, not a marker or reference to rules above.
+Generate square 1024 x 1024 images with premium photorealistic collector presentation, accurate frame geometry and legible mobile composition.
+For single-image rows, each image_prompt must be at least 200 characters, with no cross-references.
+For Carousel preserve the New Ads card order and fields; use https://sportscave.com.au/products/legends-never-die-messi-vs-ronaldo-wall-art for every card destination.
+Return a completed downloadable UTF-8 CSV; quote commas and paragraph breaks correctly.
+No extra schema, columns or identity changes. Import it into Sports Cave OS, then attach generated images.
+
+
+
+VISUAL CAMPAIGN MOMENT RULE
+Do not inject the Campaign Moment, event, seasonal props or promotion into visual instructions.
+Campaign Moment must never overwrite the reference creative logic. Use only explicitly entered promotions.
+
+REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
+{"version": "WINNER LED REFRESH V3", "run_id": "241b550a24982c046f6ac8d3", "identity_hash": "413e61810918395e327ed64fedac880494c0fc9079aa4955fca20c6f00572bd9", "product": "Legends Never Die Messi vs Ronaldo Wall Art", "category": "Football", "campaign_type": "Instant Experience", "seed": "synthetic-v3", "references": [{"label": "WINNER_IE", "image_sha256": "fixture-archive", "image_url": "https://example.fbcdn.net/reference.jpg", "evidence": "metadata only; inspect attachment in ChatGPT"}, {"label": "CANONICAL_PRODUCT", "authority": "exact artwork and black frame only"}], "styles": [{"id": "07", "name": "Minimal gallery hallway", "family": "hallway", "wall_hue": "warm plaster", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "restrained furnishings", "architecture": "minimal gallery hallway", "lighting": "soft daylight", "context": "art display", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "30", "name": "Modern apartment dining nook", "family": "dining", "wall_hue": "clay", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "compact oak furnishings", "architecture": "apartment dining nook", "lighting": "natural daylight", "context": "dining", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "03", "name": "Industrial loft lounge", "family": "loft", "wall_hue": "warm brick", "wall_value": "mid/light", "wall_material": "brick", "furniture_materials": "steel and leather", "architecture": "high-ceiling loft", "lighting": "side window light", "context": "collector lounge", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}], "recent_styles": [], "visual_analysis": "Pending external ChatGPT attachment inspection; OS has not analysed pixels."}
+For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and same family+palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
+Curated eligible style library (IE/single-image only; never override carousel concepts):
+[{"id": "01", "name": "Heritage billiards room", "family": "games", "wall_hue": "burgundy", "wall_value": "dark", "wall_material": "panelling", "furniture_materials": "traditional timber", "architecture": "heritage enclosed room", "lighting": "warm practical light", "context": "pool table", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "02", "name": "Contemporary home bar", "family": "bar", "wall_hue": "ink-blue", "wall_value": "dark", "wall_material": "paint", "furniture_materials": "walnut cabinetry", "architecture": "modern built-in bar", "lighting": "warm practical light", "context": "home bar", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "03", "name": "Industrial loft lounge", "family": "loft", "wall_hue": "warm brick", "wall_value": "mid/light", "wall_material": "brick", "furniture_materials": "steel and leather", "architecture": "high-ceiling loft", "lighting": "side window light", "context": "collector lounge", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "04", "name": "Modern sports-viewing den", "family": "den", "wall_hue": "olive", "wall_value": "mid/light", "wall_material": "acoustic walls", "furniture_materials": "low seating", "architecture": "modern enclosed den", "lighting": "soft practical light", "context": "viewing room", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "05", "name": "Daylight oak study", "family": "study", "wall_hue": "limestone", "wall_value": "mid/light", "wall_material": "stone", "furniture_materials": "natural timber", "architecture": "daylight study", "lighting": "natural daylight", "context": "desk", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "06", "name": "Traditional private library", "family": "library", "wall_hue": "oxblood", "wall_value": "dark", "wall_material": "paint", "furniture_materials": "bookshelves", "architecture": "traditional library", "lighting": "warm reading light", "context": "books", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "07", "name": "Minimal gallery hallway", "family": "hallway", "wall_hue": "warm plaster", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "restrained furnishings", "architecture": "minimal gallery hallway", "lighting": "soft daylight", "context": "art display", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "08", "name": "Mid-century conversation lounge", "family": "lounge", "wall_hue": "tobacco", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "teak and mustard upholstery", "architecture": "mid-century lounge", "lighting": "warm lamp light", "context": "conversation seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "09", "name": "Coastal collector lounge", "family": "lounge", "wall_hue": "muted blue", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "whitewashed timber", "architecture": "coastal lounge", "lighting": "soft daylight", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "10", "name": "Scandinavian reading room", "family": "reading", "wall_hue": "sage", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "ash furniture", "architecture": "Scandinavian reading room", "lighting": "diffuse daylight", "context": "reading chair", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "11", "name": "Japandi living room", "family": "lounge", "wall_hue": "sand", "wall_value": "mid/light", "wall_material": "limewash", "furniture_materials": "dark timber", "architecture": "Japandi living room", "lighting": "soft daylight", "context": "restrained seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "12", "name": "Sunken conversation room", "family": "lounge", "wall_hue": "deep taupe", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "built-in seating", "architecture": "sunken conversation room", "lighting": "warm practical light", "context": "conversation seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "13", "name": "Contemporary penthouse lounge", "family": "lounge", "wall_hue": "slate", "wall_value": "dark", "wall_material": "stone", "furniture_materials": "clean glazing", "architecture": "penthouse lounge", "lighting": "side window light", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "14", "name": "Converted warehouse apartment", "family": "loft", "wall_hue": "pale concrete", "wall_value": "mid/light", "wall_material": "concrete", "furniture_materials": "warm furnishings", "architecture": "converted warehouse", "lighting": "diffuse daylight", "context": "apartment seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "15", "name": "Vinyl listening room", "family": "listening", "wall_hue": "aubergine", "wall_value": "dark", "wall_material": "acoustic surfaces", "furniture_materials": "record storage", "architecture": "private listening room", "lighting": "warm practical light", "context": "records", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "16", "name": "Home cinema foyer", "family": "foyer", "wall_hue": "midnight-blue", "wall_value": "dark", "wall_material": "paint", "furniture_materials": "restrained timber", "architecture": "cinema foyer", "lighting": "subtle practical lighting", "context": "foyer", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "17", "name": "Collector display study", "family": "study", "wall_hue": "warm grey", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "restrained display niches", "architecture": "display study", "lighting": "soft practical light", "context": "display niches", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "19", "name": "Private training lounge", "family": "training", "wall_hue": "warm grey", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "timber bench", "architecture": "private training lounge", "lighting": "natural daylight", "context": "training", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "20", "name": "Heritage clubroom", "family": "clubroom", "wall_hue": "forest-green", "wall_value": "dark", "wall_material": "paint", "furniture_materials": "leather chairs", "architecture": "heritage clubroom", "lighting": "warm lamp light", "context": "club seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "21", "name": "Converted barn living room", "family": "lounge", "wall_hue": "chalk", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "exposed timber beams", "architecture": "converted barn", "lighting": "soft daylight", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "22", "name": "Townhouse stair landing", "family": "hallway", "wall_hue": "mineral-blue", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "stone stair details", "architecture": "townhouse stair landing", "lighting": "natural daylight", "context": "art display", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "23", "name": "Converted attic study", "family": "study", "wall_hue": "muted olive", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "timber desk", "architecture": "sloped attic ceiling", "lighting": "roof-window daylight", "context": "desk", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "24", "name": "Contemporary games room", "family": "games", "wall_hue": "cream", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "ochre accents", "architecture": "modern games room", "lighting": "soft practical light", "context": "pool table", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "25", "name": "Chess and reading lounge", "family": "reading", "wall_hue": "tobacco", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "pale timber", "architecture": "reading lounge", "lighting": "warm reading light", "context": "chess", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "26", "name": "Restrained Art Deco lounge", "family": "lounge", "wall_hue": "plum", "wall_value": "dark", "wall_material": "paint", "furniture_materials": "fluted walnut", "architecture": "Art Deco lounge", "lighting": "warm practical light", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "27", "name": "Modern farmhouse sitting room", "family": "lounge", "wall_hue": "dove-grey", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "limestone fireplace", "architecture": "farmhouse sitting room", "lighting": "soft daylight", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "28", "name": "Courtyard-facing lounge", "family": "lounge", "wall_hue": "terracotta", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "restrained timber", "architecture": "courtyard-facing lounge", "lighting": "soft natural light", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "29", "name": "Timber-lined collector retreat", "family": "retreat", "wall_hue": "cedar", "wall_value": "mid/light", "wall_material": "timber", "furniture_materials": "simple furnishings", "architecture": "timber-lined retreat", "lighting": "simple warm lighting", "context": "collector seating", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}, {"id": "30", "name": "Modern apartment dining nook", "family": "dining", "wall_hue": "clay", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "compact oak furnishings", "architecture": "apartment dining nook", "lighting": "natural daylight", "context": "dining", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}]
+
+STANDALONE EXECUTION CONTRACTS — complete each after actual attachment analysis
+PRODUCT: Legends Never Die Messi vs Ronaldo Wall Art
+REFERENCE: WINNER_IE; inspect this exact attachment. CANONICAL_PRODUCT is the independent immutable product authority.
+The canonical black-framed product image supplies the exact artwork and black frame only. Its external background is not a creative reference. Analyse the separately supplied winning advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.
+Keep/Change/Improvement rationale: after inspecting WINNER_IE, record observed concept, advertising role, product prominence, mood, hierarchy, clutter and copy appeal. Preserve the concept and role; do not claim causal sales evidence for an individual carousel card.
+Concept anchor: Determine from this winner attachment; do not substitute another reference.
+Advertising role: Determine from this winner attachment.
+Candidate execution (subject to visual compatibility): {"id": "07", "name": "Minimal gallery hallway", "family": "hallway", "wall_hue": "warm plaster", "wall_value": "mid/light", "wall_material": "plaster", "furniture_materials": "restrained furnishings", "architecture": "minimal gallery hallway", "lighting": "soft daylight", "context": "art display", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}
+Redesign architecture and layout, wall palette/material and camera composition, plus at least two of furniture, lighting, flooring, background or product placement. Describe each concrete change in the final brief. Keep defining objects (including a pool table for a billiards concept). Never replace a bar with an office. For an intentional detail card preserve its detail function rather than force a room.
+Design a genuinely new photograph, not a recolour, crop or angle sibling. Product remains the mobile-readable hero, never a tiny object in a wide interior. Compare with the winner and every sibling; revise near-duplicate rooms, palettes, layouts and copy openings.
+Output: square 1024 x 1024; preserve production safe areas and deterministic branded overlays, do not alter printed artwork. Camera perspective transforms the whole rigid product only. Explicitly describe mounting depth, contact shadow, light direction and restrained glazing reflections in the final execution. Show the full outer black frame.
+Use an existing source-preserving composite where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Do not paste the canonical external stock-photo background rectangle into the new scene.
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+
+AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES
+
+This shared master block is mandatory and overrides conflicting creative direction.
+
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PHOTOREALISM AND HUMAN REALISM - MANDATORY
+These rules apply to every ChatGPT request that creates, transforms, extends, composites, animates or otherwise produces a Sports Cave image or visual. These rules override any conflicting creative direction, style request, workflow note, room idea, camera idea, campaign concept or platform instruction.
+
+The final output must look like genuine professional photography or physically believable real-world footage. It must not look AI-generated, CGI, rendered, illustrated, painted, plastic, glossy, video-game-like, synthetic, over-smoothed, over-sharpened or fake.
+
+Use natural professional photography:
+- believable camera perspective, scale, lens choice and depth
+- straight architectural lines and physically possible room geometry
+- realistic furniture, wall, floor, ceiling and material proportions
+- natural textures on timber, paper, glass, plaster, fabric, metal and skin
+- consistent light direction, colour temperature, reflections and shadows
+- realistic contact shadows, ambient occlusion and object weight
+- no excessive HDR, bloom, glow, sharpening, fisheye distortion, fake blur or synthetic colour grading
+- no floating, melted, duplicated, malformed, impossible, intersecting or physically incoherent objects
+- no warped walls, bent shelves, impossible windows, distorted furniture, fake luxury clutter or random generated props
+
+When people appear, they must look like real people photographed in the scene:
+- Faces must remain natural, recognisable and anatomically correct
+- realistic faces, skin texture, hair, eyes, teeth, hands, fingers, wrists, arms, anatomy, posture and clothing
+- natural asymmetry and believable imperfections
+- correct number of limbs and fingers
+- no waxy skin, mannequin bodies, duplicated fingers, melted hands, disconnected limbs, uncanny eyes, fake smiles or stock-model posing
+- people, hands, furniture, glare, logos, branding and overlays must never cover the hero product or important product details unless the workflow explicitly asks for a separate deterministic branded export layer
+
+Respect the requested output format exactly:
+- use the exact requested dimensions and aspect ratio
+- compose for that canvas from the start rather than cropping from another format
+- keep all critical subject matter inside platform-safe areas when safe areas are supplied
+- before returning, inspect the final result for correct dimensions, clean geometry, realistic materials, consistent light, readable product details and absence of obvious AI artifacts
+
+SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY
+PRODUCT LOCK:
+PRODUCT AND ARTWORK LOCK - MANDATORY
+Apply this product lock whenever an uploaded Sports Cave product, artwork, framed product, framed mockup or product reference image is used as the source.
+
+Treat the uploaded full-resolution product as an immutable physical asset. Use the uploaded image directly as the source, not a screenshot, thumbnail, compressed preview, metadata description, memory of the image, rough approximation or AI recreation.
+
+Preserve the complete artwork exactly:
+- every athlete, face, body, team, vehicle, stadium, crowd, background, equipment and supporting image
+- every word, letter, number, logo, signature, title, subtitle, font, colour, border, crop, layout and design element
+- every limited-edition badge, plaque, collector badge, numbered detail and edition plate exactly as supplied
+- the exact artwork aspect ratio inside the frame
+- the exact frame colour, material, thickness, depth, proportions, crop and outer geometry
+- the exact black frame colour, material, thickness and proportions when the supplied product uses a black frame
+
+Never fabricate, repair, replace or invent product details:
+- Do not redesign the artwork.
+- Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
+- Never invent or change an edition number.
+- no fake edition numbers, unreadable plaque information, invented signatures, fake logos, new team marks, new sporting details or made-up text
+- do not recolour, enhance, repaint, sharpen, soften, upscale, regenerate, reinterpret, redraw, approximate or create a lookalike version of the artwork
+- do not mirror the artwork if it reverses text, numbers, logos, livery, jersey details or signatures
+- do not crop, zoom, stretch, squash, bend, bow, twist, curve, taper, warp, blur, melt, reshape or distort the product, artwork, frame, glass, plaque, badge or typography
+
+FRAME REALISM:
+Lock the frame geometry:
+- keep all four outer frame edges straight and all corners structurally correct
+- keep the complete outer frame visible whenever the product is shown as a framed product
+- preserve the rectangular landscape proportions of the frame and artwork
+- natural camera perspective may affect the whole product only as one rigid rectangular physical object
+- never allow conflicting perspective between the frame, artwork, glass, wall, furniture and room
+- never make the product larger by cutting off its outer edges; move the camera closer while preserving the complete frame
+
+Require genuine physical frame construction:
+- believable timber or frame depth
+- consistent thickness on all visible sides
+- sharp square corners and clean mitred joins
+- subtle realistic frame texture
+- realistic bevels, edges, weight and scale
+- physical mounting, contact shadows, ambient occlusion and light direction that match the room
+
+GLASS REALISM:
+Require realistic transparent glass:
+- genuine clear glass over the artwork, not fake shine or missing glazing
+- restrained room-based reflections, subtle natural glare and realistic highlight falloff
+- reflections consistent with the windows, lights and camera angle
+- glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
+
+ROOM REALISM:
+Require believable placement:
+- the product must look mounted, held or placed naturally in the room
+- it must never float, sink into a wall, intersect furniture, bend around a corner, detach from shadows or look digitally pasted on
+- wall shadows, contact shadows and ambient occlusion must match the product size, mounting depth and room lighting
+
+Keep the Sports Cave product as the visual hero:
+- the room supports the product; Sports Cave is selling the framed edition, not the room
+- keep the framed product prominent, dominant and large enough to understand on mobile
+- avoid distant wide-room compositions that make the frame small or secondary
+- prevent people, hands, furniture, glare, decor, branding, overlays or platform UI space from covering the product or important details
+
+Mandatory final product inspection:
+- confirm the uploaded artwork and frame remain unchanged
+- confirm every face, word, number, colour, logo, signature, badge, plaque and edition plate is preserved
+- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts
+
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 24–28% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Use no more than six words and no more than 28 characters including spaces and punctuation.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
+- Valid: ONLY 100 WILL EVER EXIST
+- Reject and shorten any longer product-specific scarcity wording before it reaches an image-generation prompt.
+
+SUPPORTING LINE
+- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
+- Express one clean supporting thought on exactly one line at the existing supporting-copy size.
+- Never wrap or compress the supporting typography.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line and use an approved collector-led action: CLAIM YOUR EDITION, SECURE YOUR EDITION, CLAIM THIS EDITION or SECURE THIS EDITION.
+- Do not use a longer explanatory CTA.
+
+The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.
+PRODUCT: Legends Never Die Messi vs Ronaldo Wall Art
+REFERENCE: WINNER_IE; inspect this exact attachment. CANONICAL_PRODUCT is the independent immutable product authority.
+The canonical black-framed product image supplies the exact artwork and black frame only. Its external background is not a creative reference. Analyse the separately supplied winning advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.
+Keep/Change/Improvement rationale: after inspecting WINNER_IE, record observed concept, advertising role, product prominence, mood, hierarchy, clutter and copy appeal. Preserve the concept and role; do not claim causal sales evidence for an individual carousel card.
+Concept anchor: Determine from this winner attachment; do not substitute another reference.
+Advertising role: Determine from this winner attachment.
+Candidate execution (subject to visual compatibility): {"id": "30", "name": "Modern apartment dining nook", "family": "dining", "wall_hue": "clay", "wall_value": "mid/light", "wall_material": "paint", "furniture_materials": "compact oak furnishings", "architecture": "apartment dining nook", "lighting": "natural daylight", "context": "dining", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}
+Redesign architecture and layout, wall palette/material and camera composition, plus at least two of furniture, lighting, flooring, background or product placement. Describe each concrete change in the final brief. Keep defining objects (including a pool table for a billiards concept). Never replace a bar with an office. For an intentional detail card preserve its detail function rather than force a room.
+Design a genuinely new photograph, not a recolour, crop or angle sibling. Product remains the mobile-readable hero, never a tiny object in a wide interior. Compare with the winner and every sibling; revise near-duplicate rooms, palettes, layouts and copy openings.
+Output: square 1024 x 1024; preserve production safe areas and deterministic branded overlays, do not alter printed artwork. Camera perspective transforms the whole rigid product only. Explicitly describe mounting depth, contact shadow, light direction and restrained glazing reflections in the final execution. Show the full outer black frame.
+Use an existing source-preserving composite where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Do not paste the canonical external stock-photo background rectangle into the new scene.
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+
+AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES
+
+This shared master block is mandatory and overrides conflicting creative direction.
+
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PHOTOREALISM AND HUMAN REALISM - MANDATORY
+These rules apply to every ChatGPT request that creates, transforms, extends, composites, animates or otherwise produces a Sports Cave image or visual. These rules override any conflicting creative direction, style request, workflow note, room idea, camera idea, campaign concept or platform instruction.
+
+The final output must look like genuine professional photography or physically believable real-world footage. It must not look AI-generated, CGI, rendered, illustrated, painted, plastic, glossy, video-game-like, synthetic, over-smoothed, over-sharpened or fake.
+
+Use natural professional photography:
+- believable camera perspective, scale, lens choice and depth
+- straight architectural lines and physically possible room geometry
+- realistic furniture, wall, floor, ceiling and material proportions
+- natural textures on timber, paper, glass, plaster, fabric, metal and skin
+- consistent light direction, colour temperature, reflections and shadows
+- realistic contact shadows, ambient occlusion and object weight
+- no excessive HDR, bloom, glow, sharpening, fisheye distortion, fake blur or synthetic colour grading
+- no floating, melted, duplicated, malformed, impossible, intersecting or physically incoherent objects
+- no warped walls, bent shelves, impossible windows, distorted furniture, fake luxury clutter or random generated props
+
+When people appear, they must look like real people photographed in the scene:
+- Faces must remain natural, recognisable and anatomically correct
+- realistic faces, skin texture, hair, eyes, teeth, hands, fingers, wrists, arms, anatomy, posture and clothing
+- natural asymmetry and believable imperfections
+- correct number of limbs and fingers
+- no waxy skin, mannequin bodies, duplicated fingers, melted hands, disconnected limbs, uncanny eyes, fake smiles or stock-model posing
+- people, hands, furniture, glare, logos, branding and overlays must never cover the hero product or important product details unless the workflow explicitly asks for a separate deterministic branded export layer
+
+Respect the requested output format exactly:
+- use the exact requested dimensions and aspect ratio
+- compose for that canvas from the start rather than cropping from another format
+- keep all critical subject matter inside platform-safe areas when safe areas are supplied
+- before returning, inspect the final result for correct dimensions, clean geometry, realistic materials, consistent light, readable product details and absence of obvious AI artifacts
+
+SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY
+PRODUCT LOCK:
+PRODUCT AND ARTWORK LOCK - MANDATORY
+Apply this product lock whenever an uploaded Sports Cave product, artwork, framed product, framed mockup or product reference image is used as the source.
+
+Treat the uploaded full-resolution product as an immutable physical asset. Use the uploaded image directly as the source, not a screenshot, thumbnail, compressed preview, metadata description, memory of the image, rough approximation or AI recreation.
+
+Preserve the complete artwork exactly:
+- every athlete, face, body, team, vehicle, stadium, crowd, background, equipment and supporting image
+- every word, letter, number, logo, signature, title, subtitle, font, colour, border, crop, layout and design element
+- every limited-edition badge, plaque, collector badge, numbered detail and edition plate exactly as supplied
+- the exact artwork aspect ratio inside the frame
+- the exact frame colour, material, thickness, depth, proportions, crop and outer geometry
+- the exact black frame colour, material, thickness and proportions when the supplied product uses a black frame
+
+Never fabricate, repair, replace or invent product details:
+- Do not redesign the artwork.
+- Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
+- Never invent or change an edition number.
+- no fake edition numbers, unreadable plaque information, invented signatures, fake logos, new team marks, new sporting details or made-up text
+- do not recolour, enhance, repaint, sharpen, soften, upscale, regenerate, reinterpret, redraw, approximate or create a lookalike version of the artwork
+- do not mirror the artwork if it reverses text, numbers, logos, livery, jersey details or signatures
+- do not crop, zoom, stretch, squash, bend, bow, twist, curve, taper, warp, blur, melt, reshape or distort the product, artwork, frame, glass, plaque, badge or typography
+
+FRAME REALISM:
+Lock the frame geometry:
+- keep all four outer frame edges straight and all corners structurally correct
+- keep the complete outer frame visible whenever the product is shown as a framed product
+- preserve the rectangular landscape proportions of the frame and artwork
+- natural camera perspective may affect the whole product only as one rigid rectangular physical object
+- never allow conflicting perspective between the frame, artwork, glass, wall, furniture and room
+- never make the product larger by cutting off its outer edges; move the camera closer while preserving the complete frame
+
+Require genuine physical frame construction:
+- believable timber or frame depth
+- consistent thickness on all visible sides
+- sharp square corners and clean mitred joins
+- subtle realistic frame texture
+- realistic bevels, edges, weight and scale
+- physical mounting, contact shadows, ambient occlusion and light direction that match the room
+
+GLASS REALISM:
+Require realistic transparent glass:
+- genuine clear glass over the artwork, not fake shine or missing glazing
+- restrained room-based reflections, subtle natural glare and realistic highlight falloff
+- reflections consistent with the windows, lights and camera angle
+- glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
+
+ROOM REALISM:
+Require believable placement:
+- the product must look mounted, held or placed naturally in the room
+- it must never float, sink into a wall, intersect furniture, bend around a corner, detach from shadows or look digitally pasted on
+- wall shadows, contact shadows and ambient occlusion must match the product size, mounting depth and room lighting
+
+Keep the Sports Cave product as the visual hero:
+- the room supports the product; Sports Cave is selling the framed edition, not the room
+- keep the framed product prominent, dominant and large enough to understand on mobile
+- avoid distant wide-room compositions that make the frame small or secondary
+- prevent people, hands, furniture, glare, decor, branding, overlays or platform UI space from covering the product or important details
+
+Mandatory final product inspection:
+- confirm the uploaded artwork and frame remain unchanged
+- confirm every face, word, number, colour, logo, signature, badge, plaque and edition plate is preserved
+- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts
+
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 24–28% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Use no more than six words and no more than 28 characters including spaces and punctuation.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
+- Valid: ONLY 100 WILL EVER EXIST
+- Reject and shorten any longer product-specific scarcity wording before it reaches an image-generation prompt.
+
+SUPPORTING LINE
+- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
+- Express one clean supporting thought on exactly one line at the existing supporting-copy size.
+- Never wrap or compress the supporting typography.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line and use an approved collector-led action: CLAIM YOUR EDITION, SECURE YOUR EDITION, CLAIM THIS EDITION or SECURE THIS EDITION.
+- Do not use a longer explanatory CTA.
+
+The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.
+PRODUCT: Legends Never Die Messi vs Ronaldo Wall Art
+REFERENCE: WINNER_IE; inspect this exact attachment. CANONICAL_PRODUCT is the independent immutable product authority.
+The canonical black-framed product image supplies the exact artwork and black frame only. Its external background is not a creative reference. Analyse the separately supplied winning advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.
+Keep/Change/Improvement rationale: after inspecting WINNER_IE, record observed concept, advertising role, product prominence, mood, hierarchy, clutter and copy appeal. Preserve the concept and role; do not claim causal sales evidence for an individual carousel card.
+Concept anchor: Determine from this winner attachment; do not substitute another reference.
+Advertising role: Determine from this winner attachment.
+Candidate execution (subject to visual compatibility): {"id": "03", "name": "Industrial loft lounge", "family": "loft", "wall_hue": "warm brick", "wall_value": "mid/light", "wall_material": "brick", "furniture_materials": "steel and leather", "architecture": "high-ceiling loft", "lighting": "side window light", "context": "collector lounge", "compatibility": "Candidate premium collector environment; confirm against actual winner pixels before use.", "exclusions": "No invented sporting equipment, logos, memorabilia or demographic stereotypes."}
+Redesign architecture and layout, wall palette/material and camera composition, plus at least two of furniture, lighting, flooring, background or product placement. Describe each concrete change in the final brief. Keep defining objects (including a pool table for a billiards concept). Never replace a bar with an office. For an intentional detail card preserve its detail function rather than force a room.
+Design a genuinely new photograph, not a recolour, crop or angle sibling. Product remains the mobile-readable hero, never a tiny object in a wide interior. Compare with the winner and every sibling; revise near-duplicate rooms, palettes, layouts and copy openings.
+Output: square 1024 x 1024; preserve production safe areas and deterministic branded overlays, do not alter printed artwork. Camera perspective transforms the whole rigid product only. Explicitly describe mounting depth, contact shadow, light direction and restrained glazing reflections in the final execution. Show the full outer black frame.
+Use an existing source-preserving composite where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Do not paste the canonical external stock-photo background rectangle into the new scene.
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+
+AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES
+
+This shared master block is mandatory and overrides conflicting creative direction.
+
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PHOTOREALISM AND HUMAN REALISM - MANDATORY
+These rules apply to every ChatGPT request that creates, transforms, extends, composites, animates or otherwise produces a Sports Cave image or visual. These rules override any conflicting creative direction, style request, workflow note, room idea, camera idea, campaign concept or platform instruction.
+
+The final output must look like genuine professional photography or physically believable real-world footage. It must not look AI-generated, CGI, rendered, illustrated, painted, plastic, glossy, video-game-like, synthetic, over-smoothed, over-sharpened or fake.
+
+Use natural professional photography:
+- believable camera perspective, scale, lens choice and depth
+- straight architectural lines and physically possible room geometry
+- realistic furniture, wall, floor, ceiling and material proportions
+- natural textures on timber, paper, glass, plaster, fabric, metal and skin
+- consistent light direction, colour temperature, reflections and shadows
+- realistic contact shadows, ambient occlusion and object weight
+- no excessive HDR, bloom, glow, sharpening, fisheye distortion, fake blur or synthetic colour grading
+- no floating, melted, duplicated, malformed, impossible, intersecting or physically incoherent objects
+- no warped walls, bent shelves, impossible windows, distorted furniture, fake luxury clutter or random generated props
+
+When people appear, they must look like real people photographed in the scene:
+- Faces must remain natural, recognisable and anatomically correct
+- realistic faces, skin texture, hair, eyes, teeth, hands, fingers, wrists, arms, anatomy, posture and clothing
+- natural asymmetry and believable imperfections
+- correct number of limbs and fingers
+- no waxy skin, mannequin bodies, duplicated fingers, melted hands, disconnected limbs, uncanny eyes, fake smiles or stock-model posing
+- people, hands, furniture, glare, logos, branding and overlays must never cover the hero product or important product details unless the workflow explicitly asks for a separate deterministic branded export layer
+
+Respect the requested output format exactly:
+- use the exact requested dimensions and aspect ratio
+- compose for that canvas from the start rather than cropping from another format
+- keep all critical subject matter inside platform-safe areas when safe areas are supplied
+- before returning, inspect the final result for correct dimensions, clean geometry, realistic materials, consistent light, readable product details and absence of obvious AI artifacts
+
+SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY
+PRODUCT LOCK:
+PRODUCT AND ARTWORK LOCK - MANDATORY
+Apply this product lock whenever an uploaded Sports Cave product, artwork, framed product, framed mockup or product reference image is used as the source.
+
+Treat the uploaded full-resolution product as an immutable physical asset. Use the uploaded image directly as the source, not a screenshot, thumbnail, compressed preview, metadata description, memory of the image, rough approximation or AI recreation.
+
+Preserve the complete artwork exactly:
+- every athlete, face, body, team, vehicle, stadium, crowd, background, equipment and supporting image
+- every word, letter, number, logo, signature, title, subtitle, font, colour, border, crop, layout and design element
+- every limited-edition badge, plaque, collector badge, numbered detail and edition plate exactly as supplied
+- the exact artwork aspect ratio inside the frame
+- the exact frame colour, material, thickness, depth, proportions, crop and outer geometry
+- the exact black frame colour, material, thickness and proportions when the supplied product uses a black frame
+
+Never fabricate, repair, replace or invent product details:
+- Do not redesign the artwork.
+- Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
+- Never invent or change an edition number.
+- no fake edition numbers, unreadable plaque information, invented signatures, fake logos, new team marks, new sporting details or made-up text
+- do not recolour, enhance, repaint, sharpen, soften, upscale, regenerate, reinterpret, redraw, approximate or create a lookalike version of the artwork
+- do not mirror the artwork if it reverses text, numbers, logos, livery, jersey details or signatures
+- do not crop, zoom, stretch, squash, bend, bow, twist, curve, taper, warp, blur, melt, reshape or distort the product, artwork, frame, glass, plaque, badge or typography
+
+FRAME REALISM:
+Lock the frame geometry:
+- keep all four outer frame edges straight and all corners structurally correct
+- keep the complete outer frame visible whenever the product is shown as a framed product
+- preserve the rectangular landscape proportions of the frame and artwork
+- natural camera perspective may affect the whole product only as one rigid rectangular physical object
+- never allow conflicting perspective between the frame, artwork, glass, wall, furniture and room
+- never make the product larger by cutting off its outer edges; move the camera closer while preserving the complete frame
+
+Require genuine physical frame construction:
+- believable timber or frame depth
+- consistent thickness on all visible sides
+- sharp square corners and clean mitred joins
+- subtle realistic frame texture
+- realistic bevels, edges, weight and scale
+- physical mounting, contact shadows, ambient occlusion and light direction that match the room
+
+GLASS REALISM:
+Require realistic transparent glass:
+- genuine clear glass over the artwork, not fake shine or missing glazing
+- restrained room-based reflections, subtle natural glare and realistic highlight falloff
+- reflections consistent with the windows, lights and camera angle
+- glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
+
+ROOM REALISM:
+Require believable placement:
+- the product must look mounted, held or placed naturally in the room
+- it must never float, sink into a wall, intersect furniture, bend around a corner, detach from shadows or look digitally pasted on
+- wall shadows, contact shadows and ambient occlusion must match the product size, mounting depth and room lighting
+
+Keep the Sports Cave product as the visual hero:
+- the room supports the product; Sports Cave is selling the framed edition, not the room
+- keep the framed product prominent, dominant and large enough to understand on mobile
+- avoid distant wide-room compositions that make the frame small or secondary
+- prevent people, hands, furniture, glare, decor, branding, overlays or platform UI space from covering the product or important details
+
+Mandatory final product inspection:
+- confirm the uploaded artwork and frame remain unchanged
+- confirm every face, word, number, colour, logo, signature, badge, plaque and edition plate is preserved
+- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts
+
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 24–28% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Use no more than six words and no more than 28 characters including spaces and punctuation.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
+- Valid: ONLY 100 WILL EVER EXIST
+- Reject and shorten any longer product-specific scarcity wording before it reaches an image-generation prompt.
+
+SUPPORTING LINE
+- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
+- Express one clean supporting thought on exactly one line at the existing supporting-copy size.
+- Never wrap or compress the supporting typography.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line and use an approved collector-led action: CLAIM YOUR EDITION, SECURE YOUR EDITION, CLAIM THIS EDITION or SECURE THIS EDITION.
+- Do not use a longer explanatory CTA.
+
+The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.
+
+EXECUTION NOTES — return a JSON array alongside the CSV; no new CSV columns.
+Exactly one record per output in permanent order with position (integer), winner_reference (WINNER_CARD_N/WINNER_IE/WINNER_AD), reference_inspected and canonical_inspected (true only after viewing both actual attachments), observations (object with scene_category, ad_role, defining_objects, composition, product_attention, strengths, clutter, mood_contrast, copy_hook, tone, structure, emotional_appeal; include observed execution dimensions where visible, label unknowns honestly), scene, role, keep, change, improvement, style_id (IE/single-image only), execution (object with architecture, layout, wall_palette, wall_material, camera and at least two of furniture, lighting, flooring, background, product_placement; for a supported intentional detail card use camera, lighting and product_placement without forcing room architecture), image_prompt (complete final standalone prompt). These go into existing internal ad notes, never customer ad copy. Include concrete architecture/layout, wall treatment, camera, furniture/materials, product placement, coherent light/glass and overlays in each image_prompt. Reuse actual supplied output/safe-area conventions; preserve deterministic branding separately from immutable artwork.
+
+FINAL BATCH CHECK
+Check exact role map, 5 carousel or 3 IE outputs, order, all copy fields, explicit keep/change/new execution, full shared rules in EACH final brief, distinct rooms and substantive copy. Revise near-duplicates. Do not claim visual product fidelity was verified without viewing the actual output images.
+
+EXACT CSV TEMPLATE
+schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta
+2,instant_experience,winner_refinement,premium_scarcity_right,PREMIUM SCARCITY — RIGHT ANGLE — Slight right-angle product photograph,1,legacy_standard,Description 1 — Legacy Standard,,,Claim Your Edition
+2,instant_experience,winner_refinement,premium_scarcity_front,PREMIUM SCARCITY — STRAIGHT ON — Straight-on product photograph,1,legacy_standard,Description 1 — Legacy Standard,,,Claim Your Edition
+2,instant_experience,winner_refinement,premium_scarcity_left,PREMIUM SCARCITY — LEFT ANGLE — Slight left-angle product photograph,1,legacy_standard,Description 1 — Legacy Standard,,,Claim Your Edition

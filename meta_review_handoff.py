@@ -117,6 +117,18 @@ def build_package(ad,selections,context,mode):
             'description':next(iter(ad['assets']['description']),{}).get('value',''),
             'cta':next(iter(ad['assets']['cta']),{}).get('value',''),
             'destination_url':next(iter(ad['assets']['url']),{}).get('value','')}
+    # Preserve original carousel order separately from deduplicated asset candidates.
+    raw = (ad.get('raw') or {}).get('creative') or ad.get('creative_metadata') or {}
+    link = (raw.get('object_story_spec') or {}).get('link_data') or {}
+    children = link.get('child_attachments') or []
+    if mode == 'best_components' and str(selections['image']['ad_id']) != str(ad['ad_id']):
+        children = []  # Mixed-ad image evidence cannot silently certify this ad's five cards.
+    if isinstance(children, list) and children:
+        package['carousel_cards'] = [
+            {'position': i, 'image_url': child.get('picture') or child.get('image_url') or '',
+             'headline': child.get('name') or '', 'description': child.get('description') or '',
+             'destination_url': child.get('link') or ''}
+            for i, child in enumerate([c if isinstance(c, dict) else {} for c in children[:5]], 1)]
     package['campaign_type_resolution'] = resolve_campaign_type(package, ad)
     if package['campaign_type_resolution']['confirmed']:
         package['source_campaign_type'] = package['campaign_type_resolution']['campaign_type']
@@ -126,6 +138,13 @@ def build_package(ad,selections,context,mode):
 def queue(package,state,actor='sports_cave_os'):
     package=products.enrich(package)
     package['image_sha256']=archive_image(package['components']['image']['value'])
+    archived = {package['components']['image']['value']: package['image_sha256']}
+    for card in (package.get('carousel_cards') or [])[:5]:
+        if card.get('image_url'):
+            url = card['image_url']
+            if url not in archived:
+                archived[url] = archive_image(url)
+            card['image_sha256'] = archived[url]
     package['decision_id']=store.save_selection(package,actor,'meta_review_handoff')
     state[PENDING]=package
 
@@ -257,6 +276,24 @@ def render_source(st):
             st.caption('Product matched: '+source['product_mapping']['product_title']+' · '+str(source.get('product_match_method') or 'canonical mapping'))
         if source.get('mode')=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
+        if resolve_campaign_type(source)['campaign_type'] == 'Carousel':
+            from ads_refresh_plan import reference_map
+            cards = reference_map('Carousel', source)[:5]
+            from ads_refresh_reference import render_winning_image_copy
+            with st.expander('Five winner card references', expanded=False):
+                for position in range(1, 6):
+                    card = cards[position-1] if len(cards) >= position else {}
+                    st.caption(f'WINNER_CARD_{position} — card from the selected carousel')
+                    try:
+                        data, mime = store.load_media(card['image_sha256']) if card.get('image_sha256') else (None, None)
+                        if data:
+                            st.image(data, width=240)
+                            render_winning_image_copy(data, mime)
+                        else:
+                            st.caption(f'Missing WINNER_CARD_{position}: attach the original card manually in ChatGPT.')
+                    except Exception:
+                        st.caption(f'WINNER_CARD_{position} unavailable: attach the original card manually in ChatGPT.')
+            return True
         try:
             data,mime=store.load_media(source['image_sha256'])
             if data:

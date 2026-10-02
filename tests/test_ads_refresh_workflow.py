@@ -47,9 +47,21 @@ def completed_single():
     workflow = {'context_key': value['context_key'], 'campaign_type': value['campaign_type'],
                 'slots': {}, 'outcomes': {}, 'widget_nonces': {}, 'export_date': '2026-09-30', 'ad_notes': {}}
     rows = [{'schema_version': '1', 'ad_number': i, 'product_name': TITLE, 'strategy': f'Refresh {i}',
-             'primary_text': f'Collector variation {i}.\nTwo legends, one rivalry.', 'headline': f'Legends {i}',
-             'description': 'Collector wall art', 'cta': 'Shop Now',
+             'primary_text': ('A rivalry worth a place on your wall.', 'Remember the moments that made football yours.', 'Give your collection an enduring centrepiece.')[i-1], 'headline': ('Own the rivalry', 'Football remembered', 'A collectors centrepiece')[i-1],
+             'description': ('A rivalry for your wall', 'Keep the football memory', 'A focal point for collectors')[i-1], 'cta': 'Shop Now',
              'image_prompt': TITLE + '. ' + ('Preserve exact black-frame artwork in a premium collector room with controlled composition and realistic light. ' * 3)} for i in range(1, 4)]
+    import ads_refresh_plan as plan
+    selected = value['creative_refresh_context']['refresh_plan']
+    workflow['ad_notes']['refresh_executions'] = [dict(
+        position=i, winner_reference='WINNER_AD', reference_inspected=True, canonical_inspected=True,
+        observations={k:'Synthetic fixture observation: '+style['name'] for k in ('scene_category','ad_role','defining_objects','composition','product_attention','strengths','clutter','mood_contrast','copy_hook','tone','structure','emotional_appeal')}, scene=style['name'], role='collector ownership',
+        keep='Rivalry appeal and product prominence', change='New architecture, wall, furniture, lighting and composition',
+        improvement='Less clutter; keep artwork readable', style_id=style['id'],
+        execution=dict(architecture=style['architecture'], layout=f'Fixture layout {i}', wall_palette=style['wall_hue'], wall_material=style['wall_material'], camera=f'Fixture composition {i}', furniture=style['furniture_materials'], lighting=style['lighting']),
+        image_prompt=plan.standalone_brief(TITLE, 'WINNER_AD', style=style))
+        for i, style in enumerate(selected['styles'], 1)]
+    for row, execution in zip(rows, workflow['ad_notes']['refresh_executions']):
+        row['image_prompt'] = execution['image_prompt']
     with patch.object(ads.st, 'session_state', {}):
         standard.apply_csv(ads, value, workflow, ads.build_standard_ads_csv(rows))
         for slot in ads.ads_image_workflow.campaign_image_slots(value['campaign_type']):

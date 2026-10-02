@@ -813,7 +813,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         winner_block = ads_page.build_creative_refresh_winner_context(winner_context)
 
-        self.assertIn("controlled sibling evolutions", refresh_prompt)
+        self.assertIn("three genuinely different environments", refresh_prompt)
         self.assertIn(winner_context["winning_primary_text"], refresh_prompt)
         self.assertIn(winner_context["winning_headline"], refresh_prompt)
         self.assertEqual(
@@ -1371,10 +1371,9 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             "Only 100 Shane Warne Editions",
         )
         self.assertIn("WINNER REFINEMENT", result["master_prompt"])
-        self.assertIn(
-            "Attach the actual winning advertisement image to this ChatGPT message before running this prompt.",
-            result["master_prompt"],
-        )
+        self.assertIn("WINNER_IE", result["master_prompt"])
+        self.assertIn("CANONICAL_PRODUCT", result["master_prompt"])
+        self.assertIn("three genuinely different environments", result["master_prompt"])
         self.assertEqual(
             len(ads_page.ads_image_workflow.campaign_image_slots(result["campaign_type"])),
             3,

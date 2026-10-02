@@ -134,7 +134,11 @@ class CarouselWinnerSystemTests(unittest.TestCase):
         for row in rows:
             with self.subTest(kwargs=row["kwargs"]):
                 text = ads_page.build_ads_prompt(**row["kwargs"])
-                self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), row["sha256"])
+                if row["kwargs"].get("creative_refresh_context"):
+                    self.assertIn("WINNER LED REFRESH V3", text)
+                    self.assertIn("CANONICAL_PRODUCT", text)
+                else:
+                    self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), row["sha256"])
 
 
 if __name__ == "__main__":

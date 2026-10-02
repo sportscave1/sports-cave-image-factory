@@ -110,6 +110,8 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
         "assets": assets,
         "files": files,
     })
+    if (result.get("creative_refresh_context") or {}).get("refresh_plan"):
+        package["refresh_executions"] = deepcopy(result.get("refresh_executions") or [])
     package["package_hash"] = content_hash(package)
     validate_saved_package(package)
     return package
