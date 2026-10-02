@@ -9,6 +9,33 @@ from starlette.concurrency import run_in_threadpool
 router=APIRouter()
 
 
+@router.api_route('/shopify/customer-events',methods=['POST','OPTIONS'])
+async def app_pixel_event(request:Request):
+    from crm_store import Store
+    from crm_shopify_pixel import record
+    from crm_onsite import allow_rate
+    origin=request.headers.get('origin','')
+    store=Store()
+    try:state=await run_in_threadpool(store.state,'shopify_automation_pixel')
+    except Exception:return Response(status_code=503)
+    if not state.get('id'):return Response(status_code=404)
+    # Shopify app pixels run in a strict worker sandbox. They can have null
+    # Origin. This telemetry has no trusted identity or dispatch privileges.
+    allowed={'null','https://'+os.getenv('SHOPIFY_STORE_DOMAIN','')}
+    allowed.update(state.get('origins',[]))
+    allowed.update(v.strip() for v in os.getenv('CRM_WEBSITE_ALLOWED_ORIGINS','').split(',') if v.strip())
+    if origin not in allowed:return Response(status_code=403)
+    cors={'Access-Control-Allow-Origin':origin,'Vary':'Origin','Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Cache-Control':'no-store'}
+    if request.method=='OPTIONS':return Response(status_code=204,headers=cors)
+    if not allow_rate(request.client.host if request.client else 'unknown'):return Response(status_code=429,headers=cors)
+    if request.headers.get('content-type','').split(';')[0]!='application/json':return Response(status_code=415,headers=cors)
+    try:
+        await run_in_threadpool(record,store,json.loads(await bounded_body(request,4096)),state)
+        return Response(status_code=202,headers=cors)
+    except (ValueError,TypeError):return Response(status_code=400,headers=cors)
+    except Exception:return Response(status_code=503,headers=cors)
+
+
 @router.api_route('/crm/tracking/events',methods=['POST','OPTIONS'])
 async def website_event(request:Request):
     from crm_onsite import config,allow_rate,record_event
@@ -47,7 +74,7 @@ async def shopify_hook(request:Request):
         expected=normalize_store_domain(os.getenv('SHOPIFY_STORE_DOMAIN',''))
         if not expected or normalize_store_domain(request.headers.get('x-shopify-shop-domain',''))!=expected:return Response(status_code=403)
         payload=json.loads(raw)
-        await run_in_threadpool(receive_shopify,Store(),request.headers.get('x-shopify-topic',''),request.headers.get('x-shopify-webhook-id',''),payload,request.headers.get('x-shopify-triggered-at'))
+        await run_in_threadpool(receive_shopify,Store(),request.headers.get('x-shopify-topic',''),request.headers.get('x-shopify-event-id') or request.headers.get('x-shopify-webhook-id',''),payload,request.headers.get('x-shopify-triggered-at'),expected)
         return Response(status_code=200)
     except (ValueError,TypeError):return Response(status_code=400)
     except Exception:return Response(status_code=503)

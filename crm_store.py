@@ -37,9 +37,12 @@ class Store:
                 return cur.fetchone() if one else cur.fetchall()
             return None
     def list(self,kind):
-        where=" WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1'" if kind=='templates' else ''
+        where=" WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' AND content->>'format' IS DISTINCT FROM 'automation_delivery_v1'" if kind=='templates' else ''
         return self.q('SELECT * FROM '+TABLES[kind]+where+' ORDER BY name LIMIT 500')
     def get(self,kind,object_id):return self.q('SELECT * FROM '+TABLES[kind]+' WHERE id=%s',(object_id,),True)
+    def active_automations(self):
+        # Worker does not need unpublished email bodies or paused/draft flows.
+        return self.q("SELECT id,name,status,trigger_type,activated_at,steps,config-'draft' AS config FROM crm_automations WHERE status='ACTIVE' ORDER BY id LIMIT 500")
     def state(self,key):
         row=self.q('SELECT value FROM crm_runtime_state WHERE key=%s',(key,),True)
         return row['value'] if row else {}
@@ -137,11 +140,25 @@ class Store:
          UPDATE crm_marketing_sends s SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes',attempts=attempts+1
          FROM due WHERE s.id=due.id RETURNING s.*''',(allow_test,allow_customer),one=True)
     def begin_send(self,row,request_hash,hashed):
-        return self.q("""UPDATE crm_marketing_sends SET status='SUBMITTING',request_hash=%s,recipient_hash=%s,first_submitted_at=now(),updated_at=now()
+        sql="""UPDATE crm_marketing_sends SET status='SUBMITTING',request_hash=%s,recipient_hash=%s,first_submitted_at=now(),updated_at=now()
          WHERE id=%s AND status='CLAIMED' AND lease_token=%s AND lease_until>now()
          AND (campaign_id IS NULL OR EXISTS(SELECT 1 FROM crm_campaigns c WHERE c.id=campaign_id AND c.status='SENDING'))
          AND (enrollment_id IS NULL OR EXISTS(SELECT 1 FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id
-              WHERE e.id=enrollment_id AND e.status='ACTIVE' AND a.status='ACTIVE')) RETURNING *""",(request_hash,hashed,row['id'],row['lease_token']),True)
+              WHERE e.id=enrollment_id AND e.status='ACTIVE' AND a.status='ACTIVE')) RETURNING *"""
+        args=(request_hash,hashed,row['id'],row['lease_token'])
+        if not row.get('enrollment_id'):return self.q(sql,args,True)
+        with self.db() as conn:
+            # Serialize the submission boundary with Pause. A submission already
+            # committed before Pause can finish, but no future step can begin.
+            active=conn.execute("SELECT a.status AS automation_status,e.status AS journey_status FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.id=%s FOR UPDATE OF a,e",(row['enrollment_id'],)).fetchone()
+            if not active or active['automation_status']!='ACTIVE' or active['journey_status']!='ACTIVE':return None
+            # Serialize with the signed completion ledger at the irreversible
+            # submission boundary; a completed checkout cannot claim transport.
+            key=conn.execute('SELECT checkout_key FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],)).fetchone()['checkout_key']
+            if key:
+                checkout=conn.execute('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE',(key,)).fetchone()
+                if not checkout or checkout['status']=='RECOVERED':return None
+            return conn.execute(sql,args).fetchone()
     def finish_send(self,row,status,code='',provider_id=None):
         result=self.q('''UPDATE crm_marketing_sends SET status=%s,error_code=%s,provider_email_id=%s,updated_at=now(),lease_until=NULL
          WHERE id=%s AND lease_token=%s RETURNING *''',(status,code,provider_id,row['id'],row['lease_token']),True)
@@ -156,15 +173,17 @@ class Store:
         return result
     def defer_send(self,row):
         self.q("UPDATE crm_marketing_sends SET status=CASE WHEN attempts>=5 THEN 'FAILED' ELSE 'PENDING' END,error_code='revalidation_unavailable',due_at=now()+interval '5 minutes',lease_until=NULL WHERE id=%s AND lease_token=%s AND status='CLAIMED'",(row['id'],row['lease_token']))
+    def release_paused_send(self,row):
+        self.q("UPDATE crm_marketing_sends SET status='PENDING',attempts=GREATEST(attempts-1,0),lease_until=NULL WHERE id=%s AND lease_token=%s AND status='CLAIMED'",(row['id'],row['lease_token']))
     def receipt(self,send_id):return self.q('SELECT * FROM crm_marketing_sends WHERE id=%s',(send_id,),True)
     def lease(self,owner):
         return bool(self.q('''INSERT INTO crm_runtime_state(key,value) VALUES('worker_lease',jsonb_build_object('owner',%s::text,'until',extract(epoch from now())+300))
          ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now() WHERE
          (crm_runtime_state.value->>'until')::numeric<extract(epoch from now()) OR crm_runtime_state.value->>'owner'=%s RETURNING key''',(owner,owner),True))
     def release(self,owner):self.q("DELETE FROM crm_runtime_state WHERE key='worker_lease' AND value->>'owner'=%s",(owner,))
-    def webhook(self,provider,event_id,topic,object_id,customer_id,at):
-        row=self.q('''INSERT INTO crm_webhook_events(provider,event_id,topic,object_id,related_customer_id,occurred_at)
-          VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING event_id''',(provider,event_id,topic,object_id,customer_id,at),True)
+    def webhook(self,provider,event_id,topic,object_id,customer_id,at,normalized=None):
+        row=self.q('''INSERT INTO crm_webhook_events(provider,event_id,topic,object_id,related_customer_id,occurred_at,normalized)
+          VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING RETURNING event_id''',(provider,event_id,topic,object_id,customer_id,at,json.dumps(normalized or {})),True)
         self.invalidate();return bool(row)
     def event(self,event_id,provider_id,event_type,hashed,at):
         return self.q('''INSERT INTO crm_marketing_events(event_id,provider_email_id,event_type,recipient_hash,occurred_at)

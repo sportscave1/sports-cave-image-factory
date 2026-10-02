@@ -137,6 +137,12 @@ def record(store,order):
       WHERE e.event_type='email.clicked' AND NOT s.test_send AND s.shopify_customer_id=%s
         AND e.occurred_at<=%s AND e.occurred_at>=%s""",
       ((order.get('customer') or {}).get('id'),date(order['createdAt']),date(order['createdAt'])-timedelta(days=window_days())))
+    from crm_automation_attribution import candidates as automation_candidates,clicks as automation_clicks
+    auto_candidates=automation_candidates(store,order,window_days())
+    if auto_candidates:
+        campaigns+=auto_candidates
+        for click in automation_clicks(store,order,window_days()):
+            clicks.append({**click,'campaign_key':'auto_'+str(click['send_id']).replace('-','')})
     match=choose(order,campaigns,clicks)
     total,currency=amount(order['netPaymentSet'])
     gross=amount(order['totalReceivedSet'],currency)[0] if order.get('totalReceivedSet') else None
@@ -153,12 +159,19 @@ def record(store,order):
         return None
     # Never downgrade established Shopify proof when Shopify temporarily omits it.
     if prior and prior.get('method') and (not match or (prior['method'] in ('SHOPIFY_UTM','SHOPIFY_UTM_EXACT') and match['method']=='RESEND_CLICK_MATCH')):
-        campaign=next((c for c in campaigns if c['id']==prior['campaign_id']),None)
+        campaign=next((c for c in campaigns if c['id']==prior['campaign_id'] or str(c['id'])==str((prior.get('evidence') or {}).get('automation_send_id'))),None)
         if campaign:
             match={'campaign':campaign,'method':prior['method'],'visit_at':date(prior['visit_at']),
                    'click_at':date(prior['click_at']),'stored_evidence':prior.get('evidence') or {}}
     campaign=match['campaign'] if match else {}
     proof=match.get('stored_evidence') if match and 'stored_evidence' in match else evidence(order,match) if match else {'journey_ready':False if pending else (order.get('customerJourneySummary') or {}).get('ready')}
+    if campaign.get('automation_id'):
+        proof.update({k:str(campaign[k]) for k in ('automation_id','automation_version','journey_id','step_id')})
+        proof.update({k:campaign[k] for k in ('source_event_id','checkout_key') if campaign.get(k)})
+        proof['automation_send_id']=str(campaign['id'])
+        proof['automation_tracking_send_id']=str(campaign['campaign_send_id'])
+        proof['recipient_send_id']=str(campaign['id'])
+        proof['resend_message_id']=campaign.get('provider_email_id')
     status='PENDING_JOURNEY' if pending else 'ATTRIBUTED' if match else 'NO_MATCH'
     attempts=(prior or {}).get('attempts',0)+1
     # Short initial retry, then five/fifteen minutes; old unresolved rows get hourly checks.
@@ -180,7 +193,7 @@ def record(store,order):
       refund_amount=excluded.refund_amount,retry_at=excluded.retry_at,attempts=excluded.attempts,
       mirror_status=excluded.mirror_status,updated_at=now()
       WHERE crm_order_attribution.source_updated_at IS NULL OR crm_order_attribution.source_updated_at<=excluded.source_updated_at""",
-      (order['id'],campaign.get('id'),campaign.get('campaign_key'),campaign.get('campaign_send_id'),order.get('name'),
+      (order['id'],None if campaign.get('automation_id') else campaign.get('id'),campaign.get('campaign_key'),None if campaign.get('automation_id') else campaign.get('campaign_send_id'),order.get('name'),
        (order.get('customer') or {}).get('id'),date(order['createdAt']),match.get('visit_at') if match else None,match.get('click_at') if match else None,
        str(max(total,0)),currency,bool(eligible and match),'sports_cave_email_'+str(window_days())+'d',match['method'] if match else None,
        json.dumps(products(order,currency)),updated,status,json.dumps(proof),str(gross) if gross is not None else None,
@@ -190,9 +203,10 @@ def record(store,order):
 
 def mirror_payload(row):
     proof=row.get('evidence') or {}
-    return {'source':'Sports Cave OS Email','campaign_id':str(row['campaign_id']),
-      'campaign_send_id':str(row['campaign_send_id']),'campaign_name':proof.get('campaign_name'),
-      'utm_source':'sports_cave_os','utm_medium':'email','utm_campaign':str(row['campaign_send_id']),
+    tracking_send=row['campaign_send_id'] or proof.get('automation_tracking_send_id')
+    return {'source':'Sports Cave OS Email','campaign_id':str(row['campaign_id'] or proof.get('automation_send_id')),
+      'campaign_send_id':str(tracking_send),'campaign_name':proof.get('campaign_name'),
+      'utm_source':'sports_cave_os','utm_medium':'email','utm_campaign':str(tracking_send),
       'utm_content':proof.get('utm_content'),'attribution_method':row['method'],'confidence':proof.get('confidence'),
       'clicked_at':date(row['click_at']).isoformat() if row.get('click_at') else None,
       'ordered_at':date(row['order_created_at']).isoformat(),
@@ -289,7 +303,12 @@ def reconcile(store,shop,clock=now):
             scan.pop('error')
             store.set_state('email_attribution_scan',scan)
         store.set_state('email_reconcile_health',{'last_run':at.isoformat()})
-    active=store.q("SELECT min(sending_started_at) AS first FROM crm_campaigns WHERE campaign_key IS NOT NULL AND status IN ('SENDING','SENT')",one=True)['first']
+    active=store.q("""SELECT min(started) AS first FROM (
+      SELECT sending_started_at AS started FROM crm_campaigns WHERE campaign_key IS NOT NULL AND status IN ('SENDING','SENT')
+      UNION ALL SELECT s.first_submitted_at FROM crm_marketing_sends s JOIN crm_template_versions v
+      ON v.template_id=s.template_id AND v.version=s.template_version
+      WHERE s.status='ACCEPTED' AND NOT s.test_send AND v.content->>'format'='automation_delivery_v1'
+      ) activity""",one=True)['first']
     if not active:
         completed();return
     key='email_attribution_scan';state=store.state(key)

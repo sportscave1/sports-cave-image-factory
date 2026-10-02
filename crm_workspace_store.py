@@ -78,7 +78,7 @@ class WorkspaceRecords(BrandTemplates):
         return cfg
 
     def templates(self,archived=False):
-        return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
+        return self.q("SELECT * FROM crm_templates WHERE (archived_at IS NOT NULL)=%s AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' AND content->>'format' IS DISTINCT FROM 'automation_delivery_v1' ORDER BY updated_at DESC LIMIT 200",(archived,))
 
     def html_library(self,metadata=False):
         # A template used by an automation is managed by that workflow, not here.
@@ -110,7 +110,7 @@ class WorkspaceRecords(BrandTemplates):
         content={'format':'campaign_blocks_v1','document':doc}
         with self.db() as conn:
             if identity:
-                row=conn.execute("UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' RETURNING *",(name,json.dumps(content),identity,version)).fetchone()
+                row=conn.execute("UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' AND content->>'format' IS DISTINCT FROM 'automation_delivery_v1' RETURNING *",(name,json.dumps(content),identity,version)).fetchone()
             else:row=conn.execute("INSERT INTO crm_templates(template_key,name,kind,content) VALUES(%s,%s,'Campaign',%s::jsonb) RETURNING *",('design_'+uuid.uuid4().hex,name,json.dumps(content))).fetchone()
             if not row:raise ValueError('Template changed elsewhere or was archived. Reload before editing.')
             conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(row['id'],row['version'],json.dumps(content)))
@@ -120,7 +120,7 @@ class WorkspaceRecords(BrandTemplates):
 
     def archive_design(self,user,identity,version):
         require(user,'crm_templates_manage')
-        if not self.q("UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1 WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' RETURNING id",(identity,version),True):raise ValueError('Template changed elsewhere.')
+        if not self.q("UPDATE crm_templates SET archived_at=now(),updated_at=now(),version=version+1 WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' AND content->>'format' IS DISTINCT FROM 'automation_delivery_v1' RETURNING id",(identity,version),True):raise ValueError('Template changed elsewhere.')
         from crm_template_cache import invalidate
         invalidate()
 

@@ -106,8 +106,10 @@ class LogicTests(unittest.TestCase):
         self.assertFalse(verify_resend(raw+b' ',headers,'whsec_'+base64.b64encode(key).decode()))
         self.assertFalse(verify_resend(raw,headers,'whsec_'+base64.b64encode(key).decode(),lambda:int(timestamp)+1000))
     def test_webhooks_only_minimal_metadata(self):
-        store=Mock();receive_shopify(store,'customers_email_marketing_consent/update','e',{'customer_id':1,'email_address':'private@example.test','note':'private body'},now())
-        self.assertNotIn('private',str(store.method_calls));self.assertEqual(store.webhook.call_args.args[4],gid(1))
+        from unittest.mock import MagicMock
+        store=MagicMock();receive_shopify(store,'customers_email_marketing_consent/update','e',{'customer_id':1,'email_address':'private@example.test','note':'private body'},now())
+        self.assertNotIn('private',str(store.method_calls))
+        self.assertEqual(store.db.return_value.__enter__.return_value.execute.call_args.args[1][3],gid(1))
     def test_schema_no_customer_replicas_and_rls(self):
         sql=(ROOT/'migrations/20260927093818_crm_marketing_v1.sql').read_text()
         for forbidden in ('crm_customers','crm_orders','crm_products','crm_segment_members','crm_abandoned_checkouts'):

@@ -141,6 +141,7 @@ PAGE_REGISTRY = (
         for route in seo_workspace.SEO_ROUTES[1:]
     ),
     {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
+    {"key": "reviews", "route": "Reviews", "label": "Reviews", "worker_assignable": True},
     *({"key": key, "route": route, "label": label, "worker_assignable": key != 'crm_settings_view', "navigation_child": True}
       for key, route, label in crm_navigation.PAGES),
     {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},

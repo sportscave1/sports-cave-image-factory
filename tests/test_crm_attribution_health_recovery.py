@@ -30,7 +30,7 @@ class AttributionHealthRecoveryTests(unittest.TestCase):
         def query(sql,*args,**kwargs):
             if sql.startswith('SELECT shopify_order_id FROM crm_order_attribution'):return self.due
             if sql.startswith('SELECT attempts FROM crm_order_attribution'):return {'attempts':3}
-            if 'min(sending_started_at)' in sql:return {'first':self.active}
+            if 'min(sending_started_at)' in sql or 'min(started)' in sql:return {'first':self.active}
             if 'max(received_at)' in sql:return {'shopify':None,'resend':None}
             return []
         self.store.q.side_effect=query

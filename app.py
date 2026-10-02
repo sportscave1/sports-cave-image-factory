@@ -9001,6 +9001,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     analytics_nav.ANALYTICS_OVERVIEW_ROUTE: ":material/analytics:",
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "Email": ":material/mail:",
+    "Reviews": ":material/reviews:",
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
@@ -9227,6 +9228,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
     import crm_navigation
     email_routes = tuple(route for route in crm_navigation.SIDEBAR_ROUTES if route in allowed_routes)
+    _sidebar_route_button("Reviews", current_page, allowed_routes, root=st)
     if email_routes and disclosure("email", "Email", SIDEBAR_ICON_BY_ROUTE["Email"], crm_navigation.EMAIL_DEFAULT_ROUTE,
                                    can_open_overview="Email" in allowed_routes, force_open_routes=crm_navigation.ROUTES):
         children = st.container(key="sidebar-email-children")
@@ -16054,6 +16056,12 @@ def render_selected_page(current_page):
         get_orders_page().render_page()
     elif current_page == "Email":
         get_support_email_page().render_page(current_os_user())
+    elif current_page == "Reviews":
+        import reviews_page
+        def reviews_navigate(route):
+            set_current_page(route, source="reviews")
+            st.rerun()
+        reviews_page.render_page(current_os_user(), reviews_navigate)
     elif current_page in os_accounts.crm_navigation.ROUTES:
         import crm_page
         def crm_navigate(route):

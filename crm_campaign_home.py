@@ -20,14 +20,14 @@ def refresh_delay():
     return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else TTL
 
 
-def arm_home_poll():
+def arm_home_poll(*, key='crm-home-poll', seconds=None):
     """One read-only parent refresh event; child interactions may accelerate it.
 
     No external Streamlit container mutation and no redundant explicit rerun.
     One-shot scheduling waits for each render to complete before the next event.
     """
     if st.session_state.get('campaign_home_rendering'): return
-    key='crm-home-poll';seconds=refresh_delay()
+    seconds=refresh_delay() if seconds is None else seconds
     # A unique script token re-arms identical pending-delay scripts in Streamlit.
     st.html('<script>/* '+uuid4().hex+' */'+
         '(()=>{const key='+repr(key)+';const delay='+str(int(seconds*1000))+';'+
@@ -125,10 +125,10 @@ ICON_PATHS = (
  '<path d="M2 3h2l3 12h12l3-8H5"/><circle cx="9" cy="20" r="1"/><circle cx="19" cy="20" r="1"/>')
 
 
-def kpis(data=None):
+def kpis(data=None,*,active_note='campaigns'):
     data=data or {}
     def number(key): return format(data[key],',') if data.get(key) is not None else '—'
-    values=(('green','Active',number('active'),'campaigns','active'),('blue','Sent (30 days)',number('sent_emails'),'emails submitted','sent_emails'),
+    values=(('green','Active',number('active'),active_note,'active'),('blue','Sent (30 days)',number('sent_emails'),'emails submitted','sent_emails'),
       ('gold','Bounce rate (30 days)',format(float(data['bounce_rate']),'.1f')+'%' if data.get('bounce_rate') is not None else '—','','bounce_rate'),
       ('purple','Click rate (avg · 30 days)',format(float(data['click_rate']),'.1f')+'%' if data.get('click_rate') is not None else '—','','click_rate'),
       ('rose','Orders (30 days)',number('orders'),'from email','orders'))

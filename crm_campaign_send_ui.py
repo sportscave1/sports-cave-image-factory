@@ -22,15 +22,17 @@ def safe_error(exc):
 
 @st.fragment
 def test_control(store,user,editor,key,available=True,cfg=None):
-    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover',on_change='rerun'):
+    automation=getattr(store,'email_mode',None)=='automation'
+    from crm_email_editor_context import current,saved_key
+    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Automations' if automation else 'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover',on_change='rerun'):
         from crm_campaign_test_ui import test_styles, readiness
         from crm_campaign_issues import CampaignValidationError
         from crm_campaign_content import preflight
         test_styles()
         st.caption('SEND TEST')
         checks=None
-        current=st.session_state.get('campaign_editor',editor)
-        if str(current.get('id'))==str(editor.get('id')):editor=current
+        active=current(st.session_state,editor)
+        if str(active.get('id'))==str(editor.get('id')):editor=active
         try:
             review_doc=deepcopy(editor['document']);review_doc['copy_reviewed']=True
             checks=preflight(review_doc,cfg=cfg if cfg is not None else store.render_settings())
@@ -57,10 +59,10 @@ def test_control(store,user,editor,key,available=True,cfg=None):
         if submit:
             if st.session_state.get(key+'test_busy'):return
             # A fragment can retain an older argument after a component rerun.
-            current=st.session_state.get('campaign_editor',editor)
-            if current is not editor and str(current.get('id'))!=str(editor.get('id')):
+            active=current(st.session_state,editor)
+            if active is not editor and str(active.get('id'))!=str(editor.get('id')):
                 st.error('Campaign changed. Reopen Send test.');return
-            editor=current
+            editor=active
             # Identical content/recipient retries retain their durable operation ID.
             doc={k:v for k,v in editor['document'].items() if k!='copy_reviewed'}
             digest=hashlib.sha256(json.dumps([doc,recipient.strip().casefold()],sort_keys=True).encode()).hexdigest()
@@ -70,7 +72,7 @@ def test_control(store,user,editor,key,available=True,cfg=None):
             try:
                 with st.spinner('Sending…'):
                     result=send_test(store,user,editor,recipient,operation)
-                st.session_state['campaign_saved']=deepcopy(editor)
+                st.session_state[saved_key(st.session_state)]=deepcopy(editor)
                 st.success('Test email sent to '+recipient.strip())
                 if not result['audit_saved']:st.warning('Provider accepted the test; receipt storage needs review. Do not resend.')
             except CampaignValidationError as exc:checks=exc.checks

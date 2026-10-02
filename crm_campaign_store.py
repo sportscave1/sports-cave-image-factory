@@ -118,10 +118,11 @@ class CampaignStore(WorkspaceRecords):
         return {'deleted':True,'audit_saved':bool(receipt)}
 
     def test_campaign(self, user, identity, version, *, recipient, confirmed, operation_id, env=None, session=None, shop=None):
-        require(user,'crm_campaigns_manage')
+        automation=getattr(self,'email_mode',None)=='automation'
+        require(user,'crm_automations_manage' if automation else 'crm_campaigns_manage')
         from crm_resend_marketing import _send_admin_email, single_email, DeliveryError
         row=self.draft(identity)
-        if self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
+        if not automation and self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
         if confirmed is not True:raise DeliveryError('confirmation_required')
         operation=str(uuid.UUID(str(operation_id)))
@@ -140,7 +141,7 @@ class CampaignStore(WorkspaceRecords):
         catalogue_sections=[s for s in row['document'].get('middle_sections',[]) if s['type']=='catalogue' and s['visible']]
         prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True)
         if prior:
-            return self._test_receipt(prior,identity,version,digest,recipient)
+            return self._test_receipt(prior,identity,version,digest,recipient,automation_step_id=self.step_id if automation else None)
         if catalogue_sections:
             from crm_catalogue import Catalogue, verify_catalogues
             from crm_shopify import Shopify
@@ -157,10 +158,13 @@ class CampaignStore(WorkspaceRecords):
             guard_key='campaign-test-rate:'+actor
             conn.execute("INSERT INTO crm_runtime_state(key,value) VALUES(%s,'{}'::jsonb) ON CONFLICT DO NOTHING",(guard_key,))
             conn.execute('SELECT key FROM crm_runtime_state WHERE key=%s FOR UPDATE',(guard_key,))
-            attempt=conn.execute("INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
+            if automation:
+                attempt=conn.execute("INSERT INTO crm_internal_tests(id,automation_id,automation_step_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,self.step_id,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
+            else:
+                attempt=conn.execute("INSERT INTO crm_internal_tests(id,campaign_id,campaign_version,render_hash,recipient,sender,actor,status) VALUES(%s,%s,%s,%s,%s,%s,%s,'REQUESTED') ON CONFLICT DO NOTHING RETURNING id",(operation,identity,version,digest,recipient.casefold(),delivery['sender'],str(user.get('id','')))).fetchone()
             if not attempt:
                 prior=conn.execute('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,)).fetchone()
-                return self._test_receipt(prior,identity,version,digest,recipient)
+                return self._test_receipt(prior,identity,version,digest,recipient,automation_step_id=self.step_id if automation else None)
             recent=conn.execute("SELECT count(*) AS n FROM crm_internal_tests WHERE actor=%s AND created_at>now()-interval '1 hour'",(actor,)).fetchone()
             if recent['n']>60:raise ValueError('Test email limit reached (60 per hour). Please try again later.')
             if catalogue_sections:
@@ -175,7 +179,7 @@ class CampaignStore(WorkspaceRecords):
         try:
             result=_send_admin_email(user=user,recipient=recipient,confirmed=confirmed,operation_id=operation,
                                     env=env,session=session,message=rendered,
-                                    campaign={'id':str(identity),'version':version,'render_hash':digest})
+                                    campaign={'id':str(identity),'version':version,'render_hash':digest,**({'email_mode':'automation','step_id':str(self.step_id)} if automation else {})})
         except DeliveryError as exc:
             self.q('UPDATE crm_internal_tests SET status=%s,error_category=%s WHERE id=%s',('UNCERTAIN' if exc.category=='resend_unavailable' else 'FAILED',exc.category,operation))
             raise
@@ -183,20 +187,22 @@ class CampaignStore(WorkspaceRecords):
         try:
             with self.db() as conn:
                 conn.execute("UPDATE crm_internal_tests SET status='ACCEPTED',provider_id=%s,accepted_at=%s WHERE id=%s",(result['message_id'],result['accepted_at'],operation))
-                current=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
-                same=current['version']==version and not current['archived_at']
-                updated=conn.execute("UPDATE crm_campaign_drafts SET last_tested_at=%s,last_test_resend_id=%s,tested_version=%s,status=CASE WHEN %s THEN 'TESTED' ELSE status END WHERE id=%s RETURNING *",
-                                     (result['accepted_at'],result['message_id'],version if same else None,same,identity)).fetchone()
-                receipt={**updated,'test_receipt':result,'test_footer':cfg,'tested_document_version':version}
-                self._history(conn,receipt,'campaign_test_sent',str(user.get('id','')),current)
+                if not automation:
+                    current=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+                    same=current['version']==version and not current['archived_at']
+                    updated=conn.execute("UPDATE crm_campaign_drafts SET last_tested_at=%s,last_test_resend_id=%s,tested_version=%s,status=CASE WHEN %s THEN 'TESTED' ELSE status END WHERE id=%s RETURNING *",
+                                         (result['accepted_at'],result['message_id'],version if same else None,same,identity)).fetchone()
+                    receipt={**updated,'test_receipt':result,'test_footer':cfg,'tested_document_version':version}
+                    self._history(conn,receipt,'campaign_test_sent',str(user.get('id','')),current)
             self.reconcile_events(result['message_id'])
         except Exception:
             result['audit_saved']=False
         return result
 
     @staticmethod
-    def _test_receipt(prior,identity,version,digest,recipient):
-        if (str(prior['campaign_id'])!=str(identity) or prior['campaign_version']!=version
+    def _test_receipt(prior,identity,version,digest,recipient,*,automation_step_id=None):
+        source=prior.get('automation_id') if automation_step_id else prior['campaign_id']
+        if (str(source)!=str(identity) or (automation_step_id and str(prior.get('automation_step_id'))!=str(automation_step_id)) or prior['campaign_version']!=version
                 or prior['render_hash']!=digest or prior['recipient']!=recipient.casefold()):
             raise ValueError('Test operation already belongs to another saved request.')
         if prior['status']=='ACCEPTED':

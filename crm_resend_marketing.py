@@ -114,7 +114,7 @@ def _send_admin_email(*, user, recipient, confirmed, operation_id, message, env=
     """Internal single-recipient transport shared by vetted renderers, never audiences."""
     if campaign:
         from crm_navigation import require
-        require(user,'crm_campaigns_manage')
+        require(user,'crm_automations_manage' if campaign.get('email_mode')=='automation' else 'crm_campaigns_manage')
     elif not os_accounts.is_admin(user):
         raise PermissionError('Only an active administrator can send a Resend test.')
     if confirmed is not True:

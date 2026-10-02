@@ -29,7 +29,7 @@ UNSUBSCRIBE = '''mutation CrmUnsubscribe($input:CustomerEmailMarketingConsentUpd
  } }'''
 CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { '+CUSTOMER_FIELDS+' } } }'
 CAMPAIGN_CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { id email validEmailAddress emailMarketingConsent { marketingState } '+EMAIL_ADDRESS_FIELDS+' defaultAddress { countryCodeV2 provinceCode zip timeZone } } } }'
-ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus
+ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus displayFulfillmentStatus
  customer { id } totalPriceSet { shopMoney { amount currencyCode } }
  lineItems(first:10) { nodes { id title variantTitle quantity product { id } }
  '''+PAGE+' }'
@@ -76,11 +76,12 @@ TOTAL = 'query CrmTotal { customersCount { count precision } }'
 CHECKOUT_LINES_FIELDS = '''id title quantity variant { id product { id } } image { url }
  originalUnitPriceSet { shopMoney { amount currencyCode } }'''
 CHECKOUT_FIELDS = '''id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id }
+ shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 }
  totalPriceSet { shopMoney { amount currencyCode } }
  lineItems(first:50) { nodes { '''+CHECKOUT_LINES_FIELDS+' } '+PAGE+' }'
 CHECKOUTS = '''query CrmCheckouts($after:String,$query:String) {
  abandonedCheckouts(first:25,after:$after,sortKey:CREATED_AT,query:$query) {
- nodes { id createdAt updatedAt completedAt customer { id } } '''+PAGE+' } }'
+ nodes { id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id } shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 } } '''+PAGE+' } }'
 CHECKOUT = 'query CrmCheckout($id:ID!) { node(id:$id) { ... on AbandonedCheckout { '+CHECKOUT_FIELDS+' } } }'
 CHECKOUT_LINES = '''query CrmCheckoutLines($id:ID!,$after:String) { node(id:$id) {
  ... on AbandonedCheckout { lineItems(first:100,after:$after) { nodes { '''+CHECKOUT_LINES_FIELDS+' } '+PAGE+' } } } }'

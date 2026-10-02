@@ -72,6 +72,9 @@ def save_checkpoint(store,user,editor):
 
 def flush_current(*,force=False):
     import streamlit as st
+    if st.session_state.get('email_editor_mode')=='automation':
+        from crm_email_editor_context import flush_automation
+        return flush_automation(st.session_state,force=force)
     context=st.session_state.get('campaign_recovery_context');editor=st.session_state.get('campaign_editor')
     if not editor:return True
     if editor.get('recovery_readonly'):return True

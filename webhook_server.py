@@ -27,6 +27,8 @@ app = FastAPI(title="Sports Cave OS Webhooks")
 # Router declarations only; CRM clients and storage initialize inside requests.
 from crm_http import router as crm_router
 app.include_router(crm_router)
+from reviews_http import router as reviews_router
+app.include_router(reviews_router)
 
 # Paid-order requests were previously serialized by virtue of doing all work on
 # Uvicorn's single event-loop thread. Keep that ordering guarantee after moving

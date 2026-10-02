@@ -238,33 +238,8 @@ def templates_page(store,actions):
 
 
 def automations_page(store,actions,shop=None):
-    from crm_flow_editor import flow_workspace
-    flow_workspace(shop,store,actions)
-
-
-def legacy_flow_configuration(store,actions,row):
-    # Only names are needed for these selectors, never every template body.
-    template_names=[t['template_key'] for t in store.q("SELECT template_key FROM crm_templates WHERE content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' ORDER BY name LIMIT 500")]
-    with st.form('crm_automation_'+str(row['id'])):
-        steps=[]
-        for i,step in enumerate(row['steps']):
-            cols=st.columns([1,2,2]);kind=cols[0].selectbox(f'Step {i+1}',['delay','revalidate','send','stop'],index=['delay','revalidate','send','stop'].index(step['type']),key=f'{row["id"]}:{i}:type')
-            current={'type':kind}
-            if kind=='delay':current['hours']=cols[1].number_input('Hours',min_value=0.0,max_value=8760.0,value=float(step.get('hours',0)),key=f'{row["id"]}:{i}:hours')
-            if kind=='send':
-                names=template_names
-                current['template']=cols[1].selectbox('Template',names,index=names.index(step['template']) if step.get('template') in names else 0,key=f'{row["id"]}:{i}:template')
-            steps.append(current)
-        config=dict(row['config'])
-        if row['trigger_type']=='win_back':config['days']=st.number_input('Days since last purchase',1,3650,int(config.get('days',180)))
-        status=st.selectbox('Status',['DRAFT','PAUSED','ACTIVE'],index=['DRAFT','PAUSED','ACTIVE'].index(row['status']))
-        append=st.checkbox('Append a step');remove=st.checkbox('Remove last step')
-        saved=st.form_submit_button('Save workflow')
-    if saved:
-        if append:steps.append({'type':'revalidate'})
-        if remove:steps=steps[:-1]
-        actions.automation(row,steps,config,status);st.success('Workflow saved.');st.rerun()
-    st.caption('OS flow activation remains disabled. Existing enrollments keep their reviewed step snapshot. Review external Klaviyo / Shopify flows for overlap before any future activation; their live status has not been changed.')
+    from crm_automation_ui import workspace
+    workspace(shop,store,actions)
 
 
 def campaigns_page(shop,store,actions):
@@ -343,6 +318,10 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
         try: campaign_workspace(shop,store,actions,navigate)
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
+    if route=='CRM Automations':
+        from crm_automation_ui import workspace
+        workspace(shop,store,actions,navigate=navigate)
+        return
     left,right=st.columns([9,1])
     left.markdown('### EMAIL · '+('CAMPAIGN SETTINGS' if route=='CRM Settings' else LABELS[route].upper()))
     left.caption('Shopify is the live source · display cache up to 90 seconds · marketing delivery '+('enabled' if actions.config.enabled else 'disabled'))
@@ -387,15 +366,7 @@ def render_page(route,user,navigate=lambda _:None,**dependencies):
         if route not in ('CRM Campaigns','CRM Automations'):
             _render_page(route,user,navigate,**dependencies)
             return
-        from email_loading import shell, stage
+        from email_loading import stage
         require(user,PAGE_KEYS[route])
-        if route == 'CRM Campaigns':
-            with stage(route, 'render'):
-                _render_page(route,user,navigate,**dependencies)
-            return
-        loading = shell(LABELS[route])
-        try:
-            with stage(route, 'render'):
-                _render_page(route,user,navigate,loading=loading,**dependencies)
-        finally:
-            if loading: loading.empty()
+        with stage(route, 'render'):
+            _render_page(route,user,navigate,**dependencies)

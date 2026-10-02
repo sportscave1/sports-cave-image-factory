@@ -26,23 +26,42 @@ class Engine:
             a=self.store.get('automations',enrollment['automation_id'])
             kind=a['trigger_type'];trigger=enrollment['trigger_shopify_id']
             if a['status']!='ACTIVE':return c,context,'automation_paused'
+            frozen=enrollment['steps'][0] if enrollment.get('steps') else {}
+            if frozen.get('automation_version'):
+                from crm_automation_definition import qualifies
+                kind=frozen['trigger']
+                from crm_automation_capabilities import require as require_trigger
+                require_trigger(self.store,kind)
+                identity_rules=[r for r in frozen['rules'] if r['field'] in ('market','customer_country')]
+                if not qualifies({'rules':identity_rules},c):return c,context,'automation_rules_changed'
             if kind=='abandoned':
+                if enrollment.get('checkout_key'):
+                    state=self.store.q('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s',(enrollment['checkout_key'],),True)
+                    if not state or state['status']=='RECOVERED':return c,context,'recovered'
                 checkout=self.shop.checkout(trigger,fresh=True)
                 if not checkout or checkout.get('completedAt'):return c,context,'recovered'
                 if (checkout.get('customer') or {}).get('id')!=c['id']:return c,context,'checkout_customer_changed'
                 if not safe_url(checkout.get('abandonedCheckoutUrl')) or not checkout['lineItems']['nodes']:return c,context,'invalid_checkout'
                 # Any newer order stops reminders, including payment-pending orders.
                 # Customer.lastOrder is authoritative and avoids scanning order history.
-                latest=c.get('lastOrder') or {}
-                if date(latest.get('createdAt')) and date(latest['createdAt'])>=date(checkout['createdAt']):return c,context,'recovered'
-                recent=self.shop.orders(c['id'],fresh=True)['nodes']
-                if any(not o.get('cancelledAt') and date(o['createdAt'])>=date(checkout['createdAt']) for o in recent):return c,context,'recovered'
+                if not enrollment.get('checkout_key'):
+                    latest=c.get('lastOrder') or {}
+                    if date(latest.get('createdAt')) and date(latest['createdAt'])>=date(checkout['createdAt']):return c,context,'recovered'
+                    recent=self.shop.orders(c['id'],fresh=True)['nodes']
+                    if any(not o.get('cancelledAt') and date(o['createdAt'])>=date(checkout['createdAt']) for o in recent):return c,context,'recovered'
                 context['checkout_url']=checkout['abandonedCheckoutUrl']
                 context['products']=[{'title':p['title'],'quantity':p['quantity'],'price':p.get('originalUnitPriceSet',{}).get('shopMoney',{}).get('amount','')} for p in checkout['lineItems']['nodes']]
-            elif kind=='post_purchase':
+                if frozen.get('automation_version'):
+                    from crm_automation_rule_facts import checkout_facts
+                    if not qualifies({'rules':frozen['rules']},c,checkout_facts(checkout)):return c,context,'automation_rules_changed'
+            elif kind in ('post_purchase','fulfilled'):
                 order=self.shop.order(trigger,fresh=True)
-                if not order or order.get('cancelledAt') or not order.get('fullyPaid') or (order.get('customer') or {}).get('id')!=c['id']:return c,context,'order_ineligible'
+                if not order or order.get('cancelledAt') or (kind=='post_purchase' and not order.get('fullyPaid')) or (order.get('customer') or {}).get('id')!=c['id']:return c,context,'order_ineligible'
+                if kind=='fulfilled' and order.get('displayFulfillmentStatus')!='FULFILLED':return c,context,'order_not_fulfilled'
                 context['order_name']=order['name']
+                if frozen.get('automation_version'):
+                    from crm_automation_rule_facts import order_facts
+                    if not qualifies({'rules':frozen['rules']},c,order_facts(self.shop,order,frozen['rules'])):return c,context,'automation_rules_changed'
             elif kind=='win_back':
                 last=date((c.get('lastOrder') or {}).get('createdAt'))
                 if not last or int(c['numberOfOrders'])<1 or last>self.clock()-timedelta(days=int(a['config'].get('days',180))):return c,context,'recent_purchase'
@@ -62,6 +81,8 @@ class Engine:
                 c,context,reason=self.validate(row['shopify_customer_id'],enrollment)
                 address=email((c or {}).get('email'))
             if reason:
+                if reason=='automation_paused':
+                    self.store.release_paused_send(row);return True
                 self.store.finish_send(row,'BLOCKED',reason);return True
             if not row['test_send']:
                 from crm_native_unsubscribe import native_unsubscribe_url
@@ -72,7 +93,16 @@ class Engine:
                 self.store.suppress(recipient_hash(address),row['shopify_customer_id'],'suppressed','resend',address)
                 self.store.finish_send(row,'BLOCKED','provider_suppression');return True
             content=self.store.template(row['template_id'],row['template_version'])
-            if content.get('format')=='campaign_delivery_v1':
+            if content.get('format')=='automation_delivery_v1':
+                if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
+                    self.store.finish_send(row,'BLOCKED','recipient_changed');return True
+                from crm_automation_runtime import render as render_automation
+                if content.get('review_request'):
+                    from reviews_submission import prepare_email
+                    from reviews_store import ReviewsStore
+                    content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
+                message=render_automation(content,row,unsubscribe)
+            elif content.get('format')=='campaign_delivery_v1':
                 from crm_campaign_schedule import overdue_reason
                 late=overdue_reason(content,row,self.clock())
                 if late:
@@ -108,11 +138,13 @@ class Engine:
             if not row['test_send']:
                 from crm_workspace_store import WorkspaceRecords
                 records=WorkspaceRecords(self.store.connect)
-                hours=content['document']['smart_hours'] if content.get('format')=='campaign_delivery_v1' else records.setting('sending')['value']['smart_hours']
+                hours=content['document']['smart_hours'] if content.get('format') in ('campaign_delivery_v1','automation_delivery_v1') else records.setting('sending')['value']['smart_hours']
                 if records.frequency_blocked(recipient_hash(address),hours):
                     self.store.finish_send(row,'BLOCKED','smart_sending');return True
             self.hold_lease()
-            if not self.store.begin_send(row,digest,recipient_hash(address)):return True
+            if not self.store.begin_send(row,digest,recipient_hash(address)):
+                if row.get('enrollment_id'):self.store.release_paused_send(row)
+                return True
             submitting=True
             provider_id=self.delivery().send(address,message,row['idempotency_key'],row['test_send'])
             self.store.finish_send(row,'ACCEPTED',provider_id=provider_id)
@@ -129,8 +161,17 @@ class Engine:
         return True
     def stop(self,enrollment,reason):
         status='RECOVERED' if reason=='recovered' else 'STOPPED'
+        if reason=='recovered' and enrollment.get('checkout_key'):
+            from crm_shopify_automation_events import recover
+            self.store.q("UPDATE crm_shopify_checkouts SET status='RECOVERED',updated_at=now() WHERE checkout_key=%s",(enrollment['checkout_key'],))
+            recover(self.store,enrollment['checkout_key']);return
         self.store.q('UPDATE crm_automation_enrollments SET status=%s,stop_reason=%s,last_checked_at=now(),updated_at=now() WHERE id=%s',(status,reason,enrollment['id']))
+        if enrollment.get('steps') and enrollment['steps'][0].get('automation_version'):
+            logging.getLogger(__name__).info('automation_exit automation_id=%s journey_id=%s journey_status=%s exit_reason=%s',enrollment['automation_id'],enrollment['id'],status,reason)
     def advance(self,enrollment):
+        if enrollment.get('steps') and enrollment['steps'][0].get('automation_version'):
+            from crm_automation_runtime import advance
+            return advance(self,enrollment)
         steps=enrollment['steps'];index=enrollment['current_step'];at=self.clock()
         if index>=len(steps):
             self.store.q("UPDATE crm_automation_enrollments SET status='COMPLETED',updated_at=now() WHERE id=%s",(enrollment['id'],));return
@@ -169,11 +210,25 @@ class Engine:
         more=page['pageInfo'].get('hasNextPage',False)
         self.store.q("UPDATE crm_campaigns SET status=%s,recipient_cursor=%s,snapshot_at=COALESCE(snapshot_at,now()),updated_at=now() WHERE id=%s AND status IN ('BUILDING','SCHEDULED')",('BUILDING' if more else 'SENDING',page['pageInfo'].get('endCursor'),campaign['id']))
     def process_event(self,event):
+        from time import perf_counter
+        start=perf_counter()
+        try:return self._process_event(event)
+        finally:
+            import re
+            identity=event.get('event_id','')
+            safe=identity if isinstance(identity,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}',identity) else 'invalid'
+            logging.getLogger(__name__).info('shopify_automation_processed shopify_topic=%s shopify_event_id=%s processing_ms=%.1f',event['topic'],safe,(perf_counter()-start)*1000)
+    def _process_event(self,event):
         topic=event['topic'];customer_id=event['related_customer_id'];at=date(event['occurred_at'])
         if topic in ('customers/delete','customers/redact'):
             if customer_id:self.store.suppress(hashlib.sha256(customer_id.encode()).hexdigest(),customer_id,'redacted','shopify')
             return
-        automations=[a for a in self.store.list('automations') if a['status']=='ACTIVE' and date(a['activated_at'])<=at]
+        active=getattr(type(self.store),'active_automations',None)
+        automations=[a for a in (active(self.store) if active else self.store.list('automations')) if a['status']=='ACTIVE' and date(a['activated_at'])<=at]
+        from crm_automation_definition import native
+        from crm_automation_runtime import process_event
+        process_event(self,event,automations)
+        automations=[a for a in automations if not native(a)]
         if topic=='customers_email_marketing_consent/update':
             c=self.shop.customer(customer_id,fresh=True)
             if consent(c)!='SUBSCRIBED':
@@ -192,13 +247,17 @@ class Engine:
             order=self.shop.order(event['object_id'],fresh=True)
             if order and not order.get('cancelledAt') and order.get('customer'):
                 customer_id=order['customer']['id']
-                self.store.q("UPDATE crm_automation_enrollments e SET status='RECOVERED',stop_reason='paid_order',updated_at=now() FROM crm_automations a WHERE e.automation_id=a.id AND a.trigger_type='abandoned' AND e.shopify_customer_id=%s AND e.trigger_at<=%s AND e.status='ACTIVE'",(customer_id,order['createdAt']))
+                self.store.q("UPDATE crm_automation_enrollments e SET status='RECOVERED',stop_reason='paid_order',updated_at=now() FROM crm_automations a WHERE e.automation_id=a.id AND e.checkout_key IS NULL AND COALESCE(e.steps->0->>'trigger',a.trigger_type)='abandoned' AND e.shopify_customer_id=%s AND e.trigger_at<=%s AND e.status='ACTIVE'",(customer_id,order['createdAt']))
                 for a in automations:
                     if a['trigger_type']=='post_purchase' and order.get('fullyPaid') and date(order['createdAt'])>=date(a['activated_at']):self.store.enroll(a,customer_id,order['id'],order['id'],at)
         elif topic.startswith('checkouts/'):
             # Events merely expedite reconciliation; only abandonedCheckouts is eligibility authority.
             self.store.set_state('reconcile:abandoned',{})
     def reconcile(self,automation):
+        from crm_automation_definition import native
+        if native(automation):
+            from crm_automation_runtime import reconcile
+            return reconcile(self,automation)
         kind=automation['trigger_type']
         if kind not in ('abandoned','win_back'):return
         key='reconcile:'+kind;state=self.store.state(key)
@@ -223,6 +282,11 @@ class Engine:
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
         try:
+            from crm_automation_capabilities import verify as verify_automation
+            checked=date(self.store.state('shopify_automation_capabilities').get('checked_at'))
+            if not checked or self.clock()-checked>timedelta(minutes=5):
+                try:verify_automation(self.shop,self.store)
+                except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
             from crm_campaign_schedule import schedule_gate
             schedule_gate(self.store,self.config.enabled,self.clock())
             events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' ORDER BY received_at LIMIT 10")
@@ -234,9 +298,18 @@ class Engine:
                 except Exception:
                     self.store.q("UPDATE crm_webhook_events SET attempts=attempts+1,status=CASE WHEN attempts>=4 THEN 'FAILED' ELSE 'PENDING' END,error_code='source_unavailable' WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
             if self.config.enabled:
-                for a in self.store.list('automations'):
+                active=getattr(type(self.store),'active_automations',None)
+                for a in (active(self.store) if active else self.store.list('automations')):
                     if a['status']=='ACTIVE':
-                        self.hold_lease();self.reconcile(a)
+                        self.hold_lease()
+                        from crm_automation_definition import native
+                        if native(a):
+                            try:self.reconcile(a)
+                            except Exception as exc:
+                                # An unavailable trigger source holds this flow;
+                                # it must not prevent unrelated Campaign dispatch.
+                                logging.getLogger(__name__).warning('automation_source_held automation_id=%s exception_type=%s',a['id'],type(exc).__name__)
+                        else:self.reconcile(a)
                 self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
                 campaigns=self.store.q("SELECT * FROM crm_campaigns WHERE audience_snapshot_id IS NULL AND (status='BUILDING' OR (status='SCHEDULED' AND scheduled_at<=now())) ORDER BY created_at LIMIT 1")
                 for campaign in campaigns:self.hold_lease();self.campaign_page(campaign)

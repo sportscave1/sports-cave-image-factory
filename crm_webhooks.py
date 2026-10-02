@@ -9,20 +9,31 @@ SHOPIFY_TOPICS={
  'customers/create':'CUSTOMERS_CREATE','customers/update':'CUSTOMERS_UPDATE','customers/delete':'CUSTOMERS_DELETE',
  'customers_email_marketing_consent/update':'CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE',
  'segments/create':'SEGMENTS_CREATE','segments/update':'SEGMENTS_UPDATE','segments/delete':'SEGMENTS_DELETE',
- 'orders/create':'ORDERS_CREATE','orders/updated':'ORDERS_UPDATED','orders/paid':'ORDERS_PAID','orders/cancelled':'ORDERS_CANCELLED',
+ 'orders/create':'ORDERS_CREATE','orders/updated':'ORDERS_UPDATED','orders/paid':'ORDERS_PAID','orders/fulfilled':'ORDERS_FULFILLED','orders/cancelled':'ORDERS_CANCELLED',
  'checkouts/create':'CHECKOUTS_CREATE','checkouts/update':'CHECKOUTS_UPDATE','checkouts/delete':'CHECKOUTS_DELETE',
 }
 # The existing paid fulfillment endpoint forwards its signed event to this ledger.
 
-def receive_shopify(store,topic,event_id,payload,occurred_at):
+def receive_shopify(store,topic,event_id,payload,occurred_at,shop_domain=None):
     if topic not in SHOPIFY_TOPICS and topic!='customers/redact':raise ValueError('Unsupported CRM topic.')
-    if not event_id or len(event_id)>200:raise ValueError('Missing webhook identity.')
-    kind='Segment' if topic.startswith('segments/') else 'Customer' if topic.startswith('customers') else 'Order' if topic.startswith('orders/') else 'AbandonedCheckout'
+    if not isinstance(event_id,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}',event_id):raise ValueError('Missing webhook identity.')
+    from crm_shopify_automation_events import facts,persist
+    import os
+    shop=shop_domain or os.getenv('SHOPIFY_STORE_DOMAIN','')
+    at=date(occurred_at) or now()
+    normalized=facts(topic,payload,shop,at)
+    if topic.startswith('checkouts/'):
+        # API 2026-04 supplies token, not id. Never synthesize an Admin GID.
+        customer_id=gid((payload.get('customer') or {}).get('id'))
+        return persist(store,event_id,topic,'checkout:'+normalized['checkout_key'],customer_id,at,normalized)
+    kind='Segment' if topic.startswith('segments/') else 'Customer' if topic.startswith('customers') else 'Order'
     value=(payload.get('customer_id') if topic=='customers_email_marketing_consent/update' else payload.get('id')) or (payload.get('customer') or {}).get('id')
     customer_id=gid(value) if kind=='Customer' else gid((payload.get('customer') or {}).get('id'))
     object_id=gid(value,kind)
     if not object_id:raise ValueError('Missing Shopify object identity.')
-    return store.webhook('shopify',event_id,topic,object_id,customer_id,date(occurred_at) or now())
+    if topic=='customers_email_marketing_consent/update' or normalized.get('checkout_key'):
+        return persist(store,event_id,topic,object_id,customer_id,at,normalized)
+    return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
 
 def receive_resend(store,event_id,payload):
     from crm_workspace_store import WorkspaceRecords

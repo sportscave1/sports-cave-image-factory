@@ -8,6 +8,7 @@ import psycopg
 import manual_certificate_schema
 import crm_schema
 import support_email_schema
+import reviews_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,9 +54,15 @@ CRM_MIGRATIONS = (
     '20260928024722_crm_campaigns_first_workspace.sql',
     '20260930031755_crm_campaigns_production_v2.sql',
     '20260930051803_crm_email_attribution_hardening.sql',
+    '20261002132200_crm_native_automations_v1.sql',
+    '20261002143522_crm_shopify_automation_triggers_v1.sql',
 )
 EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql')
+REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 REVIEWED_MIGRATION_SHA256 = {
+    '20261002152512_reviews_v1.sql': '3804945b37e86e41a4c079ae48d4cab2eab785e5ef09eb6f613e39502543fc00',
+    '20261002143522_crm_shopify_automation_triggers_v1.sql': '687be08c5463d9704d5ea40199b277edbf8ad76e9b236c4282ba9c58d58eca90',
+    '20261002132200_crm_native_automations_v1.sql': '47dcc5d645dc99cde163869ee18d4217c1939faca556f17a46b698e52aaec60e',
     '20260927020406_customer_support_workflow.sql': 'cee29c8f0e6ba41ca22dc444edf11545a131862e9313cac8a33a55319beb5757',
     '20260927025319_customer_support_email_settings.sql': '3d56ce51148c47de111e8518fbef0532ea5189893a93a1f56637dad302ef4761',
     '20260930055619_support_email_inbox_snapshot.sql': 'b00ecb32fb880b9937f83c352f49f1dd12b876e5cdb57aaaba00b64a6ba4ac4e',
@@ -91,6 +98,7 @@ DEPLOYMENT_MIGRATIONS = (
     "20260927223857_edition_design_tracking_spreadsheet.sql",
     *CRM_MIGRATIONS,
     *EMAIL_MIGRATIONS,
+    *REVIEWS_MIGRATIONS,
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
@@ -405,7 +413,7 @@ def run_deployment_migrations(*, check=False):
                     cur.execute(_migration_body(sql))
                 cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
                 applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
         conn.commit()
@@ -413,7 +421,7 @@ def run_deployment_migrations(*, check=False):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
                           options='-c default_transaction_read_only=on', prepare_threshold=None) as conn:
         with conn.cursor() as cur:
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur)
             if issues:
                 raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
             cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')

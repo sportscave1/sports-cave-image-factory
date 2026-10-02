@@ -110,7 +110,7 @@ def validate_tracking(doc,cfg,campaign_id):
 
 def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     """One explicit submission confirms reviewed copy; all backend guards still run."""
-    require(user,'crm_campaigns_manage')
+    require(user,'crm_automations_manage' if getattr(store,'email_mode',None)=='automation' else 'crm_campaigns_manage')
     recipient=recipient.strip() if isinstance(recipient,str) else recipient
     if not single_email(recipient):raise ValueError('Enter one valid email address.')
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True

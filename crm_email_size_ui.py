@@ -7,7 +7,8 @@ from crm_email_size import campaign_size,analyze_rendered_email,meter_html,rende
 
 @st.fragment(run_every='2s')
 def size_meter(editor,key,cfg):
-    current=st.session_state.get('campaign_editor',editor)
+    from crm_email_editor_context import current as current_editor
+    current=current_editor(st.session_state,editor)
     if str(current.get('id'))!=str(editor.get('id')):return
     cfg=st.session_state.get(key+'review_preview_settings',cfg)
     token=hashlib.sha256(json.dumps([current['id'],current['document'],cfg],sort_keys=True,default=str).encode()).hexdigest()

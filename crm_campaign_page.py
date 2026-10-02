@@ -157,13 +157,13 @@ def recent_campaigns(drafts,key,user):
 
 @st.fragment(**({'key':COMPOSER_TARGET} if COMPOSER_TARGET else {}))
 @autosaving
-def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
+def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='campaign',settings_control=None):
     """Content interactions repaint only composer/preview; no workspace DB reads."""
     closing=st.session_state.pop('campaign_template_close_dialog',None)
     if closing is not None:closing.close()
     from crm_html_workspace import section_editor,composer_canvas
     from crm_recovery_ui import recovery_bridge
-    if available:recovery_bridge(drafts,actions.user,editor,key)
+    if available and mode=='campaign':recovery_bridge(drafts,actions.user,editor,key)
     doc=editor['document'];c=doc['content']
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
@@ -173,13 +173,16 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
                 if details.open:
                     from crm_prompt_ui import prompt_control,field_feedback
                     prompt_control(shop,editor,key)
-                    editor['name']=st.text_input('Campaign name',editor['name'],max_chars=150,key=key+'name')
+                    editor['name']=st.text_input('Automation name' if mode=='automation' else 'Campaign name',editor['name'],max_chars=150,key=key+'name')
                     c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
                     c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
                     field_feedback()
                     from crm_campaign_controls import market_control,timing_control
-                    market_control(shop,drafts,doc,key)
-                    timing_control(doc,key)
+                    if mode=='automation':
+                        if settings_control:settings_control(editor,key)
+                    else:
+                        market_control(shop,drafts,doc,key)
+                        timing_control(doc,key)
             with html_tab:
                 if html_tab.open:
                     from crm_email_prompt_ui import email_prompt_control
@@ -200,9 +203,10 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available):
     if st.session_state.get('campaign_save_error'):
         st.warning(st.session_state['campaign_save_error'])
         if st.button('Retry save',key=key+'retry_save'):
+            if mode=='automation':flush_current(force=True);return
             from crm_recovery_ui import retry_browser
             if not retry_browser(drafts,actions.user,editor,key):flush_current(force=True)
-        if st.button('Save separate recovery copy',key=key+'recovery_copy'):
+        if mode=='campaign' and st.button('Save separate recovery copy',key=key+'recovery_copy'):
             pending=st.session_state.pop('campaign_browser_recovery',None)
             if pending:editor.update(pending['editor'])
             editor['id']=None;editor['version']=None;editor['recovery_seed']=uuid.uuid4().hex
@@ -228,6 +232,7 @@ def continue_campaign_leave(drafts,navigate):
 
 @st.fragment
 def campaign_workspace(shop,store,actions,navigate=lambda _:None):
+    st.session_state['email_editor_mode']='campaign'
     from email_loading import stage
     from crm_html_workspace import composer_styles
     composer_styles()

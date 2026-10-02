@@ -23,6 +23,11 @@ def navigation_allowed(state,current,target,*,source='user'):
     """Metadata-only unsaved-draft guard; no DB/Shopify calls in the OS shell."""
     editor=state.get('campaign_editor');saved=state.get('campaign_saved') or {}
     pending=editor and (editor.get('document')!=saved.get('document') or editor.get('name')!=saved.get('name'))
+    if current=='CRM Automations' and target!=current:
+        auto=state.get('automation_editor');base=state.get('automation_saved') or {}
+        if auto and (auto.get('document')!=base.get('document') or auto.get('name')!=base.get('name')):
+            state['automation_requested_route']=target
+            return False
     if current=='CRM Campaigns' and target!=current and pending:
         state['crm_requested_route']=target
         return False

@@ -116,7 +116,8 @@ def middle_editor(doc, key, shop, store=None):
         try:templates=[{k:r[k] for k in ('id','name','version')} for r in library_rows(store)]
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
     from crm_image_prompt import image_prompt
-    editor = st.session_state.get('campaign_editor', {})
+    from crm_email_editor_context import current
+    editor = current(st.session_state,{})
     campaign_name = editor.get('name', '') if editor.get('document') is doc else ''
     from crm_email_prompt import handoff
     from crm_prompt_copy import clipboard_script

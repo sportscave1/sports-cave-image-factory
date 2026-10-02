@@ -84,6 +84,8 @@ COLUMNS = {'crm_automation_enrollments': ('automation_id',
                          'send_id',
                          'test_id'),
  'crm_internal_tests': ('accepted_at',
+                        'automation_id',
+                        'automation_step_id',
                         'actor',
                         'campaign_id',
                         'campaign_version',
@@ -193,3 +195,11 @@ INDEXES+=('crm_campaign_snapshots_campaign','crm_campaign_tracking_key','crm_cam
 
 COLUMNS['crm_order_attribution']+=('attribution_status','evidence','gross_revenue','refund_amount','retry_at','attempts','mirror_error','created_at','updated_at')
 INDEXES+=('crm_attribution_retry',)
+
+INDEXES+=('crm_internal_tests_automation','crm_enrollment_automation_customer','crm_attribution_automation')
+COLUMNS['crm_webhook_events']+=('normalized',)
+COLUMNS['crm_automation_enrollments']+=('checkout_key','source_event_id')
+COLUMNS['crm_shopify_checkouts']=('checkout_key','shop','customer_id','source_event_id','created_at','activity_at','status','admin_checkout_id','order_id','updated_at')
+COLUMNS['crm_shopify_pixel_events']=('event_id','shop','event_name','client_hash','product_id','occurred_at','received_at')
+COLUMNS['crm_shopify_consent_versions']=('customer_id','state','changed_at')
+INDEXES+=('crm_checkout_due','crm_enrollment_checkout','crm_pixel_received')

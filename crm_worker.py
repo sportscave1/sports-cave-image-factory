@@ -20,6 +20,11 @@ def main(argv=None):
     engine=Engine(store,Shopify());stop=threading.Event();owner=str(uuid.uuid4())
     signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     while not stop.is_set():
+        # Durable review imports are independent of marketing delivery gates.
+        try:
+            from reviews_worker import tick as review_import_tick
+            review_import_tick()
+        except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
         try:engine.tick(owner)
         except Exception as exc:logging.getLogger(__name__).warning('crm_worker_cycle_failed type=%s',type(exc).__name__)
         if args.once:break

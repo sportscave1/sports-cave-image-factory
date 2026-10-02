@@ -1,0 +1,24 @@
+type = "web_pixel_extension"
+name = "Sports Cave Automations"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = true
+marketing = true
+preferences = false
+sale_of_data = "disabled"
+
+[settings]
+type = "object"
+
+[settings.fields.endpoint]
+name = "Customer events endpoint"
+type = "single_line_text_field"
+
+[settings.fields.shop]
+name = "Shop domain"
+type = "single_line_text_field"
+
+[settings.fields.ingestionId]
+name = "Public ingestion identifier"
+type = "single_line_text_field"
