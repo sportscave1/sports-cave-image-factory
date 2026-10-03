@@ -45,7 +45,11 @@ if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture
 from tests.test_crm_abandoned_checkout import checkout
 shop=st.session_state.get('fixture_shop')
 if shop is None:shop=Mock();st.session_state['fixture_shop']=shop
-shop.abandoned_preview.return_value={'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
+fixture_checkout=checkout(identity=2 if st.session_state.get('fixture_new_customer') else 1,items=2)
+if st.session_state.get('fixture_new_customer'):
+    fixture_checkout['customer']['firstName']='New'
+    fixture_checkout['lineItems']['nodes'][0]['title']='New collector product'
+shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}
 if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
 elif st.query_params.get('fixture_delay'):
     def delayed(**kwargs):
@@ -54,6 +58,27 @@ elif st.query_params.get('fixture_delay'):
         return {'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
     shop.abandoned_preview.side_effect=delayed
 from crm_automation_ui import workspace
+if st.query_params.get('fixture_rerun'):
+    import crm_checkout_preview as preview_module
+    if not hasattr(preview_module,'_fixture_document'):
+        preview_module._fixture_document=preview_module.document
+        def measured_document(*args,**kwargs):
+            st.session_state['fixture_hydrations']=st.session_state.get('fixture_hydrations',0)+1
+            return preview_module._fixture_document(*args,**kwargs)
+        preview_module.document=measured_document
+    if st.button('Synthetic global rerun'):
+        from time import sleep
+        sleep(2)
+    if st.button('Synthetic new checkout'):
+        st.session_state['fixture_new_customer']=True
+        fresh=checkout(identity=2,items=2)
+        fresh['customer']['firstName']='New'
+        fresh['lineItems']['nodes'][0]['title']='New collector product'
+        shop.abandoned_preview.return_value={'nodes':[fresh],'pageInfo':{'hasNextPage':False}}
+    if st.button('Synthetic lookup failure'):
+        st.session_state['fixture_lookup_failure']=True
+    if st.session_state.get('fixture_lookup_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic failure')
 workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
 
 if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))
+if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))

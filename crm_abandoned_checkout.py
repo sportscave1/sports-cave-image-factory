@@ -91,10 +91,10 @@ def latest(shop):
     return None
 
 
-def preview_context(state,shop,*,refresh=False,auto_refresh=True):
+def preview_context(state,shop,*,refresh=False,auto_refresh=True,slot='abandoned_preview'):
     from time import monotonic
     from crm_campaign_home_cache import POOL,CAPACITY
-    entry=state.get('abandoned_preview')
+    entry=state.get(slot)
     namespace=getattr(shop,'namespace',None)
     namespace=namespace if isinstance(namespace,str) else 'configured-shop'
     if entry and entry.get('namespace')!=namespace:entry=None
@@ -109,7 +109,7 @@ def preview_context(state,shop,*,refresh=False,auto_refresh=True):
             finally:CAPACITY.release()
         try:future=POOL.submit(load)
         except RuntimeError:CAPACITY.release();return last_good,'Checkout preview temporarily unavailable.'
-        entry=state['abandoned_preview']={'future':future,'started':monotonic(),'namespace':namespace,'last_good':last_good}
+        entry=state[slot]={'future':future,'started':monotonic(),'namespace':namespace,'last_good':last_good}
     if not entry['future'].done():return last_good,'Refreshing latest abandoned checkout…' if last_good else 'Loading latest abandoned checkout…'
     try:value=entry['future'].result()
     except Exception:return last_good,'Checkout preview temporarily unavailable.'

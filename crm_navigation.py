@@ -28,6 +28,9 @@ def navigation_allowed(state,current,target,*,source='user'):
         if auto and (auto.get('document')!=base.get('document') or auto.get('name')!=base.get('name')):
             state['automation_requested_route']=target
             return False
+        # A later return starts a new checkout preview session. Retain the pin
+        # while navigation is blocked so unsaved edits never replace its customer.
+        state.pop('_automation_preview_open',None)
     if current=='CRM Campaigns' and target!=current and pending:
         state['crm_requested_route']=target
         return False

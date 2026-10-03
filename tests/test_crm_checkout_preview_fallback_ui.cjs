@@ -41,9 +41,10 @@ const fs=require('node:fs');
    const initial=await frame.evaluate(()=>({updates:window.previewUpdates,loads:window.previewLoads}));
    if(!failure){
     await email.locator('body').evaluate(()=>window.scrollTo(0,200));
+    const idleScroll=await email.locator('body').evaluate(()=>window.scrollY);
     await page.waitForTimeout(60000);
     assert.deepEqual(await frame.evaluate(()=>({updates:window.previewUpdates,loads:window.previewLoads})),initial);
-    assert.ok(await email.locator('body').evaluate(()=>window.scrollY)>=190);
+    assert.equal(await email.locator('body').evaluate(()=>window.scrollY),idleScroll);
     console.log('60s idle: zero updates, reloads and scroll resets');
    }
    await page.locator('.st-key-crm-preview-devices button:visible').nth(1).click();

@@ -161,15 +161,18 @@ class AutomationStore(CampaignStore):
         self.preview_warning=''
         if not needs_checkout(doc):return doc,''
         import streamlit as st
-        data,note=preview_context(st.session_state,self.preview_shop,auto_refresh=False)
+        data,note=preview_context(st.session_state,self.preview_shop,auto_refresh=False,slot='_automation_checkout_pin')
         if not data:data=sample(doc)
         from crm_automation_preview_cache import digest
         token=digest([doc,data])
-        cached=st.session_state.get('_automation_hydration')
-        if not cached or cached['token']!=token:
+        entries=st.session_state.get('_automation_hydrations',{})
+        cached=entries.get(token)
+        if cached is None:
             rendered,detected=document(doc,data)
             cached={'token':token,'document':rendered,'legacy':detected}
-            st.session_state['_automation_hydration']=cached
+            entries={**entries,token:cached}
+            if len(entries)>4:entries.pop(next(iter(entries)))
+            st.session_state['_automation_hydrations']=entries
         rendered,detected=cached['document'],cached['legacy']
         if detected:self.preview_warning='Legacy checkout block detected · preview uses native checkout products.'
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')

@@ -237,7 +237,9 @@ def detail(shop,store,actions,identity):
     from crm_email_size_ui import automation_size_meter
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
     if st.button('← Automations',key='auto_back'):
-        if flush_current():st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
+        if flush_current():
+            st.session_state.pop('_automation_preview_open',None)
+            st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
     title,action=st.columns([3,1]);title.subheader(row['name']);title.caption(status(row)+' · Published version '+str(row['config']['published_version']))
     if row['status']=='ACTIVE' and not readonly:
         if action.button('Pause'):store.lifecycle(user,identity,'pause');changed();st.rerun()
@@ -257,12 +259,15 @@ def detail(shop,store,actions,identity):
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
     store.preview_trigger=flow['trigger']
     key='auto_'+str(identity)+'_'+step['step_id']+'_'
-    if st.session_state.get('_automation_preview_open')!=key:
-        st.session_state['_automation_preview_open']=key
+    namespace=getattr(shop,'namespace',None)
+    preview_scope=(key,flow['trigger'],namespace if isinstance(namespace,str) else 'configured-shop')
+    if st.session_state.get('_automation_preview_open')!=preview_scope:
+        st.session_state['_automation_preview_open']=preview_scope
+        st.session_state.pop('_automation_checkout_pin',None)
         from crm_checkout_preview import needs_checkout
         if needs_checkout(editor['document']):
             from crm_abandoned_checkout import preview_context
-            preview_context(st.session_state,shop)
+            preview_context(st.session_state,shop,auto_refresh=False,slot='_automation_checkout_pin')
     cfg=store.render_settings();composer_styles()
     st.html('''<style>
     .st-key-crm-automation-editor [data-testid="stVerticalBlock"]{gap:8px}
@@ -305,6 +310,8 @@ def detail(shop,store,actions,identity):
 
 
 def workspace(shop,base,actions,navigate=lambda _:None):
+    if st.session_state.get('email_editor_mode')!='automation':
+        st.session_state.pop('_automation_preview_open',None)
     st.session_state['email_editor_mode']='automation'
     store=AutomationStore(base.connect);identity=st.session_state.get('automation_selected') or st.query_params.get('automation')
     notice=st.session_state.pop('automation_notice',None)
@@ -332,5 +339,7 @@ def workspace(shop,base,actions,navigate=lambda _:None):
             else:
                 with st.container(key='crm-automation-editor'):
                     detail(shop,store,actions,identity)
-        else:home(store,actions.user)
+        else:
+            st.session_state.pop('_automation_preview_open',None)
+            home(store,actions.user)
     except (StoreUnavailable,ValueError,PermissionError) as exc:st.warning(str(exc))

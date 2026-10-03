@@ -24,9 +24,10 @@ while the editor is open. No React effect or external frontend framework is invo
   previous internal scroll position after load.
 - There are no settled-state polling timers. While the initial/manual checkout
   lookup is pending, a small completion bridge checks once per second; it stops
-  when resolved. One completion rerun updates the action row without remounting the
-  keyed iframe. No background refresh starts solely because the cache TTL expires.
-- Editor entry checks the existing 45-second cache once. The async checkout read
+  when resolved. Completion stays inside the preview fragment; the size report is
+  delivered through the existing scoped browser event. No background refresh starts solely because the cache TTL expires.
+- Editor entry creates a dedicated session pin and fetches once; backend TTL expiry
+  cannot replace that pin. The async checkout read
   starts before sender/default settings are loaded, allowing those reads to overlap.
   A small refresh icon explicitly refreshes checkout context. Last-good data stays
   visible; an identical checkout does not replace the iframe.
@@ -87,3 +88,82 @@ Tests/evidence: `tests/test_crm_automation_preview_stability.py`,
 `tests/fixtures/crm_automation_preview.py`,
 `docs/performance-evidence/checkout-fallback-real.png`,
 `docs/performance-evidence/checkout-fallback-sample.png`.
+
+
+## Follow-up: pinned context and rerun dimming (2026-10-03)
+
+A controlled browser run of the previous implementation stayed stable for 90 idle
+seconds: zero additional checkout requests, inner iframe loads or replacements.
+A two-second full app rerun did reproduce dimming: effective iframe opacity fell
+from 1 to 0.33. Streamlit marks retained element containers `data-stale=true` and
+applies its built-in fading transition, independently of inner iframe loading.
+No production periodic trigger was measured; do not interpret the local result as
+proof of which production background event initiates reruns.
+
+There was also a full app rerun on async checkout completion and a single-entry
+hydration/output cache shared by the size meter and canvas. Their distinct document
+representations evicted one another. Local instrumentation measured hydration
+counts advancing 5 → 7 → 9 on successive full reruns. The bounded four-entry caches
+now retain both representations: 2 → 2 → 2. Final HTML SHA-256, rather than the input
+cache token, controls iframe replacement. Unchanged HTML stays mounted even if
+nonvisual input changes require a fresh validation/render.
+
+The dedicated `_automation_checkout_pin` is isolated from other preview lookups
+and Send Test. Its completed future, last-good context and load timestamp persist
+until manual refresh, editor reopen or scope change (automation/step/trigger/shop).
+Approved navigation away clears the editor scope; blocked unsaved navigation does
+not. Failed refresh retains last-good data. This is preview state only, never a
+live enrollment context. Namespace selection and existing shared lookup defaults
+remain backwards compatible.
+
+Only the two automation preview surfaces opt out of Streamlit stale opacity, via
+an exact selector for their retained preview component. This is paired with pinned
+data, bounded memoization and removal of the completion app rerun; it does not
+hide fetch errors or change unrelated app loading indicators. Settled previews
+have no timer. The existing one-second bridge runs only while an explicit lookup
+is pending. Top-bar notification/planner status work remains unchanged; the planner
+app-refresh bridge is restricted to Dashboard/Reporting/Weekly Review, not this
+editor. Campaign polling, Inbox checks and Orders loaders remain unchanged.
+
+Focused tests: editor pin survives 900 simulated seconds; failed refresh keeps the
+pin; Send Test cannot replace it; navigation invalidation waits for approval;
+identical HTML retains its digest; alternate representations reuse bounded caches.
+Combined automation/email/Campaign/size/tracking regression suite: 138 passed,
+zero skipped, using loopback PostgreSQL and mocked external providers.
+
+
+Changed in this follow-up:
+- Runtime: `crm_abandoned_checkout.py`, `crm_abandoned_checkout_ui.py`,
+  `crm_automation_preview_cache.py`, `crm_automation_store.py`, `crm_automation_ui.py`.
+- Shared navigation metadata: `crm_navigation.py`, only the successful departure
+  from CRM Automations branch, to permit a fresh pin when returning. Other routing
+  decisions and unsaved-draft protections are unchanged.
+- Tests: `tests/test_crm_automation_preview_stability.py`,
+  `tests/test_crm_automation_pinned_preview_ui.cjs`,
+  `tests/test_crm_checkout_preview_fallback_ui.cjs`,
+  `tests/fixtures/crm_automation_preview.py`.
+- This document and regenerated real/sample synthetic preview screenshots.
+
+The existing fallback browser test compares actual initial scroll position rather
+than assuming every rendered email permits a 200px scroll. No new live data or
+external provider calls are permitted by the fixtures.
+
+
+Final browser verification (loopback fixture / mocked Shopify):
+- 90 seconds idle plus a two-second global rerun: zero additional Shopify queries,
+  zero iframe remounts/loads/HTML replacements, zero additional image requests,
+  zero hydrations after settling. Effective preview opacity remained 1 throughout.
+- Save/device changes reuse the pin. A newer checkout does not replace it until
+  refresh. Each manual refresh makes one fixture lookup: changed product updates
+  once, identical result makes no replacement, failure retains last-good preview.
+- Existing real/sample fallback browser suite passes: 60-second idle stability,
+  scroll retention, 20 typed characters → one update, device reuse, visible size,
+  retained legacy surrounding HTML, editor/email viewport coverage.
+- Python: 138 regression tests passed; final focused rerun 20 passed. Compilation,
+  JavaScript syntax and diff whitespace checks passed. No live send, commit, push,
+  deployment or production data modification.
+
+Baseline 90-second idle also had zero extra queries/remounts/loads; baseline idle
+hydration was not independently instrumented. The measured improvements are
+rerun opacity (0.33 → 1) and repeated full-rerun hydration (+2 → 0), rather than a
+claimed reduction in production idle Shopify latency or an unobserved timer.
