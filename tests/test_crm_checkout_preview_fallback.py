@@ -34,7 +34,7 @@ class PreviewFallbackTests(unittest.TestCase):
         message=render_campaign(result,CFG)
         self.assertTrue(warning);self.assertEqual(doc,original)
         self.assertEqual([s['id'] for s in result['middle_sections']],[s['id'] for s in doc['middle_sections']])
-        for text in ('MY CUSTOM HEADLINE','MY CUSTOM OUTRO','Questions about sizing','AUD 199.50'):self.assertIn(text,message['html'])
+        for text in ('MY CUSTOM HEADLINE','MY CUSTOM OUTRO','Questions about sizing','A$199.50'):self.assertIn(text,message['html'])
         for token in ('{{','{%','OLD EMPTY CART MESSAGE'):self.assertNotIn(token,message['html'])
         self.assertEqual(message['html'].count('Complete Your Order'),1)
         self.assertIn('/checkouts/1/',message['html'])
@@ -104,7 +104,7 @@ class PreviewFallbackTests(unittest.TestCase):
         store.preview_shop.abandoned_preview.return_value={'nodes':[checkout()], 'pageInfo':{'hasNextPage':False}}
         doc=self.legacy_document();before=deepcopy(doc);result=store.test_document(doc,'op')
         message=render_production(result,CFG)
-        self.assertIn('AUD 199.50',message['html']);self.assertIn('Recovery action disabled',message['html'])
+        self.assertIn('A$199.50',message['html']);self.assertIn('Recovery action disabled',message['html'])
         self.assertNotIn('/checkouts/1/',message['html']);self.assertEqual(doc,before)
 
     def test_preview_fallback_cannot_relax_publication_or_live_binding(self):

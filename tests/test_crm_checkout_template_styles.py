@@ -28,12 +28,12 @@ def attrs(source,name):
 class TemplateStyleTests(unittest.TestCase):
     def test_data_markup_has_contract_but_no_visual_theme(self):
         html=block_html(context(checkout(items=2)))
-        for name in CLASSES:self.assertTrue(attrs(html,name),name)
+        for name in CLASSES-{'sc-cart-label','sc-cart-dimensions'}:self.assertTrue(attrs(html,name),name)
         for forbidden in ('color:','background:','font-size:','font-weight:','opacity:','padding:'):
             self.assertNotIn(forbidden,html)
 
     def test_variant_title_button_and_image_width_follow_authored_css(self):
-        html=default_html().replace('.sc-cart-variant { color:#ffffff;', '.sc-cart-variant { color:#d1a938 !important;').replace('.sc-cart-title { color:#ffffff;', '.sc-cart-title { color:#ff0000 !important;').replace('background:#d1a938;', 'background:#c59b2d !important;').replace('max-width:480px;', 'max-width:320px;')
+        html=default_html().replace('.sc-cart-variant { color:#b79335;', '.sc-cart-variant { color:#d1a938 !important;').replace('.sc-cart-title { color:#ffffff;', '.sc-cart-title { color:#ff0000 !important;').replace('background:#d1a938;', 'background:#c59b2d !important;').replace('max-width:480px;', 'max-width:320px;')
         doc=styled(html);original=deepcopy(doc)
         message=render_campaign(hydrate(doc,context(checkout())),CFG)
         self.assertIn('color:#d1a938',attrs(message['html'],'sc-cart-variant')[0]['style'])
@@ -44,7 +44,7 @@ class TemplateStyleTests(unittest.TestCase):
         self.assertEqual(doc,original)
 
     def test_preview_test_and_live_compilation_match_theme(self):
-        doc=styled(default_html().replace('.sc-cart-variant { color:#ffffff;', '.sc-cart-variant { color:#d1a938;'))
+        doc=styled(default_html().replace('.sc-cart-variant { color:#b79335;', '.sc-cart-variant { color:#d1a938;'))
         data=context(checkout())
         preview=preview_document(doc,data)[0];test=preview_document(doc,data,test=True)[0];live=hydrate(doc,data)
         for rendered in (preview,test,live):
@@ -75,7 +75,7 @@ class TemplateStyleTests(unittest.TestCase):
     def test_legacy_typed_block_without_css_gets_template_file_fallback(self):
         doc=styled();doc['middle_sections'][0]['html']='<p>Existing authored copy</p>';doc['custom_html']=doc['middle_sections'][0]['html']
         rendered=render_campaign(hydrate(doc,context(checkout())),CFG)
-        self.assertIn('color:#ffffff',attrs(rendered['html'],'sc-cart-variant')[0]['style'])
+        self.assertIn('color:#b79335',attrs(rendered['html'],'sc-cart-variant')[0]['style'])
         self.assertIn('Existing authored copy',rendered['html'])
 
     def test_general_html_css_boundary_remains_closed(self):
@@ -93,7 +93,7 @@ class MasterPersistenceTests(unittest.TestCase):
         store=AutomationStore(connect);previous=store.state(KEY)
         try:
             old=load(store);draft=styled();before=deepcopy(draft)
-            changed=old['html'].replace('.sc-cart-variant { color:#ffffff;', '.sc-cart-variant { color:#d1a938;')
+            changed=old['html'].replace('.sc-cart-variant { color:#b79335;', '.sc-cart-variant { color:#d1a938;')
             row=save(store,ADMIN,changed,old['revision'])
             self.assertEqual(load(store)['html'],changed);self.assertEqual(draft,before)
             use(store,draft);self.assertIn('color:#d1a938',draft['middle_sections'][0]['html'])

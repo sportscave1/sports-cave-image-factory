@@ -41,7 +41,7 @@ class CheckoutTests(unittest.TestCase):
             with self.subTest(currency=currency):
                 original=native_document();before=deepcopy(original);data=context(checkout(currency=currency,items=2))
                 rendered=render_campaign(hydrate(original,data),CFG)
-                self.assertIn(currency+' 199.50',rendered['html']);self.assertIn('Quantity: 2',rendered['text'])
+                self.assertIn({'AUD':'A$','USD':'US$','GBP':'£'}.get(currency,currency+' ')+'199.50',rendered['html']);self.assertIn('Qty 2',rendered['text'])
                 self.assertIn('&lt;safe&gt;',rendered['html']);self.assertNotIn('NZD 312',rendered['html'])
                 self.assertIn('Complete Your Order',rendered['html']);self.assertEqual(original,before)
                 self.assertNotIn('{{',rendered['html']);self.assertNotIn(BLOCK,rendered['html'])
@@ -50,7 +50,7 @@ class CheckoutTests(unittest.TestCase):
         raw=checkout();line=raw['lineItems']['nodes'][0];line['image']=None;line['variantTitle']=None
         line['title']='Real product identity — '+('Collector '+ 'edition ')*40
         data=context(raw);output=render_campaign(hydrate(native_document(),data),CFG,images_off=True)
-        self.assertIn(line['title'],output['text']);self.assertIn('AUD 199.50',output['text'])
+        self.assertIn(line['title'],output['text']);self.assertIn('A$199.50',output['text'])
         self.assertNotIn('<img',block_html(data));self.assertNotIn('None',output['html'])
 
     def test_test_message_disables_only_recovery_and_keeps_real_products(self):

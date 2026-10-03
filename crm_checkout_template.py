@@ -1,14 +1,14 @@
 """Editable master HTML in existing runtime-state storage; drafts own copied HTML."""
 from copy import deepcopy
 import json
-from crm_checkout_styles import MARKER,CLASSES,default_html,rules
+from crm_checkout_styles import MARKER,CLASSES,default_html,rules,upgrade_html
 
 KEY='abandoned_checkout_master_v1'
 
 
 def load(store):
     row=store.state(KEY)
-    return row if row else {'revision':0,'html':default_html()}
+    return {**row,'html':upgrade_html(row['html'])} if row else {'revision':0,'html':default_html()}
 
 
 def validate(html):

@@ -27,7 +27,7 @@ def money(value):
     return amount,currency
 
 
-def context(checkout):
+def context(checkout,*,edition_reader=None):
     if not isinstance(checkout,dict) or checkout.get('completedAt'):raise ValueError('Checkout is unavailable or already recovered.')
     identity=checkout.get('id','');url=checkout.get('abandonedCheckoutUrl','')
     if not re.fullmatch(r'gid://shopify/AbandonedCheckout/\d+',identity) or not public_https(url):raise ValueError('Checkout recovery data unavailable.')
@@ -47,7 +47,33 @@ def context(checkout):
             from crm_campaign_html import email_image_url
             image=email_image_url(image)
             if not image:raise ValueError('Checkout image needs a public HTTPS destination.')
-        items.append({'title':title,'variant':variant,'quantity':quantity,'image':image,'amount':str(amount),'currency':currency})
+        product=(item.get('variant') or {}).get('product') or item.get('product') or {}
+        items.append({'title':title,'variant':variant,'quantity':quantity,'image':image,'amount':str(amount),'currency':currency,
+                      'product_id':product.get('id'),'edition':None})
+    # Read existing ledger facts once per context, never during HTML rendering.
+    # This projection has next/limit facts, but no checkout reservation authority.
+    from crm_catalogue import product_id,edition_for
+    ids=list(dict.fromkeys(product_id(item['product_id']) for item in items if product_id(item['product_id'])))
+    if ids:
+        try:
+            if edition_reader is None:
+                from supabase_backend import list_edition_products_read_only
+                edition_reader=list_edition_products_read_only
+            rows=[]
+            for start in range(0,len(ids),50):
+                rows.extend(edition_reader(product_ids=ids[start:start+50],handles=[],limit=100))
+            for item in items:
+                pid=product_id(item['product_id'])
+                if not pid:continue
+                item['edition']=edition_for({'id':pid,'handle':''},rows)
+                exact=[row for row in rows if product_id(row.get('shopify_product_gid') or row.get('shopify_product_id'))==pid]
+                if item['edition'] is None and len(exact)==1:
+                    row=exact[0];limit=row.get('edition_total')
+                    if not row.get('allocation_blocked') and row.get('active') is not False and type(limit) is int and limit>0:
+                        item['edition']={'limit':limit}
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning('checkout_editions_unavailable type=%s',type(exc).__name__)
     customer=checkout.get('customer') or {}
     return {'checkout_id':identity,'customer_id':customer.get('id'),'created_at':checkout.get('createdAt'),
       'label':' '.join(str(customer.get(k) or '').strip() for k in ('firstName','lastName')).strip() or customer.get('email') or 'latest abandoned checkout',
@@ -119,13 +145,44 @@ def preview_context(state,shop,*,refresh=False,auto_refresh=True,slot='abandoned
     return last_good,'No recent abandoned checkout available for preview.'
 
 
+def variant_details(value):
+    """Separate only recognisable dimensions; preserve unknown product options."""
+    value=str(value or '').strip()
+    match=re.search(r'\s+[-–—]\s+(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*cm(?:\s*\([^\n<>]+\))?)$',value,re.I)
+    dimensions=match[1] if match else ''
+    variant=value[:match.start()].strip() if match else value
+    parts=[part.strip() for part in variant.split('/')]
+    if parts and parts[0] in {'Black','Oak','White','Unframed','Black Frame','Oak Frame','White Frame'}:
+        parts[0]={'Black':'Black Frame','Oak':'Oak Frame','White':'White Frame'}.get(parts[0],parts[0])
+        variant=' · '.join(parts)
+    return variant,dimensions
+
+
+def edition_label(edition):
+    if not isinstance(edition,dict):return ''
+    limit=edition.get('limit');number=edition.get('next')
+    if type(limit) is not int or limit<1:return ''
+    if type(number) is int and 1<=number<=limit and edition.get('remaining',0)>0:
+        return 'YOUR EDITION NUMBER WILL BE #'+str(number).zfill(3 if limit==100 else len(str(limit)))+'/'+str(limit)
+    return 'LIMITED TO '+str(limit)+' WORLDWIDE'
+
+
 def block_html(data,*,test=False):
     """Dynamic facts and semantic markup only. Theme belongs to authored HTML."""
     rows=[]
     for index,item in enumerate(data['items']):
         image='' if not item['image'] else '<img class="sc-cart-image" src="'+escape(item['image'],quote=True)+'" alt="'+escape(item['title'],quote=True)+'" style="display:block;width:100%;height:auto">'
-        label=item['currency']+' '+format(Decimal(item['amount']),',.2f') if item['amount'] is not None else 'Price unavailable in sample preview'
-        rows.append('<tr'+(' class="sc-cart-extra-items"' if index else '')+'><td class="sc-cart-image-wrap"><p class="sc-cart-label">YOUR SELECTED EDITION</p>'+image+'<p class="sc-cart-title">'+escape(item['title'])+'</p>'+('<p class="sc-cart-variant">'+escape(item['variant'])+'</p>' if item['variant'] else '')+'<p class="sc-cart-meta">Quantity: '+str(item['quantity'])+'</p><p class="sc-cart-price">Line total: '+escape(label)+'</p></td></tr>')
+        from crm_catalogue import price_label
+        price=price_label({'currency':item['currency'],'price':item['amount']}) if item['amount'] is not None else 'Price unavailable in sample preview'
+        variant,dimensions=variant_details(item['variant']);label=edition_label(item.get('edition'))
+        rows.append('<tr'+(' class="sc-cart-extra-items"' if index else '')+'><td class="sc-cart-image-wrap">'+
+          ('<p class="sc-cart-label">'+escape(label)+'</p>' if label else '')+image+
+          '<p class="sc-cart-title">'+escape(item['title'])+'</p>'+
+          ('<p class="sc-cart-variant">'+escape(variant)+'</p>' if variant else '')+
+          ('<p class="sc-cart-dimensions">'+escape(dimensions)+'</p>' if dimensions else '')+
+          '<p class="sc-cart-meta"><span class="sc-cart-qty">Qty '+str(item['quantity'])+'</span>'+
+          '<span class="sc-cart-divider"> | </span><span class="sc-cart-price">'+escape(price)+'</span></p>'+
+          '<hr class="sc-cart-rule"></td></tr>')
     disabled=test or data.get('preview_only')
     cta='<span class="sc-cart-button">'+('Recovery action disabled in test email' if test else 'Complete Your Order →')+'</span>' if disabled else '<a class="sc-cart-button" href="'+escape(data['recovery_url'],quote=True)+'">Complete Your Order →</a>'
     return '<table class="sc-cart-block" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td class="sc-cart-button-wrap" align="center">'+cta+'</td></tr></table>'

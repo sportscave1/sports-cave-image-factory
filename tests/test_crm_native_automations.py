@@ -96,7 +96,7 @@ class NativeAutomationTests(unittest.TestCase):
             send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
         wire.post.assert_called_once();self.store.preview_shop.abandoned_preview.assert_called_once_with(after=None,fresh=True)
         payload=wire.post.call_args.kwargs['json'];self.assertIn('Recovery action disabled',payload['html'])
-        self.assertNotIn('/checkouts/83/',str(payload));self.assertIn('AUD 199.50',payload['html'])
+        self.assertNotIn('/checkouts/83/',str(payload));self.assertIn('A$199.50',payload['html'])
         saved=self.store.flow(a['id'])['config']['draft']['emails'][0]['document']
         self.assertNotIn('/checkouts/83/',str(saved));self.assertTrue(any(s['type']=='abandoned_checkout_products' for s in saved['middle_sections']))
 

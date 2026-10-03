@@ -5,12 +5,31 @@ from pathlib import Path
 import re
 from crm_campaign_html import CSS
 
-CLASSES=frozenset('sc-cart-block sc-cart-label sc-cart-image-wrap sc-cart-image sc-cart-title sc-cart-variant sc-cart-meta sc-cart-price sc-cart-button-wrap sc-cart-button sc-cart-extra-items'.split())
+CLASSES=frozenset('sc-cart-block sc-cart-label sc-cart-image-wrap sc-cart-image sc-cart-title sc-cart-variant sc-cart-dimensions sc-cart-meta sc-cart-qty sc-cart-divider sc-cart-rule sc-cart-price sc-cart-button-wrap sc-cart-button sc-cart-extra-items'.split())
 MARKER='<!--SC_ABANDONED_CHECKOUT-->'
 STYLE=re.compile(r'<style\b[^>]*>(.*?)</style\s*>',re.I|re.S)
 
 
 def default_html():return (Path(__file__).parent/'templates'/'abandoned_checkout_collector_reminder.html').read_text(encoding='utf-8')
+
+
+def upgrade_html(source):
+    """Add missing detail rules to legacy masters/drafts without changing authored rules."""
+    # Only the exact previous built-in defaults are upgraded; custom values survive.
+    replacements={
+      '.sc-cart-variant { color:#ffffff; font-size:13px; line-height:19px; font-weight:500; margin:8px 0; }':'sc-cart-variant',
+      '.sc-cart-price { color:#ffffff; font-size:14px; line-height:19px; font-weight:700; margin:8px 0; }':'sc-cart-price',
+    }
+    defaults=default_html()
+    for previous,name in replacements.items():
+        current=re.search(r'\.'+name+r'\s*\{[^{}]*\}',defaults)[0]
+        source=source.replace(previous,current)
+    present=rules(source,strict=False)
+    additions=[]
+    for selector,body in re.findall(r'(\.sc-cart-[\w-]+)\s*\{([^{}]*)\}',defaults):
+        if selector[1:] in {'sc-cart-dimensions','sc-cart-qty','sc-cart-divider','sc-cart-rule'} and selector[1:] not in present:
+            additions.append(selector+' {'+body+'}')
+    return ('<style>\n'+'\n'.join(additions)+'\n</style>\n'+source) if additions else source
 
 
 def declarations(source):
@@ -86,7 +105,10 @@ def count(doc):
 
 def compile_document(doc,*,strict=True):
     from copy import deepcopy
-    result=deepcopy(doc);source='\n'.join(sources(doc));theme=rules(source,strict=strict) or rules(default_html())
+    result=deepcopy(doc);source='\n'.join(sources(doc))
+    theme=rules(upgrade_html(source),strict=strict) if rules(source,strict=strict) else rules(default_html())
+    for name,values in rules(default_html()).items():
+        if name in {'sc-cart-dimensions','sc-cart-qty','sc-cart-divider','sc-cart-rule'}:theme.setdefault(name,values)
     if 'middle_sections' in result:
         for s in result['middle_sections']:
             if s.get('type') in ('html','image'):s['html']=compile_html(s['html'],theme)
