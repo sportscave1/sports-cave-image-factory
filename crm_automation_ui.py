@@ -153,9 +153,40 @@ def home(store,user):
     arm_home_poll(key='crm-auto-home-poll',seconds=.25 if pending else 20)
 
 
+def flow_email_control(flow,identity,selected):
+    from crm_campaign_recovery import flush_current
+    selection=st.selectbox('Flow email',list(range(len(flow['emails']))),index=next(i for i,s in enumerate(flow['emails']) if s['step_id']==selected),format_func=lambda i:'Email '+str(i+1)+' · '+(flow['emails'][i]['document']['content']['subject'] or 'Untitled')+' · '+str(flow['emails'][i]['delay_seconds']//60)+' min delay',key='auto_flow_step_'+str(identity)+'_'+str(len(flow['emails'])))
+    if flow['emails'][selection]['step_id']!=selected:
+        if not flush_current():return
+        st.session_state['automation_step']=flow['emails'][selection]['step_id']
+        st.session_state.pop('automation_editor',None);st.rerun()
+
+
+def add_email_controls(store,user,editor,key):
+    from crm_campaign_recovery import flush_current
+    if st.button('Duplicate email',key=key+'duplicate_step'):
+        if not flush_current(force=True):return
+        fresh=store.flow(editor['id']);definition=deepcopy(fresh['config']['draft'])
+        index=next(i for i,s in enumerate(definition['emails']) if s['step_id']==store.step_id)
+        source=definition['emails'][index]
+        definition['emails'].insert(index+1,email_step(source['document'],source['delay_seconds']))
+        store.save_flow(user,editor['id'],fresh['name'],definition,fresh['config']['revision']);changed()
+        st.session_state['automation_step']=definition['emails'][index+1]['step_id'];st.session_state.pop('automation_editor',None);st.rerun()
+    add,blank=st.columns(2)
+    for column,label,duplicate in ((add,'+ Add email · duplicate previous',True),(blank,'+ Add email · start blank',False)):
+        if column.button(label,key=key+str(duplicate)):
+            if not flush_current(force=True):return
+            current=store.flow(editor['id']);new=deepcopy(current['config']['draft'])
+            new['emails'].append(email_step(new['emails'][-1]['document'] if duplicate else None,86400))
+            saved=store.save_flow(user,editor['id'],editor['name'],new,current['config']['revision'])
+            st.session_state['automation_step']=saved['config']['draft']['emails'][-1]['step_id']
+            st.session_state.pop('automation_editor',None);changed();st.rerun()
+
+
 def settings_control(editor,key):
     context=st.session_state['automation_editor_context'];store,user=context
     row=store.flow(editor['id']);flow=deepcopy(row['config']['draft']);step=next(s for s in flow['emails'] if s['step_id']==store.step_id)
+    flow_email_control(flow,editor['id'],store.step_id)
     kind=st.selectbox('Trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda t:TRIGGERS[t][1],key=key+'trigger')
     rules=[]
     from crm_automation_definition import RULE_FIELDS
@@ -193,6 +224,7 @@ def settings_control(editor,key):
         next(s for s in desired['emails'] if s['step_id']==store.step_id)['document']=deepcopy(editor['document'])
         updated=store.save_flow(user,row['id'],editor['name'],desired,editor['version'])
         editor['version']=updated['config']['revision']
+    add_email_controls(store,user,editor,key)
 
 
 def detail(shop,store,actions,identity):
@@ -209,27 +241,9 @@ def detail(shop,store,actions,identity):
         if action.button('Pause'):store.lifecycle(user,identity,'pause');changed();st.rerun()
     elif row['status']=='PAUSED' and not readonly:
         if action.button('Resume'):store.lifecycle(user,identity,'resume');changed();st.rerun()
-    with st.expander('Flow · '+str(len(flow['emails']))+' emails',expanded=False):
-        st.caption('Trigger · '+TRIGGERS[flow['trigger']][1])
-        for index,item in enumerate(flow['emails']):
-            with st.container(border=True):
-                text,edit,duplicate=st.columns([4,1,1])
-                text.markdown('**Email '+str(index+1)+'** · '+str(item['delay_seconds']//60)+' min delay')
-                text.caption(item['document']['content']['subject'] or 'Untitled email')
-                if edit.button('Edit',key='auto_timeline_edit_'+item['step_id'],disabled=readonly):
-                    if not flush_current():return
-                    st.session_state['auto_flow_step_'+str(identity)+'_'+str(len(flow['emails']))]=index;st.rerun()
-                if duplicate.button('Duplicate',key='auto_timeline_duplicate_'+item['step_id'],disabled=readonly):
-                    if not flush_current(force=True):return
-                    fresh=store.flow(identity);definition=deepcopy(fresh['config']['draft'])
-                    source=next(s for s in definition['emails'] if s['step_id']==item['step_id'])
-                    definition['emails'].insert(index+1,email_step(source['document'],source['delay_seconds']))
-                    store.save_flow(user,identity,fresh['name'],definition,fresh['config']['revision']);changed()
-                    st.session_state['automation_step']=definition['emails'][index+1]['step_id'];st.session_state.pop('automation_editor',None);st.rerun()
     selected=st.session_state.get('automation_step')
     if selected not in [s['step_id'] for s in flow['emails']]:selected=flow['emails'][0]['step_id']
-    selection=st.selectbox('Flow email',list(range(len(flow['emails']))),index=next(i for i,s in enumerate(flow['emails']) if s['step_id']==selected),format_func=lambda i:'Email '+str(i+1)+' · '+(flow['emails'][i]['document']['content']['subject'] or 'Untitled')+' · '+str(flow['emails'][i]['delay_seconds']//60)+' min delay',key='auto_flow_step_'+str(identity)+'_'+str(len(flow['emails'])))
-    step=flow['emails'][selection]
+    step=next(s for s in flow['emails'] if s['step_id']==selected)
     if store.step_id!=step['step_id']:store.step_id=step['step_id']
     editor=st.session_state.get('automation_editor')
     if editor and (str(editor['id'])!=str(identity) or st.session_state.get('automation_step')!=step['step_id']):
@@ -253,7 +267,10 @@ def detail(shop,store,actions,identity):
     key='auto_'+str(identity)+'_'+step['step_id']+'_'
     if readonly:
         from crm_html_workspace import composer_canvas
-        composer_canvas(editor['document'],cfg,key,store);return
+        with st.container(horizontal=True,gap='small'):
+            with st.container(width=360):flow_email_control(flow,identity,selected)
+            with st.container(width='stretch'):composer_canvas(editor['document'],cfg,key,store)
+        return
     with st.container(horizontal=True,vertical_alignment='center'):
         with st.container(width='stretch'):size_meter(editor,key,cfg)
         if st.button('Save draft',key=key+'save'):
@@ -268,15 +285,6 @@ def detail(shop,store,actions,identity):
             except (ValueError,StoreUnavailable,PermissionError) as exc:st.error(safe_error(exc))
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
-    add,blank=st.columns(2)
-    for column,label,duplicate in ((add,'+ Add email · duplicate previous',True),(blank,'+ Add email · start blank',False)):
-        if column.button(label,key=key+str(duplicate)):
-            if not flush_current(force=True):return
-            current=store.flow(identity);new=deepcopy(current['config']['draft'])
-            new['emails'].append(email_step(new['emails'][-1]['document'] if duplicate else None,86400))
-            saved=store.save_flow(user,identity,editor['name'],new,current['config']['revision'])
-            st.session_state['automation_step']=saved['config']['draft']['emails'][-1]['step_id']
-            st.session_state.pop('automation_editor',None);changed();st.rerun()
     if st.toggle('Show email step analytics',key='auto_step_stats'):
         from crm_automation_home_data import step_metrics
         names={s['step_id']:'Email '+str(i+1)+' · '+s['document']['content']['subject'] for i,s in enumerate(flow['emails'])}

@@ -24,6 +24,49 @@ with patch('crm_automation_ui.job',side_effect=job):home(store,ADMIN)
 
 
 class AutomationUiTests(unittest.TestCase):
+    def test_flow_management_is_only_in_left_settings_without_main_accordion(self):
+        import inspect
+        from crm_automation_ui import detail,settings_control,add_email_controls,flow_email_control
+        main=inspect.getsource(detail);settings=inspect.getsource(settings_control)
+        self.assertNotIn("st.expander('Flow",main)
+        self.assertNotIn('auto_timeline_',main)
+        self.assertNotIn('add_email_controls(',main)
+        self.assertNotIn("st.selectbox('Flow email'",main)
+        self.assertIn('flow_email_control(flow',settings)
+        self.assertIn('add_email_controls(store,user,editor,key)',settings)
+        self.assertIn("st.selectbox('Trigger'",settings)
+        self.assertIn("st.number_input('Delay before email",settings)
+        self.assertIn("st.selectbox('Flow email'",inspect.getsource(flow_email_control))
+        self.assertIn("st.button('Duplicate email'",inspect.getsource(add_email_controls))
+
+    def test_left_email_switch_flushes_before_selecting_without_saving_flow_definition(self):
+        from crm_automation_ui import flow_email_control
+        from crm_automation_definition import email_step
+        flow={'emails':[email_step(document(),0),email_step(document(),3600)]}
+        original=deepcopy(flow);state={'automation_editor':{'id':'flow'},'automation_step':flow['emails'][0]['step_id']}
+        with patch('crm_automation_ui.st.selectbox',return_value=1),patch('crm_automation_ui.st.session_state',state),patch('crm_campaign_recovery.flush_current',return_value=True) as flush,patch('crm_automation_ui.st.rerun') as rerun:
+            flow_email_control(flow,'flow',flow['emails'][0]['step_id'])
+        flush.assert_called_once();rerun.assert_called_once()
+        self.assertEqual(state['automation_step'],flow['emails'][1]['step_id']);self.assertNotIn('automation_editor',state)
+        self.assertEqual(flow,original)
+        blocked={'automation_editor':{'id':'flow'}}
+        with patch('crm_automation_ui.st.selectbox',return_value=1),patch('crm_automation_ui.st.session_state',blocked),patch('crm_campaign_recovery.flush_current',return_value=False),patch('crm_automation_ui.st.rerun') as rerun:
+            flow_email_control(flow,'flow',flow['emails'][0]['step_id'])
+        rerun.assert_not_called();self.assertIn('automation_editor',blocked)
+
+    def test_rendering_left_settings_does_not_change_saved_trigger_delay_or_published_data(self):
+        from crm_automation_ui import settings_control
+        from crm_automation_definition import new_flow
+        flow=new_flow('welcome');flow['rules']=[];flow['emails'][0]['delay_seconds']=73
+        row={'config':{'draft':flow,'published':deepcopy(flow),'published_version':2},'status':'ACTIVE'}
+        original=deepcopy(row);store=Mock();store.flow.return_value=row;store.step_id=flow['emails'][0]['step_id']
+        editor={'id':'flow','name':'Existing automation','version':3,'document':deepcopy(flow['emails'][0]['document'])}
+        select=lambda label,options,**kw:options[kw.get('index',0)]
+        with patch('crm_automation_ui.st.session_state',{'automation_editor_context':(store,{})}),patch('crm_automation_ui.st.selectbox',side_effect=select),patch('crm_automation_ui.st.number_input',side_effect=lambda *a,**kw:kw['value']),patch('crm_automation_ui.st.checkbox',return_value=editor['document']['copy_reviewed']),patch('crm_automation_ui.st.caption'),patch('crm_automation_ui.st.button',return_value=False),patch('crm_automation_ui.flow_email_control') as selector,patch('crm_automation_ui.add_email_controls') as additions:
+            settings_control(editor,'fixture_')
+        selector.assert_called_once();additions.assert_called_once();store.save_flow.assert_not_called()
+        self.assertEqual(row,original);self.assertEqual(editor['version'],3)
+
     def test_home_shared_kpis_tabs_no_revenue_or_legacy_shell(self):
         app=AppTest.from_string(HOME_SCRIPT).run()
         self.assertFalse(app.exception)
