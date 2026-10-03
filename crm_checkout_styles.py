@@ -27,17 +27,24 @@ def declarations(source):
     return result
 
 
-def rules(source):
+def rules(source,*,strict=True):
     result={}
     for css in STYLE.findall(source):
         css=re.sub(r'/\*.*?\*/','',css,flags=re.S)
         while css.strip():
             match=re.match(r'\s*([^{}]+)\{([^{}]*)\}',css)
-            if not match:raise ValueError('Use simple .sc-cart-* checkout CSS rules.')
-            values=declarations(match[2])
+            if not match:
+                if strict:raise ValueError('Use simple .sc-cart-* checkout CSS rules.')
+                break
+            try:values=declarations(match[2])
+            except ValueError:
+                if strict:raise
+                css=css[match.end():];continue
             for selector in match[1].split(','):
                 name=selector.strip().removeprefix('.')
-                if selector.strip()!='.'+name or name not in CLASSES:raise ValueError('Only the checkout class contract can be styled here.')
+                if selector.strip()!='.'+name or name not in CLASSES:
+                    if strict:raise ValueError('Only the checkout class contract can be styled here.')
+                    continue
                 existing=result.setdefault(name,{})
                 for prop,value in values.items():
                     if prop not in existing or value[1] or not existing[prop][1]:existing[prop]=value
@@ -51,10 +58,10 @@ class Inline(HTMLParser):
         attrs=dict(attrs);name=attrs.get('class','');styles={}
         for key in name.split():
             for prop,value in self.theme.get(key,{}).items():
-                if prop not in styles or value[1] or not styles[prop][1]:styles[prop]=value
+                if prop not in styles or value[1]:styles[prop]=value
         if styles:
             for prop,value in declarations(attrs.get('style','')).items():
-                if prop not in styles or value[1] or not styles[prop][1]:styles[prop]=value
+                if prop not in styles or value[1]:styles[prop]=value
             attrs['style']=';'.join(prop+':'+value[0] for prop,value in styles.items())
         self.parts.append('<'+tag+''.join(' '+k+'="'+escape(v or '',quote=True)+'"' for k,v in attrs.items())+'>')
     def handle_endtag(self,tag):self.parts.append('</'+tag+'>')
@@ -77,9 +84,9 @@ def count(doc):
     return sum(s.get('type')=='abandoned_checkout_products' and s.get('visible') for s in doc.get('middle_sections',[]))+sum(source.count(MARKER) for source in sources(doc))
 
 
-def compile_document(doc):
+def compile_document(doc,*,strict=True):
     from copy import deepcopy
-    result=deepcopy(doc);source='\n'.join(sources(doc));theme=rules(source) or rules(default_html())
+    result=deepcopy(doc);source='\n'.join(sources(doc));theme=rules(source,strict=strict) or rules(default_html())
     if 'middle_sections' in result:
         for s in result['middle_sections']:
             if s.get('type') in ('html','image'):s['html']=compile_html(s['html'],theme)

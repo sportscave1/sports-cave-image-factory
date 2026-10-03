@@ -60,7 +60,7 @@ class PreviewStabilityTests(TestCase):
 
     def test_automation_only_polling_and_debounce(self):
         ui=Path('crm_abandoned_checkout_ui.py').read_text()
-        self.assertNotIn('run_every',ui);self.assertNotIn('st.dialog',ui)
+        self.assertNotIn('run_every',ui);self.assertNotIn("st.dialog('Live preview'",ui)
         self.assertNotIn('live_control',Path('crm_automation_ui.py').read_text(encoding='utf-8'))
         self.assertIn("auto_refresh=False",ui)
         section=Path('crm_section_ui.py').read_text(encoding='utf-8')

@@ -82,4 +82,4 @@ def document(doc,data,*,test=False):
         # Compatibility mirror must follow the substituted source, never render twice.
         result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
     else:result['custom_html'],warning=legacy_html(result.get('custom_html',''),markup)
-    return hydrate(result,data,test=test),warning
+    return hydrate(result,data,test=test,preview=True),warning

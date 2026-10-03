@@ -9,7 +9,9 @@ BLOCK='abandoned_checkout_products'
 TEMPLATE='Abandoned Checkout — Collector Reminder'
 
 
-def dynamic(doc):return any(s.get('type')==BLOCK and s.get('visible') for s in doc.get('middle_sections',[]))
+def dynamic(doc):
+    from crm_checkout_styles import count
+    return bool(count(doc))
 
 
 def reject_unresolved(value):
@@ -118,44 +120,62 @@ def preview_context(state,shop,*,refresh=False,auto_refresh=True):
 
 
 def block_html(data,*,test=False):
+    """Dynamic facts and semantic markup only. Theme belongs to authored HTML."""
     rows=[]
-    for item in data['items']:
-        image='' if not item['image'] else '<img src="'+escape(item['image'],quote=True)+'" alt="'+escape(item['title'],quote=True)+'" width="540" style="display:block;width:100%;max-width:540px;height:auto;border:0;margin:0">'
+    for index,item in enumerate(data['items']):
+        image='' if not item['image'] else '<img class="sc-cart-image" src="'+escape(item['image'],quote=True)+'" alt="'+escape(item['title'],quote=True)+'" style="display:block;width:100%;height:auto">'
         label=item['currency']+' '+format(Decimal(item['amount']),',.2f') if item['amount'] is not None else 'Price unavailable in sample preview'
-        rows.append('<tr><td style="padding:14px 24px;font:15px/1.5 Arial;word-wrap:break-word"><p style="font-size:11px;color:#76633c">YOUR SELECTED EDITION</p>'+image+'<p style="font-weight:700">'+escape(item['title'])+'</p>'+('<p>'+escape(item['variant'])+'</p>' if item['variant'] else '')+'<p>Quantity: '+str(item['quantity'])+' · Line total: '+escape(label)+'</p></td></tr>')
+        rows.append('<tr'+(' class="sc-cart-extra-items"' if index else '')+'><td class="sc-cart-image-wrap"><p class="sc-cart-label">YOUR SELECTED EDITION</p>'+image+'<p class="sc-cart-title">'+escape(item['title'])+'</p>'+('<p class="sc-cart-variant">'+escape(item['variant'])+'</p>' if item['variant'] else '')+'<p class="sc-cart-meta">Quantity: '+str(item['quantity'])+'</p><p class="sc-cart-price">Line total: '+escape(label)+'</p></td></tr>')
     disabled=test or data.get('preview_only')
-    cta='<span style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial">'+('Recovery action disabled in test email' if test else 'Complete Your Order →')+'</span>' if disabled else '<a href="'+escape(data['recovery_url'],quote=True)+'" style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial;text-decoration:none">Complete Your Order →</a>'
-    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td align="center" style="padding:14px 24px">'+cta+'</td></tr></table>'
+    cta='<span class="sc-cart-button">'+('Recovery action disabled in test email' if test else 'Complete Your Order →')+'</span>' if disabled else '<a class="sc-cart-button" href="'+escape(data['recovery_url'],quote=True)+'">Complete Your Order →</a>'
+    return '<table class="sc-cart-block" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td class="sc-cart-button-wrap" align="center">'+cta+'</td></tr></table>'
 
 
-def hydrate(doc,data,*,test=False):
+def hydrate(doc,data,*,test=False,preview=False):
+    from crm_checkout_styles import MARKER,compile_document
     result=deepcopy(doc)
     for section in result.get('middle_sections',[]):
         if section['type']==BLOCK:
             if section['visible'] and not data:raise ValueError('No recent abandoned checkout available for preview.')
             section.update(type='image',html=block_html(data,test=test) if section['visible'] else '')
-        elif section['type'] in ('html','image'):reject_unresolved(section['html'])
+        elif section['type'] in ('html','image'):
+            if MARKER in section['html']:
+                if not data:raise ValueError('Checkout context could not be resolved.')
+                section['html']=section['html'].replace(MARKER,block_html(data,test=test))
+            reject_unresolved(section['html'])
+    if 'middle_sections' in result:
+        result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
+    elif MARKER in result.get('custom_html',''):
+        if not data:raise ValueError('Checkout context could not be resolved.')
+        result['custom_html']=result['custom_html'].replace(MARKER,block_html(data,test=test))
     reject_unresolved(result.get('custom_html',''))
-    return result
+    return compile_document(result,strict=not preview)
 
 
 def publication_document(doc,trigger):
-    """Validate authored content offline; recipient HTML is checked again at dispatch."""
-    if dynamic(doc) and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
-    reject_unresolved(doc.get('custom_html',''))
+    """Validate authored HTML offline; enrollment data is resolved at dispatch."""
+    from crm_checkout_styles import MARKER,count,compile_document
+    total=count(doc)
+    if total and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
+    if total>1:raise ValueError('Use exactly one abandoned checkout products block.')
     result=deepcopy(doc);result['middle_sections']=[s for s in result.get('middle_sections',[]) if s['type']!=BLOCK]
     for s in result['middle_sections']:
-        if s['type'] in ('html','image'):reject_unresolved(s['html'])
-    return result if 'middle_sections' in doc else doc
+        if s['type'] in ('html','image'):
+            s['html']=s['html'].replace(MARKER,'');reject_unresolved(s['html'])
+    result['custom_html']=result.get('custom_html','').replace(MARKER,'');reject_unresolved(result['custom_html'])
+    if 'middle_sections' not in doc:result.pop('middle_sections',None)
+    return compile_document(result) if total else result
 
 
-def apply_template(doc):
+def apply_template(doc,html=None):
     from crm_middle_sections import commit_middle
+    from crm_checkout_styles import MARKER,default_html
     import uuid
-    sections=[{'id':uuid.uuid4().hex,'type':'html','html_number':1,'visible':True,'html':'<table role="presentation" width="100%"><tr><td style="padding:24px;font:16px/1.6 Arial"><h2>YOUR COLLECTION AWAITS</h2><p>Still thinking it over?</p><p>You were close to adding this piece to your collection.<br>Pick up exactly where you left off below.</p></td></tr></table>'},
+    html=default_html() if html is None else html
+    if html.count(MARKER)!=1:raise ValueError('Keep exactly one protected checkout insertion point.')
+    before,after=html.split(MARKER)
+    sections=[{'id':uuid.uuid4().hex,'type':'html','html_number':1,'visible':True,'html':before},
       {'id':uuid.uuid4().hex,'type':BLOCK,'visible':True},
-      {'id':uuid.uuid4().hex,'type':'html','html_number':2,'visible':True,'html':'<table role="presentation" width="100%"><tr><td style="padding:16px 24px;font:14px/1.6 Arial">Questions about sizing or framing?<br>Just reply to this email.</td></tr></table>'}]
+      {'id':uuid.uuid4().hex,'type':'html','html_number':2,'visible':True,'html':after}]
     doc['content_mode']='HTML';commit_middle(doc,sections);doc['copy_reviewed']=False
     doc['content']['subject']='Your collection awaits';doc['content']['preheader']='Pick up exactly where you left off.'
-
-
