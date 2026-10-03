@@ -11,11 +11,14 @@ def size_meter(editor,key,cfg):
     current=current_editor(st.session_state,editor)
     if str(current.get('id'))!=str(editor.get('id')):return
     cfg=st.session_state.get(key+'review_preview_settings',cfg)
-    token=hashlib.sha256(json.dumps([current['id'],current['document'],cfg],sort_keys=True,default=str).encode()).hexdigest()
-    cache=st.session_state.get(key+'size_cache')
     try:
+        doc=current['document']
+        if st.session_state.get('email_editor_mode')=='automation':
+            store,_=st.session_state['automation_editor_context'];doc,_=store.preview_document(doc)
+        token=hashlib.sha256(json.dumps([current['id'],doc,cfg],sort_keys=True,default=str).encode()).hexdigest()
+        cache=st.session_state.get(key+'size_cache')
         if not cache or cache['token']!=token:
-            message=render_production(current['document'],cfg,current.get('id'))
+            message=render_production(doc,cfg,current.get('id'))
             cache={'token':token,'message':message};st.session_state[key+'size_cache']=cache
         message=cache['message']
         local=analyze_rendered_email(message['html'],message['text'])

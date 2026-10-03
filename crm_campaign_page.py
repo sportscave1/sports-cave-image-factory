@@ -172,11 +172,11 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
             with details:
                 if details.open:
                     from crm_prompt_ui import prompt_control,field_feedback
-                    prompt_control(shop,editor,key)
+                    if mode!='automation':prompt_control(shop,editor,key)
                     editor['name']=st.text_input('Automation name' if mode=='automation' else 'Campaign name',editor['name'],max_chars=150,key=key+'name')
                     c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
                     c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
-                    field_feedback()
+                    if mode!='automation':field_feedback()
                     from crm_campaign_controls import market_control,timing_control
                     if mode=='automation':
                         if settings_control:settings_control(editor,key)
@@ -186,7 +186,7 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
             with html_tab:
                 if html_tab.open:
                     from crm_email_prompt_ui import email_prompt_control
-                    email_prompt_control(shop,editor,key)
+                    if mode!='automation':email_prompt_control(shop,editor,key)
                     section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
             with templates_tab:
                 if templates_tab.open and available:
@@ -194,6 +194,9 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)
                     st.divider()
                     from crm_campaign_library import library
+                    if mode=='automation':
+                        from crm_abandoned_checkout_ui import template_control
+                        template_control(editor,key)
                     library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False

@@ -75,6 +75,7 @@ MEMBERSHIPS = 'query CrmMemberships($id:ID!,$segments:[ID!]!) { customerSegmentM
 TOTAL = 'query CrmTotal { customersCount { count precision } }'
 CHECKOUT_LINES_FIELDS = '''id title quantity variant { id product { id } } image { url }
  originalUnitPriceSet { shopMoney { amount currencyCode } }'''
+CHECKOUT_LINES_FIELDS += ''' variantTitle discountedTotalPriceWithCodeDiscount { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }'''
 CHECKOUT_FIELDS = '''id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id }
  shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 }
  totalPriceSet { shopMoney { amount currencyCode } }
@@ -83,6 +84,8 @@ CHECKOUTS = '''query CrmCheckouts($after:String,$query:String) {
  abandonedCheckouts(first:25,after:$after,sortKey:CREATED_AT,query:$query) {
  nodes { id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id } shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 } } '''+PAGE+' } }'
 CHECKOUT = 'query CrmCheckout($id:ID!) { node(id:$id) { ... on AbandonedCheckout { '+CHECKOUT_FIELDS+' } } }'
+CHECKOUT_PREVIEW_FIELDS=CHECKOUT_FIELDS.replace('customer { id }','customer { id firstName lastName email }')
+CHECKOUT_PREVIEW='''query CrmAbandonedPreview($after:String) { abandonedCheckouts(first:5,after:$after,sortKey:CREATED_AT,reverse:true,query:"recovery_state:not_recovered") { nodes { '''+CHECKOUT_PREVIEW_FIELDS+' } '+PAGE+' } }'
 CHECKOUT_LINES = '''query CrmCheckoutLines($id:ID!,$after:String) { node(id:$id) {
  ... on AbandonedCheckout { lineItems(first:100,after:$after) { nodes { '''+CHECKOUT_LINES_FIELDS+' } '+PAGE+' } } } }'
 _LIMIT = threading.BoundedSemaphore(2)
@@ -299,6 +302,11 @@ class Shopify:
         return self.query(CHECKOUTS, {'after':after, 'query':query}, 'abandoned checkouts', 20, fresh)['abandonedCheckouts']
     def checkout(self, checkout_id, fresh=False):
         return self.query(CHECKOUT, {'id':gid(checkout_id, 'AbandonedCheckout')}, 'abandoned checkouts', 20, fresh).get('node')
+    def checkout_lines(self,checkout_id,after,fresh=False):
+        node=self.query(CHECKOUT_LINES,{'id':gid(checkout_id,'AbandonedCheckout'),'after':after},'abandoned checkouts',20,fresh).get('node')
+        return (node or {}).get('lineItems')
+    def abandoned_preview(self,after=None,fresh=False):
+        return self.query(CHECKOUT_PREVIEW,{'after':after},'abandoned checkout preview',45,fresh)['abandonedCheckouts']
 
 
     def memberships(self, customer_id, segments):

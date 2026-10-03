@@ -32,6 +32,8 @@ def validate_middle(sections):
         elif s.get('type') == 'image':
             if set(s) != common | {'html'} or not isinstance(s['html'], str):
                 raise ValueError('Invalid Image section.')
+        elif s.get('type') == 'abandoned_checkout_products':
+            if set(s)!=common:raise ValueError('Invalid abandoned checkout section.')
         elif s.get('type') == 'catalogue':
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
@@ -115,6 +117,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     present = False
     for s in middle_sections(doc):
         if not s['visible']: continue
+        if s['type']=='abandoned_checkout_products':raise ValueError('Resolve checkout data before rendering this automation.')
         source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,

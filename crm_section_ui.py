@@ -106,6 +106,14 @@ def middle_editor(doc, key, shop, store=None):
             logging.getLogger(__name__).warning('crm_catalogue_load_failed type=%s',type(exc).__name__)
             st.warning('Current product facts are unavailable. Saved preview retained; refresh catalogue facts before testing.')
     sections = middle_sections(doc)
+    if getattr(store,'email_mode',None)=='automation':
+        from crm_abandoned_checkout import BLOCK
+        from crm_email_editor_context import current
+        active=current(st.session_state,{})
+        if active.get('id') and store.flow(active['id'])['config']['draft']['trigger']=='abandoned' and not any(s['type']==BLOCK for s in sections):
+            if st.button('Add abandoned checkout products',key=key+'add_checkout'):
+                sections.append({'id':uuid.uuid4().hex,'type':BLOCK,'visible':True})
+                commit_middle(doc,sections);doc['copy_reviewed']=False;rerun_editor()
     warnings = {s['id']:[issue for p in s['products'] for issue in product_issues(p,s['settings'])]
                 for s in sections if s['type']=='catalogue'}
     component = components.declare_component('crm_middle_sections_v2',path=str(Path(__file__).parent/'components'/'crm_sections'))

@@ -15,6 +15,9 @@ from tests.crm_db_fixture import connect
 from tests.test_crm import ADMIN
 from tests.test_crm_send_flow import LIVE,CFG
 from tests.test_crm_simple_editor import document
+# Load the recipient helper before setUp patches its imported Shopify authority.
+# Otherwise an initial lazy import can retain a test mock across other suites.
+import crm_test_recipient
 
 
 class DefinitionTests(unittest.TestCase):
@@ -34,6 +37,49 @@ class DefinitionTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class NativeAutomationTests(unittest.TestCase):
+    def test_dynamic_checkout_publication_worker_recipient_isolation_and_recovered_stop(self):
+        from tests.test_crm_abandoned_checkout import checkout,native_document
+        a=self.store.create(ADMIN,'abandoned','Dynamic checkout local fixture');self.created.append(str(a['id']))
+        flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(native_document(),0)]
+        a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
+        a=self.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)
+        bound=checkout(71);bound['customer']['id']=self.customer['id'];bound['createdAt']=(self.clock-timedelta(hours=2)).isoformat()
+        self.shop.checkout.return_value=deepcopy(bound);self.shop.orders.return_value={'nodes':[]}
+        j=enter(self.engine,a,self.customer['id'],bound['id'],'dynamic-cart-71',self.clock+timedelta(seconds=1))
+        advance(self.engine,self.due(j));self.engine.send_one()
+        self.provider.send.assert_called_once();sent=self.provider.send.call_args
+        self.assertIn('/checkouts/71/',str(sent));self.assertNotIn('/checkouts/1/',str(sent))
+        self.shop.abandoned_preview.assert_not_called()
+        saved=self.store.flow(a['id']);self.assertEqual(saved['config']['draft']['emails'][0]['document'],flow['emails'][0]['document'])
+        second=checkout(72);second['customer']['id']=self.customer['id'];second['createdAt']=bound['createdAt']
+        self.customer['id']='gid://shopify/Customer/'+str(uuid.uuid4().int%10**12)
+        self.customer['email']=uuid.uuid4().hex+'@example.test';second['customer']['id']=self.customer['id']
+        self.shop.checkout.return_value=second
+        j=enter(self.engine,a,self.customer['id'],second['id'],'dynamic-cart-72',self.clock+timedelta(days=31))
+        second['completedAt']=now().isoformat();self.shop.checkout.return_value=second
+        advance(self.engine,self.due(j));self.engine.send_one()
+        self.provider.send.assert_called_once()
+        self.assertEqual(self.store.q('SELECT status FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['status'],'RECOVERED')
+
+    def test_dynamic_checkout_manual_test_real_latest_without_recovery_link_or_draft_data(self):
+        from tests.test_crm_abandoned_checkout import checkout,native_document
+        from crm_campaign_send import send_test
+        from tests.crm_fixtures import TestRecipientShop
+        a=self.store.create(ADMIN,'abandoned','Checkout test local fixture');self.created.append(str(a['id']))
+        flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(native_document(),0)]
+        a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,1);self.store.step_id=flow['emails'][0]['step_id']
+        self.store.preview_shop=Mock();self.store.preview_shop.abandoned_preview.return_value={'nodes':[checkout(83)],'pageInfo':{'hasNextPage':False}}
+        editor=self.store.draft(a['id']);operation=str(uuid.uuid4());wire=Mock()
+        wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
+            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
+            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
+        wire.post.assert_called_once();self.store.preview_shop.abandoned_preview.assert_called_once_with(after=None,fresh=True)
+        payload=wire.post.call_args.kwargs['json'];self.assertIn('Recovery action disabled',payload['html'])
+        self.assertNotIn('/checkouts/83/',str(payload));self.assertIn('AUD 199.50',payload['html'])
+        saved=self.store.flow(a['id'])['config']['draft']['emails'][0]['document']
+        self.assertNotIn('/checkouts/83/',str(saved));self.assertTrue(any(s['type']=='abandoned_checkout_products' for s in saved['middle_sections']))
+
     def setUp(self):
         self.store=AutomationStore(connect);self.clock=now();self.created=[]
         self.store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})

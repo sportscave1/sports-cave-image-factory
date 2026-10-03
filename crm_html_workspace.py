@@ -135,13 +135,24 @@ def _preview_device(key,label):
     st.session_state[key+'preview_device']=label
 
 
-@st.fragment
 def composer_canvas(doc,cfg,key,store=None):
+    if getattr(store,'email_mode',None)=='automation':
+        from crm_abandoned_checkout_ui import automation_canvas
+        automation_canvas(doc,cfg,key,store)
+    else:_campaign_canvas(doc,cfg,key,store)
+
+
+@st.fragment
+def _campaign_canvas(doc,cfg,key,store=None):
+    _composer_canvas(doc,cfg,key,store)
+
+
+def _composer_canvas(doc,cfg,key,store=None,*,live=False):
     """Only check default revisions; no campaigns, template library or audience fetch."""
-    with st.container(key='crm-composer-preview'):
+    with st.container(key='crm-automation-live-preview' if live else 'crm-composer-preview'):
         with st.container(horizontal=True,vertical_alignment='center'):
             st.markdown('**Email Preview**')
-            with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-preview-devices'):
+            with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-live-preview-devices' if live else 'crm-preview-devices'):
                 mode=st.session_state.get(key+'preview_device','Desktop')
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
                     st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',
@@ -149,8 +160,23 @@ def composer_canvas(doc,cfg,key,store=None):
         from crm_store import StoreUnavailable
         try:
             if store:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
-            rendered=cached_preview(st.session_state,doc,cfg,loading=lambda:st.spinner('Updating preview…'))
+            preview_doc=doc
+            if getattr(store,'email_mode',None)=='automation':
+                preview_doc,note=store.preview_document(doc)
+                if note:st.caption(note)
+            if live:
+                from crm_preview_cache import preview_key
+                from crm_email_size import render_production
+                token=preview_key(preview_doc,cfg)
+                cache=st.session_state.get(key+'production_preview')
+                if not cache or cache['token']!=token:
+                    cache={'token':token,'message':render_production(preview_doc,cfg)}
+                    st.session_state[key+'production_preview']=cache
+                rendered=cache['message']
+            else:rendered=cached_preview(st.session_state,preview_doc,cfg)
             st.session_state[key+'review_preview_settings']=deepcopy(cfg)
             with st.container(horizontal=True,horizontal_alignment='center'):
-                components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=680,scrolling=True)
-        except (ValueError,StoreUnavailable) as exc:st.warning(str(exc))
+                components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=480 if live else 680,scrolling=True)
+        except (ValueError,StoreUnavailable) as exc:
+            if getattr(store,'email_mode',None)=='automation':st.caption(str(exc))
+            else:st.warning(str(exc))

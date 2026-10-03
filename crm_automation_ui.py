@@ -211,6 +211,7 @@ def settings_control(editor,key):
     st.caption('Flow status · '+status(row)+' · fresh consent and suppressions checked before every email')
     editor['document']['copy_reviewed']=st.checkbox('This email copy is reviewed',value=editor['document']['copy_reviewed'],key=key+'reviewed')
     desired=deepcopy(flow);desired.update(trigger=kind,rules=rules,reentry_days=days)
+    store.preview_trigger=kind
     if kind=='abandoned':
         minutes=st.number_input('Qualify as abandoned after inactivity (minutes)',min_value=1,max_value=10080,value=flow.get('abandonment_seconds',3600)//60,key=key+'abandonment')
         desired['abandonment_seconds']=int(minutes)*60
@@ -228,6 +229,7 @@ def settings_control(editor,key):
 
 
 def detail(shop,store,actions,identity):
+    store.preview_shop=shop
     from crm_campaign_page import composer_form
     from crm_campaign_send_ui import test_control,safe_error
     from crm_campaign_recovery import flush_current
@@ -253,8 +255,13 @@ def detail(shop,store,actions,identity):
         editor=store.draft(identity);editor['document']=html_document(editor['document'])
         st.session_state['automation_editor']=editor;st.session_state['automation_saved']=deepcopy(editor)
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
+    store.preview_trigger=flow['trigger']
     cfg=store.render_settings();composer_styles()
     st.html('''<style>
+    .st-key-crm-automation-editor [data-testid="stVerticalBlock"]{gap:8px}
+    .st-key-crm-automation-editor h3{margin:0;padding:0;font-size:20px}
+    .st-key-crm-automation-editor .st-key-crm-composer-preview{padding:12px;gap:6px}
+    .st-key-crm-automation-editor .st-key-crm-composer-preview iframe{height:clamp(340px,calc(100dvh - var(--sc-topbar-height,64px) - 250px),680px)!important}
     .st-key-crm-automation-editor button[kind="primary"]{background:#c8a346!important;border-color:#b99436!important;color:#141414!important}
     @media(max-width:760px){
     .st-key-crm-automation-editor .st-key-crm-composer-layout{flex-wrap:wrap!important}
@@ -275,6 +282,8 @@ def detail(shop,store,actions,identity):
         with st.container(width='stretch'):size_meter(editor,key,cfg)
         if st.button('Save draft',key=key+'save'):
             if flush_current(force=True):changed();st.toast('Draft saved')
+        from crm_abandoned_checkout_ui import live_control
+        live_control(store,editor,key,cfg)
         test_control(store,user,editor,key,cfg=cfg)
         if st.button('Publish now',type='primary',key=key+'publish'):
             try:

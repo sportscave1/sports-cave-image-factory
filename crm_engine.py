@@ -50,6 +50,7 @@ class Engine:
                     recent=self.shop.orders(c['id'],fresh=True)['nodes']
                     if any(not o.get('cancelledAt') and date(o['createdAt'])>=date(checkout['createdAt']) for o in recent):return c,context,'recovered'
                 context['checkout_url']=checkout['abandonedCheckoutUrl']
+                context['_checkout']=checkout;context['_checkout_id']=trigger
                 context['products']=[{'title':p['title'],'quantity':p['quantity'],'price':p.get('originalUnitPriceSet',{}).get('shopMoney',{}).get('amount','')} for p in checkout['lineItems']['nodes']]
                 if frozen.get('automation_version'):
                     from crm_automation_rule_facts import checkout_facts
@@ -101,7 +102,9 @@ class Engine:
                     from reviews_submission import prepare_email
                     from reviews_store import ReviewsStore
                     content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
-                message=render_automation(content,row,unsubscribe)
+                from crm_abandoned_checkout import dynamic,complete
+                if dynamic(content['document']):context['_checkout']=complete(self.shop,context.get('_checkout'))
+                message=render_automation(content,row,unsubscribe,context)
             elif content.get('format')=='campaign_delivery_v1':
                 from crm_campaign_schedule import overdue_reason
                 late=overdue_reason(content,row,self.clock())

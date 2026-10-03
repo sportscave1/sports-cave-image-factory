@@ -61,9 +61,11 @@ class AutomationStore(CampaignStore):
             require_trigger(self,flow['trigger'])
             for index,step in enumerate(flow['emails']):
                 doc=with_email_defaults(production_document(step['document']),cfg)
-                failures=[k for k,v in production_checks(doc,cfg,env,reviewed_audience=True).items() if not v]
+                from crm_abandoned_checkout import publication_document
+                validation_doc=publication_document(doc,flow['trigger'])
+                failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True).items() if not v]
                 if failures: raise ValueError('Email '+str(index+1)+' blocked: '+'; '.join(failures))
-                validate_rendered_email(validate_tracking(doc,cfg,str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))))
+                validate_rendered_email(validate_tracking(validation_doc,cfg,str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))))
                 template_id=str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))
                 content={'format':'automation_delivery_v1','document':doc,'render_settings':cfg,
                          'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
@@ -152,6 +154,31 @@ class AutomationStore(CampaignStore):
         if not step: raise ValueError('Email step changed. Reopen it.')
         return {'id':str(row['id']),'version':row['config']['revision'],'name':row['name'],
                 'document':deepcopy(step['document']),'archived_at':row['config'].get('archived_at')}
+
+    def preview_document(self,doc):
+        from crm_abandoned_checkout import dynamic,preview_context,hydrate,publication_document
+        publication_document(doc,getattr(self,'preview_trigger','abandoned'))
+        if not dynamic(doc):return doc,''
+        import streamlit as st
+        editor=st.session_state.get('automation_editor') or {}
+        trigger=getattr(self,'preview_trigger',None)
+        if trigger is None and editor.get('id'):trigger=self.flow(editor['id'])['config']['draft']['trigger']
+        if trigger and trigger!='abandoned':raise ValueError('Checkout abandoned trigger required.')
+        data,note=preview_context(st.session_state,self.preview_shop)
+        if not data:raise ValueError(note)
+        return hydrate(doc,data),'Previewing: '+data['label']+' · latest abandoned checkout'
+
+    def test_document(self,doc,operation_id):
+        from crm_abandoned_checkout import dynamic,latest,hydrate,publication_document
+        publication_document(doc,'abandoned')
+        if not dynamic(doc):return doc
+        if self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':raise ValueError('Checkout abandoned trigger required.')
+        if getattr(self,'_checkout_test_operation',None)!=operation_id:
+            from crm_shopify import Shopify
+            data=latest(getattr(self,'preview_shop',None) or Shopify())
+            if not data:raise ValueError('No recent abandoned checkout available for preview.')
+            self._checkout_test_data=data;self._checkout_test_operation=operation_id
+        return hydrate(doc,self._checkout_test_data,test=True)
 
     def save(self,user,name,document,identity=None,version=None,**_):
         row=self.flow(identity);flow=deepcopy(row['config']['draft'])

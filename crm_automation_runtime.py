@@ -136,15 +136,22 @@ def advance(engine,enrollment):
     LOG.info('automation_submission automation_id=%s journey_id=%s step_id=%s provider_message_id=%s sent_at=%s',enrollment['automation_id'],enrollment['id'],step['step_id'],receipt.get('provider_email_id'),receipt.get('first_submitted_at'))
 
 
-def render(content,row,unsubscribe):
+def render(content,row,unsubscribe,context=None):
     from crm_campaign_content import render_campaign
     from crm_campaign_send import production_checks
     from crm_email_size import validate_rendered_email
     from crm_tracking import send_identity
     from crm_automation_definition import production_document
     doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
+    from crm_abandoned_checkout import dynamic,hydrate,context as checkout_context,reject_unresolved
+    if dynamic(doc):
+        source=(context or {}).get('_checkout')
+        if content.get('trigger')!='abandoned' or not source or source.get('id')!=(context or {}).get('_checkout_id') or (source.get('customer') or {}).get('id')!=row['shopify_customer_id']:
+            raise ValueError('Checkout recipient context mismatch.')
+        doc=hydrate(doc,checkout_context(source))
     if not all(production_checks(doc,content['render_settings'],reviewed_audience=True).values()):raise ValueError('Automation production readiness failed.')
     message=render_campaign(doc,content['render_settings'],unsubscribe_url=unsubscribe,production=True,
                             campaign_id=str(row['id']),send_id=send_identity(row['id']))
+    reject_unresolved(message['html']);reject_unresolved(message['text'])
     validate_rendered_email(message);message['unsubscribe_url']=unsubscribe
     return message

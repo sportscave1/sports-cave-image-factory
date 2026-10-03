@@ -128,7 +128,10 @@ class CampaignStore(WorkspaceRecords):
         operation=str(uuid.UUID(str(operation_id)))
         if row['version']!=version or row['archived_at']: raise ValueError('Reload the current editable campaign before testing.')
         cfg=self.render_settings(env)
-        checks=preflight(row['document'],env,cfg)
+        render_doc=row['document']
+        if automation:
+            self.draft_identity=identity;render_doc=self.test_document(render_doc,operation)
+        checks=preflight(render_doc,env,cfg)
         if not checks['test_ready']:
             from crm_campaign_issues import CampaignValidationError
             raise CampaignValidationError(checks)
@@ -148,7 +151,10 @@ class CampaignStore(WorkspaceRecords):
             verify_catalogues(row['document'], Catalogue(shop or Shopify()))
         from crm_test_recipient import test_recipient_url
         unsubscribe_url=test_recipient_url(self,recipient,shop=shop)
-        rendered=render_campaign(row['document'],cfg,unsubscribe_url=unsubscribe_url,production=True,test_tracking=True)
+        rendered=render_campaign(render_doc,cfg,unsubscribe_url=unsubscribe_url,production=True,test_tracking=True)
+        if automation:
+            from crm_abandoned_checkout import reject_unresolved
+            reject_unresolved(rendered['html']);reject_unresolved(rendered['text'])
         # Production-authentic content, still a manual TEST transport and receipt.
         rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
         rendered['unsubscribe_url']=unsubscribe_url

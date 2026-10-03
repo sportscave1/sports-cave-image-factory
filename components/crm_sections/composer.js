@@ -76,7 +76,7 @@ function renderTemplates(){
  }
 }
 function render(){renderTemplates();const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;for(const card of [...root.children])if(!args.sections.some(s=>s.id===card.dataset.id))card.remove();args.sections.forEach((s,index)=>{
- const name=s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':'Catalogue';if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image';
+ const name=s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':s.type==='abandoned_checkout_products'?'Abandoned checkout products':'Catalogue';if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image';
  const signature=JSON.stringify({...s,html:undefined,open:opened[s.id],prompt:s.type==='image'?args.image_prompt:undefined});
  const existing=[...root.children].find(c=>c.dataset.id===s.id);
  if(existing?.dataset.signature===signature){syncArea(s);return;}
@@ -96,6 +96,8 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,html:area.value}}));drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,750);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
  content.append(historyTools,area);if(s.type==='image')content.append(advice);
+ }else if(s.type==='abandoned_checkout_products'){
+ content.append(el('div','Products, variants, quantities, prices and recovery link resolve from each customer’s own checkout.','warning'));
  }else{
  const tools=el('div','','tools');tools.append(button('Select products','Select products for '+name,()=>emit('picker',{id:s.id})),button('↻','Refresh current Shopify and Edition Ops facts',()=>emit('refresh',{id:s.id})));content.append(tools);
  s.products.forEach(p=>{let pr=el('div','','product');pr.dataset.product=p.id;pr.dataset.parent=s.id;handle(pr,p.id,s.id);let info=el('div','','product-info');info.append(el('span',p.title));if(!p.edition)info.append(el('div','Edition data not connected','warning'));pr.append(info,button('×','Remove '+p.title,()=>emit('product_remove',{id:s.id,product_id:p.id})));content.append(pr);});

@@ -26,12 +26,19 @@ def setup():
     for kind,name,state in (('welcome','Welcome series · local fixture','ACTIVE'),('abandoned','Abandoned checkout · local fixture','DRAFT'),('post_purchase','Collector follow-up · local fixture','PAUSED')):
         row=store.create(ADMIN,kind,name);flow=deepcopy(row['config']['draft'])
         flow['emails']=[email_step(document(),0),email_step(document(),86400)]
+        if kind=='abandoned':
+            from crm_abandoned_checkout import apply_template
+            apply_template(flow['emails'][0]['document'])
         row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
         if state!='DRAFT':row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
         if state=='PAUSED':store.lifecycle(ADMIN,row['id'],'pause')
         identities.append(str(row['id']))
     return identities
 
-setup()
+identities=setup()
+if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
+from tests.test_crm_abandoned_checkout import checkout
+shop=Mock();shop.abandoned_preview.return_value={'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
 from crm_automation_ui import workspace
-workspace(Mock(),AutomationStore(connect),SimpleNamespace(user=ADMIN))
+workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
