@@ -285,9 +285,8 @@ class Engine:
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
         try:
-            from crm_automation_capabilities import verify as verify_automation
-            checked=date(self.store.state('shopify_automation_capabilities').get('checked_at'))
-            if not checked or self.clock()-checked>timedelta(minutes=5):
+            from crm_automation_capabilities import verify as verify_automation,refresh_due
+            if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
                 try:verify_automation(self.shop,self.store)
                 except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
             from crm_campaign_schedule import schedule_gate

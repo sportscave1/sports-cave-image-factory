@@ -299,6 +299,8 @@ def detail(shop,store,actions,identity):
                 st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None)
                 st.session_state['automation_notice']='Automation published · listening for future events';st.rerun()
             except (ValueError,StoreUnavailable,PermissionError) as exc:st.error(safe_error(exc))
+    from crm_automation_diagnostic_ui import control as diagnostic_control
+    diagnostic_control(shop,store,user,flow['trigger'],key)
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
     if st.toggle('Show email step analytics',key='auto_step_stats'):
