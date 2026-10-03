@@ -72,7 +72,7 @@ def legacy_html(source,markup):
     return source,True
 
 
-def document(doc,data,*,test=False):
+def document(doc,data,*,test=False,preview_warnings=None):
     """Render-copy substitution; authored sections/IDs and saved content stay intact."""
     result=deepcopy(doc);warning=False;markup=block_html(data,test=test)
     for section in result.get('middle_sections',[]):
@@ -82,4 +82,4 @@ def document(doc,data,*,test=False):
         # Compatibility mirror must follow the substituted source, never render twice.
         result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
     else:result['custom_html'],warning=legacy_html(result.get('custom_html',''),markup)
-    return hydrate(result,data,test=test,preview=True),warning
+    return hydrate(result,data,test=test,preview=True,preview_warnings=preview_warnings),warning

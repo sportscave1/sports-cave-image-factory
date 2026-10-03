@@ -60,7 +60,7 @@ class PreviewStabilityTests(TestCase):
 
     def test_automation_only_polling_and_debounce(self):
         ui=Path('crm_abandoned_checkout_ui.py').read_text()
-        self.assertNotIn('run_every',ui);self.assertNotIn("st.dialog('Live preview'",ui)
+        self.assertIn('run_every=1 if pending else None',ui);self.assertNotIn("st.dialog('Live preview'",ui)
         self.assertNotIn('live_control',Path('crm_automation_ui.py').read_text(encoding='utf-8'))
         self.assertIn("auto_refresh=False",ui)
         section=Path('crm_section_ui.py').read_text(encoding='utf-8')
@@ -100,14 +100,15 @@ class PreviewStabilityTests(TestCase):
             preview_context(state,shop,auto_refresh=False,slot='_automation_checkout_pin')
             self.assertEqual(lookup.call_count,3)
 
-    def test_completion_is_fragment_only_and_fade_exception_is_scoped(self):
+    def test_native_preview_and_native_size_have_no_asset_dependency(self):
         ui=Path('crm_abandoned_checkout_ui.py').read_text()
         canvas=ui.split('def template_control')[0]
-        self.assertNotIn("st.rerun(scope='app')",canvas)
-        self.assertIn("digest=cache['html_hash']",canvas)
-        self.assertIn('[data-stale="true"]:has(iframe[src*="crm_automation_stable_preview"])',canvas)
-        self.assertIn("key=key+'stable_preview'",canvas)
-
+        self.assertNotIn('declare_component',canvas)
+        self.assertIn("components.html(cache['message']['html']",canvas)
+        self.assertIn('iframe[data-testid="stIFrame"]',canvas)
+        size=Path('crm_email_size_ui.py').read_text().split('@st.fragment')[0]
+        self.assertNotIn('declare_component',size)
+        self.assertIn("st.html(meter_html(cache['size']))",size)
 
     def test_send_test_does_not_replace_pinned_editor_checkout(self):
         import streamlit as st
@@ -148,3 +149,51 @@ class PreviewStabilityTests(TestCase):
                 store.preview_document.return_value=({'representation':index},'preview')
                 output(state,store,{}, {'email_defaults':{}},'fixture')
             self.assertEqual(len(state['_automation_visual_outputs']),4)
+
+
+    def test_pipeline_lengths_and_preview_only_compiler_failure(self):
+        from crm_abandoned_checkout import hydrate,block_html
+        from crm_checkout_styles import default_html,MARKER
+        from tests.test_crm_abandoned_checkout import native_document
+        from crm_campaign_html import import_html
+        from crm_email_size import render_production
+        from tests.test_crm_send_flow import CFG
+        data=context(checkout());doc=native_document()
+        self.assertIn(MARKER,default_html())
+        self.assertGreater(len(block_html(data)),0)
+        compiled=hydrate(doc,data,preview=True)
+        message=render_production(compiled,CFG)
+        self.assertGreater(len(message['html']),0)
+        self.assertNotIn(MARKER,message['html'])
+        self.assertIn('sc-cart-variant',message['html'])
+        with patch('crm_checkout_styles.compile_document',side_effect=RuntimeError('Synthetic compiler failure')):
+            with self.assertLogs('crm_abandoned_checkout',level='ERROR'):
+                warnings=[]
+                fallback=hydrate(doc,data,preview=True,preview_warnings=warnings)
+            self.assertTrue(warnings)
+            safe=render_production(fallback,CFG)
+            self.assertIn('Complete Your Order',safe['html'])
+            self.assertIn('Black frame / Large',safe['html'])
+            with self.assertRaises(RuntimeError):hydrate(doc,data,preview=False)
+
+    def test_failed_render_retains_last_good_native_preview(self):
+        import streamlit as st
+        from crm_abandoned_checkout_ui import _automation_canvas
+        from crm_email_size import analyze_rendered_email
+        from unittest.mock import MagicMock
+        cache={'html_hash':'known','message':{'html':'<p>Last good design</p>','text':'Last good design'},'size':analyze_rendered_email('<p>Last good design</p>','Last good design')}
+        state={'fixture_last_good_visual':(cache,'Previewing: Fixture','')}
+        with patch.object(st,'session_state',state),patch.object(st,'container',return_value=MagicMock()),patch.object(st,'markdown'),patch.object(st,'button',return_value=False),patch.object(st,'caption'),patch.object(st,'html'),patch('crm_automation_preview_cache.output',side_effect=RuntimeError('Synthetic render failure')),patch('crm_abandoned_checkout_ui.components.html') as preview, self.assertLogs('crm_abandoned_checkout_ui',level='ERROR'):
+            _automation_canvas({}, {}, 'fixture_',Mock(),current_document=False)
+        preview.assert_called_once_with('<p>Last good design</p>',width=600,height=520,scrolling=True)
+
+
+    def test_first_render_failure_stops_completed_lookup_timer(self):
+        import streamlit as st
+        from crm_abandoned_checkout_ui import _automation_canvas
+        from unittest.mock import MagicMock
+        future=Future();future.set_result(context(checkout()))
+        state={'_automation_checkout_pin':{'future':future}}
+        with patch.object(st,'session_state',state),patch.object(st,'container',return_value=MagicMock()),patch.object(st,'markdown'),patch.object(st,'button',return_value=False),patch.object(st,'caption'),patch.object(st,'html'),patch.object(st,'rerun') as rerun,patch('crm_automation_preview_cache.output',side_effect=RuntimeError('Synthetic failure')), self.assertLogs('crm_abandoned_checkout_ui',level='ERROR'):
+            _automation_canvas({}, {}, 'fixture_',Mock(),current_document=False,loading=True)
+        rerun.assert_called_once_with(scope='app')

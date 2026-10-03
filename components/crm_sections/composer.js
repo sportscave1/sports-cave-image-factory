@@ -4,6 +4,9 @@ if(typeof module!=='undefined')module.exports={moveId};
 if(typeof document!=='undefined'){
 let args={sections:[]},opened={},pending=false,inFlight=null,drag=null,typing=null,drafts={},queue=[],settingsDrafts={};
 const root=document.getElementById('sections');
+// Optional same-origin OS hooks must never prevent the Streamlit handshake.
+const withParent=fn=>{try{return fn(parent);}catch{return undefined;}};
+const signalPending=detail=>withParent(p=>p.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail})));
 const pendingCopyInputs=new Map();
 const goToSection=id=>{
  if(!args.sections.some(s=>s.id===id))return false;
@@ -14,8 +17,8 @@ const goToSection=id=>{
   card?.querySelector('.title')?.focus({preventScroll:true});
  });return true;
 };
-parent.scCampaignGoToSection=goToSection;
-addEventListener('pagehide',()=>{if(parent.scCampaignGoToSection===goToSection)delete parent.scCampaignGoToSection;});
+withParent(p=>p.scCampaignGoToSection=goToSection);
+addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignGoToSection===goToSection)delete p.scCampaignGoToSection;});});
 const areas=new Map(),histories=new Map();let historyScope='',deleted=null,deleteTimer=null;
 
 const height=()=>parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:document.body.scrollHeight+4},'*');
@@ -33,8 +36,8 @@ const flushSections=()=>new Promise((resolve,reject)=>{
   setTimeout(check,30);
  };check();
 });
-parent.scCampaignFlushSections=flushSections;
-addEventListener('pagehide',()=>{if(parent.scCampaignFlushSections===flushSections)delete parent.scCampaignFlushSections;});
+withParent(p=>p.scCampaignFlushSections=flushSections);
+addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignFlushSections===flushSections)delete p.scCampaignFlushSections;});});
 const el=(tag,text='',cls='')=>{let n=document.createElement(tag);n.textContent=text;n.className=cls;return n;};
 function button(text,label,fn,cls=''){let n=el('button',text,cls);n.type='button';n.title=label;n.setAttribute('aria-label',label);n.onclick=fn;return n;}
 function placeCards(ids){ids.forEach((id,index)=>{const card=[...root.children].find(c=>c.dataset.id===id);if(card&&root.children[index]!==card){if(root.moveBefore)root.moveBefore(card,root.children[index]||null);else root.insertBefore(card,root.children[index]||null);}});}
@@ -93,7 +96,7 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  syncArea(s);
  const advice=el('div',s.type==='image'?imageAdvice(area.value):'','warning');advice.setAttribute('aria-live','polite');
  const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
- area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,html:area.value}}));drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;
+ area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
  content.append(historyTools,area);if(s.type==='image')content.append(advice);
  }else if(s.type==='abandoned_checkout_products'){
@@ -101,10 +104,10 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  }else{
  const tools=el('div','','tools');tools.append(button('Select products','Select products for '+name,()=>emit('picker',{id:s.id})),button('↻','Refresh current Shopify and Edition Ops facts',()=>emit('refresh',{id:s.id})));content.append(tools);
  s.products.forEach(p=>{let pr=el('div','','product');pr.dataset.product=p.id;pr.dataset.parent=s.id;handle(pr,p.id,s.id);let info=el('div','','product-info');info.append(el('span',p.title));if(!p.edition)info.append(el('div','Edition data not connected','warning'));pr.append(info,button('×','Remove '+p.title,()=>emit('product_remove',{id:s.id,product_id:p.id})));content.append(pr);});
- const copyFields=el('div','','fields');for(const [field,limit] of [['headline',80],['subtext',180]]){const input=document.createElement('input');input.type='text';input.value=s.settings[field]||'';input.maxLength=limit;input.placeholder=field==='headline'?'Headline (optional)':'Subtext (optional)';input.setAttribute('aria-label','Catalogue '+field);let timer;const inputKey=s.id+':'+field;const commit=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);changeSettings(s,{[field]:input.value});};input.oninput=()=>{pendingCopyInputs.set(inputKey,commit);parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,[field]:input.value}}));clearTimeout(timer);timer=setTimeout(commit,750);};input.onchange=commit;copyFields.append(input);}content.append(copyFields);
+ const copyFields=el('div','','fields');for(const [field,limit] of [['headline',80],['subtext',180]]){const input=document.createElement('input');input.type='text';input.value=s.settings[field]||'';input.maxLength=limit;input.placeholder=field==='headline'?'Headline (optional)':'Subtext (optional)';input.setAttribute('aria-label','Catalogue '+field);let timer;const inputKey=s.id+':'+field;const commit=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);changeSettings(s,{[field]:input.value});};input.oninput=()=>{pendingCopyInputs.set(inputKey,commit);signalPending({id:s.id,[field]:input.value});clearTimeout(timer);timer=setTimeout(commit,750);};input.onchange=commit;copyFields.append(input);}content.append(copyFields);
 
  const labels={image:'Product image',title:'Product title',price:'Price',limit:'Limited to',next:'Next available',remaining:'Remaining',cta:'CTA'},fields=el('div','','fields');for(let [key,label] of Object.entries(labels)){let l=el('label'),c=document.createElement('input');c.type='checkbox';c.checked=s.settings.display[key];c.onchange=()=>changeSettings(s,{display:{[key]:c.checked}});l.append(c,el('span',label));fields.append(l);}content.append(fields);
- const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const commitCta=()=>{clearTimeout(ctaTimer);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,cta:cta.value}}));clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,750);};cta.onchange=commitCta;content.append(cta);
+ const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const commitCta=()=>{clearTimeout(ctaTimer);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{signalPending({id:s.id,cta:cta.value});clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,750);};cta.onchange=commitCta;content.append(cta);
  for(const warning of (args.warnings||{})[s.id]||[])content.append(el('div',warning,'warning'));
  }
  card.append(content);}if(existing)existing.replaceWith(card);else root.append(card);

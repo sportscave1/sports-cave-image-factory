@@ -14,7 +14,7 @@ const fs=require('node:fs');
   });
   const page=await context.newPage();await page.goto('http://127.0.0.1:8533/?fixture_checkout=1');
   await page.getByText('Previewing: Fixture Collector · latest abandoned checkout',{exact:true}).waitFor();
-  const main=page.locator('.st-key-crm-composer-preview').frameLocator('iframe[src*="crm_automation_stable_preview"]').frameLocator('iframe[srcdoc]');
+  const main=page.locator('.st-key-crm-composer-preview').frameLocator('iframe[data-testid="stIFrame"]');
   await main.locator('.sc-cart-variant').first().waitFor();
   assert.equal(await main.locator('.sc-cart-variant').first().evaluate(e=>getComputedStyle(e).color),'rgb(255, 255, 255)');
   await page.getByRole('tab',{name:'Templates',exact:true}).click();
@@ -23,7 +23,7 @@ const fs=require('node:fs');
   const original=await source.inputValue();
   const changed=original.replace('.sc-cart-variant { color:#ffffff;', '.sc-cart-variant { color:#d1a938 !important;').replace('.sc-cart-title { color:#ffffff;', '.sc-cart-title { color:#ff0000 !important;').replace('background:#d1a938;', 'background:#c59b2d !important;');
   await source.fill(changed);await source.press('Tab');
-  const preview=dialog.locator('.st-key-crm-checkout-master-preview').frameLocator('iframe[src*="crm_automation_stable_preview"]').frameLocator('iframe[srcdoc]');
+  const preview=dialog.locator('.st-key-crm-checkout-master-preview').frameLocator('iframe[data-testid="stIFrame"]');
   await preview.locator('.sc-cart-variant').first().waitFor();
   await page.waitForTimeout(350);
   assert.equal(await preview.locator('.sc-cart-variant').first().evaluate(e=>getComputedStyle(e).color),'rgb(209, 169, 56)');
@@ -36,8 +36,8 @@ const fs=require('node:fs');
   assert.equal(await main.locator('.sc-cart-variant').first().evaluate(e=>getComputedStyle(e).color),'rgb(209, 169, 56)');
   assert.equal(await main.locator('.sc-cart-button').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(197, 155, 45)');
   for(const width of [600,430,390,375,320]){
-   const frame=await (await page.locator('.st-key-crm-composer-preview iframe[src*="crm_automation_stable_preview"]').elementHandle()).contentFrame();
-   await frame.evaluate(w=>document.getElementById('email').style.width=w+'px',width);
+   const frame=await (await page.locator('.st-key-crm-composer-preview iframe[data-testid="stIFrame"]').elementHandle()).contentFrame();
+   await frame.evaluate(w=>frameElement.style.width=w+'px',width);
    assert.ok(await main.locator('body').evaluate(()=>document.documentElement.scrollWidth)<=width+2);
   }
   await page.locator('[class*="_checkout_template_edit"] button').click();

@@ -11,7 +11,7 @@ test('section navigation dismisses popover, selects Editor and targets only the 
 });
 test('expanding a section uses existing render without emitting a save or changing drafts',()=>{
  const source=fs.readFileSync('components/crm_sections/composer.js','utf8');
- const part=source.slice(source.indexOf('const goToSection='),source.indexOf('parent.scCampaignGoToSection='));
+ const part=source.slice(source.indexOf('const goToSection='),source.indexOf('withParent(p=>p.scCampaignGoToSection='));
  const calls=[],context={args:{sections:[{id:'wanted'}]},opened:{},render:()=>calls.push('render'),
   requestAnimationFrame:fn=>fn(),root:{children:[{dataset:{id:'wanted'},scrollIntoView:()=>calls.push('scroll'),querySelector:()=>({focus:()=>calls.push('focus')})}]}};
  vm.runInNewContext(part+';globalThis.go=goToSection;',context);

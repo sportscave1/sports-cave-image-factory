@@ -1,64 +1,42 @@
-// Loopback fixture only. Checks actual opacity, physical iframe identity and requests.
+// ASGI production-mode fixture, no frontend dev server or live provider I/O.
 const {chromium}=require('playwright');
-const assert=require('node:assert/strict');
-const fs=require('node:fs');
-(async()=>{
- const browser=await chromium.launch({channel:'msedge',headless:true});
- try{
-  const page=await browser.newPage({viewport:{width:1366,height:768}});
-  let imageRequests=0;
-  await page.route('**/*',r=>{
-   const u=new URL(r.request().url());
-   if(u.hostname==='127.0.0.1')return r.continue();
-   if(u.href==='https://cdn.shopify.com/fixture.png'){imageRequests++;return r.fulfill({contentType:'image/png',body:fs.readFileSync('tests/fixtures/checkout_product_generated.png')})}
-   return r.abort();
-  });
-  await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_profile=1&fixture_rerun=1');
-  await page.getByText('Previewing: Fixture Collector · latest abandoned checkout',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(3000);
-  const hydrationLabel=await page.getByText(/^Fixture hydrations: /).innerText();
-  const frame=await(await page.locator('iframe[src*="crm_automation_stable_preview"]').elementHandle()).contentFrame();
-  await frame.evaluate(()=>{window.instanceMarker='original';document.getElementById('email').contentWindow.scrollTo(0,200)});
-  const idleScroll=await frame.evaluate(()=>document.getElementById('email').contentWindow.scrollY);
-  const counts=()=>frame.evaluate(()=>({updates:previewUpdates,loads:previewLoads,instance:instanceMarker}));
-  const initial=await counts();const initialImages=imageRequests;
-  assert.ok(initialImages>0);
-  await page.evaluate(()=>{window.minPreviewOpacity=1;window.sampler=setInterval(()=>{const e=document.querySelector('.st-key-crm-composer-preview iframe');if(!e)return;let o=1;for(let p=e;p;p=p.parentElement)o*=Number(getComputedStyle(p).opacity);window.minPreviewOpacity=Math.min(window.minPreviewOpacity,o)},20)});
-  await page.waitForTimeout(Number(process.env.PREVIEW_IDLE_MS||90000));
-  assert.deepEqual(await counts(),initial);
-  assert.equal(imageRequests,initialImages);
-  assert.equal(await page.evaluate(()=>minPreviewOpacity),1);
-  await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(3000);
-  assert.equal(await page.evaluate(()=>minPreviewOpacity),1);
-  assert.deepEqual(await counts(),initial);
-  await page.getByText('Fixture Shopify requests: 1',{exact:true}).waitFor();
-  await page.getByText(hydrationLabel,{exact:true}).waitFor();
-  assert.equal(await frame.evaluate(()=>document.getElementById('email').contentWindow.scrollY),idleScroll);
-  console.log((Number(process.env.PREVIEW_IDLE_MS||90000)/1000)+'s idle + slow global rerun: 0 Shopify requests, 0 remounts, 0 reloads, 0 hydrations; minimum opacity 1');
-  await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.waitForTimeout(600);
-  await page.locator('.st-key-crm-preview-devices button:visible').nth(1).click();await page.waitForTimeout(600);
-  assert.deepEqual(await counts(),initial);
-  await page.getByRole('button',{name:'Synthetic new checkout'}).click();await page.waitForTimeout(600);
-  await page.getByText('Previewing: Fixture Collector · latest abandoned checkout',{exact:true}).waitFor();
-  assert.deepEqual(await counts(),initial);
-  const refresh=page.locator('.st-key-crm-preview-devices button:visible').nth(2);
-  await refresh.click();
-  await page.getByText('Previewing: New Collector · latest abandoned checkout',{exact:true}).waitFor();
-  await frame.waitForFunction(n=>window.previewUpdates===n+1,initial.updates);
-  assert.equal((await counts()).updates,initial.updates+1);
-  await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(3000);
-  await page.getByText('Fixture Shopify requests: 2',{exact:true}).waitFor();
-  await refresh.click();await page.waitForTimeout(1600);
-  assert.equal((await counts()).updates,initial.updates+1);
-  await page.getByRole('button',{name:'Synthetic lookup failure'}).click();await page.waitForTimeout(600);
-  await page.getByText('Fixture Shopify requests: 3',{exact:true}).waitFor();
-  await refresh.click();await page.waitForTimeout(1600);
-  await page.getByText('Previewing: New Collector · cached latest abandoned checkout',{exact:true}).waitFor();
-  assert.equal((await counts()).updates,initial.updates+1);
-  await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(3000);
-  await page.getByText('Fixture Shopify requests: 4',{exact:true}).waitFor();
-  assert.equal(await page.getByTestId('stException').count(),0);
-  assert.equal(await page.evaluate(()=>minPreviewOpacity),1);
-  console.log('Save/device reuse pin; new checkout remains pinned until manual refresh; each refresh one request; identical/failed refresh no HTML replacement');
- }finally{await browser.close()}
-})().catch(e=>{console.error(e);process.exit(1)});
+const assert=require('node:assert/strict');const fs=require('node:fs');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1366,height:768}});let images=0,customPreviewRequests=0;
+ await page.route('**/*',r=>{const u=new URL(r.request().url());
+  if(/crm_automation_stable_(preview|size)/.test(u.href)){customPreviewRequests++;return r.abort()}
+  if(u.hostname==='127.0.0.1')return r.continue();
+  if(u.href==='https://cdn.shopify.com/fixture.png'){images++;return r.fulfill({contentType:'image/png',body:fs.readFileSync('tests/fixtures/checkout_product_generated.png')})}return r.abort();});
+ await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_legacy=1&fixture_profile=1&fixture_rerun=1');
+ await page.getByText('Previewing: Fixture Collector · latest abandoned checkout',{exact:true}).waitFor();
+ const iframe=page.locator('.st-key-crm-composer-preview iframe[data-testid="stIFrame"]');
+ const email=iframe.contentFrame();await email.getByText('MY CUSTOM OUTRO',{exact:true}).waitFor();
+ await page.locator('.st-key-crm-composer-preview').getByText(/Email size .* KB/).waitFor();
+ await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(2500);
+ const hydrationLabel=await page.getByText(/^Fixture hydrations: /).innerText();
+ await page.evaluate(()=>{window.originalPreview=document.querySelector('.st-key-crm-composer-preview iframe');window.previewLoads=0;window.originalPreview.addEventListener('load',()=>window.previewLoads++);window.minPreviewOpacity=1;window.opacitySampler=setInterval(()=>{let o=1;for(let p=window.originalPreview;p;p=p.parentElement)o*=Number(getComputedStyle(p).opacity);window.minPreviewOpacity=Math.min(window.minPreviewOpacity,o)},20)});
+ await email.locator('body').evaluate(()=>window.scrollTo(0,200));const scroll=await email.locator('body').evaluate(()=>scrollY);
+ const initialImages=images;const unchanged=async()=>{assert.equal(await page.evaluate(()=>document.querySelector('.st-key-crm-composer-preview iframe')===originalPreview),true);assert.equal(await page.evaluate(()=>previewLoads),0)};
+ await page.waitForTimeout(Number(process.env.PREVIEW_IDLE_MS||90000));
+ await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(2500);
+ await unchanged();assert.equal(images,initialImages);assert.equal(await page.evaluate(()=>minPreviewOpacity),1);
+ assert.equal(await email.locator('body').evaluate(()=>scrollY),scroll);
+ await page.getByText('Fixture Shopify requests: 1',{exact:true}).waitFor();await page.getByText(hydrationLabel,{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.waitForTimeout(300);await unchanged();
+ await page.locator('.st-key-crm-preview-devices button:visible').nth(1).click();await page.waitForTimeout(300);await unchanged();
+ assert.ok((await iframe.boundingBox()).width<=392);
+ await page.getByRole('button',{name:'Synthetic new checkout'}).click();await page.waitForTimeout(300);await unchanged();
+ await page.getByText('Previewing: Fixture Collector · latest abandoned checkout',{exact:true}).waitFor();
+ const refresh=page.locator('.st-key-crm-preview-devices button:visible').nth(2);await refresh.click();
+ await page.getByText('Previewing: New Collector · latest abandoned checkout',{exact:true}).waitFor();
+ await email.getByText('New collector product',{exact:true}).waitFor();await page.waitForTimeout(300);
+ assert.equal(await page.evaluate(()=>previewLoads),1);
+ await refresh.click();await page.waitForTimeout(500);assert.equal(await page.evaluate(()=>previewLoads),1);
+ await page.getByRole('button',{name:'Synthetic lookup failure'}).click();await page.waitForTimeout(300);await refresh.click();await page.waitForTimeout(500);
+ await page.getByText('Previewing: New Collector · cached latest abandoned checkout',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>previewLoads),1);
+ await page.getByRole('button',{name:'Synthetic global rerun'}).click();await page.waitForTimeout(2500);
+ await page.getByText('Fixture Shopify requests: 4',{exact:true}).waitFor();
+ assert.equal(customPreviewRequests,0);assert.equal(await page.getByTestId('stException').count(),0);
+ assert.equal(await page.getByText(/Your app is having trouble loading/).count(),0);
+ console.log((Number(process.env.PREVIEW_IDLE_MS||90000)/1000)+'s ASGI smoke: native preview/size visible; zero custom asset requests; zero idle queries, reloads, remounts, image reloads, hydrations; full-opacity rerun; refresh/same/failure/Save/device passed');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

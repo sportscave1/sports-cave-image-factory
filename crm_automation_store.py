@@ -168,13 +168,16 @@ class AutomationStore(CampaignStore):
         entries=st.session_state.get('_automation_hydrations',{})
         cached=entries.get(token)
         if cached is None:
-            rendered,detected=document(doc,data)
-            cached={'token':token,'document':rendered,'legacy':detected}
+            style_warnings=[]
+            rendered,detected=document(doc,data,preview_warnings=style_warnings)
+            cached={'token':token,'document':rendered,'legacy':detected,'style_warnings':style_warnings}
             entries={**entries,token:cached}
             if len(entries)>4:entries.pop(next(iter(entries)))
             st.session_state['_automation_hydrations']=entries
         rendered,detected=cached['document'],cached['legacy']
         if detected:self.preview_warning='Legacy checkout block detected · preview uses native checkout products.'
+        if cached.get('style_warnings'):
+            self.preview_warning+=' '+ ' '.join(cached['style_warnings'])
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')
         return rendered,label
 

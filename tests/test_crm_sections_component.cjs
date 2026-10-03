@@ -7,6 +7,7 @@ const original=['1','2'];moveId(original,'2','1');assert.deepEqual(original,['1'
 // Exercise the actual pointer and keyboard handlers with a minimal event target.
 const vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('components/crm_sections/composer.js','utf8');
+const parentHelpers=source.slice(source.indexOf('const withParent='),source.indexOf('const pendingCopyInputs='));
 const handlers={},reorders=[];
 const card=(id,top,parent)=>({classes:new Set(),dataset:{id,product:id,parent},getBoundingClientRect:()=>({top,bottom:top+100,height:100}),classList:{add(...names){names.forEach(n=>cards.find(c=>c.classList===this)?.classes.add(n));},remove(...names){names.forEach(n=>cards.find(c=>c.classList===this)?.classes.delete(n));}}});
 const cards=[card('html-1',0),card('cat',100),card('html-2',200)];
@@ -28,6 +29,7 @@ const messages=[],listeners={};let sequence=0;
 const parent={postMessage:msg=>messages.push(msg.value)};
 const bridge=vm.createContext({parent,crypto:{randomUUID:()=>String(++sequence)},
  addEventListener:(name,fn)=>listeners[name]=fn,render(){}});
+vm.runInContext(parentHelpers,bridge);
 vm.runInContext("let historyScope,areas=new Map(),histories=new Map(),drag=null;let args={sections:[{id:'html-1',html:''}]},pending=false,inFlight=null,drafts={},queue=[],settingsDrafts={};"+
  source.slice(source.indexOf('const emit='),source.indexOf('const el='))+
  source.slice(source.indexOf("addEventListener('message'"),source.indexOf('new ResizeObserver'))+
@@ -59,6 +61,7 @@ const input={setAttribute(){}};
 const ctaContext=vm.createContext({parent:{dispatchEvent(){}},CustomEvent:class{},document:{createElement:()=>input},s:section,content:{append(){}},
  changeSettings:(s,patch)=>ctaChanges.push(patch),
  setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
+vm.runInContext(parentHelpers,ctaContext);
 vm.runInContext(source.slice(source.indexOf('const cta='),source.indexOf('for(const warning')),ctaContext);
 input.value='Claim Your Edition';input.oninput();assert.equal(ctaChanges.length,0);
 input.onchange();assert.equal(timers.size,0);assert.equal(ctaChanges[0].cta,'Claim Your Edition');
@@ -90,6 +93,7 @@ const copyContext=vm.createContext({s:{id:'catalogue',settings:{}},content:{appe
  el:()=>({append(){}}),document:{createElement:()=>{const n={setAttribute(){}};copyInputs.push(n);return n;}},
  parent:{dispatchEvent(){}},CustomEvent:class{},pendingCopyInputs:copyPending,
  changeSettings:(s,p)=>copyChanges.push(p),setTimeout:f=>{copyTimers.set(++copyTimer,f);return copyTimer;},clearTimeout:id=>copyTimers.delete(id)});
+vm.runInContext(parentHelpers,copyContext);
 vm.runInContext(source.slice(source.indexOf(' const copyFields='),source.indexOf(' const labels=')),copyContext);
 assert.deepEqual(copyInputs.map(n=>n.maxLength),[80,180]);
 copyInputs[0].value='Own The Moment';copyInputs[0].oninput();copyInputs[1].value='Collector tribute';copyInputs[1].oninput();

@@ -234,7 +234,6 @@ def detail(shop,store,actions,identity):
     from crm_campaign_send_ui import test_control,safe_error
     from crm_campaign_recovery import flush_current
     from crm_html_workspace import html_document,composer_styles
-    from crm_email_size_ui import automation_size_meter
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
     if st.button('← Automations',key='auto_back'):
         if flush_current():
@@ -290,7 +289,6 @@ def detail(shop,store,actions,identity):
             with st.container(width='stretch'):composer_canvas(editor['document'],cfg,key,store)
         return
     with st.container(horizontal=True,vertical_alignment='center'):
-        with st.container(width='stretch'):automation_size_meter(editor,key,cfg)
         if st.button('Save draft',key=key+'save'):
             if flush_current(force=True):changed();st.toast('Draft saved')
         test_control(store,user,editor,key,cfg=cfg)

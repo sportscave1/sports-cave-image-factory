@@ -5,18 +5,9 @@ import streamlit as st
 from crm_email_size import campaign_size,analyze_rendered_email,meter_html,render_production
 
 
-def automation_size_meter(editor,key,cfg):
-    """No timer or second render: analyze the embedded preview's exact HTML."""
-    from crm_automation_preview_cache import output
-    store,_=st.session_state['automation_editor_context']
-    try:
-        cache,_,_=output(st.session_state,store,editor['document'],cfg,editor.get('id'))
-        from pathlib import Path
-        import streamlit.components.v1 as components
-        component=components.declare_component('crm_automation_stable_size',path=str(Path(__file__).parent/'components'/'crm_automation_preview'))
-        component(kind='size',scope=key,meter=meter_html(cache['size']),key=key+'stable_size',default=None)
-    except (ValueError,RuntimeError):
-        st.caption('Email size · Calculating…')
+def automation_size_meter(cache):
+    """Native display of the exact preview message's server-side byte analysis."""
+    st.html(meter_html(cache['size']))
 
 
 @st.fragment(run_every='2s')

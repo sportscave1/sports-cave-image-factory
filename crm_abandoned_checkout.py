@@ -131,7 +131,7 @@ def block_html(data,*,test=False):
     return '<table class="sc-cart-block" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td class="sc-cart-button-wrap" align="center">'+cta+'</td></tr></table>'
 
 
-def hydrate(doc,data,*,test=False,preview=False):
+def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None):
     from crm_checkout_styles import MARKER,compile_document
     result=deepcopy(doc)
     for section in result.get('middle_sections',[]):
@@ -149,7 +149,21 @@ def hydrate(doc,data,*,test=False,preview=False):
         if not data:raise ValueError('Checkout context could not be resolved.')
         result['custom_html']=result['custom_html'].replace(MARKER,block_html(data,test=test))
     reject_unresolved(result.get('custom_html',''))
-    return compile_document(result,strict=not preview)
+    if not preview:return compile_document(result,strict=True)
+    try:return compile_document(result,strict=False)
+    except Exception as exc:
+        # Editor-only recovery. Delivery/publication keep strict compilation.
+        import logging
+        logging.getLogger(__name__).error('checkout_preview_css_failed type=%s',type(exc).__name__)
+        from crm_checkout_styles import compile_html,rules,default_html
+        theme=rules(default_html())
+        if 'middle_sections' in result:
+            for section in result['middle_sections']:
+                if section.get('type') in ('html','image'):section['html']=compile_html(section['html'],theme)
+            result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
+        else:result['custom_html']=compile_html(result.get('custom_html',''),theme)
+        if preview_warnings is not None:preview_warnings.append('Template styles unavailable · preview uses safe defaults.')
+        return result
 
 
 def publication_document(doc,trigger):
