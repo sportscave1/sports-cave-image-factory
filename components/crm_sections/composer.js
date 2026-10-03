@@ -93,7 +93,7 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  syncArea(s);
  const advice=el('div',s.type==='image'?imageAdvice(area.value):'','warning');advice.setAttribute('aria-live','polite');
  const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
- area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,html:area.value}}));drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,750);};area.onblur=update;
+ area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);parent.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{id:s.id,html:area.value}}));drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
  content.append(historyTools,area);if(s.type==='image')content.append(advice);
  }else if(s.type==='abandoned_checkout_products'){

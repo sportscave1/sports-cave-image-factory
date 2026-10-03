@@ -89,7 +89,7 @@ def latest(shop):
     return None
 
 
-def preview_context(state,shop,*,refresh=False):
+def preview_context(state,shop,*,refresh=False,auto_refresh=True):
     from time import monotonic
     from crm_campaign_home_cache import POOL,CAPACITY
     entry=state.get('abandoned_preview')
@@ -100,7 +100,7 @@ def preview_context(state,shop,*,refresh=False):
     if entry and entry['future'].done():
         try:last_good=entry['future'].result() or last_good
         except Exception:pass
-    if not entry or (entry['future'].done() and (refresh or monotonic()-entry['started']>=45)):
+    if not entry or (entry['future'].done() and (refresh or (auto_refresh and monotonic()-entry['started']>=45))):
         if not CAPACITY.acquire(blocking=False):return last_good,'Refreshing latest abandoned checkout…'
         def load():
             try:return latest(shop)
@@ -112,7 +112,7 @@ def preview_context(state,shop,*,refresh=False):
     try:value=entry['future'].result()
     except Exception:return last_good,'Checkout preview temporarily unavailable.'
     if value:
-        entry['last_good']=value
+        if entry.get('last_good')!=value:entry['last_good']=value
         return value,''
     return last_good,'No recent abandoned checkout available for preview.'
 

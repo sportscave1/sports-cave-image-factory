@@ -43,7 +43,17 @@ identities=setup(bool(st.query_params.get('fixture_legacy')))
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
 from tests.test_crm_abandoned_checkout import checkout
-shop=Mock();shop.abandoned_preview.return_value={'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
+shop=st.session_state.get('fixture_shop')
+if shop is None:shop=Mock();st.session_state['fixture_shop']=shop
+shop.abandoned_preview.return_value={'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
 if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
+elif st.query_params.get('fixture_delay'):
+    def delayed(**kwargs):
+        from time import sleep
+        sleep(2)
+        return {'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
+    shop.abandoned_preview.side_effect=delayed
 from crm_automation_ui import workspace
 workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+
+if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))

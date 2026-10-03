@@ -234,7 +234,7 @@ def detail(shop,store,actions,identity):
     from crm_campaign_send_ui import test_control,safe_error
     from crm_campaign_recovery import flush_current
     from crm_html_workspace import html_document,composer_styles
-    from crm_email_size_ui import size_meter
+    from crm_email_size_ui import automation_size_meter
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
     if st.button('← Automations',key='auto_back'):
         if flush_current():st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
@@ -256,12 +256,19 @@ def detail(shop,store,actions,identity):
         st.session_state['automation_editor']=editor;st.session_state['automation_saved']=deepcopy(editor)
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
     store.preview_trigger=flow['trigger']
+    key='auto_'+str(identity)+'_'+step['step_id']+'_'
+    if st.session_state.get('_automation_preview_open')!=key:
+        st.session_state['_automation_preview_open']=key
+        from crm_checkout_preview import needs_checkout
+        if needs_checkout(editor['document']):
+            from crm_abandoned_checkout import preview_context
+            preview_context(st.session_state,shop)
     cfg=store.render_settings();composer_styles()
     st.html('''<style>
     .st-key-crm-automation-editor [data-testid="stVerticalBlock"]{gap:8px}
     .st-key-crm-automation-editor h3{margin:0;padding:0;font-size:20px}
     .st-key-crm-automation-editor .st-key-crm-composer-preview{padding:12px;gap:6px}
-    .st-key-crm-automation-editor .st-key-crm-composer-preview iframe{height:clamp(340px,calc(100dvh - var(--sc-topbar-height,64px) - 250px),680px)!important}
+    .st-key-crm-automation-editor .st-key-crm-composer-preview iframe{height:clamp(340px,calc(100dvh - var(--sc-topbar-height,64px) - 205px),680px)!important}
     .st-key-crm-automation-editor button[kind="primary"]{background:#c8a346!important;border-color:#b99436!important;color:#141414!important}
     @media(max-width:760px){
     .st-key-crm-automation-editor .st-key-crm-composer-layout{flex-wrap:wrap!important}
@@ -271,7 +278,6 @@ def detail(shop,store,actions,identity):
     .st-key-crm-automation-editor .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
     }
     </style>''')
-    key='auto_'+str(identity)+'_'+step['step_id']+'_'
     if readonly:
         from crm_html_workspace import composer_canvas
         with st.container(horizontal=True,gap='small'):
@@ -279,11 +285,9 @@ def detail(shop,store,actions,identity):
             with st.container(width='stretch'):composer_canvas(editor['document'],cfg,key,store)
         return
     with st.container(horizontal=True,vertical_alignment='center'):
-        with st.container(width='stretch'):size_meter(editor,key,cfg)
+        with st.container(width='stretch'):automation_size_meter(editor,key,cfg)
         if st.button('Save draft',key=key+'save'):
             if flush_current(force=True):changed();st.toast('Draft saved')
-        from crm_abandoned_checkout_ui import live_control
-        live_control(store,editor,key,cfg)
         test_control(store,user,editor,key,cfg=cfg)
         if st.button('Publish now',type='primary',key=key+'publish'):
             try:
