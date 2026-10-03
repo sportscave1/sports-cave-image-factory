@@ -37,6 +37,26 @@ class DefinitionTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class NativeAutomationTests(unittest.TestCase):
+    def test_legacy_checkout_send_test_fallback_preserves_draft_and_blocks_publish(self):
+        from tests.test_crm_checkout_preview_fallback import PreviewFallbackTests
+        from crm_campaign_send import send_test
+        from tests.crm_fixtures import TestRecipientShop
+        a=self.store.create(ADMIN,'abandoned','Legacy preview-only fixture');self.created.append(str(a['id']))
+        doc=PreviewFallbackTests().legacy_document();flow=deepcopy(a['config']['draft'])
+        flow['emails']=[email_step(doc,0)];a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
+        self.store.step_id=flow['emails'][0]['step_id'];self.store.preview_shop=Mock()
+        self.store.preview_shop.abandoned_preview.side_effect=RuntimeError('Synthetic unavailable')
+        wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+        editor=self.store.draft(a['id']);operation=str(uuid.uuid4())
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
+            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
+            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
+        wire.post.assert_called_once();payload=wire.post.call_args.kwargs['json']
+        self.assertIn('MY CUSTOM HEADLINE',payload['html']);self.assertIn('Recovery action disabled',payload['html'])
+        self.assertNotIn('{{',payload['html']);self.assertNotIn('/checkouts/',payload['html'])
+        saved=self.store.flow(a['id']);self.assertEqual(saved['config']['draft']['emails'][0]['document']['middle_sections'],doc['middle_sections'])
+        with self.assertRaisesRegex(ValueError,'Unresolved'):self.store.publish(ADMIN,a['id'],saved['config']['revision'],env=LIVE)
+
     def test_dynamic_checkout_publication_worker_recipient_isolation_and_recovered_stop(self):
         from tests.test_crm_abandoned_checkout import checkout,native_document
         a=self.store.create(ADMIN,'abandoned','Dynamic checkout local fixture');self.created.append(str(a['id']))

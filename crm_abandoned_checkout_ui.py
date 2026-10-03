@@ -1,9 +1,10 @@
 from crm_abandoned_checkout import dynamic,preview_context,apply_template,TEMPLATE
+from crm_checkout_preview import needs_checkout
 
 def live_control(store,editor,key,cfg):
     import streamlit as st
     if st.button('Live preview',key=key+'live_preview'):
-        if dynamic(editor['document']):preview_context(st.session_state,store.preview_shop,refresh=True)
+        if needs_checkout(editor['document']):preview_context(st.session_state,store.preview_shop,refresh=True)
         live_dialog(store,editor['document'],key,cfg)
 
 
@@ -17,7 +18,7 @@ def live_dialog(store,doc,key,cfg):
 
 def automation_canvas(doc,cfg,key,store,*,live=False):
     if live:_live_canvas(doc,cfg,key,store)
-    elif dynamic(doc):_dynamic_canvas(doc,cfg,key,store)
+    elif needs_checkout(doc):_dynamic_canvas(doc,cfg,key,store)
     else:
         from crm_html_workspace import _campaign_canvas
         _campaign_canvas(doc,cfg,key,store)

@@ -156,29 +156,30 @@ class AutomationStore(CampaignStore):
                 'document':deepcopy(step['document']),'archived_at':row['config'].get('archived_at')}
 
     def preview_document(self,doc):
-        from crm_abandoned_checkout import dynamic,preview_context,hydrate,publication_document
-        publication_document(doc,getattr(self,'preview_trigger','abandoned'))
-        if not dynamic(doc):return doc,''
+        from crm_abandoned_checkout import preview_context
+        from crm_checkout_preview import needs_checkout,document,sample
+        self.preview_warning=''
+        if not needs_checkout(doc):return doc,''
         import streamlit as st
-        editor=st.session_state.get('automation_editor') or {}
-        trigger=getattr(self,'preview_trigger',None)
-        if trigger is None and editor.get('id'):trigger=self.flow(editor['id'])['config']['draft']['trigger']
-        if trigger and trigger!='abandoned':raise ValueError('Checkout abandoned trigger required.')
         data,note=preview_context(st.session_state,self.preview_shop)
-        if not data:raise ValueError(note)
-        return hydrate(doc,data),'Previewing: '+data['label']+' · latest abandoned checkout'
+        if not data:data=sample(doc)
+        rendered,detected=document(doc,data)
+        if detected:self.preview_warning='Legacy checkout block detected · preview uses native checkout products.'
+        label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')
+        return rendered,label
 
     def test_document(self,doc,operation_id):
-        from crm_abandoned_checkout import dynamic,latest,hydrate,publication_document
-        publication_document(doc,'abandoned')
-        if not dynamic(doc):return doc
+        from crm_abandoned_checkout import latest
+        from crm_checkout_preview import needs_checkout,document,sample
+        if not needs_checkout(doc):return doc
         if self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':raise ValueError('Checkout abandoned trigger required.')
         if getattr(self,'_checkout_test_operation',None)!=operation_id:
             from crm_shopify import Shopify
-            data=latest(getattr(self,'preview_shop',None) or Shopify())
-            if not data:raise ValueError('No recent abandoned checkout available for preview.')
+            try:data=latest(getattr(self,'preview_shop',None) or Shopify())
+            except Exception:data=None
+            if not data:data=sample(doc)
             self._checkout_test_data=data;self._checkout_test_operation=operation_id
-        return hydrate(doc,self._checkout_test_data,test=True)
+        return document(doc,self._checkout_test_data,test=True)[0]
 
     def save(self,user,name,document,identity=None,version=None,**_):
         row=self.flow(identity);flow=deepcopy(row['config']['draft'])

@@ -80,25 +80,29 @@ class CheckoutTests(unittest.TestCase):
         shop=Mock();shop.abandoned_preview.side_effect=RuntimeError('source unavailable')
         with self.assertRaises(RuntimeError):latest(shop)
 
-    def test_manual_test_without_checkout_or_wrong_trigger_cannot_render(self):
+    def test_manual_test_without_checkout_uses_disabled_sample_but_wrong_trigger_blocks(self):
         from crm_automation_store import AutomationStore
         store=AutomationStore(lambda:None);store.draft_identity='local-fixture'
         store.flow=Mock(return_value={'config':{'draft':{'trigger':'abandoned'}}})
         store.preview_shop=Mock();store.preview_shop.abandoned_preview.return_value={'nodes':[],'pageInfo':{'hasNextPage':False}}
         doc=native_document();original=deepcopy(doc)
-        with self.assertRaisesRegex(ValueError,'No recent'):store.test_document(doc,'operation')
+        preview=store.test_document(doc,'operation')
+        self.assertIn('Recovery action disabled',str(preview));self.assertNotIn('recover?key',str(preview))
         self.assertEqual(doc,original)
         store.flow.return_value={'config':{'draft':{'trigger':'welcome'}}}
         store.preview_shop.reset_mock()
         with self.assertRaisesRegex(ValueError,'trigger'):store.test_document(doc,'operation')
         store.preview_shop.abandoned_preview.assert_not_called()
 
-    def test_legacy_liquid_preview_fails_before_shopify_reads(self):
+    def test_legacy_liquid_preview_renders_native_sample_without_mutating_draft(self):
         from crm_automation_store import AutomationStore
         store=AutomationStore(lambda:None);store.preview_shop=Mock()
         doc=document();doc['custom_html']='{{ item.product_title }}'
-        with self.assertRaisesRegex(ValueError,'Unresolved'):store.preview_document(doc)
-        store.preview_shop.abandoned_preview.assert_not_called()
+        with patch('crm_abandoned_checkout.preview_context',return_value=(None,'Unavailable')):
+            preview,label=store.preview_document(doc)
+        self.assertEqual(label,'Previewing: Sample abandoned checkout')
+        self.assertNotIn('{{',preview['custom_html']);self.assertIn('Your selected edition',preview['custom_html'])
+        self.assertEqual(doc['custom_html'],'{{ item.product_title }}')
 
     def test_bounded_complete_products_and_unstable_pagination(self):
         raw=checkout();raw['lineItems']['pageInfo']={'hasNextPage':True,'endCursor':'next'}

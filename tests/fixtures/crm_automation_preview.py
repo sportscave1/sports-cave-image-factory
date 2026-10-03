@@ -18,7 +18,7 @@ requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionE
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
 
 @st.cache_resource
-def setup():
+def setup(legacy_preview=False):
     store=AutomationStore(connect)
     from crm_logic import now
     store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
@@ -29,16 +29,21 @@ def setup():
         if kind=='abandoned':
             from crm_abandoned_checkout import apply_template
             apply_template(flow['emails'][0]['document'])
+            if legacy_preview:
+                from tests.test_crm_checkout_preview_fallback import LEGACY
+                doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)
+                doc['middle_sections'][0]['html']=LEGACY;doc['custom_html']=LEGACY
         row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
         if state!='DRAFT':row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
         if state=='PAUSED':store.lifecycle(ADMIN,row['id'],'pause')
         identities.append(str(row['id']))
     return identities
 
-identities=setup()
+identities=setup(bool(st.query_params.get('fixture_legacy')))
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
 from tests.test_crm_abandoned_checkout import checkout
 shop=Mock();shop.abandoned_preview.return_value={'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
+if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
 from crm_automation_ui import workspace
 workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))

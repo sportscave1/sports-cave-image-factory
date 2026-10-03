@@ -96,27 +96,35 @@ def preview_context(state,shop,*,refresh=False):
     namespace=getattr(shop,'namespace',None)
     namespace=namespace if isinstance(namespace,str) else 'configured-shop'
     if entry and entry.get('namespace')!=namespace:entry=None
+    last_good=(entry or {}).get('last_good')
+    if entry and entry['future'].done():
+        try:last_good=entry['future'].result() or last_good
+        except Exception:pass
     if not entry or (entry['future'].done() and (refresh or monotonic()-entry['started']>=45)):
-        if not CAPACITY.acquire(blocking=False):return None,'Loading latest abandoned checkout…'
+        if not CAPACITY.acquire(blocking=False):return last_good,'Refreshing latest abandoned checkout…'
         def load():
             try:return latest(shop)
             finally:CAPACITY.release()
         try:future=POOL.submit(load)
-        except RuntimeError:CAPACITY.release();return None,'Checkout preview temporarily unavailable.'
-        entry=state['abandoned_preview']={'future':future,'started':monotonic(),'namespace':namespace}
-    if not entry['future'].done():return None,'Loading latest abandoned checkout…'
+        except RuntimeError:CAPACITY.release();return last_good,'Checkout preview temporarily unavailable.'
+        entry=state['abandoned_preview']={'future':future,'started':monotonic(),'namespace':namespace,'last_good':last_good}
+    if not entry['future'].done():return last_good,'Refreshing latest abandoned checkout…' if last_good else 'Loading latest abandoned checkout…'
     try:value=entry['future'].result()
-    except Exception:return None,'Checkout preview temporarily unavailable.'
-    return value,'' if value else 'No recent abandoned checkout available for preview.'
+    except Exception:return last_good,'Checkout preview temporarily unavailable.'
+    if value:
+        entry['last_good']=value
+        return value,''
+    return last_good,'No recent abandoned checkout available for preview.'
 
 
 def block_html(data,*,test=False):
     rows=[]
     for item in data['items']:
         image='' if not item['image'] else '<img src="'+escape(item['image'],quote=True)+'" alt="'+escape(item['title'],quote=True)+'" width="540" style="display:block;width:100%;max-width:540px;height:auto;border:0;margin:0">'
-        label=item['currency']+' '+format(Decimal(item['amount']),',.2f')
+        label=item['currency']+' '+format(Decimal(item['amount']),',.2f') if item['amount'] is not None else 'Price unavailable in sample preview'
         rows.append('<tr><td style="padding:14px 24px;font:15px/1.5 Arial;word-wrap:break-word"><p style="font-size:11px;color:#76633c">YOUR SELECTED EDITION</p>'+image+'<p style="font-weight:700">'+escape(item['title'])+'</p>'+('<p>'+escape(item['variant'])+'</p>' if item['variant'] else '')+'<p>Quantity: '+str(item['quantity'])+' · Line total: '+escape(label)+'</p></td></tr>')
-    cta='<span style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial">Recovery action disabled in test email</span>' if test else '<a href="'+escape(data['recovery_url'],quote=True)+'" style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial;text-decoration:none">Complete Your Order →</a>'
+    disabled=test or data.get('preview_only')
+    cta='<span style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial">'+('Recovery action disabled in test email' if test else 'Complete Your Order →')+'</span>' if disabled else '<a href="'+escape(data['recovery_url'],quote=True)+'" style="display:inline-block;background:#c8a346;color:#171717;padding:14px 24px;font:bold 15px Arial;text-decoration:none">Complete Your Order →</a>'
     return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td align="center" style="padding:14px 24px">'+cta+'</td></tr></table>'
 
 

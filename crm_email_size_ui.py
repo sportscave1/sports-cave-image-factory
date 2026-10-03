@@ -29,4 +29,5 @@ def size_meter(editor,key,cfg):
     except Exception:
         # Invalid/incomplete compose state must not interrupt the editor or leak
         # content in diagnostics. Review/send independently validate it.
-        st.html('<span class="sc-email-size" style="font-size:11px">Email size · Unknown</span>')
+        label='Calculating…' if st.session_state.get('email_editor_mode')=='automation' else 'Unknown'
+        st.html('<span class="sc-email-size" style="font-size:11px">Email size · '+label+'</span>')

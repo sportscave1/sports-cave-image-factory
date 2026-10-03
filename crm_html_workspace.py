@@ -164,6 +164,7 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
             if getattr(store,'email_mode',None)=='automation':
                 preview_doc,note=store.preview_document(doc)
                 if note:st.caption(note)
+                if getattr(store,'preview_warning',''):st.caption(store.preview_warning)
             if live:
                 from crm_preview_cache import preview_key
                 from crm_email_size import render_production
