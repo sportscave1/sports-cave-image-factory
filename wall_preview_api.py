@@ -28,7 +28,7 @@ DEFAULT_ALLOWED_ORIGINS = {
     "https://www.sportscaveshop.com",
     "https://sportscaveshop.com",
 }
-DROPBOX_RELATIVE_ROOT = "05 Mockups/Wall Previews"
+DROPBOX_RELATIVE_ROOT = "11 Wall Preview Inbox"
 
 LOGGER = logging.getLogger(__name__)
 _RATE_LOCK = threading.Lock()
