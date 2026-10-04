@@ -18,6 +18,7 @@ from starlette.responses import JSONResponse, Response
 
 import dropbox_integration
 import wall_preview_store
+import wall_preview_identity
 
 
 WALL_PREVIEW_PATH = "/api/wall-previews"
@@ -35,6 +36,7 @@ LOGGER = logging.getLogger(__name__)
 _RATE_LOCK = threading.Lock()
 _RATE_BUCKETS = {}
 _INGEST_SLOTS = threading.BoundedSemaphore(4)
+_ARCHIVE_LOCKS = tuple(threading.Lock() for _ in range(32))
 _DROPBOX_LOCK = threading.Lock()
 _DROPBOX_CACHE = {"token": "", "root": "", "expires_at": 0.0}
 
@@ -139,12 +141,12 @@ def _inspect_image(data, content_type):
     return int(width), int(height)
 
 
-def _dropbox_destination(root_path, handle, digest, content_type):
+def _dropbox_destination(root_path, handle, digest, content_type, customer_email):
     now = datetime.now(timezone.utc)
     extension = ".png" if content_type == "image/png" else ".jpg"
-    filename = f"sports-cave-wall-preview-{digest}{extension}"
+    filename = f"{_safe_handle(handle)}-{now:%Y%m%dT%H%M%S%fZ}-{digest[:16]}{extension}"
     folder = dropbox_integration.normalize_dropbox_path(
-        f"{root_path}/{DROPBOX_RELATIVE_ROOT}/{now:%Y}/{now:%m}"
+        f"{root_path}/{DROPBOX_RELATIVE_ROOT}/{wall_preview_identity.customer_folder_name(customer_email)}"
     )
     if not dropbox_integration.path_is_within_root(folder, root_path):
         raise ValueError("Wall preview destination is outside the Dropbox root.")
@@ -206,12 +208,26 @@ async def _ingest(request):
 
 
 def _save_preview(request, data, content_type, cors):
+    # Bounded stripes serialize same-owner retries in the single web process.
+    # No growing lock registry and no duplicate physical upload on double-click.
+    address = str(request.query_params.get('customer_email') or '').strip().lower()
+    key = hashlib.sha256(address.encode() + b'\0' + data).digest()
+    with _ARCHIVE_LOCKS[key[0] % len(_ARCHIVE_LOCKS)]:
+        return _save_preview_locked(request, data, content_type, cors)
+
+
+def _save_preview_locked(request, data, content_type, cors):
     try:
         if _query_text(request, "unit", 2) not in {'', 'cm', 'in'}:
             raise ValueError("Choose cm or in for the measurement unit.")
         width, height = _inspect_image(data, content_type)
+        identity = wall_preview_identity.resolve(
+            request.query_params.get('customer_email'),
+            request.query_params.get('customer_name'),
+            request.query_params.get('identity_source'),
+        )
         digest = hashlib.sha256(data).hexdigest()
-        existing = wall_preview_store.find_preview(digest)
+        existing = wall_preview_store.find_preview(digest, customer_email=identity['customer_email'])
         if existing:
             return JSONResponse({"ok": True, "preview_id": str(existing['id']),
                                  "duplicate": True,
@@ -226,6 +242,7 @@ def _save_preview(request, data, content_type, cors):
             product_handle,
             digest,
             content_type,
+            identity['customer_email'],
         )
         dropbox_integration.ensure_folder_path(token, folder, root_path=root_path)
         metadata = dropbox_integration.upload_stream(
@@ -243,6 +260,8 @@ def _save_preview(request, data, content_type, cors):
         saved = wall_preview_store.record_preview(
             {
                 "image_sha256": digest,
+                **identity,
+                "customer_folder": folder,
                 "product_id": _query_text(request, "product_id", 80),
                 "variant_id": _query_text(request, "variant_id", 80),
                 "product_handle": product_handle,

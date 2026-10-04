@@ -50,6 +50,7 @@ class WallPreviewFeatureTests(unittest.TestCase):
             "Cristiano Ronaldo — The Mentality",
             "a" * 64,
             "image/jpeg",
+            "Customer@Example.com",
         )
         self.assertIn("/03_ASSETS/11 Wall Preview Inbox/", folder)
         self.assertTrue(destination.startswith(folder + "/"))
@@ -108,6 +109,8 @@ class WallPreviewFeatureTests(unittest.TestCase):
 
 class WallPreviewHttpTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.identity_shop = patch('wall_preview_identity.crm_shopify.Shopify')
+        self.identity_shop.start().return_value.customers.return_value = {'nodes':[], 'pageInfo':{'hasNextPage':False}}
         wall_preview_api._RATE_BUCKETS.clear()
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=Starlette(routes=[
             Route(wall_preview_api.WALL_PREVIEW_PATH, wall_preview_api.wall_preview_ingest, methods=['POST','OPTIONS'])
@@ -115,17 +118,18 @@ class WallPreviewHttpTests(unittest.IsolatedAsyncioTestCase):
         self.headers = {'Origin':'https://sportscaveshop.com', 'Content-Type':'image/jpeg'}
 
     async def asyncTearDown(self):
+        self.identity_shop.stop()
         await self.client.aclose()
 
     async def test_valid_upload_and_duplicate_avoid_second_dropbox_upload(self):
         blob = WallPreviewFeatureTests()._jpeg()
         row = {'id':'preview', 'marketing_permission':False}
         with patch('wall_preview_store.find_preview', side_effect=[None,row]), patch('wall_preview_api._dropbox_connection', return_value=('token','/Sportscave Team Folder')), patch('dropbox_integration.ensure_folder_path'), patch('dropbox_integration.upload_stream', return_value={'id':'file'}) as upload, patch('wall_preview_store.record_preview',return_value=row) as save:
-            response = await self.client.post('/api/wall-previews?frame=Black&size=Large&unit=cm&marketing_permission=false', content=blob,headers=self.headers)
+            response = await self.client.post('/api/wall-previews?customer_email=guest@example.com&customer_name=Guest&identity_source=guest&frame=Black&size=Large&unit=cm&marketing_permission=false', content=blob,headers=self.headers)
             self.assertEqual(response.status_code,200)
             self.assertEqual(save.call_args.args[0]['image_bytes'],len(blob))
             self.assertFalse(save.call_args.args[0]['marketing_permission'])
-            duplicate = await self.client.post('/api/wall-previews?marketing_permission=true',content=blob,headers=self.headers)
+            duplicate = await self.client.post('/api/wall-previews?customer_email=guest@example.com&customer_name=Guest&identity_source=guest&marketing_permission=true',content=blob,headers=self.headers)
             self.assertTrue(duplicate.json()['duplicate']);self.assertFalse(duplicate.json()['marketing_permission'])
             upload.assert_called_once(); save.assert_called_once()
 
@@ -149,7 +153,7 @@ class WallPreviewHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code,429)
         wall_preview_api._RATE_BUCKETS.clear()
         with patch('wall_preview_store.find_preview',side_effect=RuntimeError('private secret')):
-            response = await self.client.post('/api/wall-previews',content=WallPreviewFeatureTests()._jpeg(),headers=self.headers)
+            response = await self.client.post('/api/wall-previews?customer_email=guest@example.com&customer_name=Guest&identity_source=guest',content=WallPreviewFeatureTests()._jpeg(),headers=self.headers)
             self.assertEqual(response.status_code,503);self.assertNotIn('private',response.text)
 
     async def test_storage_io_leaves_event_loop_responsive(self):
@@ -247,9 +251,14 @@ class WallPreviewDatabaseTests(unittest.TestCase):
         from tests.crm_db_fixture import connect
         with connect() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS public.os_users(id uuid PRIMARY KEY)')
-            sql=Path('migrations/20261004_wall_preview_inbox.sql').read_text().replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')
-            for statement in sql.split(';'):
-                if statement.strip():conn.execute(statement)
+            for name in run_migrations.WALL_PREVIEW_MIGRATIONS:
+                sql=Path('migrations', name).read_text().replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')
+                for statement in sql.split(';'):
+                    if statement.strip():conn.execute(statement)
+                if name == '20261004_wall_preview_inbox.sql':
+                    conn.execute("INSERT INTO public.wall_previews(image_sha256,dropbox_path,image_width,image_height,image_bytes) VALUES (%s,%s,640,480,1024) ON CONFLICT DO NOTHING", ('c'*64, inbox_path()+'/legacy.jpg'))
+            legacy=conn.execute("SELECT customer_email,identity_source,email_marketing_state FROM public.wall_previews WHERE image_sha256=%s",('c'*64,)).fetchone()
+            assert legacy == {'customer_email':'','identity_source':'','email_marketing_state':'UNKNOWN'}
 
     def test_real_sql_deduplication_status_consent_and_schema(self):
         from tests.crm_db_fixture import Connection
@@ -278,6 +287,22 @@ class WallPreviewDatabaseTests(unittest.TestCase):
             for status in ('approved','used','archived'):
                 self.assertEqual(wall_preview_store.update_status(permitted['id'],status)['status'],status)
             with Adapter() as cur:self.assertEqual(wall_preview_store.schema_issues(cur),[])
+            # The same image from two emails remains separate from its legacy
+            # owner, with independent consent and identity, and indexed search.
+            jane=wall_preview_store.record_preview(dict(payload,customer_email='jane@example.com',customer_name='Jane Collector',identity_source='guest'))
+            other=wall_preview_store.record_preview(dict(payload,customer_email='other@example.com',customer_name='Other Collector',identity_source='guest',marketing_permission=True))
+            self.assertNotEqual(jane['id'],other['id'])
+            self.assertNotEqual(jane['id'],first['id'])
+            self.assertEqual(wall_preview_store.find_preview('a'*64,customer_email='jane@example.com')['id'],jane['id'])
+            self.assertEqual([row['id'] for row in wall_preview_store.list_previews(status='all',customer_search='Jane',include_private=True)],[jane['id']])
+            self.assertEqual(wall_preview_store.list_previews(status='all',customer_search='Jane'),[])
+            # Safe to replay the new additive migration; data is retained.
+            with Adapter() as cur:
+                for statement in Path('migrations/20261004_wall_preview_customer_identity.sql').read_text().split(';'):
+                    if statement.strip():cur.execute(statement)
+                self.assertEqual(wall_preview_store.schema_issues(cur),[])
+                cur.execute("SELECT has_table_privilege('anon','public.wall_previews','SELECT') AS anon,has_table_privilege('authenticated','public.wall_previews','SELECT') AS authenticated")
+                self.assertEqual(cur.fetchone(),{'anon':False,'authenticated':False})
 
 
 if __name__ == "__main__":

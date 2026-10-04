@@ -18,11 +18,14 @@ def schema_issues(cur):
                 'product_title', 'product_url', 'frame_label', 'size_label',
                 'measurement_unit', 'marketing_permission', 'status', 'dropbox_file_id',
                 'dropbox_path', 'content_type', 'image_width', 'image_height', 'image_bytes',
-                'save_count', 'received_at', 'last_saved_at', 'reviewed_by', 'reviewed_at', 'notes'}
+                'save_count', 'received_at', 'last_saved_at', 'reviewed_by', 'reviewed_at', 'notes',
+                'customer_email', 'customer_name', 'shopify_customer_id', 'identity_source',
+                'email_marketing_state', 'customer_folder'}
     issues = ['wall_previews missing column: ' + name for name in sorted(required - columns)]
     cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='wall_previews'")
     indexes = {row['indexname'] for row in cur.fetchall()}
-    for name in ('wall_previews_image_sha256_key', 'idx_wall_previews_status_received',
+    for name in ('idx_wall_previews_customer_image', 'idx_wall_previews_customer_email_search',
+                 'idx_wall_previews_customer_name_search', 'idx_wall_previews_status_received',
                  'idx_wall_previews_permission_received', 'idx_wall_previews_product_received'):
         if name not in indexes: issues.append('wall_previews missing index: ' + name)
     cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('public.wall_previews')")
@@ -45,12 +48,12 @@ def _clean(value, limit):
     return " ".join(str(value or "").split())[: int(limit)]
 
 
-def find_preview(digest):
+def find_preview(digest, *, customer_email=''):
     """Reuse the original archive on retries, including its original consent."""
     with _backend().connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='4000ms'")
-            cur.execute("SELECT * FROM public.wall_previews WHERE image_sha256=%s", (digest,))
+            cur.execute("SELECT * FROM public.wall_previews WHERE customer_email=%s AND image_sha256=%s", (customer_email, digest))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -98,12 +101,15 @@ def record_preview(payload):
                         content_type,
                         image_width,
                         image_height,
-                        image_bytes
+                        image_bytes,
+                        customer_email, customer_name, shopify_customer_id,
+                        identity_source, email_marketing_state, customer_folder
                     )
                     VALUES (
-                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                        %s,%s,%s,%s,%s,%s
                     )
-                    ON CONFLICT (image_sha256) DO UPDATE SET
+                    ON CONFLICT (customer_email, image_sha256) DO UPDATE SET
                         save_count = public.wall_previews.save_count + 1,
                         last_saved_at = now()
                     RETURNING *,
@@ -126,6 +132,12 @@ def record_preview(payload):
                         int(payload.get("image_width") or 0),
                         int(payload.get("image_height") or 0),
                         int(payload.get("image_bytes") or 0),
+                        _clean(payload.get('customer_email'), 254).lower(),
+                        _clean(payload.get('customer_name'), 200),
+                        _clean(payload.get('shopify_customer_id'), 100),
+                        _clean(payload.get('identity_source'), 16),
+                        _clean(payload.get('email_marketing_state') or 'UNKNOWN', 32),
+                        _clean(payload.get('customer_folder'), 1500),
                     ),
                 )
                 row = dict(cur.fetchone() or {})
@@ -136,7 +148,7 @@ def record_preview(payload):
             raise
 
 
-def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False):
+def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search=''):
     clean_status = str(status or "new").strip().lower()
     if clean_status not in (*VALID_STATUSES, "all"):
         clean_status = "new"
@@ -148,6 +160,13 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False):
         params.append(clean_status)
     if not include_private:
         clauses.append("marketing_permission = TRUE")
+    search = _clean(customer_search, 254).lower()
+    if search:
+        # Prefix searches use the dedicated pattern indexes; no all-history scan
+        # or wildcard injection from customer-controlled strings.
+        pattern = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        clauses.append("(customer_email LIKE %s OR lower(customer_name) LIKE %s)")
+        params.extend((pattern, pattern))
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     params.append(safe_limit)
     with _backend().connect() as conn:

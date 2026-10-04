@@ -14,6 +14,7 @@ import dropbox_integration
 import os_accounts
 import social_media
 import wall_preview_store
+import wall_preview_identity
 
 
 _TEMP_LINK_CACHE = {}
@@ -95,7 +96,20 @@ def _set_status(user, row, status):
         st.error("This change could not be saved. Please retry.")
 
 
-def _render_card(user, row, *, key_prefix):
+def _current_marketing(rows):
+    """One cached, read-only batch for the visible customer matches, never consent writes."""
+    identities = list({row.get('shopify_customer_id') for row in rows if row.get('shopify_customer_id')})
+    if not identities:
+        return {}
+    try:
+        customers = wall_preview_identity.crm_shopify.Shopify().customer_batch(identities[:50])
+        return {customer['id']: customer for customer in customers}
+    except Exception as error:
+        logging.getLogger(__name__).warning('wall_preview_marketing_unavailable error_type=%s', type(error).__name__)
+        return {}
+
+
+def _render_card(user, row, *, key_prefix, current_customers=None):
     if not os_accounts.is_admin(user) and not row.get("marketing_permission"):
         return
     path = str(row.get("dropbox_path") or "")
@@ -110,6 +124,31 @@ def _render_card(user, row, *, key_prefix):
             st.image(image_url, use_container_width=True)
         else:
             st.caption("Preview image is temporarily unavailable.")
+
+        address = str(row.get('customer_email') or '')
+        st.caption(str(row.get('customer_name') or 'Customer identity unavailable · legacy preview'))
+        if address:
+            st.text(address)
+        customer_id = str(row.get('shopify_customer_id') or '')
+        if customer_id:
+            st.caption('Shopify customer matched by email')
+            customer = (current_customers or {}).get(customer_id)
+            current_state = 'UNKNOWN'
+            if customer and wall_preview_identity.email(customer.get('email')) == address:
+                current_state = wall_preview_identity.marketing_state(customer)
+            if current_state != 'UNKNOWN':
+                st.caption(f'Shopify email marketing · {current_state.replace("_", " ").title()}')
+            else:
+                saved_state = str(row.get('email_marketing_state') or 'UNKNOWN')
+                if saved_state not in wall_preview_identity.MARKETING_STATES:
+                    saved_state = 'UNKNOWN'
+                st.caption(f'Email marketing at save · {saved_state.replace("_", " ").title()} · current state unavailable')
+            if os_accounts.is_admin(user):
+                customer_url = wall_preview_identity.customer_admin_url(customer_id)
+                if customer_url:
+                    st.link_button('Open Shopify customer', customer_url, use_container_width=True)
+        elif address:
+            st.caption('Guest preview · email marketing unknown')
 
         title = str(row.get("product_title") or row.get("product_handle") or "Sports Cave edition")
         st.markdown(f"**{html.escape(title)}**")
@@ -228,12 +267,16 @@ def render(user):
         (key for key, label in STATUS_LABELS.items() if label == selected),
         "new",
     )
+    customer_search = st.text_input('Search customer name or email',
+                                    placeholder='Name or email starts with…',
+                                    key='wall-preview-customer-search', max_chars=254)
     try:
         counts = wall_preview_store.summary(include_private=is_admin)
         rows = wall_preview_store.list_previews(
             status=status,
             limit=48,
             include_private=is_admin,
+            customer_search=customer_search,
         )
     except Exception:
         st.warning(
@@ -251,8 +294,9 @@ def render(user):
         return
 
     with st.container(key="wall-preview-grid"):
+        current_customers = _current_marketing(rows)
         for start in range(0, len(rows), 3):
             columns = st.columns(3)
             for column, row in zip(columns, rows[start:start + 3]):
                 with column:
-                    _render_card(user, row, key_prefix=f"wall-preview-{row['id']}")
+                    _render_card(user, row, key_prefix=f"wall-preview-{row['id']}", current_customers=current_customers)

@@ -15,7 +15,7 @@ import run_migrations
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
 from support_email_idle import IdleLifecycle
-from wall_preview_api import WALL_PREVIEW_ROUTES
+from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 
 
 routes = [
@@ -75,6 +75,16 @@ class _GoogleOAuthAccessLogFilter(logging.Filter):
         return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
 
 logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
+
+
+class _WallPreviewAccessLogFilter(logging.Filter):
+    def filter(self, record):
+        # The established binary-body contract carries customer identity in the
+        # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
+        return WALL_PREVIEW_PATH not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 streamlit_app = App("app.py", routes=routes)
 app = ConstantTimeHealthMiddleware(
     IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(streamlit_app))
