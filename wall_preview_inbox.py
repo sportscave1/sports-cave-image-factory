@@ -16,6 +16,9 @@ import wall_preview_store
 _TEMP_LINK_CACHE = {}
 
 
+WALL_PREVIEW_DROPBOX_PATH = "/Sportscave Team Folder/11 Wall Preview Inbox"
+
+
 STATUS_LABELS = {
     "new": "New",
     "approved": "Approved",
@@ -141,12 +144,37 @@ def _render_card(user, row, *, key_prefix):
             st.link_button("Open product", product_url, use_container_width=True)
 
 
+def _open_wall_preview_folder():
+    clean_path = dropbox_integration.normalize_dropbox_path(WALL_PREVIEW_DROPBOX_PATH)
+    st.session_state["files_browser_path"] = clean_path
+    st.session_state.pop("files_preview_path", None)
+    st.session_state["current_page"] = "Files"
+    st.session_state["selected_page"] = "Files"
+    st.session_state["current_page_source"] = "wall-preview-inbox"
+    try:
+        st.query_params["page"] = "files"
+        st.query_params["files_path"] = clean_path
+    except Exception:
+        pass
+    st.rerun()
+
+
 def render(user):
     st.subheader("Wall Preview Inbox")
     st.caption(
         "Shopper-saved See It On Your Wall previews arrive here automatically. "
         "Only previews with explicit permission can be approved for social use."
     )
+    folder_col, _ = st.columns([1, 2])
+    with folder_col:
+        if st.button(
+            "Open Wall Preview Folder",
+            icon=":material/folder_open:",
+            key="wall-preview-open-dropbox-folder",
+            use_container_width=True,
+        ):
+            _open_wall_preview_folder()
+    st.caption("Dropbox · /Sportscave Team Folder/11 Wall Preview Inbox")
 
     is_admin = os_accounts.is_admin(user)
     labels = ("New", "Approved", "Used", "Archived", "All")
