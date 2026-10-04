@@ -9,6 +9,7 @@ import os_accounts
 import social_media
 import social_media_store
 import social_media_workspace
+import wall_preview_inbox
 from ui_option_ordering import alphabetize_options, selected_option_index
 
 
@@ -1132,12 +1133,14 @@ def render_page(user, *, store=social_media_store, account_store=None):
     target = _admin_staff_selector(user, staff)
     view = st.segmented_control(
         "Social Media workspace",
-        ("Create", "Plan", "Playbook", "Tracking"),
-        default="Create",
+        ("Wall Preview Inbox", "Create", "Plan", "Playbook", "Tracking"),
+        default="Wall Preview Inbox",
         key="social-media-workspace-view",
         label_visibility="collapsed",
     )
-    if view == "Plan":
+    if view == "Wall Preview Inbox":
+        wall_preview_inbox.render(user)
+    elif view == "Plan":
         social_media_workspace.render_plan(
             user,
             target,
