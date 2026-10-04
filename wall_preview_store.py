@@ -10,6 +10,27 @@ DEFAULT_LIMIT = 36
 MAX_LIMIT = 120
 
 
+def schema_issues(cur):
+    """Check the additive inbox schema before the main service opens its port."""
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='wall_previews'")
+    columns = {row['column_name'] for row in cur.fetchall()}
+    required = {'id', 'image_sha256', 'product_id', 'variant_id', 'product_handle',
+                'product_title', 'product_url', 'frame_label', 'size_label',
+                'measurement_unit', 'marketing_permission', 'status', 'dropbox_file_id',
+                'dropbox_path', 'content_type', 'image_width', 'image_height', 'image_bytes',
+                'save_count', 'received_at', 'last_saved_at', 'reviewed_by', 'reviewed_at', 'notes'}
+    issues = ['wall_previews missing column: ' + name for name in sorted(required - columns)]
+    cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='wall_previews'")
+    indexes = {row['indexname'] for row in cur.fetchall()}
+    for name in ('wall_previews_image_sha256_key', 'idx_wall_previews_status_received',
+                 'idx_wall_previews_permission_received', 'idx_wall_previews_product_received'):
+        if name not in indexes: issues.append('wall_previews missing index: ' + name)
+    cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('public.wall_previews')")
+    if not (cur.fetchone() or {}).get('relrowsecurity'):
+        issues.append('wall_previews RLS is not enabled')
+    return issues
+
+
 class WallPreviewStoreError(RuntimeError):
     pass
 
@@ -22,6 +43,30 @@ def _backend():
 
 def _clean(value, limit):
     return " ".join(str(value or "").split())[: int(limit)]
+
+
+def find_preview(digest):
+    """Reuse the original archive on retries, including its original consent."""
+    with _backend().connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout='4000ms'")
+            cur.execute("SELECT * FROM public.wall_previews WHERE image_sha256=%s", (digest,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def summary(*, include_private=False):
+    where = "" if include_private else "WHERE marketing_permission=TRUE"
+    with _backend().connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout='4000ms'")
+            cur.execute(f"""SELECT
+                count(*) FILTER (WHERE status='new') AS new,
+                count(*) FILTER (WHERE status='approved') AS approved,
+                count(*) FILTER (WHERE status='used') AS used,
+                count(*) FILTER (WHERE NOT marketing_permission) AS private
+                FROM public.wall_previews {where}""")
+            return dict(cur.fetchone() or {})
 
 
 def record_preview(payload):
@@ -59,24 +104,6 @@ def record_preview(payload):
                         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
                     )
                     ON CONFLICT (image_sha256) DO UPDATE SET
-                        product_id = EXCLUDED.product_id,
-                        variant_id = EXCLUDED.variant_id,
-                        product_handle = EXCLUDED.product_handle,
-                        product_title = EXCLUDED.product_title,
-                        product_url = EXCLUDED.product_url,
-                        frame_label = EXCLUDED.frame_label,
-                        size_label = EXCLUDED.size_label,
-                        measurement_unit = EXCLUDED.measurement_unit,
-                        marketing_permission = (
-                            public.wall_previews.marketing_permission
-                            OR EXCLUDED.marketing_permission
-                        ),
-                        dropbox_file_id = EXCLUDED.dropbox_file_id,
-                        dropbox_path = EXCLUDED.dropbox_path,
-                        content_type = EXCLUDED.content_type,
-                        image_width = EXCLUDED.image_width,
-                        image_height = EXCLUDED.image_height,
-                        image_bytes = EXCLUDED.image_bytes,
                         save_count = public.wall_previews.save_count + 1,
                         last_saved_at = now()
                     RETURNING *,
@@ -109,7 +136,7 @@ def record_preview(payload):
             raise
 
 
-def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=True):
+def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False):
     clean_status = str(status or "new").strip().lower()
     if clean_status not in (*VALID_STATUSES, "all"):
         clean_status = "new"
@@ -139,7 +166,7 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=True):
             return [dict(row or {}) for row in cur.fetchall() or ()]
 
 
-def update_status(preview_id, status, *, actor_user_id=None):
+def update_status(preview_id, status, *, actor_user_id=None, include_private=False):
     clean_status = str(status or "").strip().lower()
     if clean_status not in VALID_STATUSES:
         raise WallPreviewStoreError("Choose a valid wall preview status.")
@@ -151,7 +178,7 @@ def update_status(preview_id, status, *, actor_user_id=None):
         try:
             with conn.cursor() as cur:
                 cur.execute("SET LOCAL statement_timeout='4000ms'")
-                if clean_status in {"approved", "used"}:
+                if clean_status in {"approved", "used"} or not include_private:
                     cur.execute(
                         """
                         SELECT marketing_permission

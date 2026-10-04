@@ -8,7 +8,9 @@ import social_media_workspace
 
 
 READY_PAGE = r'''
+import streamlit as st
 import social_media_page
+st.session_state.setdefault("social-media-workspace-view", "Create")
 
 user = {
     "id": "worker-1",
@@ -77,7 +79,7 @@ social_media_page.render_page(user, store=FakeSocialStore)
 
 
 class SocialMediaPageTests(unittest.TestCase):
-    def test_default_create_view_and_all_shortcuts_render(self):
+    def test_existing_create_view_and_all_shortcuts_render(self):
         app = AppTest.from_string(READY_PAGE).run(timeout=15)
 
         self.assertEqual(len(app.exception), 0)
@@ -238,6 +240,7 @@ social_media_page.render_page(user)
             r'''
 import streamlit as st
 import social_media_page
+st.session_state.setdefault("social-media-workspace-view", "Create")
 
 user = {
     "id": "worker-1",

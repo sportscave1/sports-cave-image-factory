@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, Response
 
 import dropbox_integration
@@ -33,6 +34,7 @@ DROPBOX_RELATIVE_ROOT = "03_ASSETS/11 Wall Preview Inbox"
 LOGGER = logging.getLogger(__name__)
 _RATE_LOCK = threading.Lock()
 _RATE_BUCKETS = {}
+_INGEST_SLOTS = threading.BoundedSemaphore(4)
 _DROPBOX_LOCK = threading.Lock()
 _DROPBOX_CACHE = {"token": "", "root": "", "expires_at": 0.0}
 
@@ -66,9 +68,9 @@ def _origin(request):
 def _client_key(request):
     forwarded = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
     if forwarded:
-        return forwarded[:80]
+        return hashlib.sha256(forwarded[:80].encode()).hexdigest()
     client = getattr(request, "client", None)
-    return str(getattr(client, "host", "") or "unknown")[:80]
+    return hashlib.sha256(str(getattr(client, "host", "") or "unknown").encode()).hexdigest()
 
 
 def _rate_allowed(key):
@@ -80,14 +82,8 @@ def _rate_allowed(key):
             return False
         recent.append(now)
         _RATE_BUCKETS[key] = recent
-        if len(_RATE_BUCKETS) > 2000:
-            cutoff = now - RATE_WINDOW_SECONDS
-            for bucket_key in list(_RATE_BUCKETS)[:500]:
-                kept = [stamp for stamp in _RATE_BUCKETS[bucket_key] if stamp >= cutoff]
-                if kept:
-                    _RATE_BUCKETS[bucket_key] = kept
-                else:
-                    _RATE_BUCKETS.pop(bucket_key, None)
+        while len(_RATE_BUCKETS) > 2000:
+            _RATE_BUCKETS.pop(next(iter(_RATE_BUCKETS)))
         return True
 
 
@@ -127,20 +123,26 @@ def _inspect_image(data, content_type):
         raise ValueError("The preview is not a valid JPEG.")
     if content_type == "image/png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("The preview is not a valid PNG.")
-    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
-    with Image.open(io.BytesIO(data)) as image:
-        image.verify()
-    with Image.open(io.BytesIO(data)) as image:
-        width, height = image.size
-    if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
-        raise ValueError("The preview image dimensions are not accepted.")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if not (0 < width <= 10000 and 0 < height <= 10000) or width * height > MAX_IMAGE_PIXELS:
+                raise ValueError("The preview image dimensions are not accepted.")
+            if image.format != {"image/jpeg": "JPEG", "image/png": "PNG"}[content_type]:
+                raise ValueError("The preview format does not match its content type.")
+            image.verify()
+        # Force decoding: verify() alone does not reject all truncated JPEGs.
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+    except (OSError, Image.DecompressionBombError) as error:
+        raise ValueError("The preview is not a valid bounded image.") from error
     return int(width), int(height)
 
 
 def _dropbox_destination(root_path, handle, digest, content_type):
     now = datetime.now(timezone.utc)
     extension = ".png" if content_type == "image/png" else ".jpg"
-    filename = f"sports-cave-{_safe_handle(handle)}-wall-preview-{digest[:12]}{extension}"
+    filename = f"sports-cave-wall-preview-{digest}{extension}"
     folder = dropbox_integration.normalize_dropbox_path(
         f"{root_path}/{DROPBOX_RELATIVE_ROOT}/{now:%Y}/{now:%m}"
     )
@@ -150,6 +152,19 @@ def _dropbox_destination(root_path, handle, digest, content_type):
 
 
 async def wall_preview_ingest(request):
+    if request.method == 'OPTIONS' or _origin(request) not in _allowed_origins():
+        return await _ingest(request)
+    # Bound body buffers and expensive image/storage operations together.
+    if not _INGEST_SLOTS.acquire(blocking=False):
+        return JSONResponse({"ok": False, "error": "storage_busy"}, status_code=503,
+                            headers=_cors_headers(_origin(request)))
+    try:
+        return await _ingest(request)
+    finally:
+        _INGEST_SLOTS.release()
+
+
+async def _ingest(request):
     origin = _origin(request)
     cors = _cors_headers(origin)
     if request.method == "OPTIONS":
@@ -187,11 +202,25 @@ async def wall_preview_ingest(request):
             headers=cors,
         )
 
+    return await run_in_threadpool(_save_preview, request, data, content_type, cors)
+
+
+def _save_preview(request, data, content_type, cors):
     try:
+        if _query_text(request, "unit", 2) not in {'', 'cm', 'in'}:
+            raise ValueError("Choose cm or in for the measurement unit.")
         width, height = _inspect_image(data, content_type)
         digest = hashlib.sha256(data).hexdigest()
+        existing = wall_preview_store.find_preview(digest)
+        if existing:
+            return JSONResponse({"ok": True, "preview_id": str(existing['id']),
+                                 "duplicate": True,
+                                 "marketing_permission": bool(existing['marketing_permission'])},
+                                headers=cors)
         product_handle = _query_text(request, "product_handle", 255)
         token, root_path = _dropbox_connection()
+        if root_path.rstrip('/') != "/Sportscave Team Folder":
+            raise ValueError("The configured Wall Preview folder is unavailable.")
         folder, destination = _dropbox_destination(
             root_path,
             product_handle,
@@ -255,8 +284,8 @@ async def wall_preview_ingest(request):
             status_code=400,
             headers=cors,
         )
-    except Exception:
-        LOGGER.exception("wall_preview_ingest_failed")
+    except Exception as error:
+        LOGGER.warning("wall_preview_ingest_failed error_type=%s", type(error).__name__)
         return JSONResponse(
             {"ok": False, "error": "storage_unavailable"},
             status_code=503,

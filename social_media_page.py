@@ -1100,6 +1100,16 @@ def render_page(user, *, store=social_media_store, account_store=None):
     )
     _profile_shortcuts()
     _show_result_notice()
+    view = st.segmented_control(
+        "Social Media workspace",
+        ("Wall Preview Inbox", "Create", "Plan", "Playbook", "Tracking"),
+        default="Wall Preview Inbox",
+        key="social-media-workspace-view",
+        label_visibility="collapsed",
+    )
+    if view == "Wall Preview Inbox":
+        wall_preview_inbox.render(user)
+        return
     try:
         storage = store.schema_status()
     except Exception:
@@ -1131,16 +1141,7 @@ def render_page(user, *, store=social_media_store, account_store=None):
         st.warning("Social Media access could not be loaded right now.")
         return
     target = _admin_staff_selector(user, staff)
-    view = st.segmented_control(
-        "Social Media workspace",
-        ("Wall Preview Inbox", "Create", "Plan", "Playbook", "Tracking"),
-        default="Wall Preview Inbox",
-        key="social-media-workspace-view",
-        label_visibility="collapsed",
-    )
-    if view == "Wall Preview Inbox":
-        wall_preview_inbox.render(user)
-    elif view == "Plan":
+    if view == "Plan":
         social_media_workspace.render_plan(
             user,
             target,

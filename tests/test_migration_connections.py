@@ -34,6 +34,8 @@ class MigrationConnections(unittest.TestCase):
             connect = stack.enter_context(patch.object(run_migrations.psycopg, 'connect', side_effect=connections))
             stack.enter_context(patch.object(run_migrations.manual_certificate_schema, 'schema_issues', return_value=[]))
             stack.enter_context(patch.object(run_migrations.crm_schema, 'schema_issues', return_value=[]))
+            stack.enter_context(patch.object(run_migrations.reviews_schema, 'schema_issues', return_value=[]))
+            stack.enter_context(patch.object(run_migrations.wall_preview_store, 'schema_issues', return_value=[]))
             stack.enter_context(patch.object(run_migrations.support_email_schema, 'schema_issues', side_effect=[[], post_commit_issues or []]))
             if post_commit_issues:
                 with self.assertRaisesRegex(RuntimeError, 'Post-commit deployment verification failed'):

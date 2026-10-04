@@ -682,8 +682,12 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         server_source = (ROOT / "sports_cave_server.py").read_text(encoding="utf-8")
         api_source = (ROOT / "files_upload_api.py").read_text(encoding="utf-8")
         render_source = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        topology = (ROOT / "docs/RENDER_SERVICE_TOPOLOGY.md").read_text(encoding="utf-8")
         self.assertIn('App("app.py", routes=routes)', server_source)
-        self.assertIn("python sports_cave_server.py", render_source)
+        # Primary is externally managed; declaring it in the webhook Blueprint
+        # would duplicate production. Its existing command is documented here.
+        self.assertIn("`sports_cave_server.py`", topology)
+        self.assertNotIn("startCommand: python sports_cave_server.py", render_source)
         self.assertIn("record_activity_log", api_source)
         self.assertIn('"files_uploaded"', api_source)
         self.assertIn('actor=actor', api_source)

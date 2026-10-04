@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import html
 import time
+import logging
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import streamlit as st
 
@@ -41,13 +44,20 @@ def _dropbox_connection():
     return token
 
 
-def _temporary_link(path):
+def _temporary_link(path, file_id=""):
     now = time.monotonic()
     cached = _TEMP_LINK_CACHE.get(path) or {}
     if cached.get("url") and float(cached.get("expires_at") or 0) > now:
         return cached["url"]
     token = _dropbox_connection()
-    url = dropbox_integration.get_temporary_link(token, path)
+    try:
+        url = dropbox_integration.get_temporary_link(token, path)
+    except dropbox_integration.DropboxApiError:
+        # IDs survive path/namespace changes and avoid creating shared links.
+        if not file_id.startswith("id:"):
+            raise
+        result = dropbox_integration.team_space_client(token).files_get_temporary_link(file_id)
+        url = str(result.link or "")
     _TEMP_LINK_CACHE[path] = {"url": url, "expires_at": now + 8 * 60}
     if len(_TEMP_LINK_CACHE) > 250:
         for key in list(_TEMP_LINK_CACHE)[:50]:
@@ -60,6 +70,10 @@ def _format_received(value):
     if value is None:
         return ""
     try:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(social_media.SYDNEY_TZ).strftime("%d %b %Y · %I:%M %p")
     except Exception:
         return str(value)
@@ -71,18 +85,25 @@ def _set_status(user, row, status):
             row.get("id"),
             status,
             actor_user_id=user.get("id"),
+            include_private=os_accounts.is_admin(user),
         )
         _TEMP_LINK_CACHE.pop(str(row.get("dropbox_path") or ""), None)
         st.rerun()
-    except Exception as error:
+    except wall_preview_store.WallPreviewStoreError as error:
         st.error(str(error))
+    except Exception:
+        st.error("This change could not be saved. Please retry.")
 
 
 def _render_card(user, row, *, key_prefix):
+    if not os_accounts.is_admin(user) and not row.get("marketing_permission"):
+        return
     path = str(row.get("dropbox_path") or "")
     try:
-        image_url = _temporary_link(path) if path else ""
-    except Exception:
+        image_url = _temporary_link(path, str(row.get("dropbox_file_id") or "")) if path else ""
+    except Exception as error:
+        category = next((value for value in ('missing_scope', 'expired_access_token', 'invalid_access_token', 'not_found') if value in str(error)), 'unavailable')
+        logging.getLogger(__name__).warning("wall_preview_image_unavailable error_type=%s category=%s", type(error).__name__, category)
         image_url = ""
     with st.container(border=True):
         if image_url:
@@ -106,11 +127,12 @@ def _render_card(user, row, *, key_prefix):
 
         permitted = bool(row.get("marketing_permission"))
         if permitted:
-            st.success("Approved by shopper for social use.", icon=":material/check_circle:")
+            st.caption("Social permission granted")
         else:
-            st.caption("Private preview · social permission not granted.")
+            st.caption("PRIVATE PREVIEW · No social permission")
 
         status = str(row.get("status") or "new").lower()
+        st.caption(f"Status · {STATUS_LABELS.get(status, status.title())}")
         actions = st.columns(2)
         if permitted and status == "new":
             if actions[0].button(
@@ -140,7 +162,8 @@ def _render_card(user, row, *, key_prefix):
         if image_url:
             st.link_button("Open preview", image_url, use_container_width=True)
         product_url = str(row.get("product_url") or "").strip()
-        if product_url.startswith("https://"):
+        parts = urlsplit(product_url)
+        if parts.scheme == "https" and parts.netloc in {"sportscaveshop.com", "www.sportscaveshop.com"} and parts.path.startswith("/products/"):
             st.link_button("Open product", product_url, use_container_width=True)
 
 
@@ -154,27 +177,43 @@ def _open_wall_preview_folder():
     try:
         st.query_params["page"] = "files"
         st.query_params["files_path"] = clean_path
+        for key in ("files_preview", "files_action", "files_selected"):
+            if key in st.query_params:
+                del st.query_params[key]
     except Exception:
         pass
     st.rerun()
 
 
 def render(user):
+    if not os_accounts.can_access_page(user, social_media.SOCIAL_MEDIA_ROUTE):
+        st.caption("Wall Preview Inbox access is not approved for this account.")
+        return
+    st.markdown("""<style>
+        .st-key-wall-preview-grid [data-testid="stImage"] img {width:100%;height:auto;object-fit:contain}
+        @media(max-width:900px){.st-key-wall-preview-grid [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
+        .st-key-wall-preview-grid [data-testid="stColumn"]{flex:1 1 45%;min-width:0}}
+        @media(max-width:560px){.st-key-wall-preview-grid [data-testid="stColumn"]{flex:1 1 100%}}
+        </style>""", unsafe_allow_html=True)
     st.subheader("Wall Preview Inbox")
     st.caption(
         "Shopper-saved See It On Your Wall previews arrive here automatically. "
         "Only previews with explicit permission can be approved for social use."
     )
-    folder_col, _ = st.columns([1, 2])
+    folder_col, refresh_col = st.columns([3, 1])
     with folder_col:
         if st.button(
             "Open Wall Preview Folder",
             icon=":material/folder_open:",
             key="wall-preview-open-dropbox-folder",
             use_container_width=True,
+            disabled=not os_accounts.can_access_page(user, "Files"),
         ):
             _open_wall_preview_folder()
-    st.caption("Dropbox · /Sportscave Team Folder/03_ASSETS/11 Wall Preview Inbox")
+    with refresh_col:
+        if st.button("Refresh", icon=":material/refresh:", key="wall-preview-refresh", use_container_width=True):
+            _TEMP_LINK_CACHE.clear()
+    st.caption(f"Dropbox · {WALL_PREVIEW_DROPBOX_PATH}")
 
     is_admin = os_accounts.is_admin(user)
     labels = ("New", "Approved", "Used", "Archived", "All")
@@ -190,6 +229,7 @@ def render(user):
         "new",
     )
     try:
+        counts = wall_preview_store.summary(include_private=is_admin)
         rows = wall_preview_store.list_previews(
             status=status,
             limit=48,
@@ -202,21 +242,17 @@ def render(user):
         )
         return
 
+    metrics = st.columns(4)
+    for column, (key, label) in zip(metrics, (("new", "New Previews"), ("approved", "Approved For Social"), ("used", "Used"), ("private", "Private"))):
+        column.metric(label, counts.get(key, 0))
+
     if not rows:
-        st.info("No wall previews match this view yet.")
+        st.info("No wall previews match this view yet. Save a preview from a product page, then Refresh.")
         return
 
-    permitted_count = sum(bool(row.get("marketing_permission")) for row in rows)
-    metrics = st.columns(3)
-    metrics[0].metric("Previews", len(rows))
-    metrics[1].metric("Social permission", permitted_count)
-    metrics[2].metric("Private", len(rows) - permitted_count)
-
-    columns = st.columns(3)
-    for index, row in enumerate(rows):
-        with columns[index % 3]:
-            _render_card(
-                user,
-                row,
-                key_prefix=f"wall-preview-{row.get('id') or index}",
-            )
+    with st.container(key="wall-preview-grid"):
+        for start in range(0, len(rows), 3):
+            columns = st.columns(3)
+            for column, row in zip(columns, rows[start:start + 3]):
+                with column:
+                    _render_card(user, row, key_prefix=f"wall-preview-{row['id']}")

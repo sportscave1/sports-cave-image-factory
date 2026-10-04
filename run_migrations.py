@@ -9,6 +9,7 @@ import manual_certificate_schema
 import crm_schema
 import support_email_schema
 import reviews_schema
+import wall_preview_store
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -416,7 +417,7 @@ def run_deployment_migrations(*, check=False):
                     cur.execute(_migration_body(sql))
                 cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
                 applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur)
             if issues:
                 raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
         conn.commit()
@@ -424,7 +425,7 @@ def run_deployment_migrations(*, check=False):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
                           options='-c default_transaction_read_only=on', prepare_threshold=None) as conn:
         with conn.cursor() as cur:
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur)
             if issues:
                 raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
             cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')
