@@ -51,6 +51,9 @@ class HttpTests(unittest.TestCase):
         raw=b'{"type":"email.delivered","created_at":"2026-09-28T01:00:00Z","data":{"email_id":"f63b27ee-bf05-465c-9b8d-20cd9fbe3574"}}';timestamp=str(int(time.time()));secret=b'k'*32
         signature=base64.b64encode(hmac.new(secret,b'event.'+timestamp.encode()+b'.'+raw,hashlib.sha256).digest()).decode()
         with patch.dict(os.environ,{'CRM_RESEND_WEBHOOK_SECRET':'whsec_'+base64.b64encode(secret).decode()}),patch('crm_workspace_store.WorkspaceRecords',return_value=self.store):
+            from contextlib import nullcontext
+            self.store.db.return_value=nullcontext(self.store)
+            self.store.execute.return_value.fetchone.return_value=None
             headers={'svix-id':'event','svix-timestamp':timestamp,'svix-signature':'v1,'+signature}
             self.store.q.return_value=None
             self.assertEqual(self.client.post('/webhooks/resend/crm',content=raw,headers=headers).status_code,200)

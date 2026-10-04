@@ -78,6 +78,8 @@ def _service_version_info():
 
 @app.on_event("startup")
 def _start_recent_order_reconciliation():
+    from crm_resend_event_worker import start
+    start()
     shopify_order_reconciliation_worker.start()
     if os.getenv("SC3148_READ_ONLY_AUDIT") == "1":
         threading.Thread(target=_audit_sc3148_read_only, daemon=True, name="sc3148-audit").start()
@@ -105,6 +107,8 @@ def _audit_sc3148_read_only():
 
 @app.on_event("shutdown")
 def _stop_recent_order_reconciliation():
+    from crm_resend_event_worker import stop
+    stop()
     shopify_order_reconciliation_worker.stop()
 
 

@@ -84,13 +84,27 @@ async def resend_hook(request:Request):
     from crm_resend import Config,verify_resend
     from crm_store import Store
     from crm_webhooks import receive_resend
+    from crm_resend_event_worker import admission,log
+    from time import perf_counter
+    started=perf_counter();identity=None;admitted=False
     try:
         raw=await bounded_body(request,128*1024)
         if not verify_resend(raw,request.headers,Config().resend_webhook_secret):return Response(status_code=401)
-        await run_in_threadpool(receive_resend,Store(),request.headers['svix-id'],json.loads(raw))
+        identity=request.headers['svix-id']
+        admitted=admission.acquire(blocking=False)
+        if not admitted:
+            await run_in_threadpool(log,'backpressure')
+            return Response(status_code=503)
+        await run_in_threadpool(log,'received')
+        await run_in_threadpool(receive_resend,Store(),identity,json.loads(raw),defer=True)
+        await run_in_threadpool(log,'acknowledged',duration_ms=round((perf_counter()-started)*1000,1))
         return Response(status_code=200)
     except (ValueError,TypeError):return Response(status_code=400)
-    except Exception:return Response(status_code=503)
+    except Exception as exc:
+        await run_in_threadpool(log,'processing_failed',error_type=type(exc).__name__)
+        return Response(status_code=503)
+    finally:
+        if admitted:admission.release()
 
 @router.get('/crm/unsubscribe')
 async def unsubscribe_page(token:str=''):

@@ -1,7 +1,7 @@
 """Bounded Shopify order reconciliation owned by the webhook service.
 
 This module deliberately has no import-time database or Shopify work. The
-daemon starts only when explicitly enabled or when running as the Render
+isolated child starts only when explicitly enabled or when running as the Render
 webhook service.
 """
 
@@ -9,10 +9,13 @@ import json
 import os
 import threading
 import time
+import subprocess
+import sys
+from pathlib import Path
 
 
 _stop = threading.Event()
-_thread = None
+_process = None
 
 
 def _log(event, **fields):
@@ -101,21 +104,33 @@ def _loop():
 
 
 def start():
-    global _thread
+    global _process
     if not enabled():
         return False
-    if _thread and _thread.is_alive():
+    if _process and _process.poll() is None:
         return False
-    _stop.clear()
-    _thread = threading.Thread(
-        target=_loop,
-        name="shopify-recent-order-reconciliation",
-        daemon=True,
-    )
-    _thread.start()
+    # Same bounded reconciliation, separate interpreter and DB connection pool.
+    kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+    try:_process=subprocess.Popen([sys.executable,str(Path(__file__).resolve())],**kwargs)
+    except OSError as exc:
+        _log('shopify_order_reconciliation_start_failed',error_type=type(exc).__name__)
+        return False
     _log("shopify_order_reconciliation_started", interval_seconds=interval_seconds())
     return True
 
 
 def stop():
     _stop.set()
+    if _process and _process.poll() is None:
+        _process.terminate()
+        try:_process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            _log('shopify_order_reconciliation_shutdown_timeout')
+            _process.kill();_process.wait(timeout=5)
+
+
+if __name__=='__main__':
+    import signal
+    signal.signal(signal.SIGTERM,lambda *_:_stop.set())
+    signal.signal(signal.SIGINT,lambda *_:_stop.set())
+    _loop()

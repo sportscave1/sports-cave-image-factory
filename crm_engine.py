@@ -291,7 +291,7 @@ class Engine:
                 except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
             from crm_campaign_schedule import schedule_gate
             schedule_gate(self.store,self.config.enabled,self.clock())
-            events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' ORDER BY received_at LIMIT 10")
+            events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' AND provider<>'resend' ORDER BY received_at LIMIT 10")
             for event in events:
                 if not self.store.lease(owner):return {'leader':False}
                 try:

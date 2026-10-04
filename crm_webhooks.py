@@ -35,7 +35,7 @@ def receive_shopify(store,topic,event_id,payload,occurred_at,shop_domain=None):
         return persist(store,event_id,topic,object_id,customer_id,at,normalized)
     return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
 
-def receive_resend(store,event_id,payload):
+def receive_resend(store,event_id,payload,*,defer=False):
     from crm_workspace_store import WorkspaceRecords
     if not isinstance(event_id,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,200}',event_id) or not isinstance(payload,dict):raise ValueError('Invalid event envelope.')
     event_type=payload.get('type','');data=payload.get('data')
@@ -53,7 +53,17 @@ def receive_resend(store,event_id,payload):
     from crm_tracking import event_link
     click=data.get('click') or {}
     clicked_url=event_link(click.get('link')) if isinstance(click,dict) and event_type=='email.clicked' else None
-    result=records.q('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,hard_bounce,clicked_url) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING event_id',(event_id,provider_id,event_type,occurred,hard,clicked_url),True)
+    values=(event_id,provider_id,event_type,occurred,hard,clicked_url)
+    if defer:
+        # Acknowledgement requires BOTH facts and retry work to be committed.
+        # No raw payload, address or customer-provided campaign tags are stored.
+        with records.db() as conn:
+            result=conn.execute('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,hard_bounce,clicked_url) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING event_id',values).fetchone()
+            conn.execute("INSERT INTO crm_webhook_events(provider,event_id,topic,object_id,occurred_at) SELECT 'resend',event_id,event_type,provider_id,occurred_at FROM crm_delivery_events WHERE event_id=%s ON CONFLICT DO NOTHING",(event_id,))
+        from crm_resend_event_worker import log
+        log('queued' if result else 'duplicate_ignored',event_id=event_id)
+        return bool(result)
+    result=records.q('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,hard_bounce,clicked_url) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING event_id',values,True)
     # Store minimal unmatched events for race recovery. They cannot count as CRM
     # delivery or suppress anyone until a locally stored provider receipt matches.
     records.reconcile_events(provider_id)
