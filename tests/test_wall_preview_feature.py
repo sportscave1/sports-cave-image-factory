@@ -188,30 +188,51 @@ class WallPreviewUiTests(unittest.TestCase):
     def tearDown(self):
         wall_preview_store.summary, wall_preview_store.list_previews, wall_preview_inbox._temporary_link = self.originals
 
-    def test_empty_refresh_and_internal_folder_navigation(self):
+    def test_empty_gallery_is_clean_and_has_no_toolbar_or_metrics(self):
         app = AppTest.from_string(INBOX_PAGE).run()
-        self.assertEqual(len(app.exception),0)
-        self.assertEqual(len(app.metric),4)
-        self.assertIn('No wall previews',app.info[0].value)
-        self.assertIn('Refresh',[button.label for button in app.button])
-        app.session_state['files_preview_path']='/old.jpg'
-        app.query_params['files_preview']='/old.jpg'
-        app.button(key='wall-preview-open-dropbox-folder').click().run()
-        self.assertEqual(app.session_state['current_page'],'Files')
-        self.assertEqual(app.session_state['files_browser_path'],inbox_path())
-        self.assertNotIn('files_preview',app.query_params)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(len(app.metric), 0)
+        self.assertNotIn('Refresh', [button.label for button in app.button])
+        self.assertNotIn('Open Wall Preview Folder', [button.label for button in app.button])
+        self.assertEqual(app.segmented_control[0].value, 'All')
+        self.assertTrue(any('No wall previews to show yet.' in item.value for item in app.markdown))
 
-    def test_private_card_has_no_approve_and_permitted_has_product_and_preview_links(self):
-        app=AppTest.from_string(INBOX_PAGE)
-        app.session_state['fixture-rows']=[{'id':'a','product_title':'Collector edition','marketing_permission':False,'dropbox_path':'/a.jpg','status':'new'}, {'id':'b','product_title':'Another edition','marketing_permission':True,'dropbox_path':'/b.jpg','status':'approved','product_url':'https://sportscaveshop.com/products/edition'}]
+    def test_gallery_cards_are_image_first_and_action_free(self):
+        app = AppTest.from_string(INBOX_PAGE)
+        app.session_state['fixture-rows'] = [
+            {
+                'id':'a',
+                'customer_name':'Jane Collector',
+                'customer_email':'jane@example.com',
+                'product_title':'Collector edition',
+                'marketing_permission':False,
+                'dropbox_path':'/a.jpg',
+                'status':'new',
+            },
+            {
+                'id':'b',
+                'customer_name':'Sam Fan',
+                'customer_email':'sam@example.com',
+                'product_title':'Another edition',
+                'marketing_permission':True,
+                'dropbox_path':'/b.jpg',
+                'status':'approved',
+                'product_url':'https://sportscaveshop.com/products/edition',
+            },
+        ]
         app.run()
-        self.assertEqual(len(app.exception),0)
-        self.assertNotIn('Approve',[button.label for button in app.button])
-        self.assertIn('Mark used',[button.label for button in app.button])
-        self.assertTrue(any('PRIVATE PREVIEW' in item.value for item in app.caption))
-        links=app.get('link_button')
-        self.assertEqual(sum(item.label=='Open preview' for item in links),2)
-        self.assertEqual(sum(item.label=='Open product' for item in links),1)
+        self.assertEqual(len(app.exception), 0)
+        labels = [button.label for button in app.button]
+        self.assertNotIn('Approve', labels)
+        self.assertNotIn('Mark used', labels)
+        self.assertNotIn('Archive', labels)
+        self.assertEqual(len(app.get('link_button')), 0)
+        html = '\n'.join(item.value for item in app.markdown)
+        self.assertIn('Jane Collector', html)
+        self.assertIn('jane@example.com', html)
+        self.assertIn('Private', html)
+        self.assertIn('Social approved', html)
+        self.assertIn('Collector edition', html)
 
     def test_staff_cannot_request_private_image_even_from_injected_row(self):
         with patch.object(wall_preview_inbox,'_temporary_link') as link:
