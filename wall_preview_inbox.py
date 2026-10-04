@@ -13,6 +13,9 @@ import social_media
 import wall_preview_store
 
 
+_TEMP_LINK_CACHE = {}
+
+
 STATUS_LABELS = {
     "new": "New",
     "approved": "Approved",
@@ -35,10 +38,19 @@ def _dropbox_connection():
     return token
 
 
-@st.cache_data(ttl=8 * 60, show_spinner=False, max_entries=200)
 def _temporary_link(path):
+    now = time.monotonic()
+    cached = _TEMP_LINK_CACHE.get(path) or {}
+    if cached.get("url") and float(cached.get("expires_at") or 0) > now:
+        return cached["url"]
     token = _dropbox_connection()
-    return dropbox_integration.get_temporary_link(token, path)
+    url = dropbox_integration.get_temporary_link(token, path)
+    _TEMP_LINK_CACHE[path] = {"url": url, "expires_at": now + 8 * 60}
+    if len(_TEMP_LINK_CACHE) > 250:
+        for key in list(_TEMP_LINK_CACHE)[:50]:
+            if float((_TEMP_LINK_CACHE.get(key) or {}).get("expires_at") or 0) <= now:
+                _TEMP_LINK_CACHE.pop(key, None)
+    return url
 
 
 def _format_received(value):
@@ -57,7 +69,7 @@ def _set_status(user, row, status):
             status,
             actor_user_id=user.get("id"),
         )
-        _temporary_link.clear()
+        _TEMP_LINK_CACHE.pop(str(row.get("dropbox_path") or ""), None)
         st.rerun()
     except Exception as error:
         st.error(str(error))
