@@ -15,6 +15,7 @@ import run_migrations
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
 from support_email_idle import IdleLifecycle
+from wall_preview_api import WALL_PREVIEW_ROUTES
 
 
 routes = [
@@ -25,6 +26,7 @@ routes = [
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,
+        *WALL_PREVIEW_ROUTES,
     )
 ]
 routes.extend(app_branding.public_branding_routes())
