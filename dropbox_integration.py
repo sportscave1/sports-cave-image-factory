@@ -38,6 +38,7 @@ DROPBOX_FOLDER_OPTIONS = (
     ("invoices_quotes", "08 Invoices & Quotes"),
     ("research_images", "09 Research Images"),
     ("archive", "10 Archive"),
+    ("wall_preview_inbox", "11 Wall Preview Inbox"),
 )
 
 
