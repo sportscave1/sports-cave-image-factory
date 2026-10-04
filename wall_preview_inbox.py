@@ -134,6 +134,8 @@ def _render_card(user, row, *, key_prefix):
             ):
                 _set_status(user, row, "archived")
 
+        if image_url:
+            st.link_button("Open preview", image_url, use_container_width=True)
         product_url = str(row.get("product_url") or "").strip()
         if product_url.startswith("https://"):
             st.link_button("Open product", product_url, use_container_width=True)
