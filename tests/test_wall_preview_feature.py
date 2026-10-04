@@ -36,7 +36,7 @@ class WallPreviewFeatureTests(unittest.TestCase):
             "a" * 64,
             "image/jpeg",
         )
-        self.assertIn("/11 Wall Preview Inbox/", folder)
+        self.assertIn("/03_ASSETS/11 Wall Preview Inbox/", folder)
         self.assertTrue(destination.startswith(folder + "/"))
         self.assertTrue(destination.endswith(".jpg"))
         self.assertNotIn("—", destination)

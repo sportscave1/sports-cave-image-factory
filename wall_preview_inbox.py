@@ -16,7 +16,7 @@ import wall_preview_store
 _TEMP_LINK_CACHE = {}
 
 
-WALL_PREVIEW_DROPBOX_PATH = "/Sportscave Team Folder/11 Wall Preview Inbox"
+WALL_PREVIEW_DROPBOX_PATH = "/Sportscave Team Folder/03_ASSETS/11 Wall Preview Inbox"
 
 
 STATUS_LABELS = {
@@ -174,7 +174,7 @@ def render(user):
             use_container_width=True,
         ):
             _open_wall_preview_folder()
-    st.caption("Dropbox · /Sportscave Team Folder/11 Wall Preview Inbox")
+    st.caption("Dropbox · /Sportscave Team Folder/03_ASSETS/11 Wall Preview Inbox")
 
     is_admin = os_accounts.is_admin(user)
     labels = ("New", "Approved", "Used", "Archived", "All")
