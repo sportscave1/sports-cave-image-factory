@@ -168,9 +168,24 @@ async def wall_preview_ingest(request):
     if declared_size > MAX_IMAGE_BYTES:
         return JSONResponse({"ok": False, "error": "image_too_large"}, status_code=413, headers=cors)
 
-    data = await request.body()
-    if not data or len(data) > MAX_IMAGE_BYTES:
-        return JSONResponse({"ok": False, "error": "image_too_large"}, status_code=413, headers=cors)
+    chunks = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_IMAGE_BYTES:
+            return JSONResponse(
+                {"ok": False, "error": "image_too_large"},
+                status_code=413,
+                headers=cors,
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    if not data:
+        return JSONResponse(
+            {"ok": False, "error": "empty_preview"},
+            status_code=400,
+            headers=cors,
+        )
 
     try:
         width, height = _inspect_image(data, content_type)
