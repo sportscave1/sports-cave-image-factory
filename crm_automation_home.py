@@ -140,10 +140,8 @@ def accepted_publication(job):
     state['publish_handoff']={'id':str(job['automation_id']),'name':snapshot.get('name','Automation'),
       'trigger_type':snapshot.get('flow',{}).get('trigger','welcome'),'category':'Drafts',
       'updated_at':job.get('requested_at'),'publication':publication}
-    for identity,records in state.get('campaign_home_resolved',{}).items():
-        if identity[1][0]!='table':continue
-        for row in records:
-            if str(row['id'])==str(job['automation_id']):row['publication']=publication
+    # Secondary table payloads are wrapped/possibly packed. They are not the
+    # publication source of truth; the handoff and tiny status read own it.
     state.setdefault('publication_updates',{})[str(job['automation_id'])]=publication
 
 
@@ -171,6 +169,9 @@ def refresh_publications(store,records,state,updates=None):
         return  # Retain backend-accepted state; cache errors never imply success.
     overrides=state.setdefault('publication_updates',{})
     for value in updates:
+        expected=next((publication_state(r).get('job_id') for r in records if str(r['id'])==str(value['id'])),None)
+        if expected and (value.get('publication') or {}).get('job_id')!=expected:
+            continue  # An older completed read cannot settle a new publish request.
         overrides[str(value['id'])]=value.get('publication') or {}
         for row in records:
             if str(row['id'])==str(value['id']):row.update(value)
@@ -231,14 +232,16 @@ def read(store,key,load):
     state=home_state()
     # Reuse stable session cache without changing Campaigns' validation contract.
     future=job(state,store,key,lambda:payload(key,load),ttl=180 if key[0] in ('counts','delivery','activity') else 60)
-    # Tiny, bounded first-paint opportunity for the indexed identity projection.
-    # Remote/slower reads continue asynchronously; no other dashboard work waits.
-    if key[0]=='identities' and future is not None and not future.done():
-        try:future.result(timeout=.05)
-        except Exception:pass
     value,status=resolve(state,store,key,future)
     state.setdefault('activity',{})[key[0]]=status
-    if status=='ERROR':st.caption('Could not refresh this section. Last verified data remains visible.')
+    if status in ('ERROR','TIMED_OUT'):
+        st.caption('This section is unavailable. Last verified data remains visible.')
+        if st.button('Retry',key='auto-read-retry-'+str(key)):
+            identity=(store.connect,key)
+            state.get('campaign_home_cache',{}).pop(identity,None)
+            state.get('automation_read_started',{}).pop(identity,None)
+            state.get('automation_read_terminal',{}).pop(identity,None)
+            st.rerun()
     return value[0] if value else None
 
 
@@ -288,21 +291,27 @@ def table(shop,store,user,script=None):
         state=home_state();criteria=(query,kind,order)
         if state.get('criteria')!=criteria:state['offset']=0;state['criteria']=criteria
         offset=state.get('offset',0)
-        records=read(store,('identities',criteria,offset),lambda:identities(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
+        from crm_automation_home_read import identity_read
+        records,phase=identity_read(state,store,('identities',criteria,offset),lambda bounded:identities(bounded,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
+        state.setdefault('activity',{})['identities']=phase
+        if phase in ('ERROR','TIMED_OUT'):
+            st.caption('Automation list unavailable — retry. Navigation remains available.')
+            if st.button('Retry automation list'):
+                state.get('automation_identity_cache',{}).clear();st.rerun()
         records=[dict(r) for r in (records or [])]
         handoff=state.get('publish_handoff')
         if handoff and offset==0 and query.lower() in handoff['name'].lower() and kind in ('All',handoff['trigger_type']):
             records=[dict(handoff)]+[r for r in records if str(r['id'])!=handoff['id']]
-        if not records and state.get('activity',{}).get('identities') in ('LOADING','UNRESOLVED'):
-            with controller:arm_section('auto-list-refresh',1,script)
-            st.caption('Loading automations…');return
-        metrics=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset)) or []
+        from crm_automation_read_cache import unpack
+        cached_metrics=unpack(state.get('campaign_home_resolved',{}).get((store.connect,('table',criteria,offset))))
+        metrics=cached_metrics[0] if cached_metrics else []
         by_id={str(r['id']):r for r in metrics}
         for row in records:
             for field in ('entered','sent','delivered','opened','clicked','orders','revenue'):
                 row[field]=by_id.get(str(row['id']),{}).get(field)
         state['visible_status_rows']=records
-        with controller:arm_section('auto-list-refresh',60,script)
+        if st.button('Refresh automations',key='auto-list-refresh'):
+            state.get('automation_identity_cache',{}).clear();st.rerun()
         labels=('Automation','Trigger','Entered','Sent','Delivery %','Open %','Click %','Conversions','Revenue','Status')
         # Actions occupy a native Streamlit popover next to the grid.
         st.html('<div class="sc-auto-head">'+''.join('<div>'+s+'</div>' for s in labels)+'</div>')
@@ -328,7 +337,7 @@ def table(shop,store,user,script=None):
                                 duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])
                             if st.button('Archive',icon=':material/archive:',use_container_width=True,disabled=category=='Archived' or publication.get('state')=='PUBLISHING',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)
                             if st.button('Delete',icon=':material/delete:',use_container_width=True,disabled=category not in ('Draft','Archived') or publication.get('state')=='PUBLISHING',help='Archive first to retain active flow safety.' if category not in ('Draft','Archived') else None,key='auto_delete_'+str(row['id'])):delete_dialog(store,user,row)
-        if not records:st.caption('No automations match this view.')
+        if not records and phase=='READY':st.caption('No automations match this view.')
         st.caption('Showing '+str(offset+1 if records else 0)+'–'+str(offset+min(len(records),PAGE_SIZE))+' · click an automation to edit its settings.')
         prev,nxt=st.columns(2)
         if prev.button('Previous',disabled=offset==0,key='auto_previous'):state['offset']=max(0,offset-PAGE_SIZE);st.rerun()
@@ -345,13 +354,42 @@ def arm_section(key,seconds,script=None,*,dialog=False):
     (script.html if script is not None else st.html)('<script>/* '+uuid4().hex+' */'+
       '(()=>{window.scAutoTimers??={};const key='+json.dumps(key)+';clearTimeout(window.scAutoTimers[key]);if(window.scAutoRequest?.key===key)window.scAutoRequest=null;let attempts=0;'+
       'const tick=()=>{if(!document.getElementById(key+"-controller"))return;const b=document.querySelector(".st-key-"+key+" button");'+
-      'if(!b){if(++attempts!==15)window.scAutoTimers[key]=setTimeout(tick,2000);return;}if(document.hidden||document.querySelector('+json.dumps(selectors)+')||(key==="auto-list-refresh"&&document.activeElement?.closest("[class*=st-key-auto-actions-]"))||b.disabled){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
+      'if(!b){if(++attempts!==15)window.scAutoTimers[key]=setTimeout(tick,2000);return;}if(document.hidden||[...document.querySelectorAll('+json.dumps(selectors)+')].some(el=>el.getClientRects().length && getComputedStyle(el).visibility!=="hidden")||(key==="auto-list-refresh"&&document.activeElement?.closest("[class*=st-key-auto-actions-]"))||b.disabled){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
       'if(window.scAutoRequest&&!document.getElementById(window.scAutoRequest.key+"-controller"))window.scAutoRequest=null;if(window.scAutoRequest && 10000>=Date.now()-window.scAutoRequest.at){window.scAutoTimers[key]=setTimeout(tick,1000);return;}window.scAutoRequest={key,at:Date.now()};b.click();};window.scAutoTimers[key]=setTimeout(tick,'+str(int(max(1,seconds)*1000))+');})();</script>',unsafe_allow_javascript=True)
 
 
 
-@st.fragment
-@isolated
+def settling_fragment(function):
+    from functools import wraps
+    groups={'kpis':('counts','delivery'),'recent':('activity',),'table_metrics_region':('table',)}
+    @wraps(function)
+    def section(store,*args):
+        from crm_automation_ui import home_state
+        state=home_state()
+        def pending():
+            if function.__name__=='table_metrics_region' and state.get('criteria') is None:return False
+            if function.__name__=='status_region':
+                return any(publication_state(r).get('state')=='PUBLISHING' for r in state.get('visible_status_rows',[])) and state.get('activity',{}).get('publication') not in ('ERROR','TIMED_OUT')
+            return any(state.get('activity',{}).get(k) in (None,'NOT_STARTED','LOADING','REFRESHING','UNRESOLVED') for k in groups[function.__name__])
+        interval=(3 if function.__name__=='status_region' else 2) if pending() else None
+        @st.fragment(run_every=interval)
+        @isolated
+        def render():
+            function(store,*args)
+            if interval and not pending():
+                # One settlement rerun unregisters this fragment timer; idle has none.
+                from crm_automation_read_cache import lifecycle
+                lifecycle('RERUN_REQUESTED',(function.__name__,))
+                st.rerun(scope='app')
+            if not interval and pending():
+                # A normal interaction can expire a settled cache. Register a
+                # scoped completion refresh for that new read as well.
+                st.rerun(scope='app')
+        render()
+    return section
+
+
+@settling_fragment
 def status_region(store):
     """Only status JSON is polled, and only while visible jobs are pending."""
     from crm_automation_ui import home_state
@@ -363,16 +401,16 @@ def status_region(store):
     key=('publication',pending)
     future=job(state,store,key,lambda:store.q("SELECT id,config->'publication' AS publication,"+__import__('crm_automation_home_data').CATEGORY+" AS category FROM crm_automations a WHERE id=ANY(%s::uuid[])",(list(pending),)),ttl=3)
     updates,phase=resolve(state,store,key,future)
-    if updates is not None:refresh_publications(store,records,state,updates=updates)
-    if any(publication_state(r).get('state')=='PUBLISHING' for r in records):arm_section('auto-publication-refresh',3)
+    if phase=='READY' and updates is not None:refresh_publications(store,records,state,updates=updates)
+    state.setdefault('activity',{})['publication']=phase
+    if phase in ('ERROR','TIMED_OUT'):st.caption('Publication status unavailable. Reopen this page to retry.')
     values={str(r['id']):status_html(r['category'].rstrip('s'),publication_state(r)) for r in records}
     encoded=json.dumps(values).replace('<',r'\u003c')
     st.html('<script>(()=>{const values='+encoded+';for(const el of document.querySelectorAll("[data-auto-status]")){'+
       'const html=values[el.dataset.autoStatus];if(html&&el.innerHTML!==html)el.innerHTML=html;}})();</script>',unsafe_allow_javascript=True)
 
 
-@st.fragment
-@isolated
+@settling_fragment
 def table_metrics_region(store):
     """Resolve deferred metrics without replacing interactive table controls."""
     from crm_automation_ui import home_state
@@ -381,7 +419,7 @@ def table_metrics_region(store):
     if criteria is None:return
     query,kind,order=criteria;offset=state.get('offset',0)
     metrics=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
-    arm_section('auto-metrics-refresh',1 if state.get('activity',{}).get('table') in ('LOADING','REFRESHING','UNRESOLVED') else 60)
+
     if metrics is None:return
     values={}
     for row in metrics[:PAGE_SIZE]:
@@ -393,28 +431,30 @@ def table_metrics_region(store):
       'const text=values[el.dataset.autoMetric];if(text!==undefined&&el.textContent!==text)el.textContent=text;}})();</script>',unsafe_allow_javascript=True)
 
 
-@st.fragment
-@isolated
+@settling_fragment
 def kpis(store):
     count=read(store,('counts',None),lambda:counts(store)) or {}
     stats=read(store,('delivery',None),lambda:summary(store,reporting_window())) or {}
     from crm_automation_ui import home_state
     phases=home_state().get('activity',{})
-    arm_section('auto-kpi-refresh',1 if any(phases.get(k) in ('LOADING','REFRESHING','UNRESOLVED') for k in ('counts','delivery')) else 180)
-    st.html(kpi_html({**stats,**count}))
+
+    data={**stats,**count}
+    if all(phases.get(k) in ('READY','ERROR','TIMED_OUT') for k in ('counts','delivery')):
+        data={**dict.fromkeys(('active','sent_emails','delivery_rate','open_rate','click_rate','revenue')),**data}
+    st.html(kpi_html(data))
 
 
 
-@st.fragment
-@isolated
+@settling_fragment
 def recent(store,overview):
     events=read(store,('activity',None),lambda:activity(store))
     from crm_automation_ui import home_state
-    arm_section('auto-activity-refresh',1 if home_state().get('activity',{}).get('activity') in ('LOADING','REFRESHING','UNRESOLVED') else 180)
+
     with st.container(key='auto-activity'):
-        st.subheader('Recent activity');st.caption('Recorded automation events · refreshes every 3 minutes while this page is open.')
+        st.subheader('Recent activity');st.caption('Recorded automation events · cached for 3 minutes.')
         if events:st.html(activity_html(events[:4] if overview else events))
         elif events is not None:st.caption('No recorded automation activity yet.')
+        elif home_state().get('activity',{}).get('activity') in ('ERROR','TIMED_OUT'):st.caption('Recent activity unavailable — Retry above.')
         else:st.caption('Loading recent activity…')
     from crm_automation_ui import home_state
 

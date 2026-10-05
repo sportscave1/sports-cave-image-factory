@@ -11,7 +11,7 @@ def counts(store):
 
 def identities(store,*,search='',trigger='All',oldest=False,offset=0):
     """Critical first paint: bounded identities/status only, no event/order joins."""
-    return store.q("SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->'publication' AS publication,"+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+" AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s) ORDER BY a.updated_at "+('ASC' if oldest else 'DESC')+",a.id LIMIT %s OFFSET %s",(search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
+    return store.q("SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->>'revision' AS requested_revision,a.config->>'published_version' AS active_version,a.config->'publication' AS publication,"+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+" AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s) ORDER BY a.updated_at "+('ASC' if oldest else 'DESC')+",a.id LIMIT %s OFFSET %s",(search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
 
 
 def delivery_summary(store,window):

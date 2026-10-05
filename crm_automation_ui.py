@@ -13,8 +13,15 @@ def home_state():return st.session_state.setdefault('automation_home_state',{})
 def changed():
     # Definitions/counts/table change; delivery/order summaries retain last-good values.
     state=home_state();cache=state.get('campaign_home_cache',{})
+    state.pop('automation_identity_cache',None)
+    state['publication_checked']=0
+    for group in ('counts','table','identities','publication'):
+        state.get('activity',{}).pop(group,None)
     for identity in list(cache):
-        if identity[1][0] in ('counts','table','identities'):cache.pop(identity)
+        if identity[1][0] in ('counts','table','identities','publication'):
+            cache.pop(identity)
+            state.get('automation_read_terminal',{}).pop(identity,None)
+            state.get('automation_read_started',{}).pop(identity,None)
 
 
 def open_flow(identity):
