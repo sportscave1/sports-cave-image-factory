@@ -47,19 +47,24 @@
     function confirm() {
       if(inFlight) return inFlight;
       const confirmedRevision=revision;
+      const confirmedClient=clientId, previous=saved, meta=hooks.metadata();
       inFlight=(async()=>{
         // Both callbacks must canvas-reencode the FINISHED composite. Never pass the source photo.
         const archive=await hooks.compositeBlob(false);
         const branded=await hooks.compositeBlob(true);
+        if(clientId!==confirmedClient || revision!==confirmedRevision) return null;
         current={archive,branded}; hooks.showActions(true); hooks.showConfirm(false);
         emit('WallPreviewConfirmed');
-        const meta=hooks.metadata();
-        const params=new URLSearchParams({...meta,client_preview_id:clientId,session_id:session});
-        if(saved) params.set('preview_id',saved.preview_id);
+        const params=new URLSearchParams(Object.entries({...meta,client_preview_id:confirmedClient,session_id:session})
+          .filter(([,value])=>value!==undefined && value!==null && value!==''));
+        if(previous) params.set('preview_id',previous.preview_id);
         try {
-          saved=await upload(archive,params);
+          const result=await upload(archive,params);
+          if(clientId!==confirmedClient) return null;
+          saved=result;
           hooks.archiveStatus('Saved to Sports Cave');
         } catch (_) {
+          if(clientId!==confirmedClient) return null;
           hooks.archiveStatus('Preview ready locally · server save failed. Confirm again to retry.');
           hooks.showConfirm(true); // Same client ID: retries never flood the inbox.
         }
