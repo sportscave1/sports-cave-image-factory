@@ -233,6 +233,7 @@ class WallPreviewUiTests(unittest.TestCase):
         self.assertIn('Private', html)
         self.assertIn('Social approved', html)
         self.assertIn('Collector edition', html)
+        self.assertNotIn('\n\n', next(item.value for item in app.markdown if '<article class="sc-wall-card">' in item.value))
 
     def test_staff_cannot_request_private_image_even_from_injected_row(self):
         with patch.object(wall_preview_inbox,'_temporary_link') as link:

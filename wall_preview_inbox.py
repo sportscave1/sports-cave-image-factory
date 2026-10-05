@@ -148,7 +148,7 @@ def _render_card(user, row, *, key_prefix):
     ).strip()
     customer_name = str(row.get("customer_name") or "").strip()
     customer_email = str(row.get("customer_email") or "").strip()
-    customer_label = customer_name or ("Guest preview" if customer_email else "Customer preview")
+    customer_label = customer_name or ("Identified preview" if customer_email else "Anonymous preview" if row.get('client_preview_id') else "Legacy preview")
     details = " · ".join(
         value
         for value in (
@@ -210,8 +210,7 @@ def _render_card(user, row, *, key_prefix):
     permission_label = "Social approved" if permitted else "Private"
     status_class = "sc-status-" + status if status in STATUS_LABELS else "sc-status-new"
 
-    st.markdown(
-        f"""
+    markup = f"""
         <article class="sc-wall-card">
           <div class="sc-wall-photo">
             {image_markup}
@@ -228,9 +227,10 @@ def _render_card(user, row, *, key_prefix):
             </div>
           </div>
         </article>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+    # Blank optional identity lines must not terminate Markdown's HTML block and
+    # turn the remaining indented HTML into a visible code block (anonymous/legacy).
+    st.markdown('\n'.join(line.strip() for line in markup.splitlines() if line.strip()),unsafe_allow_html=True)
     if st.button('Details', icon=':material/info:',key=key_prefix+'-details',use_container_width=True):
         st.session_state['wall-preview-details'] = str(row['id'])
     if st.session_state.get('wall-preview-details') == str(row['id']):
