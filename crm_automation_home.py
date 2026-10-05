@@ -25,7 +25,22 @@ STYLE_AUTO='''<style>
 .sc-auto-head{background:#f8f8f8;border-radius:7px;padding:9px 4px;margin-right:48px;position:relative;color:#646770;font-size:11px}.sc-auto-head::after{content:'Actions';position:absolute;right:-48px;width:44px}
 .sc-auto-row>div{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.sc-auto-row>div:nth-child(n+3){text-align:right}.sc-auto-row small{display:block;color:#7a7c85;font-size:11px;margin-top:4px}.sc-auto-name{display:flex;gap:10px;align-items:center}.sc-auto-name a{color:#22242a;text-decoration:none;font-weight:600}.sc-auto-name .sc-home-icon{width:36px;height:36px}
 .sc-auto-pill{display:inline-block;border-radius:7px;background:#f0f1f4;padding:6px 9px;font-size:11px}.sc-auto-pill.active{background:#e7f7ef;color:#21613d}
-[class*='st-key-auto-row-']{gap:8px!important}[class*='st-key-auto-actions-'] button{min-height:40px!important;width:40px!important;padding:5px!important}
+[class*='st-key-auto-row-']{gap:8px!important}[class*='st-key-auto-actions-'] button{min-height:36px!important;width:36px!important;padding:5px!important;border:1px solid #e4e3df!important;border-radius:7px!important;background:#fff!important;color:#52565e!important}
+[class*='st-key-auto-actions-'] button:hover,[class*='st-key-auto-actions-'] button[aria-expanded='true']{background:#f2f1ed!important;border-color:#cfcec7!important}
+[class*='st-key-auto-actions-'] button:focus-visible{outline:2px solid #b68e2c!important;outline-offset:2px}
+[data-testid='stPopoverBody']:has([class*='st-key-auto-context-menu-']){width:190px!important;min-width:0!important;max-width:calc(100vw - 24px)!important;padding:5px!important;border:1px solid #deddd7!important;border-radius:9px!important;background:#fffefa!important;box-shadow:0 5px 18px #171a2024!important}
+[class*='st-key-auto-context-menu-']{gap:2px!important}
+[class*='st-key-auto-context-menu-'] [data-testid='stElementContainer']{margin:0!important}
+[class*='st-key-auto-context-menu-'] button{width:100%!important;min-height:34px!important;justify-content:flex-start!important;padding:6px 10px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#30343b!important;box-shadow:none!important;font-size:13px!important}
+[class*='st-key-auto-context-menu-'] button p{font-size:13px!important}
+[class*='st-key-auto-context-menu-'] button>div,[class*='st-key-auto-context-menu-'] [data-has-shortcut]{width:100%!important;justify-content:flex-start!important}
+[class*='st-key-auto-context-menu-'] [data-testid='stIconMaterial']{font-size:18px!important;width:18px;flex:none}
+[class*='st-key-auto-context-menu-'] button:hover:not(:disabled){background:#efeee9!important}
+[class*='st-key-auto-context-menu-'] button:focus-visible{outline:2px solid #b68e2c!important;outline-offset:-2px;background:#efeee9!important}
+[class*='st-key-auto-context-menu-'] button:disabled{opacity:.4!important}
+[class*='st-key-auto-context-menu-'] [class*='st-key-auto_delete_']{border-top:1px solid #e9e7e1;padding-top:3px;margin-top:3px}
+[class*='st-key-auto-context-menu-'] [class*='st-key-auto_delete_'] button:not(:disabled){color:#a43838!important}
+[class*='st-key-auto-context-menu-'] [class*='st-key-auto_delete_'] button:hover:not(:disabled){background:#f9ecea!important}
 .st-key-auto-overview{border:1px solid #e8e6e1;border-radius:12px;padding:14px;background:#fff;container-type:inline-size}
 .sc-auto-activity{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.sc-auto-event{padding:14px;border:1px solid #e8e6e1;border-radius:10px;background:#fff;min-width:0;font-size:12px}.sc-auto-event small{display:block;color:#797c86;margin:6px 0}.sc-auto-event strong{overflow-wrap:anywhere}
 .st-key-auto-home-tabs button[aria-pressed='true']{border-bottom:2px solid #c7a13f!important;font-weight:600!important}
@@ -43,6 +58,55 @@ STYLE_AUTO='''<style>
 @media(max-width:750px){.sc-auto-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sc-auto-kpi{padding:12px 8px;gap:7px}.sc-auto-kpi strong{font-size:21px}.sc-auto-activity{grid-template-columns:repeat(2,minmax(0,1fr))}.st-key-auto-overview{padding:8px}}
 @media(max-width:390px){.sc-auto-kpi .sc-home-icon{width:26px;height:28px}.sc-auto-kpi small{font-size:10px}.sc-auto-name .sc-home-icon{display:none}.sc-auto-activity{grid-template-columns:1fr}}
 </style>'''
+
+# Native popover owns placement and outside-click dismissal. Delegated keyboard
+# handling adds navigation and reliable Escape dismissal without polling/rerenders.
+MENU_SCRIPT='''<script>(()=>{
+if(window.scAutomationMenuKeys)return;
+window.scAutomationMenuKeys=true;
+const decorate=root=>{
+ const menus=[...(root.querySelectorAll?.("[class*='st-key-auto-context-menu-']")||[])];
+ if(root.matches?.("[class*='st-key-auto-context-menu-']"))menus.push(root);
+ for(const menu of menus){
+  menu.setAttribute('role','group');menu.setAttribute('aria-label','Automation actions');
+  menu.querySelectorAll('[data-testid="stIconMaterial"]').forEach(icon=>icon.setAttribute('aria-hidden','true'));
+ }
+};
+decorate(document);
+new MutationObserver(records=>records.forEach(r=>r.addedNodes.forEach(decorate)))
+ .observe(document.body,{childList:true,subtree:true});
+const close=menu=>{
+ if(!menu?.isConnected)return;
+ const key=[...menu.classList].find(c=>c.startsWith('st-key-auto-context-menu-'));
+ const id=key?.slice('st-key-auto-context-menu-'.length);
+ const trigger=[...document.querySelectorAll('[class*="st-key-auto_actions_'+id+'"] button')]
+  .find(b=>b.getClientRects().length);
+ if(trigger){trigger.click();trigger.focus();}
+};
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'){
+  const opened=document.querySelector("[data-testid='stPopoverBody'] [class*='st-key-auto-context-menu-']");
+  if(opened){e.preventDefault();e.stopPropagation();close(opened);}
+  return;
+ }
+ const menu=e.target.closest?.("[class*='st-key-auto-context-menu-']");
+ if(!menu||!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;
+ const items=[...menu.querySelectorAll('button:not(:disabled)')];
+ if(!items.length)return;
+ e.preventDefault();
+ const index=items.indexOf(document.activeElement);
+ const next=e.key==='Home'?0:e.key==='End'?items.length-1:
+ (index+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;
+ items[next].focus();
+},true);
+document.addEventListener('click',e=>{
+ const item=e.target.closest?.("[class*='st-key-auto-context-menu-'] button:not(:disabled)");
+ if(!item)return;
+ const menu=item.closest("[class*='st-key-auto-context-menu-']");
+ // Let the native action receive the click before dismissing its popover.
+ setTimeout(()=>close(menu),0);
+});
+})();</script>'''
 
 
 def money(values):
@@ -244,12 +308,13 @@ def table(shop,store,user):
                     st.html('<div class="sc-auto-row">'+''.join('<div>'+s+'</div>' for s in values)+'</div>')
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
-                        if st.button('Analytics',key='auto_analytics_'+str(row['id'])):analytics(shop,store,user,row['id'])
-                        if st.button('Open editor',key='auto_open_'+str(row['id'])):open_flow(row['id'])
-                        if st.button('Duplicate',key='auto_duplicate_'+str(row['id'])):
-                            duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])
-                        if st.button('Archive',disabled=category=='Archived',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)
-                        if st.button('Delete',disabled=category not in ('Draft','Archived'),help='Archive first to retain active flow safety.',key='auto_delete_'+str(row['id'])):delete_dialog(store,user,row)
+                        with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
+                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):analytics(shop,store,user,row['id'])
+                            if st.button('Open editor',icon=':material/edit:',use_container_width=True,key='auto_open_'+str(row['id'])):open_flow(row['id'])
+                            if st.button('Duplicate',icon=':material/content_copy:',use_container_width=True,key='auto_duplicate_'+str(row['id'])):
+                                duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])
+                            if st.button('Archive',icon=':material/archive:',use_container_width=True,disabled=category=='Archived',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)
+                            if st.button('Delete',icon=':material/delete:',use_container_width=True,disabled=category not in ('Draft','Archived'),help='Archive first to retain active flow safety.' if category not in ('Draft','Archived') else None,key='auto_delete_'+str(row['id'])):delete_dialog(store,user,row)
         if not records:st.caption('No automations match this view.')
         st.caption('Showing '+str(offset+1 if records else 0)+'–'+str(offset+min(len(records),PAGE_SIZE))+' · click an automation to edit its settings.')
         prev,nxt=st.columns(2)
@@ -260,6 +325,7 @@ def table(shop,store,user):
 def home(shop,store,user):
     from crm_automation_ui import home_state,chooser
     state=home_state();st.html(STYLE+STYLE_AUTO)
+    st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
     with st.container(key='crm-campaign-home'):
         title,create=st.columns([4,1],vertical_alignment='center')
         title.html('<h1>Automations</h1><p style="color:#73747c">Track performance across every email flow.</p>')
