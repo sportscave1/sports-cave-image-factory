@@ -16,6 +16,7 @@ from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
 from support_email_idle import IdleLifecycle
 from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
+from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
 
 
 routes = [
@@ -27,6 +28,7 @@ routes = [
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,
         *WALL_PREVIEW_ROUTES,
+        *WALL_PREVIEW_CRM_ROUTES,
     )
 ]
 routes.extend(app_branding.public_branding_routes())
@@ -81,7 +83,8 @@ class _WallPreviewAccessLogFilter(logging.Filter):
     def filter(self, record):
         # The established binary-body contract carries customer identity in the
         # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
-        return WALL_PREVIEW_PATH not in record.getMessage()
+        message=record.getMessage()
+        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message
 
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())

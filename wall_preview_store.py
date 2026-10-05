@@ -20,7 +20,9 @@ def schema_issues(cur):
                 'dropbox_path', 'content_type', 'image_width', 'image_height', 'image_bytes',
                 'save_count', 'received_at', 'last_saved_at', 'reviewed_by', 'reviewed_at', 'notes',
                 'customer_email', 'customer_name', 'shopify_customer_id', 'identity_source',
-                'email_marketing_state', 'customer_folder'}
+                'email_marketing_state', 'customer_folder', 'client_preview_id', 'session_id',
+                'archive_sha256', 'confirmed_at', 'version', 'email_requested_at', 'email_sent_at', 'share_token',
+                'share_revoked_at', 'purchased_at', 'order_id', 'order_number', 'attribution'}
     issues = ['wall_previews missing column: ' + name for name in sorted(required - columns)]
     cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='wall_previews'")
     indexes = {row['indexname'] for row in cur.fetchall()}
@@ -31,6 +33,10 @@ def schema_issues(cur):
     cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('public.wall_previews')")
     if not (cur.fetchone() or {}).get('relrowsecurity'):
         issues.append('wall_previews RLS is not enabled')
+    for table in ('wall_preview_events','wall_preview_email_jobs'):
+        cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(%s)",('public.'+table,))
+        if not (cur.fetchone() or {}).get('relrowsecurity'):
+            issues.append(table+' RLS is not enabled')
     return issues
 
 
@@ -53,7 +59,7 @@ def find_preview(digest, *, customer_email=''):
     with _backend().connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='4000ms'")
-            cur.execute("SELECT * FROM public.wall_previews WHERE customer_email=%s AND image_sha256=%s", (customer_email, digest))
+            cur.execute("SELECT * FROM public.wall_previews WHERE customer_email=%s AND image_sha256=%s AND client_preview_id IS NULL", (customer_email, digest))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -68,6 +74,12 @@ def summary(*, include_private=False):
                 count(*) FILTER (WHERE status='approved') AS approved,
                 count(*) FILTER (WHERE status='used') AS used,
                 count(*) FILTER (WHERE NOT marketing_permission) AS private
+                ,count(*) AS total
+                ,count(*) FILTER (WHERE confirmed_at IS NOT NULL) AS confirmed
+                ,count(*) FILTER (WHERE email_requested_at IS NOT NULL) AS email_captured
+                ,count(*) FILTER (WHERE purchased_at IS NOT NULL) AS purchased
+                ,count(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.wall_preview_events e
+                    WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart')) AS added_to_cart
                 FROM public.wall_previews {where}""")
             return dict(cur.fetchone() or {})
 
@@ -109,7 +121,7 @@ def record_preview(payload):
                         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                         %s,%s,%s,%s,%s,%s
                     )
-                    ON CONFLICT (customer_email, image_sha256) DO UPDATE SET
+                    ON CONFLICT (customer_email, image_sha256) WHERE client_preview_id IS NULL DO UPDATE SET
                         save_count = public.wall_previews.save_count + 1,
                         last_saved_at = now()
                     RETURNING *,
@@ -148,7 +160,7 @@ def record_preview(payload):
             raise
 
 
-def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search=''):
+def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search='', intent='all'):
     clean_status = str(status or "new").strip().lower()
     if clean_status not in (*VALID_STATUSES, "all"):
         clean_status = "new"
@@ -160,6 +172,11 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
         params.append(clean_status)
     if not include_private:
         clauses.append("marketing_permission = TRUE")
+    intent_clause = {'confirmed':'confirmed_at IS NOT NULL','email_captured':'email_requested_at IS NOT NULL',
+                     'purchased':'purchased_at IS NOT NULL',
+                     'added_to_cart':"EXISTS (SELECT 1 FROM public.wall_preview_events e WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart')"}
+    if intent in intent_clause:
+        clauses.append(intent_clause[intent])
     search = _clean(customer_search, 254).lower()
     if search:
         # Prefix searches use the dedicated pattern indexes; no all-history scan
@@ -174,7 +191,8 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
             cur.execute("SET LOCAL statement_timeout='4000ms'")
             cur.execute(
                 f"""
-                SELECT *
+                SELECT *, EXISTS (SELECT 1 FROM public.wall_preview_events e
+                    WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart') AS added_to_cart
                 FROM public.wall_previews
                 {where}
                 ORDER BY received_at DESC

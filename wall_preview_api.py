@@ -55,7 +55,7 @@ def _cors_headers(origin):
         "Cache-Control": "no-store",
         "Vary": "Origin",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, X-Wall-Preview-Token",
         "Access-Control-Max-Age": "600",
     }
     if origin in _allowed_origins():
@@ -75,11 +75,11 @@ def _client_key(request):
     return hashlib.sha256(str(getattr(client, "host", "") or "unknown").encode()).hexdigest()
 
 
-def _rate_allowed(key):
+def _rate_allowed(key, limit=None):
     now = time.monotonic()
     with _RATE_LOCK:
         recent = [stamp for stamp in _RATE_BUCKETS.get(key, ()) if now - stamp < RATE_WINDOW_SECONDS]
-        if len(recent) >= RATE_LIMIT:
+        if len(recent) >= (RATE_LIMIT if limit is None else limit):
             _RATE_BUCKETS[key] = recent
             return False
         recent.append(now)
@@ -90,7 +90,8 @@ def _rate_allowed(key):
 
 
 def _query_text(request, name, limit):
-    return " ".join(str(request.query_params.get(name) or "").split())[:limit]
+    value=re.sub(r'[\x00-\x1f\x7f]',' ',str(request.query_params.get(name) or ''))
+    return " ".join(value.split())[:limit]
 
 
 def _safe_handle(value):
@@ -208,6 +209,9 @@ async def _ingest(request):
 
 
 def _save_preview(request, data, content_type, cors):
+    if request.query_params.get('client_preview_id') or not request.query_params.get('customer_email'):
+        from wall_preview_crm_api import save
+        return save(request, data, content_type, cors)
     # Bounded stripes serialize same-owner retries in the single web process.
     # No growing lock registry and no duplicate physical upload on double-click.
     address = str(request.query_params.get('customer_email') or '').strip().lower()
@@ -221,6 +225,14 @@ def _save_preview_locked(request, data, content_type, cors):
         if _query_text(request, "unit", 2) not in {'', 'cm', 'in'}:
             raise ValueError("Choose cm or in for the measurement unit.")
         width, height = _inspect_image(data, content_type)
+        # Legacy canvas uploads normally have no metadata. Strip metadata when
+        # present while retaining their accepted format and clean-byte retries.
+        with Image.open(io.BytesIO(data)) as original:
+            if original.info.get('exif') or original.info.get('icc_profile') or original.info.get('comment'):
+                from PIL import ImageOps
+                clean=ImageOps.exif_transpose(original).convert('RGB')
+                buffer=io.BytesIO();clean.save(buffer,'PNG' if content_type=='image/png' else 'JPEG')
+                data=buffer.getvalue();width,height=clean.size
         identity = wall_preview_identity.resolve(
             request.query_params.get('customer_email'),
             request.query_params.get('customer_name'),

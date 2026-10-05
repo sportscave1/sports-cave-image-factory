@@ -192,8 +192,8 @@ class WallPreviewUiTests(unittest.TestCase):
         app = AppTest.from_string(INBOX_PAGE).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(len(app.metric), 0)
-        self.assertNotIn('Refresh', [button.label for button in app.button])
-        self.assertNotIn('Open Wall Preview Folder', [button.label for button in app.button])
+        self.assertIn('Refresh', [button.label for button in app.button])
+        self.assertIn('Open Wall Preview Folder', [button.label for button in app.button])
         self.assertEqual(app.segmented_control[0].value, 'All')
         self.assertTrue(any('No wall previews to show yet.' in item.value for item in app.markdown))
 
@@ -284,7 +284,7 @@ class WallPreviewDatabaseTests(unittest.TestCase):
     def test_real_sql_deduplication_status_consent_and_schema(self):
         from tests.crm_db_fixture import Connection
         with Connection() as conn:
-            conn.execute('TRUNCATE public.wall_previews')
+            conn.execute('TRUNCATE public.wall_previews CASCADE')
         class Adapter(Connection):
             def cursor(self):return nullcontext(self)
             def execute(self,sql,args=()):

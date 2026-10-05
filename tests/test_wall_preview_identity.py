@@ -201,10 +201,10 @@ inbox._render_card({'role':'worker','is_active':True},
                 app.session_state['fixture-rows']=[{'id':'a','customer_name':'Jane Collector','customer_email':'jane@example.com', 'shopify_customer_id':'gid://shopify/Customer/42','marketing_permission':True,'status':'new','dropbox_path':'/a.jpg'}]
                 app.run()
                 self.assertEqual(len(app.exception),0)
-                self.assertTrue(any(item.value=='Jane Collector' for item in app.caption))
-                self.assertEqual(app.text[0].value,'jane@example.com')
-                self.assertTrue(any('Unsubscribed' in item.value for item in app.caption))
-                self.assertIn('Open Shopify customer',[item.label for item in app.get('link_button')])
+                markup='\n'.join(item.value for item in app.markdown)
+                self.assertIn('Jane Collector',markup)
+                self.assertIn('jane@example.com',markup)
+                self.assertIn('Details',[item.label for item in app.button])
                 self.assertIn('Search customer name or email',[item.label for item in app.text_input])
         finally:
             store.summary,store.list_previews,inbox._temporary_link=original

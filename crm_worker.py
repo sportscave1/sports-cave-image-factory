@@ -20,6 +20,10 @@ def main(argv=None):
     engine=Engine(store,Shopify());stop=threading.Event();owner=str(uuid.uuid4())
     signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     while not stop.is_set():
+        try:
+            from wall_preview_email import tick as wall_preview_tick
+            wall_preview_tick()
+        except Exception as exc:logging.getLogger(__name__).warning('wall_preview_worker_cycle_failed type=%s',type(exc).__name__)
         # Durable review imports are independent of marketing delivery gates.
         try:
             from reviews_worker import tick as review_import_tick

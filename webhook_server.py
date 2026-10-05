@@ -205,6 +205,15 @@ def _process_paid_order_durably(payload, webhook_id, topic, shop_domain):
             if not supabase_backend.is_configured():
                 return {"state": "not_configured"}
 
+            # This entry point is reached only after the existing Shopify HMAC
+            # verification. Correlate before receipt dedup so a provider retry can
+            # repair CRM attribution even if the order was already imported.
+            if any(any(p.get('name') in ('_wall_preview_id','_wall_preview_client_id')
+                       for p in line.get('properties') or [] if isinstance(p,dict))
+                   for line in payload.get('line_items') or []):
+                from wall_preview_crm_store import correlate_order
+                correlate_order(payload)
+
             claim = supabase_backend.claim_order_paid_webhook_receipt(
                 payload,
                 webhook_id,

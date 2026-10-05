@@ -15,6 +15,7 @@ import os_accounts
 import social_media
 import wall_preview_store
 import wall_preview_identity
+import wall_preview_crm_store
 
 
 _TEMP_LINK_CACHE = {}
@@ -157,7 +158,9 @@ def _render_card(user, row, *, key_prefix):
         if value
     )
     status = str(row.get("status") or "new").lower()
-    status_label = STATUS_LABELS.get(status, status.title())
+    status_label = ('Purchased' if row.get('purchased_at') else 'Added to cart' if row.get('added_to_cart')
+                    else 'Email sent' if row.get('email_sent_at') else 'Identified' if customer_email
+                    else 'Anonymous' if row.get('client_preview_id') else STATUS_LABELS.get(status, status.title()))
     received = _format_received(row.get("received_at"))
     permitted = bool(row.get("marketing_permission"))
 
@@ -228,6 +231,49 @@ def _render_card(user, row, *, key_prefix):
         """,
         unsafe_allow_html=True,
     )
+    if st.button('Details', icon=':material/info:',key=key_prefix+'-details',use_container_width=True):
+        st.session_state['wall-preview-details'] = str(row['id'])
+    if st.session_state.get('wall-preview-details') == str(row['id']):
+        with st.container(border=True):
+            st.caption('Preview ID · '+str(row['id']))
+            if row.get('client_preview_id'):st.caption('Client ID · '+str(row['client_preview_id']))
+            if os_accounts.is_admin(user):
+                st.caption('Email delivery · '+('Sent' if row.get('email_sent_at') else 'Requested' if row.get('email_requested_at') else 'Not requested'))
+                st.caption('Follow-up flow · '+wall_preview_crm_store.FLOW_NAME)
+                if row.get('shopify_customer_id'):
+                    customer_url=wall_preview_identity.customer_admin_url(row['shopify_customer_id'])
+                    if customer_url:st.link_button('Open Shopify customer',customer_url)
+            try:
+                for item in wall_preview_crm_store.timeline(str(row['id'])):
+                    st.caption(item['event_name'].removeprefix('WallPreview')+' · '+_format_received(item['occurred_at']))
+            except Exception:st.caption('Timeline temporarily unavailable.')
+            if row.get('share_token') and not row.get('share_revoked_at'):
+                share_url='https://sports-cave-image-factory.onrender.com/wall-preview/'+row['share_token']
+                st.link_button('Open share page',share_url)
+                st.code(share_url,language=None)
+                if os_accounts.is_admin(user) and st.button('Revoke share link',key=key_prefix+'-revoke'):
+                    wall_preview_crm_store.revoke_share(str(row['id']));st.rerun()
+            if row.get('marketing_permission'):
+                if st.button('Approve',key=key_prefix+'-approve'):_set_status(user,row,'approved')
+                if st.button('Mark used',key=key_prefix+'-used'):_set_status(user,row,'used')
+            if os_accounts.is_admin(user) or row.get('marketing_permission'):
+                if st.button('Archive',key=key_prefix+'-archive'):_set_status(user,row,'archived')
+            if st.button('Close details',key=key_prefix+'-close'):
+                st.session_state.pop('wall-preview-details',None);st.rerun()
+
+
+def _open_wall_preview_folder():
+    clean_path=dropbox_integration.normalize_dropbox_path(WALL_PREVIEW_DROPBOX_PATH)
+    st.session_state['files_browser_path']=clean_path
+    st.session_state.pop('files_preview_path',None)
+    st.session_state['current_page']='Files'
+    st.session_state['selected_page']='Files'
+    st.session_state['current_page_source']='wall-preview-inbox'
+    st.query_params['page']='files'
+    st.query_params['files_path']=clean_path
+    for key in ('files_preview','files_action','files_selected'):
+        if key in st.query_params:del st.query_params[key]
+    st.rerun()
 
 
 def render(user):
@@ -263,6 +309,7 @@ def render(user):
             align-items: flex-start;
         }
         .sc-wall-card {
+            overflow-wrap: anywhere;
             overflow: hidden;
             border: 1px solid #e4ded4;
             border-radius: 15px;
@@ -430,6 +477,18 @@ def render(user):
     )
 
     is_admin = os_accounts.is_admin(user)
+    folder_col,refresh_col=st.columns([3,1])
+    with folder_col:
+        if st.button('Open Wall Preview Folder',icon=':material/folder_open:',key='wall-preview-open-dropbox-folder',
+                     disabled=not os_accounts.can_access_page(user,'Files')):_open_wall_preview_folder()
+    with refresh_col:
+        if st.button('Refresh',icon=':material/refresh:',key='wall-preview-refresh'):_TEMP_LINK_CACHE.clear()
+    try:
+        counts=wall_preview_store.summary(include_private=is_admin)
+        st.caption(' · '.join(f'{label} {counts.get(key,0):,}' for key,label in
+            (('total','Inbox'),('confirmed','Confirmed'),('email_captured','Email captured'),('added_to_cart','Added to cart'),('purchased','Purchased'))))
+    except Exception:st.caption('Inbox counts temporarily unavailable.')
+    intent=st.selectbox('CRM intent',('All','Confirmed','Email captured','Added to cart','Purchased'),key='wall-preview-intent')
     labels = ("All", "New", "Approved", "Used", "Archived")
     selected = st.segmented_control(
         "Preview status",
@@ -456,6 +515,7 @@ def render(user):
             limit=60,
             include_private=is_admin,
             customer_search=customer_search,
+            intent={'All':'all','Confirmed':'confirmed','Email captured':'email_captured','Added to cart':'added_to_cart','Purchased':'purchased'}[intent],
         )
     except Exception:
         st.warning("Wall previews are temporarily unavailable. Please try again shortly.")
@@ -483,4 +543,3 @@ def render(user):
                         row,
                         key_prefix=f"wall-preview-{row['id']}",
                     )
-
