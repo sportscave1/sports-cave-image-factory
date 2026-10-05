@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from crm_shopify_webhook_config import base_url, callbacks, hmac_configuration, receiver_readiness, CANONICAL_BASE
+from crm_shopify_webhook_config import receiver_callback_status
 from tests import test_crm_automation_diagnostics as diagnostics_fixture
 from tests import test_crm_shopify_automation_triggers as trigger_fixture
 
@@ -78,8 +79,11 @@ class ReceiverTests(unittest.TestCase):
                        {'api_version':'2025-10'},{'routes_ready':False},{'hmac_status':'YES'}):
             wire=Mock(status_code=200,content=b'{}',json=lambda:{**good,**change})
             with patch('requests.get',return_value=wire) as request:
-                if change:
+                if change and ('service' in change or 'hmac_status' in change):
                     with self.assertRaises(ValueError):receiver_readiness({'RENDER':'true'})
+                elif change:
+                    report=receiver_readiness({'RENDER':'true'})
+                    self.assertNotEqual(receiver_callback_status(report,{'RENDER':'true'}),'VERIFIED')
                 else:self.assertEqual(receiver_readiness({'RENDER':'true'}),good)
                 self.assertEqual(request.call_args.kwargs,{'timeout':(3,5),'allow_redirects':False})
         for code,body in ((302,b'{}'),(503,b'{}'),(200,b'x'*4097)):

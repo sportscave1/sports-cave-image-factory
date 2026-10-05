@@ -39,7 +39,8 @@ def verify(shop, store, env=None,*,persist=True):
         checks.setdefault('App identity','UNVERIFIED')
     for scope in ('read_customers','read_orders'):
         checks[scope]='VERIFIED' if scope in scopes else 'MISSING' if scopes_read else 'UNVERIFIED'
-    from crm_shopify_webhook_config import hmac_configuration, receiver_readiness
+    from crm_shopify_webhook_config import (hmac_configuration, receiver_readiness,
+        receiver_callback_status, ReceiverReadinessError)
     checks['Webhook HMAC']=hmac_configuration(env)
     target=callbacks(env)
     from crm_tracking import public_https
@@ -49,6 +50,10 @@ def verify(shop, store, env=None,*,persist=True):
         try:
             receiver=receiver_readiness(env)
             checks['Webhook HMAC']=receiver['hmac_status']
+            checks['Callback configuration']=receiver_callback_status(receiver,env)
+        except ReceiverReadinessError as exc:
+            checks['Webhook HMAC']='UNAVAILABLE — '+str(exc)
+            checks['Callback configuration']='UNVERIFIED — '+str(exc)
         except Exception as exc:
             checks['Webhook HMAC']='UNAVAILABLE — receiver readiness ('+type(exc).__name__+')'
             checks['Callback configuration']='UNVERIFIED — receiver readiness unavailable'

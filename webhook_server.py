@@ -177,11 +177,21 @@ truthfully returns CONFIGURED until the next valid signature is received.
 """
     from crm_shopify_webhook_config import base_url, callbacks, hmac_configuration
     status = hmac_configuration()
-    routes = {route.path for route in app.routes}
+    # Public route lookup traverses included routers in both flattened and lazy
+    # FastAPI versions; app.routes entries are not all path-bearing routes.
+    from starlette.routing import NoMatchFound
+    routes_ready = True
+    for name, path in (('shopify_hook', '/webhooks/shopify/crm'),
+                       ('shopify_orders_paid_webhook', '/webhooks/shopify/orders-paid')):
+        try:
+            routes_ready = routes_ready and str(app.url_path_for(name)) == path
+        except NoMatchFound:
+            routes_ready = False
     return Response(json.dumps({'service': 'sports-cave-os-webhooks',
+        'receiver_reachable': True,
         'base_url': base_url(), 'callbacks': callbacks(),
         'api_version': os.getenv('SHOPIFY_API_VERSION', '2026-04').strip(),
-        'routes_ready': {'/webhooks/shopify/crm', '/webhooks/shopify/orders-paid'}.issubset(routes),
+        'routes_ready': routes_ready,
         'hmac_status': 'VERIFIED' if status == 'CONFIGURED' and _SHOPIFY_HMAC_VERIFIED else status}),
         media_type='application/json', headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
