@@ -65,7 +65,10 @@ def synchronize(row, transport=graphql_request):
     else:
         # Shopify enforces email uniqueness; retries always repeat the exact lookup first.
         customer = operation(CREATE,{'input':{'email':address,**names}},'customerCreate',transport)['customer']
-    operation(TAG,{'id':customer['id'],'tags':['Wall Preview']},'tagsAdd',transport)
+    tags = ['Wall Preview']
+    if row.get('market_country_code'):
+        tags.append('Wall Preview Market: '+row['market_country_code'])
+    operation(TAG,{'id':customer['id'],'tags':tags},'tagsAdd',transport)
     latest = (customer.get('defaultEmailAddress') or {}).get('marketingUpdatedAt')
     latest = datetime.fromisoformat(latest.replace('Z','+00:00')) if latest else None
     # An intervening unsubscribe must not be overwritten by a delayed/retried job.

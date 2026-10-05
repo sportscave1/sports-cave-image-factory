@@ -24,7 +24,8 @@ def schema_issues(cur):
                 'archive_sha256', 'confirmed_at', 'version', 'email_requested_at', 'email_sent_at', 'share_token',
                 'share_revoked_at', 'purchased_at', 'order_id', 'order_number', 'attribution',
                 'image_reuse_consent_at','image_reuse_consent_source','submitted_marketing_opt_in',
-                'marketing_consent_at','marketing_consent_source'}
+                'marketing_consent_at','marketing_consent_source','market_country_code','market_country_name',
+                'marketing_consent_text','marketing_consent_version'}
     issues = ['wall_previews missing column: ' + name for name in sorted(required - columns)]
     cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='wall_previews'")
     indexes = {row['indexname'] for row in cur.fetchall()}
@@ -35,7 +36,7 @@ def schema_issues(cur):
     cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('public.wall_previews')")
     if not (cur.fetchone() or {}).get('relrowsecurity'):
         issues.append('wall_previews RLS is not enabled')
-    for table in ('wall_preview_events','wall_preview_email_jobs','wall_preview_customer_jobs'):
+    for table in ('wall_preview_events','wall_preview_email_jobs','wall_preview_customer_jobs','wall_preview_archive_jobs'):
         cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(%s)",('public.'+table,))
         if not (cur.fetchone() or {}).get('relrowsecurity'):
             issues.append(table+' RLS is not enabled')

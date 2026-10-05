@@ -66,7 +66,7 @@ def confirm(payload, upload):
         unchanged = previous and previous['archive_sha256'] == payload['image_sha256'] and all(
             str(previous.get(k) or '') == str(payload.get(k) or '') for k in fields)
         if unchanged:
-            return previous, True
+            return _market(cur,previous,payload), True
         preview_id = str(previous.get('id') or uuid.uuid4())
         storage = upload(previous, preview_id)
         version = int(previous.get('version') or 0) + 1
@@ -90,10 +90,37 @@ def confirm(payload, upload):
             save_count=wall_previews.save_count+1,marketing_permission=FALSE,
             image_reuse_consent_at=NULL,image_reuse_consent_source=NULL RETURNING *''', tuple(values))
         row = dict(cur.fetchone())
+        row = _market(cur,row,payload)
+        if storage.get('pending_archive'):
+            image=payload.get('archive_image')
+            if not isinstance(image,bytes) or not image:raise ValueError('Confirmed composite unavailable.')
+            cur.execute('''INSERT INTO public.wall_preview_archive_jobs(preview_id,version,image)
+                VALUES (%s,%s,decode(%s,'hex')) ON CONFLICT(preview_id) DO UPDATE SET
+                version=EXCLUDED.version,image=EXCLUDED.image,state='queued',attempts=0,
+                due_at=now(),last_attempt_at=NULL,finished_at=NULL,reason='' ''',(preview_id,version,image.hex()))
+        else:
+            cur.execute("UPDATE public.wall_preview_archive_jobs SET state='done',image=NULL,finished_at=now() WHERE preview_id=%s",(preview_id,))
         if not previous:
             event(cur,row,'WallPreviewStarted','started')
         event(cur,row,'WallPreviewConfirmed','confirmed:'+str(version),{'version':version})
         return row, False
+
+
+def _market(cur,row,payload):
+    cur.execute('''UPDATE public.wall_previews SET
+        market_country_code=COALESCE(market_country_code,%s),
+        market_country_name=COALESCE(market_country_name,%s) WHERE id=%s RETURNING *''',
+        (payload.get('market_country_code'),payload.get('market_country_name'),str(row['id'])))
+    return dict(cur.fetchone())
+
+
+def pending_archive_image(preview_id):
+    with transaction() as cur:
+        cur.execute('''SELECT encode(j.image,'hex') AS image FROM public.wall_preview_archive_jobs j
+            JOIN public.wall_previews p ON p.id=j.preview_id AND p.version=j.version
+            WHERE j.preview_id=%s AND j.image IS NOT NULL''',(str(preview_id),))
+        row=cur.fetchone()
+        return bytes.fromhex(row['image']) if row else None
 
 
 def add_event(preview_id, token, name, event_id):
@@ -135,14 +162,25 @@ def request_email(preview_id, token, address, options=None):
             marketing_permission=%s, image_reuse_consent_at=CASE WHEN %s::boolean IS NOT NULL THEN now() ELSE NULL END,
             image_reuse_consent_source=%s, submitted_marketing_opt_in=%s,
             marketing_consent_at=CASE WHEN %s::boolean IS NOT NULL THEN now() ELSE NULL END,
-            marketing_consent_source=%s WHERE id=%s RETURNING *''',
+            marketing_consent_source=%s,marketing_consent_text=%s,marketing_consent_version=%s,
+            market_country_code=COALESCE(%s,market_country_code),
+            market_country_name=COALESCE(%s,market_country_name) WHERE id=%s RETURNING *''',
             (options.get('name',''),options.get('name',''),reuse is True,reuse,
              options.get('reuse_consent_source') if reuse is not None else None,optin,optin,
-             options.get('marketing_consent_source') if optin is not None else None,preview_id))
+             options.get('marketing_consent_source') if optin is not None else None,
+             options.get('marketing_consent_text') if optin is not None else None,
+             options.get('marketing_consent_version') if optin is not None else None,
+             options.get('market_country_code'),options.get('market_country_name'),preview_id))
         row = dict(cur.fetchone())
         event(cur,row,'WallPreviewEmailCaptured','email-requested',
               {'image_reuse_allowed':reuse,'marketing_opt_in':optin,'email':address,
-               'shopify_customer_id':row.get('shopify_customer_id') or None})
+               'marketing_consent_source':row.get('marketing_consent_source'),
+               'marketing_consent_text':row.get('marketing_consent_text'),
+               'marketing_consent_version':row.get('marketing_consent_version'),
+               'marketing_consent_at':str(row.get('marketing_consent_at') or ''),
+               'shopify_customer_id':row.get('shopify_customer_id') or None,
+               'market_country_code':row.get('market_country_code'),
+               'market_country_name':row.get('market_country_name')})
         cur.execute('''INSERT INTO public.wall_preview_customer_jobs(preview_id) VALUES (%s)
             ON CONFLICT(preview_id) DO NOTHING''',(preview_id,))
         for kind, hours in (('requested',0),('4h',4),('24h',24)):

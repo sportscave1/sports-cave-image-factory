@@ -59,6 +59,21 @@ class CustomerTests(unittest.TestCase):
         update=next(v['input'] for d,v in self.calls if d==customer.UPDATE)
         self.assertEqual(update,{'id':self.existing['id'],'lastName':'Baker'})
 
+    def test_market_tag_preserves_tags_and_never_updates_customer_address(self):
+        self.row.update(market_country_code='AU',market_country_name='Australia')
+        customer.synchronize(self.row,self.transport)
+        self.assertEqual(self.calls[-1],(customer.TAG,{'id':self.existing['id'],
+                         'tags':['Wall Preview','Wall Preview Market: AU']}))
+        for _,variables in self.calls:
+            self.assertNotIn('address',str(variables).lower())
+
+    def test_new_customer_market_signal_does_not_create_postal_address(self):
+        self.records=[];self.row.update(market_country_code='NZ',market_country_name='New Zealand')
+        customer.synchronize(self.row,self.transport)
+        create=next(v['input'] for d,v in self.calls if d==customer.CREATE)
+        self.assertEqual(set(create),{'email','firstName','lastName'})
+        self.assertIn('Wall Preview Market: NZ',self.calls[-1][1]['tags'])
+
     def test_ambiguous_or_incomplete_lookup_never_creates(self):
         self.records.append(dict(self.existing,id='gid://shopify/Customer/43'))
         with self.assertRaises(ValueError):customer.synchronize(self.row,self.transport)
@@ -87,6 +102,18 @@ class ContractTests(unittest.TestCase):
         options=api.email_options({'name':'  Nathan  Baker  ','image_reuse_allowed':True,'marketing_opt_in':False})
         self.assertEqual(options['name'],'Nathan Baker');self.assertTrue(options['image_reuse_allowed']);self.assertFalse(options['marketing_opt_in'])
 
+    def test_country_normalization_and_old_payload_unknown_market(self):
+        options=api.email_options({'market_country_code':' au ','market_country_name':' Australia '})
+        self.assertEqual(options['market_country_code'],'AU');self.assertEqual(options['market_country_name'],'Australia')
+        self.assertIsNone(api.email_options({})['market_country_code'])
+        self.assertIsNone(api.email_options({})['market_country_name'])
+
+    def test_invalid_country_fields_rejected(self):
+        for fields in ({'market_country_code':'AUS'},{'market_country_code':1},{'market_country_code':'A1'},
+                       {'market_country_name':['Australia']},{'market_country_name':'x'*101},
+                       {'market_country_name':'Australia\nHeader'},{'market_country_name':''}):
+            with self.subTest(fields=fields),self.assertRaises(ValueError):api.email_options(fields)
+
     def test_invalid_types_sources_name_and_product_rejected(self):
         for payload in ({'image_reuse_allowed':'true'},{'marketing_opt_in':1},{'name':'x\nheader'},
                         {'name':'x'*201},{'reuse_consent_source':'other'},{'product_url':'https://evil.example/products/a'}):
@@ -108,6 +135,7 @@ class ContractTests(unittest.TestCase):
             for reuse in (True,False,None):
                 app=AppTest.from_string(INBOX_PAGE)
                 app.session_state['fixture-rows']=[{'id':'fixture','marketing_permission':reuse,
+                    'market_country_code':'AU','market_country_name':'Australia',
                     'customer_name':'Collector','customer_email':'collector@example.com',
                     'email_marketing_state':'SUBSCRIBED' if reuse is False else 'UNKNOWN',
                     'email_requested_at':'2026-10-05T00:00:00Z','email_job_state':'queued'}]
@@ -116,6 +144,7 @@ class ContractTests(unittest.TestCase):
                 self.assertIn('MARKETING USE: ALLOWED' if reuse else 'N/A',markup)
                 self.assertEqual('EMAIL: SUBSCRIBED' in markup,reuse is False)
                 self.assertIn('HD email: queued',markup)
+                self.assertIn('MARKET: AUSTRALIA (AU)',markup)
         finally:
             inbox.wall_preview_store.summary,inbox.wall_preview_store.list_previews,inbox._temporary_link=originals
 
@@ -151,6 +180,18 @@ class HdDatabaseTests(unittest.TestCase):
         store.request_email(pid,sid,'collector@example.com',api.email_options({'marketing_opt_in':False}))
         store.request_email(pid,sid,'collector@example.com',api.email_options({'marketing_opt_in':True,'image_reuse_allowed':True}))
         saved=self.read(pid);self.assertFalse(saved['submitted_marketing_opt_in']);self.assertFalse(saved['marketing_permission'])
+
+    def test_market_persisted_once_event_audit_and_reconfirm_preserves_original_signal(self):
+        row=self.create();pid=str(row['id']);sid=str(row['session_id'])
+        options=api.email_options({'market_country_code':'AU','market_country_name':'Australia','marketing_opt_in':True})
+        store.request_email(pid,sid,'collector@example.com',options)
+        store.request_email(pid,sid,'collector@example.com',api.email_options({'market_country_code':'US','market_country_name':'United States'}))
+        saved=self.read(pid)
+        self.assertEqual((saved['market_country_code'],saved['market_country_name']),('AU','Australia'))
+        self.assertEqual(store.timeline(pid)[-1]['metadata']['market_country_code'],'AU')
+        self.data['image_sha256']='b'*64
+        updated,_=store.confirm(self.data,self.upload)
+        self.assertEqual(updated['market_country_code'],'AU')
 
     def test_old_request_unknown_reuse_and_marketing(self):
         row=self.create();pid=str(row['id'])
@@ -192,9 +233,24 @@ class HdDatabaseTests(unittest.TestCase):
                 for statement in sql.split(';'):
                     if statement.strip():cur.execute(statement)
             cur.execute("SELECT count(*) AS n FROM information_schema.columns WHERE table_name='wall_previews'")
-            self.assertEqual(cur.fetchone()['n'],51)
+            self.assertEqual(cur.fetchone()['n'],55)
             cur.execute("SELECT has_table_privilege('anon','public.wall_preview_customer_jobs','SELECT') AS allowed")
             self.assertFalse(cur.fetchone()['allowed'])
+
+    def test_market_migration_replay_preserves_previews_indexes_and_rls(self):
+        row=self.create()
+        with self.Adapter() as cur:
+            cur.execute("SELECT indexname FROM pg_indexes WHERE tablename='wall_previews'")
+            before=cur.fetchall()
+            sql=Path('migrations/20261005194500_wall_preview_market_country.sql').read_text()
+            for _ in range(2):
+                for statement in sql.split(';'):
+                    if statement.strip():cur.execute(statement)
+            cur.execute("SELECT indexname FROM pg_indexes WHERE tablename='wall_previews'")
+            self.assertEqual(cur.fetchall(),before)
+            cur.execute("SELECT relrowsecurity FROM pg_class WHERE relname='wall_previews'")
+            self.assertTrue(cur.fetchone()['relrowsecurity'])
+        self.assertEqual(self.read(str(row['id']))['archive_sha256'],row['archive_sha256'])
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -207,9 +263,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(wall_preview_email,'configured',return_value=True),patch.object(store,'request_email',return_value='queued') as enqueue,patch.object(customer,'synchronize') as sync:
             result=await self.client.post(f'/api/wall-previews/{self.pid}/email',headers=headers,
                 json={'email':' COLLECTOR@example.com ','name':'Nathan Baker','image_reuse_allowed':True,
-                      'marketing_opt_in':False,'reuse_consent_source':'wall_preview_hd_email'})
+                      'marketing_opt_in':True,'reuse_consent_source':'wall_preview_hd_email',
+                      'market_country_code':'AU','market_country_name':'Australia'})
             self.assertEqual(result.status_code,200);self.assertFalse(result.json()['marketing_subscribed'])
             self.assertEqual(enqueue.call_args.args[2],'collector@example.com');sync.assert_not_called()
+            self.assertEqual(enqueue.call_args.args[3]['market_country_code'],'AU')
 
     async def test_invalid_consent_is_rejected_before_enqueue(self):
         with patch.object(store,'request_email') as enqueue:

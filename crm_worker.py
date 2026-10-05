@@ -21,6 +21,10 @@ def main(argv=None):
     signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     while not stop.is_set():
         try:
+            from wall_preview_archive import tick as archive_tick
+            archive_tick()
+        except Exception as exc:logging.getLogger(__name__).warning('wall_preview_archive_cycle_failed type=%s',type(exc).__name__)
+        try:
             from wall_preview_email import tick as wall_preview_tick
             wall_preview_tick()
         except Exception as exc:logging.getLogger(__name__).warning('wall_preview_worker_cycle_failed type=%s',type(exc).__name__)

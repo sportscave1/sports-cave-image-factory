@@ -20,6 +20,7 @@ const {chromium}=require('playwright');
    for(const card of layout.cards) assert.ok(card.width>0&&card.right<=width+1&&card.left>=0,`Card clipped at ${width}`);
    await page.getByText('MARKETING USE: ALLOWED',{exact:true}).waitFor();
    await page.getByText('EMAIL: SUBSCRIBED',{exact:true}).waitFor();
+   await page.getByText('MARKET: AUSTRALIA (AU)',{exact:true}).first().waitFor();
    console.log(`PASS Inbox ${width}px: no horizontal overflow, independent badges visible`);
   }
  } finally {await browser.close();}

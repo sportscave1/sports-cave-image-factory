@@ -114,6 +114,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
     async def test_anonymous_blank_identity_confirm_uses_stable_private_root(self):
         def confirm(data,upload):
             storage=upload({},self.pid)
+            self.assertTrue(storage['pending_archive'])
             self.assertIn('/03_ASSETS/11 Wall Preview Inbox/Anonymous/',storage['path'])
             self.assertEqual(data['identity']['identity_source'],'anonymous')
             self.assertEqual(data['identity']['customer_email'],'')
@@ -123,7 +124,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(response.json()['preview_id'],self.pid)
             self.assertEqual(response.json()['preview_token'],self.sid)
-            self.assertEqual(upload.call_args.kwargs['conflict'],'replace');shop.assert_not_called()
+            upload.assert_not_called();shop.assert_not_called()
             self.assertNotIn('dropbox',response.text);self.assertNotIn('customer_email',response.text)
     async def test_events_whitelist_arbitrary_metadata_and_purchase_spoof_rejected(self):
         headers={**self.headers,'X-Wall-Preview-Token':self.sid}

@@ -116,10 +116,12 @@ def _render_card(user, row, *, key_prefix):
 
     path = str(row.get("dropbox_path") or "")
     try:
-        image_url = _temporary_link(
+        pending_url = ('https://sports-cave-image-factory.onrender.com/wall-preview/'+str(row['share_token'])+'/image'
+                       if row.get('share_token') and not row.get('share_revoked_at') and not row.get('dropbox_file_id') else '')
+        image_url = pending_url or (_temporary_link(
             path,
             str(row.get("dropbox_file_id") or ""),
-        ) if path else ""
+        ) if path else "")
     except Exception as error:
         category = next(
             (
@@ -177,6 +179,9 @@ def _render_card(user, row, *, key_prefix):
     safe_customer = html.escape(customer_label)
     safe_email = html.escape(customer_email)
     safe_details = html.escape(details)
+    market = ' '.join(filter(None,(str(row.get('market_country_name') or '').upper(),
+                                  '('+str(row['market_country_code'])+')' if row.get('market_country_code') else '')))
+    market_markup = '<div class="sc-wall-details">MARKET: '+html.escape(market)+'</div>' if market else ''
     safe_received = html.escape(received)
     safe_product_url = html.escape(product_url, quote=True)
 
@@ -219,6 +224,7 @@ def _render_card(user, row, *, key_prefix):
           <div class="sc-wall-card-body">
             <div class="sc-wall-customer">{safe_customer}</div>
             {email_markup}
+            {market_markup}
             {'<div class="sc-wall-details">EMAIL: SUBSCRIBED</div>' if row.get('email_marketing_state') == 'SUBSCRIBED' else ''}
             {'<div class="sc-wall-details">HD email: ' + html.escape(str(row.get('email_job_state') or ('Sent' if row.get('email_sent_at') else 'Requested'))) + '</div>' if row.get('email_requested_at') else ''}
             {product_markup}

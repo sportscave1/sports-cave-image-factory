@@ -18,6 +18,8 @@ import wall_preview_identity as identity
 
 LOG = logging.getLogger(__name__)
 BASE = 'https://sports-cave-image-factory.onrender.com'
+CONSENT_TEXT = 'By selecting Send, you’ll also receive Sports Cave collector emails. Unsubscribe anytime.'
+CONSENT_VERSION = 'wall_preview_hd_email_send_v1'
 
 
 def timestamp(value):
@@ -91,19 +93,20 @@ def save(request,data,content_type,cors):
         payload['frame_label'] = archive._query_text(request,'frame',120)
         payload['size_label'] = archive._query_text(request,'size',160)
         payload['product_url'] = product_url(params.get('product_url'),payload['variant_id'])
+        market = email_options({key:params[key] for key in ('market_country_code','market_country_name') if key in params})
+        payload.update({key:market[key] for key in ('market_country_code','market_country_name')})
+        payload['archive_image'] = data
         def upload(previous,preview_id):
-            token,root = archive._dropbox_connection()
-            if root.rstrip('/') != '/Sportscave Team Folder':
-                raise ValueError('Wall Preview storage is unavailable.')
+            root = '/Sportscave Team Folder'
             # Stable file per client key. Capturing email never moves/deletes the archive.
             folder = (previous or {}).get('customer_folder') or f'{root}/{archive.DROPBOX_RELATIVE_ROOT}/' + (
                 identity.customer_folder_name(ident['customer_email']) if ident['customer_email'] else 'Anonymous')
             path = (previous or {}).get('dropbox_path') or f'{folder}/{client}.jpg'
             if not archive.dropbox_integration.path_is_within_root(path,f'{root}/{archive.DROPBOX_RELATIVE_ROOT}'):
                 raise ValueError('Invalid archive destination.')
-            archive.dropbox_integration.ensure_folder_path(token,folder,root_path=root)
-            metadata = archive.dropbox_integration.upload_stream(token,path,io.BytesIO(data),size=len(data),conflict='replace')
-            return {'folder':folder,'path':path,'file_id':str((metadata or {}).get('id') or (metadata or {}).get('file_id') or '')}
+            # Commit the cleaned composite and job together before acknowledging.
+            # Dropbox runs in the existing worker, never on the shopper request.
+            return {'folder':folder,'path':path,'file_id':'','pending_archive':True}
         row,duplicate = store.confirm(payload,upload)
         LOG.info('wall_preview_confirmed preview_id=%s version=%s duplicate=%s bytes=%s',row['id'],row['version'],duplicate,len(data))
         response = {'ok':True,'preview_id':str(row['id']),'client_preview_id':client,'preview_token':session,
@@ -160,7 +163,9 @@ async def _action(request):
             result = {'ok':True}
         else:
             if set(payload)-{'email','product_url','requested_at','name','image_reuse_allowed',
-                             'marketing_opt_in','marketing_consent_source','reuse_consent_source'}:
+                             'marketing_opt_in','marketing_consent_source','reuse_consent_source',
+                             'marketing_consent_text','marketing_consent_version',
+                             'market_country_code','market_country_name'}:
                 raise ValueError('Unsupported email fields.')
             options = email_options(payload)
             address = identity.normalize_email(payload.get('email'))
@@ -183,21 +188,41 @@ async def _action(request):
 
 
 def email_options(payload):
-    """Strict independent checkboxes, with absent values remaining unknown."""
+    """Explicit Send disclosure and image permission remain independent."""
     options = {}
     for key in ('image_reuse_allowed','marketing_opt_in'):
         if key in payload and type(payload[key]) is not bool:
             raise ValueError('Consent must be a boolean.')
         options[key] = payload.get(key)
-    name = str(payload.get('name') or '')
-    if len(name)>200 or any(ord(c)<32 or ord(c)==127 for c in name):
+    name = payload.get('name')
+    if name is None:name=''
+    if not isinstance(name,str) or len(name)>200 or any(ord(c)<32 or ord(c)==127 for c in name):
         raise ValueError('Invalid contact name.')
     options['name'] = ' '.join(name.split())
+    code = payload.get('market_country_code')
+    country = payload.get('market_country_name')
+    if code is not None and (not isinstance(code,str) or not re.fullmatch(r'[A-Za-z]{2}',code.strip())):
+        raise ValueError('Invalid market country code.')
+    if country is not None and (not isinstance(country,str) or not country.strip() or len(country)>100
+            or any(ord(c)<32 or ord(c)==127 for c in country)):
+        raise ValueError('Invalid market country name.')
+    options['market_country_code'] = code.strip().upper() if code is not None else None
+    options['market_country_name'] = ' '.join(country.split()) if country is not None else None
     for key in ('marketing_consent_source','reuse_consent_source'):
         value = payload.get(key)
-        if value is not None and value != 'wall_preview_hd_email':
+        allowed={'wall_preview_hd_email','wall_preview_hd_email_send'} if key=='marketing_consent_source' else {'wall_preview_hd_email'}
+        if value is not None and (not isinstance(value,str) or value not in allowed):
             raise ValueError('Invalid consent source.')
         options[key] = value or 'wall_preview_hd_email'
+    text=payload.get('marketing_consent_text')
+    version=payload.get('marketing_consent_version')
+    if text is not None and (not isinstance(text,str) or text!=CONSENT_TEXT):raise ValueError('Invalid consent disclosure.')
+    if version is not None and version!=CONSENT_VERSION:raise ValueError('Invalid consent version.')
+    if options['marketing_consent_source']=='wall_preview_hd_email_send':
+        if options['marketing_opt_in'] is True and text!=CONSENT_TEXT:raise ValueError('Send consent requires its disclosure.')
+        options['marketing_consent_version']=version or (CONSENT_VERSION if text else None)
+    else:options['marketing_consent_version']=version
+    options['marketing_consent_text']=text
     if payload.get('product_url'):
         product_url(payload['product_url']) # never replace the canonical preview product
     return options
@@ -238,6 +263,10 @@ async def _share(request):
 
 
 def archive_bytes(row):
+    # A Dropbox outage never loses the already-confirmed composite. Capability
+    # checks happen before this internal read; no public database access.
+    pending=store.pending_archive_image(row['id'])
+    if pending is not None:return pending
     token,_ = archive._dropbox_connection()
     client = archive.dropbox_integration.team_space_client(token)
     _, response = client.files_download(row.get('dropbox_file_id') or row['dropbox_path'])
