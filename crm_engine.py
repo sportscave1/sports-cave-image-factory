@@ -41,6 +41,11 @@ class Engine:
                 checkout=self.shop.checkout(trigger,fresh=True)
                 if not checkout or checkout.get('completedAt'):return c,context,'recovered'
                 if (checkout.get('customer') or {}).get('id')!=c['id']:return c,context,'checkout_customer_changed'
+                if enrollment.get('checkout_key'):
+                    from crm_shopify_automation_events import key_from_recovery_url
+                    import os
+                    if key_from_recovery_url(checkout.get('abandonedCheckoutUrl'),os.getenv('SHOPIFY_STORE_DOMAIN',''))!=enrollment['checkout_key']:
+                        return c,context,'checkout_identity_changed'
                 if not safe_url(checkout.get('abandonedCheckoutUrl')) or not checkout['lineItems']['nodes']:return c,context,'invalid_checkout'
                 # Any newer order stops reminders, including payment-pending orders.
                 # Customer.lastOrder is authoritative and avoids scanning order history.

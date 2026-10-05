@@ -13,14 +13,9 @@ from starlette.concurrency import run_in_threadpool
 import shopify_order_reconciliation_worker
 
 
-SHOPIFY_WEBHOOK_SECRET_ENV_NAMES = (
-    "SHOPIFY_WEBHOOK_SECRET",
-    "SHOPIFY_API_SECRET_KEY",
-    "SHOPIFY_API_SECRET",
-    "SHOPIFY_SHARED_SECRET",
-    "SHOPIFY_CLIENT_SECRET",
-)
-SHOPIFY_ADMIN_TOKEN_PREFIXES = ("shpat_", "shpca_", "shppa_", "shpss_")
+from crm_shopify_webhook_config import SECRET_ENV_NAMES as SHOPIFY_WEBHOOK_SECRET_ENV_NAMES
+from crm_shopify_webhook_config import ADMIN_TOKEN_PREFIXES as SHOPIFY_ADMIN_TOKEN_PREFIXES
+_SHOPIFY_HMAC_VERIFIED = False
 
 app = FastAPI(title="Sports Cave OS Webhooks")
 
@@ -134,13 +129,21 @@ def _calculate_shopify_hmac(raw_body: bytes, secret: str):
 
 
 def verify_shopify_webhook_hmac(raw_body: bytes, headers: Mapping[str, str]):
+    global _SHOPIFY_HMAC_VERIFIED
     received_hmac = _header(headers, "X-Shopify-Hmac-Sha256", "X-Shopify-Hmac-SHA256").strip()
+    try:
+        if len(base64.b64decode(received_hmac, validate=True)) != 32:
+            received_hmac = ''
+    except (ValueError, UnicodeError):
+        received_hmac = ''
     candidates = _shopify_webhook_secret_candidates()
     candidate_results = []
     matched = None
     debug_security = _debug_webhook_security_enabled()
 
     for candidate in candidates:
+        if candidate['looks_like_admin_token']:
+            continue
         calculated = _calculate_shopify_hmac(raw_body, candidate["secret"])
         is_match = bool(received_hmac) and hmac.compare_digest(received_hmac, calculated)
         safe_candidate = {
@@ -152,6 +155,8 @@ def verify_shopify_webhook_hmac(raw_body: bytes, headers: Mapping[str, str]):
         if is_match and matched is None:
             matched = safe_candidate
 
+    if matched:
+        _SHOPIFY_HMAC_VERIFIED = True
     return {
         "ok": bool(matched),
         "secret_env_used": (matched or {}).get("env_name") or "",
@@ -161,6 +166,24 @@ def verify_shopify_webhook_hmac(raw_body: bytes, headers: Mapping[str, str]):
             candidate["env_name"] for candidate in candidates if candidate["looks_like_admin_token"]
         ] if debug_security else [],
     }
+
+
+@app.get('/webhooks/shopify/readiness')
+def shopify_receiver_readiness():
+    """Public configuration only: no secrets, database, Shopify calls or writes.
+
+VERIFIED means this receiver process has accepted a real HMAC. On restart it
+truthfully returns CONFIGURED until the next valid signature is received.
+"""
+    from crm_shopify_webhook_config import base_url, callbacks, hmac_configuration
+    status = hmac_configuration()
+    routes = {route.path for route in app.routes}
+    return Response(json.dumps({'service': 'sports-cave-os-webhooks',
+        'base_url': base_url(), 'callbacks': callbacks(),
+        'api_version': os.getenv('SHOPIFY_API_VERSION', '2026-04').strip(),
+        'routes_ready': {'/webhooks/shopify/crm', '/webhooks/shopify/orders-paid'}.issubset(routes),
+        'hmac_status': 'VERIFIED' if status == 'CONFIGURED' and _SHOPIFY_HMAC_VERIFIED else status}),
+        media_type='application/json', headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
 
 def _safe_hmac_log_fields(hmac_result):
@@ -331,6 +354,21 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
     except ValueError:
         return Response("Invalid JSON payload.", status_code=400)
 
+    # Conversion is a send-safety guard, not best-effort post-response work.
+    # Commit it before allocation/acknowledgement; retries use the same ledger.
+    # Legacy orders without checkout_token retain their existing fan-out path.
+    if isinstance(payload, dict) and payload.get('checkout_token'):
+        try:
+            from crm_store import Store
+            from crm_webhooks import receive_shopify
+            await run_in_threadpool(receive_shopify, Store(), 'orders/paid',
+                _header(request.headers, 'X-Shopify-Event-Id') or webhook_id,
+                payload, triggered_at)
+        except Exception as error:
+            _webhook_log('crm_paid_conversion_retry', webhook_id=webhook_id,
+                         error_type=type(error).__name__)
+            return Response('CRM conversion persistence failed; retry this webhook.', status_code=503)
+
     try:
         pipeline = await run_in_threadpool(
             _process_paid_order_durably,
@@ -355,7 +393,7 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
         _webhook_log("webhook_receipt_record_failed", webhook_id=webhook_id, topic=topic, error=str(error))
         return Response("Webhook receipt could not be recorded.", status_code=500)
     claim = pipeline.get("claim") or {}
-    if pipeline_state in ("processed", "duplicate"):
+    if pipeline_state in ("processed", "duplicate") and not payload.get('checkout_token'):
         from crm_webhooks import forward_paid_order
         background_tasks.add_task(forward_paid_order, payload, webhook_id, triggered_at)
     if pipeline_state == "duplicate":

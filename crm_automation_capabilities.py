@@ -18,6 +18,7 @@ CREATE_PIXEL = '''mutation AutomationPixelCreate($pixel:WebPixelInput!) {
 def verify(shop, store, env=None,*,persist=True):
     import os
     from crm_tracking_health import callbacks, subscriptions
+    remote_receiver = env is None and bool(os.getenv('RENDER') or os.getenv('RENDER_SERVICE_NAME'))
     env=os.environ if env is None else env
     result={'scopes':[],'triggers':{},'pixel':'UNVERIFIED','checks':{},'webhooks':{},'webhook_details':{}}
     checks=result['checks'];identity=False;scopes=[];scopes_read=False
@@ -38,13 +39,20 @@ def verify(shop, store, env=None,*,persist=True):
         checks.setdefault('App identity','UNVERIFIED')
     for scope in ('read_customers','read_orders'):
         checks[scope]='VERIFIED' if scope in scopes else 'MISSING' if scopes_read else 'UNVERIFIED'
-    from webhook_server import SHOPIFY_WEBHOOK_SECRET_ENV_NAMES,SHOPIFY_ADMIN_TOKEN_PREFIXES
-    secrets=[env.get(k,'').strip() for k in SHOPIFY_WEBHOOK_SECRET_ENV_NAMES if env.get(k,'').strip()]
-    result['webhook_hmac_configured']=any(not value.startswith(SHOPIFY_ADMIN_TOKEN_PREFIXES) for value in secrets)
-    checks['Webhook HMAC']='CONFIGURED' if result['webhook_hmac_configured'] else 'MALFORMED — Admin API token is not a webhook secret' if secrets else 'MISSING'
+    from crm_shopify_webhook_config import hmac_configuration, receiver_readiness
+    checks['Webhook HMAC']=hmac_configuration(env)
     target=callbacks(env)
     from crm_tracking import public_https
     checks['Callback configuration']='VERIFIED' if all(public_https(url) for url in target.values()) else 'MISSING / INVALID HTTPS BASE URL'
+    if remote_receiver:
+        result['receiver_source']='sports-cave-os-webhooks'
+        try:
+            receiver=receiver_readiness(env)
+            checks['Webhook HMAC']=receiver['hmac_status']
+        except Exception as exc:
+            checks['Webhook HMAC']='UNAVAILABLE — receiver readiness ('+type(exc).__name__+')'
+            checks['Callback configuration']='UNVERIFIED — receiver readiness unavailable'
+    result['webhook_hmac_configured']=checks['Webhook HMAC'] in ('CONFIGURED','VERIFIED')
     rows=None
     try:rows=subscriptions(shop)
     except Exception as exc:checks['Webhook API']='UNAVAILABLE ('+type(exc).__name__+')'
@@ -53,7 +61,7 @@ def verify(shop, store, env=None,*,persist=True):
         same=[r for r in (rows or []) if r.get('topic')==topic]
         callback=[r for r in same if (r.get('endpoint') or {}).get('callbackUrl','').rstrip('/') in allowed]
         good=checks['Callback configuration']=='VERIFIED' and any((r.get('apiVersion') or {}).get('handle')=='2026-04' for r in callback)
-        status='VERIFIED' if good else 'UNAVAILABLE' if rows is None else 'MISSING' if not same else 'CALLBACK MISMATCH' if not callback else 'API VERSION MISMATCH — requires 2026-04'
+        status='VERIFIED' if good else 'UNAVAILABLE' if rows is None else 'MISSING' if not same else 'CALLBACK CONFIGURATION UNVERIFIED' if checks['Callback configuration']!='VERIFIED' else 'CALLBACK MISMATCH' if not callback else 'API VERSION MISMATCH — requires 2026-04'
         result['webhooks'][topic]=good;checks[topic]=status
         # Public diagnostics never persist query strings or arbitrary endpoint credentials.
         from urllib.parse import urlsplit,urlunsplit
@@ -62,7 +70,7 @@ def verify(shop, store, env=None,*,persist=True):
             if not public_https(value):return 'Invalid HTTPS callback'
             parsed=urlsplit(value)
             return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,'',''))
-        result['webhook_details'][topic]={'status':status,'subscriptions':[
+        result['webhook_details'][topic]={'status':status,'duplicate':len(same)>1,'subscriptions':[
           {'callback':public_callback(r),'api_version':str((r.get('apiVersion') or {}).get('handle') or 'Unknown')[:30]} for r in same[:20]]}
     result['reasons']={}
     for kind,topics in TOPICS.items():

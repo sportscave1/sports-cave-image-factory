@@ -14,8 +14,11 @@ production webhook signature has been accepted.
 
 Expected callbacks come from `crm_tracking_health.callbacks()`: the
 `SPORTS_CAVE_WEBHOOK_BASE_URL`, falling back to `CRM_PUBLIC_BASE_URL`, followed
-by `/webhooks/shopify/crm` or `/webhooks/shopify/orders-paid`. Verify the actual
-webhook host rather than substituting the primary UI host.
+by the canonical receiver origin in Render when neither override exists, then
+`/webhooks/shopify/crm` or `/webhooks/shopify/orders-paid`. Render diagnostics
+obtain signing readiness from the receiver's non-secret readiness endpoint,
+not the OS/worker environment. See [the receiver audit](ABANDONED_CHECKOUT_RECEIVER_AUDIT.md)
+for evidence, service ownership and the approval-only live procedure.
 
 Web Pixel installation, customer-event verification and pixel scopes are
 separate. They do not block the abandoned server trigger.
@@ -40,10 +43,11 @@ for mismatched subscriptions. Errors contain classes rather than provider bodies
 
 1. Run `python scripts/shopify_automation_diagnostics.py` to verify and persist
    the current result. `--inspect-only` reports without updating storage.
-2. Inspect `python scripts/register_crm_webhooks.py --automation-only` before any
-   repair. This tool requires `SPORTS_CAVE_WEBHOOK_BASE_URL` explicitly.
+2. Inspect `python scripts/register_crm_webhooks.py --abandoned-only` before any
+   abandoned-checkout repair. Outside Render, configure the HTTPS receiver origin
+   explicitly; in Render the canonical receiver default is available.
 3. For proven missing topics only, verify the deployed endpoint exists and use
-   the existing `--automation-only --apply` workflow. Existing different callbacks
+   the `--abandoned-only --apply` workflow. Existing different callbacks
    or versions require review; the tool does not duplicate them.
 4. Rerun the diagnostic, confirm `AVAILABLE`, then publish explicitly in the UI.
 5. Confirm the leased CRM worker keeps `checked_at` fresh beyond ten minutes.

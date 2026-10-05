@@ -384,7 +384,12 @@ def get_shopify_webhook_secret(config=None):
 def verify_shopify_webhook_hmac(raw_body: bytes, hmac_header: str, secret: str) -> bool:
     if not raw_body or not hmac_header or not secret:
         return False
+    from crm_shopify_webhook_config import ADMIN_TOKEN_PREFIXES
+    if str(secret).strip().startswith(ADMIN_TOKEN_PREFIXES):
+        return False
     try:
+        if len(base64.b64decode(str(hmac_header).strip(), validate=True)) != 32:
+            return False
         digest = hmac.new(str(secret).encode("utf-8"), raw_body, hashlib.sha256).digest()
         calculated = base64.b64encode(digest).decode("utf-8")
     except Exception:

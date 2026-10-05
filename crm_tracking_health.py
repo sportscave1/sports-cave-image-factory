@@ -15,9 +15,8 @@ REQUIRED=('ORDERS_CREATE','ORDERS_UPDATED','ORDERS_PAID')
 
 
 def callbacks(env=None):
-    env=os.environ if env is None else env
-    base=(env.get('SPORTS_CAVE_WEBHOOK_BASE_URL') or env.get('CRM_PUBLIC_BASE_URL','')).rstrip('/')
-    return {'crm':base+'/webhooks/shopify/crm','paid':base+'/webhooks/shopify/orders-paid'}
+    from crm_shopify_webhook_config import callbacks as receiver_callbacks
+    return receiver_callbacks(env)
 
 
 def subscriptions(shop):

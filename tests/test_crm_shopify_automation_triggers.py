@@ -79,7 +79,7 @@ class CapabilitiesTests(unittest.TestCase):
         from scripts.register_crm_webhooks import main
         from crm_automation_capabilities import TOPICS
         rows=[{'id':'gid://shopify/WebhookSubscription/'+str(i),'topic':topic,'apiVersion':{'handle':'2026-04'},'endpoint':{'callbackUrl':'https://fixture.example/webhooks/shopify/crm'}} for i,topic in enumerate({t for ts in TOPICS.values() for t in ts})]
-        with patch.dict(os.environ,{'SPORTS_CAVE_WEBHOOK_BASE_URL':'https://fixture.example'}),patch('shopify_sync.graphql_request',side_effect=[(self.shop().query('',{}),{}),({'webhookSubscriptions':{'nodes':rows,'pageInfo':{'hasNextPage':False}}},{})]) as query,contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch.dict(os.environ,{'SPORTS_CAVE_WEBHOOK_BASE_URL':'https://fixture.example','SHOPIFY_API_VERSION':'2026-04'}),patch('shopify_sync.graphql_request',side_effect=[(self.shop().query('',{}),{}),({'webhookSubscriptions':{'nodes':rows,'pageInfo':{'hasNextPage':False}}},{})]) as query,contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(['--automation-only','--apply']),0)
         self.assertEqual(query.call_count,2)
         self.assertNotIn('mutation',str(query.call_args_list));self.assertEqual(output.getvalue().count('registered'),6)
