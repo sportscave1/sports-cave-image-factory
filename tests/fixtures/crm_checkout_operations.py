@@ -21,8 +21,9 @@ store=Mock();store.connect='fixture';store.suppressed.return_value=False
 def add(shop,store,user,identity,checkout_id):
     c=next(c for c in records if c['admin_checkout_id']==checkout_id)
     c['enrollment_id']='persistent-fixture-'+c['checkout_key']
+    c.update(flow_status='ACTIVE',next_due_at=now()+timedelta(minutes=78),current_step=0,steps=[{}])
     return {'id':c['enrollment_id']}
-@st.fragment
+@st.dialog('Automation analytics',width='large')
 def page():
     with patch.object(ui,'read',return_value=(records,'READY')),patch.object(ui,'add_to_flow',side_effect=add):
         ui.checkout_panel(Mock(),store,{},row,(None,now()),'All time')

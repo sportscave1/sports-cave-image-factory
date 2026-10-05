@@ -52,8 +52,8 @@ class Presentation(TestCase):
 
     def test_operational_page_has_no_secondary_analytics(self):
         import inspect
-        from crm_automation_analytics_ui import checkout_panel,content
-        panel=inspect.getsource(checkout_panel)
+        from crm_automation_analytics_ui import checkout_panel,_checkout_panel,content
+        panel=inspect.getsource(checkout_panel)+inspect.getsource(_checkout_panel)
         self.assertNotIn('secondary(',panel)
         self.assertNotIn('countdown_html',panel)
         self.assertIn("disabled=not selected",panel)

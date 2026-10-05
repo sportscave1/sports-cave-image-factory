@@ -100,7 +100,7 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  count(*) FILTER(WHERE event_type='email.clicked') AS clicked,max(occurred_at) AS last_event
  FROM crm_delivery_events e JOIN messages s ON s.id=e.send_id GROUP BY e.send_id
 ), receipts AS (
- SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'step',step_index,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code) ORDER BY step_index) AS sends,
+ SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'enrollment_id',s.enrollment_id,'step',step_index,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code) ORDER BY step_index) AS sends,
  sum(COALESCE(e.opened,0)) AS opened,sum(COALESCE(e.clicked,0)) AS clicked,max(e.last_event) AS last_event
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )

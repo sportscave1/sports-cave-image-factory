@@ -91,15 +91,34 @@ def checkout_details(store,user,row,c):
 
 @isolated
 def checkout_panel(shop,store,user,row,bounds,period):
+    # Scope every override to this panel or the dialog containing it.
+    st.html('''<style>
+    div[role="dialog"]:has(.st-key-checkout-compact)>div:first-child{padding:12px 24px 4px!important}
+    div[role="dialog"]:has(.st-key-checkout-compact)>div:nth-child(2){padding:4px 24px 16px!important}
+    div[role="dialog"]:has(.st-key-checkout-compact) [data-testid="stVerticalBlock"]{gap:.5rem}
+    .st-key-checkout-compact [data-testid="stVerticalBlock"]{gap:.5rem}
+    .st-key-checkout-compact h3{padding:0;font-size:1.2rem;line-height:2rem}
+    .st-key-checkout-compact [data-testid="stHorizontalBlock"]{gap:.5rem;align-items:center}
+    .st-key-checkout-compact [data-baseweb="select"]>div{min-height:32px;height:32px}
+    .st-key-checkout-compact [data-baseweb="input"]{height:32px;min-height:32px}
+    .st-key-checkout-compact [data-testid="stButton"] button{min-height:32px;padding:.2rem .65rem}
+    .st-key-checkout-compact [data-testid="stButton"] button p{font-size:13px}
+    </style>''')
+    with st.container(key='checkout-compact'):
+        _checkout_panel(shop,store,user,row,bounds,period)
+
+
+def _checkout_panel(shop,store,user,row,bounds,period):
     from pathlib import Path
     import streamlit.components.v1 as components
     from crm_component_json import render_component
     from crm_checkout_identity import display_name,reference,recovery_status
+    from crm_checkout_timing_ui import time_to_send
     slot='auto-checkouts-'+str(row['id']);key=('checkout-list',str(row['id']),period)
     heading,status=st.columns([4,1]);heading.subheader('Abandoned checkouts')
     status.selectbox('Checkout status',['Incomplete'],label_visibility='collapsed',key=slot+'-status')
-    st.markdown('**All**')
-    search=st.text_input('Search and filter',placeholder='Checkout, customer name or email',key=slot+'-search')
+    search_column,actions=st.columns([1.2,1.5],vertical_alignment='center')
+    search=search_column.text_input('Search and filter',placeholder='Checkout, customer name or email',label_visibility='collapsed',key=slot+'-search')
     records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
     if records is None:
         st.caption('Loading abandoned checkouts…' if phase!='ERROR' else 'Checkout records temporarily unavailable.');return
@@ -107,7 +126,7 @@ def checkout_panel(shop,store,user,row,bounds,period):
     visible=[c for c in records if not needle or needle in ' '.join((reference(c),display_name(c),str((c.get('analytics') or {}).get('email') or ''),str(c.get('admin_checkout_id') or ''))).casefold()]
     keys={c['checkout_key'] for c in visible}
     selected=[k for k in st.session_state.get(slot+'-selected',[]) if k in keys]
-    with st.container(horizontal=True):
+    with actions.container(horizontal=True):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
         add=st.button('Add to flow',disabled=not selected,key=slot+'-add',type='primary')
     if refresh:
@@ -138,7 +157,7 @@ def checkout_panel(shop,store,user,row,bounds,period):
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
     listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
       'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
-      'status':recovery_status(c)} for c in visible]
+      'status':recovery_status(c),'time_to_send':time_to_send(c)} for c in visible]
     component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
     event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)
     if event and event.get('sequence')!=st.session_state.get(slot+'-event'):
