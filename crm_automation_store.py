@@ -5,7 +5,7 @@ import json
 import uuid
 from crm_campaign_store import CampaignStore
 from crm_navigation import require
-from crm_automation_definition import FORMAT, new_flow, validate, native, status, production_document
+from crm_automation_definition import FORMAT, new_flow, validate, native, status
 from crm_logic import now, date
 
 
@@ -46,54 +46,17 @@ class AutomationStore(CampaignStore):
             cfg.update(draft=deepcopy(flow),revision=revision+1)
             return conn.execute('UPDATE crm_automations SET name=%s,config=%s::jsonb,updated_at=now() WHERE id=%s RETURNING *',(name,json.dumps(cfg),identity)).fetchone()
 
+    def request_publish(self,user,identity,revision):
+        from crm_automation_publication import request
+        return request(self,user,identity,revision)
+
     def publish(self,user,identity,revision,*,env=None):
-        require(user,'crm_automations_manage')
-        from crm_campaign_send import production_checks, validate_tracking
-        from crm_campaign_sections import with_email_defaults
-        from crm_email_size import validate_rendered_email
-        cfg=self.render_settings(env)
-        with self.db() as conn:
-            row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
-            if not row or not native(row) or status(row)=='ARCHIVED' or row['config'].get('deleted_at'): raise ValueError('Automation is not publishable.')
-            config=deepcopy(row['config'])
-            if config['revision']!=revision: raise ValueError('Automation changed. Save and review again.')
-            from crm_checkout_migration import migrate_flow
-            flow=validate(migrate_flow(config['draft']));config['draft']=deepcopy(flow)
-            version=config['published_version']+1;steps=[]
-            from crm_automation_capabilities import require as require_trigger
-            require_trigger(self,flow['trigger'])
-            for index,step in enumerate(flow['emails']):
-                doc=with_email_defaults(production_document(step['document']),cfg)
-                from crm_abandoned_checkout import publication_document
-                validation_doc=publication_document(doc,flow['trigger'])
-                failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True).items() if not v]
-                if failures: raise ValueError('Email '+str(index+1)+' blocked: '+'; '.join(failures))
-                validate_rendered_email(validate_tracking(validation_doc,cfg,str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))))
-                template_id=str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))
-                content={'format':'automation_delivery_v1','document':doc,'render_settings':cfg,
-                         'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
-                         'trigger':flow['trigger'],'rules':flow['rules']}
-                if flow.get('review_request'):
-                    from reviews_submission import MARKER
-                    if MARKER not in json.dumps(doc):raise ValueError('Add the review request link before publishing.')
-                    content['review_request']=deepcopy(flow['review_request'])
-                conn.execute("""INSERT INTO crm_templates(id,template_key,name,kind,version,content)
-                  VALUES(%s,%s,%s,'Automation',%s,%s::jsonb) ON CONFLICT(id) DO UPDATE SET
-                  version=excluded.version,content=excluded.content,updated_at=now()""",
-                  (template_id,'automation-email:'+template_id,row['name']+' · Email '+str(index+1),version,json.dumps(content)))
-                conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(template_id,version,json.dumps(content)))
-                steps.append({'type':'send','step_id':step['step_id'],'delay_seconds':step['delay_seconds'],
-                              'template_id':template_id,'template_version':version,
-                              'automation_version':version,'trigger':flow['trigger'],'rules':flow['rules']})
-            # The immutable email versions / enrollment steps own content. The
-            # entry policy only needs rules and re-entry, never the email bodies.
-            config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
-            config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
-            if config.get('paused_at'):
-                self._resume_due(conn,identity,config['paused_at'],now())
-            config.pop('paused_at',None)
-            return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status='ACTIVE',activated_at=now(),updated_at=now() WHERE id=%s RETURNING *",
-                (json.dumps(config),json.dumps(steps),flow['trigger'],identity)).fetchone()
+        """Authoritative synchronous executor retained for internal/local callers.
+
+        The editor only calls request_publish; durable jobs use the same validator.
+        """
+        from crm_automation_publication import publish_direct
+        return publish_direct(self,user,identity,revision,env=env)
 
     def lifecycle(self,user,identity,action):
         require(user,'crm_automations_manage')

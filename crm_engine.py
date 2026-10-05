@@ -230,6 +230,8 @@ class Engine:
         topic=event['topic'];customer_id=event['related_customer_id'];at=date(event['occurred_at'])
         if topic in ('customers/delete','customers/redact'):
             if customer_id:self.store.suppress(hashlib.sha256(customer_id.encode()).hexdigest(),customer_id,'redacted','shopify')
+            # New private analytics projection must honor existing redaction.
+            if customer_id:self.store.q("UPDATE crm_shopify_checkouts SET analytics='{}' WHERE customer_id=%s",(customer_id,))
             return
         active=getattr(type(self.store),'active_automations',None)
         automations=[a for a in (active(self.store) if active else self.store.list('automations')) if a['status']=='ACTIVE' and date(a['activated_at'])<=at]
@@ -294,6 +296,13 @@ class Engine:
             if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
                 try:verify_automation(self.shop,self.store)
                 except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
+            # One durable publication per leased cycle, independent of mail gates.
+            try:
+                from crm_automation_publication import tick as publication_tick
+                from crm_automation_store import AutomationStore
+                publication_tick(AutomationStore(self.store.connect),owner)
+            except Exception as exc:
+                logging.getLogger(__name__).warning('automation_publication_cycle_failed error_class=%s',type(exc).__name__)
             from crm_campaign_schedule import schedule_gate
             schedule_gate(self.store,self.config.enabled,self.clock())
             events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' AND provider<>'resend' ORDER BY received_at LIMIT 10")

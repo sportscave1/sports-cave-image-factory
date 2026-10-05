@@ -14,7 +14,7 @@ def changed():
     # Definitions/counts/table change; delivery/order summaries retain last-good values.
     state=home_state();cache=state.get('campaign_home_cache',{})
     for identity in list(cache):
-        if identity[1][0] in ('counts','table'):cache.pop(identity)
+        if identity[1][0] in ('counts','table','identities'):cache.pop(identity)
 
 
 def open_flow(identity):
@@ -107,7 +107,6 @@ def settings_control(editor,key):
     days=st.selectbox('Re-entry',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else 'After '+str(d)+' days',key=key+'reentry')
     delay=st.number_input('Delay before email (minutes)',min_value=0,max_value=525600,value=step['delay_seconds']//60,step=1,key=key+'delay')
     st.caption('Flow status · '+status(row)+' · fresh consent and suppressions checked before every email')
-    editor['document']['copy_reviewed']=st.checkbox('This email copy is reviewed',value=editor['document']['copy_reviewed'],key=key+'reviewed')
     desired=deepcopy(flow);desired.update(trigger=kind,rules=rules,reentry_days=days)
     store.preview_trigger=kind
     if kind=='abandoned':
@@ -133,6 +132,9 @@ def detail(shop,store,actions,identity):
     from crm_campaign_recovery import flush_current
     from crm_html_workspace import html_document,composer_styles
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
+    publication=row['config'].get('publication') or {}
+    if publication.get('state')=='FAILED':st.error(publication.get('error') or 'Publication failed. Review the saved draft and retry.')
+    if publication.get('state')=='PUBLISHING':st.caption('Publishing saved revision '+str(publication['revision'])+' · you can continue editing the next draft.')
     if st.button('← Automations',key='auto_back'):
         if flush_current():
             st.session_state.pop('_automation_preview_open',None)
@@ -190,14 +192,23 @@ def detail(shop,store,actions,identity):
         if st.button('Save draft',key=key+'save'):
             if flush_current(force=True):changed();st.toast('Draft saved')
         test_control(store,user,editor,key,cfg=cfg)
-        if st.button('Publish now',type='primary',key=key+'publish'):
-            try:
-                if not flush_current(force=True):return
-                store.publish(user,identity,editor['version']);changed()
-                st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None)
-                st.session_state['automation_notice']='Automation published · listening for future events';st.rerun()
-            except (ValueError,StoreUnavailable,PermissionError) as exc:st.error(safe_error(exc))
+        publish_requested=st.button('Publish now',type='primary',disabled=publication.get('state')=='PUBLISHING',key=key+'publish')
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
+    from pathlib import Path
+    publish_js=Path(__file__).with_name('components').joinpath('crm_sections','automation_publish.js').read_text(encoding='utf-8')
+    st.html('<script>'+publish_js+'</script>',unsafe_allow_javascript=True)
+    if publish_requested:
+        try:
+            if not flush_current(force=True):return
+            job=store.request_publish(user,identity,editor['version'])
+            # Prime last-good table rows so the accepted state is visible before
+            # the bounded table refresh completes. KPI values stay untouched.
+            from crm_automation_home import accepted_publication
+            accepted_publication(job);changed()
+            st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None)
+            st.session_state['automation_notice']='Publication accepted · validation continues in the background';st.rerun()
+        except (ValueError,StoreUnavailable,PermissionError) as exc:
+            st.error('Automation storage is temporarily unavailable. Your draft is retained; retry publishing.' if isinstance(exc,StoreUnavailable) else safe_error(exc))
     st.session_state[key+'editor_emitted']=True
     if st.toggle('Show email step analytics',key='auto_step_stats'):
         from crm_automation_home_data import step_metrics

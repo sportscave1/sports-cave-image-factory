@@ -32,7 +32,8 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
                 # Recheck under the same row locks as publication and enrollment;
                 # a concurrent checkout update must not bypass the inactivity timer.
                 if flow['trigger']!='abandoned' or row['config'].get('archived_at') or row['config'].get('deleted_at'):return None
-                if date(checkout['created_at'])<date(row['activated_at']):return None
+                # Explicit single-checkout admin entry may predate activation.
+                # Automatic reconciliation below retains its future-only cutoff.
                 if date(checkout['activity_at'])+timedelta(seconds=flow.get('abandonment_seconds',3600))>at:return None
         if not qualifies(flow,c,event_facts):return None
         # Duplicate source identities remain blocked across ALL flow versions.
@@ -106,6 +107,8 @@ def reconcile(engine,a):
         key=key_from_recovery_url(checkout.get('abandonedCheckoutUrl'),os.getenv('SHOPIFY_STORE_DOMAIN',''))
         state_row=engine.store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,),True) if key else None
         if not state_row or state_row['status']=='RECOVERED' or not c or state_row['customer_id']!=c['id']:continue
+        from crm_checkout_analytics import details
+        details(engine.store,checkout)
         threshold=a['config']['published'].get('abandonment_seconds',3600)
         activity=date(state_row['activity_at'])
         if created and cutoff<=created and cutoff<=date(state_row['created_at']) and activity<=at-timedelta(seconds=threshold) and not checkout.get('completedAt'):

@@ -9,6 +9,11 @@ def counts(store):
     return store.q("SELECT count(*) AS all_count,count(*) FILTER(WHERE category='Drafts') AS drafts,count(*) FILTER(WHERE category='Active') AS active,count(*) FILTER(WHERE category='Paused') AS paused,count(*) FILTER(WHERE category='Archived') AS archived FROM (SELECT "+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+") t",one=True)
 
 
+def identities(store,*,search='',trigger='All',oldest=False,offset=0):
+    """Critical first paint: bounded identities/status only, no event/order joins."""
+    return store.q("SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->'publication' AS publication,"+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+" AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s) ORDER BY a.updated_at "+('ASC' if oldest else 'DESC')+",a.id LIMIT %s OFFSET %s",(search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
+
+
 def delivery_summary(store,window):
     # Same verified per-message event semantics and accepted denominator as Home.
     return store.q("""WITH recipients AS (
@@ -33,7 +38,7 @@ def orders_summary(store,window):
 
 def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offset=0):
     return store.q("""WITH page AS (
-      SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,"""+CATEGORY+""" AS category FROM crm_automations a
+      SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->'publication' AS publication,"""+CATEGORY+""" AS category FROM crm_automations a
       WHERE """+VISIBLE+" AND (%s='All automations' OR ("+CATEGORY+""" )=%s)
         AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s)
       ORDER BY a.updated_at """+('ASC' if oldest else 'DESC')+""",a.id LIMIT %s OFFSET %s
@@ -46,13 +51,19 @@ def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offs
     ), totals AS (SELECT automation_id,count(*) FILTER(WHERE status='ACCEPTED') AS sent,
       count(*) FILTER(WHERE delivered) AS delivered,count(*) FILTER(WHERE delivered AND opened) AS opened,
       count(*) FILTER(WHERE delivered AND clicked) AS clicked FROM recipients GROUP BY automation_id)
+    , entrances AS (
+      SELECT j.automation_id,count(*) AS entered FROM crm_automation_enrollments j
+      JOIN page p ON p.id=j.automation_id GROUP BY j.automation_id
+    ), money AS (
+      SELECT p.id,o.currency,count(*) AS orders,sum(o.amount) AS amount
+      FROM page p JOIN crm_order_attribution o ON o.evidence->>'automation_id'=p.id::text AND o.eligible
+      GROUP BY p.id,o.currency
+    ), commerce AS (
+      SELECT id,sum(orders)::bigint AS orders,jsonb_object_agg(currency,amount) AS revenue FROM money GROUP BY id
+    )
     SELECT p.*,COALESCE(t.sent,0) AS sent,COALESCE(t.delivered,0) AS delivered,COALESCE(t.opened,0) AS opened,COALESCE(t.clicked,0) AS clicked,
-      (SELECT count(*) FROM crm_automation_enrollments j WHERE j.automation_id=p.id) AS entered,
-      (SELECT count(*) FROM crm_order_attribution o WHERE o.eligible AND o.evidence->>'automation_id'=p.id::text) AS orders,
-      (SELECT COALESCE(jsonb_object_agg(currency,amount),'{}') FROM
-        (SELECT o.currency,sum(o.amount) AS amount FROM crm_order_attribution o WHERE o.eligible
-        AND o.evidence->>'automation_id'=p.id::text GROUP BY o.currency) money) AS revenue
-      FROM page p LEFT JOIN totals t ON t.automation_id=p.id ORDER BY p.updated_at """+('ASC' if oldest else 'DESC')+",p.id",
+      COALESCE(j.entered,0) AS entered,COALESCE(o.orders,0) AS orders,COALESCE(o.revenue,'{}') AS revenue
+      FROM page p LEFT JOIN totals t ON t.automation_id=p.id LEFT JOIN entrances j ON j.automation_id=p.id LEFT JOIN commerce o ON o.id=p.id ORDER BY p.updated_at """+('ASC' if oldest else 'DESC')+",p.id",
       (tab,tab,search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
 
 

@@ -199,7 +199,12 @@ INDEXES+=('crm_attribution_retry',)
 INDEXES+=('crm_internal_tests_automation','crm_enrollment_automation_customer','crm_attribution_automation')
 COLUMNS['crm_webhook_events']+=('normalized',)
 COLUMNS['crm_automation_enrollments']+=('checkout_key','source_event_id')
-COLUMNS['crm_shopify_checkouts']=('checkout_key','shop','customer_id','source_event_id','created_at','activity_at','status','admin_checkout_id','order_id','updated_at')
+COLUMNS['crm_shopify_checkouts']=('checkout_key','shop','customer_id','source_event_id','created_at','activity_at','status','admin_checkout_id','order_id','updated_at','analytics')
 COLUMNS['crm_shopify_pixel_events']=('event_id','shop','event_name','client_hash','product_id','occurred_at','received_at')
 COLUMNS['crm_shopify_consent_versions']=('customer_id','state','changed_at')
 INDEXES+=('crm_checkout_due','crm_enrollment_checkout','crm_pixel_received')
+
+COLUMNS['crm_automation_publish_jobs']=('id','automation_id','revision','publication_version','snapshot','requested_by','state','requested_at','available_at','started_at','completed_at','attempts','owner','lease_until','error')
+INDEXES=(*INDEXES,'crm_automation_publish_active','crm_automation_publish_due','crm_automation_publish_revision')
+
+INDEXES += ('crm_checkout_created',)

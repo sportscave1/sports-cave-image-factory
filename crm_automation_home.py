@@ -5,9 +5,9 @@ from time import monotonic
 from base64 import b64encode
 import streamlit as st
 from crm_automation_definition import TRIGGERS, native
-from crm_automation_home_data import counts, rows, PAGE_SIZE, reporting_window, step_metrics
+from crm_automation_home_data import counts, rows, identities, PAGE_SIZE, reporting_window, step_metrics
 from crm_automation_analytics import summary, activity, performance, revenue, conversions, checkout_page, flow_state, add_to_flow
-from crm_campaign_home import STYLE, ICON_PATHS, arm_home_poll
+from crm_campaign_home import STYLE, ICON_PATHS
 from crm_campaign_home_cache import resolve
 from crm_logic import now, date
 
@@ -25,6 +25,8 @@ STYLE_AUTO='''<style>
 .sc-auto-head{background:#f8f8f8;border-radius:7px;padding:9px 4px;margin-right:48px;position:relative;color:#646770;font-size:11px}.sc-auto-head::after{content:'Actions';position:absolute;right:-48px;width:44px}
 .sc-auto-row>div{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.sc-auto-row>div:nth-child(n+3){text-align:right}.sc-auto-row small{display:block;color:#7a7c85;font-size:11px;margin-top:4px}.sc-auto-name{display:flex;gap:10px;align-items:center}.sc-auto-name a{color:#22242a;text-decoration:none;font-weight:600}.sc-auto-name .sc-home-icon{width:36px;height:36px}
 .sc-auto-pill{display:inline-block;border-radius:7px;background:#f0f1f4;padding:6px 9px;font-size:11px}.sc-auto-pill.active{background:#e7f7ef;color:#21613d}
+.sc-auto-pill.publishing{background:#edf1f7;color:#4a5d75}.sc-auto-pill.failed{background:#faecea;color:#9c3c36}.sc-auto-publish-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;animation:sc-auto-pulse 1.2s ease-in-out infinite}
+@keyframes sc-auto-pulse{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){.sc-auto-publish-dot{animation:none}}
 [class*='st-key-auto-row-']{gap:8px!important}[class*='st-key-auto-actions-'] button{min-height:36px!important;width:36px!important;padding:5px!important;border:1px solid #e4e3df!important;border-radius:7px!important;background:#fff!important;color:#52565e!important}
 [class*='st-key-auto-actions-'] button:hover,[class*='st-key-auto-actions-'] button[aria-expanded='true']{background:#f2f1ed!important;border-color:#cfcec7!important}
 [class*='st-key-auto-actions-'] button:focus-visible{outline:2px solid #b68e2c!important;outline-offset:2px}
@@ -114,7 +116,64 @@ def money(values):
     return ' · '.join(str(k)+' '+format(float(v),',.2f') for k,v in sorted(values.items())) or '—'
 
 
+def number(value):return '—' if value is None else format(value,',')
+
+
 def percentage(n,d):return '—' if not d else format(100*float(n or 0)/float(d),'.1f')+'%'
+
+
+def publication_state(row):
+    from crm_automation_ui import home_state
+    value=row.get('publication') or {}
+    override=home_state().get('publication_updates',{}).get(str(row['id'])) or {}
+    return override if override.get('job_id')==value.get('job_id') and override else value
+
+
+def accepted_publication(job):
+    from crm_automation_ui import home_state
+    publication={'job_id':str(job['id']),'revision':job['revision'],'version':job['publication_version'],
+                 'state':'LIVE' if job['state']=='SUCCEEDED' else 'PUBLISHING','requested_at':str(job.get('requested_at') or now())}
+    state=home_state()
+    snapshot=job.get('snapshot') or {}
+    state['publish_handoff']={'id':str(job['automation_id']),'name':snapshot.get('name','Automation'),
+      'trigger_type':snapshot.get('flow',{}).get('trigger','welcome'),'category':'Drafts',
+      'updated_at':job.get('requested_at'),'publication':publication}
+    for identity,records in state.get('campaign_home_resolved',{}).items():
+        if identity[1][0]!='table':continue
+        for row in records:
+            if str(row['id'])==str(job['automation_id']):row['publication']=publication
+    state.setdefault('publication_updates',{})[str(job['automation_id'])]=publication
+
+
+def status_html(category,publication):
+    state=publication.get('state')
+    if category=='Archived':label,colour='Archived',''
+    elif state=='PUBLISHING':label,colour='Publishing…','publishing'
+    elif state=='FAILED':label,colour='Publish failed','failed'
+    else:label,colour=('Live','active') if category=='Active' or state=='LIVE' else (category,'')
+    title='Publishing saved revision '+str(publication.get('revision')) if state=='PUBLISHING' else publication.get('error','')
+    requested=date(publication.get('requested_at'))
+    if state=='PUBLISHING' and requested and (now()-requested).total_seconds()>600:
+        label='Publishing delayed';title='Publication is taking longer than expected. Open the editor to inspect this attempt; do not submit a duplicate.'
+    dot='<span class="sc-auto-publish-dot" aria-hidden="true"></span>' if colour=='publishing' else ''
+    return '<span class="sc-auto-pill '+colour+'" title="'+escape(title,quote=True)+'">'+dot+escape(label)+'</span>'
+
+
+def refresh_publications(store,records,state):
+    pending=[str(r['id']) for r in records if publication_state(r).get('state')=='PUBLISHING']
+    if not pending or monotonic()-state.get('publication_checked',0)<3:return
+    state['publication_checked']=monotonic()
+    try:
+        updates=store.q("SELECT id,config->'publication' AS publication,"+__import__('crm_automation_home_data').CATEGORY+" AS category FROM crm_automations a WHERE id=ANY(%s::uuid[])",(pending,))
+    except Exception:
+        return  # Retain backend-accepted state; cache errors never imply success.
+    overrides=state.setdefault('publication_updates',{})
+    for value in updates:
+        overrides[str(value['id'])]=value.get('publication') or {}
+        for row in records:
+            if str(row['id'])==str(value['id']):row.update(value)
+        if str((state.get('publish_handoff') or {}).get('id'))==str(value['id']) and (value.get('publication') or {}).get('state')!='PUBLISHING':
+            state.pop('publish_handoff',None)
 
 
 def icon(index,colour='green'):
@@ -188,84 +247,9 @@ def activity_html(events,profiles=None):
 
 
 @st.dialog('Automation analytics',width='large')
-def analytics(shop,store,user,identity):
-    row=store.get('automations',identity)
-    if not row or row['config'].get('deleted_at'):st.warning('Automation unavailable.');return
-    st.subheader(row['name']);window=reporting_window()
-    st.caption('Performance · rolling 30 days UTC. Provider submission is separate from delivery.')
-    history=performance(store,identity,window)
-    total={k:sum(r[k] for r in history) for k in ('sent','delivered','opened','clicked')}
-    total['conversions']=conversions(store,identity,window)
-    columns=st.columns(5)
-    for col,key in zip(columns,total):col.metric(key.title(),format(total[key],','))
-    if history:st.line_chart(history,x='day',y=['sent','delivered','opened','clicked'],height=210)
-    else:st.caption('No accepted sends in this reporting period.')
-    st.caption('Revenue · '+money(revenue(store,window,identity)['revenue']))
-    if row['trigger_type']=='abandoned':checkout_analytics(shop,store,user,row)
-    else:
-        metrics=step_metrics(store,identity)
-        st.dataframe(metrics,hide_index=True,use_container_width=True)
-    events=activity(store,identity,12)
-    st.subheader('Recent activity')
-    if events:st.html(activity_html(events))
-    else:st.caption('No recorded activity yet.')
-
-
-@st.fragment(run_every='1s')
-def countdown(checkout):
-    label,next_action=flow_state(checkout)
-    st.caption(label+' · '+next_action)
-
-
-@st.fragment(run_every='20s')
-def checkout_analytics(shop,store,user,row):
-    st.subheader('Abandoned checkouts')
-    st.caption('Shopify checkout list with this flow’s signed checkout, journey and email state.')
-    slot='auto_checkout_page_'+str(row['id'])
-    cursor=st.session_state.get(slot+'_cursor')
-    try:
-        page=checkout_page(shop,store,row['id'],cursor)
-        st.session_state[slot]=page
-    except Exception:
-        page=st.session_state.get(slot)
-        st.caption('Shopify checkout refresh unavailable. Last loaded page is retained.')
-        if not page:return
-    listing=[]
-    for c in page['nodes']:
-        customer=c.get('customer') or {};ledger=c.get('ledger') or {};state,next_action=flow_state(c)
-        sent={s['step']:s['status'] for s in ledger.get('sends',[])}
-        price=(c.get('totalPriceSet') or {}).get('shopMoney') or {}
-        listing.append({'Checkout':c['id'].rsplit('/',1)[-1],'Customer':' '.join(filter(None,[customer.get('firstName'),customer.get('lastName')])) or 'Guest',
-          'Email':customer.get('email') or '—','Region':(c.get('shippingAddress') or c.get('billingAddress') or {}).get('countryCodeV2') or '—',
-          'Total':money({price['currencyCode']:price['amount']}) if price else '—','Recovery':'Recovered' if state=='Recovered' else 'Not recovered',
-          'Flow status':state,'Email 1':'Sent' if sent.get(0)=='ACCEPTED' else sent.get(0,'Not sent'),
-          'Email 2':'Sent' if sent.get(1)=='ACCEPTED' else sent.get(1,'Not sent'),
-          'Opened':ledger.get('opened') or 0,'Clicked':ledger.get('clicked') or 0,'Last activity':str(ledger.get('last_activity_at') or c.get('updatedAt') or ''),
-          'Next action':next_action})
-    selection=st.dataframe(listing,hide_index=True,use_container_width=True,on_select='rerun',selection_mode='single-row',key=slot+'_table')
-    selected=selection.selection.rows
-    if selected and 0<=selected[0]<len(page['nodes']):
-        checkout=page['nodes'][selected[0]];countdown(checkout)
-        ledger=checkout.get('ledger') or {};state,_=flow_state(checkout)
-        eligible=bool(ledger) and not ledger.get('enrollment_id') and state!='Recovered' and ledger.get('automation_status')=='ACTIVE' and row['status']=='ACTIVE' and native(row)
-        if eligible:
-            st.caption('Adds to the published flow after fresh eligibility checks. Existing inactivity and email delays apply.')
-            confirmed=st.checkbox('Confirm adding this checkout to the published flow',key=slot+'_confirm_'+checkout['id'])
-            if st.button('Add to flow',disabled=not confirmed,type='primary',key=slot+'_add_'+checkout['id']):
-                try:
-                    add_to_flow(shop,store,user,str(row['id']),checkout['id'])
-                    from crm_automation_ui import changed,home_state
-                    changed()
-                    cache=home_state().get('campaign_home_cache',{})
-                    for key in list(cache):
-                        if key[1][0]=='activity':cache.pop(key)
-                    st.session_state.pop(slot,None);st.toast('Added to flow · delivery remains with the background worker.');st.rerun(scope='fragment')
-                except (ValueError,PermissionError) as exc:st.warning(str(exc))
-        elif not ledger.get('enrollment_id') and state!='Recovered':st.caption('Add to flow requires an active published flow and a signed, eligible checkout receipt.')
-    if page['pageInfo'].get('hasNextPage') and st.button('Next checkout page',key=slot+'_next'):
-        st.session_state[slot+'_cursor']=page['pageInfo']['endCursor'];st.rerun(scope='fragment')
-    if cursor and st.button('Newest checkouts',key=slot+'_first'):
-        st.session_state.pop(slot+'_cursor',None);st.rerun(scope='fragment')
+def analytics(shop,store,user,identity,name=None):
+    from crm_automation_analytics_ui import render
+    render(shop,store,user,identity,name=name)
 
 
 @st.dialog('Archive automation?',width='small')
@@ -278,9 +262,11 @@ def archive_dialog(store,user,row):
         store.lifecycle(user,row['id'],'archive');changed();st.rerun()
 
 
-def table(shop,store,user):
+@st.fragment
+def table(shop,store,user,script=None):
     from crm_automation_ui import open_flow,changed,delete_dialog
     with st.container(key='auto-overview'):
+        controller=st.container()
         search,trigger,sort=st.columns([4,1.1,1.1])
         query=search.text_input('Search automations',placeholder='Search automations...',label_visibility='collapsed',key='auto_search')
         kind=trigger.selectbox('Trigger',['All',*TRIGGERS],format_func=lambda k:'All triggers' if k=='All' else TRIGGERS[k][1],label_visibility='collapsed',key='auto_filter')
@@ -289,32 +275,46 @@ def table(shop,store,user):
         state=home_state();criteria=(query,kind,order)
         if state.get('criteria')!=criteria:state['offset']=0;state['criteria']=criteria
         offset=state.get('offset',0)
-        records=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
-        if records is None:st.caption('Loading automations…');return
+        records=read(store,('identities',criteria,offset),lambda:identities(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
+        records=[dict(r) for r in (records or [])]
+        handoff=state.get('publish_handoff')
+        if handoff and offset==0 and query.lower() in handoff['name'].lower() and kind in ('All',handoff['trigger_type']):
+            records=[dict(handoff)]+[r for r in records if str(r['id'])!=handoff['id']]
+        if not records and state.get('activity',{}).get('identities') in ('LOADING','UNRESOLVED'):
+            with controller:arm_section('auto-list-refresh',.1,script)
+            st.caption('Loading automations…');return
+        metrics=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset)) or []
+        by_id={str(r['id']):r for r in metrics}
+        for row in records:
+            for field in ('entered','sent','delivered','opened','clicked','orders','revenue'):
+                row[field]=by_id.get(str(row['id']),{}).get(field)
+        state['visible_status_rows']=records
+        with controller:arm_section('auto-list-refresh',.1 if state.get('activity',{}).get('table') in ('LOADING','REFRESHING') else 20,script)
         labels=('Automation','Trigger','Entered','Sent','Delivery %','Open %','Click %','Conversions','Revenue','Status')
         # Actions occupy a native Streamlit popover next to the grid.
         st.html('<div class="sc-auto-head">'+''.join('<div>'+s+'</div>' for s in labels)+'</div>')
         for row in records[:PAGE_SIZE]:
+            publication=publication_state(row)
             with st.container(horizontal=True,key='auto-row-'+str(row['id'])):
                 with st.container(width='stretch'):
                     label=TRIGGERS.get(row['trigger_type'],('','Legacy flow'))[1]
-                    category=row['category'].rstrip('s')
+                    category='Active' if publication.get('state')=='LIVE' else row['category'].rstrip('s')
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
                     name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a href="'+escape(target,quote=True)+'" target="_self">'+escape(row['name'])+'</a><small>'+escape(label)+'</small></div></div>'
-                    values=[name,escape(label),format(row['entered'],','),format(row['sent'],','),percentage(row['delivered'],row['sent']),
-                      percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),format(row['orders'],','),escape(money(row.get('revenue'))),
-                      '<span class="sc-auto-pill '+('active' if category=='Active' else '')+'">'+escape(category)+'</span>']
+                    values=[name,escape(label),number(row['entered']),number(row['sent']),percentage(row['delivered'],row['sent']),
+                      percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),number(row['orders']),escape(money(row.get('revenue'))),
+                      '<span data-auto-status="'+str(row['id'])+'">'+status_html(category,publication)+'</span>']
                     st.html('<div class="sc-auto-row">'+''.join('<div>'+s+'</div>' for s in values)+'</div>')
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
                         with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
-                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):analytics(shop,store,user,row['id'])
+                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):analytics(shop,store,user,row['id'],name=row['name'])
                             if st.button('Open editor',icon=':material/edit:',use_container_width=True,key='auto_open_'+str(row['id'])):open_flow(row['id'])
                             if st.button('Duplicate',icon=':material/content_copy:',use_container_width=True,key='auto_duplicate_'+str(row['id'])):
                                 duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])
-                            if st.button('Archive',icon=':material/archive:',use_container_width=True,disabled=category=='Archived',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)
-                            if st.button('Delete',icon=':material/delete:',use_container_width=True,disabled=category not in ('Draft','Archived'),help='Archive first to retain active flow safety.' if category not in ('Draft','Archived') else None,key='auto_delete_'+str(row['id'])):delete_dialog(store,user,row)
+                            if st.button('Archive',icon=':material/archive:',use_container_width=True,disabled=category=='Archived' or publication.get('state')=='PUBLISHING',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)
+                            if st.button('Delete',icon=':material/delete:',use_container_width=True,disabled=category not in ('Draft','Archived') or publication.get('state')=='PUBLISHING',help='Archive first to retain active flow safety.' if category not in ('Draft','Archived') else None,key='auto_delete_'+str(row['id'])):delete_dialog(store,user,row)
         if not records:st.caption('No automations match this view.')
         st.caption('Showing '+str(offset+1 if records else 0)+'–'+str(offset+min(len(records),PAGE_SIZE))+' · click an automation to edit its settings.')
         prev,nxt=st.columns(2)
@@ -322,8 +322,58 @@ def table(shop,store,user):
         if nxt.button('Next',disabled=len(records)<=PAGE_SIZE,key='auto_next'):state['offset']=offset+PAGE_SIZE;st.rerun()
 
 
+def arm_section(key,seconds,script=None):
+    """Above-fold completion wakeup, scoped to its owning fragment."""
+    from uuid import uuid4
+    import json
+    st.button('Refresh automation section',key=key)
+    (script.html if script is not None else st.html)('<span id="'+key+'-controller" hidden></span><style>.st-key-'+key+'{display:none}</style><script>/* '+uuid4().hex+' */'+
+      '(()=>{window.scAutoTimers??={};const key='+json.dumps(key)+';clearTimeout(window.scAutoTimers[key]);'+
+      'const tick=()=>{if(!document.getElementById(key+"-controller"))return;const b=document.querySelector(".st-key-"+key+" button");if(!b){window.scAutoTimers[key]=setTimeout(tick,200);return;}'+
+      'if(document.hidden||document.querySelector("[role=dialog],[data-testid=stPopoverBody],[role=listbox]")||document.activeElement?.closest("[class*=st-key-auto-actions-]")){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
+      'if(b.disabled){window.scAutoTimers[key]=setTimeout(tick,250);return;}b.click();window.scAutoTimers[key]=setTimeout(tick,500);};window.scAutoTimers[key]=setTimeout(tick,'+str(int(seconds*1000))+');})();</script>',unsafe_allow_javascript=True)
+
+
+@st.fragment(run_every='3s')
+def status_region(store):
+    """Only status JSON is polled, and only while visible jobs are pending."""
+    from crm_automation_ui import home_state
+    import json
+    state=home_state();records=state.get('visible_status_rows',[])
+    if not any(publication_state(r).get('state')=='PUBLISHING' for r in records):return
+    refresh_publications(store,records,state)
+    values={str(r['id']):status_html(r['category'].rstrip('s'),publication_state(r)) for r in records}
+    encoded=json.dumps(values).replace('<',r'\u003c')
+    st.html('<script>(()=>{const values='+encoded+';for(const el of document.querySelectorAll("[data-auto-status]")){'+
+      'const html=values[el.dataset.autoStatus];if(html&&el.innerHTML!==html)el.innerHTML=html;}})();</script>',unsafe_allow_javascript=True)
+
+
+@st.fragment(run_every='1s')
+def kpis(store,script=None):
+    controller=st.container()
+    count=read(store,('counts',None),lambda:counts(store)) or {}
+    stats=read(store,('delivery',None),lambda:summary(store,reporting_window())) or {}
+    st.html(kpi_html({**stats,**count}))
+    from crm_automation_ui import home_state
+    pending=any(home_state().get('activity',{}).get(k) in ('LOADING','REFRESHING','UNRESOLVED') for k in ('counts','delivery'))
+
+
+
+@st.fragment(run_every='1s')
+def recent(store,overview,script=None):
+    controller=st.container()
+    events=read(store,('activity',None),lambda:activity(store))
+    with st.container(key='auto-activity'):
+        st.subheader('Recent activity');st.caption('Recorded automation events · updates every 20 seconds while this page is open.')
+        if events:st.html(activity_html(events[:4] if overview else events))
+        elif events is not None:st.caption('No recorded automation activity yet.')
+        else:st.caption('Loading recent activity…')
+    from crm_automation_ui import home_state
+
+
+
 def home(shop,store,user):
-    from crm_automation_ui import home_state,chooser
+    from crm_automation_ui import home_state,chooser,job
     state=home_state();st.html(STYLE+STYLE_AUTO)
     st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
     with st.container(key='crm-campaign-home'):
@@ -331,30 +381,12 @@ def home(shop,store,user):
         title.html('<h1>Automations</h1><p style="color:#73747c">Track performance across every email flow.</p>')
         with create.container(key='auto-create'):
             if st.button('+ Create automation',type='primary',use_container_width=True):chooser(store,user)
-        stamp=monotonic()
-        if 'window' not in state or stamp-state.get('window_stamp',0)>=20:state['window']=reporting_window();state['window_stamp']=stamp
-        # Independent jobs start in one render; no Shopify calls on Home.
-        from crm_automation_ui import job
-        for key,load in ((('counts',None),lambda:counts(store)),(('delivery',None),lambda:summary(store,state['window'])),(('activity',None),lambda:activity(store))):
-            job(state,store,key,lambda key=key,load=load:payload(key,load))
-        count=read(store,('counts',None),lambda:counts(store)) or {}
-        stats=read(store,('delivery',None),lambda:summary(store,state['window'])) or {}
-        st.html(kpi_html({**stats,**count}))
+        # Reserve KPI location, but submit/render the critical list first.
+        list_script=st.empty();kpi_script=st.empty();activity_script=st.empty()
+        cards=st.container()
+        statuses=st.container()
         tab=st.segmented_control('Automation view',['Overview','Recent Activity'],default='Overview',label_visibility='collapsed',key='auto-home-tabs') or 'Overview'
-        events=read(store,('activity',None),lambda:activity(store))
-        profiles={}
-        if events and shop is not None:
-            identities=tuple(sorted({e['customer_id'] for e in events if e.get('customer_id')}))
-            def labels():
-                return {c['id']:(' '.join(filter(None,[c.get('firstName'),c.get('lastName')])) or 'Customer '+c['id'].rsplit('/',1)[-1]) for c in shop.customer_batch(list(identities))}
-            profiles=read(store,('profiles',identities),labels) or {}
-        if tab=='Overview':table(shop,store,user)
-        with st.container(key='auto-activity'):
-            st.subheader('Recent activity');st.caption('Recorded automation events · updates every 20 seconds while this page is open.')
-            if events:st.html(activity_html(events[:4] if tab=='Overview' else events,profiles))
-            elif events is not None:st.caption('No recorded automation activity yet.')
-            else:st.caption('Loading recent activity…')
-        with st.container(key='crm-auto-home-poll'):st.button('Refresh automation data',key='crm-auto-home-poll-tick')
-        st.html('<style>.st-key-crm-auto-home-poll{display:none}</style>')
-    pending=any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in state.get('activity',{}).values())
-    arm_home_poll(key='crm-auto-home-poll',seconds=.25 if pending else 20)
+        if tab=='Overview':table(shop,store,user,list_script)
+        with statuses:status_region(store)
+        with cards:kpis(store,kpi_script)
+        recent(store,tab=='Overview',activity_script)

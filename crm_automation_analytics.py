@@ -40,7 +40,7 @@ def performance(store, identity, window):
       FROM messages GROUP BY day ORDER BY day""",(identity,*window))
 
 
-def activity(store, identity=None, limit=24):
+def activity(store, identity=None, limit=24, *, bounds=None):
     # Indexed ledgers, independent bounded branches. No bodies/customer scans.
     return store.q("""SELECT * FROM (
       (SELECT j.automation_id,a.name,j.shopify_customer_id AS customer_id,j.trigger_at AS occurred_at,
@@ -65,7 +65,7 @@ def activity(store, identity=None, limit=24):
       UNION ALL (SELECT (o.evidence->>'automation_id')::uuid,a.name,o.customer_id,o.order_created_at,'Order placed',o.shopify_order_id
       FROM crm_order_attribution o JOIN crm_automations a ON a.id::text=o.evidence->>'automation_id'
       WHERE o.eligible AND (%s::uuid IS NULL OR a.id=%s::uuid) ORDER BY o.order_created_at DESC LIMIT %s)
-      ) events ORDER BY occurred_at DESC LIMIT %s""",(*(identity,identity,limit)*5,limit))
+      ) events WHERE (%s::timestamptz IS NULL OR occurred_at>=%s) AND (%s::timestamptz IS NULL OR occurred_at<%s) ORDER BY occurred_at DESC LIMIT %s""",(*(identity,identity,limit)*5,*(bounds[:1]*2+bounds[1:]*2 if bounds else (None,)*4),limit))
 
 
 CHECKOUTS='''query AutomationCheckoutAnalytics($after:String) {
@@ -149,7 +149,9 @@ def add_to_flow(shop, store, user, identity, checkout_id):
     at=now();threshold=row['config']['published'].get('abandonment_seconds',3600)
     created=date(checkout.get('createdAt'));activated=date(row.get('activated_at'))
     if not created or not activated:raise ValueError('Verified checkout and activation dates are required.')
-    if date(ledger['created_at'])<activated or created<activated:raise ValueError('This checkout predates flow activation; historical backfill is blocked.')
+    # Manual selection is intentional historical enrollment, not automatic backfill.
+    # Exact creation identity must still agree with the signed checkout ledger.
+    if abs((date(ledger['created_at'])-created).total_seconds())>1:raise ValueError('Checkout identity dates do not match the signed receipt.')
     updated=date(checkout.get('updatedAt'))
     if not updated:raise ValueError('Verified checkout activity date is required.')
     if max(date(ledger['activity_at']),updated)+timedelta(seconds=threshold)>at:raise ValueError('Checkout is not yet abandoned. Wait for the configured inactivity period.')

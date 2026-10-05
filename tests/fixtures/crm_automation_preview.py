@@ -53,6 +53,9 @@ shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'has
 shop.query.return_value={'abandonedCheckouts':{'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}}
 shop.checkout.return_value=fixture_checkout
 shop.customer_batch.return_value=[fixture_checkout['customer']]
+if st.query_params.get('fixture_analytics'):
+    from tests.fixtures.crm_checkout_analytics_data import configure
+    configure(AutomationStore(connect),shop,identities[1])
 if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
 elif st.query_params.get('fixture_delay'):
     def delayed(**kwargs):
@@ -81,7 +84,22 @@ if st.query_params.get('fixture_rerun'):
     if st.button('Synthetic lookup failure'):
         st.session_state['fixture_lookup_failure']=True
     if st.session_state.get('fixture_lookup_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic failure')
-workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+if st.query_params.get('fixture_home_delay'):
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from time import sleep
+    import crm_automation_home as home_module
+    def slow(fn):
+        def work(*args,**kwargs):
+            sleep(3)
+            return fn(*args,**kwargs)
+        return work
+    with ExitStack() as stack:
+        for name in ('rows','summary','activity'):
+            stack.enter_context(patch.object(home_module,name,slow(getattr(home_module,name))))
+        workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+else:
+    workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
 
 if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))
 if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))

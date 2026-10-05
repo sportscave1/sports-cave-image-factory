@@ -17,7 +17,7 @@ from crm_automation_ui import home
 from tests.test_crm import ADMIN
 store=Mock();store.connect=None
 def job(state,store,key,load):
- value={'all_count':1,'drafts':1,'active':0,'paused':0,'archived':0,'sent_emails':4,'bounce_rate':0.,'click_rate':25.,'orders':1} if key[0]!='table' else [{'id':'00000000-0000-0000-0000-000000000001','name':'Real fixture automation','trigger_type':'welcome','updated_at':'2026-10-02','category':'Drafts','format':'automation_flow_v1','entered':0,'sent':0,'delivered':0,'opened':0,'clicked':0,'orders':0}]
+ value={'all_count':1,'drafts':1,'active':0,'paused':0,'archived':0,'sent_emails':4,'bounce_rate':0.,'click_rate':25.,'orders':1} if key[0] not in ('table','identities') else [{'id':'00000000-0000-0000-0000-000000000001','name':'Real fixture automation','trigger_type':'welcome','updated_at':'2026-10-02','category':'Drafts','format':'automation_flow_v1','entered':0,'sent':0,'delivered':0,'opened':0,'clicked':0,'orders':0}]
  if key[0]=='delivery':value.update(delivery_rate=99.,open_rate=40.,revenue={'AUD':100},previous={})
  if key[0]=='activity':value=[]
  f=Future()
