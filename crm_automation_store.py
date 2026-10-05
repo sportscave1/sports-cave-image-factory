@@ -34,7 +34,8 @@ class AutomationStore(CampaignStore):
           VALUES(%s,%s,%s,%s,%s::jsonb) RETURNING *""",(identity,'native:'+identity,name or TRIGGERS[trigger][0],trigger,json.dumps(cfg)),True)
 
     def save_flow(self,user,identity,name,flow,revision):
-        require(user,'crm_automations_manage');validate(flow)
+        from crm_checkout_migration import migrate_flow
+        require(user,'crm_automations_manage');flow=migrate_flow(flow);validate(flow)
         if not isinstance(name,str) or not name.strip() or len(name)>150: raise ValueError('Use an automation name of 1–150 characters.')
         with self.db() as conn:
             old=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
@@ -56,7 +57,9 @@ class AutomationStore(CampaignStore):
             if not row or not native(row) or status(row)=='ARCHIVED' or row['config'].get('deleted_at'): raise ValueError('Automation is not publishable.')
             config=deepcopy(row['config'])
             if config['revision']!=revision: raise ValueError('Automation changed. Save and review again.')
-            flow=validate(config['draft']);version=config['published_version']+1;steps=[]
+            from crm_checkout_migration import migrate_flow
+            flow=validate(migrate_flow(config['draft']));config['draft']=deepcopy(flow)
+            version=config['published_version']+1;steps=[]
             from crm_automation_capabilities import require as require_trigger
             require_trigger(self,flow['trigger'])
             for index,step in enumerate(flow['emails']):
@@ -162,8 +165,10 @@ class AutomationStore(CampaignStore):
         row=self.flow(identity)
         step=next((s for s in row['config']['draft']['emails'] if s['step_id']==self.step_id),None)
         if not step: raise ValueError('Email step changed. Reopen it.')
+        from crm_checkout_migration import migrate
+        doc=migrate(step['document']) if row['config']['draft']['trigger']=='abandoned' else deepcopy(step['document'])
         return {'id':str(row['id']),'version':row['config']['revision'],'name':row['name'],
-                'document':deepcopy(step['document']),'archived_at':row['config'].get('archived_at')}
+                'document':doc,'archived_at':row['config'].get('archived_at')}
 
     def preview_document(self,doc):
         from crm_abandoned_checkout import preview_context
@@ -185,7 +190,7 @@ class AutomationStore(CampaignStore):
             if len(entries)>4:entries.pop(next(iter(entries)))
             st.session_state['_automation_hydrations']=entries
         rendered,detected=cached['document'],cached['legacy']
-        if detected:self.preview_warning='Legacy checkout block detected · preview uses native checkout products.'
+        if detected:self.preview_warning='Legacy checkout block needs migration · replace it with the native checkout products block before publishing.'
         if cached.get('style_warnings'):
             self.preview_warning+=' '+ ' '.join(cached['style_warnings'])
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')

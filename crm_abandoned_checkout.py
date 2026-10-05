@@ -206,6 +206,8 @@ def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None):
         if not data:raise ValueError('Checkout context could not be resolved.')
         result['custom_html']=result['custom_html'].replace(MARKER,block_html(data,test=test))
     reject_unresolved(result.get('custom_html',''))
+    from crm_checkout_migration import join_fragments
+    join_fragments(result)
     if not preview:return compile_document(result,strict=True)
     try:return compile_document(result,strict=False)
     except Exception as exc:
@@ -229,7 +231,15 @@ def publication_document(doc,trigger):
     total=count(doc)
     if total and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
     if total>1:raise ValueError('Use exactly one abandoned checkout products block.')
-    result=deepcopy(doc);result['middle_sections']=[s for s in result.get('middle_sections',[]) if s['type']!=BLOCK]
+    result=deepcopy(doc)
+    # Keep the migrated template's surrounding table nesting intact even for
+    # offline checks, where recipient-owned checkout data is not available.
+    from crm_checkout_migration import join_fragments
+    native_ids={s['id'] for s in result.get('middle_sections',[]) if s['type']==BLOCK}
+    for section in result.get('middle_sections',[]):
+        if section['type']==BLOCK:section.update(type='image',html='')
+    join_fragments(result)
+    result['middle_sections']=[s for s in result.get('middle_sections',[]) if s['id'] not in native_ids]
     for s in result['middle_sections']:
         if s['type'] in ('html','image'):
             s['html']=s['html'].replace(MARKER,'');reject_unresolved(s['html'])

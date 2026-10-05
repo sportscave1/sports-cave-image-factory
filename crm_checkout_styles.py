@@ -46,28 +46,50 @@ def declarations(source):
     return result
 
 
+def _css_blocks(css):
+    """Read balanced blocks; ordinary email media rules are outside our contract."""
+    while css.strip():
+        opening=css.find('{')
+        if opening<0:
+            yield css.strip(), None
+            return
+        depth=1;end=opening+1;quote=None
+        while end<len(css) and depth:
+            char=css[end]
+            if quote:
+                if char==quote and css[end-1]!='\\':quote=None
+            elif char in ('"', "'"):quote=char
+            elif char=='{':depth+=1
+            elif char=='}':depth-=1
+            end+=1
+        yield css[:opening].strip(), css[opening+1:end-1] if not depth else None
+        if depth:return
+        css=css[end:]
+
+
 def rules(source,*,strict=True):
     result={}
-    for css in STYLE.findall(source):
-        css=re.sub(r'/\*.*?\*/','',css,flags=re.S)
-        while css.strip():
-            match=re.match(r'\s*([^{}]+)\{([^{}]*)\}',css)
-            if not match:
-                if strict:raise ValueError('Use simple .sc-cart-* checkout CSS rules.')
-                break
-            try:values=declarations(match[2])
+    def scan(css,nested=False):
+        for selector,body in _css_blocks(css):
+            if selector.startswith('@'):
+                # Checkout media/nested rules cannot be faithfully inlined.
+                if body is not None:scan(body,nested=True)
+                elif strict and re.search(r'\.sc-cart-',selector):raise ValueError('Use simple .sc-cart-* checkout CSS rules.')
+                continue
+            if not re.search(r'\.sc-cart-[\w-]*',selector):continue
+            selectors=[item.strip() for item in selector.split(',')]
+            if nested or body is None or any(item not in {'.'+name for name in CLASSES} for item in selectors):
+                if strict:raise ValueError('Only the checkout class contract can be styled here.')
+                continue
+            try:values=declarations(body)
             except ValueError:
                 if strict:raise
-                css=css[match.end():];continue
-            for selector in match[1].split(','):
-                name=selector.strip().removeprefix('.')
-                if selector.strip()!='.'+name or name not in CLASSES:
-                    if strict:raise ValueError('Only the checkout class contract can be styled here.')
-                    continue
-                existing=result.setdefault(name,{})
+                continue
+            for item in selectors:
+                existing=result.setdefault(item[1:],{})
                 for prop,value in values.items():
                     if prop not in existing or value[1] or not existing[prop][1]:existing[prop]=value
-            css=css[match.end():]
+    for css in STYLE.findall(source):scan(re.sub(r'/\*.*?\*/','',css,flags=re.S))
     return result
 
 
@@ -91,7 +113,14 @@ class Inline(HTMLParser):
 
 
 def compile_html(source,theme):
-    parser=Inline(theme);parser.feed(STYLE.sub('',source));parser.close();return ''.join(parser.parts)
+    def consumed(match):
+        css=re.sub(r'/\*.*?\*/','',match[1],flags=re.S)
+        blocks=list(_css_blocks(css))
+        # General/mixed styles belong to the shared email sanitizer. Only a
+        # checkout-only stylesheet has been fully consumed by this inliner.
+        owned={'.'+name for name in CLASSES}
+        return '' if blocks and all(body is not None and all(s.strip() in owned for s in selector.split(',')) for selector,body in blocks) else match[0]
+    parser=Inline(theme);parser.feed(STYLE.sub(consumed,source));parser.close();return ''.join(parser.parts)
 
 
 def sources(doc):

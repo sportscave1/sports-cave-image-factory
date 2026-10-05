@@ -42,7 +42,7 @@ class PreviewFallbackTests(unittest.TestCase):
     def test_known_marker_reuses_same_native_renderer(self):
         doc=self.legacy_document();doc['middle_sections'][0]['html']='<h2>Before</h2><!--SC_ABANDONED_CHECKOUT--><p>After</p>'
         result,warning=document(doc,context(checkout()))
-        self.assertTrue(warning);self.assertIn('Before',str(result));self.assertIn('After',str(result))
+        self.assertFalse(warning);self.assertIn('Before',str(result));self.assertIn('After',str(result))
         self.assertNotIn('SC_ABANDONED_CHECKOUT',str(result))
 
     def test_incomplete_legacy_token_does_not_blank_surrounding_design(self):

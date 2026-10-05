@@ -74,7 +74,8 @@ def legacy_html(source,markup):
 
 def document(doc,data,*,test=False,preview_warnings=None):
     """Render-copy substitution; authored sections/IDs and saved content stay intact."""
-    result=deepcopy(doc);warning=False;markup=block_html(data,test=test)
+    from crm_checkout_migration import migrate
+    result=migrate(doc);warning=False;markup=block_html(data,test=test)
     for section in result.get('middle_sections',[]):
         if section.get('type') in ('html','image'):
             section['html'],detected=legacy_html(section['html'],markup);warning|=detected
