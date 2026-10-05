@@ -120,7 +120,17 @@ class AutomationStore(CampaignStore):
         conn.execute("UPDATE crm_marketing_sends s SET due_at=s.due_at+%s::interval FROM crm_automation_enrollments e WHERE s.enrollment_id=e.id AND e.automation_id=%s AND s.status IN ('PENDING','CLAIMED')",(interval,identity))
 
     def duplicate(self,user,identity):
-        old=self.flow(identity);row=self.create(user,old['config']['draft']['trigger'],old['name']+' copy')
+        require(user,'crm_automations_manage')
+        old=self.get('automations',str(uuid.UUID(str(identity))))
+        if not old or old['config'].get('deleted_at'):raise ValueError('Automation unavailable.')
+        if not native(old):
+            # Legacy duplication stays an unpublished legacy definition; never
+            # mutate its original live steps or enrollments.
+            copy_id=str(uuid.uuid4())
+            cfg=deepcopy(old['config']);cfg.pop('archived_at',None);cfg.pop('deleted_at',None)
+            return self.q("INSERT INTO crm_automations(id,automation_key,name,trigger_type,status,steps,config) VALUES(%s,%s,%s,%s,'DRAFT',%s::jsonb,%s::jsonb) RETURNING *",
+              (copy_id,'legacy-copy:'+copy_id,old['name']+' copy',old['trigger_type'],json.dumps(old['steps']),json.dumps(cfg)),True)
+        row=self.create(user,old['config']['draft']['trigger'],old['name']+' copy')
         flow=deepcopy(old['config']['draft'])
         for step in flow['emails']: step['step_id']=str(uuid.uuid4())
         return self.save_flow(user,row['id'],row['name'],flow,1)

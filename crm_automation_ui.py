@@ -1,18 +1,11 @@
 """Automations: the existing email Home and composer with trigger/flow controls."""
 from copy import deepcopy
-from html import escape
 import uuid
-from time import monotonic
 import streamlit as st
 from crm_automation_definition import TRIGGERS,MARKETS,email_step,status
 from crm_automation_store import AutomationStore
-from crm_campaign_home import STYLE,kpis
-from crm_campaign_home_cache import job,resolve
-from crm_campaign_home_data import invalidate
+from crm_campaign_home_cache import job
 from crm_store import StoreUnavailable
-
-TABS=('All automations','Drafts','Active','Paused','Archived')
-
 
 def home_state():return st.session_state.setdefault('automation_home_state',{})
 
@@ -33,10 +26,7 @@ def open_flow(identity):
 @st.dialog('Create automation',width='small')
 def chooser(store,user):
     st.caption('Choose a trigger. Publishing listens for future events only.')
-    capabilities=store.state('shopify_automation_capabilities')
     for kind,(name,label,_) in TRIGGERS.items():
-        available=capabilities.get('triggers',{}).get(kind,'UNVERIFIED')
-        st.caption(label+' · '+available+' · drafts can be prepared before connection')
         if st.button(name+' · '+label,key='auto_create_'+kind,use_container_width=True):
             row=store.create(user,kind);changed();open_flow(row['id'])
     with st.expander('Start from scratch'):
@@ -56,101 +46,9 @@ def delete_dialog(store,user,row):
 
 
 @st.fragment
-def metrics(store):
-    from crm_automation_home_data import counts,delivery_summary,orders_summary,reporting_window
-    state=home_state();stamp=monotonic()
-    if 'window' not in state or stamp-state.get('window_stamp',0)>=20:
-        state['window']=reporting_window();state['window_stamp']=stamp
-    window=state['window'];data={};errors=[]
-    for name,load,fields in (('counts',lambda:counts(store),('all_count','drafts','active','paused','archived')),
-        ('delivery',lambda:delivery_summary(store,window),('sent_emails','bounce_rate','click_rate')),
-        ('attribution',lambda:orders_summary(store,window),('orders',))):
-        key=(name,None);value,activity=resolve(state,store,key,job(state,store,key,load),fields=fields)
-        state.setdefault('activity',{})[name]=activity
-        if value:data.update(value)
-        if activity=='ERROR':errors.append(name)
-    st.html(kpis(data,active_note='automations'))
-    if errors:st.caption('Some statistics could not refresh. Last verified values remain visible.')
-
-
-@st.fragment
-def table(store,user):
-    from crm_automation_home_data import counts,rows,PAGE_SIZE
-    state=home_state()
-    c,_=resolve(state,store,('counts',None),job(state,store,('counts',None),lambda:counts(store)),fields=('all_count','drafts','active','paused','archived'))
-    with st.container(key='crm-home-list'):
-        labels=dict(zip(TABS,('all_count','drafts','active','paused','archived')))
-        tab=st.segmented_control('Automation status',TABS,default=TABS[0],format_func=lambda t:t+' '+str((c or {}).get(labels[t],'—')),key='crm-home-tabs') or TABS[0]
-        st.html('<style>.st-key-crm-home-tabs button:nth-child('+str(TABS.index(tab)+1)+'){border-bottom:2px solid #c7a13f!important;color:#161616!important;font-weight:600}</style>')
-        with st.container(key='crm-home-controls'):
-            search,filter_col,sort=st.columns([3,1,1])
-            query=search.text_input('Search automations',placeholder='Search automations...',label_visibility='collapsed',key='auto_search')
-            trigger=filter_col.selectbox('Trigger',['All',*TRIGGERS],format_func=lambda t:'All triggers' if t=='All' else TRIGGERS[t][1],label_visibility='collapsed',key='auto_filter')
-            order=sort.selectbox('Sort',['Newest first','Oldest first'],label_visibility='collapsed',key='auto_sort')
-        criteria=(tab,query,trigger,order)
-        if state.get('criteria')!=criteria:state['offset']=0;state['criteria']=criteria
-        offset=state.get('offset',0);key=('table',criteria,offset)
-        result,activity=resolve(state,store,key,job(state,store,key,lambda:rows(store,tab=tab,search=query,trigger=trigger,oldest=order=='Oldest first',offset=offset)))
-        state.setdefault('activity',{})['table']=activity
-        if activity=='ERROR':st.caption('List refresh failed. Previously verified rows are retained.')
-        if result is None:st.caption('Loading automations…');return
-        fields=('Automation','Trigger','Updated','Entered','Sent','Delivered','Opened','Clicked','Orders','Status')
-        st.html('<div class="sc-auto-head">'+''.join('<div>'+f+'</div>' for f in fields)+'</div>')
-        for row in result[:PAGE_SIZE]:
-            with st.container(horizontal=True,key='auto-row-'+str(row['id'])):
-                with st.container(width='stretch'):
-                    updated=str(row['updated_at'])[:10]
-                    values=(row['name'],TRIGGERS.get(row['trigger_type'],('', 'Legacy flow'))[1],updated,*[format(row[k],',') for k in ('entered','sent','delivered','opened','clicked','orders')],row['category'].rstrip('s').upper())
-                    st.html('<div class="sc-auto-row">'+''.join('<div>'+escape(str(v))+'</div>' for v in values)+'</div>')
-                with st.container(width=80,horizontal=True,gap='xxsmall',key='auto-actions-'+str(row['id'])):
-                    with st.popover('Actions',key='auto_actions_'+str(row['id'])):
-                        if st.button('Open',key='auto_open_'+str(row['id'])):open_flow(row['id'])
-                        if row['format']=='automation_flow_v1' and st.button('Duplicate',key='auto_duplicate_'+str(row['id'])):
-                            copy=store.duplicate(user,row['id']);changed();open_flow(copy['id'])
-                        action={'Active':'pause','Paused':'resume'}.get(row['category']) if row['format']=='automation_flow_v1' else ('pause' if row['category']=='Active' else None)
-                        if action and st.button(action.title(),key='auto_lifecycle_'+str(row['id'])):store.lifecycle(user,row['id'],action);changed();st.rerun(scope='fragment')
-                        if row['category'] in ('Paused','Drafts') and st.button('Archive',key='auto_archive_'+str(row['id'])):store.lifecycle(user,row['id'],'archive');changed();st.rerun(scope='fragment')
-                    if row['category'] in ('Drafts','Archived'):
-                        with st.container(key='auto-trash-'+str(row['id'])):
-                            if st.button('Delete automation',icon=':material/delete:',key='auto_delete_'+str(row['id']),help='Delete automation'):
-                                delete_dialog(store,user,row)
-        if not result:st.caption('No automations match this view.')
-        previous,next_col=st.columns(2)
-        if previous.button('Previous',disabled=offset==0,key='auto_previous'):state['offset']=max(0,offset-PAGE_SIZE);st.rerun(scope='fragment')
-        if next_col.button('Next',disabled=len(result)<=PAGE_SIZE,key='auto_next'):state['offset']=offset+PAGE_SIZE;st.rerun(scope='fragment')
-
-
-@st.fragment
-def home(store,user):
-    st.html(STYLE)
-    st.html('''<style>.sc-auto-head,.sc-auto-row{display:grid;grid-template-columns:minmax(150px,2.5fr) minmax(90px,1.3fr) 76px repeat(6,minmax(32px,.55fr)) 65px;gap:8px;align-items:center;font-size:12px;min-width:0;padding:12px 0;border-bottom:1px solid #eee}.sc-auto-head{font-size:10px;color:#777}.sc-auto-row>div{min-width:0;overflow-wrap:anywhere}
-    .sc-auto-head{margin-right:88px;position:relative}.sc-auto-head::after{content:"Actions";position:absolute;right:-88px;width:80px;text-align:center}
-    [class*="st-key-auto-actions-"]{flex-wrap:nowrap!important}
-    [class*="st-key-auto-actions-"]>[data-testid="stLayoutWrapper"]{width:36px!important;flex:0 0 36px!important}
-    [class*="st-key-auto-row-"] [data-testid="stPopover"]{width:36px!important;flex:0 0 36px!important}
-    [class*="st-key-auto-row-"] [data-testid="stPopover"] button{width:36px!important;padding:4px!important}
-    [class*="st-key-auto-row-"] [data-testid="stPopover"] button p{font-size:0!important}
-    [class*="st-key-auto-row-"] [data-testid="stPopover"] button p::after{content:"⋯";font-size:18px}
-    [class*="st-key-auto-row-"] [data-testid="stPopover"] button svg{display:none}
-    [class*="st-key-auto-row-"]{gap:8px!important}[class*="st-key-auto-row-"] button{min-height:36px}
-    [class*="st-key-auto-trash-"] button{width:36px!important;height:36px!important;padding:5px!important}[class*="st-key-auto-trash-"] button p{font-size:0!important}
-    .st-key-crm-campaign-home button[kind="primary"]{background:#c8a346!important;color:#141414!important;border-color:#c8a346!important}
-    .st-key-crm-home-tabs button[aria-pressed="true"]{border-bottom:2px solid #c7a13f!important;color:#161616!important;font-weight:600}
-    .sc-auto-row>div:last-child{display:inline-block;padding:4px 6px;background:#f4f2ed;border-radius:6px;font-size:11px;text-align:center}
-    @media(max-width:1000px){.sc-auto-head>div:nth-child(3),.sc-auto-row>div:nth-child(3),.sc-auto-head>div:nth-child(7),.sc-auto-row>div:nth-child(7),.sc-auto-head>div:nth-child(9),.sc-auto-row>div:nth-child(9){display:none}.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(120px,2fr) 85px repeat(4,minmax(32px,.6fr)) 60px}}
-    @media(max-width:700px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(0,1.8fr) 48px 26px 45px;font-size:11px;gap:5px}.sc-auto-head>div:nth-child(4),.sc-auto-row>div:nth-child(4),.sc-auto-head>div:nth-child(6),.sc-auto-row>div:nth-child(6),.sc-auto-head>div:nth-child(8),.sc-auto-row>div:nth-child(8){display:none}}
-    </style>''')
-    with st.container(key='crm-campaign-home'):
-        title,create=st.columns([3,1],vertical_alignment='center')
-        title.html('<h1>Automations</h1><p style="color:#73747c">Create and manage trigger-based email flows.</p>')
-        if create.button('+ Create automation',type='primary',use_container_width=True):chooser(store,user)
-        metrics(store);table(store,user)
-        with st.container(key='crm-auto-home-poll'):
-            st.button('Refresh automation data',key='crm-auto-home-poll-tick')
-        st.html('<style>.st-key-crm-auto-home-poll{display:none}</style>')
-    from crm_campaign_home import arm_home_poll
-    pending=any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in home_state().get('activity',{}).values())
-    arm_home_poll(key='crm-auto-home-poll',seconds=.25 if pending else 20)
+def home(store,user,shop=None):
+    from crm_automation_home import home as render_home
+    render_home(shop,store,user)
 
 
 def flow_email_control(flow,identity,selected):
@@ -299,8 +197,6 @@ def detail(shop,store,actions,identity):
                 st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None)
                 st.session_state['automation_notice']='Automation published · listening for future events';st.rerun()
             except (ValueError,StoreUnavailable,PermissionError) as exc:st.error(safe_error(exc))
-    from crm_automation_diagnostic_ui import control as diagnostic_control
-    diagnostic_control(shop,store,user,flow['trigger'],key)
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
     if st.toggle('Show email step analytics',key='auto_step_stats'):
@@ -341,5 +237,5 @@ def workspace(shop,base,actions,navigate=lambda _:None):
                     detail(shop,store,actions,identity)
         else:
             st.session_state.pop('_automation_preview_open',None)
-            home(store,actions.user)
+            home(store,actions.user,shop=shop)
     except (StoreUnavailable,ValueError,PermissionError) as exc:st.warning(str(exc))

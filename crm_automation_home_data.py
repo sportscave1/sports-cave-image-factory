@@ -13,7 +13,7 @@ def delivery_summary(store,window):
     # Same verified per-message event semantics and accepted denominator as Home.
     return store.q("""WITH recipients AS (
       SELECT j.automation_id,s.id,bool_or(e.event_type='email.delivered') AS delivered,
-        bool_or(e.event_type='email.clicked') AS clicked,
+        bool_or(e.event_type='email.clicked') AS clicked,bool_or(e.event_type='email.opened') AS opened,
         bool_or(e.event_type='email.bounced' AND e.occurred_at>=%s AND e.occurred_at<%s) AS bounced
       FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
       LEFT JOIN crm_delivery_events e ON e.send_id=s.id
@@ -21,7 +21,10 @@ def delivery_summary(store,window):
       GROUP BY j.automation_id,s.id
     ), rates AS (SELECT automation_id,100.0*count(*) FILTER(WHERE delivered AND clicked)/NULLIF(count(*) FILTER(WHERE delivered),0) AS rate FROM recipients GROUP BY automation_id)
     SELECT count(*) AS sent_emails,100.0*count(*) FILTER(WHERE bounced)/NULLIF(count(*),0) AS bounce_rate,
-      (SELECT avg(rate) FROM rates) AS click_rate FROM recipients""",(*window,*window),one=True)
+      (SELECT avg(rate) FROM rates) AS click_rate,
+      100.0*count(*) FILTER(WHERE delivered)/NULLIF(count(*),0) AS delivery_rate,
+      100.0*count(*) FILTER(WHERE delivered AND opened)/NULLIF(count(*) FILTER(WHERE delivered),0) AS open_rate
+      FROM recipients""",(*window,*window),one=True)
 
 
 def orders_summary(store,window):
@@ -45,7 +48,10 @@ def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offs
       count(*) FILTER(WHERE delivered AND clicked) AS clicked FROM recipients GROUP BY automation_id)
     SELECT p.*,COALESCE(t.sent,0) AS sent,COALESCE(t.delivered,0) AS delivered,COALESCE(t.opened,0) AS opened,COALESCE(t.clicked,0) AS clicked,
       (SELECT count(*) FROM crm_automation_enrollments j WHERE j.automation_id=p.id) AS entered,
-      (SELECT count(*) FROM crm_order_attribution o WHERE o.eligible AND o.evidence->>'automation_id'=p.id::text) AS orders
+      (SELECT count(*) FROM crm_order_attribution o WHERE o.eligible AND o.evidence->>'automation_id'=p.id::text) AS orders,
+      (SELECT COALESCE(jsonb_object_agg(currency,amount),'{}') FROM
+        (SELECT o.currency,sum(o.amount) AS amount FROM crm_order_attribution o WHERE o.eligible
+        AND o.evidence->>'automation_id'=p.id::text GROUP BY o.currency) money) AS revenue
       FROM page p LEFT JOIN totals t ON t.automation_id=p.id ORDER BY p.updated_at """+('ASC' if oldest else 'DESC')+",p.id",
       (tab,tab,search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
 

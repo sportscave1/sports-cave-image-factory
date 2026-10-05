@@ -2,6 +2,8 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const path=require('node:path');
+const fs=require('node:fs');
+const evidence=path.resolve(process.env.CODEX_AUTOMATION_EVIDENCE || 'test-results/automation-home');fs.mkdirSync(evidence,{recursive:true});
 (async()=>{
  const browser=await chromium.launch({channel:'msedge',headless:true});
  try{
@@ -13,19 +15,29 @@ const path=require('node:path');
    await page.getByRole('button',{name:'+ Create automation',exact:true}).waitFor();
    await page.locator('.sc-auto-row').first().waitFor();
    assert.equal(await page.getByTestId('stException').count(),0);
-   assert.equal(await page.locator('.sc-home-kpi').count(),5);
+   assert.equal(await page.locator('.sc-auto-kpi').count(),6);
    const geometry=await page.evaluate(()=>({width:innerWidth,body:document.documentElement.scrollWidth,
      rowOverflow:[...document.querySelectorAll('.sc-auto-row')].some(e=>e.scrollWidth>e.clientWidth+2)}));
    assert.ok(geometry.body<=width+2,JSON.stringify(geometry));
    assert.ok(!geometry.rowOverflow,JSON.stringify(geometry));
-   await page.getByRole('button',{name:/Delete automation/}).first().waitFor();
-   for(const b of await page.getByRole('button',{name:/Delete automation/}).all())assert.ok((await b.boundingBox()).height<=40);
-   await page.screenshot({path:path.resolve('docs/performance-evidence/automation-home-'+width+'.png'),fullPage:true});
-   console.log('Automations Home '+width+'px: no overflow; five KPI cards; real fixture rows');
+   assert.equal(await page.getByText('Shopify trigger diagnostic',{exact:true}).count(),0);
+   await page.getByRole('button',{name:'Overview',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Recent Activity',exact:true}).waitFor();
+   await page.screenshot({path:path.join(evidence,'automation-home-'+width+'.png'),fullPage:true});
+   console.log('Automations Home '+width+'px: no overflow; six KPI cards; real fixture rows');
   }
   await page.setViewportSize({width:1366,height:768});
   const rowsBefore=await page.locator('.sc-auto-row').count();
-  await page.getByRole('button',{name:/Delete automation/}).first().click();
+  await page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first().getByTestId('stPopoverButton').first().click();
+  await page.getByRole('button',{name:'Analytics',exact:true}).click();
+  await page.getByRole('dialog').waitFor();
+  await page.getByRole('heading',{name:'Abandoned checkouts',exact:true}).waitFor();
+  assert.equal(await page.getByTestId('stException').count(),0);
+  await page.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.waitForTimeout(750);
+  if(!await page.getByRole('button',{name:'Delete',exact:true}).isVisible())await page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first().getByTestId('stPopoverButton').first().click();
+  await page.getByRole('button',{name:'Delete',exact:true}).click();
   await page.getByRole('dialog').waitFor();
   await page.getByRole('button',{name:'Cancel',exact:true}).click();
   await page.getByRole('dialog').waitFor({state:'hidden'});
@@ -48,7 +60,7 @@ const path=require('node:path');
    const geometry=await page.evaluate(()=>({width:innerWidth,body:document.documentElement.scrollWidth}));
    assert.ok(geometry.body<=width+2,JSON.stringify(geometry));
    assert.equal(await page.getByTestId('stException').count(),0);
-   await page.screenshot({path:path.resolve('docs/performance-evidence/automation-editor-'+width+'.png'),fullPage:true});
+   await page.screenshot({path:path.join(evidence,'automation-editor-'+width+'.png'),fullPage:true});
    console.log('Shared automation editor '+width+'px: no horizontal overflow');
   }
   await page.setViewportSize({width:1366,height:768});

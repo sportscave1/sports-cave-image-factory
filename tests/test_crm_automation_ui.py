@@ -18,7 +18,13 @@ from tests.test_crm import ADMIN
 store=Mock();store.connect=None
 def job(state,store,key,load):
  value={'all_count':1,'drafts':1,'active':0,'paused':0,'archived':0,'sent_emails':4,'bounce_rate':0.,'click_rate':25.,'orders':1} if key[0]!='table' else [{'id':'00000000-0000-0000-0000-000000000001','name':'Real fixture automation','trigger_type':'welcome','updated_at':'2026-10-02','category':'Drafts','format':'automation_flow_v1','entered':0,'sent':0,'delivered':0,'opened':0,'clicked':0,'orders':0}]
- f=Future();f.set_result(value);state.setdefault('campaign_home_cache',{})[(store.connect,key)]=(None,f);return f
+ if key[0]=='delivery':value.update(delivery_rate=99.,open_rate=40.,revenue={'AUD':100},previous={})
+ if key[0]=='activity':value=[]
+ f=Future()
+ if not st.session_state.get('pending'):
+  if st.session_state.get('failed') and key[0]=='delivery':f.set_exception(ValueError('Private diagnostic'))
+  else:f.set_result([value])
+ state.setdefault('campaign_home_cache',{})[(store.connect,key)]=(None,f);return f
 with patch('crm_automation_ui.job',side_effect=job):home(store,ADMIN)
 '''
 
@@ -67,14 +73,14 @@ class AutomationUiTests(unittest.TestCase):
         selector.assert_called_once();additions.assert_called_once();store.save_flow.assert_not_called()
         self.assertEqual(row,original);self.assertEqual(editor['version'],3)
 
-    def test_home_shared_kpis_tabs_no_revenue_or_legacy_shell(self):
+    def test_home_six_kpis_overview_activity_and_action_menu(self):
         app=AppTest.from_string(HOME_SCRIPT).run()
         self.assertFalse(app.exception)
         html='\n'.join(e.proto.body for e in app.get('html'))
-        for value in ('Automations','Bounce rate','Real fixture automation','Customer subscribes to email'):self.assertIn(value,html)
-        for value in ('Revenue','EMAIL · AUTOMATIONS','sc-email-loading'):self.assertNotIn(value,html)
-        self.assertEqual(html.count('class="sc-home-kpi"'),5)
-        self.assertTrue(any(b.label=='Delete automation' for b in app.button))
+        for value in ('Automations','Delivery rate','Open rate','Revenue from automations (30 days)','Real fixture automation','Customer subscribes to email'):self.assertIn(value,html)
+        for value in ('Bounce rate','EMAIL · AUTOMATIONS','sc-email-loading'):self.assertNotIn(value,html)
+        self.assertEqual(html.count('class="sc-auto-kpi"'),6)
+        self.assertTrue(any(b.label=='Analytics' for b in app.button))
         self.assertTrue(any(b.label=='+ Create automation' for b in app.button))
     def test_editor_context_does_not_overwrite_campaign(self):
         original={'id':'campaign','name':'Campaign','document':document()}
@@ -88,6 +94,20 @@ class AutomationUiTests(unittest.TestCase):
         auto['document']['content']['subject']='Unsaved'
         self.assertFalse(navigation_allowed(state,'CRM Automations','CRM Campaigns'))
         self.assertEqual(state['automation_requested_route'],'CRM Campaigns')
+
+    def test_loaded_cards_and_rows_survive_refresh_and_errors(self):
+        app=AppTest.from_string(HOME_SCRIPT).run()
+        before=' '.join(e.proto.body for e in app.get('html'))
+        app.session_state['pending']=True;app.run()
+        html=' '.join(e.proto.body for e in app.get('html'))
+        self.assertIn('AUD 100.00',html);self.assertIn('Real fixture automation',html)
+        app.session_state['pending']=False;app.session_state['failed']=True;app.run()
+        self.assertFalse(app.exception)
+        html=' '.join(e.proto.body for e in app.get('html'))
+        self.assertIn('AUD 100.00',html);self.assertNotIn('Private diagnostic',html)
+        app.get('button_group')[0].set_value('Recent Activity').run()
+        self.assertFalse(app.exception)
+        self.assertIn('AUD 100.00',' '.join(e.proto.body for e in app.get('html')))
     def test_automation_cache_is_independent_and_summary_survives_definition_change(self):
         from crm_automation_ui import changed
         campaign_value={'sent_emails':4,'orders':1}
@@ -100,15 +120,15 @@ class AutomationUiTests(unittest.TestCase):
         self.assertEqual(auto['campaign_home_resolved'][(None,('delivery',None))],auto_value)
         self.assertEqual(campaign['campaign_home_resolved'][(None,('delivery',None))],campaign_value)
 
-    def test_home_status_change_only_changes_selected_table_request(self):
+    def test_home_search_only_changes_selected_table_request(self):
         app=AppTest.from_string(HOME_SCRIPT.replace("def job(state,store,key,load):", "def job(state,store,key,load):\n st.session_state.setdefault('requests',[]).append(key)")).run()
         initial=app.session_state['requests']
-        self.assertEqual([k[1][0] for k in initial if k[0]=='table'],['All automations'])
+        self.assertEqual([k[1][0] for k in initial if k[0]=='table'],[''])
         # Streamlit currently exposes segmented controls as button groups.
         group=app.get('button_group')[0]
-        group.set_value('Drafts').run()
+        app.text_input[0].set_value('Reminder').run()
         self.assertFalse(app.exception)
-        self.assertEqual([k[1][0] for k in app.session_state['requests'] if k[0]=='table'],['All automations','Drafts'])
+        self.assertEqual([k[1][0] for k in app.session_state['requests'] if k[0]=='table'],['','Reminder'])
 
     def test_same_composer_preview_templates_and_test_send_are_called(self):
         source=Path('crm_automation_ui.py').read_text()

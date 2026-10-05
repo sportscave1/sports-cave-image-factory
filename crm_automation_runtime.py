@@ -10,7 +10,7 @@ from crm_automation_definition import native, qualifies
 LOG=logging.getLogger(__name__)
 
 
-def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None):
+def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False):
     """Serialize re-entry with publication/pause and freeze the complete flow."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
     if not at: return None
@@ -28,6 +28,12 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         if checkout_key:
             checkout=conn.execute("SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE",(checkout_key,)).fetchone()
             if not checkout or checkout['status']=='RECOVERED' or checkout['customer_id']!=customer_id:return None
+            if manual_checkout:
+                # Recheck under the same row locks as publication and enrollment;
+                # a concurrent checkout update must not bypass the inactivity timer.
+                if flow['trigger']!='abandoned' or row['config'].get('archived_at') or row['config'].get('deleted_at'):return None
+                if date(checkout['created_at'])<date(row['activated_at']):return None
+                if date(checkout['activity_at'])+timedelta(seconds=flow.get('abandonment_seconds',3600))>at:return None
         if not qualifies(flow,c,event_facts):return None
         # Duplicate source identities remain blocked across ALL flow versions.
         if conn.execute('SELECT 1 FROM crm_automation_enrollments WHERE automation_id=%s AND trigger_key=%s',(row['id'],event_id)).fetchone():return None

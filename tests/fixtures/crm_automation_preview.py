@@ -50,6 +50,9 @@ if st.session_state.get('fixture_new_customer'):
     fixture_checkout['customer']['firstName']='New'
     fixture_checkout['lineItems']['nodes'][0]['title']='New collector product'
 shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}
+shop.query.return_value={'abandonedCheckouts':{'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}}
+shop.checkout.return_value=fixture_checkout
+shop.customer_batch.return_value=[fixture_checkout['customer']]
 if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
 elif st.query_params.get('fixture_delay'):
     def delayed(**kwargs):

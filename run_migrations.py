@@ -57,11 +57,13 @@ CRM_MIGRATIONS = (
     '20260930051803_crm_email_attribution_hardening.sql',
     '20261002132200_crm_native_automations_v1.sql',
     '20261002143522_crm_shopify_automation_triggers_v1.sql',
+    '20261005145500_crm_automation_reporting_indexes.sql',
 )
 EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql')
 REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261005145500_crm_automation_reporting_indexes.sql': 'd5d8d421a47e39051304eff122244a71466d0e80bcbc09e280505da0b067d6ba',
     '20261005_wall_preview_crm_v2.sql': 'e7e001508496dcf6fac6bbdd2daedf76512ae3f373425f7dc09ef0c3370d1a6f',
     '20261004_wall_preview_customer_identity.sql': '5d1a26e41f876b30a6a11b46cdc618fa0cbd0ae00c0043c90542873383de18ab',
     '20261004_wall_preview_inbox.sql': 'ac072337d8cf461a6761a4ae2f415a0950b3c8769f9a6566754a7199832fdcc6',
