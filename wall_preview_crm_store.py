@@ -87,7 +87,8 @@ def confirm(payload, upload):
         cur.execute(f'''INSERT INTO public.wall_previews ({','.join(columns)},confirmed_at,share_expires_at)
             VALUES ({','.join(['%s']*(len(values)-1))},%s::jsonb,now(),now()+interval '90 days')
             ON CONFLICT(client_preview_id) DO UPDATE SET {updates},updated_at=now(),last_saved_at=now(),
-            save_count=wall_previews.save_count+1 RETURNING *''', tuple(values))
+            save_count=wall_previews.save_count+1,marketing_permission=FALSE,
+            image_reuse_consent_at=NULL,image_reuse_consent_source=NULL RETURNING *''', tuple(values))
         row = dict(cur.fetchone())
         if not previous:
             event(cur,row,'WallPreviewStarted','started')
@@ -104,18 +105,23 @@ def add_event(preview_id, token, name, event_id):
         event(cur,row,name,name+':'+key)
 
 
-def request_email(preview_id, token, address):
+def request_email(preview_id, token, address, options=None):
+    options = options or {}
     with transaction() as cur:
         row = authorize(cur,preview_id,token)
+        if not row.get('confirmed_at') or row.get('share_revoked_at') or not row.get('share_token'):
+            raise ValueError('A confirmed available preview is required.')
         # One recipient and one immediate request per preview, including network retries.
         if row.get('email_requested_at') and row.get('customer_email') != address:
             raise ValueError('This preview email has already been requested.')
-        if not row.get('email_requested_at'):
-            cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',('wall-preview-email:'+address,))
-            cur.execute('''SELECT count(*) AS n FROM public.wall_previews WHERE customer_email=%s
-                AND email_requested_at>now()-interval '1 day' ''',(address,))
-            if (cur.fetchone() or {}).get('n',0)>=3:
-                raise ValueError('Preview email request limit reached.')
+        if row.get('email_requested_at'):
+            cur.execute("SELECT state FROM public.wall_preview_email_jobs WHERE preview_id=%s AND kind='requested'", (preview_id,))
+            return (cur.fetchone() or {}).get('state','queued')
+        cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',('wall-preview-email:'+address,))
+        cur.execute('''SELECT count(*) AS n FROM public.wall_previews WHERE customer_email=%s
+            AND email_requested_at>now()-interval '1 day' ''',(address,))
+        if (cur.fetchone() or {}).get('n',0)>=3:
+            raise ValueError('Preview email request limit reached.')
         cur.execute('''UPDATE public.wall_previews SET customer_email=%s,
             identity_source=CASE WHEN identity_source='logged_in' AND customer_email=%s THEN identity_source ELSE 'email_capture' END,
             shopify_customer_id=CASE WHEN customer_email=%s THEN shopify_customer_id ELSE '' END,
@@ -123,7 +129,22 @@ def request_email(preview_id, token, address):
             email_requested_at=COALESCE(email_requested_at,now()),updated_at=now() WHERE id=%s RETURNING *''',
             (address,address,address,address,preview_id))
         row = dict(cur.fetchone())
-        event(cur,row,'WallPreviewEmailCaptured','email-requested')
+        reuse = options.get('image_reuse_allowed')
+        optin = options.get('marketing_opt_in')
+        cur.execute('''UPDATE public.wall_previews SET customer_name=CASE WHEN %s<>'' THEN %s ELSE customer_name END,
+            marketing_permission=%s, image_reuse_consent_at=CASE WHEN %s::boolean IS NOT NULL THEN now() ELSE NULL END,
+            image_reuse_consent_source=%s, submitted_marketing_opt_in=%s,
+            marketing_consent_at=CASE WHEN %s::boolean IS NOT NULL THEN now() ELSE NULL END,
+            marketing_consent_source=%s WHERE id=%s RETURNING *''',
+            (options.get('name',''),options.get('name',''),reuse is True,reuse,
+             options.get('reuse_consent_source') if reuse is not None else None,optin,optin,
+             options.get('marketing_consent_source') if optin is not None else None,preview_id))
+        row = dict(cur.fetchone())
+        event(cur,row,'WallPreviewEmailCaptured','email-requested',
+              {'image_reuse_allowed':reuse,'marketing_opt_in':optin,'email':address,
+               'shopify_customer_id':row.get('shopify_customer_id') or None})
+        cur.execute('''INSERT INTO public.wall_preview_customer_jobs(preview_id) VALUES (%s)
+            ON CONFLICT(preview_id) DO NOTHING''',(preview_id,))
         for kind, hours in (('requested',0),('4h',4),('24h',24)):
             cur.execute('''INSERT INTO public.wall_preview_email_jobs(preview_id,kind,due_at)
                 VALUES (%s,%s,now()+%s*interval '1 hour') ON CONFLICT(preview_id,kind) DO NOTHING''',

@@ -159,8 +159,10 @@ async def _action(request):
             await run_in_threadpool(store.add_event,preview_id,token,payload.get('event_name'),payload.get('event_id'))
             result = {'ok':True}
         else:
-            if set(payload)-{'email','product_url','requested_at'}:
+            if set(payload)-{'email','product_url','requested_at','name','image_reuse_allowed',
+                             'marketing_opt_in','marketing_consent_source','reuse_consent_source'}:
                 raise ValueError('Unsupported email fields.')
+            options = email_options(payload)
             address = identity.normalize_email(payload.get('email'))
             # Never queue emails to reserved/testing domains; useful production non-delivery check.
             if address.rsplit('@',1)[-1].endswith(('.invalid','.test','.example')):
@@ -168,7 +170,7 @@ async def _action(request):
             from wall_preview_email import configured
             if not configured(address):
                 return JSONResponse({'ok':False,'error':'email_delivery_not_configured'},status_code=503,headers=cors)
-            state = await run_in_threadpool(store.request_email,preview_id,token,address)
+            state = await run_in_threadpool(store.request_email,preview_id,token,address,options)
             result = {'ok':True,'preview_id':preview_id,'email_status':state,'marketing_subscribed':False}
         return JSONResponse(result,headers=cors)
     except PermissionError:
@@ -178,6 +180,27 @@ async def _action(request):
     except Exception as exc:
         LOG.warning('wall_preview_action_failed error_type=%s',type(exc).__name__)
         return JSONResponse({'ok':False,'error':'temporarily_unavailable'},status_code=503,headers=cors)
+
+
+def email_options(payload):
+    """Strict independent checkboxes, with absent values remaining unknown."""
+    options = {}
+    for key in ('image_reuse_allowed','marketing_opt_in'):
+        if key in payload and type(payload[key]) is not bool:
+            raise ValueError('Consent must be a boolean.')
+        options[key] = payload.get(key)
+    name = str(payload.get('name') or '')
+    if len(name)>200 or any(ord(c)<32 or ord(c)==127 for c in name):
+        raise ValueError('Invalid contact name.')
+    options['name'] = ' '.join(name.split())
+    for key in ('marketing_consent_source','reuse_consent_source'):
+        value = payload.get(key)
+        if value is not None and value != 'wall_preview_hd_email':
+            raise ValueError('Invalid consent source.')
+        options[key] = value or 'wall_preview_hd_email'
+    if payload.get('product_url'):
+        product_url(payload['product_url']) # never replace the canonical preview product
+    return options
 
 
 async def share(request):

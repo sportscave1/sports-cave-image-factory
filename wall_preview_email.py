@@ -42,7 +42,7 @@ def message(row, kind='requested', unsubscribe=''):
     <tr><td style="padding:24px;text-align:center"><h2 style="font-size:20px">{title}</h2><p>{context}</p>
     <a href="{html.escape(url,quote=True)}" style="display:inline-block;padding:16px 24px;background:#cfa84b;color:#111;text-decoration:none;font-weight:bold">SECURE YOUR EDITION</a>
     <p>Questions? Reply to this email.</p>{optout}</td></tr></table></td></tr></table></body></html>'''
-    subject = 'Your Sports Cave wall preview is ready' if kind=='requested' else ('Still thinking about your Sports Cave edition?' if kind=='4h' else 'See your Sports Cave edition on your wall')
+    subject = 'Your Sports Cave wall preview' if kind=='requested' else ('Still thinking about your Sports Cave edition?' if kind=='4h' else 'See your Sports Cave edition on your wall')
     return {'subject':subject,'html':body,'text':f"{heading}\n{copy}\n{row.get('product_title','')}\n{context}\nSECURE YOUR EDITION: {url}" + ('\nUnsubscribe: '+unsubscribe if unsubscribe else ''),'unsubscribe_url':unsubscribe}
 
 

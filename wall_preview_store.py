@@ -22,7 +22,9 @@ def schema_issues(cur):
                 'customer_email', 'customer_name', 'shopify_customer_id', 'identity_source',
                 'email_marketing_state', 'customer_folder', 'client_preview_id', 'session_id',
                 'archive_sha256', 'confirmed_at', 'version', 'email_requested_at', 'email_sent_at', 'share_token',
-                'share_revoked_at', 'purchased_at', 'order_id', 'order_number', 'attribution'}
+                'share_revoked_at', 'purchased_at', 'order_id', 'order_number', 'attribution',
+                'image_reuse_consent_at','image_reuse_consent_source','submitted_marketing_opt_in',
+                'marketing_consent_at','marketing_consent_source'}
     issues = ['wall_previews missing column: ' + name for name in sorted(required - columns)]
     cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='wall_previews'")
     indexes = {row['indexname'] for row in cur.fetchall()}
@@ -33,7 +35,7 @@ def schema_issues(cur):
     cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass('public.wall_previews')")
     if not (cur.fetchone() or {}).get('relrowsecurity'):
         issues.append('wall_previews RLS is not enabled')
-    for table in ('wall_preview_events','wall_preview_email_jobs'):
+    for table in ('wall_preview_events','wall_preview_email_jobs','wall_preview_customer_jobs'):
         cur.execute("SELECT relrowsecurity FROM pg_class WHERE oid=to_regclass(%s)",('public.'+table,))
         if not (cur.fetchone() or {}).get('relrowsecurity'):
             issues.append(table+' RLS is not enabled')
@@ -172,7 +174,7 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
         params.append(clean_status)
     if not include_private:
         clauses.append("marketing_permission = TRUE")
-    intent_clause = {'confirmed':'confirmed_at IS NOT NULL','email_captured':'email_requested_at IS NOT NULL',
+    intent_clause = {'reuse_allowed':'marketing_permission=TRUE','confirmed':'confirmed_at IS NOT NULL','email_captured':'email_requested_at IS NOT NULL',
                      'purchased':'purchased_at IS NOT NULL',
                      'added_to_cart':"EXISTS (SELECT 1 FROM public.wall_preview_events e WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart')"}
     if intent in intent_clause:
@@ -191,7 +193,9 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
             cur.execute("SET LOCAL statement_timeout='4000ms'")
             cur.execute(
                 f"""
-                SELECT *, EXISTS (SELECT 1 FROM public.wall_preview_events e
+                SELECT *, (SELECT state FROM public.wall_preview_email_jobs j
+                    WHERE j.preview_id=wall_previews.id AND j.kind='requested') AS email_job_state,
+                EXISTS (SELECT 1 FROM public.wall_preview_events e
                     WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart') AS added_to_cart
                 FROM public.wall_previews
                 {where}

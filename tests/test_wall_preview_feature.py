@@ -230,8 +230,8 @@ class WallPreviewUiTests(unittest.TestCase):
         html = '\n'.join(item.value for item in app.markdown)
         self.assertIn('Jane Collector', html)
         self.assertIn('jane@example.com', html)
-        self.assertIn('Private', html)
-        self.assertIn('Social approved', html)
+        self.assertIn('N/A', html)
+        self.assertIn('MARKETING USE: ALLOWED', html)
         self.assertIn('Collector edition', html)
         self.assertNotIn('\n\n', next(item.value for item in app.markdown if '<article class="sc-wall-card">' in item.value))
 

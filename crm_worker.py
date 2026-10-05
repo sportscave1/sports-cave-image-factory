@@ -24,6 +24,10 @@ def main(argv=None):
             from wall_preview_email import tick as wall_preview_tick
             wall_preview_tick()
         except Exception as exc:logging.getLogger(__name__).warning('wall_preview_worker_cycle_failed type=%s',type(exc).__name__)
+        try:
+            from wall_preview_customer import tick as wall_preview_customer_tick
+            wall_preview_customer_tick()
+        except Exception as exc:logging.getLogger(__name__).warning('wall_preview_customer_cycle_failed type=%s',type(exc).__name__)
         # Durable review imports are independent of marketing delivery gates.
         try:
             from reviews_worker import tick as review_import_tick

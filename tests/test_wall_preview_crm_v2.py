@@ -59,7 +59,7 @@ class PureTests(unittest.TestCase):
         mail=delivery.message(row)
         self.assertIn('&lt;script&gt;',mail['html']);self.assertNotIn('<script>',mail['html'])
         self.assertIn('/wall-preview/'+'a'*43+'/image',mail['html']);self.assertIn('?variant=456',mail['html'])
-        self.assertEqual(mail['subject'],'Your Sports Cave wall preview is ready')
+        self.assertEqual(mail['subject'],'Your Sports Cave wall preview')
         self.assertNotIn('Unsubscribe',mail['html'])
     def test_claimed_customer_id_never_used_as_auth(self):
         with self.assertRaises(ValueError):store.identifier('123')

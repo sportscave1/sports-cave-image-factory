@@ -207,7 +207,7 @@ def _render_card(user, row, *, key_prefix):
         email_markup = f'<div class="sc-wall-email">{safe_email}</div>'
 
     permission_class = "is-approved" if permitted else "is-private"
-    permission_label = "Social approved" if permitted else "Private"
+    permission_label = "MARKETING USE: ALLOWED" if permitted else "N/A"
     status_class = "sc-status-" + status if status in STATUS_LABELS else "sc-status-new"
 
     markup = f"""
@@ -219,6 +219,8 @@ def _render_card(user, row, *, key_prefix):
           <div class="sc-wall-card-body">
             <div class="sc-wall-customer">{safe_customer}</div>
             {email_markup}
+            {'<div class="sc-wall-details">EMAIL: SUBSCRIBED</div>' if row.get('email_marketing_state') == 'SUBSCRIBED' else ''}
+            {'<div class="sc-wall-details">HD email: ' + html.escape(str(row.get('email_job_state') or ('Sent' if row.get('email_sent_at') else 'Requested'))) + '</div>' if row.get('email_requested_at') else ''}
             {product_markup}
             {'<div class="sc-wall-details">' + safe_details + '</div>' if details else ''}
             <div class="sc-wall-card-footer">
@@ -238,7 +240,7 @@ def _render_card(user, row, *, key_prefix):
             st.caption('Preview ID · '+str(row['id']))
             if row.get('client_preview_id'):st.caption('Client ID · '+str(row['client_preview_id']))
             if os_accounts.is_admin(user):
-                st.caption('Email delivery · '+('Sent' if row.get('email_sent_at') else 'Requested' if row.get('email_requested_at') else 'Not requested'))
+                st.caption('HD email · '+str(row.get('email_job_state') or ('Sent' if row.get('email_sent_at') else 'Requested' if row.get('email_requested_at') else 'Not requested')))
                 st.caption('Follow-up flow · '+wall_preview_crm_store.FLOW_NAME)
                 if row.get('shopify_customer_id'):
                     customer_url=wall_preview_identity.customer_admin_url(row['shopify_customer_id'])
@@ -422,6 +424,7 @@ def render(user):
         }
         .sc-wall-card-footer {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             justify-content: space-between;
             gap: .6rem;
@@ -488,7 +491,7 @@ def render(user):
         st.caption(' · '.join(f'{label} {counts.get(key,0):,}' for key,label in
             (('total','Inbox'),('confirmed','Confirmed'),('email_captured','Email captured'),('added_to_cart','Added to cart'),('purchased','Purchased'))))
     except Exception:st.caption('Inbox counts temporarily unavailable.')
-    intent=st.selectbox('CRM intent',('All','Confirmed','Email captured','Added to cart','Purchased'),key='wall-preview-intent')
+    intent=st.selectbox('CRM intent',('All','Confirmed','Email captured','Added to cart','Purchased','Reuse allowed'),key='wall-preview-intent')
     labels = ("All", "New", "Approved", "Used", "Archived")
     selected = st.segmented_control(
         "Preview status",
@@ -515,7 +518,7 @@ def render(user):
             limit=60,
             include_private=is_admin,
             customer_search=customer_search,
-            intent={'All':'all','Confirmed':'confirmed','Email captured':'email_captured','Added to cart':'added_to_cart','Purchased':'purchased'}[intent],
+            intent={'All':'all','Confirmed':'confirmed','Email captured':'email_captured','Added to cart':'added_to_cart','Purchased':'purchased','Reuse allowed':'reuse_allowed'}[intent],
         )
     except Exception:
         st.warning("Wall previews are temporarily unavailable. Please try again shortly.")
