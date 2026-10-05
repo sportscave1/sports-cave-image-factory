@@ -10,11 +10,11 @@ from crm_automation_definition import native, qualifies
 LOG=logging.getLogger(__name__)
 
 
-def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False):
+def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None):
     """Serialize re-entry with publication/pause and freeze the complete flow."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
     if not at: return None
-    c=engine.shop.customer(customer_id,fresh=True)
+    c=recipient if recipient is not None else engine.shop.customer(customer_id,fresh=True)
     if not eligibility(c,store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
     with store.db() as conn:
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(automation['id'],)).fetchone()
@@ -27,7 +27,7 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
             return None
         if checkout_key:
             checkout=conn.execute("SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE",(checkout_key,)).fetchone()
-            if not checkout or checkout['status']=='RECOVERED' or checkout['customer_id']!=customer_id:return None
+            if not checkout or checkout['status']=='RECOVERED' or checkout['customer_id'] not in ('',customer_id):return None
             if manual_checkout:
                 # Recheck under the same row locks as publication and enrollment;
                 # a concurrent checkout update must not bypass the inactivity timer.
@@ -42,9 +42,11 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         if prior and (flow['reentry_days']==0 or prior['status']=='ACTIVE' or at<date(prior['trigger_at'])+timedelta(days=flow['reentry_days'])):return None
         steps=deepcopy(row['steps'])
         if not steps:return None
+        due_base=at
+        if manual_checkout:due_base=min(at,date(checkout['activity_at'])+timedelta(seconds=flow.get('abandonment_seconds',3600)))
         result=conn.execute('''INSERT INTO crm_automation_enrollments(automation_id,shopify_customer_id,trigger_shopify_id,trigger_key,trigger_at,steps,next_due_at,checkout_key,source_event_id)
           VALUES(%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING *''',
-          (row['id'],customer_id,trigger_id,event_id,at,json.dumps(steps),at+timedelta(seconds=steps[0]['delay_seconds']),checkout_key,source_event_id)).fetchone()
+          (row['id'],customer_id,trigger_id,event_id,at,json.dumps(steps),max(at,due_base+timedelta(seconds=steps[0]['delay_seconds'])),checkout_key,source_event_id)).fetchone()
     if result:LOG.info('automation_entry automation_id=%s automation_version=%s trigger_type=%s trigger_event_id=%s journey_id=%s journey_status=ACTIVE due_at=%s duration_ms=%.1f',row['id'],steps[0]['automation_version'],flow['trigger'],event_id,result['id'],result['next_due_at'],(perf_counter()-started)*1000)
     return result
 
@@ -88,15 +90,20 @@ def process_event(engine,event,automations):
 
 def reconcile(engine,a):
     if a['trigger_type']!='abandoned':return
-    key='reconcile:native:'+str(a['id'])+':'+str(a['config']['published_version'])+':'+str(a['activated_at'])
-    state=engine.store.state(key);at=engine.clock()
+    state_key='reconcile:native:'+str(a['id'])+':'+str(a['config']['published_version'])+':'+str(a['activated_at'])
+    state=engine.store.state(state_key);at=engine.clock()
     if date(state.get('next_at')) and date(state['next_at'])>at:return
     cutoff=date(a['activated_at']);cursor=state.get('cursor')
+    # First rollout establishes a future-only boundary; cache/repair cannot bulk enroll history.
+    boundary=engine.store.state('checkout-auto-start-v2')
+    if not boundary.get('started_at'):
+        boundary={'started_at':at.isoformat()};engine.store.set_state('checkout-auto-start-v2',boundary)
+    cutoff=max(cutoff,date(boundary['started_at']))
     from crm_automation_capabilities import require as require_trigger
     require_trigger(engine.store,'abandoned')
-    # The signed future-only token ledger is the entry boundary. Admin checkout
-    # objects only resolve/recheck those exact identities; never backfill others.
-    page=engine.shop.checkouts(cursor,query='created_at:>='+cutoff.isoformat(),fresh=True)
+    # Shopify Admin is abandonment authority. Future activity is the entry
+    # boundary, including checkouts created before activation but still active.
+    page=engine.shop.checkouts(cursor,query='updated_at:>='+cutoff.isoformat(),fresh=True)
     more=page['pageInfo'].get('hasNextPage');end=page['pageInfo'].get('endCursor')
     if more and (not end or end==cursor):raise ValueError('Abandoned checkout pagination did not advance.')
     for checkout in page['nodes']:
@@ -105,17 +112,30 @@ def reconcile(engine,a):
         from crm_shopify_automation_events import key_from_recovery_url
         import os
         key=key_from_recovery_url(checkout.get('abandonedCheckoutUrl'),os.getenv('SHOPIFY_STORE_DOMAIN',''))
-        state_row=engine.store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,),True) if key else None
-        if not state_row or state_row['status']=='RECOVERED' or not c or state_row['customer_id']!=c['id']:continue
         from crm_checkout_analytics import details
         details(engine.store,checkout)
+        state_row=engine.store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,),True) if key else None
+        if not state_row or state_row['status']=='RECOVERED':continue
+        if date(state_row['activity_at'])<cutoff:continue
+        if engine.store.q('SELECT 1 FROM crm_automation_enrollments WHERE automation_id=%s AND checkout_key=%s',(a['id'],key),True):continue
+        from crm_checkout_identity import recipient
+        evaluation_key='checkout-evaluation:'+key+':'+str(a['id'])
+        try:c=recipient(engine.shop,engine.store,checkout,state_row)
+        except ValueError:
+            engine.store.set_state(evaluation_key,{'result':'Missing email' if not state_row.get('analytics',{}).get('email') else 'Not eligible: verified identity unavailable','at':at.isoformat()});continue
+        ok,reason=eligibility(c,engine.store.suppressed((c or {}).get('id'),recipient_hash((c or {}).get('email'))))
+        if not ok:
+            from crm_checkout_identity import block_label
+            engine.store.set_state(evaluation_key,{'result':block_label(reason),'reason':reason,'at':at.isoformat()});continue
         threshold=a['config']['published'].get('abandonment_seconds',3600)
         activity=date(state_row['activity_at'])
-        if created and cutoff<=created and cutoff<=date(state_row['created_at']) and activity<=at-timedelta(seconds=threshold) and not checkout.get('completedAt'):
+        if created and activity>=cutoff and activity<=at-timedelta(seconds=threshold) and not checkout.get('completedAt'):
             engine.store.q("UPDATE crm_shopify_checkouts SET admin_checkout_id=%s,status=CASE WHEN status='OPEN' THEN 'ABANDONED' ELSE status END WHERE checkout_key=%s AND status<>'RECOVERED'",(checkout['id'],key))
             from crm_automation_rule_facts import checkout_facts
-            enter(engine,a,c['id'],checkout['id'],'checkout:'+key,activity+timedelta(seconds=threshold),checkout_key=key,source_event_id=state_row['source_event_id'],event_facts=checkout_facts(checkout))
-    engine.store.set_state(key,{'cursor':end if more else None,'next_at':(at+timedelta(seconds=2 if more else 300)).isoformat()})
+            entered=enter(engine,a,c['id'],checkout['id'],'checkout:'+key,activity+timedelta(seconds=threshold),checkout_key=key,source_event_id=state_row['source_event_id'],event_facts=checkout_facts(checkout),recipient=c)
+            engine.store.set_state(evaluation_key,{'result':'Added to flow' if entered else 'Not eligible: rules, re-entry or changed state','at':at.isoformat()})
+            LOG.info('checkout_evaluated checkout_key=%s automation_id=%s enrolled=%s',key,a['id'],bool(entered))
+    engine.store.set_state(state_key,{'cursor':end if more else None,'next_at':(at+timedelta(seconds=2 if more else 300)).isoformat()})
 
 
 def advance(engine,enrollment):
@@ -133,6 +153,8 @@ def advance(engine,enrollment):
         store.enqueue(key,c['id'],recipient_hash(c['email']),{'id':step['template_id'],'version':step['template_version']},enrollment_id=enrollment['id'],step_index=index)
         return
     if receipt['status'] in ('PENDING','CLAIMED','SUBMITTING'):return
+    if enrollment.get('checkout_key') and receipt['status']=='FAILED' and receipt.get('error_code')=='provider_rejected':
+        store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes',stop_reason='provider_rejected' WHERE id=%s",(enrollment['id'],));return
     if receipt['status']!='ACCEPTED':engine.stop(enrollment,receipt['error_code'] or 'send_held');return
     if enrollment.get('checkout_key'):
         store.q("UPDATE crm_shopify_checkouts SET status='RECOVERY_EMAIL_SENT',updated_at=now() WHERE checkout_key=%s AND status<>'RECOVERED'",(enrollment['checkout_key'],))

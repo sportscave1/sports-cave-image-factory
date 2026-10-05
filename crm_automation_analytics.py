@@ -125,7 +125,7 @@ def flow_state(checkout, at=None):
 
 
 def add_to_flow(shop, store, user, identity, checkout_id):
-    """Fresh exact checkout + signed ledger + published policy; never send inline."""
+    """Fresh exact Shopify checkout + persistent mirror + published policy; no inline sends."""
     from crm_navigation import require
     from crm_automation_definition import native
     from crm_automation_capabilities import require as ready
@@ -140,22 +140,40 @@ def add_to_flow(shop, store, user, identity, checkout_id):
         raise ValueError('Use an active, published abandoned-checkout flow. Drafts cannot send.')
     ready(store,'abandoned')
     checkout=shop.checkout(checkout_id,fresh=True)
-    if not checkout or checkout.get('id')!=checkout_id or checkout.get('completedAt'):raise ValueError('Checkout is unavailable or recovered.')
+    if not checkout:raise ValueError('Error: Shopify checkout verification unavailable')
+    if checkout.get('id')!=checkout_id:raise ValueError('Not eligible: checkout identity changed')
+    if date(checkout.get('completedAt')):raise ValueError('Recovered')
     customer=(checkout.get('customer') or {}).get('id')
     key=key_from_recovery_url(checkout.get('abandonedCheckoutUrl'),os.getenv('SHOPIFY_STORE_DOMAIN',''))
-    if not customer or not key:raise ValueError('Verified checkout/customer identity required.')
+    if not key:raise ValueError('Verified checkout identity required.')
+    from crm_checkout_analytics import details
+    details(store,checkout)
     ledger=store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,),True)
-    if not ledger or ledger['customer_id']!=customer or ledger['status']=='RECOVERED':raise ValueError('Signed checkout receipt is missing, mismatched or recovered.')
+    if not ledger:raise ValueError('Error: checkout persistence unavailable')
+    if ledger['status']=='RECOVERED':raise ValueError('Recovered')
+    if store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s AND checkout_key=%s',(identity,key),True):raise ValueError('Already in flow')
+    from crm_checkout_identity import recipient,block_label
+    from crm_logic import eligibility,recipient_hash
+    c=recipient(shop,store,checkout,ledger)
+    if not (c or {}).get('email'):raise ValueError('Missing email')
+    eligible,reason=eligibility(c,store.suppressed(c['id'],recipient_hash(c.get('email'))))
+    if not eligible:raise ValueError(block_label(reason))
+    from crm_native_unsubscribe import native_unsubscribe_url
+    if not native_unsubscribe_url(c):raise ValueError('Not eligible: unsubscribe link unavailable')
+    customer=c['id']
     at=now();threshold=row['config']['published'].get('abandonment_seconds',3600)
     created=date(checkout.get('createdAt'));activated=date(row.get('activated_at'))
     if not created or not activated:raise ValueError('Verified checkout and activation dates are required.')
     # Manual selection is intentional historical enrollment, not automatic backfill.
-    # Exact creation identity must still agree with the signed checkout ledger.
-    if abs((date(ledger['created_at'])-created).total_seconds())>1:raise ValueError('Checkout identity dates do not match the signed receipt.')
+    # Shopify Admin identity is matched using its exact recovery key.
+    # Admin abandonment creation can differ from the original checkout webhook time.
+    # Match the exact recovery token and customer, never timestamp equality.
     updated=date(checkout.get('updatedAt'))
     if not updated:raise ValueError('Verified checkout activity date is required.')
     if max(date(ledger['activity_at']),updated)+timedelta(seconds=threshold)>at:raise ValueError('Checkout is not yet abandoned. Wait for the configured inactivity period.')
     result=enter(Engine(store,shop),row,customer,checkout_id,'checkout:'+key,at,checkout_key=key,
-                 source_event_id=ledger['source_event_id'],event_facts=checkout_facts(checkout),manual_checkout=True)
-    if not result:raise ValueError('Already enrolled, recovered, ineligible or changed. No duplicate journey created.')
+                 source_event_id=ledger['source_event_id'],event_facts=checkout_facts(checkout),manual_checkout=True,recipient=c)
+    if not result:
+        if store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s AND checkout_key=%s',(identity,key),True):raise ValueError('Already in flow')
+        raise ValueError('Not eligible: flow rules, re-entry policy or checkout state changed')
     return result

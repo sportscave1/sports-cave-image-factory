@@ -19,8 +19,8 @@ class ContractTests(unittest.TestCase):
         import crm_automation_analytics_ui as ui
         text=inspect.getsource(ui)
         for old in ('Next checkout page','Newest checkouts','st.checkbox',"run_every='1s'"):self.assertNotIn(old,text)
-        self.assertIn('setInterval(tick,1000)',text)
-        self.assertIn('selection_mode=\'single-row\'',text)
+        self.assertNotIn('countdown_html',text)
+        self.assertIn('crm_checkout_table',text)
         self.assertIn('patch_checkout',text)
         self.assertNotIn('shop.query',inspect.getsource(ui.content))
         self.assertNotIn('shop.query',inspect.getsource(checkouts))
@@ -56,6 +56,7 @@ class LedgerTests(unittest.TestCase):
         for days in (1,10,40,100,400):
             key=uuid.uuid4().hex;created.append((key,days))
             self.store.q("INSERT INTO crm_shopify_checkouts(checkout_key,shop,source_event_id,created_at,activity_at,status) VALUES(%s,'fixture.myshopify.com','fixture',%s,%s,'OPEN')",(key,at-timedelta(days=days),at-timedelta(days=days)))
+        self.store.q("UPDATE crm_shopify_checkouts SET analytics=analytics||'{\"shopify_abandoned\":true}'::jsonb WHERE source_event_id='fixture'")
         original=self.store.q
         for label,days in PERIODS.items():
             with patch.object(self.store,'q',wraps=original) as query:
@@ -70,7 +71,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(data['admin_checkout_id'],c['id']);self.assertEqual(data['analytics']['amount'],'199.50')
         self.assertNotIn(self.token,json.dumps(data['analytics']))
         wrong=deepcopy(c);wrong['customer']['id']='gid://shopify/Customer/wrong';wrong['customer']['email']='bad@example.test'
-        details(self.store,wrong)
+        with self.assertRaises(ValueError):details(self.store,wrong)
         self.assertNotEqual(checkouts(self.store,a['id'],window('All time',self.clock),self.key)[0]['analytics']['email'],'bad@example.test')
 
     def test_manual_historical_allowed_automatic_backfill_still_blocked(self):
@@ -93,14 +94,14 @@ class LedgerTests(unittest.TestCase):
         data=checkouts(self.store,a['id'],window('All time',self.clock),self.key)[0]
         self.assertEqual(disabled_reason(data,a,self.clock),'Already in flow')
         self.assertEqual(flow_state({'ledger':data},self.clock)[0],'In Flow — Email 1 pending')
-        data['status']='RECOVERED';self.assertEqual(disabled_reason(data,a,self.clock),'Recovered')
-        data['status']='OPEN';data['enrollment_id']=None
+        data['order_id']='gid://shopify/Order/1';data['status']='RECOVERED';self.assertEqual(disabled_reason(data,a,self.clock),'Recovered')
+        data['order_id']=None;data['status']='OPEN';data['enrollment_id']=None
         self.assertEqual(disabled_reason(data,{**a,'status':'DRAFT'},self.clock),'Flow is not live')
         data['admin_checkout_id']=None;self.assertIn('identity',disabled_reason(data,a,self.clock))
 
     def test_bounded_refresh_does_not_enroll(self):
         a,c=self.prepared();self.shop.query.return_value={'abandonedCheckouts':{'nodes':[c],'pageInfo':{'hasNextPage':False}}}
-        count,more=reconcile(self.shop,self.store,'All time');self.assertEqual((count,more),(1,False))
+        count,more=reconcile(self.shop,self.store,'All time');self.assertEqual((count,more),({'Updated':1,'Unchanged':0,'Failed':0},False))
         self.assertFalse(self.store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],)))
         self.provider.send.assert_not_called()
 
@@ -111,12 +112,12 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(checkouts(self.store,a['id'],window('All time',self.clock),self.key)[0]['analytics']['amount'],'199.50')
         self.engine._process_event({'topic':'customers/redact','related_customer_id':self.customer['id'],'occurred_at':self.clock})
         details(self.store,c)
-        self.assertEqual(checkouts(self.store,a['id'],window('All time',self.clock),self.key)[0]['analytics'],{})
+        self.assertEqual(self.store.q('SELECT analytics FROM crm_shopify_checkouts WHERE checkout_key=%s',(self.key,),True)['analytics'],{})
 
     def test_unsigned_suppressed_and_recovered_entry_blocked(self):
         a,c=self.prepared()
         self.store.q('DELETE FROM crm_shopify_checkouts WHERE checkout_key=%s',(self.key,))
-        with self.assertRaises(ValueError):self.add(a,c)
+        details(self.store,c) # Authenticated Shopify read can create a missing mirror safely.
         self.event('checkouts/create',{'token':self.token,'customer':{'id':self.customer['id']},'created_at':c['createdAt'],'updated_at':c['updatedAt']},date(c['createdAt']))
         self.customer['emailMarketingConsent']['marketingState']='UNSUBSCRIBED'
         with self.assertRaises(ValueError):self.add(a,c)

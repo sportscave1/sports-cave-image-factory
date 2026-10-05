@@ -24,7 +24,7 @@ def key_from_recovery_url(url, shop):
     path = parts.path.split('/')
     try:
         index = path.index('checkouts') + 1
-        if path[index] == 'cn': index += 1
+        if path[index] in ('cn','ac'): index += 1
         return checkout_key(path[index], shop)
     except (ValueError, IndexError): return None
 
@@ -56,7 +56,7 @@ def facts(topic, payload, shop, at):
     return result
 
 
-def persist(store, event_id, topic, object_id, customer_id, at, normalized):
+def persist(store, event_id, topic, object_id, customer_id, at, normalized,*,display=None):
     """Commit inbox and completion guard together; no Shopify/Resend work here."""
     key = normalized.get('checkout_key')
     with store.db() as conn:
@@ -84,6 +84,13 @@ def persist(store, event_id, topic, object_id, customer_id, at, normalized):
               order_id=COALESCE(excluded.order_id,crm_shopify_checkouts.order_id),updated_at=now()''',
               (key, normalized['shop'], customer_id or '', event_id, date(normalized.get('created_at')) or at,
                date(normalized['updated_at']), 'RECOVERED' if completed else 'OPEN', object_id if topic.startswith('orders/') else None))
+            if display:
+                from crm_logic import recipient_hash
+                safe={k:v for k,v in display.items() if k in ('name','email','country','region') and v}
+                conn.execute("""UPDATE crm_shopify_checkouts SET analytics=analytics||%s::jsonb
+                  WHERE checkout_key=%s AND activity_at<=%s AND NOT EXISTS(SELECT 1 FROM crm_suppressions
+                  WHERE reason='redacted' AND (shopify_customer_id=%s OR recipient_hash=%s))""",
+                  (json.dumps(safe),key,date(normalized['updated_at']),customer_id,recipient_hash(safe.get('email'))))
     store.invalidate()
     LOG.info('shopify_automation_ingest shopify_topic=%s shopify_event_id=%s checkout_key=%s order_id=%s', topic, event_id, key or '-', object_id if topic.startswith('orders/') else '-')
     return True

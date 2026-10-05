@@ -25,7 +25,19 @@ def receive_shopify(store,topic,event_id,payload,occurred_at,shop_domain=None):
     if topic.startswith('checkouts/'):
         # API 2026-04 supplies token, not id. Never synthesize an Admin GID.
         customer_id=gid((payload.get('customer') or {}).get('id'))
-        return persist(store,event_id,topic,'checkout:'+normalized['checkout_key'],customer_id,at,normalized)
+        # Minimal signed contact facts go only to the private checkout cache,
+        # not the event inbox. They confer neither consent nor recovery.
+        from crm_checkout_identity import identity
+        def address(value):
+            value=value or {}
+            return {'name':value.get('name'),'firstName':value.get('first_name'),
+                    'lastName':value.get('last_name'),'countryCodeV2':value.get('country_code')}
+        customer=payload.get('customer') or {}
+        display=identity({'email':payload.get('email'),'customer':{
+            'firstName':customer.get('first_name'),'lastName':customer.get('last_name'),
+            'email':customer.get('email')},'shippingAddress':address(payload.get('shipping_address')),
+            'billingAddress':address(payload.get('billing_address'))})
+        return persist(store,event_id,topic,'checkout:'+normalized['checkout_key'],customer_id,at,normalized,display=display)
     kind='Segment' if topic.startswith('segments/') else 'Customer' if topic.startswith('customers') else 'Order'
     value=(payload.get('customer_id') if topic=='customers_email_marketing_consent/update' else payload.get('id')) or (payload.get('customer') or {}).get('id')
     customer_id=gid(value) if kind=='Customer' else gid((payload.get('customer') or {}).get('id'))

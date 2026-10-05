@@ -110,7 +110,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_manual_guards_consent_recovery_identity_unsigned_historical_and_delay(self):
         a,c=self.prepared()
         original=deepcopy(c)
-        for mutation in ({'completedAt':now().isoformat()},{'id':'wrong'},{'updatedAt':self.clock.isoformat()},{'createdAt':(date(a['activated_at'])-timedelta(days=1)).isoformat()}):
+        for mutation in ({'completedAt':now().isoformat()},{'id':'wrong'},{'updatedAt':self.clock.isoformat()}):
             self.shop.checkout.return_value={**original,**mutation}
             with self.assertRaises(ValueError):self.add(a,c)
         self.shop.checkout.return_value=original

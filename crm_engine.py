@@ -39,8 +39,17 @@ class Engine:
                     state=self.store.q('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s',(enrollment['checkout_key'],),True)
                     if not state or state['status']=='RECOVERED':return c,context,'recovered'
                 checkout=self.shop.checkout(trigger,fresh=True)
-                if not checkout or checkout.get('completedAt'):return c,context,'recovered'
-                if (checkout.get('customer') or {}).get('id')!=c['id']:return c,context,'checkout_customer_changed'
+                if not checkout:raise ValueError('Checkout verification unavailable')
+                if date(checkout.get('completedAt')):
+                    if enrollment.get('checkout_key'):
+                        self.store.q("UPDATE crm_shopify_checkouts SET analytics=analytics||%s::jsonb WHERE checkout_key=%s",(json.dumps({'completed_at':checkout['completedAt']}),enrollment['checkout_key']))
+                    return c,context,'recovered'
+                if (checkout.get('customer') or {}).get('id')!=c['id']:
+                    from crm_checkout_identity import recipient
+                    ledger=self.store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(enrollment.get('checkout_key'),),True)
+                    verified=recipient(self.shop,self.store,checkout,ledger or {})
+                    if not verified or verified['id']!=c['id']:return c,context,'checkout_customer_changed'
+                    checkout={**checkout,'customer':c}
                 if enrollment.get('checkout_key'):
                     from crm_shopify_automation_events import key_from_recovery_url
                     import os
@@ -156,6 +165,9 @@ class Engine:
             submitting=True
             provider_id=self.delivery().send(address,message,row['idempotency_key'],row['test_send'])
             self.store.finish_send(row,'ACCEPTED',provider_id=provider_id)
+            if enrollment and enrollment.get('checkout_key'):
+                try:self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'ACCEPTED','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id'])})
+                except Exception:logging.getLogger(__name__).warning('checkout_send_audit_deferred send_id=%s',row['id'])
         except MarketingDisabled:
             self.store.defer_send(row)
         except Exception as exc:
@@ -163,7 +175,11 @@ class Engine:
                 # No automatic replay after potentially accepted submission, including process crashes.
                 from email_service import EmailDeliveryError
                 known_rejection=isinstance(exc,EmailDeliveryError) and exc.status_code in (400,401,403,404,405,422,429)
-                self.store.finish_send(row,'FAILED' if known_rejection else 'UNCERTAIN','provider_rejected' if known_rejection else 'submission_uncertain')
+                if known_rejection and exc.status_code==429 and enrollment and enrollment.get('checkout_key'):
+                    self.store.q("UPDATE crm_marketing_sends SET status='PENDING',error_code='provider_rate_limited',due_at=now()+interval '5 minutes',lease_until=NULL WHERE id=%s AND lease_token=%s AND status='SUBMITTING'",(row['id'],row['lease_token']))
+                else:self.store.finish_send(row,'FAILED' if known_rejection else 'UNCERTAIN','provider_rejected' if known_rejection else 'submission_uncertain')
+                if enrollment and enrollment.get('checkout_key'):
+                    self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'REJECTED' if known_rejection else 'UNCERTAIN','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id']),'http_status':getattr(exc,'status_code',None)})
             else:self.store.defer_send(row)
             logging.getLogger(__name__).warning('crm_send_held phase=%s type=%s','submission' if submitting else 'revalidation',type(exc).__name__)
         return True
@@ -313,6 +329,10 @@ class Engine:
                     self.store.q("UPDATE crm_webhook_events SET status='DONE',processed_at=now() WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
                 except Exception:
                     self.store.q("UPDATE crm_webhook_events SET attempts=attempts+1,status=CASE WHEN attempts>=4 THEN 'FAILED' ELSE 'PENDING' END,error_code='source_unavailable' WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
+            try:
+                from crm_checkout_analytics import sync_cache
+                sync_cache(self.shop,self.store,self.clock())
+            except Exception as exc:logging.getLogger(__name__).warning('checkout_cache_sync_failed type=%s',type(exc).__name__)
             if self.config.enabled:
                 active=getattr(type(self.store),'active_automations',None)
                 for a in (active(self.store) if active else self.store.list('automations')):
@@ -333,7 +353,9 @@ class Engine:
                 for e in due:
                     self.hold_lease()
                     try:self.advance(e)
-                    except Exception:self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes' WHERE id=%s",(e['id'],))
+                    except Exception:
+                        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes',stop_reason='verification_unavailable' WHERE id=%s",(e['id'],))
+                        logging.getLogger(__name__).warning('checkout_advance_held enrollment_id=%s checkout_key=%s',e['id'],e.get('checkout_key'))
             # Native reviewed campaigns consume the frozen delivery snapshot in
             # batches. Automation/legacy template tests retain their own path.
             from crm_campaign_dispatch import dispatch
@@ -367,7 +389,7 @@ class Engine:
                         self.delivery().suppress(address)
                         self.store.q('UPDATE crm_suppressions SET provider_synced=true,email_for_provider=NULL WHERE recipient_hash=%s',(row['recipient_hash'],))
                     except Exception:break
-            self.store.set_state('worker_health',{'checked_at':self.clock().isoformat(),'status':'ok'})
+            self.store.set_state('worker_health',{'checked_at':self.clock().isoformat(),'status':'ok','marketing_enabled':self.config.enabled,'provider_configured':bool(self.config.api_key),'sender_configured':bool(self.config.sender and self.config.reply_to)})
             return {'leader':True}
         finally:
             self.store.release(owner);self.owner=None

@@ -244,8 +244,9 @@ class NativeAutomationTests(unittest.TestCase):
             receive_shopify(self.store,'checkouts/create',uuid.uuid4().hex,{'token':'native-checkout-token','customer':{'id':self.customer['id']},'created_at':(self.clock-timedelta(hours=1,minutes=1)).isoformat()},self.clock-timedelta(hours=1,minutes=1))
         self.shop.checkouts.return_value={'nodes':[{'id':'gid://shopify/AbandonedCheckout/1','createdAt':(self.clock-timedelta(hours=1,minutes=1)).isoformat(),'customer':{'id':self.customer['id']},'completedAt':None}], 'pageInfo':{'hasNextPage':False,'endCursor':None}}
         self.shop.checkouts.return_value['nodes'][0]['abandonedCheckoutUrl']='https://fixture.myshopify.com/checkouts/native-checkout-token/recover'
+        self.store.set_state('checkout-auto-start-v2',{'started_at':str(a['activated_at'])})
         with patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'}):reconcile(self.engine,a)
-        self.assertIn('created_at:>=',self.shop.checkouts.call_args.kwargs['query'])
+        self.assertIn('updated_at:>=',self.shop.checkouts.call_args.kwargs['query'])
         self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
         newer=self.published('abandoned');self.shop.checkouts.return_value={'nodes':[],'pageInfo':{'hasNextPage':True,'endCursor':None}}
         with self.assertRaises(ValueError):reconcile(self.engine,newer)

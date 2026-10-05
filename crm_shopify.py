@@ -76,6 +76,7 @@ TOTAL = 'query CrmTotal { customersCount { count precision } }'
 CHECKOUT_LINES_FIELDS = '''id title quantity variant { id product { id } } image { url }
  originalUnitPriceSet { shopMoney { amount currencyCode } }'''
 CHECKOUT_LINES_FIELDS += ''' variantTitle discountedTotalPriceWithCodeDiscount { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }'''
+CHECKOUT_IDENTITY = '''name customer { id firstName lastName email } shippingAddress { name firstName lastName country countryCodeV2 } billingAddress { name firstName lastName country countryCodeV2 }'''
 CHECKOUT_FIELDS = '''id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id }
  shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 }
  totalPriceSet { shopMoney { amount currencyCode } }
@@ -83,6 +84,8 @@ CHECKOUT_FIELDS = '''id createdAt updatedAt completedAt abandonedCheckoutUrl cus
 CHECKOUTS = '''query CrmCheckouts($after:String,$query:String) {
  abandonedCheckouts(first:25,after:$after,sortKey:CREATED_AT,query:$query) {
  nodes { id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id } shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 } } '''+PAGE+' } }'
+CHECKOUT_FIELDS=CHECKOUT_FIELDS.replace('customer { id }',CHECKOUT_IDENTITY)
+CHECKOUTS=CHECKOUTS.replace('customer { id }',CHECKOUT_IDENTITY)
 CHECKOUT = 'query CrmCheckout($id:ID!) { node(id:$id) { ... on AbandonedCheckout { '+CHECKOUT_FIELDS+' } } }'
 CHECKOUT_PREVIEW_FIELDS=CHECKOUT_FIELDS.replace('customer { id }','customer { id firstName lastName email }')
 CHECKOUT_PREVIEW='''query CrmAbandonedPreview($after:String) { abandonedCheckouts(first:5,after:$after,sortKey:CREATED_AT,reverse:true,query:"recovery_state:not_recovered") { nodes { '''+CHECKOUT_PREVIEW_FIELDS+' } '+PAGE+' } }'
