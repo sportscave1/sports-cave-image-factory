@@ -31,6 +31,10 @@ def navigation_allowed(state,current,target,*,source='user'):
         # A later return starts a new checkout preview session. Retain the pin
         # while navigation is blocked so unsaved edits never replace its customer.
         state.pop('_automation_preview_open',None)
+        from crm_automation_read_cache import dispose
+        dispose(state.get('automation_home_state',{}),keep_compact=True)
+        dispose(state.get('automation_analytics_reads',{}))
+        state.pop('automation_analytics_reads',None)
     if current=='CRM Campaigns' and target!=current and pending:
         state['crm_requested_route']=target
         return False

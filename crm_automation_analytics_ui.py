@@ -1,35 +1,36 @@
-"""Independent, cached analytics panels. Read futures never mutate UI state."""
+"""One dialog refresh owner; bounded cached reads never mutate UI state."""
+from crm_automation_read_cache import isolated
 from html import escape
 from time import monotonic
 from concurrent.futures import Future
 from uuid import uuid4
 import streamlit as st
-from crm_campaign_home_cache import job,resolve
+from crm_automation_read_cache import job,resolve,dispose,pack
 from crm_checkout_analytics import PERIODS,window,checkouts,report,disabled_reason,reconcile
 from crm_automation_analytics import flow_state,activity,add_to_flow
 from crm_logic import now,date
 
 def state():return st.session_state.setdefault('automation_analytics_reads',{})
 
-def read(store,key,fn,ttl=30):
+def read(store,key,fn,ttl=180):
     def verified():
         value=fn()
         if key[0]=='analytics-report':
             required=('sent','delivered','opened','clicked','conversions','history','revenue')
             if not isinstance(value,list) or len(value)!=1 or not isinstance(value[0],dict) or any(value[0].get(k) is None for k in required):raise ValueError('Incomplete analytics report')
         return value
-    data,phase=resolve(state(),store,key,job(state(),store,key,verified,ttl=ttl))
+    future=job(state(),store,key,verified,ttl=ttl)
+    if key[0] in ('analytics-definition','checkout-list') and future is not None and not future.done():
+        try:future.result(timeout=.05)
+        except Exception:pass
+    data,phase=resolve(state(),store,key,future)
     if phase in ('LOADING','REFRESHING'):st.session_state['automation-analytics-pending']=True
     return data,phase
 
 def arm(key,seconds):
     """One shot, fragment-only refresh. No server timer per checkout."""
-    st.button('Refresh analytics status',key=key)
-    st.html('<style>.st-key-'+key+'{display:none}</style><script>/* '+uuid4().hex+' */'+
-      '(()=>{window.scAnalyticsTimers??={};const key='+repr(key)+';clearTimeout(window.scAnalyticsTimers[key]);'+
-      'const tick=()=>{const b=document.querySelector(".st-key-"+key+" button");'+
-      'if(!b?.closest("[role=dialog]"))return;if(document.hidden||document.querySelector("[role=listbox]")){window.scAnalyticsTimers[key]=setTimeout(tick,2000);return;}'+
-      'if(b.disabled){window.scAnalyticsTimers[key]=setTimeout(tick,250);return;}b.click();window.scAnalyticsTimers[key]=setTimeout(tick,500);};window.scAnalyticsTimers[key]=setTimeout(tick,'+str(int(seconds*1000))+');})();</script>',unsafe_allow_javascript=True)
+    from crm_automation_home import arm_section
+    arm_section(key,max(1,seconds),dialog=True)
 
 def patch_checkout(store,identity,checkout):
     """Replace only the mutated row in resolved date-range tables; fence old reads."""
@@ -37,7 +38,7 @@ def patch_checkout(store,identity,checkout):
     for token,records in list(resolved.items()):
         if token[0]!=store.connect or token[1][:2]!=('checkout-list',str(identity)):continue
         updated=[checkout if c['checkout_key']==checkout['checkout_key'] else c for c in records]
-        future=Future();future.set_result(updated);cache[token]=(monotonic(),future);resolved[token]=updated
+        future=Future();future.set_result(pack(updated));cache[token]=(monotonic(),future);resolved[token]=pack(updated)
 
 def invalidate_activity(store,identity):
     cache=state().get('campaign_home_cache',{})
@@ -82,7 +83,7 @@ def stats(value):
     @media(max-width:750px){.sc-analytics-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media(max-width:390px){.sc-analytics-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}</style><dl class="sc-analytics-stats">'''+cards+'</dl>')
 
-@st.fragment(run_every='20s')
+@isolated
 def checkout_panel(shop,store,user,row,bounds,period):
     slot='auto-checkouts-'+str(row['id']);key=('checkout-list',str(row['id']),period)
     st.subheader('Abandoned checkouts')
@@ -94,7 +95,7 @@ def checkout_panel(shop,store,user,row,bounds,period):
             state().get('campaign_home_cache',{}).pop((store.connect,key),None)
             st.caption('Verified '+str(count)+' Shopify checkout details'+(' · more records remain for reconciliation' if more else '')+'.')
         except Exception:st.caption('Latest Shopify verification temporarily unavailable. Local records remain visible.')
-    records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),20)
+    records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
     if records is None:
         st.dataframe({'Checkout':[],'Customer':[],'Flow status':[],'Next action':[]},height=360,hide_index=True)
         st.caption('Loading signed checkout records…' if phase!='ERROR' else 'Checkout records temporarily unavailable. Retry shortly.')
@@ -119,7 +120,7 @@ def checkout_panel(shop,store,user,row,bounds,period):
         indices=st.session_state[table_key]['selection']['rows']
         st.session_state[slot+'-selected']=keys[indices[0]] if indices and indices[0]<len(keys) else None
     st.dataframe(listing or {'Checkout':[],'Customer':[],'Flow status':[],'Next action':[]},height=400,hide_index=True,
-      use_container_width=True,on_select=selected,selection_mode='single-row',key=table_key)
+      width='stretch',on_select=selected,selection_mode='single-row',key=table_key)
     st.caption(str(len(visible))+' matching checkouts · '+str(sum(c['status']=='RECOVERED' for c in visible))+' recovered')
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-selected')),None)
     if chosen:
@@ -135,7 +136,7 @@ def checkout_panel(shop,store,user,row,bounds,period):
                 changed();st.toast('Added to flow · awaiting the background worker.');st.rerun(scope='fragment')
             except Exception as exc:st.warning(safe_add_error(exc))
 
-@st.fragment(run_every='30s')
+@isolated
 def secondary(store,row,bounds,period,charts=False):
     slot='auto-analytics-'+str(row['id'])
     if row['trigger_type']=='abandoned' and not st.session_state.get('analytics-primary-ready-'+str(row['id'])):
@@ -161,14 +162,14 @@ def secondary(store,row,bounds,period,charts=False):
         st.html(activity_html(events))
     elif events is not None:st.caption('No recorded activity in this reporting period.')
 
-@st.fragment
+@isolated
 def content(shop,store,user,identity,period,bounds):
     # Keep initial-load scheduling above the fold even on narrow dialogs. The
-    # table/summary subsequently refresh in their own bounded server fragments.
+    # dialog owns all controls; nested fragments caused duplicate widget IDs.
     poll=st.container();st.session_state['automation-analytics-pending']=False
-    rows,phase=read(store,('analytics-definition',str(identity)),lambda:[store.get('automations',identity)],20)
+    rows,phase=read(store,('analytics-definition',str(identity)),lambda:[store.get('automations',identity)],60)
     if not rows:
-        with poll:arm('auto-analytics-definition-poll',.1 if phase!='ERROR' else 20)
+        with poll:arm('auto-analytics-definition-poll',1 if phase!='ERROR' else 30)
         stats(None)
         st.dataframe({'Checkout':[],'Customer':[],'Flow status':[],'Next action':[]},height=360,hide_index=True)
         st.caption('Loading automation…' if phase!='ERROR' else 'Automation details temporarily unavailable.')
@@ -183,13 +184,15 @@ def content(shop,store,user,identity,period,bounds):
         else:
             from crm_automation_home_data import step_metrics
             steps,_=read(store,('analytics-steps',str(identity)),lambda:step_metrics(store,identity))
-            if steps is not None:st.dataframe(steps,hide_index=True,use_container_width=True)
+            if steps is not None:st.dataframe(steps,hide_index=True,width='stretch')
     with metrics:secondary(store,row,bounds,period)
     with chart:secondary(store,row,bounds,period,charts=True)
-    if st.session_state.get('automation-analytics-pending'):
-        with poll:arm('auto-analytics-definition-poll',.1)
+    with poll:arm('auto-analytics-definition-poll',1 if st.session_state.get('automation-analytics-pending') else 30)
 
 def render(shop,store,user,identity,name=None):
+    previous=state().get('owner')
+    if previous!=str(identity):
+        dispose(state());state()['owner']=str(identity)
     st.subheader('Automation analytics')
     if name:st.caption(name)
     period=st.selectbox('Date range',list(PERIODS),index=1,key='auto-analytics-period-'+str(identity))

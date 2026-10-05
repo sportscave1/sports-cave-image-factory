@@ -1,4 +1,5 @@
 """Premium Automations overview; detail queries run only on explicit opening."""
+from crm_automation_read_cache import isolated
 from html import escape
 from urllib.parse import urlencode
 from time import monotonic
@@ -8,7 +9,7 @@ from crm_automation_definition import TRIGGERS, native
 from crm_automation_home_data import counts, rows, identities, PAGE_SIZE, reporting_window, step_metrics
 from crm_automation_analytics import summary, activity, performance, revenue, conversions, checkout_page, flow_state, add_to_flow
 from crm_campaign_home import STYLE, ICON_PATHS
-from crm_campaign_home_cache import resolve
+from crm_automation_read_cache import resolve
 from crm_logic import now, date
 
 STYLE_AUTO='''<style>
@@ -134,6 +135,7 @@ def accepted_publication(job):
     publication={'job_id':str(job['id']),'revision':job['revision'],'version':job['publication_version'],
                  'state':'LIVE' if job['state']=='SUCCEEDED' else 'PUBLISHING','requested_at':str(job.get('requested_at') or now())}
     state=home_state()
+    state['publication_reset_filters']=True
     snapshot=job.get('snapshot') or {}
     state['publish_handoff']={'id':str(job['automation_id']),'name':snapshot.get('name','Automation'),
       'trigger_type':snapshot.get('flow',{}).get('trigger','welcome'),'category':'Drafts',
@@ -159,12 +161,12 @@ def status_html(category,publication):
     return '<span class="sc-auto-pill '+colour+'" title="'+escape(title,quote=True)+'">'+dot+escape(label)+'</span>'
 
 
-def refresh_publications(store,records,state):
+def refresh_publications(store,records,state,updates=None):
     pending=[str(r['id']) for r in records if publication_state(r).get('state')=='PUBLISHING']
     if not pending or monotonic()-state.get('publication_checked',0)<3:return
     state['publication_checked']=monotonic()
     try:
-        updates=store.q("SELECT id,config->'publication' AS publication,"+__import__('crm_automation_home_data').CATEGORY+" AS category FROM crm_automations a WHERE id=ANY(%s::uuid[])",(pending,))
+        if updates is None:updates=store.q("SELECT id,config->'publication' AS publication,"+__import__('crm_automation_home_data').CATEGORY+" AS category FROM crm_automations a WHERE id=ANY(%s::uuid[])",(pending,))
     except Exception:
         return  # Retain backend-accepted state; cache errors never imply success.
     overrides=state.setdefault('publication_updates',{})
@@ -228,7 +230,13 @@ def read(store,key,load):
     from crm_automation_ui import home_state,job
     state=home_state()
     # Reuse stable session cache without changing Campaigns' validation contract.
-    value,status=resolve(state,store,key,job(state,store,key,lambda:payload(key,load)))
+    future=job(state,store,key,lambda:payload(key,load),ttl=180 if key[0] in ('counts','delivery','activity') else 60)
+    # Tiny, bounded first-paint opportunity for the indexed identity projection.
+    # Remote/slower reads continue asynchronously; no other dashboard work waits.
+    if key[0]=='identities' and future is not None and not future.done():
+        try:future.result(timeout=.05)
+        except Exception:pass
+    value,status=resolve(state,store,key,future)
     state.setdefault('activity',{})[key[0]]=status
     if status=='ERROR':st.caption('Could not refresh this section. Last verified data remains visible.')
     return value[0] if value else None
@@ -263,8 +271,13 @@ def archive_dialog(store,user,row):
 
 
 @st.fragment
+@isolated
 def table(shop,store,user,script=None):
-    from crm_automation_ui import open_flow,changed,delete_dialog
+    from crm_automation_ui import open_flow,changed,delete_dialog,home_state
+    state=home_state()
+    if state.pop('publication_reset_filters',False):
+        st.session_state.update(auto_search='',auto_filter='All',auto_sort='Newest first')
+        state['offset']=0
     with st.container(key='auto-overview'):
         controller=st.container()
         search,trigger,sort=st.columns([4,1.1,1.1])
@@ -281,7 +294,7 @@ def table(shop,store,user,script=None):
         if handoff and offset==0 and query.lower() in handoff['name'].lower() and kind in ('All',handoff['trigger_type']):
             records=[dict(handoff)]+[r for r in records if str(r['id'])!=handoff['id']]
         if not records and state.get('activity',{}).get('identities') in ('LOADING','UNRESOLVED'):
-            with controller:arm_section('auto-list-refresh',.1,script)
+            with controller:arm_section('auto-list-refresh',1,script)
             st.caption('Loading automations…');return
         metrics=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset)) or []
         by_id={str(r['id']):r for r in metrics}
@@ -289,7 +302,7 @@ def table(shop,store,user,script=None):
             for field in ('entered','sent','delivered','opened','clicked','orders','revenue'):
                 row[field]=by_id.get(str(row['id']),{}).get(field)
         state['visible_status_rows']=records
-        with controller:arm_section('auto-list-refresh',.1 if state.get('activity',{}).get('table') in ('LOADING','REFRESHING') else 20,script)
+        with controller:arm_section('auto-list-refresh',60,script)
         labels=('Automation','Trigger','Entered','Sent','Delivery %','Open %','Click %','Conversions','Revenue','Status')
         # Actions occupy a native Streamlit popover next to the grid.
         st.html('<div class="sc-auto-head">'+''.join('<div>'+s+'</div>' for s in labels)+'</div>')
@@ -305,7 +318,7 @@ def table(shop,store,user,script=None):
                     values=[name,escape(label),number(row['entered']),number(row['sent']),percentage(row['delivered'],row['sent']),
                       percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),number(row['orders']),escape(money(row.get('revenue'))),
                       '<span data-auto-status="'+str(row['id'])+'">'+status_html(category,publication)+'</span>']
-                    st.html('<div class="sc-auto-row">'+''.join('<div>'+s+'</div>' for s in values)+'</div>')
+                    st.html('<div class="sc-auto-row">'+''.join('<div>'+('<span data-auto-metric="'+str(row['id'])+':'+str(i)+'">'+value+'</span>' if 2<=i<=8 else value)+'</div>' for i,value in enumerate(values))+'</div>')
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
                         with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
@@ -322,49 +335,84 @@ def table(shop,store,user,script=None):
         if nxt.button('Next',disabled=len(records)<=PAGE_SIZE,key='auto_next'):state['offset']=offset+PAGE_SIZE;st.rerun()
 
 
-def arm_section(key,seconds,script=None):
-    """Above-fold completion wakeup, scoped to its owning fragment."""
+def arm_section(key,seconds,script=None,*,dialog=False):
+    """One-shot scoped wakeup. No repeating retry loop after a click."""
     from uuid import uuid4
     import json
     st.button('Refresh automation section',key=key)
-    (script.html if script is not None else st.html)('<span id="'+key+'-controller" hidden></span><style>.st-key-'+key+'{display:none}</style><script>/* '+uuid4().hex+' */'+
-      '(()=>{window.scAutoTimers??={};const key='+json.dumps(key)+';clearTimeout(window.scAutoTimers[key]);'+
-      'const tick=()=>{if(!document.getElementById(key+"-controller"))return;const b=document.querySelector(".st-key-"+key+" button");if(!b){window.scAutoTimers[key]=setTimeout(tick,200);return;}'+
-      'if(document.hidden||document.querySelector("[role=dialog],[data-testid=stPopoverBody],[role=listbox]")||document.activeElement?.closest("[class*=st-key-auto-actions-]")){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
-      'if(b.disabled){window.scAutoTimers[key]=setTimeout(tick,250);return;}b.click();window.scAutoTimers[key]=setTimeout(tick,500);};window.scAutoTimers[key]=setTimeout(tick,'+str(int(seconds*1000))+');})();</script>',unsafe_allow_javascript=True)
+    selectors='[data-testid=stPopoverBody],[role=listbox]' if dialog else '[role=dialog],[data-testid=stPopoverBody],[role=listbox]'
+    st.html('<span id="'+key+'-controller" hidden></span><style>.st-key-'+key+'{display:none}</style>')
+    (script.html if script is not None else st.html)('<script>/* '+uuid4().hex+' */'+
+      '(()=>{window.scAutoTimers??={};const key='+json.dumps(key)+';clearTimeout(window.scAutoTimers[key]);if(window.scAutoRequest?.key===key)window.scAutoRequest=null;let attempts=0;'+
+      'const tick=()=>{if(!document.getElementById(key+"-controller"))return;const b=document.querySelector(".st-key-"+key+" button");'+
+      'if(!b){if(++attempts!==15)window.scAutoTimers[key]=setTimeout(tick,2000);return;}if(document.hidden||document.querySelector('+json.dumps(selectors)+')||(key==="auto-list-refresh"&&document.activeElement?.closest("[class*=st-key-auto-actions-]"))||b.disabled){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
+      'if(window.scAutoRequest&&!document.getElementById(window.scAutoRequest.key+"-controller"))window.scAutoRequest=null;if(window.scAutoRequest && 10000>=Date.now()-window.scAutoRequest.at){window.scAutoTimers[key]=setTimeout(tick,1000);return;}window.scAutoRequest={key,at:Date.now()};b.click();};window.scAutoTimers[key]=setTimeout(tick,'+str(int(max(1,seconds)*1000))+');})();</script>',unsafe_allow_javascript=True)
 
 
-@st.fragment(run_every='3s')
+
+@st.fragment
+@isolated
 def status_region(store):
     """Only status JSON is polled, and only while visible jobs are pending."""
     from crm_automation_ui import home_state
     import json
     state=home_state();records=state.get('visible_status_rows',[])
     if not any(publication_state(r).get('state')=='PUBLISHING' for r in records):return
-    refresh_publications(store,records,state)
+    from crm_automation_read_cache import job
+    pending=tuple(str(r['id']) for r in records if publication_state(r).get('state')=='PUBLISHING')
+    key=('publication',pending)
+    future=job(state,store,key,lambda:store.q("SELECT id,config->'publication' AS publication,"+__import__('crm_automation_home_data').CATEGORY+" AS category FROM crm_automations a WHERE id=ANY(%s::uuid[])",(list(pending),)),ttl=3)
+    updates,phase=resolve(state,store,key,future)
+    if updates is not None:refresh_publications(store,records,state,updates=updates)
+    if any(publication_state(r).get('state')=='PUBLISHING' for r in records):arm_section('auto-publication-refresh',3)
     values={str(r['id']):status_html(r['category'].rstrip('s'),publication_state(r)) for r in records}
     encoded=json.dumps(values).replace('<',r'\u003c')
     st.html('<script>(()=>{const values='+encoded+';for(const el of document.querySelectorAll("[data-auto-status]")){'+
       'const html=values[el.dataset.autoStatus];if(html&&el.innerHTML!==html)el.innerHTML=html;}})();</script>',unsafe_allow_javascript=True)
 
 
-@st.fragment(run_every='1s')
-def kpis(store,script=None):
-    controller=st.container()
+@st.fragment
+@isolated
+def table_metrics_region(store):
+    """Resolve deferred metrics without replacing interactive table controls."""
+    from crm_automation_ui import home_state
+    import json
+    state=home_state();criteria=state.get('criteria')
+    if criteria is None:return
+    query,kind,order=criteria;offset=state.get('offset',0)
+    metrics=read(store,('table',criteria,offset),lambda:rows(store,search=query,trigger=kind,oldest=order=='Oldest first',offset=offset))
+    arm_section('auto-metrics-refresh',1 if state.get('activity',{}).get('table') in ('LOADING','REFRESHING','UNRESOLVED') else 60)
+    if metrics is None:return
+    values={}
+    for row in metrics[:PAGE_SIZE]:
+        texts=[number(row['entered']),number(row['sent']),percentage(row['delivered'],row['sent']),
+               percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),number(row['orders']),money(row.get('revenue'))]
+        values.update({str(row['id'])+':'+str(i):text for i,text in enumerate(texts,2)})
+    encoded=json.dumps(values).replace('<',r'\u003c')
+    st.html('<script>(()=>{const values='+encoded+';for(const el of document.querySelectorAll("[data-auto-metric]")){'+
+      'const text=values[el.dataset.autoMetric];if(text!==undefined&&el.textContent!==text)el.textContent=text;}})();</script>',unsafe_allow_javascript=True)
+
+
+@st.fragment
+@isolated
+def kpis(store):
     count=read(store,('counts',None),lambda:counts(store)) or {}
     stats=read(store,('delivery',None),lambda:summary(store,reporting_window())) or {}
-    st.html(kpi_html({**stats,**count}))
     from crm_automation_ui import home_state
-    pending=any(home_state().get('activity',{}).get(k) in ('LOADING','REFRESHING','UNRESOLVED') for k in ('counts','delivery'))
+    phases=home_state().get('activity',{})
+    arm_section('auto-kpi-refresh',1 if any(phases.get(k) in ('LOADING','REFRESHING','UNRESOLVED') for k in ('counts','delivery')) else 180)
+    st.html(kpi_html({**stats,**count}))
 
 
 
-@st.fragment(run_every='1s')
-def recent(store,overview,script=None):
-    controller=st.container()
+@st.fragment
+@isolated
+def recent(store,overview):
     events=read(store,('activity',None),lambda:activity(store))
+    from crm_automation_ui import home_state
+    arm_section('auto-activity-refresh',1 if home_state().get('activity',{}).get('activity') in ('LOADING','REFRESHING','UNRESOLVED') else 180)
     with st.container(key='auto-activity'):
-        st.subheader('Recent activity');st.caption('Recorded automation events · updates every 20 seconds while this page is open.')
+        st.subheader('Recent activity');st.caption('Recorded automation events · refreshes every 3 minutes while this page is open.')
         if events:st.html(activity_html(events[:4] if overview else events))
         elif events is not None:st.caption('No recorded automation activity yet.')
         else:st.caption('Loading recent activity…')
@@ -373,7 +421,7 @@ def recent(store,overview,script=None):
 
 
 def home(shop,store,user):
-    from crm_automation_ui import home_state,chooser,job
+    from crm_automation_ui import home_state,chooser
     state=home_state();st.html(STYLE+STYLE_AUTO)
     st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
     with st.container(key='crm-campaign-home'):
@@ -382,11 +430,13 @@ def home(shop,store,user):
         with create.container(key='auto-create'):
             if st.button('+ Create automation',type='primary',use_container_width=True):chooser(store,user)
         # Reserve KPI location, but submit/render the critical list first.
-        list_script=st.empty();kpi_script=st.empty();activity_script=st.empty()
+        list_script=st.empty()
         cards=st.container()
         statuses=st.container()
+        metric_region=st.container()
         tab=st.segmented_control('Automation view',['Overview','Recent Activity'],default='Overview',label_visibility='collapsed',key='auto-home-tabs') or 'Overview'
         if tab=='Overview':table(shop,store,user,list_script)
         with statuses:status_region(store)
-        with cards:kpis(store,kpi_script)
-        recent(store,tab=='Overview',activity_script)
+        with metric_region:table_metrics_region(store)
+        with cards:kpis(store)
+        recent(store,tab=='Overview')

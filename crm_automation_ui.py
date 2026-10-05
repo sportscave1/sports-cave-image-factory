@@ -4,7 +4,7 @@ import uuid
 import streamlit as st
 from crm_automation_definition import TRIGGERS,MARKETS,email_step,status
 from crm_automation_store import AutomationStore
-from crm_campaign_home_cache import job
+from crm_automation_read_cache import job
 from crm_store import StoreUnavailable
 
 def home_state():return st.session_state.setdefault('automation_home_state',{})

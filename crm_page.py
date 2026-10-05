@@ -237,9 +237,18 @@ def templates_page(store,actions):
     with right:preview_template(content,actions.config)
 
 
+def automation_workspace(shop,store,actions,navigate=lambda _:None):
+    """Route-specific boundary; control-flow BaseExceptions still reach Streamlit."""
+    try:
+        from crm_automation_ui import workspace
+        workspace(shop,store,actions,navigate=navigate)
+    except Exception as exc:
+        __import__('logging').getLogger(__name__).error('automation_render failure=%s',type(exc).__name__)
+        st.error('Automations temporarily unavailable. Other OS sections remain available.')
+
+
 def automations_page(store,actions,shop=None):
-    from crm_automation_ui import workspace
-    workspace(shop,store,actions)
+    automation_workspace(shop,store,actions)
 
 
 def campaigns_page(shop,store,actions):
@@ -319,8 +328,7 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
     if route=='CRM Automations':
-        from crm_automation_ui import workspace
-        workspace(shop,store,actions,navigate=navigate)
+        automation_workspace(shop,store,actions,navigate=navigate)
         return
     left,right=st.columns([9,1])
     left.markdown('### EMAIL · '+('CAMPAIGN SETTINGS' if route=='CRM Settings' else LABELS[route].upper()))
