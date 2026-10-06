@@ -174,7 +174,7 @@ class RouteReliabilityTests(unittest.TestCase):
             last_query = "dashboard"
             expected = session_route
             for index in range(100):
-                expected = routes[(index + 1) % len(routes)]
+                expected = routes[(routes.index(session_route) + 1) % len(routes)]
                 query_value = os_accounts.page_key_for_route(expected)
                 resolved, source = navigation_runtime.resolve_route(
                     session_route=session_route,

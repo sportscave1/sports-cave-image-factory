@@ -40,7 +40,8 @@ class ImageProtectionSidebarTests(unittest.TestCase):
         source = FIXTURE.read_text(encoding='utf-8').replace(
             "'role':'admin'", "'role':'worker'")
         # Keep the fixture's app.py resolution when executing from a string.
-        source = source.replace("Path(__file__).resolve().parents[1]", repr(str(FIXTURE.resolve().parents[1])) + ' and Path(' + repr(str(FIXTURE.resolve().parents[1])) + ')')
+        source = source.replace("Path(__file__).resolve().parents[1]",
+                                f"Path({str(FIXTURE.resolve().parents[1])!r})")
         app = AppTest.from_string(source).run()
         self.assertFalse(list(app.exception))
         self.assertNotIn('Image Protection', [b.label for b in app.sidebar.button])
