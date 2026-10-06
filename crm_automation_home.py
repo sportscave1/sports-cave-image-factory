@@ -22,13 +22,13 @@ STYLE_AUTO='''<style>
 .st-key-auto-create button{max-width:280px;float:right}
 .sc-auto-trend{color:#71747c}.sc-auto-kpi strong{line-height:1.25}.sc-auto-kpi{min-height:110px}
 .sc-auto-head,.sc-auto-row{font-size:13px}.sc-auto-head{font-size:12px}.sc-auto-row small{font-size:12px}
-.sc-auto-head,.sc-auto-row{display:grid;grid-template-columns:minmax(180px,2.6fr) minmax(105px,1.3fr) repeat(7,minmax(45px,.65fr)) 70px;gap:12px;align-items:center;font-size:12px;padding:10px 0;min-width:0;border-bottom:1px solid #eee}
-.sc-auto-head{background:#f8f8f8;border-radius:7px;padding:9px 4px;margin-right:48px;position:relative;color:#646770;font-size:11px}.sc-auto-head::after{content:'Actions';position:absolute;right:-48px;width:44px}
-.sc-auto-row>div{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.sc-auto-row>div:nth-child(n+3){text-align:right}.sc-auto-row small{display:block;color:#7a7c85;font-size:11px;margin-top:4px}.sc-auto-name{display:flex;gap:10px;align-items:center}.sc-auto-name a{color:#22242a;text-decoration:none;font-weight:600}.sc-auto-name .sc-home-icon{width:36px;height:36px}
+.sc-auto-head,.sc-auto-row{display:grid;grid-template-columns:minmax(160px,2.6fr) minmax(110px,1.4fr) repeat(3,minmax(50px,.7fr)) minmax(88px,.9fr) repeat(3,minmax(60px,.7fr)) 80px;gap:8px;align-items:center;font-size:12px;padding:10px 0;min-width:0;border-bottom:1px solid #eee}
+.sc-auto-head{background:#f8f8f8;border-radius:7px;padding:9px 0;position:relative;color:#646770;font-size:11px}.sc-auto-actions-heading{width:40px;text-align:center;font-size:11px;color:#646770}
+.sc-auto-row>div{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.sc-auto-head>div:nth-child(n+3),.sc-auto-row>div:nth-child(n+3){text-align:center}.sc-auto-row small{display:block;color:#7a7c85;font-size:11px;margin-top:4px}.sc-auto-name{display:flex;gap:10px;align-items:center}.sc-auto-name a{color:#22242a;text-decoration:none;font-weight:600}.sc-auto-name .sc-home-icon{width:36px;height:36px}
 .sc-auto-pill{display:inline-block;border-radius:7px;background:#f0f1f4;padding:6px 9px;font-size:11px}.sc-auto-pill.active{background:#e7f7ef;color:#21613d}
 .sc-auto-pill.publishing{background:#edf1f7;color:#4a5d75}.sc-auto-pill.failed{background:#faecea;color:#9c3c36}.sc-auto-publish-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;animation:sc-auto-pulse 1.2s ease-in-out infinite}
 @keyframes sc-auto-pulse{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){.sc-auto-publish-dot{animation:none}}
-[class*='st-key-auto-row-']{gap:8px!important}[class*='st-key-auto-actions-'] button{min-height:36px!important;width:36px!important;padding:5px!important;border:1px solid #e4e3df!important;border-radius:7px!important;background:#fff!important;color:#52565e!important}
+[class*='st-key-auto-row-'],.st-key-auto-table-header{gap:8px!important;align-items:center}.st-key-auto-table-header{background:#f8f8f8;border-radius:7px}[class*='st-key-auto-actions-']{align-items:center!important}[class*='st-key-auto-actions-'] button{min-height:36px!important;width:36px!important;padding:5px!important;border:1px solid #e4e3df!important;border-radius:7px!important;background:#fff!important;color:#52565e!important}
 [class*='st-key-auto-actions-'] button:hover,[class*='st-key-auto-actions-'] button[aria-expanded='true']{background:#f2f1ed!important;border-color:#cfcec7!important}
 [class*='st-key-auto-actions-'] button:focus-visible{outline:2px solid #b68e2c!important;outline-offset:2px}
 [data-testid='stPopoverBody']:has([class*='st-key-auto-context-menu-']){width:190px!important;min-width:0!important;max-width:calc(100vw - 24px)!important;padding:5px!important;border:1px solid #deddd7!important;border-radius:9px!important;background:#fffefa!important;box-shadow:0 5px 18px #171a2024!important}
@@ -56,7 +56,7 @@ STYLE_AUTO='''<style>
 .st-key-auto-activity{border:1px solid #e8e6e1;border-radius:12px;background:#fff;padding:14px;margin-top:6px}.st-key-auto-activity h3{font-size:20px;padding-top:0;padding-bottom:0}
 .st-key-auto-overview input{background:#fff;border:1px solid #e6e9ef;border-radius:7px}
 @media(max-width:1400px){.sc-auto-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@container(max-width:1080px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(170px,2fr) minmax(95px,1fr) repeat(4,minmax(45px,.7fr)) 70px}.sc-auto-head>div:nth-child(5),.sc-auto-row>div:nth-child(5),.sc-auto-head>div:nth-child(6),.sc-auto-row>div:nth-child(6),.sc-auto-head>div:nth-child(9),.sc-auto-row>div:nth-child(9){display:none}}
+@container(max-width:900px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(170px,2fr) minmax(95px,1fr) repeat(4,minmax(45px,.7fr)) 70px}.sc-auto-head>div:nth-child(5),.sc-auto-row>div:nth-child(5),.sc-auto-head>div:nth-child(6),.sc-auto-row>div:nth-child(6),.sc-auto-head>div:nth-child(9),.sc-auto-row>div:nth-child(9){display:none}}
 @container(max-width:710px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(100px,2fr) 48px 60px;gap:8px}.sc-auto-head>div:nth-child(2),.sc-auto-row>div:nth-child(2),.sc-auto-head>div:nth-child(3),.sc-auto-row>div:nth-child(3),.sc-auto-head>div:nth-child(7),.sc-auto-row>div:nth-child(7),.sc-auto-head>div:nth-child(8),.sc-auto-row>div:nth-child(8){display:none}}
 @media(max-width:750px){.sc-auto-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sc-auto-kpi{padding:12px 8px;gap:7px}.sc-auto-kpi strong{font-size:21px}.sc-auto-activity{grid-template-columns:repeat(2,minmax(0,1fr))}.st-key-auto-overview{padding:8px}}
 @media(max-width:390px){.sc-auto-kpi .sc-home-icon{width:26px;height:28px}.sc-auto-kpi small{font-size:10px}.sc-auto-name .sc-home-icon{display:none}.sc-auto-activity{grid-template-columns:1fr}}
@@ -121,6 +121,15 @@ def number(value):return '—' if value is None else format(value,',')
 
 
 def percentage(n,d):return '—' if not d else format(100*float(n or 0)/float(d),'.1f')+'%'
+
+
+def metric_texts(row):
+    """One formatter for cached first paint and incremental metric updates."""
+    sent=row.get('sent');delivered=row.get('delivered');opened=row.get('opened')
+    opens='—' if not sent or opened is None else number(opened)+' ('+percentage(opened,delivered)+')'
+    bounce='—' if row.get('bounced') is None else percentage(row['bounced'],sent)
+    return [number(row.get('entered')),number(sent),percentage(delivered,sent),opens,
+            percentage(row.get('clicked'),delivered) if sent else '—',number(row.get('orders')),bounce]
 
 
 def publication_state(row):
@@ -307,14 +316,18 @@ def table(shop,store,user,script=None):
         metrics=cached_metrics[0] if cached_metrics else []
         by_id={str(r['id']):r for r in metrics}
         for row in records:
-            for field in ('entered','sent','delivered','opened','clicked','orders','revenue'):
+            for field in ('entered','sent','delivered','opened','clicked','orders','bounced'):
                 row[field]=by_id.get(str(row['id']),{}).get(field)
         state['visible_status_rows']=records
         if st.button('Refresh automations',key='auto-list-refresh'):
             state.get('automation_identity_cache',{}).clear();st.rerun()
-        labels=('Automation','Trigger','Entered','Sent','Delivery %','Open %','Click %','Conversions','Revenue','Status')
+        labels=('Automation','Trigger','Entered','Sent','Delivery %','Opens','Click %','Conversions','Bounce rate','Status')
         # Actions occupy a native Streamlit popover next to the grid.
-        st.html('<div class="sc-auto-head">'+''.join('<div>'+s+'</div>' for s in labels)+'</div>')
+        with st.container(horizontal=True,key='auto-table-header'):
+            with st.container(width='stretch'):
+                st.html('<div class="sc-auto-head">'+''.join('<div>'+s+'</div>' for s in labels)+'</div>')
+            with st.container(width=40):
+                st.html('<div class="sc-auto-actions-heading">Actions</div>')
         for row in records[:PAGE_SIZE]:
             publication=publication_state(row)
             with st.container(horizontal=True,key='auto-row-'+str(row['id'])):
@@ -324,8 +337,7 @@ def table(shop,store,user,script=None):
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
                     name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a href="'+escape(target,quote=True)+'" target="_self">'+escape(row['name'])+'</a><small>'+escape(label)+'</small></div></div>'
-                    values=[name,escape(label),number(row['entered']),number(row['sent']),percentage(row['delivered'],row['sent']),
-                      percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),number(row['orders']),escape(money(row.get('revenue'))),
+                    values=[name,escape(label),*metric_texts(row),
                       '<span data-auto-status="'+str(row['id'])+'">'+status_html(category,publication)+'</span>']
                     st.html('<div class="sc-auto-row">'+''.join('<div>'+('<span data-auto-metric="'+str(row['id'])+':'+str(i)+'">'+value+'</span>' if 2<=i<=8 else value)+'</div>' for i,value in enumerate(values))+'</div>')
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
@@ -423,8 +435,7 @@ def table_metrics_region(store):
     if metrics is None:return
     values={}
     for row in metrics[:PAGE_SIZE]:
-        texts=[number(row['entered']),number(row['sent']),percentage(row['delivered'],row['sent']),
-               percentage(row['opened'],row['delivered']),percentage(row['clicked'],row['delivered']),number(row['orders']),money(row.get('revenue'))]
+        texts=metric_texts(row)
         values.update({str(row['id'])+':'+str(i):text for i,text in enumerate(texts,2)})
     encoded=json.dumps(values).replace('<',r'\u003c')
     st.html('<script>(()=>{const values='+encoded+';for(const el of document.querySelectorAll("[data-auto-metric]")){'+

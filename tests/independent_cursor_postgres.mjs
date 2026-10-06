@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const {PGlite}=await import(pathToFileURL(process.env.PGLITE_MODULE).href);
-const db=new PGlite();
+let db=new PGlite();
 const sql=readFileSync(new URL('../migrations/20260912045939_independent_edition_cursor.sql',import.meta.url),'utf8');
 const strings='source_channel external_order_id external_line_item_id allocation_key shopify_product_gid shopify_order_id shopify_order_name shopify_line_item_id shopify_product_id shopify_variant_id shopify_handle product_title edition_name variant_title sku customer_name customer_email shopify_customer_name shopify_customer_email certificate_status status source mirror_status'.split(' ');
 await db.exec(`
@@ -48,5 +48,20 @@ await test('occupied number and backwards cursor rejected',async()=>{await alloc
 await test('tombstoned/reserved number rejected',async()=>{await db.query('INSERT INTO edition_allocation_tombstones(shopify_product_gid,former_edition_number) VALUES($1,50)',[product]);await assert.rejects(allocate(),/issued or reserved/);});
 await test('variant identity conflict rejected on retry',async()=>{await allocate();await assert.rejects(allocate(1,'17545899573555','7408832905523','other'),/conflicting identities/);});
 assert(sql.includes('pg_advisory_xact_lock') && sql.includes('FOR UPDATE'));
+await test('late edition product creation allocates current N exactly once and survives restart',async()=>{
+ await db.exec('DELETE FROM edition_products');
+ await assert.rejects(allocate(),/no rows/);
+ await db.query('INSERT INTO edition_products(shopify_product_gid,active_edition_run_id,edition_total,next_edition_number,sold_count,remaining_count) VALUES($1,$2,100,37,0,100)',[product,run]);
+ await db.exec('UPDATE edition_runs SET next_edition_number=37');
+ assert.equal((await allocate())[0].allocation.edition_number,37);
+ assert.deepEqual(await state(),{next_edition_number:38,sold_count:1,remaining_count:99});
+ assert.equal((await allocate())[0].was_created,false);
+ assert.deepEqual(await state(),{next_edition_number:38,sold_count:1,remaining_count:99});
+ const dump=await db.dumpDataDir();await db.close();db=new PGlite({loadDataDir:dump});
+ const rows=(await db.query('SELECT edition_number,certificate_status FROM edition_orders')).rows;
+ assert.deepEqual(rows,[{edition_number:37,certificate_status:'Certificate Missing'}]);
+ assert.equal((await allocate())[0].was_created,false);
+ assert.deepEqual(await state(),{next_edition_number:38,sold_count:1,remaining_count:99});
+});
 console.log(`${passed} PostgreSQL scenarios passed. PGlite serializes connections; cross-process locking is provided by PostgreSQL transaction locks and database unique constraints.`);
 await db.close();

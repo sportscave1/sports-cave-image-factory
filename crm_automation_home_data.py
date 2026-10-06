@@ -44,13 +44,15 @@ def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offs
       ORDER BY a.updated_at """+('ASC' if oldest else 'DESC')+""",a.id LIMIT %s OFFSET %s
     ), recipients AS (
       SELECT j.automation_id,s.id,s.status,bool_or(e.event_type='email.delivered') AS delivered,
-        bool_or(e.event_type='email.opened') AS opened,bool_or(e.event_type='email.clicked') AS clicked
+        bool_or(e.event_type='email.opened') AS opened,bool_or(e.event_type='email.clicked') AS clicked,
+        bool_or(e.event_type='email.bounced') AS bounced
       FROM crm_automation_enrollments j JOIN page p ON p.id=j.automation_id
       JOIN crm_marketing_sends s ON s.enrollment_id=j.id AND NOT s.test_send
       LEFT JOIN crm_delivery_events e ON e.send_id=s.id GROUP BY j.automation_id,s.id,s.status
     ), totals AS (SELECT automation_id,count(*) FILTER(WHERE status='ACCEPTED') AS sent,
       count(*) FILTER(WHERE delivered) AS delivered,count(*) FILTER(WHERE delivered AND opened) AS opened,
-      count(*) FILTER(WHERE delivered AND clicked) AS clicked FROM recipients GROUP BY automation_id)
+      count(*) FILTER(WHERE delivered AND clicked) AS clicked,
+      count(*) FILTER(WHERE status='ACCEPTED' AND bounced) AS bounced FROM recipients GROUP BY automation_id)
     , entrances AS (
       SELECT j.automation_id,count(*) AS entered FROM crm_automation_enrollments j
       JOIN page p ON p.id=j.automation_id GROUP BY j.automation_id
@@ -61,7 +63,7 @@ def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offs
     ), commerce AS (
       SELECT id,sum(orders)::bigint AS orders,jsonb_object_agg(currency,amount) AS revenue FROM money GROUP BY id
     )
-    SELECT p.*,COALESCE(t.sent,0) AS sent,COALESCE(t.delivered,0) AS delivered,COALESCE(t.opened,0) AS opened,COALESCE(t.clicked,0) AS clicked,
+    SELECT p.*,COALESCE(t.sent,0) AS sent,COALESCE(t.delivered,0) AS delivered,COALESCE(t.opened,0) AS opened,COALESCE(t.clicked,0) AS clicked,COALESCE(t.bounced,0) AS bounced,
       COALESCE(j.entered,0) AS entered,COALESCE(o.orders,0) AS orders,COALESCE(o.revenue,'{}') AS revenue
       FROM page p LEFT JOIN totals t ON t.automation_id=p.id LEFT JOIN entrances j ON j.automation_id=p.id LEFT JOIN commerce o ON o.id=p.id ORDER BY p.updated_at """+('ASC' if oldest else 'DESC')+",p.id",
       (tab,tab,search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))

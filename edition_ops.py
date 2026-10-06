@@ -2481,6 +2481,9 @@ def render_page():
             flush=True,
         )
         _render_advanced_controls(backend, current_rows)
+        if backend:
+            from edition_order_recovery import render as render_order_recovery
+            render_order_recovery(backend, current_rows)
 
         errors = {row["product_title"]: row["sync_error"] for row in current_rows if row.get("sync_error")}
         if errors:

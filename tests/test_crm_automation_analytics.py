@@ -146,7 +146,7 @@ class AnalyticsTests(unittest.TestCase):
           {'id':a['steps'][0]['template_id'],'version':a['steps'][0]['template_version']},enrollment_id=j['id'],step_index=0)
         sent_at=now()
         self.store.q("UPDATE crm_marketing_sends SET status='ACCEPTED',first_submitted_at=%s WHERE id=%s",(sent_at,send['id']))
-        for kind in ('email.delivered','email.opened','email.clicked'):
+        for kind in ('email.delivered','email.opened','email.clicked','email.bounced'):
             for _ in range(2):self.store.q('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,send_id) VALUES(%s,%s,%s,%s,%s)',(str(uuid.uuid4()),str(uuid.uuid4()),kind,sent_at,send['id']))
         for currency,amount,eligible,age in (('AUD',10,True,0),('NZD',20,True,0),('AUD',500,False,0),('AUD',100,True,40)):
             self.store.q('''INSERT INTO crm_order_attribution(shopify_order_id,customer_id,order_created_at,visit_at,amount,currency,eligible,evidence)
@@ -159,6 +159,7 @@ class AnalyticsTests(unittest.TestCase):
         record=rows(self.store,search=a['name'])[0]
         self.assertEqual([record[k] for k in ('entered','sent','delivered','opened','clicked','orders')],[1,1,1,1,1,3])
         self.assertEqual(record['revenue'],{'AUD':110,'NZD':20})
+        self.assertEqual(record['bounced'],1) # duplicate provider events count once per accepted send
         self.assertIn('Email sent',[e['event'] for e in activity(self.store,a['id'])])
         self.assertIn('Added to flow',[e['event'] for e in activity(self.store,a['id'])])
         self.shop.query.return_value={'abandonedCheckouts':{'nodes':[c],'pageInfo':{'hasNextPage':False}}}
