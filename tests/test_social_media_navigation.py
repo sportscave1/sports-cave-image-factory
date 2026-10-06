@@ -280,8 +280,8 @@ class SocialStorageContractTests(unittest.TestCase):
 class SocialHubUiContractTests(unittest.TestCase):
     def test_hub_is_compact_safe_and_has_all_workflow_views(self):
         source = (ROOT / "social_media_page.py").read_text(encoding="utf-8")
-        self.assertIn("Sports Cave Social Media", source)
-        self.assertIn('"Wall Preview Inbox", "Create", "Plan", "Playbook", "Tracking"', source)
+        self.assertIn("<h1>Social Media</h1>", source)
+        self.assertIn('"Overview", "Create", "Plan", "Playbook", "Tracking"', source)
         self.assertIn("Today", source)
         self.assertIn("Post Tracker", source)
         self.assertIn("Weekly Check-In", source)
@@ -297,7 +297,8 @@ class SocialHubUiContractTests(unittest.TestCase):
         source = inspect.getsource(module.render_page)
         tracking_source = inspect.getsource(module._render_tracking)
         self.assertIn('default="Overview"', source)
-        self.assertIn('if view == "Wall Preview Inbox"', source)
+        self.assertNotIn('wall_preview_inbox.render', source)
+        self.assertNotIn('wall_preview_analytics_ui', source)
         self.assertIn('elif view == "Tracking"', source)
         self.assertIn('if view == "Post Tracker"', tracking_source)
         self.assertIn('elif view == "Weekly Check-In"', tracking_source)

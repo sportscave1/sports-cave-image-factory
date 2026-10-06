@@ -104,7 +104,7 @@ class WallPreviewFeatureTests(unittest.TestCase):
             self.assertIn('marketing_permission = TRUE', sql)
             self.assertIn('ORDER BY received_at DESC', sql)
             self.assertEqual(wall_preview_store.summary()['new'], 2)
-            self.assertIn('WHERE marketing_permission=TRUE', cur.execute.call_args.args[0])
+            self.assertIn('AND marketing_permission=TRUE', cur.execute.call_args.args[0])
 
 
 class WallPreviewHttpTests(unittest.IsolatedAsyncioTestCase):
@@ -177,6 +177,7 @@ user={'id':'admin','role':'admin','is_active':True,'page_permissions':[]}
 inbox.wall_preview_store.summary=lambda **kwargs: {'new':1,'approved':0,'used':0,'private':1}
 inbox.wall_preview_store.list_previews=lambda **kwargs: st.session_state.get('fixture-rows', [])
 inbox._temporary_link=lambda path, file_id='': 'https://dl.dropboxusercontent.com/fixture.jpg'
+inbox._page.clear()
 inbox.render(user)
 '''
 
@@ -194,8 +195,8 @@ class WallPreviewUiTests(unittest.TestCase):
         self.assertEqual(len(app.metric), 0)
         self.assertIn('Refresh', [button.label for button in app.button])
         self.assertIn('Open Wall Preview Folder', [button.label for button in app.button])
-        self.assertEqual(app.segmented_control[0].value, 'All')
-        self.assertTrue(any('No wall previews to show yet.' in item.value for item in app.markdown))
+        self.assertEqual(next(x for x in app.selectbox if x.label=='Status').value, 'All')
+        self.assertTrue(any('No customer wall previews match' in item.value for item in app.info))
 
     def test_gallery_cards_are_image_first_and_action_free(self):
         app = AppTest.from_string(INBOX_PAGE)
@@ -227,17 +228,14 @@ class WallPreviewUiTests(unittest.TestCase):
         self.assertNotIn('Mark used', labels)
         self.assertNotIn('Archive', labels)
         self.assertEqual(len(app.get('link_button')), 0)
-        html = '\n'.join(item.value for item in app.markdown)
-        self.assertIn('Jane Collector', html)
-        self.assertIn('jane@example.com', html)
-        self.assertIn('N/A', html)
-        self.assertIn('MARKETING USE: ALLOWED', html)
-        self.assertIn('Collector edition', html)
-        self.assertNotIn('\n\n', next(item.value for item in app.markdown if '<article class="sc-wall-card">' in item.value))
+        args=json.loads(app.get('component_instance')[-1].proto.json_args)
+        self.assertEqual([r['title'] for r in args['items']],['Collector edition','Another edition'])
+        self.assertEqual(args['items'][0]['identity'],'jane@example.com')
+        self.assertTrue(args['canDelete'])
 
     def test_staff_cannot_request_private_image_even_from_injected_row(self):
         with patch.object(wall_preview_inbox,'_temporary_link') as link:
-            wall_preview_inbox._render_card({'role':'worker','is_active':True}, {'marketing_permission':False},key_prefix='private')
+            wall_preview_inbox._details({'role':'worker','is_active':True}, {'marketing_permission':False})
             link.assert_not_called()
 
     def test_dropbox_path_failure_uses_stable_file_id_without_public_sharing(self):
@@ -247,22 +245,12 @@ class WallPreviewUiTests(unittest.TestCase):
             self.assertIn('temporary.jpg',wall_preview_inbox._temporary_link('/original.jpg','id:stable'))
             client.files_get_temporary_link.assert_called_once_with('id:stable')
 
-    def test_first_default_workspace_ignores_unrelated_social_storage(self):
-        app=AppTest.from_string('''
-import social_media_page
-import wall_preview_inbox
-wall_preview_inbox.wall_preview_store.list_previews=lambda **kwargs: []
-wall_preview_inbox.wall_preview_store.summary=lambda **kwargs: {}
-class Store:
-    def schema_status(self):raise AssertionError('Unrelated social storage queried')
-social_media_page.render_page({'id':'admin','role':'admin','is_active':True}, store=Store())
-''').run()
-        self.assertEqual(len(app.exception),0)
-        self.assertEqual(app.segmented_control[0].value,'Overview')
-        self.assertEqual(app.segmented_control[0].options,['Overview','Wall Preview Inbox','Create','Plan','Playbook','Tracking'])
-        app.segmented_control[0].set_value('Wall Preview Inbox').run()
-        self.assertEqual(len(app.exception),0)
-        self.assertIn('Open Wall Preview Folder',[b.label for b in app.button])
+    def test_overview_has_no_wall_preview_calls(self):
+        import inspect, social_media_page
+        source=inspect.getsource(social_media_page.render_page)
+        self.assertNotIn('wall_preview_inbox.render',source)
+        self.assertNotIn('wall_preview_analytics_ui',source)
+        self.assertIn('"Overview", "Create", "Plan", "Playbook", "Tracking"',source)
 
 
 def inbox_path():

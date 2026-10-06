@@ -115,7 +115,7 @@ class IdentityTests(unittest.TestCase):
         sql,params=cur.execute.call_args.args
         self.assertIn('customer_email LIKE %s',sql)
         self.assertIn('marketing_permission = TRUE',sql)
-        self.assertEqual(params,('new',r'jane\%\_%',r'jane\%\_%',36))
+        self.assertEqual(params,('new',r'jane\%\_%',r'jane\%\_%',r'jane\%\_%',36))
 
 
 class IdentityHttpTests(WallPreviewHttpTests):
@@ -184,10 +184,10 @@ class IdentityUiTests(unittest.TestCase):
             app=AppTest.from_string('''
 import wall_preview_inbox as inbox
 inbox._temporary_link=lambda *args: 'https://dl.dropboxusercontent.com/fixture.jpg'
-inbox._render_card({'role':'worker','is_active':True},
+inbox._details({'role':'worker','is_active':True},
     {'id':'a','customer_email':'jane@example.com','customer_name':'Jane',
      'shopify_customer_id':'gid://shopify/Customer/42','marketing_permission':True,
-     'dropbox_path':'/a.jpg','status':'new'},key_prefix='staff')
+     'dropbox_path':'/a.jpg','status':'new'})
 ''').run()
             self.assertEqual(len(app.exception),0)
             self.assertNotIn('Open Shopify customer',[item.label for item in app.get('link_button')])
@@ -202,10 +202,10 @@ inbox._render_card({'role':'worker','is_active':True},
                 app.run()
                 self.assertEqual(len(app.exception),0)
                 markup='\n'.join(item.value for item in app.markdown)
-                self.assertIn('Jane Collector',markup)
-                self.assertIn('jane@example.com',markup)
-                self.assertIn('Details',[item.label for item in app.button])
-                self.assertIn('Search customer name or email',[item.label for item in app.text_input])
+                self.assertIn('jane@example.com',str(app.get('component_instance')[-1].proto))
+                self.assertIn('jane@example.com',str(app.get('component_instance')[-1].proto))
+                self.assertEqual(len(app.get('component_instance')),1)
+                self.assertIn('Search customer or product',[item.label for item in app.text_input])
         finally:
             store.summary,store.list_previews,inbox._temporary_link=original
 

@@ -96,6 +96,8 @@ def confirm(payload, upload):
         cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('wall-preview:'+client_id,))
         cur.execute('SELECT * FROM public.wall_previews WHERE client_preview_id=%s FOR UPDATE', (client_id,))
         previous = dict(cur.fetchone() or {})
+        if (previous.get('attribution') or {}).get('inbox_deleted_at'):
+            raise ValueError('This preview was removed.')
         if previous and not hmac.compare_digest(str(previous['session_id']), session):
             raise PermissionError('Preview authorization required.')
         if payload.get('preview_id') and (not previous or str(previous['id']) != str(payload['preview_id'])):

@@ -68,7 +68,7 @@ def find_preview(digest, *, customer_email=''):
 
 
 def summary(*, include_private=False):
-    where = "" if include_private else "WHERE marketing_permission=TRUE"
+    where = "WHERE NOT (COALESCE(attribution,'{}'::jsonb) ? 'inbox_deleted_at')" + ("" if include_private else " AND marketing_permission=TRUE")
     with _backend().connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='4000ms'")
@@ -163,13 +163,24 @@ def record_preview(payload):
             raise
 
 
-def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search='', intent='all'):
+def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search='', intent='all', start_date=None, end_date=None, product_id='', device_type='', capture_source='', cursor=None):
     clean_status = str(status or "new").strip().lower()
     if clean_status not in (*VALID_STATUSES, "all"):
         clean_status = "new"
     safe_limit = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
-    clauses = []
+    clauses = ["NOT (COALESCE(attribution,'{}'::jsonb) ? 'inbox_deleted_at')"]
     params = []
+    for column, value, operator in (('received_at',start_date,'>='),('received_at',end_date,'<'),('product_id',product_id,'=')):
+        if value:
+            clauses.append(f"{column} {operator} %s")
+            params.append(value)
+    for column,value in (('device_type',device_type),('capture_source',capture_source)):
+        if value:
+            clauses.append(f"(SELECT filter_event.{column} FROM public.wall_preview_events filter_event WHERE (filter_event.preview_id=wall_previews.id OR filter_event.client_preview_id=wall_previews.client_preview_id) AND NULLIF(filter_event.{column},'') IS NOT NULL ORDER BY filter_event.occurred_at DESC,filter_event.id DESC LIMIT 1)=%s")
+            params.append(value)
+    if cursor:
+        clauses.append('(received_at,id) < (%s::timestamptz,%s::uuid)')
+        params.extend(cursor)
     if clean_status != "all":
         clauses.append("status = %s")
         params.append(clean_status)
@@ -182,11 +193,10 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
         clauses.append(intent_clause[intent])
     search = _clean(customer_search, 254).lower()
     if search:
-        # Prefix searches use the dedicated pattern indexes; no all-history scan
-        # or wildcard injection from customer-controlled strings.
+        # Prefix filtering stays in SQL; customer-controlled wildcards are escaped.
         pattern = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-        clauses.append("(customer_email LIKE %s OR lower(customer_name) LIKE %s)")
-        params.extend((pattern, pattern))
+        clauses.append("(customer_email LIKE %s OR lower(customer_name) LIKE %s OR lower(product_title) LIKE %s)")
+        params.extend((pattern, pattern, pattern))
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     params.append(safe_limit)
     with _backend().connect() as conn:
@@ -200,7 +210,7 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
                     WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart') AS added_to_cart
                 FROM public.wall_previews
                 {where}
-                ORDER BY received_at DESC
+                ORDER BY received_at DESC, id DESC
                 LIMIT %s
                 """,
                 tuple(params),
@@ -261,3 +271,54 @@ def update_status(preview_id, status, *, actor_user_id=None, include_private=Fal
         except Exception:
             conn.rollback()
             raise
+
+
+def get_preview(preview_id, *, include_private=False):
+    with _backend().connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout='4000ms'")
+            cur.execute("""SELECT * FROM public.wall_previews WHERE id=%s
+                AND NOT (COALESCE(attribution,'{}'::jsonb) ? 'inbox_deleted_at')
+                AND (%s OR marketing_permission)""", (preview_id, include_private))
+            return dict(cur.fetchone() or {})
+
+
+def delete_preview(preview_id, *, user, remove_asset):
+    """Remove one image, retaining its analytics tombstone and exact-request identity.
+
+    Shares the archive worker's parent-row lock. Provider failure leaves the inbox
+    intact; a retry after a DB failure tolerates an already removed provider file.
+    """
+    import os_accounts
+    import wall_preview_crm_store as crm
+    import activity_log
+    if not os_accounts.is_admin(user):
+        raise PermissionError('Only an administrator can delete a preview.')
+    with crm.transaction() as cur:
+        cur.execute('SELECT * FROM public.wall_previews WHERE id=%s FOR UPDATE', (preview_id,))
+        row = dict(cur.fetchone() or {})
+        if not row or (row.get('attribution') or {}).get('inbox_deleted_at'):
+            return False
+        cur.execute("SELECT id FROM public.wall_preview_email_jobs WHERE preview_id=%s AND state='processing' LIMIT 1",(preview_id,))
+        if cur.fetchone():
+            raise WallPreviewStoreError('An image delivery is in progress. Retry deletion shortly.')
+        if row.get('dropbox_path'):
+            cur.execute("""SELECT id FROM public.wall_previews WHERE id<>%s
+                AND ((dropbox_file_id<>'' AND dropbox_file_id=%s) OR dropbox_path=%s) LIMIT 1""",
+                (preview_id,row['dropbox_file_id'],row['dropbox_path']))
+            if cur.fetchone():
+                raise WallPreviewStoreError('This asset is shared by another preview; deletion was stopped.')
+            remove_asset(row)
+        cur.execute("""UPDATE public.wall_previews SET
+            attribution=COALESCE(attribution,'{}'::jsonb) || jsonb_build_object(
+                'inbox_deleted_at',now(),'inbox_deleted_by',%s::text),
+            share_revoked_at=now(),status='archived',dropbox_file_id='',dropbox_path='',updated_at=now()
+            WHERE id=%s""", (str(user['id']),preview_id))
+        cur.execute("""UPDATE public.wall_preview_archive_jobs SET state='failed',image=NULL,
+            reason='admin_deleted',finished_at=now() WHERE preview_id=%s""", (preview_id,))
+        cur.execute("""UPDATE public.wall_preview_email_jobs SET state='suppressed',reason='preview_deleted'
+            WHERE preview_id=%s AND state='queued'""", (preview_id,))
+    activity_log.record_activity_log('wall_preview_deleted','Social Media','Wall preview image deleted',
+        entity_type='wall_preview',entity_id=str(preview_id),actor=str(user['id']),
+        event_key='wall-preview-deleted:'+str(preview_id))
+    return True

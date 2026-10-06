@@ -9,7 +9,6 @@ import os_accounts
 import social_media
 import social_media_store
 import social_media_workspace
-import wall_preview_inbox
 from ui_option_ordering import alphabetize_options, selected_option_index
 
 
@@ -43,26 +42,6 @@ def _inject_styles():
     st.markdown(
         """
         <style>
-        .sc-social-header {
-            background: #111111;
-            border-bottom: 3px solid #b58a2a;
-            border-radius: 6px;
-            color: #ffffff;
-            margin-bottom: 0.9rem;
-            padding: 1.15rem 1.3rem;
-        }
-        .sc-social-header h1 {
-            color: #ffffff !important;
-            font-size: 1.65rem;
-            letter-spacing: 0;
-            line-height: 1.15;
-            margin: 0;
-        }
-        .sc-social-header p {
-            color: #d8d4ca !important;
-            font-size: 0.88rem;
-            margin: 0.35rem 0 0;
-        }
         .sc-social-profiles {
             display: grid;
             gap: 0.55rem;
@@ -1087,13 +1066,17 @@ def render_page(user, *, store=social_media_store, account_store=None):
         st.title("Access not approved")
         st.caption("This page is not available for your account.")
         return
+    if st.session_state.get('social-media-workspace-view') == 'Wall Preview Inbox':
+        st.session_state['social-media-workspace-view'] = 'Overview'
     _inject_styles()
+    from social_media_ui import inject_styles
+    inject_styles()
     social_media_workspace.inject_workspace_styles()
     st.markdown(
         """
         <div class="sc-social-header">
-            <h1>Sports Cave Social Media</h1>
-            <p>Create today's content, follow the approved plan and track what performs.</p>
+            <h1>Social Media</h1>
+            <p>Create, manage and track Sports Cave social content.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1102,17 +1085,11 @@ def render_page(user, *, store=social_media_store, account_store=None):
     _show_result_notice()
     view = st.segmented_control(
         "Social Media workspace",
-        ("Overview", "Wall Preview Inbox", "Create", "Plan", "Playbook", "Tracking"),
+        ("Overview", "Create", "Plan", "Playbook", "Tracking"),
         default="Overview",
         key="social-media-workspace-view",
         label_visibility="collapsed",
     )
-    if view == "Wall Preview Inbox":
-        wall_preview_inbox.render(user)
-        return
-    if view == "Overview":
-        from wall_preview_analytics_ui import overview
-        overview()
     try:
         storage = store.schema_status()
     except Exception:

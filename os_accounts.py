@@ -57,6 +57,9 @@ PAGE_REGISTRY = (
         "label": social_media.SOCIAL_MEDIA_ROUTE,
         "worker_assignable": True,
     },
+    {"key": social_media.WALL_PREVIEW_PAGE_KEY, "route": social_media.WALL_PREVIEW_ROUTE,
+     "label": "Wall Preview Inbox", "worker_assignable": False,
+     "parent_key": social_media.SOCIAL_MEDIA_PAGE_KEY, "navigation_child": True},
     {
         "key": social_media.AI_REELS_PAGE_KEY,
         "route": social_media.AI_REELS_ROUTE,
@@ -408,6 +411,7 @@ def can_access_page(user, route_or_key):
     if page and page["key"] in {
         social_media.SOCIAL_MEDIA_PAGE_KEY,
         social_media.AI_REELS_PAGE_KEY,
+        social_media.WALL_PREVIEW_PAGE_KEY,
     }:
         if is_admin(user):
             return True

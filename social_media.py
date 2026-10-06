@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 
 SOCIAL_MEDIA_PAGE_KEY = "social_media"
+WALL_PREVIEW_PAGE_KEY = "social_media_wall_previews"
+WALL_PREVIEW_ROUTE = "Wall Preview Inbox"
 AI_REELS_PAGE_KEY = "social_media_ai_reels"
 LEGACY_REELS_PAGE_KEY = "social_media_reels_studio"
 SOCIAL_MEDIA_ROUTE = "Social Media"

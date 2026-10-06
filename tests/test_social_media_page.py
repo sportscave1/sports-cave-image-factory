@@ -85,7 +85,7 @@ class SocialMediaPageTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.segmented_control[0].value, "Create")
         markup = "\n".join(item.value for item in app.markdown)
-        self.assertIn("Sports Cave Social Media", markup)
+        self.assertIn("<h1>Social Media</h1>", markup)
         self.assertIn("Today's assignment", markup)
         for platform in ("Instagram", "Facebook", "Pinterest", "TikTok", "YouTube"):
             self.assertIn(platform, markup)

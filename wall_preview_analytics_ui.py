@@ -19,23 +19,15 @@ def bounds(days):
     end=datetime.combine(today+timedelta(days=1),datetime.min.time(),social_media.SYDNEY_TZ)
     return start.isoformat(),end.isoformat()
 
-def overview():
-    st.subheader('Wall Preview — Last 7 Days')
-    try:
-        data=snapshot(*bounds(7))['summary']
-        for col,label,value in zip(st.columns(4),('Opens','ATCs','Purchases','Revenue'),(data['opens'],data['atc'],data['purchased'],cash(data['revenue']))):col.metric(label,value)
-    except Exception:st.caption('Wall Preview analytics temporarily unavailable.')
-    def open_inbox():st.session_state['social-media-workspace-view']='Wall Preview Inbox'
-    st.button('View Wall Preview Analytics →',key='wall-preview-overview-open',on_click=open_inbox)
-
 def render():
-    with st.container(border=True):
-        st.markdown('**Wall Preview performance**')
-        cols=st.columns([2,2,1,1])
-        period=cols[0].selectbox('Date range',('Today','7 Days','30 Days','90 Days','Custom'),index=2,key='wp-analytics-period')
-        product=cols[1].text_input('Product ID',key='wp-analytics-product')
-        device=cols[2].selectbox('Device',('All','mobile','desktop','tablet'),key='wp-analytics-device')
-        capture=cols[3].selectbox('Photo source',('All','camera','upload'),key='wp-analytics-capture')
+    with st.container():
+        kpis=st.container()
+        with st.container(key='wp-analytics-filters'):
+            cols=st.columns([2,2,1,1])
+            period=cols[0].selectbox('Date range',('Today','7 Days','30 Days','90 Days','Custom'),index=2,key='wp-analytics-period')
+            product=cols[1].text_input('Product ID',key='wp-analytics-product')
+            device=cols[2].selectbox('Device',('All','mobile','desktop','tablet'),key='wp-analytics-device')
+            capture=cols[3].selectbox('Photo source',('All','camera','upload'),key='wp-analytics-capture')
         start,end=bounds({'Today':1,'7 Days':7,'30 Days':30,'90 Days':90,'Custom':30}[period])
         if period=='Custom':
             dates=st.date_input('Date range (Sydney)',value=(datetime.fromisoformat(start).date(),datetime.now(social_media.SYDNEY_TZ).date()),key='wp-analytics-custom')
@@ -43,14 +35,35 @@ def render():
             start=datetime.combine(dates[0],datetime.min.time(),social_media.SYDNEY_TZ).isoformat()
             end=datetime.combine(dates[1]+timedelta(days=1),datetime.min.time(),social_media.SYDNEY_TZ).isoformat()
         try:data=snapshot(start,end,product,'' if device=='All' else device,'' if capture=='All' else capture)
-        except Exception:st.caption('Analytics temporarily unavailable. Inbox controls remain available below.');return
+        except Exception:
+            st.caption('Analytics temporarily unavailable. Inbox remains available.')
+            return dict(start_date=start,end_date=end,product_id=product,device_type='' if device=='All' else device,capture_source='' if capture=='All' else capture)
         summary=data['summary']
-        metrics=[('Preview Opens',summary['opens']),('Unique Sessions',summary['sessions']),('Photos Loaded',summary['photo_ready']),('Placement Confirmed',summary['confirmed']),('Added To Cart',summary['atc']),('Purchased',summary['purchased']),('Preview → ATC %',pct(summary['atc_percent'])),('Preview → Purchase %',pct(summary['purchase_percent'])),('Revenue',cash(summary['revenue']))]
-        for offset in (0,5):
-            for col,(label,value) in zip(st.columns(5 if offset==0 else 4),metrics[offset:offset+5]):col.metric(label,value)
-        st.caption('Unique preview journeys per stage. Revenue is attributed line revenue, separated by currency. Tracking starts at rollout; missing events are not inferred.')
-        with st.expander('Funnel and product performance',expanded=True):
-            st.dataframe([{'Stage':r['stage'],'Event count':r['events'],'Journeys':r['journeys'],'Next stage':pct(r['next_stage_percent']),'Drop-off':pct(r['drop_off_percent'])} for r in data['funnel']],hide_index=True,use_container_width=True)
-            st.dataframe([{'Product':r['product'] or r['product_id'],'Preview Opens':r['opens'],'Photo Ready':r['photo_ready'],'Confirmed':r['confirmed'],'ATC':r['atc'],'Purchased':r['purchased'],'Revenue':cash(r['revenue']),'Preview → Purchase %':pct(r['purchase_percent'])} for r in data['products']],hide_index=True,use_container_width=True)
-        with st.expander('Interaction insights'):
-            st.dataframe(data['insights'],hide_index=True,use_container_width=True)
+        engagement=data.get('engagement',{})
+        def number(key):return engagement.get(key,0)
+        def duration(key):
+            value=engagement.get(key)
+            return '—' if value is None else f'{float(value):.1f}s'
+        metrics=[('CTA Clicks',number('cta_clicks')),('Unique Clickers',number('unique_clickers')),
+                 ('Preview Opens',number('opens')),('Click → Open %',pct(engagement.get('click_open_percent'))),
+                 ('Avg Active Time',duration('avg_active_seconds')),('Median Active Time',duration('median_active_seconds')),
+                 ('Photos Loaded',number('photo_ready')),('Placement Confirmed',number('confirmed')),
+                 ('Placement Rate',pct(engagement.get('placement_percent'))),('Added to Cart',number('atc')),
+                 ('Preview → Cart %',pct(engagement.get('cart_percent')))]
+        import html
+        kpis.markdown('<div class="sc-social-kpis">'+''.join('<div class="sc-social-kpi"><span>'+html.escape(label)+'</span><strong>'+html.escape(str(value))+'</strong></div>' for label,value in metrics)+'</div>',unsafe_allow_html=True)
+        return dict(start_date=start,end_date=end,product_id=product,device_type='' if device=='All' else device,capture_source='' if capture=='All' else capture)
+
+
+def details(filters):
+    with st.popover('Analytics details'):
+        try:data=snapshot(filters['start_date'],filters['end_date'],filters['product_id'],filters['device_type'],filters['capture_source'])
+        except Exception:
+            st.caption('Analytics temporarily unavailable.');return
+        summary=data['summary']
+        st.caption('Performance uses instrumented viewer visits: one count per stage per visit; unique clickers are anonymous browser-session visitors. Rates match subsequent stages to the same visit. Active time excludes hidden, unfocused and 60-second idle periods; averages use recorded cumulative samples, never open-to-close elapsed time. Historical events without visit IDs remain below, not inferred into the new funnel.')
+        st.caption('Unique journeys per stage; sessions span all recorded events. Historical captures may lack opening events. Missing events are not inferred.')
+        st.caption('Purchased: '+str(summary['purchased'])+' · Revenue: '+cash(summary['revenue'])+' · Preview → ATC: '+pct(summary['atc_percent'])+' · Preview → Purchase: '+pct(summary['purchase_percent']))
+        st.dataframe(data['funnel'],hide_index=True,use_container_width=True)
+        st.dataframe(data['products'],hide_index=True,use_container_width=True)
+        st.dataframe(data['insights'],hide_index=True,use_container_width=True)

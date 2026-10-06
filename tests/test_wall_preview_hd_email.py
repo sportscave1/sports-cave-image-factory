@@ -133,17 +133,17 @@ class ContractTests(unittest.TestCase):
         originals=(inbox.wall_preview_store.summary,inbox.wall_preview_store.list_previews,inbox._temporary_link)
         try:
             for reuse in (True,False,None):
-                app=AppTest.from_string(INBOX_PAGE)
+                app=AppTest.from_string(INBOX_PAGE.replace('inbox.render(user)', "inbox._details(user,st.session_state['fixture-rows'][0])"))
                 app.session_state['fixture-rows']=[{'id':'fixture','marketing_permission':reuse,
                     'market_country_code':'AU','market_country_name':'Australia',
                     'customer_name':'Collector','customer_email':'collector@example.com',
                     'email_marketing_state':'SUBSCRIBED' if reuse is False else 'UNKNOWN',
                     'email_requested_at':'2026-10-05T00:00:00Z','email_job_state':'queued'}]
                 app.run();self.assertEqual(len(app.exception),0)
-                markup=next(m.value for m in app.markdown if '<article' in m.value)
+                markup='\n'.join(m.value for m in app.caption)
                 self.assertIn('MARKETING USE: ALLOWED' if reuse else 'N/A',markup)
                 self.assertEqual('EMAIL: SUBSCRIBED' in markup,reuse is False)
-                self.assertIn('HD email: queued',markup)
+                self.assertIn('HD email · queued',markup)
                 self.assertIn('MARKET: AUSTRALIA (AU)',markup)
         finally:
             inbox.wall_preview_store.summary,inbox.wall_preview_store.list_previews,inbox._temporary_link=originals
