@@ -9,11 +9,13 @@ def main(argv=None):
     logging.basicConfig(level=logging.WARNING,format='%(asctime)s %(levelname)s %(message)s')
     # Enable only the safe batch counters/timings, not third-party debug output.
     logging.getLogger('crm_campaign_dispatch').setLevel(logging.INFO)
-    for name in ('crm_automation_runtime','crm_shopify_automation_events','crm_engine'):
+    for name in ('crm_automation_runtime','crm_shopify_automation_events','crm_engine','wall_preview_archive','wall_preview_crm_store'):
         logging.getLogger(name).setLevel(logging.INFO)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once',action='store_true');parser.add_argument('--seed',action='store_true',help='Insert draft definitions only; requires applied migration.')
     args=parser.parse_args(argv)
+    from wall_preview_archive import configuration_diagnostic
+    configuration_diagnostic()
     from crm_store import Store
     store=Store()
     if args.seed:store.seed();return 0

@@ -2,12 +2,47 @@
 import hashlib
 import hmac
 import json
+import logging
+import posixpath
 import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import wall_preview_store as legacy
+
+LOG = logging.getLogger(__name__)
+
+
+def archive_needs_customer_folder(row):
+    from wall_preview_identity import customer_folder_name
+    return bool(row.get('customer_email') and posixpath.basename(
+        (row.get('customer_folder') or '').rstrip('/')) != customer_folder_name(row['customer_email']))
+
+
+def _ensure_archive(cur, row, payload, force=False):
+    """Same identity/version, but a queued acknowledgement is not an archive receipt."""
+    cur.execute('SELECT version,state,image IS NOT NULL AS has_image FROM public.wall_preview_archive_jobs WHERE preview_id=%s FOR UPDATE', (str(row['id']),))
+    job = dict(cur.fetchone() or {})
+    complete = bool(row.get('dropbox_file_id') and not archive_needs_customer_folder(row)
+                    and (not job or (job['state'] == 'done' and job['version'] == row['version'])))
+    image = payload.get('archive_image')
+    if not force and complete:
+        return dict(row, archive_status='archived')
+    if not force and job.get('state') == 'queued' and job['version'] == row['version'] and job['has_image']:
+        # Preserve the active job/backoff. The worker reads current identity under lock.
+        return dict(row, archive_status='queued')
+    if not isinstance(image, bytes) or not image:
+        if force:
+            raise ValueError('Confirmed composite unavailable.')
+        return dict(row, archive_status='accepted')
+    cur.execute('''INSERT INTO public.wall_preview_archive_jobs(preview_id,version,image)
+        VALUES (%s,%s,decode(%s,'hex')) ON CONFLICT(preview_id) DO UPDATE SET
+        version=EXCLUDED.version,image=EXCLUDED.image,state='queued',attempts=0,
+        due_at=now(),last_attempt_at=NULL,finished_at=NULL,reason='' ''',
+        (str(row['id']),row['version'],image.hex()))
+    LOG.info('wall_preview_archive_queued preview_id=%s version=%s',row['id'],row['version'])
+    return dict(row, archive_status='queued')
 
 PUBLIC_EVENTS = frozenset({'WallPreviewStarted', 'WallPreviewConfirmed', 'WallPreviewDownloaded',
                           'WallPreviewShared', 'WallPreviewEmailCaptured', 'WallPreviewAddedToCart'})
@@ -66,7 +101,8 @@ def confirm(payload, upload):
         unchanged = previous and previous['archive_sha256'] == payload['image_sha256'] and all(
             str(previous.get(k) or '') == str(payload.get(k) or '') for k in fields)
         if unchanged:
-            return _download_permission(cur,_market(cur,previous,payload),payload), True
+            row = _download_permission(cur,_market(cur,previous,payload),payload)
+            return _ensure_archive(cur,row,payload), True
         preview_id = str(previous.get('id') or uuid.uuid4())
         storage = upload(previous, preview_id)
         version = int(previous.get('version') or 0) + 1
@@ -91,19 +127,15 @@ def confirm(payload, upload):
             image_reuse_consent_at=NULL,image_reuse_consent_source=NULL RETURNING *''', tuple(values))
         row = dict(cur.fetchone())
         row = _market(cur,row,payload)
+        row = _download_permission(cur,row,payload)
         if storage.get('pending_archive'):
-            image=payload.get('archive_image')
-            if not isinstance(image,bytes) or not image:raise ValueError('Confirmed composite unavailable.')
-            cur.execute('''INSERT INTO public.wall_preview_archive_jobs(preview_id,version,image)
-                VALUES (%s,%s,decode(%s,'hex')) ON CONFLICT(preview_id) DO UPDATE SET
-                version=EXCLUDED.version,image=EXCLUDED.image,state='queued',attempts=0,
-                due_at=now(),last_attempt_at=NULL,finished_at=NULL,reason='' ''',(preview_id,version,image.hex()))
+            row = _ensure_archive(cur,row,payload,force=True)
         else:
             cur.execute("UPDATE public.wall_preview_archive_jobs SET state='done',image=NULL,finished_at=now() WHERE preview_id=%s",(preview_id,))
         if not previous:
             event(cur,row,'WallPreviewStarted','started')
         event(cur,row,'WallPreviewConfirmed','confirmed:'+str(version),{'version':version})
-        return _download_permission(cur,row,payload), False
+        return row, False
 
 
 def _download_permission(cur,row,payload):

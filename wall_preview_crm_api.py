@@ -109,7 +109,7 @@ def save(request,data,content_type,cors):
         payload['archive_image'] = data
         def upload(previous,preview_id):
             root = '/Sportscave Team Folder'
-            # Stable file per client key. Capturing email never moves/deletes the archive.
+            # Keep the last committed path until the worker safely relocates it.
             folder = (previous or {}).get('customer_folder') or f'{root}/{archive.DROPBOX_RELATIVE_ROOT}/' + (
                 identity.customer_folder_name(ident['customer_email']) if ident['customer_email'] else 'Anonymous')
             path = (previous or {}).get('dropbox_path') or f'{folder}/{client}.jpg'
@@ -121,7 +121,8 @@ def save(request,data,content_type,cors):
         row,duplicate = store.confirm(payload,upload)
         LOG.info('wall_preview_confirmed preview_id=%s version=%s duplicate=%s bytes=%s',row['id'],row['version'],duplicate,len(data))
         response = {'ok':True,'preview_id':str(row['id']),'client_preview_id':client,'preview_token':session,
-                    'version':row['version'],'duplicate':duplicate}
+                    'version':row['version'],'duplicate':duplicate,
+                    'archive_status':row.get('archive_status','accepted')}
         if row.get('share_token') and not row.get('share_revoked_at'):
             response['share_url'] = BASE+'/wall-preview/'+row['share_token']
         return JSONResponse(response,headers=cors)

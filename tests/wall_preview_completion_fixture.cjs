@@ -1,7 +1,7 @@
 // Real theme markup/CSS/JS with Liquid product data replaced by a fixed test product.
 const fs=require('fs');
 function fixture(){
- let s=fs.readFileSync('shopify_theme/snippets/sc-wall-visualizer-v1.liquid','utf8');
+ let s=fs.readFileSync('shopify_theme/snippets/sc-wall-visualizer-v1.liquid','utf8').replace(/\r\n/g,'\n');
  s=s.slice(s.indexOf('<div\nid='));
  s=s.replace(/{%- assign sc_wall_rendered_sizes = false -%}[\s\S]*?{%- unless sc_wall_rendered_sizes -%}/,'');
  s=s.replace(/<script type="application\/json" data-sc-wall-product-data>[\s\S]*?<\/script>/,'<script type="application/json" data-sc-wall-product-data>'+JSON.stringify({options:['Size','Frame'],variants:[{id:456,available:true,options:['S - 21 × 30 cm (8.3 × 11.8 in)','Black Frame'],option1:'S - 21 × 30 cm (8.3 × 11.8 in)',option2:'Black Frame',price:12000}],formatted:{456:{price:'$120'}}})+'</script>');

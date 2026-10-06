@@ -1636,7 +1636,7 @@ var cameraViewportRaf=0;
 var cameraArtworkPrimePromise=null;
 var photoLoadSeq=0;
 var lastActiveElement=null;
-var confirmTimer=0,archivePromise=null,lastArchiveBlob=null;var sessionId=browserSessionId();var state={frame:currentFrameFromPicker(root),unit:currentUnitFromPicker(root)||(root.getAttribute('data-unit')==='in'?'in':'cm'),sizeRaw:'',sizeInfo:null,photoReady:false,calibrated:false,calibrationActive:false,awaitingMeasurement:false,referenceMeasurement:0,pointA:null,pointB:null,centerX:50,centerY:44,artWidthPercent:42,dragging:false,dragPointerId:null,dragStartX:0,dragStartY:0,dragStartCenterX:50,dragStartCenterY:44,pageScrollX:0,pageScrollY:0,isMobileCamera:false,previewChipDismissed:false,upsizeCueArmed:false,upsizeCueConsumed:false,upsizeCueTargetRaw:'',clientPreviewId:makeId('preview'),previewId:'',shareUrl:'',storageSaved:false,confirmed:false,confirming:false,confirmPromptReady:false,hasDraggedPlacement:false,quickPreview:false,scaleHelpDismissed:false,hasPlacedOnce:false,photoLandscape:false,startedAt:new Date().toISOString()};
+var confirmTimer=0,archivePromise=null,lastArchiveBlob=null;var sessionId=browserSessionId();var state={frame:currentFrameFromPicker(root),unit:currentUnitFromPicker(root)||(root.getAttribute('data-unit')==='in'?'in':'cm'),sizeRaw:'',sizeInfo:null,photoReady:false,calibrated:false,calibrationActive:false,awaitingMeasurement:false,referenceMeasurement:0,pointA:null,pointB:null,centerX:50,centerY:44,artWidthPercent:42,dragging:false,dragPointerId:null,dragStartX:0,dragStartY:0,dragStartCenterX:50,dragStartCenterY:44,pageScrollX:0,pageScrollY:0,isMobileCamera:false,previewChipDismissed:false,upsizeCueArmed:false,upsizeCueConsumed:false,upsizeCueTargetRaw:'',clientPreviewId:makeId('preview'),previewId:'',shareUrl:'',storageSaved:false,storageAccepted:false,archiveStatus:'',confirmed:false,confirming:false,confirmPromptReady:false,hasDraggedPlacement:false,quickPreview:false,scaleHelpDismissed:false,hasPlacedOnce:false,photoLandscape:false,startedAt:new Date().toISOString()};
 
 function sourceUrlFor(frame){if(frame==='oak') return root.getAttribute('data-oak-url')||root.getAttribute('data-black-url')||'';if(frame==='white') return root.getAttribute('data-white-url')||root.getAttribute('data-black-url')||'';return root.getAttribute('data-black-url')||'';}
 function loadImage(url){if(!url)return Promise.reject(new Error('No product image available'));if(cache[url])return Promise.resolve(cache[url]);if(imagePromiseCache[url])return imagePromiseCache[url];imagePromiseCache[url]=new Promise(function(resolve,reject){var image=new Image();image.crossOrigin='anonymous';image.decoding='async';image.onload=function(){cache[url]=image;delete imagePromiseCache[url];resolve(image);};image.onerror=function(){delete imagePromiseCache[url];reject(new Error('Unable to load product image'));};image.src=url;});return imagePromiseCache[url];}
@@ -1772,7 +1772,7 @@ function hideConfirmPrompt(){if(confirmTimer){window.clearTimeout(confirmTimer);
 function hidePlacementGuide(){if(placementGuide) placementGuide.hidden=true;if(stage) stage.classList.remove('is-positioning');}
 function showPlacementGuide(){if(!stage||!placementGuide||state.confirmed||!state.photoReady||!previewIsReady()||artCanvas.hidden) return;stage.classList.add('is-positioning');placementGuide.hidden=false;requestArtworkEffectsSync();}
 function showConfirmPrompt(delay){if(confirmTimer) window.clearTimeout(confirmTimer);if(!state.photoReady||!previewIsReady()||artCanvas.hidden||state.confirmed||state.confirming||!state.hasDraggedPlacement){hideConfirmPrompt();return;}confirmTimer=window.setTimeout(function(){state.confirmPromptReady=true;if(confirmPromptEl){confirmPromptEl.classList.remove('is-confirmed');confirmPromptEl.hidden=false;}if(confirmLabel) confirmLabel.textContent='Place';requestArtworkEffectsSync();},Math.max(0,Number(delay||0)));}
-function invalidateConfirmation(showPrompt){if(state.confirming) return;state.confirmed=false;state.hasDraggedPlacement=false;savedBlob=null;assetRevision+=1;assetPromise=null;savedFile=null;archivePromise=null;lastArchiveBlob=null;state.storageSaved=false;root.classList.remove('sc-wall-v1--confirmed');if(overlay) overlay.classList.remove('is-confirmed');stage.classList.remove('is-confirmed');setShareNote('');setPreviewActionState();if(showPrompt!==false&&state.photoReady&&previewIsReady()&&!artCanvas.hidden){showPlacementGuide();showConfirmPrompt(180);}else{hidePlacementGuide();hideConfirmPrompt();}syncSizeAvailabilityFromPicker();}
+function invalidateConfirmation(showPrompt){if(state.confirming) return;state.confirmed=false;state.hasDraggedPlacement=false;savedBlob=null;assetRevision+=1;assetPromise=null;savedFile=null;archivePromise=null;lastArchiveBlob=null;state.storageSaved=false;state.storageAccepted=false;state.archiveStatus='';root.classList.remove('sc-wall-v1--confirmed');if(overlay) overlay.classList.remove('is-confirmed');stage.classList.remove('is-confirmed');setShareNote('');setPreviewActionState();if(showPrompt!==false&&state.photoReady&&previewIsReady()&&!artCanvas.hidden){showPlacementGuide();showConfirmPrompt(180);}else{hidePlacementGuide();hideConfirmPrompt();}syncSizeAvailabilityFromPicker();}
 function markConfirmedUi(){state.confirmed=true;state.hasPlacedOnce=true;state.confirmPromptReady=false;hidePlacementGuide();root.classList.add('sc-wall-v1--confirmed');if(overlay) overlay.classList.add('is-confirmed');stage.classList.add('is-confirmed');if(confirmPromptEl){confirmPromptEl.hidden=false;confirmPromptEl.classList.add('is-confirmed');}if(confirmLabel) confirmLabel.textContent='✓ Your wall preview is ready';setPreviewActionState();requestArtworkEffectsSync();updateStickyBuy();if(confirmTimer) window.clearTimeout(confirmTimer);confirmTimer=window.setTimeout(function(){if(!state.confirmed) return;if(confirmPromptEl) confirmPromptEl.hidden=true;},1800);}
 function setUnit(unit){unit=unit==='in'?'in':'cm';state.unit=unit;root.setAttribute('data-unit',unit);if(measurementUnit) measurementUnit.textContent=unit;if(scaleUnitInline) scaleUnitInline.textContent=unit;if(referenceMeasurement) referenceMeasurement.placeholder='';renderSizeButtons();updateStatus();if(state.calibrated&&!state.quickPreview) applyScaledSize();}
 function renderSizeButtons(){var order={XL:0,L:1,M:2,S:3};sizeButtons.forEach(function(button,index){var info=parseSizeInfo(button.getAttribute('data-size-raw')||'',Number(button.getAttribute('data-size-index')||index));button.__scSizeInfo=info;button.style.order=Object.prototype.hasOwnProperty.call(order,info.token)?String(order[info.token]):String(10+index);var token=button.querySelector('[data-sc-wall-size-token]');var dims=button.querySelector('[data-sc-wall-size-dims]');if(token) token.textContent=info.token;if(dims) dims.textContent=formatSize(info,state.unit);});}
@@ -1880,7 +1880,7 @@ archivePromise=null;
 lastArchiveBlob=null;
 state.previewId='';
 state.shareUrl='';
-state.storageSaved=false;
+state.storageSaved=false;state.storageAccepted=false;state.archiveStatus='';
 state.clientPreviewId=makeId('preview');
 if(!preserveInstantCameraState){
 state.confirmed=false;
@@ -2061,7 +2061,7 @@ state.hasDraggedPlacement=false;
 state.quickPreview=false;
 state.previewId='';
 state.shareUrl='';
-state.storageSaved=false;
+state.storageSaved=false;state.storageAccepted=false;state.archiveStatus='';
 
 state.hasPlacedOnce=false;
 state.clientPreviewId=makeId('preview');
@@ -2195,7 +2195,7 @@ if(!response.ok) throw new Error('Preview archive failed ('+response.status+')')
 var data=await response.json();
 if(!data||data.ok!==true||!data.preview_id) throw new Error('Preview was not persisted');
 if(params.get('client_preview_id')!==state.clientPreviewId) return data;
-state.storageSaved=true;
+state.storageAccepted=true;state.archiveStatus=String(data.archive_status||'accepted');state.storageSaved=state.archiveStatus==='archived';
 
 if(data){
 var nested=data.preview&&typeof data.preview==='object'?data.preview:null;
@@ -2215,7 +2215,7 @@ var snapshot=metadata||archiveMetadata(identity,permission);
 // Serialize retries and updates so an older placement can never overwrite a newer one.
 var job=saveTail.catch(function(){}).then(async function(){var image=await blob;if(!image) throw new Error('Preview image unavailable');return archiveWithRetry(image,identity,permission,snapshot);});
 saveTail=job;archivePromise=job;
-job.then(function(){fireLocalPreviewEvent('wall_preview_saved',{client_preview_id:snapshot.get('client_preview_id')});},function(){try{console.warn('[Sports Cave Wall Preview] save pending; retry on next Place or Download');}catch(error){}});
+job.then(function(result){fireLocalPreviewEvent(result.archive_status==='archived'?'wall_preview_saved':'wall_preview_save_queued',{client_preview_id:snapshot.get('client_preview_id'),archive_status:result.archive_status||'accepted'});},function(){try{console.warn('[Sports Cave Wall Preview] save pending; retry on next Place or Download');}catch(error){}});
 return job;
 }
 function startPlacementPersistenceInBackground(){
@@ -2275,9 +2275,9 @@ setShareNote('Downloaded — saving your Sports Cave copy…');
 archivePromise=queuePreviewSave(savedBlob,identity,allowFeature);
 var archive=await archivePromise;
 if(archive&&archive.ok!==false){
-state.storageSaved=true;
+// Backend acceptance is not a Dropbox receipt. Future actions can repair storage.
 // UGC permission is stored with this same preview, independently of analytics.
-setShareNote('Downloaded — Sports Cave copy saved.');
+setShareNote(archive.archive_status==='archived'?'Downloaded — Sports Cave copy saved.':'Downloaded to your device.');
 }else{
 setShareNote('Downloaded to your device.');
 }
