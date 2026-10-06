@@ -45,7 +45,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
-    {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False},
+    {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},
     {"key": "prodigi", "route": "Prodigi", "label": "Fulfilment", "worker_assignable": True},

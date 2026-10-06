@@ -7,7 +7,7 @@ try{
 const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',permissions:['camera'],acceptDownloads:true});let errors=[],captures=[];
 page.on('pageerror',e=>errors.push(e.stack));
 await page.route('**/api/wall-previews**',r=>{if(r.request().method()==='POST'&&!r.request().url().includes('/events'))captures.push(r.request().url());return r.fulfill({status:200,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},body:'{"ok":true,"archive_status":"queued","preview_id":"11111111-1111-4111-8111-111111111111"}'});});
-await page.goto('https://www.sportscaveshop.com/products/legends-never-die-kobe-bryant-michael-jordan-wall-art?preview_theme_id='+theme,{waitUntil:'domcontentloaded'});
+await page.goto('https://www.sportscaveshop.com/products/legends-never-die-kobe-bryant-michael-jordan-wall-art'+(theme==='188890644787'?'':'?preview_theme_id='+theme),{waitUntil:'domcontentloaded'});
 await page.waitForFunction(()=>window.Shopify?.theme?.id);assert.equal(String(await page.evaluate(()=>Shopify.theme.id)),theme);
 await page.locator('[data-sc-wall-open]').waitFor();
 console.log('Deployed assets',await page.locator('script[src*="sports-cave-wall-preview"],script[src*="sports-cave-image-protection"]').evaluateAll(es=>es.map(e=>e.src)));

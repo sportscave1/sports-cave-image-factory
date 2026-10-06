@@ -1,13 +1,454 @@
-git status --short; `
-git add -A; `
-git diff --cached --check; `
-if ($LASTEXITCODE -ne 0) { throw "Pre-deploy diff check failed — nothing was pushed." }; `
-git diff --cached --quiet; `
-if ($LASTEXITCODE -ne 0) { `
-    git commit -m "Deploy email inbox hardening and image protection"; `
-    if ($LASTEXITCODE -ne 0) { throw "Commit failed — deployment stopped." } `
-}; `
-git push origin main; `
-if ($LASTEXITCODE -ne 0) { throw "Push failed — Render deployment was not triggered." }; `
-Write-Host "`nDEPLOYED: Email Inbox hardening + Image Protection pushed to main. Render auto-deploy triggered." -ForegroundColor Green; `
-git log -1 --oneline
+{% doc %}
+Renders the Sports Cave wall visualizer on a product page.
+Uses the current product's framed variant images and established Sports Cave crop coordinates.
+The shopper can take or upload a wall photo, mark a known distance, preview real product sizes at approximate true scale,
+confirm the final placement, save or share the finished preview, archive it with the proven Sports Cave OS image-upload contract, and secure the selected Shopify variant using the edition metafield gate.
+
+@param {product} product - Current Shopify product.
+{% enddoc %}
+
+{%- liquid
+assign sc_wall_product = product
+assign sc_wall_frame_option_position = 0
+
+for option in sc_wall_product.options_with_values
+assign sc_wall_option_name = option.name | downcase
+if sc_wall_option_name contains 'frame'
+assign sc_wall_frame_option_position = option.position
+break
+elsif sc_wall_option_name contains 'style'
+assign sc_wall_frame_option_position = option.position
+break
+endif
+endfor
+
+assign sc_wall_black_image = blank
+assign sc_wall_oak_image = blank
+assign sc_wall_white_image = blank
+
+for variant in sc_wall_product.variants
+assign sc_wall_frame_value = ''
+case sc_wall_frame_option_position
+when 1
+assign sc_wall_frame_value = variant.option1
+when 2
+assign sc_wall_frame_value = variant.option2
+when 3
+assign sc_wall_frame_value = variant.option3
+endcase
+
+assign sc_wall_frame_value_down = sc_wall_frame_value | default: '' | downcase
+
+if variant.featured_image != blank
+if sc_wall_black_image == blank and sc_wall_frame_value_down contains 'black'
+assign sc_wall_black_image = variant.featured_image
+endif
+if sc_wall_oak_image == blank and sc_wall_frame_value_down contains 'oak'
+assign sc_wall_oak_image = variant.featured_image
+endif
+if sc_wall_white_image == blank and sc_wall_frame_value_down contains 'white'
+assign sc_wall_white_image = variant.featured_image
+endif
+endif
+
+if sc_wall_black_image != blank and sc_wall_oak_image != blank and sc_wall_white_image != blank
+break
+endif
+endfor
+
+if sc_wall_black_image == blank or sc_wall_oak_image == blank or sc_wall_white_image == blank
+for media in sc_wall_product.media
+if media.media_type == 'image'
+assign sc_wall_media_alt = media.alt | default: '' | downcase
+if sc_wall_black_image == blank and sc_wall_media_alt contains 'black'
+assign sc_wall_black_image = media.preview_image
+endif
+if sc_wall_oak_image == blank and sc_wall_media_alt contains 'oak'
+assign sc_wall_oak_image = media.preview_image
+endif
+if sc_wall_white_image == blank and sc_wall_media_alt contains 'white'
+assign sc_wall_white_image = media.preview_image
+endif
+endif
+
+if sc_wall_black_image != blank and sc_wall_oak_image != blank and sc_wall_white_image != blank
+break
+endif
+endfor
+endif
+
+if sc_wall_black_image == blank
+assign sc_wall_black_image = sc_wall_product.featured_image
+endif
+if sc_wall_oak_image == blank
+assign sc_wall_oak_image = sc_wall_black_image
+endif
+if sc_wall_white_image == blank
+assign sc_wall_white_image = sc_wall_black_image
+endif
+
+assign sc_wall_black_url = ''
+assign sc_wall_oak_url = ''
+assign sc_wall_white_url = ''
+
+if sc_wall_black_image != blank
+assign sc_wall_black_url = sc_wall_black_image | image_url: width: 2000, height: 2000, crop: 'center'
+endif
+if sc_wall_oak_image != blank
+assign sc_wall_oak_url = sc_wall_oak_image | image_url: width: 2000, height: 2000, crop: 'center'
+endif
+if sc_wall_white_image != blank
+assign sc_wall_white_url = sc_wall_white_image | image_url: width: 2000, height: 2000, crop: 'center'
+endif
+
+assign sc_wall_logo_url = 'https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-logo-email-header.png?v=1790838922'
+
+assign sc_wall_country = localization.country.iso_code | default: 'AU'
+assign sc_wall_unit = 'cm'
+if sc_wall_country == 'US' or sc_wall_country == 'LR' or sc_wall_country == 'MM'
+assign sc_wall_unit = 'in'
+endif
+
+assign sc_wall_currency_iso = cart.currency.iso_code | default: localization.country.currency.iso_code | default: shop.currency
+assign sc_wall_currency_prefix = ''
+case sc_wall_currency_iso
+when 'AUD'
+assign sc_wall_currency_prefix = 'AU'
+when 'USD'
+assign sc_wall_currency_prefix = 'US'
+when 'CAD'
+assign sc_wall_currency_prefix = 'CA'
+when 'NZD'
+assign sc_wall_currency_prefix = 'NZ'
+endcase
+
+assign sc_wall_edition_total_raw = sc_wall_product.metafields.sports_cave.edition_total.value
+assign sc_wall_edition_next_raw = sc_wall_product.metafields.sports_cave.edition_next_number.value
+assign sc_wall_edition_total = sc_wall_edition_total_raw | default: 100 | plus: 0
+assign sc_wall_edition_next = sc_wall_edition_next_raw | default: 1 | plus: 0
+if sc_wall_edition_total < 1
+assign sc_wall_edition_total = 100
+endif
+if sc_wall_edition_next < 1
+assign sc_wall_edition_next = 1
+endif
+
+comment
+Wall visualizer purchase gate intentionally follows Edition Ops, not Shopify inventory.
+Sports Cave collector runs are 100 editions. The sticky buy button stays live through #100
+and only closes when the next edition metafield has moved beyond 100.
+endcomment
+assign sc_wall_edition_expired = false
+if sc_wall_edition_next_raw != blank and sc_wall_edition_next > 100
+assign sc_wall_edition_expired = true
+endif
+
+assign sc_wall_instance_id = section.id | default: sc_wall_product.id
+assign sc_wall_id = 'sc-wall-visualizer-' | append: sc_wall_product.id | append: '-' | append: sc_wall_instance_id
+-%}
+
+<div
+id="{{ sc_wall_id }}"
+class="sc-wall-v1"
+data-sc-wall-root
+data-product-id="{{ sc_wall_product.id }}"
+data-product-handle="{{ sc_wall_product.handle | escape }}"
+data-product-title="{{ sc_wall_product.title | escape }}"
+data-black-url="{{ sc_wall_black_url | escape }}"
+data-oak-url="{{ sc_wall_oak_url | escape }}"
+data-white-url="{{ sc_wall_white_url | escape }}"
+data-logo-url="{{ sc_wall_logo_url | escape }}"
+data-unit="{{ sc_wall_unit | escape }}"
+data-customer-logged-in="{% if customer %}1{% else %}0{% endif %}"
+data-customer-id="{% if customer %}{{ customer.id | escape }}{% endif %}"
+data-customer-name="{% if customer %}{{ customer.first_name | escape }}{% if customer.last_name != blank %} {{ customer.last_name | escape }}{% endif %}{% endif %}"
+data-customer-email="{% if customer %}{{ customer.email | escape }}{% endif %}"
+data-market-country-code="{{ localization.country.iso_code | escape }}"
+data-market-country-name="{{ localization.country.name | escape }}"
+data-edition-total="{{ sc_wall_edition_total }}"
+data-edition-next="{{ sc_wall_edition_next }}"
+data-edition-expired="{% if sc_wall_edition_expired %}1{% else %}0{% endif %}"
+data-wall-inbox-url="https://sports-cave-image-factory.onrender.com/api/wall-previews"
+>
+<script type="application/json" data-sc-wall-product-data>{"options":{{ sc_wall_product.options | json }},"variants":{{ sc_wall_product.variants | json }},"formatted":{%- for variant in sc_wall_product.variants -%}{%- capture sc_wall_price -%}{{- variant.price | money_without_trailing_zeros -}}{%- endcapture -%}"{{ variant.id }}":{"pricePrefix":{{ sc_wall_currency_prefix | json }},"price":{{ sc_wall_price | strip | json }}}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%}}}</script>
+
+<button
+type="button"
+class="sc-wall-v1__launch sc-wall-v1__launch--premium"
+data-sc-wall-open
+aria-haspopup="dialog"
+aria-expanded="false"
+aria-controls="{{ sc_wall_id }}-dialog"
+aria-label="See {{ sc_wall_product.title | escape }} on your wall"
+>
+<span class="sc-wall-v1__launch-medallion" aria-hidden="true">
+<span class="sc-wall-v1__launch-medallion-ring"></span>
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+<path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"></path>
+<circle cx="12" cy="13" r="4"></circle>
+</svg>
+</span>
+
+<span class="sc-wall-v1__launch-copy">
+<strong>See It On Your Wall</strong>
+</span>
+
+<span class="sc-wall-v1__launch-arrow" aria-hidden="true">
+<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+<path d="m9 6 6 6-6 6"></path>
+</svg>
+</span>
+</button>
+
+<div class="sc-wall-v1__overlay" data-sc-wall-overlay hidden aria-hidden="true" data-nosnippet>
+<div id="{{ sc_wall_id }}-dialog" class="sc-wall-v1__dialog" data-sc-wall-dialog role="dialog" aria-modal="true" aria-label="Sports Cave wall preview" aria-describedby="{{ sc_wall_id }}-intro-copy">
+<div class="sc-wall-v1__modal" data-sc-wall-modal>
+<button type="button" class="sc-wall-v1__intro-close" data-sc-wall-intro-close aria-label="Close wall preview">
+<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+<path d="M6 6l12 12M18 6 6 18"></path>
+</svg>
+</button>
+
+<div class="sc-wall-v1__intro" data-sc-wall-intro>
+<div class="sc-wall-v1__intro-brand">
+<span>SPORTS CAVE WALL PREVIEW</span>
+<strong>See It In Your Space</strong>
+</div>
+<p id="{{ sc_wall_id }}-intro-copy">Choose a photo of your wall. Straight-on works best.</p>
+
+<div class="sc-wall-v1__intro-actions">
+<button type="button" class="sc-wall-v1__primary" data-sc-wall-camera>Take Wall Photo</button>
+<button type="button" class="sc-wall-v1__secondary" data-sc-wall-upload>Choose Wall Photo</button>
+</div>
+
+<input class="sc-wall-v1__file" type="file" accept="image/*" capture="environment" data-sc-wall-camera-input>
+<input class="sc-wall-v1__file" type="file" accept="image/*" data-sc-wall-upload-input>
+<p class="sc-wall-v1__device-note" data-sc-wall-device-note hidden>Camera available on mobile.</p>
+</div>
+
+<div class="sc-wall-v1__camera-live" data-sc-wall-live-camera hidden>
+<div class="sc-wall-v1__camera-shell">
+<video class="sc-wall-v1__camera-video" data-sc-wall-camera-video autoplay playsinline muted></video>
+<div class="sc-wall-v1__camera-hint" data-sc-wall-camera-hint hidden aria-live="polite">
+<strong>Point at your wall</strong>
+<span>Take the photo straight-on</span>
+</div>
+<button type="button" class="sc-wall-v1__camera-cancel" data-sc-wall-camera-cancel aria-label="Close camera">
+<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+</button>
+<div class="sc-wall-v1__camera-bar">
+<button type="button" class="sc-wall-v1__camera-library" data-sc-wall-camera-library aria-label="Choose photo from library" title="Choose photo">
+<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<rect x="3" y="4" width="18" height="16" rx="2"></rect>
+<circle cx="8.5" cy="9" r="1.5"></circle>
+<path d="m4.5 17 4.3-4.2 3.1 3 2.4-2.3 5.2 3.5"></path>
+</svg>
+</button>
+<button type="button" class="sc-wall-v1__camera-capture" data-sc-wall-camera-capture aria-label="Take photo">
+<span class="sc-wall-v1__camera-capture-ring" aria-hidden="true"><span class="sc-wall-v1__camera-capture-core"></span></span>
+</button>
+</div>
+</div>
+</div>
+
+<div class="sc-wall-v1__editor" data-sc-wall-editor hidden>
+<div class="sc-wall-v1__workspace">
+<div class="sc-wall-v1__preview-column">
+<div class="sc-wall-v1__stage-wrap">
+<div class="sc-wall-v1__stage" data-sc-wall-stage>
+<img class="sc-wall-v1__room" data-sc-wall-room alt="Your wall preview" width="1600" height="1200" decoding="async" draggable="false">
+<div class="sc-wall-v1__stage-tone" data-sc-wall-stage-tone hidden></div>
+<canvas class="sc-wall-v1__art" data-sc-wall-art aria-label="Move artwork preview" hidden></canvas>
+<div class="sc-wall-v1__art-error" data-sc-wall-art-error hidden role="status">Artwork could not load. Your photo is safe. <button type="button" data-sc-wall-art-retry>Try again</button></div>
+<div class="sc-wall-v1__art-fx" data-sc-wall-art-fx hidden aria-hidden="true"></div>
+
+
+<div class="sc-wall-v1__preview-tools" data-sc-wall-save-wrap hidden aria-label="Preview actions">
+<button type="button" class="sc-wall-v1__save-full sc-wall-v1__preview-icon" data-sc-wall-save aria-label="Download your wall preview" title="Download preview">
+<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path>
+</svg>
+<span class="sc-wall-v1__preview-icon-label" data-sc-wall-save-label>Download Your Preview</span>
+</button>
+
+<button type="button" class="sc-wall-v1__share-full sc-wall-v1__preview-icon" data-sc-wall-share-preview aria-label="Share your wall preview" title="Share preview">
+<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.7 10.7 6.6-4.4M8.7 13.3l6.6 4.4"></path>
+</svg>
+<span class="sc-wall-v1__preview-icon-label" data-sc-wall-share-label>Share Preview</span>
+</button>
+
+<button type="button" class="sc-wall-v1__preview-icon sc-wall-v1__preview-icon--close" data-sc-wall-close aria-label="Close wall preview" title="Close preview">
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+<path d="M6 6l12 12M18 6 6 18"></path>
+</svg>
+</button>
+</div>
+
+<div class="sc-wall-v1__placement-guide" data-sc-wall-placement-guide hidden aria-hidden="true">
+<span class="sc-wall-v1__placement-guide-label">Drag into best position</span>
+<svg class="sc-wall-v1__placement-guide-track" viewBox="0 0 48 92" aria-hidden="true">
+<path d="M28 82 C10 66, 39 48, 22 14"></path>
+</svg>
+<span class="sc-wall-v1__placement-guide-finger">
+<svg viewBox="0 0 24 24" width="27" height="27" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M9 11V5.2a2 2 0 0 1 4 0V10"></path>
+<path d="M13 10V7.5a2 2 0 0 1 4 0V11"></path>
+<path d="M17 11V9.7a2 2 0 0 1 4 0V15c0 4-2.5 7-6.5 7H13c-2.2 0-4-1-5.2-2.8L4.7 15a2 2 0 0 1 3-2.5L9 14V11"></path>
+</svg>
+</span>
+</div>
+
+<div class="sc-wall-v1__measure-line" data-sc-wall-measure-line hidden></div>
+<span class="sc-wall-v1__measure-point" data-sc-wall-point-a hidden>1</span>
+<span class="sc-wall-v1__measure-point" data-sc-wall-point-b hidden>2</span>
+<div class="sc-wall-v1__tap-instruction" data-sc-wall-tap-instruction hidden></div>
+
+<div class="sc-wall-v1__tap-demo" data-sc-wall-tap-demo hidden aria-hidden="true">
+<span class="sc-wall-v1__tap-demo-line"></span>
+<span class="sc-wall-v1__tap-demo-dot sc-wall-v1__tap-demo-dot--a"></span>
+<span class="sc-wall-v1__tap-demo-dot sc-wall-v1__tap-demo-dot--b"></span>
+<span class="sc-wall-v1__tap-demo-finger">
+<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M9 11V5.2a2 2 0 0 1 4 0V10"></path>
+<path d="M13 10V7.5a2 2 0 0 1 4 0V11"></path>
+<path d="M17 11V9.7a2 2 0 0 1 4 0V15c0 4-2.5 7-6.5 7H13c-2.2 0-4-1-5.2-2.8L4.7 15a2 2 0 0 1 3-2.5L9 14V11"></path>
+</svg>
+</span>
+</div>
+
+<div class="sc-wall-v1__scale-status">
+<span class="sc-wall-v1__quick-badge" data-sc-wall-quick-badge hidden>NOT TO SCALE</span>
+<button type="button" class="sc-wall-v1__preview-chip sc-wall-v1__scale-link" data-sc-wall-preview-chip data-sc-wall-set-real-scale hidden aria-label="Set scale">Set Scale</button>
+<button type="button" class="sc-wall-v1__scale-reset" data-sc-wall-reset hidden aria-label="Reset scale">Reset</button>
+</div>
+
+<div class="sc-wall-v1__confirm-placement" data-sc-wall-confirm-placement hidden>
+<button type="button" class="sc-wall-v1__confirm-button" data-sc-wall-confirm aria-label="Place artwork here">
+<span class="sc-wall-v1__confirm-place-icon" aria-hidden="true">
+<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 3H4a1 1 0 0 0-1 1v3M13 3h3a1 1 0 0 1 1 1v3M17 13v3a1 1 0 0 1-1 1h-3M7 17H4a1 1 0 0 1-1-1v-3"></path>
+<circle cx="10" cy="10" r="2.25"></circle>
+</svg>
+</span>
+<span data-sc-wall-confirm-label aria-live="polite" aria-atomic="true">Place</span>
+<span class="sc-wall-v1__confirm-spinner" aria-hidden="true"></span>
+</button>
+</div>
+
+<div class="sc-wall-v1__scale-help" data-sc-wall-scale-help hidden>
+<button type="button" class="sc-wall-v1__scale-help-close" data-sc-wall-scale-help-close aria-label="Close scale help">
+<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+<path d="M6 6l12 12M18 6 6 18"></path>
+</svg>
+</button>
+<div class="sc-wall-v1__scale-help-head">
+<div class="sc-wall-v1__scale-help-heading">
+<span class="sc-wall-v1__scale-help-eyebrow">TRUE SCALE</span>
+<strong data-sc-wall-scale-help-title>Get the real size</strong>
+</div>
+</div>
+<p data-sc-wall-scale-copy-start>Tap both sides of something you know the size of, then enter the distance in <span data-sc-wall-scale-unit-inline>{{ sc_wall_unit }}</span>.</p>
+<p data-sc-wall-scale-copy-second hidden>Perfect — now tap the other side.</p>
+<div class="sc-wall-v1__scale-entry" data-sc-wall-scale-entry hidden>
+<div class="sc-wall-v1__flow-input">
+<input type="text" min="0.1" max="10000" step="0.1" inputmode="decimal" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-sc-wall-reference-measurement aria-label="Measured distance">
+<span data-sc-wall-measurement-unit>{{ sc_wall_unit }}</span>
+</div>
+<button type="button" class="sc-wall-v1__flow-button" data-sc-wall-submit-measurement>Show My Edition</button>
+</div>
+<button type="button" class="sc-wall-v1__flow-link sc-wall-v1__flow-link--skip" data-sc-wall-quick-preview>Skip scale — just show me</button>
+<p class="sc-wall-v1__flow-error" data-sc-wall-flow-error aria-live="polite"></p>
+</div>
+
+<button type="button" class="sc-wall-v1__scale-help-reopen" data-sc-wall-scale-help-reopen hidden aria-label="Show scale help">?</button>
+
+</div>
+</div>
+
+<div class="sc-wall-v1__landscape-scale-dock" data-sc-wall-landscape-scale-dock hidden aria-label="Scale instructions"></div>
+
+<div class="sc-wall-v1__landscape-controls" data-sc-wall-landscape-controls hidden aria-label="Wall preview controls"></div>
+
+<p class="sc-wall-v1__share-note sc-wall-v1__share-note--status" data-sc-wall-share-note aria-live="polite"></p>
+
+<div class="sc-wall-v1__utility-actions sc-wall-v1__utility-actions--under-save">
+<button type="button" class="sc-wall-v1__secondary" data-sc-wall-retake>Another Photo</button>
+</div>
+
+</div>
+</div>
+</div>
+</div>
+
+<div class="sc-wall-v1__sticky-buy" data-sc-wall-sticky-buy hidden>
+<div class="sc-wall-v1__sticky-size-grid" data-sc-wall-size-grid aria-label="Choose artwork size">
+{%- assign sc_wall_rendered_sizes = false -%}
+{%- for option in sc_wall_product.options_with_values -%}
+{%- assign sc_wall_size_name = option.name | downcase -%}
+{%- if sc_wall_size_name contains 'size' -%}
+{%- assign sc_wall_rendered_sizes = true -%}
+{%- for value in option.values -%}
+<button
+type="button"
+class="sc-wall-v1__sticky-size-btn"
+data-sc-wall-size-option
+data-size-raw="{{ value | escape }}"
+data-size-index="{{ forloop.index0 }}"
+aria-pressed="{% if value.selected %}true{% else %}false{% endif %}"
+>
+<span data-sc-wall-size-token>{{ value }}</span>
+<small data-sc-wall-size-dims></small>
+<em data-sc-wall-upsize-badge hidden>Try next size</em>
+</button>
+{%- endfor -%}
+{%- endif -%}
+{%- endfor -%}
+
+{%- unless sc_wall_rendered_sizes -%}
+<button type="button" class="sc-wall-v1__sticky-size-btn" data-sc-wall-size-option data-size-raw="S - 21 × 30 cm (8.3 × 11.8 in)" data-size-index="0" aria-pressed="false"><span data-sc-wall-size-token>S</span><small data-sc-wall-size-dims></small><em data-sc-wall-upsize-badge hidden>Try next size</em></button>
+<button type="button" class="sc-wall-v1__sticky-size-btn" data-sc-wall-size-option data-size-raw="M - 30 × 45 cm (11.8 × 17.7 in)" data-size-index="1" aria-pressed="false"><span data-sc-wall-size-token>M</span><small data-sc-wall-size-dims></small><em data-sc-wall-upsize-badge hidden>Try next size</em></button>
+<button type="button" class="sc-wall-v1__sticky-size-btn" data-sc-wall-size-option data-size-raw="L - 45 × 62 cm (17.7 × 24.4 in)" data-size-index="2" aria-pressed="true"><span data-sc-wall-size-token>L</span><small data-sc-wall-size-dims></small><em data-sc-wall-upsize-badge hidden>Try next size</em></button>
+<button type="button" class="sc-wall-v1__sticky-size-btn" data-sc-wall-size-option data-size-raw="XL - 62 × 87 cm (24.4 × 34.3 in)" data-size-index="3" aria-pressed="false"><span data-sc-wall-size-token>XL</span><small data-sc-wall-size-dims></small><em data-sc-wall-upsize-badge hidden>Try next size</em></button>
+{%- endunless -%}
+</div>
+<button type="button" class="sc-wall-v1__sticky-secure" data-sc-wall-sticky-secure>
+<span class="sc-wall-v1__sticky-secure-label" data-sc-wall-cart-label>Add To Cart</span>
+<span class="sc-wall-v1__sticky-secure-price" data-sc-wall-cart-price></span>
+<span class="sc-wall-v1__sticky-secure-spinner" aria-hidden="true"></span>
+</button>
+<button type="button" class="sc-wall-v1__keep-browsing" data-sc-wall-keep-browsing>Keep browsing</button>
+<p class="sc-wall-v1__cart-error" data-sc-wall-cart-error role="alert"></p>
+</div>
+
+<div class="sc-wall-v1__download-gate" data-sc-wall-download-gate hidden aria-hidden="true">
+<div class="sc-wall-v1__download-card" role="dialog" aria-modal="true" aria-labelledby="{{ sc_wall_id }}-download-title">
+<button type="button" class="sc-wall-v1__download-close" data-sc-wall-download-close aria-label="Close download form">
+<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+<path d="M6 6l12 12M18 6 6 18"></path>
+</svg>
+</button>
+<div class="sc-wall-v1__download-eyebrow">SPORTS CAVE</div>
+<h3 id="{{ sc_wall_id }}-download-title">Download your wall preview</h3>
+<p class="sc-wall-v1__download-copy">Enter your details to save your finished preview.</p>
+<div class="sc-wall-v1__download-fields">
+<input type="text" autocomplete="name" maxlength="120" placeholder="Name" data-sc-wall-download-name aria-label="Name">
+<input type="email" autocomplete="email" inputmode="email" maxlength="254" placeholder="Email" data-sc-wall-download-email aria-label="Email address">
+</div>
+<label class="sc-wall-v1__download-consent">
+<input type="checkbox" data-sc-wall-download-consent checked>
+<span>Allow Sports Cave to feature this wall preview.</span>
+</label>
+<p class="sc-wall-v1__download-error" data-sc-wall-download-error aria-live="polite"></p>
+<button type="button" class="sc-wall-v1__download-confirm" data-sc-wall-download-confirm>Download Preview</button>
+</div>
+</div>
+
+</div>
+</div>
+</div>
+
+<noscript><style>#{{ sc_wall_id }} .sc-wall-v1__launch{display:none!important}</style></noscript>
+
+{{ 'sports-cave-wall-preview.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'sports-cave-wall-preview.js' | asset_url }}" defer></script>

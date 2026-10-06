@@ -6,7 +6,7 @@ page.on('pageerror',e=>errors.push(e.stack));page.on('response',r=>{if(r.url().i
 await page.route('**/api/wall-previews**',r=>r.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},body:'{"ok":true,"archive_status":"queued"}'}));
 await page.addInitScript(()=>{window.scPerf={cls:0,lcp:0};new PerformanceObserver(l=>l.getEntries().forEach(e=>{if(!e.hadRecentInput)scPerf.cls+=e.value;})).observe({type:'layout-shift',buffered:true});new PerformanceObserver(l=>l.getEntries().forEach(e=>scPerf.lcp=e.startTime)).observe({type:'largest-contentful-paint',buffered:true});});
 for(const path of ['/','/collections/all','/products/legends-never-die-kobe-bryant-michael-jordan-wall-art']){
- await page.goto(origin+path+'?preview_theme_id='+theme,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.__scProtectionReady);assert.equal(String(await page.evaluate(()=>Shopify.theme.id)),theme);
+ await page.goto(origin+path+(theme==='188890644787'?'':'?preview_theme_id='+theme),{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.__scProtectionReady);assert.equal(String(await page.evaluate(()=>Shopify.theme.id)),theme);
  const art=page.locator(path==='/'?'.schero__img':path.startsWith('/collections')?'.sc-product-media img':'.product-media img').first();await art.waitFor({state:'attached'});
  assert.equal(await art.evaluate(e=>e.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))),false);
  assert.equal(await art.evaluate(e=>e.dispatchEvent(new Event('dragstart',{bubbles:true,cancelable:true}))),false);
