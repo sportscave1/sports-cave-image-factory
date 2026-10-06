@@ -37,7 +37,7 @@ class ImageProtectionTests(unittest.TestCase):
 
     def test_outage_cached_and_does_not_fail_storefront(self):
         with patch.object(policy,'load_policy',side_effect=RuntimeError('offline')) as read:
-            for _ in range(3):self.assertEqual(policy.public_policy(),policy.DEFAULTS)
+            for _ in range(3):self.assertEqual(policy.public_policy(),{**policy.DEFAULTS,'enabled':False})
         read.assert_called_once()
         with patch.object(public,'public_policy',side_effect=RuntimeError('offline')):
             response=asyncio.run(public.config(request()))
@@ -45,12 +45,13 @@ class ImageProtectionTests(unittest.TestCase):
 
     def test_save_existing_admin_only_no_new_tables(self):
         import supabase_backend as db
-        with patch.object(db,'set_app_setting') as save:
+        with patch.object(db,'set_app_setting') as save, patch.object(db,'record_activity_log') as audit:
             with self.assertRaises(PermissionError):policy.save_policy({'role':'worker','is_active':True},{})
             with self.assertRaises(ValueError):policy.save_policy(ADMIN,{'enabled':'true'})
             with self.assertRaises(ValueError):policy.save_policy(ADMIN,{'private_key':'not-allowed'})
             policy.save_policy(ADMIN,{'visibleWatermark':True})
         save.assert_called_once_with(policy.SETTING_KEY,{**policy.DEFAULTS,'visibleWatermark':True},ensure_schema_first=False)
+        audit.assert_called_once()
 
     def test_settings_route_admin_only_and_lazy(self):
         self.assertTrue(os_accounts.can_access_page(ADMIN,'Image Protection'))
@@ -61,6 +62,25 @@ class ImageProtectionTests(unittest.TestCase):
         import inspect,app
         self.assertNotIn('image_protection',inspect.getsource(app.main))
         self.assertNotIn('image_protection',inspect.getsource(app.is_app_authenticated))
+
+    def test_legacy_settings_preserved_with_new_scopes(self):
+        values=policy.clean_policy({'enabled':False,'visibleWatermark':True})
+        self.assertFalse(values['enabled'])
+        self.assertTrue(values['visibleWatermark'])
+        self.assertTrue(values['protectWallPreview'])
+        self.assertFalse(values['wallPreviewWatermark'])
+
+    def test_watermark_validation(self):
+        for values in ({'watermarkOpacity':True},{'watermarkOpacity':2},{'watermarkText':''},{'watermarkPosition':'script'}):
+            with self.assertRaises(ValueError):policy.clean_policy(values)
+
+    def test_etag_and_only_allowlisted_public_values(self):
+        import json
+        with patch.object(public,'public_policy',return_value=dict(policy.DEFAULTS)):
+            first=asyncio.run(public.config(request()))
+            req=Request({'type':'http','method':'GET','path':'/', 'headers':[(b'if-none-match',first.headers['etag'].encode())]})
+            self.assertEqual(asyncio.run(public.config(req)).status_code,304)
+            self.assertEqual(set(json.loads(first.body)),set(policy.DEFAULTS))
 
     def test_baseline_login_cookie_30_days_without_optional_secret_in_render(self):
         with patch.dict(os.environ,{'RENDER':'true','SPORTS_CAVE_AUTH_SECRET':''}):
@@ -122,11 +142,11 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 import image_protection as policy
 screen = "import streamlit as st\\nfrom image_protection_ui import render\\nrender(st,{'id':'fixture-admin','role':'admin','is_active':True,'account_status':'active'})"
-with patch.object(policy,'load_policy',return_value=dict(policy.DEFAULTS)),patch.object(policy,'save_policy') as save:
+with patch.object(policy,'last_updated',return_value='2026-10-06'),patch.object(policy,'load_policy',return_value=dict(policy.DEFAULTS)),patch.object(policy,'save_policy') as save:
     page=AppTest.from_string(screen).run()
     assert not page.exception
-    assert page.title[0].value=='IMAGE PROTECTION'
-    assert len(page.checkbox)==10 and not page.checkbox[-1].value
+    assert page.title[0].value=='Image Protection'
+    assert len(page.checkbox)==15 and not page.checkbox[-1].value
     save.assert_not_called()
     page.button[0].click().run()
     assert not page.exception

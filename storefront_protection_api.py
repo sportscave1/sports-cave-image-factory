@@ -1,5 +1,7 @@
 """Public configuration and script only; never exposes admin/session data."""
 from pathlib import Path
+import hashlib
+import json
 
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, Response
@@ -24,8 +26,12 @@ async def config(request):
         values=await run_in_threadpool(public_policy)
     except Exception:
         # Safe baseline is explicit; operators see storage failures in private UI.
-        values=dict(DEFAULTS)
+        values={**DEFAULTS, 'enabled':False}
         headers['Cache-Control']='no-store'
+    etag='"'+hashlib.sha256(json.dumps(values,sort_keys=True).encode()).hexdigest()+'"'
+    headers['ETag']=etag
+    if request.headers.get('if-none-match') == etag:
+        return Response(status_code=304,headers=headers)
     return JSONResponse(values,headers=headers)
 
 

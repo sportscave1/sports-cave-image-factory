@@ -9002,6 +9002,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     seo_nav.SEO_OVERVIEW_ROUTE: ":material/search_insights:",
     "Email": ":material/mail:",
     "Reviews": ":material/reviews:",
+    "Image Protection": ":material/shield:",
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
@@ -9234,6 +9235,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
+    _sidebar_route_button("Image Protection", current_page, allowed_routes, root=st)
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:
