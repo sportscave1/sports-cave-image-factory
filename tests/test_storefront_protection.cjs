@@ -63,6 +63,10 @@ const fs=require('fs'),assert=require('assert');
  await perf.page.addScriptTag({content:source});assert.equal(perf.reads(),1);checks++;
  const milliseconds=await perf.page.evaluate(()=>{const e=document.querySelector('#art'),t=performance.now();for(let i=0;i<1000;i++)e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}));return performance.now()-t;});
  console.log(JSON.stringify({delegatedEvents:1000,milliseconds,scriptBytes:Buffer.byteLength(source),polling:0,extraConfigRequestsAfterReinstall:perf.reads()-1}));await perf.page.close();
+ const real=await fixture(1366);await real.page.waitForFunction(()=>window.__scProtectionReady);
+ for(const className of ['sc-product-media','gallery-viewer','sc-square-mobile-zoom','sc-featured-collection-banner__frame']){
+  assert.equal(await real.page.evaluate(c=>{const host=document.createElement('div');host.className=c;const img=document.createElement('img');host.append(img);document.body.append(host);return img.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}));},className),false);checks++;
+ }await real.page.close();
  const outage=await fixture(390,undefined,null); await outage.page.waitForTimeout(150); assert.equal(await outage.page.locator('#art').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),true);assert.deepStrictEqual(outage.errors,[]);checks+=2;await outage.page.close();
  // Real WebKit CSS support is checked in WebKit, not inferred from Chromium.
  console.log(JSON.stringify({checks,widths:[1920,1366,750,390,320],errors:0}));

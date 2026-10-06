@@ -15,7 +15,7 @@
   const wallRoot = '.sc-wall-v1,[data-sc-wall-overlay],[data-sc-wall-visualizer]';
   const wallMedia = '.sc-wall-v1 img,.sc-wall-v1 canvas,.sc-wall-v1 video,[data-sc-wall-overlay] img,[data-sc-wall-overlay] canvas,[data-sc-wall-overlay] video';
   const marker = '[data-sc-protected="artwork"],.sc-protected-artwork';
-  const media = '.product__media img,.product-media img,.product-single__photo,.product__media-item img,.card__media img,.product-gallery img,.product-block__image img,.product-detail__images img,.product-block .rimage__image,.product-media-modal img,.product-lightbox img,.schero__img,.sc-shop-by-sport__image,.sc-featured-collection-banner__frame img,.sc-square-mobile-zoom img,.sc-square-mobile-thumb img,.thumbnail--media-image img,.sc-desktop-featured__media img,.scmm-featured-card__media img';
+  const media = '.product__media img,.product-media img,.product-single__photo,.product__media-item img,.card__media img,.product-gallery img,.product-block__image img,.product-detail__images img,.product-block .rimage__image,.product-media-modal img,.product-lightbox img,.schero__img,.sc-shop-by-sport__image,.sc-featured-collection-banner__frame img,.sc-square-mobile-zoom img,.sc-square-mobile-thumb img,.thumbnail--media-image img,.sc-desktop-featured__media img,.scmm-featured-card__media img,.sc-product-media img,.gallery-viewer img,.sc-legacy__image';
   const editable = el => el instanceof Element && !!el.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
   const protectedTarget = el => config.enabled && el instanceof Element && !editable(el) && selector && !!el.closest(selector);
   const style = document.createElement('style'); document.head.appendChild(style);
