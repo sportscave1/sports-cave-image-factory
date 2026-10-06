@@ -286,6 +286,19 @@ internal sealed class DesktopConfig
 
 internal sealed class DesktopWindow : Window
 {
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeVersion
+    {
+        public uint Size, Major, Minor, Build, Platform;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string ServicePack;
+    }
+    [DllImport("ntdll.dll", CharSet = CharSet.Unicode)]
+    private static extern int RtlGetVersion(ref NativeVersion version);
+    private bool captureExcluded;
     private readonly DesktopConfig config;
     private readonly WebView2 browser;
     private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
@@ -327,6 +340,18 @@ internal sealed class DesktopWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         browser = new WebView2();
         Content = browser;
+        SourceInitialized += delegate
+        {
+            // WDA_EXCLUDEFROMCAPTURE requires Windows 10 2004 (build 19041).
+            // Verify the actual affinity; never advertise a successful API call alone.
+            IntPtr handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            uint actual;
+            NativeVersion version = new NativeVersion();
+            version.Size = (uint)Marshal.SizeOf(typeof(NativeVersion));
+            captureExcluded = RtlGetVersion(ref version) == 0 && version.Build >= 19041
+                && SetWindowDisplayAffinity(handle, 0x11)
+                && GetWindowDisplayAffinity(handle, out actual) && actual == 0x11;
+        };
         Loaded += OnLoaded;
         Closing += delegate(object sender, System.ComponentModel.CancelEventArgs args)
         {
@@ -406,6 +431,9 @@ internal sealed class DesktopWindow : Window
         {
             browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
             browser.CoreWebView2.Settings.AreHostObjectsAllowed = false;
+            await browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                "Object.defineProperty(window,'__SC_NATIVE_CAPTURE_PROTECTION',{value:{platform:'Windows',excluded:"
+                + (captureExcluded ? "true" : "false") + "},writable:false,configurable:false});");
             browser.CoreWebView2.Settings.IsPasswordAutosaveEnabled = true;
             browser.CoreWebView2.Settings.IsGeneralAutofillEnabled = true;
             browser.CoreWebView2.WebMessageReceived += OnWebMessage;

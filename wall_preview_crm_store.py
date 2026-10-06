@@ -210,7 +210,7 @@ def revoke_share(preview_id):
 
 def timeline(preview_id):
     with transaction() as cur:
-        cur.execute('SELECT event_name,occurred_at,metadata FROM public.wall_preview_events WHERE preview_id=%s ORDER BY occurred_at LIMIT 100',(preview_id,))
+        cur.execute('SELECT event_name,occurred_at,metadata,frame,size FROM public.wall_preview_events WHERE preview_id=%s OR client_preview_id=(SELECT client_preview_id FROM public.wall_previews WHERE id=%s) ORDER BY occurred_at,id LIMIT 100',(preview_id,preview_id))
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -233,12 +233,17 @@ def correlate_order(payload):
             column = 'id' if props.get('_wall_preview_id') else 'client_preview_id'
             cur.execute(f'SELECT * FROM public.wall_previews WHERE {column}=%s FOR UPDATE',(value,))
             row = dict(cur.fetchone() or {})
-            if not row or not row.get('variant_id') or str(row['variant_id']).rsplit('/',1)[-1] != str(line.get('variant_id')):
+            from wall_preview_analytics import purchase
+            if not row:
+                purchase(cur,payload,line)
+                continue
+            if not row.get('variant_id') or str(row['variant_id']).rsplit('/',1)[-1] != str(line.get('variant_id')):
                 continue
             cur.execute('''UPDATE public.wall_previews SET purchased_at=COALESCE(purchased_at,now()),
                 order_id=COALESCE(order_id,%s),order_number=COALESCE(order_number,%s),updated_at=now() WHERE id=%s''',
                 (order_id,str(payload.get('name') or payload.get('order_number') or '')[:100],str(row['id'])))
             event(cur,row,'WallPreviewPurchased','order:'+order_id,{'order_id':order_id})
+            purchase(cur,payload,line,row)
             cur.execute("UPDATE public.wall_preview_email_jobs SET state='suppressed',reason='purchased',finished_at=now() WHERE preview_id=%s AND kind<>'requested' AND state='queued'",(str(row['id']),))
             matched += 1
     return matched

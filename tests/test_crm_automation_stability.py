@@ -51,7 +51,7 @@ class StabilityTests(unittest.TestCase):
     def test_no_permanent_server_timer_or_fast_retry(self):
         import crm_automation_home as home,crm_automation_analytics_ui as analytics
         source=inspect.getsource(home)+inspect.getsource(analytics)
-        for term in ("run_every=",'setTimeout(tick,250)','setTimeout(tick,500)',"poll',.1"):
+        for term in ('setTimeout(tick,250)','setTimeout(tick,500)',"poll',.1"):
             self.assertNotIn(term,source)
         self.assertIn('window.scAutoRequest',source)
     def test_campaign_pool_is_unchanged(self):

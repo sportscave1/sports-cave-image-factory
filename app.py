@@ -10075,6 +10075,11 @@ def _clear_authenticated_session_state(message=""):
     st.session_state["sports_cave_authenticated"] = False
     for key in (
         "sports_cave_current_user",
+        "sports_cave_security_sid",
+        "sports_cave_security_token",
+        "security_image_audit",
+        "security_image_audit_remaining",
+        "security_image_audit_cursor",
         "sports_cave_auth_checked_at",
         "sports_cave_admin_setup_required",
         "files_access_token",
@@ -10165,11 +10170,22 @@ def _auth_cookie_script(cookie_value="", *, max_age_seconds=None, clear=False):
 
 
 def set_auth_cookie(token, *, remember):
-    max_age = sc_auth.auth_cookie_max_age() if remember else None
-    _auth_cookie_script(token, max_age_seconds=max_age)
+    valid, _reason, payload = sc_auth.validate_user_auth_token(token, password=get_app_password(), extra_secret=get_auth_extra_secret())
+    if not valid:
+        # Bootstrap compatibility until the first real account is created.
+        _auth_cookie_script(token, max_age_seconds=sc_auth.auth_cookie_max_age() if remember else None)
+        return
+    from security_protection import STORE
+    sid = STORE.register(token, payload, current_os_user(), 'Sports Cave OS browser/app')
+    st.session_state['sports_cave_security_sid'] = sid
+    st.session_state['sports_cave_security_token'] = token
+    grant=STORE.issue_cookie_handoff(token,payload,current_os_user())
+    body = json.dumps({'grant': grant, 'remember': bool(remember), 'action': 'register'}).replace('<', '\\u003c')
+    st.html('<script>fetch("/api/os/security/session", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(' + body + ')}).then(r=>{if(!r.ok)throw new Error("Session persistence unavailable");}).catch(()=>{});</script>', unsafe_allow_javascript=True)
 
 
 def clear_auth_cookie():
+    st.html('<script>fetch("/api/os/security/session",{method:"POST",headers:{"Content-Type":"application/json"},body:\'{"action":"logout"}\'}).catch(()=>{});</script>',unsafe_allow_javascript=True)
     _auth_cookie_script(clear=True)
 
 
@@ -10276,13 +10292,20 @@ def render_login_gate():
     admin = status.get("admin") or {}
     if status.get("available") and admin:
         try:
+            from security_protection import STORE as protection_store
+            login_key=protection_store.login_attempt(login)
             user, reason = os_accounts.authenticate_user(login, password)
+        except PermissionError as error:
+            st.error(str(error))
+            return False
         except Exception:
             st.warning("Sign in is temporarily unavailable. Please try again shortly.")
             return False
         if not user:
+            protection_store.audit('LOGIN_FAILED',result='denied')
             st.error("This account is inactive." if reason == "inactive" else "Username or password is incorrect.")
             return False
+        protection_store.login_success(login_key,user)
         _set_authenticated_user(user)
         token = sc_auth.create_user_auth_token(
             user["id"],
@@ -10385,6 +10408,11 @@ def render_admin_account_setup():
 
 
 def logout_app():
+    sid = st.session_state.get('sports_cave_security_sid')
+    if sid:
+        from security_protection import STORE
+        STORE.q('UPDATE os_security_sessions SET revoked_at=now() WHERE id=%s', (sid,))
+        STORE.audit('LOGOUT', current_os_user().get('id'), session_id=sid)
     record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
     set_current_page("Dashboard", source="logout")
     _clear_authenticated_session_state()
@@ -11846,6 +11874,8 @@ def render_my_profile_section(user):
         )
     else:
         _set_authenticated_user(updated, legacy=bool(user.get("legacy")))
+        token = sc_auth.create_user_auth_token(updated["id"], session_version=updated.get("session_version", 1), password=get_app_password(), extra_secret=get_auth_extra_secret())
+        set_auth_cookie(token, remember=True)
         record_activity_log(
             "password_changed",
             "Accounts & Access",
@@ -15998,6 +16028,24 @@ def render_files_page():
 
 
 def render_selected_page(current_page):
+    if current_page == 'Security & Protection':
+        import security_protection_ui
+        security_protection_ui.render(st,current_os_user(),st.session_state.get('sports_cave_security_sid',''))
+        return
+    if current_page in ('Accounts & Access','Developer','Settings') and not current_os_user().get('legacy'):
+        from security_protection import STORE
+        sid=st.session_state.get('sports_cave_security_sid','')
+        try:STORE.require_reauth(current_os_user()['id'],sid)
+        except PermissionError:
+            st.title('Verify your password')
+            st.caption('Account and setup changes require recent password verification.')
+            with st.form('admin-action-verify'):
+                password=st.text_input('Current password',type='password')
+                verified=st.form_submit_button('Continue')
+            if verified:
+                try:STORE.reauthenticate(current_os_user()['id'],sid,password);st.rerun()
+                except PermissionError as error:st.error(str(error))
+            return
     def os_route_pages():
         import_started = time.perf_counter()
         pages = get_os_pages()
@@ -16102,6 +16150,10 @@ def main():
     inject_styles()
     log_startup_stage("CSS LOADED")
 
+    if os.getenv("RENDER") and not get_auth_extra_secret():
+        st.error("Secure session configuration requires administrator attention before sign-in.")
+        return
+
     auth_started = time.perf_counter()
     auth_checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
     auth_cache_hit = bool(
@@ -16127,6 +16179,43 @@ def main():
         log_startup_stage("ADMIN SETUP STOP")
         return
 
+    # Durable revocation and inactivity are checked before any page action runs.
+    if not current_os_user().get('legacy'):
+        from security_protection import STORE as protection_store, cached_policy
+        from security_session_api import identity as security_identity
+        try:
+            sid = st.session_state.get('sports_cave_security_sid')
+            if not sid:
+                token = current_auth_cookie()
+                security_user, claims = security_identity(token)
+                sid = protection_store.register(token, claims, security_user, 'Sports Cave OS browser/app')
+                st.session_state['sports_cave_security_sid'] = sid
+            protection_store.validate_session(sid, current_os_user()['id'])
+            st.session_state['sports_cave_current_user']['_security_sid']=sid
+        except PermissionError as error:
+            st.title('Session locked')
+            st.caption(str(error))
+            if sid:
+                with st.form('security-session-unlock'):
+                    unlock_password = st.text_input('Current password', type='password')
+                    unlock = st.form_submit_button('Unlock')
+                if unlock:
+                    try:
+                        protection_store.reauthenticate(current_os_user()['id'],sid,unlock_password)
+                        st.rerun()
+                    except PermissionError as failure:st.error(str(failure))
+            if st.button('Return to sign in'):
+                _clear_authenticated_session_state()
+                clear_auth_cookie()
+                st.rerun()
+            return
+        except Exception:
+            st.error('Session verification temporarily unavailable. No protected action was performed.')
+            return
+        privacy_script = (BASE_DIR / 'app-protection.js').read_text(encoding='utf-8')
+        privacy_script = privacy_script.replace('SC_POLICY',json.dumps(cached_policy())).replace('SC_NAME',json.dumps(current_os_user().get('display_name') or 'Sports Cave user').replace('<','\\u003c'))
+        st.html('<script>'+privacy_script+'</script>',unsafe_allow_javascript=True)
+
     set_activity_actor(
         _activity_actor_for_user(current_os_user()),
         _activity_actor_metadata_for_user(current_os_user()),
@@ -16146,7 +16235,7 @@ def main():
     )
     top_bar.render_top_bar(
         get_components_module(),
-        current_os_user(),
+        {**current_os_user(), '_security_sid':st.session_state.get('sports_cave_security_sid','')},
         logo_src=asset_data_uri(str(APP_ICON_PATH)),
         current_route=current_page,
         navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),

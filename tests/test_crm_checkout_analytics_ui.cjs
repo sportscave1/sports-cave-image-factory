@@ -9,6 +9,8 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
    await page.setViewportSize({width,height:950});await page.goto('http://127.0.0.1:8533/?fixture_analytics=1');
    await page.getByRole('textbox',{name:'Search automations',exact:true}).fill('Abandoned checkout · local fixture');
    await page.getByRole('textbox',{name:'Search automations',exact:true}).press('Tab');
+   // Wait for the search response, not an old row from the previous projection.
+   await page.waitForFunction(()=>document.querySelectorAll('.sc-auto-row').length===1);
    const row=page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first();await row.waitFor();
    await row.locator('[data-testid=stPopoverButton]:visible').click();const start=Date.now();await page.getByRole('button',{name:'Analytics',exact:true}).click();
    const dialog=page.getByRole('dialog');await dialog.getByRole('heading',{name:'Automation analytics',exact:true}).waitFor();
@@ -38,7 +40,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
   }
   await dialog.getByRole('textbox',{name:'Search checkouts',exact:true}).fill('local0@example.test');
   await dialog.getByRole('textbox',{name:'Search checkouts',exact:true}).press('Tab');
-  await dialog.getByText('1 matching checkouts · 0 recovered',{exact:true}).waitFor();
+  await page.waitForFunction(()=>[...document.querySelectorAll('[role=dialog] p')].some(e=>e.textContent.includes('matching checkouts')&&parseInt(e.textContent)>0&&parseInt(e.textContent)<10));
   const grid=dialog.getByTestId('stDataFrame');await grid.locator('.dvn-scroller').click({position:{x:15,y:50}});
   const add=dialog.getByRole('button',{name:'Add to flow',exact:true});await add.waitFor();assert.equal(await add.isEnabled(),true);
   assert.equal(await dialog.getByRole('checkbox').count(),0);

@@ -45,7 +45,7 @@ class PublicationUiTests(unittest.TestCase):
           ('Active',{'state':'FAILED','error':'Review the email.'},'Publish failed')]:
             self.assertIn(label,status_html(category,pub))
         code=inspect.getsource(status_region)
-        self.assertIn("run_every='3s'",code);self.assertNotIn('summary(',code)
+        self.assertIn('@settling_fragment',code);self.assertNotIn('summary(',code)
         self.assertNotIn('secret-value',safe_reason(RuntimeError('secret-value')))
         self.assertNotIn('truthful-copy review',safe_reason(ValueError('Subject present and truthful-copy review complete')))
 
@@ -92,6 +92,26 @@ class PublicationTests(unittest.TestCase):
         self.assertFalse(saved['config']['draft']['emails'][0]['document']['copy_reviewed'])
         self.assertEqual(job['revision'],row['config']['revision'])
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_template_versions v WHERE content->>\'automation_id\'=%s',(str(row['id']),),True)['n'],0)
+
+    def test_first_abandoned_publication_loads_home_from_empty_cache(self):
+        # This suite is explicitly gated to the disposable localhost SQL fixture.
+        self.store.q('TRUNCATE crm_automations CASCADE')
+        from crm_automation_home_read import identity_read
+        from crm_automation_home_data import identities,counts,reporting_window
+        from crm_automation_analytics import summary,activity
+        read=lambda state:identity_read(state,self.store,('identities',0),lambda bounded:identities(bounded))
+        self.assertEqual(read({}),([], 'READY'))
+        row=self.draft('abandoned');job=self.job(row)
+        pending,phase=read({})
+        self.assertEqual(phase,'READY');self.assertEqual(pending[0]['publication']['state'],'PUBLISHING')
+        self.run_job()
+        live,phase=read({})
+        self.assertEqual((phase,live[0]['category'],live[0]['active_version']),('READY','Active','1'))
+        self.assertEqual(counts(self.store)['active'],1)
+        self.assertEqual(summary(self.store,reporting_window())['sent_emails'],0)
+        self.assertEqual(activity(self.store),[])
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_marketing_sends WHERE enrollment_id IS NOT NULL',one=True)['n'],0)
+        self.assertEqual(read({})[0][0]['id'],str(row['id']))
 
     def test_missing_subject_and_revision_mismatch_rejected_before_queue(self):
         row=self.draft();flow=deepcopy(row['config']['draft']);flow['emails'][0]['document']['content']['subject']=''

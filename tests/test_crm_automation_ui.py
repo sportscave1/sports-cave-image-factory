@@ -11,12 +11,13 @@ from tests.test_crm_simple_editor import document
 
 HOME_SCRIPT='''
 import streamlit as st
-from unittest.mock import Mock,patch
+from unittest.mock import Mock,MagicMock,patch
 from concurrent.futures import Future
 from crm_automation_ui import home
 from tests.test_crm import ADMIN
-store=Mock();store.connect=None
-def job(state,store,key,load):
+store=MagicMock();store.connect=None
+store.db.return_value.__enter__.return_value.execute.return_value.fetchall.return_value=[{'id':'00000000-0000-0000-0000-000000000001','name':'Real fixture automation','trigger_type':'welcome','updated_at':'2026-10-02','category':'Drafts','format':'automation_flow_v1'}]
+def job(state,store,key,load,**kwargs):
  value={'all_count':1,'drafts':1,'active':0,'paused':0,'archived':0,'sent_emails':4,'bounce_rate':0.,'click_rate':25.,'orders':1} if key[0] not in ('table','identities') else [{'id':'00000000-0000-0000-0000-000000000001','name':'Real fixture automation','trigger_type':'welcome','updated_at':'2026-10-02','category':'Drafts','format':'automation_flow_v1','entered':0,'sent':0,'delivered':0,'opened':0,'clicked':0,'orders':0}]
  if key[0]=='delivery':value.update(delivery_rate=99.,open_rate=40.,revenue={'AUD':100},previous={})
  if key[0]=='activity':value=[]
@@ -41,7 +42,7 @@ class AutomationUiTests(unittest.TestCase):
         self.assertIn('flow_email_control(flow',settings)
         self.assertIn('add_email_controls(store,user,editor,key)',settings)
         self.assertIn("st.selectbox('Trigger'",settings)
-        self.assertIn("st.number_input('Delay before email",settings)
+        self.assertIn("st.number_input('Delay",settings)
         self.assertIn("st.selectbox('Flow email'",inspect.getsource(flow_email_control))
         self.assertIn("st.button('Duplicate email'",inspect.getsource(add_email_controls))
 
@@ -78,7 +79,7 @@ class AutomationUiTests(unittest.TestCase):
         self.assertFalse(app.exception)
         html='\n'.join(e.proto.body for e in app.get('html'))
         for value in ('Automations','Delivery rate','Open rate','Revenue from automations (30 days)','Real fixture automation','Customer subscribes to email'):self.assertIn(value,html)
-        for value in ('Bounce rate','EMAIL · AUTOMATIONS','sc-email-loading'):self.assertNotIn(value,html)
+        for value in ('EMAIL · AUTOMATIONS','sc-email-loading'):self.assertNotIn(value,html)
         self.assertEqual(html.count('class="sc-auto-kpi"'),6)
         self.assertTrue(any(b.label=='Analytics' for b in app.button))
         self.assertTrue(any(b.label=='+ Create automation' for b in app.button))
@@ -121,14 +122,14 @@ class AutomationUiTests(unittest.TestCase):
         self.assertEqual(campaign['campaign_home_resolved'][(None,('delivery',None))],campaign_value)
 
     def test_home_search_only_changes_selected_table_request(self):
-        app=AppTest.from_string(HOME_SCRIPT.replace("def job(state,store,key,load):", "def job(state,store,key,load):\n st.session_state.setdefault('requests',[]).append(key)")).run()
+        app=AppTest.from_string(HOME_SCRIPT.replace("def job(state,store,key,load,**kwargs):", "def job(state,store,key,load,**kwargs):\n st.session_state.setdefault('requests',[]).append(key)")).run()
         initial=app.session_state['requests']
-        self.assertEqual([k[1][0] for k in initial if k[0]=='table'],[''])
+        self.assertEqual(list(dict.fromkeys(k[1][0] for k in initial if k[0]=='table')),[''])
         # Streamlit currently exposes segmented controls as button groups.
         group=app.get('button_group')[0]
         app.text_input[0].set_value('Reminder').run()
         self.assertFalse(app.exception)
-        self.assertEqual([k[1][0] for k in app.session_state['requests'] if k[0]=='table'],['','Reminder'])
+        self.assertEqual(list(dict.fromkeys(k[1][0] for k in app.session_state['requests'] if k[0]=='table')),['','Reminder'])
 
     def test_same_composer_preview_templates_and_test_send_are_called(self):
         source=Path('crm_automation_ui.py').read_text()

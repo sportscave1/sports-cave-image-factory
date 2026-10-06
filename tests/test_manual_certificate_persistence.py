@@ -15,6 +15,9 @@ from tests.test_orders_bounded_reader import ProductionCardinalityDatabase
 
 
 class PersistenceTests(unittest.TestCase):
+    def setUp(self):
+        guard=patch('security_protection.sensitive_admin',return_value=ACTOR)
+        guard.start();self.addCleanup(guard.stop)
     def connection(self, record, *, fail_commit=False):
         conn = MagicMock()
         conn.__enter__.return_value = conn

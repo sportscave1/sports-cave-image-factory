@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import hashlib
 import os
 from pathlib import Path
@@ -60,11 +60,15 @@ CRM_MIGRATIONS = (
     '20261005145500_crm_automation_reporting_indexes.sql',
     '20261005061015_crm_automation_publication_jobs.sql',
     '20261005064444_crm_checkout_analytics.sql',
+    '20261006033000_crm_single_delay.sql',
 )
 EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql')
 REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
-WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql')
+WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261006030857_wall_preview_funnel_analytics.sql': 'a8f9ba917b0b27f9900b82f25451581d448ae5107fa1108a063bb4e159ce5ed5',
+    '20261006033000_crm_single_delay.sql': '6b27bb0b887f0e9a9e4f0c0da93fa94df4dc2f805f26c828002c5e3ee7292903',
+    '20261005092224_os_security_protection.sql': '889748c4384d0f47c4c08c267ac654b2f899a75deae00515ed4e0ffa8048cfc1',
     '20261005064444_crm_checkout_analytics.sql': 'dab748c36dea631e30ad302a0b89ddd8fa423b2d02ef6d6c2daff99152c3da1b',
     '20261005061015_crm_automation_publication_jobs.sql': 'ca514e21e1fa8a835918eb7b71c11429f71ddb22787badf37e3eb22674a58693',
     '20261005145500_crm_automation_reporting_indexes.sql': 'd5d8d421a47e39051304eff122244a71466d0e80bcbc09e280505da0b067d6ba',
@@ -114,6 +118,7 @@ DEPLOYMENT_MIGRATIONS = (
     *EMAIL_MIGRATIONS,
     *REVIEWS_MIGRATIONS,
     *WALL_PREVIEW_MIGRATIONS,
+    '20261005092224_os_security_protection.sql',
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {

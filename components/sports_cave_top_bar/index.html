@@ -2662,6 +2662,7 @@
           ${["System", "Light", "Dark"].map((theme) => `<button type="button" class="sc-os-theme-option" data-theme="${theme}" aria-pressed="${selected === theme}">${theme}</button>`).join("")}
         </div>
         <div class="sc-os-settings-divider"></div>
+        <button type="button" class="sc-os-topbar-action" data-action="security">${icon("settings")}<span>Security &amp; Protection</span></button>
         <button type="button" class="sc-os-topbar-action sc-os-mobile-only" data-action="refresh">${icon("refresh")}<span>Refresh</span></button>
         <button type="button" class="sc-os-topbar-action" data-action="print">${icon("print")}<span>Print</span></button>
         <button type="button" class="sc-os-topbar-action" data-action="record">${icon("record")}<span>${recording ? "Stop recording" : "Record screen"}</span></button>
@@ -2670,6 +2671,7 @@
         button.addEventListener("click", () => setTheme(button.dataset.theme));
       });
       settingsPanel.querySelector('[data-action="refresh"]').addEventListener("click", () => parentWindow.location.reload());
+      settingsPanel.querySelector('[data-action="security"]').addEventListener("click", () => navigate({route_key: "security_protection", group: "Pages"}));
       settingsPanel.querySelector('[data-action="print"]').addEventListener("click", () => parentWindow.print());
       settingsPanel.querySelector('[data-action="record"]').addEventListener("click", startRecording);
     };

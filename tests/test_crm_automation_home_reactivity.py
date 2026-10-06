@@ -20,6 +20,7 @@ class HomeReactivityTests(unittest.TestCase):
         job={'id':'job','automation_id':'auto','revision':8,'publication_version':2,'state':'QUEUED',
              'snapshot':{'name':'Saved name','flow':{'trigger':'abandoned'}}}
         with patch('crm_automation_ui.home_state',return_value=state):accepted_publication(job)
+        self.assertTrue(state['publication_reset_filters'])
         row=state['publish_handoff']
         self.assertEqual((row['id'],row['name'],row['trigger_type']),('auto','Saved name','abandoned'))
         self.assertEqual(row['publication']['state'],'PUBLISHING')
@@ -47,7 +48,7 @@ class HomeReactivityTests(unittest.TestCase):
         source=inspect.getsource(home)
         self.assertNotIn('customer_batch',source)
         self.assertNotIn('arm_home_poll(',source)
-        self.assertLess(source.index('table(shop'),source.index('kpis(store,'))
+        self.assertLess(source.index('table(shop'),source.index('kpis(store)'))
         source=inspect.getsource(status_region)
         for term in ('summary(', 'activity(', 'st.rerun(', 'rows('):self.assertNotIn(term,source)
         self.assertIn('data-auto-status',source)

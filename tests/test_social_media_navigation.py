@@ -296,7 +296,7 @@ class SocialHubUiContractTests(unittest.TestCase):
         module = __import__("social_media_page")
         source = inspect.getsource(module.render_page)
         tracking_source = inspect.getsource(module._render_tracking)
-        self.assertIn('default="Wall Preview Inbox"', source)
+        self.assertIn('default="Overview"', source)
         self.assertIn('if view == "Wall Preview Inbox"', source)
         self.assertIn('elif view == "Tracking"', source)
         self.assertIn('if view == "Post Tracker"', tracking_source)

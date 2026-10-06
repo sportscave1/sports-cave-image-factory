@@ -16,6 +16,7 @@ await db.exec(readFileSync('migrations/20261005145500_crm_automation_reporting_i
 await db.exec(`CREATE TABLE edition_orders(id bigserial primary key,shopify_customer_id text,customer_email text,edition_number int,edition_total int,product_title text,variant_title text,certificate_file_url text,shopify_order_name text);`);
 await db.exec(readFileSync('migrations/20261005061015_crm_automation_publication_jobs.sql','utf8'));
 await db.exec(readFileSync('migrations/20261005064444_crm_checkout_analytics.sql','utf8'));
+await db.exec(readFileSync('migrations/20261006033000_crm_single_delay.sql','utf8'));
 let queue=Promise.resolve();
 const server=http.createServer(async(req,res)=>{
  if(req.method!=='POST'){res.writeHead(405).end();return;}

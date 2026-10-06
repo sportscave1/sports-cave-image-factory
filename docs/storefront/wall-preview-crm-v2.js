@@ -8,17 +8,59 @@
   // This random session is a write capability. Never put it in dataLayer/share URLs/logs.
   window.SportsCaveWallPreviewCRM = function (hooks) {
     let clientId, saved = null, inFlight = null, current = null, revision = 0;
-    const emit = name => window.dispatchEvent(new CustomEvent(name, {detail: {
+    let started=0,furthest=0,capture='',hasPhoto=false,lastFrame='',lastSize='';
+    const once=new Set(),eventIds=new Map();
+    const stages=['Started','PhotoReady','ArtworkDragged','Confirmed','AddedToCart','CheckoutStarted','Purchased'];
+    function ensureJourney() {
+      if(clientId)return;
+      clientId=crypto.randomUUID();started=Date.now();
+      const meta=hooks.metadata();lastFrame=String(meta.frame || '');lastSize=String(meta.size || '');
+    }
+    function track(name) {
+      try {
+        ensureJourney();
+        if(['Started','ArtworkDragged','PhotoReady','Closed','CheckoutStarted'].includes(name.replace('WallPreview',''))) {
+          if(once.has(name))return;once.add(name);
+        }
+        const stage=stages.indexOf(name.replace('WallPreview',''));furthest=Math.max(furthest,stage);
+        const meta=hooks.metadata(), page=typeof location!=='undefined'?new URL(location.href):null;
+        const allowed=['product_id','variant_id','product_handle','product_title','frame','size','unit'];
+        const payload={event:name,event_id:crypto.randomUUID(),occurred_at:new Date().toISOString(),
+          session_id:session,client_preview_id:clientId,preview_id:saved?saved.preview_id:null,
+          elapsed_ms:Math.min(86400000,Math.max(0,Date.now()-started)),furthest_stage:stages[furthest],
+          capture_source:capture,device_type:typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches?'mobile':'desktop'};
+        for(const key of allowed)payload[key]=String(meta[key] || '').slice(0,500);
+        if(name==='WallPreviewConfirmed') {
+          const key=name+':'+revision;
+          if(eventIds.has(key))return;eventIds.set(key,payload.event_id);
+        }
+        if(page) {
+          payload.page_url=page.origin+page.pathname;
+          for(const key of ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'])payload[key]=(page.searchParams.get(key)||'').slice(0,160);
+        }
+        if(typeof document!=='undefined' && document.referrer) {
+          const ref=new URL(document.referrer);payload.referrer=ref.origin+ref.pathname;
+        }
+        // No session capability in DOM events/dataLayer. No photo or customer fields.
+        const body=JSON.stringify(payload);
+        if(name==='WallPreviewClosed' && typeof navigator!=='undefined' && navigator.sendBeacon) {
+          if(navigator.sendBeacon(API+'/analytics/events',new Blob([body],{type:'application/json'})))return;
+        }
+        Promise.resolve(fetch(API+'/analytics/events',{method:'POST',headers:{'Content-Type':'application/json'},
+          body,keepalive:true})).catch(()=>{});
+      } catch (_) { /* Analytics cannot interrupt any visualizer action. */ }
+    }
+    const emit = name => { track(name); window.dispatchEvent(new CustomEvent(name, {detail: {
       client_preview_id: clientId, preview_id: saved ? saved.preview_id : null,
       product_id: String(hooks.metadata().product_id || '')
-    }}));
-    const event = async name => {
+    }})); };
+    const event = name => {
       emit(name);
       if (!saved) return;
       try {
-        await fetch(`${API}/${saved.preview_id}/events`, {method:'POST', headers:{
+        Promise.resolve(fetch(`${API}/${saved.preview_id}/events`, {method:'POST', headers:{
           'Content-Type':'application/json', 'X-Wall-Preview-Token':saved.preview_token
-        }, body:JSON.stringify({event_name:name, event_id:crypto.randomUUID()})});
+        }, body:JSON.stringify({event_name:name, event_id:crypto.randomUUID()})})).catch(()=>{});
       } catch (_) { /* Local download/share/ATC must remain usable. */ }
     };
     async function upload(blob, params) {
@@ -37,7 +79,8 @@
       throw new Error('Server archive unavailable');
     }
     function newWallPhoto() {
-      clientId=crypto.randomUUID(); saved=null; current=null; revision++;
+      if(hasPhoto){clientId=null;once.clear();eventIds.clear();furthest=0;}
+      ensureJourney();hasPhoto=true;saved=null;current=null;revision++;
       hooks.showActions(false); hooks.showConfirm(true); emit('WallPreviewStarted');
     }
     function placementChanged() {
@@ -100,7 +143,27 @@
     function cartProperties(existing={}) {
       return {...existing,_wall_preview_client_id:clientId,...(saved ? {_wall_preview_id:saved.preview_id} : {})};
     }
-    return {newWallPhoto,placementChanged,confirm,emailPreview,download,share,cartProperties,
+    // Call at existing action completion points. No pointermove listeners or UX changes.
+    const opened=()=>{ensureJourney();if(!once.has('WallPreviewStarted'))emit('WallPreviewStarted');};
+    const action=name=>{opened();emit('WallPreview'+name);};
+    function changed(kind,value) {
+      opened();value=String(value || '');
+      if(kind==='Frame'){if(value===lastFrame)return;lastFrame=value;}
+      else {if(value===lastSize)return;lastSize=value;}
+      emit('WallPreview'+kind+'Changed');
+    }
+    return {newWallPhoto,placementChanged,confirm,emailPreview,download,share,cartProperties,opened,
+      cameraOpened:()=>{capture='camera';action('CameraOpened');},
+      galleryOpened:()=>{capture='upload';action('GalleryOpened');},
+      photoCaptured:()=>{capture='camera';action('PhotoCaptured');},
+      photoUploaded:()=>{capture='upload';action('PhotoUploaded');},
+      photoReady:()=>action('PhotoReady'),
+      dragCompleted:distance=>{if(Number(distance)>=3)action('ArtworkDragged');},
+      frameChanged:value=>changed('Frame',value),sizeChanged:value=>changed('Size',value),
+      scaleStarted:()=>action('ScaleStarted'),scaleCompleted:()=>action('ScaleCompleted'),
+      quickPreviewUsed:()=>action('QuickPreviewUsed'),closed:()=>{if(clientId)emit('WallPreviewClosed');},
+      // Call only after a verified checkout-start signal, never from a guessed button click.
+      checkoutStarted:()=>action('CheckoutStarted'),
       addedToCart:()=>event('WallPreviewAddedToCart')};
   };
 })();

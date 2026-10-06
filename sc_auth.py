@@ -51,8 +51,24 @@ def verify_password(password, stored_hash):
 
 
 def _signing_key(password=DEFAULT_APP_PASSWORD, extra_secret=""):
+    import os
+    if os.getenv('RENDER') and not str(extra_secret or '').strip():
+        raise RuntimeError('SPORTS_CAVE_AUTH_SECRET is required in production.')
     material = f"sports-cave-auth-v{TOKEN_VERSION}|{password}|{extra_secret or ''}"
     return hashlib.sha256(material.encode("utf-8")).digest()
+
+
+def sign_user_auth_claims(payload, *, password=DEFAULT_APP_PASSWORD, extra_secret=''):
+    """Reissue server-validated claims for a single-use HttpOnly cookie handoff.
+
+    Never call with public request JSON. The receiver loads claims exclusively
+    from the private server session record consumed under a row lock.
+    """
+    if not isinstance(payload,dict) or payload.get('v')!=USER_TOKEN_VERSION:
+        raise ValueError('Invalid server session claims.')
+    part=_b64_encode(json.dumps(payload,separators=(',',':'),sort_keys=True).encode())
+    signature=hmac.new(_signing_key(password=password,extra_secret=extra_secret),part.encode('ascii'),hashlib.sha256).digest()
+    return part+'.'+_b64_encode(signature)
 
 
 def _b64_encode(raw):

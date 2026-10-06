@@ -301,6 +301,7 @@ class NativeTransferRecord:
     user_id: str
     roots: list
     items: list
+    session_id: str = ''
     created_at: float = field(default_factory=time.monotonic)
     expires_at: float = field(
         default_factory=lambda: time.monotonic() + FILES_NATIVE_TRANSFER_SECONDS
@@ -452,6 +453,7 @@ class NativeTransferManager:
             user_id=str((user or {}).get("id") or ""),
             roots=transfer_roots,
             items=manifest,
+            session_id=str((user or {}).get("_security_sid") or ""),
         )
         with self._lock:
             self._cleanup()
@@ -828,6 +830,12 @@ def _request_user(request):
         except Exception:
             user = {}
         if user and os_accounts.can_access_page(user, "Files"):
+            if not os_accounts.account_is_active(user) or int(user.get('session_version') or 1) != int(payload.get('sv') or 1):
+                raise FilesUploadError('Session access expired.',status_code=403,code='access_denied')
+            from security_protection import STORE, session_key
+            STORE.register(token,payload,user,request.headers.get('user-agent',''))
+            STORE.validate_session(session_key(token),user['id'])
+            user['_security_sid']=session_key(token)
             return user
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
         token,
@@ -835,6 +843,10 @@ def _request_user(request):
         extra_secret=extra_secret,
     )
     if legacy_valid:
+        # A bootstrap token must not bypass established account revocation.
+        status=os_accounts.prepare_account_system()
+        if not status.get('available') or status.get('admin'):
+            raise FilesUploadError('Sign in with your Sports Cave account.',status_code=403,code='access_denied')
         return {
             "id": "legacy-master-admin",
             "username": "admin",
@@ -851,6 +863,9 @@ def _request_files_delete_user(request):
     user = _request_user(request)
     if not os_accounts.can_delete_files(user):
         raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
+    if user.get('id') != 'legacy-master-admin':
+        from security_protection import STORE, session_key
+        STORE.require_reauth(user['id'],session_key(request.cookies.get(sc_auth.AUTH_COOKIE_NAME,'')))
     return user
 
 
@@ -1259,6 +1274,8 @@ async def _bounded_chunk(request):
 
 
 def _response_error(error):
+    if isinstance(error, PermissionError):
+        return JSONResponse({"ok":False,"code":"access_denied","message":str(error)},status_code=403,headers={"Cache-Control":"no-store"})
     if isinstance(error, FilesUploadError):
         return JSONResponse(
             {
@@ -1725,6 +1742,7 @@ async def download_file(request: Request):
         )
         if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
             raise FilesUploadError("This file is not available.", status_code=403)
+        await run_in_threadpool(_audit_master_access, user['id'], user.get('_security_sid',''), path)
         link = await run_in_threadpool(
             dropbox_integration.get_temporary_link,
             context["access_token"],
@@ -1877,6 +1895,21 @@ def _native_transfer_secret(request):
     return str(request.headers.get("x-sports-cave-transfer-secret") or "")
 
 
+def _audit_master_access(user_id, sid, filename):
+    if PurePosixPath(str(filename)).suffix.casefold() in {'.psd','.psb','.tif','.tiff','.pdf','.ai','.eps'}:
+        from security_protection import STORE
+        STORE.audit('MASTER_FILE_ACCESS',user_id,'private_file',session_id=sid)
+
+
+def _validate_transfer_access(record):
+    # Bearer grants retain their API shape, but never outlive account/session access.
+    user=os_accounts.DEFAULT_STORE.get_user(record.user_id)
+    if not os_accounts.account_is_active(user) or not os_accounts.can_access_page(user, 'Files'):
+        raise FilesUploadError('Transfer access expired.', status_code=403)
+    from security_protection import STORE
+    STORE.validate_session(record.session_id, record.user_id)
+
+
 async def native_transfer_manifest(request: Request):
     """Return only the validated manifest attached to one transfer grant."""
     try:
@@ -1884,6 +1917,7 @@ async def native_transfer_manifest(request: Request):
             request.query_params.get("ticket"),
             _native_transfer_secret(request),
         )
+        await run_in_threadpool(_validate_transfer_access, record)
         public_items = [
             {
                 key: item[key]
@@ -1934,6 +1968,8 @@ async def native_transfer_content(request: Request):
             _native_transfer_secret(request),
             request.query_params.get("item"),
         )
+        await run_in_threadpool(_validate_transfer_access, record)
+        await run_in_threadpool(_audit_master_access, record.user_id, record.session_id, item["name"])
         if item["is_directory"]:
             raise FilesUploadError(
                 "Folders do not have downloadable content.",

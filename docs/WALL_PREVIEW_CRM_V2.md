@@ -39,7 +39,7 @@ the existing theme). V2 requires random UUID v4 `client_preview_id` and `session
 Identity is optional. Reconfirmation reuses the client ID and session. `preview_id` is optional
 and must match. Response includes `ok`, `preview_id`, `preview_token`, `version`, `duplicate`,
 and `share_url`. The random session doubles as a first-party write capability: keep it private,
-do not include it in analytics, URLs, logs or share payloads. Preview/customer IDs confer no auth.
+send it only to the private first-party backend, never to dataLayer, third-party analytics, URLs, logs or share payloads. Preview/customer IDs confer no auth.
 Legacy email/name query requests remain accepted during rollout, with their original permission semantics.
 
 `POST /api/wall-previews/{preview_id}/events` takes `{event_name,event_id}` and

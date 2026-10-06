@@ -282,7 +282,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
                 "server": ("sports-cave.test", 443),
             }
         )
-        with patch.object(
+        with patch.object(files_upload_api, "_audit_master_access") as audit_master, patch.object(
             files_upload_api,
             "_request_user",
             return_value=self.user,
@@ -300,6 +300,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
         ) as record_activity:
             response = asyncio.run(files_upload_api.download_file(request))
 
+        audit_master.assert_called_once()
         self.assertEqual(response.status_code, 307)
         self.assertEqual(
             response.headers["location"],

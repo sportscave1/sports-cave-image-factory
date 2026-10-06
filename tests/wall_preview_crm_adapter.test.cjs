@@ -19,7 +19,7 @@ function fixture(fetch) {
 }
 async function main() {
   let calls=0,posted;
-  const f=fixture(async(url)=>{calls++;posted=url;return {ok:true,json:async()=>({ok:true,preview_id:'server-preview',preview_token:'private',share_url:'https://example.test/share'})};});
+  const f=fixture(async(url)=>{if(url.includes('/analytics/'))return {ok:true};calls++;posted=url;return {ok:true,json:async()=>({ok:true,preview_id:'server-preview',preview_token:'private',share_url:'https://example.test/share'})};});
   f.adapter.newWallPhoto();f.adapter.placementChanged();assert.equal(calls,0);
   await Promise.all([f.adapter.confirm(),f.adapter.confirm()]);assert.equal(calls,1);
   assert.equal(new URL(posted).searchParams.has('customer_email'),false);
@@ -29,12 +29,12 @@ async function main() {
   assert.ok(f.events.every(e=>!('session_id' in e.detail) && !('email' in e.detail)));
   let release,started;
   const active=new Promise(resolve=>{started=resolve;});
-  const race=fixture(async()=>{started();await new Promise(resolve=>{release=resolve;});return {ok:true,json:async()=>({ok:true,preview_id:'old-wall'})};});
+  const race=fixture(async(url)=>{if(url.includes('/analytics/'))return {ok:true};started();await new Promise(resolve=>{release=resolve;});return {ok:true,json:async()=>({ok:true,preview_id:'old-wall'})};});
   race.adapter.newWallPhoto();const pending=race.adapter.confirm();await active;
   race.adapter.newWallPhoto();release();await pending;
   assert.equal(race.adapter.cartProperties()._wall_preview_id,undefined);
   let retries=0;
-  const failing=fixture(async()=>{retries++;throw new Error('network unavailable');});
+  const failing=fixture(async(url)=>{if(url.includes('/analytics/'))throw new Error('Analytics offline');retries++;throw new Error('network unavailable');});
   failing.adapter.newWallPhoto();await failing.adapter.confirm();assert.equal(retries,3);
   assert.ok(failing.statuses.some(s=>s.includes('server save failed')));
   assert.equal(failing.adapter.cartProperties()._wall_preview_id,undefined);

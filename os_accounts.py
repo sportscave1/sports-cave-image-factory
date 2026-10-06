@@ -45,6 +45,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
+    {"key": "security_protection", "route": "Security & Protection", "label": "Security & Protection", "worker_assignable": False, "navigation_child": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},
     {"key": "prodigi", "route": "Prodigi", "label": "Fulfilment", "worker_assignable": True},
@@ -1019,6 +1020,7 @@ class PostgresAccountStore:
                         UPDATE os_users
                         SET username=%s, email=%s, display_name=%s,
                             country=%s, timezone=%s,
+                            session_version=GREATEST(COALESCE(session_version,1),1)+1,
                             updated_at=now(){password_sql}
                         WHERE id=%s
                           AND role='worker'
@@ -1104,7 +1106,7 @@ class PostgresAccountStore:
                 cur.execute(
                     """
                     UPDATE os_users
-                    SET password_hash=%s, updated_at=now()
+                    SET password_hash=%s, session_version=GREATEST(COALESCE(session_version,1),1)+1, updated_at=now()
                     WHERE id=%s
                       AND account_status <> 'removed'
                     RETURNING *
@@ -1456,6 +1458,9 @@ def create_worker_account(
     store=None,
     actor=None,
 ):
+    if store is None:
+        from security_protection import sensitive_admin
+        sensitive_admin(actor)
     clean_username = str(username or "").strip()
     clean_name = str(display_name or "").strip()
     if not clean_username or not clean_name or not password:
@@ -1486,6 +1491,9 @@ def update_worker_account(
     store=None,
     actor=None,
 ):
+    if store is None:
+        from security_protection import sensitive_admin
+        sensitive_admin(actor)
     clean_username = str(username or "").strip()
     clean_name = str(display_name or "").strip()
     if not clean_username or not clean_name:
@@ -1522,6 +1530,9 @@ def change_my_password(user_id, *, current_password, new_password, store=None):
 
 
 def update_reporting_permission(actor, *, enabled, store=None):
+    if store is None:
+        from security_protection import sensitive_admin
+        sensitive_admin(actor)
     actor = actor or {}
     return (store or DEFAULT_STORE).set_reporting_permission(
         actor,
@@ -1531,6 +1542,9 @@ def update_reporting_permission(actor, *, enabled, store=None):
 
 
 def remote_logout_user(actor, target_user_id, *, store=None):
+    if store is None:
+        from security_protection import sensitive_admin
+        sensitive_admin(actor)
     store = store or DEFAULT_STORE
     try:
         result = store.remote_logout_user(actor or {}, target_user_id)
@@ -1564,6 +1578,9 @@ def remote_logout_user(actor, target_user_id, *, store=None):
 
 
 def remove_user_account(actor, target_user_id, *, store=None):
+    if store is None:
+        from security_protection import sensitive_admin
+        sensitive_admin(actor)
     store = store or DEFAULT_STORE
     try:
         result = store.remove_account(actor or {}, target_user_id)

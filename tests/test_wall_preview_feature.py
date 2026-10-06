@@ -258,8 +258,11 @@ class Store:
 social_media_page.render_page({'id':'admin','role':'admin','is_active':True}, store=Store())
 ''').run()
         self.assertEqual(len(app.exception),0)
-        self.assertEqual(app.segmented_control[0].value,'Wall Preview Inbox')
-        self.assertEqual(app.segmented_control[0].options[0],'Wall Preview Inbox')
+        self.assertEqual(app.segmented_control[0].value,'Overview')
+        self.assertEqual(app.segmented_control[0].options,['Overview','Wall Preview Inbox','Create','Plan','Playbook','Tracking'])
+        app.segmented_control[0].set_value('Wall Preview Inbox').run()
+        self.assertEqual(len(app.exception),0)
+        self.assertIn('Open Wall Preview Folder',[b.label for b in app.button])
 
 
 def inbox_path():

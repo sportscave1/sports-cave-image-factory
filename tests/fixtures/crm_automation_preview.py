@@ -84,6 +84,45 @@ if st.query_params.get('fixture_rerun'):
     if st.button('Synthetic lookup failure'):
         st.session_state['fixture_lookup_failure']=True
     if st.session_state.get('fixture_lookup_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic failure')
+if st.query_params.get('fixture_stability'):
+    import threading,ctypes,json,tracemalloc
+    @st.cache_resource
+    def instrumentation():
+        tracemalloc.start(5)
+        metrics={'queries':0,'read_calls':0}
+        original=AutomationStore.q
+        def counted(self,*args,**kwargs):
+            metrics['queries']+=1
+            return original(self,*args,**kwargs)
+        AutomationStore.q=counted
+        import crm_automation_home as home_module
+        old_read=home_module.read
+        def read_counted(*args,**kwargs):
+            metrics['read_calls']+=1
+            return old_read(*args,**kwargs)
+        home_module.read=read_counted
+        return metrics
+    measurements=instrumentation()
+    if st.button('Fixture leave Automations'):
+        from crm_navigation import navigation_allowed
+        navigation_allowed(st.session_state,'CRM Automations','Home')
+        st.session_state['fixture_away']=True
+    if st.session_state.get('fixture_away'):
+        st.title('Lightweight fixture page')
+        if st.button('Fixture return Automations'):
+            st.session_state['fixture_away']=False;st.rerun()
+        st.stop()
+    st.button('Fixture sample metrics')
+    def sampled():
+        class Counters(ctypes.Structure):
+            _fields_=[('cb',ctypes.c_ulong),('PageFaultCount',ctypes.c_ulong),('PeakWorkingSetSize',ctypes.c_size_t),('WorkingSetSize',ctypes.c_size_t),('QuotaPeakPagedPoolUsage',ctypes.c_size_t),('QuotaPagedPoolUsage',ctypes.c_size_t),('QuotaPeakNonPagedPoolUsage',ctypes.c_size_t),('QuotaNonPagedPoolUsage',ctypes.c_size_t),('PagefileUsage',ctypes.c_size_t),('PeakPagefileUsage',ctypes.c_size_t)]
+        counters=Counters();counters.cb=ctypes.sizeof(counters)
+        ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.c_void_p(-1),ctypes.byref(counters),counters.cb)
+        states=[st.session_state.get(k,{}) for k in ('automation_home_state','automation_analytics_reads')]
+        caches=[entry for state in states for entry in state.get('campaign_home_cache',{}).values()]
+        return {**measurements,'rss':counters.WorkingSetSize,'allocations':tracemalloc.get_traced_memory()[0],
+          'threads':threading.active_count(),'futures':len(caches),'pending':sum(not f.done() for _,f in caches),
+          'provider_calls':shop.abandoned_preview.call_count}
 if st.query_params.get('fixture_home_delay'):
     from contextlib import ExitStack
     from unittest.mock import patch
@@ -103,3 +142,5 @@ else:
 
 if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))
 if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))
+
+if st.query_params.get("fixture_stability"):st.html("<pre id=fixture-measurements>"+json.dumps(sampled())+"</pre>")

@@ -48,6 +48,10 @@ const evidence=path.resolve(process.env.CODEX_AUTOMATION_EVIDENCE || 'test-resul
   await page.getByRole('button',{name:'Welcome series · Customer subscribes to email',exact:true}).click();
   await page.getByRole('button',{name:'Publish now',exact:true}).waitFor();
   await page.getByText('Email Preview',{exact:true}).waitFor();
+  await page.locator('input[aria-label="Delay"]').waitFor();
+  assert.equal(await page.locator('input[aria-label="Delay"]').count(),1);
+  assert.equal(await page.getByText('Abandonment qualification (minutes)',{exact:true}).count(),0);
+  assert.equal(await page.getByText('Delay unit',{exact:true}).count(),1);
   assert.equal(await page.getByTestId('stException').count(),0);
   for(const name of ['Settings','Editor','Templates'])assert.ok(await page.getByRole('tab',{name,exact:true}).count());
   assert.equal(await page.getByText(/^Flow · \d+ emails$/).count(),0,'No main Flow accordion');
@@ -72,7 +76,7 @@ const evidence=path.resolve(process.env.CODEX_AUTOMATION_EVIDENCE || 'test-resul
   await selector.locator('[role=combobox]').click();
   await page.getByRole('option',{name:'Email 1 · Untitled · 0 min delay',exact:true}).click();
   await selector.getByText('Email 1 · Untitled · 0 min delay',{exact:true}).waitFor();
-  await page.waitForFunction(()=>document.querySelector('input[aria-label="Delay before email (minutes)"]')?.value==='0');
+  await page.waitForFunction(()=>document.querySelector('input[aria-label="Delay"]')?.value==='0');
   await page.locator('.st-key-crm-composer-controls').getByRole('button',{name:'Duplicate email',exact:true}).click();
   await selector.getByText('Email 2 · Untitled · 0 min delay',{exact:true}).waitFor();
   assert.equal(await page.getByText(/^Flow · \d+ emails$/).count(),0);

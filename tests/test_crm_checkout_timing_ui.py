@@ -37,13 +37,13 @@ class TimingLabels(unittest.TestCase):
         self.assertEqual(self.label(),'Awaiting schedule')
 
     def test_provider_states_are_not_sent(self):
-        for status, expected in [('PENDING','Queued'),('CLAIMED','Processing'),('SUBMITTING','Processing'),
+        for status, expected in [('PENDING','Awaiting schedule'),('CLAIMED','Processing'),('SUBMITTING','Processing'),
                                  ('FAILED','Send failed'),('UNCERTAIN','Awaiting confirmation'),('BLOCKED','Suppressed')]:
             self.assertEqual(self.label(sends=[{'enrollment_id':'fixture','step':0,'status':status,'error':'local_suppression'}]),expected)
 
     def test_accepted_step_uses_existing_worker_clock(self):
         receipt = {'enrollment_id':'fixture','step':0,'status':'ACCEPTED','provider_id':'fixture','updated_at':self.at}
-        self.assertEqual(self.label(sends=[receipt], next_due_at=self.at-timedelta(days=2)), '1h 0m remaining')
+        self.assertEqual(self.label(sends=[receipt], next_due_at=self.at-timedelta(days=2)), 'Awaiting schedule')
         self.assertEqual(self.label(sends=[receipt], steps=[{}]),'Sent')
         self.assertEqual(self.label(sends=[receipt], flow_status='COMPLETED'),'Sent')
 

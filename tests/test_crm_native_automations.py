@@ -245,11 +245,16 @@ class NativeAutomationTests(unittest.TestCase):
         self.shop.checkouts.return_value={'nodes':[{'id':'gid://shopify/AbandonedCheckout/1','createdAt':(self.clock-timedelta(hours=1,minutes=1)).isoformat(),'customer':{'id':self.customer['id']},'completedAt':None}], 'pageInfo':{'hasNextPage':False,'endCursor':None}}
         self.shop.checkouts.return_value['nodes'][0]['abandonedCheckoutUrl']='https://fixture.myshopify.com/checkouts/native-checkout-token/recover'
         self.store.set_state('checkout-auto-start-v2',{'started_at':str(a['activated_at'])})
-        with patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'}):reconcile(self.engine,a)
-        self.assertIn('updated_at:>=',self.shop.checkouts.call_args.kwargs['query'])
+        from crm_checkout_analytics import details
+        self.shop.checkout.return_value=self.shop.checkouts.return_value['nodes'][0]
+        with patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'}):
+            details(self.store,self.shop.checkout.return_value)
+            reconcile(self.engine,a)
+        self.shop.checkouts.assert_not_called()
         self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
         newer=self.published('abandoned');self.shop.checkouts.return_value={'nodes':[],'pageInfo':{'hasNextPage':True,'endCursor':None}}
-        with self.assertRaises(ValueError):reconcile(self.engine,newer)
+        with patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'}):reconcile(self.engine,newer)
+        self.shop.checkouts.assert_not_called()
 
     def test_global_email_templates_and_test_transport_have_no_campaign_draft(self):
         from crm_campaign_send import send_test

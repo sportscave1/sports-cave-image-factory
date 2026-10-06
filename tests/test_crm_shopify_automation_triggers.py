@@ -161,6 +161,8 @@ class TriggerTests(unittest.TestCase):
         self.event('checkouts/create',{'token':self.token,'customer':{'id':self.customer['id']}})
         j=enter(self.engine,a,self.customer['id'],'gid://shopify/AbandonedCheckout/123','checkout:'+self.key,self.clock,checkout_key=self.key)
         self.store.enqueue('automation:'+str(j['id'])+':0',self.customer['id'],recipient_hash(self.customer['email']),{'id':a['steps'][0]['template_id'],'version':a['steps'][0]['template_version']},enrollment_id=j['id'],step_index=0)
+        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()-interval '1 minute' WHERE id=%s",(j['id'],))
+        self.store.q("UPDATE crm_marketing_sends SET due_at=now()-interval '1 minute' WHERE enrollment_id=%s",(j['id'],))
         row=self.store.claim_send();self.assertIsNotNone(row)
         self.event('orders/create',{'id':456,'checkout_token':self.token})
         self.assertIsNone(self.store.begin_send(row,'request-hash',recipient_hash(self.customer['email'])))

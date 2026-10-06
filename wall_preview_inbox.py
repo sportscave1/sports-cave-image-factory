@@ -251,9 +251,11 @@ def _render_card(user, row, *, key_prefix):
                 if row.get('shopify_customer_id'):
                     customer_url=wall_preview_identity.customer_admin_url(row['shopify_customer_id'])
                     if customer_url:st.link_button('Open Shopify customer',customer_url)
+            st.markdown('**Journey**')
+            st.caption(customer_name or customer_email or 'Anonymous visitor')
             try:
                 for item in wall_preview_crm_store.timeline(str(row['id'])):
-                    st.caption(item['event_name'].removeprefix('WallPreview')+' · '+_format_received(item['occurred_at']))
+                    st.caption(item['event_name'].removeprefix('WallPreview')+(' · '+str(item.get('size') or '') if item['event_name']=='WallPreviewSizeChanged' else ' · '+str(item.get('frame') or '') if item['event_name']=='WallPreviewFrameChanged' else '')+' · '+_format_received(item['occurred_at']))
             except Exception:st.caption('Timeline temporarily unavailable.')
             if row.get('share_token') and not row.get('share_revoked_at'):
                 share_url='https://sports-cave-image-factory.onrender.com/wall-preview/'+row['share_token']
@@ -485,13 +487,19 @@ def render(user):
         unsafe_allow_html=True,
     )
 
+    from wall_preview_analytics_ui import render as analytics_render
+    analytics_render()
     is_admin = os_accounts.is_admin(user)
     folder_col,refresh_col=st.columns([3,1])
     with folder_col:
         if st.button('Open Wall Preview Folder',icon=':material/folder_open:',key='wall-preview-open-dropbox-folder',
                      disabled=not os_accounts.can_access_page(user,'Files')):_open_wall_preview_folder()
     with refresh_col:
-        if st.button('Refresh',icon=':material/refresh:',key='wall-preview-refresh'):_TEMP_LINK_CACHE.clear()
+        if st.button('Refresh',icon=':material/refresh:',key='wall-preview-refresh'):
+            _TEMP_LINK_CACHE.clear()
+            from wall_preview_analytics_ui import snapshot
+            snapshot.clear()
+            st.rerun()
     try:
         counts=wall_preview_store.summary(include_private=is_admin)
         st.caption(' · '.join(f'{label} {counts.get(key,0):,}' for key,label in
