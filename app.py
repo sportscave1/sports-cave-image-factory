@@ -10032,12 +10032,14 @@ def account_local_now(user=None):
     return datetime.now(timezone.utc).astimezone(timezone_for_os_user(user or current_os_user()))
 
 
-def _set_authenticated_user(user, *, legacy=False):
+def _set_authenticated_user(user, *, legacy=False, remember=None):
     clean_user = _public_account(user or _legacy_admin_account())
     if legacy:
         clean_user["legacy"] = True
     st.session_state["sports_cave_authenticated"] = True
     st.session_state["sports_cave_current_user"] = clean_user
+    if remember is not None:
+        st.session_state["sports_cave_session_remembered"] = bool(remember)
     st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
     set_activity_actor(_activity_actor_for_user(clean_user), _activity_actor_metadata_for_user(clean_user))
 
@@ -10081,6 +10083,7 @@ def _clear_authenticated_session_state(message=""):
         "security_image_audit_remaining",
         "security_image_audit_cursor",
         "sports_cave_auth_checked_at",
+        "sports_cave_session_remembered",
         "sports_cave_admin_setup_required",
         "files_access_token",
         "files_connection_status",
@@ -10180,8 +10183,9 @@ def set_auth_cookie(token, *, remember):
     st.session_state['sports_cave_security_sid'] = sid
     st.session_state['sports_cave_security_token'] = token
     grant=STORE.issue_cookie_handoff(token,payload,current_os_user())
-    body = json.dumps({'grant': grant, 'remember': bool(remember), 'action': 'register'}).replace('<', '\\u003c')
-    st.html('<script>fetch("/api/os/security/session", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(' + body + ')}).then(r=>{if(!r.ok)throw new Error("Session persistence unavailable");}).catch(()=>{});</script>', unsafe_allow_javascript=True)
+    remembered = bool(payload.get('remember', remember))
+    body = json.dumps({'grant': grant, 'remember': remembered, 'action': 'register'}).replace('<', '\\u003c')
+    st.html('<script>fetch("/api/os/security/session", {method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(' + body + ')}).then(r=>{if(!r.ok)throw new Error("Session persistence unavailable");window.setTimeout(()=>window.parent.location.reload(),80);}).catch(()=>{});</script>', unsafe_allow_javascript=True)
 
 
 def clear_auth_cookie():
@@ -10220,7 +10224,7 @@ def is_app_authenticated():
         except Exception:
             user = {}
         if _auth_payload_matches_user(payload, user):
-            _set_authenticated_user(user)
+            _set_authenticated_user(user, remember=bool(payload.get("remember", False)))
             return True
         _clear_authenticated_session_state("This account no longer has access. Please contact an administrator.")
         clear_auth_cookie()
@@ -10249,41 +10253,43 @@ def is_app_authenticated():
 
 
 def render_login_gate():
-    _left, center, _right = st.columns([1, 1.1, 1])
-    with center:
-        st.markdown(
-            """
-            <div class="sc-login-wrap">
-                <div class="sc-login-kicker">Sports Cave</div>
-                <div class="sc-login-title">Welcome back</div>
-                <div class="sc-login-copy">Sign in to open Sports Cave.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        auth_notice = str(st.session_state.pop("sports_cave_auth_notice", "") or "").strip()
-        if auth_notice:
-            st.warning(auth_notice)
-        with st.form("sports-cave-login-form"):
-            login = st.text_input(
-                "Username or email",
-                label_visibility="collapsed",
-                placeholder="Username or email",
-                key="sports-cave-login-username",
+    login_panel = st.empty()
+    with login_panel.container():
+        _left, center, _right = st.columns([1, 1.1, 1])
+        with center:
+            st.markdown(
+                """
+                <div class="sc-login-wrap">
+                    <div class="sc-login-kicker">Sports Cave</div>
+                    <div class="sc-login-title">Welcome back</div>
+                    <div class="sc-login-copy">Sign in to open Sports Cave.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-            password = st.text_input(
-                "Password",
-                type="password",
-                label_visibility="collapsed",
-                placeholder="Password",
-                key="sports-cave-login-password",
-            )
-            remember = st.checkbox(
-                "Stay signed in for 30 days",
-                value=True,
-                key="sports-cave-login-remember",
-            )
-            submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+            auth_notice = str(st.session_state.pop("sports_cave_auth_notice", "") or "").strip()
+            if auth_notice:
+                st.warning(auth_notice)
+            with st.form("sports-cave-login-form"):
+                login = st.text_input(
+                    "Username or email",
+                    label_visibility="collapsed",
+                    placeholder="Username or email",
+                    key="sports-cave-login-username",
+                )
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    label_visibility="collapsed",
+                    placeholder="Password",
+                    key="sports-cave-login-password",
+                )
+                remember = st.checkbox(
+                    "Stay signed in for 30 days",
+                    value=True,
+                    key="sports-cave-login-remember",
+                )
+                submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
 
     if not submitted:
         return False
@@ -10306,12 +10312,13 @@ def render_login_gate():
             st.error("This account is inactive." if reason == "inactive" else "Username or password is incorrect.")
             return False
         protection_store.login_success(login_key,user)
-        _set_authenticated_user(user)
+        _set_authenticated_user(user, remember=bool(remember))
         token = sc_auth.create_user_auth_token(
             user["id"],
             password=get_app_password(),
             extra_secret=get_auth_extra_secret(),
             session_version=user.get("session_version") or 1,
+            remember=bool(remember),
         )
         record_activity_log(
             "login",
@@ -10322,10 +10329,11 @@ def render_login_gate():
             metadata={"username": user.get("username") or "", "role": user.get("role") or ""},
         )
         set_auth_cookie(token, remember=remember)
+        login_panel.empty()
         return True
 
     if sc_auth.password_matches(password, get_app_password()):
-        _set_authenticated_user(_legacy_admin_account(), legacy=True)
+        _set_authenticated_user(_legacy_admin_account(), legacy=True, remember=bool(remember))
         st.session_state["sports_cave_login_remember"] = bool(remember)
         if status.get("available"):
             st.session_state["sports_cave_admin_setup_required"] = True
@@ -10336,6 +10344,7 @@ def render_login_gate():
             )
             record_activity_log("login", "Dashboard", "Signed in", entity_type="session")
             set_auth_cookie(token, remember=remember)
+        login_panel.empty()
         return True
 
     st.error("Username or password is incorrect.")
@@ -10382,13 +10391,15 @@ def render_admin_account_setup():
     if not os_accounts.verify_password(password, user.get("password_hash")):
         st.error("The admin account is already set up. Sign in with that account.")
         return False
-    _set_authenticated_user(user)
+    remembered = bool(st.session_state.get("sports_cave_login_remember", True))
+    _set_authenticated_user(user, remember=remembered)
     st.session_state.pop("sports_cave_admin_setup_required", None)
     token = sc_auth.create_user_auth_token(
         user["id"],
         password=get_app_password(),
         extra_secret=get_auth_extra_secret(),
         session_version=user.get("session_version") or 1,
+        remember=remembered,
     )
     record_activity_log(
         "account_created",
@@ -10403,7 +10414,7 @@ def render_admin_account_setup():
             "timezone": user.get("timezone") or "",
         },
     )
-    set_auth_cookie(token, remember=bool(st.session_state.get("sports_cave_login_remember", True)))
+    set_auth_cookie(token, remember=remembered)
     return True
 
 
@@ -16213,7 +16224,9 @@ def main():
             st.error('Session verification temporarily unavailable. No protected action was performed.')
             return
         privacy_script = (BASE_DIR / 'app-protection.js').read_text(encoding='utf-8')
-        privacy_script = privacy_script.replace('SC_POLICY',json.dumps(cached_policy())).replace('SC_NAME',json.dumps(current_os_user().get('display_name') or 'Sports Cave user').replace('<','\\u003c'))
+        runtime_policy = dict(cached_policy())
+        runtime_policy['rememberedSession'] = bool(st.session_state.get('sports_cave_session_remembered', False))
+        privacy_script = privacy_script.replace('SC_POLICY',json.dumps(runtime_policy)).replace('SC_NAME',json.dumps(current_os_user().get('display_name') or 'Sports Cave user').replace('<','\\u003c'))
         st.html('<script>'+privacy_script+'</script>',unsafe_allow_javascript=True)
 
     set_activity_actor(
