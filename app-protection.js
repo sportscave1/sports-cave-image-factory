@@ -20,7 +20,8 @@
   let marking;
   new MutationObserver(records=>{if(records.some(record=>record.addedNodes.length)){clearTimeout(marking);marking=setTimeout(markArtwork,150);}}).observe(doc.body,{childList:true,subtree:true});
   markArtwork();
-  function armIdle(){clearTimeout(idleDeadline);if(cfg.autoLockMinutes && !locked)idleDeadline=setTimeout(lock,Math.max(0,cfg.autoLockMinutes*60000-(Date.now()-lastActivity)));}
+  function idleLockEnabled(){return !!cfg.autoLockMinutes && !cfg.rememberedSession;}
+  function armIdle(){clearTimeout(idleDeadline);if(idleLockEnabled() && !locked)idleDeadline=setTimeout(lock,Math.max(0,cfg.autoLockMinutes*60000-(Date.now()-lastActivity)));}
   function update(value,displayName){
     cfg=value;user=displayName;armIdle();
     style.textContent=(cfg.appSelection?'[data-sc-protected],.sc-protected-artwork{user-select:none}':'')+(cfg.appPrinting?'@media print{[data-sc-protected],.sc-protected-artwork{visibility:hidden!important}}':'');
@@ -46,7 +47,7 @@
   doc.addEventListener('visibilitychange',obscure);window.addEventListener('blur',obscure);window.addEventListener('focus',obscure);
   setInterval(async () => {
     if(locked)return;
-    if(cfg.autoLockMinutes && Date.now()-lastActivity>=cfg.autoLockMinutes*60000){lock();return;}
+    if(idleLockEnabled() && Date.now()-lastActivity>=cfg.autoLockMinutes*60000){lock();return;}
     if(doc.hidden || lastActivity===lastSent)return;
     lastSent=lastActivity;
     try {const response=await fetch('/api/os/security/session',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"action":"activity"}'});if(response.status===423)lock();}catch(_){}
