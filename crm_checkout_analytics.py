@@ -104,14 +104,16 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  sum(COALESCE(e.opened,0)) AS opened,sum(COALESCE(e.clicked,0)) AS clicked,max(e.last_event) AS last_event
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )
-SELECT c.*,v.value AS evaluation,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
+SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,
  j.id AS enrollment_id,j.status AS flow_status,j.stop_reason,j.current_step,j.steps,j.next_due_at,
  GREATEST(c.activity_at,j.updated_at,r.last_event) AS last_activity_at,
  COALESCE(r.sends,'[]') AS sends,COALESCE(r.opened,0) AS opened,COALESCE(r.clicked,0) AS clicked
 FROM selected c JOIN crm_automations a ON a.id=%s LEFT JOIN journeys j USING(checkout_key)
 LEFT JOIN receipts r ON r.checkout_key=c.checkout_key
-LEFT JOIN crm_runtime_state v ON v.key='checkout-evaluation:'||c.checkout_key||':'||a.id::text ORDER BY c.created_at DESC,c.checkout_key"""
+LEFT JOIN crm_runtime_state v ON v.key='checkout-evaluation:'||c.checkout_key||':'||a.id::text
+LEFT JOIN crm_runtime_state request ON request.key='checkout-enroll:'||a.id::text||':'||c.checkout_key
+ORDER BY c.created_at DESC,c.checkout_key"""
 
 def checkouts(store,identity,bounds,key=None):
     start,end=bounds

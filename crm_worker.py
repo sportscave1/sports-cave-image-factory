@@ -21,6 +21,13 @@ def main(argv=None):
     from crm_engine import Engine
     engine=Engine(store,Shopify());stop=threading.Event();owner=str(uuid.uuid4())
     signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
+    # Durable manual enrollment validation shares this worker process, but a
+    # slow Shopify lookup must not block either its peers or the email cycle.
+    from crm_checkout_enrollment_requests import Processor
+    logging.getLogger('crm_checkout_enrollment_requests').setLevel(logging.INFO)
+    enrollment=Processor(store,Shopify())
+    enrollment_thread=threading.Thread(target=enrollment.run,args=(stop,),name='checkout-enrollment-poll',daemon=True)
+    enrollment_thread.start()
     while not stop.is_set():
         try:
             from wall_preview_archive import tick as archive_tick
@@ -43,6 +50,7 @@ def main(argv=None):
         except Exception as exc:logging.getLogger(__name__).warning('crm_worker_cycle_failed type=%s',type(exc).__name__)
         if args.once:break
         stop.wait(30)
+    stop.set();enrollment_thread.join(timeout=6)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

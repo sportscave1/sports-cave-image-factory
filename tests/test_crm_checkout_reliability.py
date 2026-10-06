@@ -56,7 +56,7 @@ class Presentation(TestCase):
         panel=inspect.getsource(checkout_panel)+inspect.getsource(_checkout_panel)
         self.assertNotIn('secondary(',panel)
         self.assertNotIn('countdown_html',panel)
-        self.assertIn("disabled=not selected",panel)
+        self.assertIn("disabled=not available",panel)
         self.assertLess(panel.index("'Refresh checkout details'"),panel.index("'Add to flow'"))
         branch=inspect.getsource(content).split("if row['trigger_type']=='abandoned':",1)[1].split('return',1)[0]
         self.assertNotIn('secondary(',branch)

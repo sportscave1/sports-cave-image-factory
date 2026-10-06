@@ -12,19 +12,34 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  assert.equal(await page.locator('[role=dialog]>div').first().evaluate(el=>getComputedStyle(el).paddingTop),'12px');
  assert.ok((await page.getByRole('textbox',{name:'Search and filter'}).boundingBox()).height<=34);
  await table.getByText('Sent',{exact:true}).waitFor();
- for(const [text,cls] of [['Not sent','red'],['Not recovered','orange'],['Recovered','green']])assert.equal(await table.locator('.pill.'+cls).filter({hasText:text}).count(),1);
+ for(const [text,cls] of [['Not sent','red'],['Not recovered','orange'],['Recovered','green']])assert.equal(await table.locator('.pill.'+cls).filter({hasText:text}).count(),text==='Not sent'?10:1);
  await table.getByRole('checkbox',{name:'Select #100',exact:true}).check();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Add to flow'&&!b.disabled));
  await table.getByRole('checkbox',{name:'Select #102',exact:true}).check();
- await add.click();await page.getByText('Added to flow',{exact:true}).waitFor({state:'attached'});
+ const clicked=Date.now();await add.click();await table.getByText('Adding…',{exact:true}).first().waitFor();assert.ok(Date.now()-clicked<1500);
+ await table.getByText('Checking eligibility…',{exact:true}).first().waitFor();
+ await table.getByText('Added to flow',{exact:true}).first().waitFor();
  await table.getByText('1h 18m remaining',{exact:true}).waitFor();
- await add.click();await page.getByText('Already in flow',{exact:true}).waitFor({state:'attached'});
+ await add.click();await table.getByText('Already in flow',{exact:true}).first().waitFor();
  await table.getByRole('button',{name:'Details #100'}).click();await page.getByText('Checkout details \u00b7 #100',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Close details'}).click();await page.getByText('Checkout details \u00b7 #100',{exact:true}).waitFor({state:'hidden'});
  const search=page.getByRole('textbox',{name:'Search and filter'});await search.fill('fixture1@example.test');await search.press('Enter');await table.getByText('Brian Albers').waitFor();await table.getByText('Joanne Lawrence').waitFor({state:'hidden'});
  assert.equal(await table.getByText('Joanne Lawrence').count(),0);assert.equal(await add.isDisabled(),true);
  await search.fill('');await search.press('Enter');await table.getByText('Joanne Lawrence').waitFor();
+ await table.getByRole('checkbox',{name:'Select visible checkouts',exact:true}).check();
+ await add.click();await table.getByText('Adding…',{exact:true}).first().waitFor();
+ // Search remains interactive while independent worker rows are pending.
+ await search.fill('fixture3@example.test');await search.press('Enter');await table.getByText('Fixture 3',{exact:true}).waitFor();
+ await search.fill('');await search.press('Enter');
+ const row7=table.locator('tbody tr').filter({hasText:'Fixture 7'});
+ await row7.getByText('Added to flow',{exact:true}).waitFor();
+ await table.locator('tbody tr').filter({hasText:'Fixture 3'}).getByText('Checking eligibility…',{exact:true}).waitFor();
+ await table.getByText('Unsubscribed',{exact:true}).waitFor();await table.getByText('Suppressed',{exact:true}).waitFor();
+ await table.getByRole('button',{name:'Retry #104',exact:true}).waitFor();
+ await table.getByRole('button',{name:'Retry #104',exact:true}).click();
+ await table.locator('tbody tr').filter({hasText:'Fixture 4'}).getByText('Added to flow',{exact:true}).waitFor();
+ await table.locator('tbody tr').filter({hasText:'Fixture 3'}).getByText('Added to flow',{exact:true}).waitFor();
  await page.screenshot({path:'tmp/checkout-operations-desktop.png',fullPage:true});
  for(const width of [750,390,320]){await page.setViewportSize({width,height:900});await page.screenshot({path:`tmp/checkout-operations-${width}.png`,fullPage:true});assert.equal(await page.getByTestId('stException').count(),0);}
  for(const text of ['Recent activity','No accepted sends in this reporting period.','Not in flow \u00b7 Add to flow','Revenue \u00b7 \u2014'])assert.equal(await page.getByText(text,{exact:true}).count(),0);
- console.log('PASS: columns, status pills, selection bridge, disabled action, enrolment results, idempotence, details, email search, four viewport sizes, no analytics clutter');
+ console.log('PASS: columns, status pills, selection bridge, disabled action, enrolment results, idempotence, details, email search, four viewport sizes, 12-row asynchronous progress, slow-row isolation, mixed outcomes, row retry, responsive search, no analytics clutter');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

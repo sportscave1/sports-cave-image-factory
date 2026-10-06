@@ -5,8 +5,8 @@ from time import monotonic
 from concurrent.futures import Future
 import streamlit as st
 from crm_automation_read_cache import job,resolve,dispose,pack
-from crm_checkout_analytics import PERIODS,window,checkouts,report,disabled_reason,reconcile
-from crm_automation_analytics import activity,add_to_flow
+from crm_checkout_analytics import PERIODS,window,checkouts,report,reconcile
+from crm_automation_analytics import activity
 from crm_logic import now
 
 def state():return st.session_state.setdefault('automation_analytics_reads',{})
@@ -33,10 +33,16 @@ def arm(key,seconds):
 
 def patch_checkout(store,identity,checkout):
     """Replace only the mutated row in resolved date-range tables; fence old reads."""
+    patch_checkouts(store,identity,[checkout])
+
+
+def patch_checkouts(store,identity,checkouts):
+    """Patch a batch in one pass through each cache, without reloading the list."""
+    replacements={c['checkout_key']:c for c in checkouts}
     cache=state().setdefault('campaign_home_cache',{});resolved=state().setdefault('campaign_home_resolved',{})
     for token,records in list(resolved.items()):
         if token[0]!=store.connect or token[1][:2]!=('checkout-list',str(identity)):continue
-        updated=[checkout if c['checkout_key']==checkout['checkout_key'] else c for c in records]
+        updated=[replacements.get(c['checkout_key'],c) for c in records]
         future=Future();future.set_result(pack(updated));cache[token]=(monotonic(),future);resolved[token]=pack(updated)
 
 def invalidate_activity(store,identity):
@@ -122,13 +128,16 @@ def _checkout_panel(shop,store,user,row,bounds,period):
     records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
     if records is None:
         st.caption('Loading abandoned checkouts…' if phase!='ERROR' else 'Checkout records temporarily unavailable.');return
+    from crm_checkout_enrollment_ui import progress,begin
+    enrollment_results,busy=progress(store,row,records,slot)
     needle=search.strip().casefold()
     visible=[c for c in records if not needle or needle in ' '.join((reference(c),display_name(c),str((c.get('analytics') or {}).get('email') or ''),str(c.get('admin_checkout_id') or ''))).casefold()]
     keys={c['checkout_key'] for c in visible}
     selected=[k for k in st.session_state.get(slot+'-selected',[]) if k in keys]
+    available=[k for k in selected if k not in busy]
     with actions.container(horizontal=True):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
-        add=st.button('Add to flow',disabled=not selected,key=slot+'-add',type='primary')
+        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='primary')
     if refresh:
         try:
             counts,more=reconcile(shop,store,period)
@@ -138,32 +147,23 @@ def _checkout_panel(shop,store,user,row,bounds,period):
             st.rerun(scope='fragment')
         except Exception:st.warning('Shopify refresh unavailable. Saved records retained.')
     if add:
-        results=[]
-        for c in visible:
-            if c['checkout_key'] not in selected:continue
-            reason=disabled_reason(c,row)
-            if not reason:
-                try:
-                    add_to_flow(shop,store,user,str(row['id']),c['admin_checkout_id']);reason='Added to flow'
-                except ValueError as exc:
-                    message=str(exc);allowed=('Already in flow','Recovered','Missing email','Invalid email','Suppressed','Unsubscribed','Not eligible')
-                    reason=next((x for x in allowed if message.startswith(x)),safe_add_error(exc))
-                except Exception:reason='Error: verification unavailable; retry'
-            results.append({'Checkout':reference(c),'Result':reason})
-        st.session_state[slot+'-results']=results
-        state().get('campaign_home_cache',{}).pop((store.connect,key),None)
+        begin(store,user,str(row['id']),available,slot)
         st.rerun(scope='fragment')
     if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True)
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
     listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
       'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
-      'status':recovery_status(c),'time_to_send':time_to_send(c)} for c in visible]
+      'status':recovery_status(c),'time_to_send':time_to_send(c),
+      'enrollment_progress':{k:enrollment_results.get(c['checkout_key'],{}).get(k) for k in ('state','result')}} for c in visible]
     component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
     event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)
     if event and event.get('sequence')!=st.session_state.get(slot+'-event'):
         st.session_state[slot+'-event']=event['sequence']
         st.session_state[slot+'-selected']=[k for k in event.get('selected',[]) if k in keys]
         if event.get('detail') in keys:st.session_state[slot+'-detail']=event['detail']
+        retry=event.get('retry')
+        if retry in keys and retry not in busy and enrollment_results.get(retry,{}).get('state')=='FAILED':
+            begin(store,user,str(row['id']),[retry],slot)
         st.rerun(scope='fragment')
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
@@ -199,6 +199,7 @@ def content(shop,store,user,identity,period,bounds):
     # Keep initial-load scheduling above the fold even on narrow dialogs. The
     # dialog owns all controls; nested fragments caused duplicate widget IDs.
     poll=st.container();st.session_state['automation-analytics-pending']=False
+    st.session_state['checkout-enrollment-pending']=False
     rows,phase=read(store,('analytics-definition',str(identity)),lambda:[store.get('automations',identity)],60)
     if not rows:
         with poll:arm('auto-analytics-definition-poll',1 if phase!='ERROR' else 30)
@@ -209,7 +210,7 @@ def content(shop,store,user,identity,period,bounds):
     if not row or row['config'].get('deleted_at'):st.warning('Automation unavailable.');return
     if row['trigger_type']=='abandoned':
         checkout_panel(shop,store,user,row,window('All time'),'All time')
-        with poll:arm('auto-analytics-definition-poll',1 if st.session_state.get('automation-analytics-pending') else 30)
+        with poll:arm('auto-analytics-definition-poll',2 if st.session_state.get('checkout-enrollment-pending') else 1 if st.session_state.get('automation-analytics-pending') else 30)
         return
     st.subheader('Automation analytics')
     st.caption(row['name'])

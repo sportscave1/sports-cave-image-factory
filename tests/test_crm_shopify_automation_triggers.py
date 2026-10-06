@@ -165,10 +165,14 @@ class TriggerTests(unittest.TestCase):
         self.event('orders/create',{'id':456,'checkout_token':self.token})
         self.assertIsNone(self.store.begin_send(row,'request-hash',recipient_hash(self.customer['email'])))
         self.provider.send.assert_not_called()
-    def test_no_historical_or_unsigned_checkout_enrollment(self):
+    def test_no_historical_checkout_enrollment_without_new_activity(self):
         from crm_automation_runtime import reconcile
         a=self.published('abandoned');self.clock=now()+timedelta(hours=2)
-        self.shop.checkouts.return_value={'nodes':[{'id':'gid://shopify/AbandonedCheckout/123','createdAt':(self.clock-timedelta(hours=1,minutes=1)).isoformat(),'abandonedCheckoutUrl':'https://fixture.myshopify.com/checkouts/'+self.token+'/recover','customer':{'id':self.customer['id']},'completedAt':None}],'pageInfo':{'hasNextPage':False}}
+        # Shopify Admin is already the authoritative abandonment source. The old
+        # fixture was created AFTER publication (clock + 59m), so it described a
+        # new eligible abandon, not historical backlog. Both dates must be old.
+        historical=(now()-timedelta(days=1)).isoformat()
+        self.shop.checkouts.return_value={'nodes':[{'id':'gid://shopify/AbandonedCheckout/123','createdAt':historical,'updatedAt':historical,'abandonedCheckoutUrl':'https://fixture.myshopify.com/checkouts/'+self.token+'/recover','customer':{'id':self.customer['id']},'completedAt':None}],'pageInfo':{'hasNextPage':False}}
         reconcile(self.engine,a)
         self.assertFalse(self.store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],)))
         # Signed but created before publication must not become a new audience.

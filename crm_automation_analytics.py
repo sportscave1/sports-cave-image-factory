@@ -127,6 +127,12 @@ def flow_state(checkout, at=None):
 def add_to_flow(shop, store, user, identity, checkout_id):
     """Fresh exact Shopify checkout + persistent mirror + published policy; no inline sends."""
     from crm_navigation import require
+    require(user,'crm_automations_manage')
+    return _authorized_add_to_flow(shop,store,identity,checkout_id)
+
+
+def _authorized_add_to_flow(shop,store,identity,checkout_id,expected_key=None):
+    """Server-only continuation of an explicitly authorized durable request."""
     from crm_automation_definition import native
     from crm_automation_capabilities import require as ready
     from crm_shopify_automation_events import key_from_recovery_url
@@ -134,7 +140,6 @@ def add_to_flow(shop, store, user, identity, checkout_id):
     from crm_automation_runtime import enter
     from crm_engine import Engine
     import os
-    require(user,'crm_automations_manage')
     row=store.get('automations',identity)
     if not row or not native(row) or row['status']!='ACTIVE' or row['config'].get('archived_at') or row['config'].get('deleted_at') or row['trigger_type']!='abandoned':
         raise ValueError('Use an active, published abandoned-checkout flow. Drafts cannot send.')
@@ -146,6 +151,7 @@ def add_to_flow(shop, store, user, identity, checkout_id):
     customer=(checkout.get('customer') or {}).get('id')
     key=key_from_recovery_url(checkout.get('abandonedCheckoutUrl'),os.getenv('SHOPIFY_STORE_DOMAIN',''))
     if not key:raise ValueError('Verified checkout identity required.')
+    if expected_key is not None and key!=expected_key:raise ValueError('Not eligible: checkout identity changed')
     from crm_checkout_analytics import details
     details(store,checkout)
     ledger=store.q('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,),True)
