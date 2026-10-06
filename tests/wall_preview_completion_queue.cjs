@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),fs=require('fs'),vm=require('vm');
+const source=fs.readFileSync('shopify_theme/snippets/sc-wall-visualizer-v1.liquid','utf8');
+const queue=source.slice(source.indexOf('function queuePreviewSave('),source.indexOf('function startPlacementPersistenceInBackground('));
+(async()=>{let calls=[],resolveOld;const old=new Promise(r=>resolveOld=r);let attempts=0;
+const c={saveTail:Promise.resolve(),archivePromise:null,console,fireLocalPreviewEvent(){},archiveMetadata(){return new URLSearchParams('client_preview_id=fixture');},async archiveWithRetry(blob){calls.push(blob);if(blob==='failure')throw Error('mock outage');return {ok:true};}};vm.createContext(c);vm.runInContext(queue,c);
+const first=c.queuePreviewSave(old),second=c.queuePreviewSave(Promise.resolve('new'));
+await new Promise(r=>setImmediate(r));assert.deepEqual(calls,[]);resolveOld('old');await Promise.all([first,second]);assert.deepEqual(calls,['old','new']);
+await assert.rejects(c.queuePreviewSave('failure'));await c.queuePreviewSave('recovered');assert.deepEqual(calls,['old','new','failure','recovered']);
+console.log('PASS upload ordering despite out-of-order render completion; failed job does not block next save');
+let renderResolve,renderCount=0;const ctx={assetRevision:0,assetPromise:null,savedBlob:null,savedFile:null,buildCompositeCanvas(){renderCount++;return new Promise(r=>renderResolve=r);},canvasToBlob:async()=>({image:'exact'}),File:class{},previewFilename:()=>'',setPreviewActionState(){}};
+vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('async function ensureSavedPreviewAsset('),source.indexOf('function archiveMetadata(')),ctx);
+const place=ctx.ensureSavedPreviewAsset(true),download=ctx.ensureSavedPreviewAsset(true);renderResolve({});const [a,b]=await Promise.all([place,download]);assert.equal(a,b);assert.equal(renderCount,1);
+ctx.savedBlob=null;const closing=ctx.ensureSavedPreviewAsset(true);ctx.assetRevision++;ctx.assetPromise=null;renderResolve({});assert(await closing);assert.equal(ctx.savedBlob,null);
+console.log('PASS shared exact composite; closing preserves pending save without restoring stale UI cache');
+})().catch(e=>{console.error(e);process.exitCode=1});

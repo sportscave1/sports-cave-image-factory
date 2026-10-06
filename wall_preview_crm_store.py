@@ -66,7 +66,7 @@ def confirm(payload, upload):
         unchanged = previous and previous['archive_sha256'] == payload['image_sha256'] and all(
             str(previous.get(k) or '') == str(payload.get(k) or '') for k in fields)
         if unchanged:
-            return _market(cur,previous,payload), True
+            return _download_permission(cur,_market(cur,previous,payload),payload), True
         preview_id = str(previous.get('id') or uuid.uuid4())
         storage = upload(previous, preview_id)
         version = int(previous.get('version') or 0) + 1
@@ -103,7 +103,26 @@ def confirm(payload, upload):
         if not previous:
             event(cur,row,'WallPreviewStarted','started')
         event(cur,row,'WallPreviewConfirmed','confirmed:'+str(version),{'version':version})
-        return row, False
+        return _download_permission(cur,row,payload), False
+
+
+def _download_permission(cur,row,payload):
+    """Explicit image-use choice only; never subscribes or schedules an email."""
+    if 'image_reuse_allowed' not in payload:
+        return row
+    allowed = payload['image_reuse_allowed']
+    if type(allowed) is not bool:
+        raise ValueError('Image permission must be boolean.')
+    ident = payload.get('identity') or {}
+    cur.execute('''UPDATE public.wall_previews SET marketing_permission=%s,
+        image_reuse_consent_at=now(),image_reuse_consent_source='wall_preview_download_checkbox',
+        customer_email=CASE WHEN COALESCE(customer_email,'')='' THEN %s ELSE customer_email END,
+        customer_name=CASE WHEN COALESCE(customer_email,'')='' THEN %s ELSE customer_name END,
+        identity_source=CASE WHEN COALESCE(customer_email,'')='' AND %s<>'' THEN 'email_capture' ELSE identity_source END
+        WHERE id=%s RETURNING *''',
+        (allowed,ident.get('customer_email',''),ident.get('customer_name',''),ident.get('customer_email',''),str(row['id'])))
+    result = dict(cur.fetchone())
+    return result
 
 
 def _market(cur,row,payload):

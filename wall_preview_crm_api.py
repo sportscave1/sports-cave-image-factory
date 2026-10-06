@@ -41,12 +41,19 @@ def product_url(value, variant=''):
     return urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode({'variant':variant}) if variant else '', ''))
 
 
-def clean_image(data, content_type):
+def clean_image(data, content_type, finished_composite=False):
     archive._inspect_image(data,content_type)
     with Image.open(io.BytesIO(data)) as image:
+        # Canvas-exported finished JPEGs contain no private source metadata.
+        # Preserve the exact Download bytes and dimensions after normal validation.
+        if finished_composite and image.format == 'JPEG' and not image.getexif() and not (
+            set(image.info) - {'jfif','jfif_version','jfif_unit','jfif_density'}
+        ):
+            return data, image.width, image.height
         # Retain orientation but remove EXIF/GPS, ICC comments and embedded thumbnails.
         image = ImageOps.exif_transpose(image).convert('RGB')
-        image.thumbnail((2400,2400))
+        if not finished_composite:
+            image.thumbnail((2400,2400))
         output = io.BytesIO()
         image.save(output,'JPEG',quality=90,optimize=True)
         return output.getvalue(), image.width, image.height
@@ -73,7 +80,7 @@ def save(request,data,content_type,cors):
         unit = archive._query_text(request,'unit',2)
         if unit not in ('','cm','in'):
             raise ValueError('Choose cm or in.')
-        data,width,height = clean_image(data,content_type)
+        data,width,height = clean_image(data,content_type,params.get('finished_composite') == '1')
         address = str(params.get('customer_email') or '').strip()
         ident = {'customer_email':'','customer_name':'','shopify_customer_id':'','identity_source':'anonymous','email_marketing_state':'UNKNOWN'}
         if address:
@@ -86,6 +93,10 @@ def save(request,data,content_type,cors):
         payload = {'client_preview_id':client,'session_id':session,'preview_id':params.get('preview_id'),
                    'image_sha256':hashlib.sha256(data).hexdigest(),'width':width,'height':height,'bytes':len(data),
                    'identity':ident,'attribution':attribution(params),'measurement_unit':unit}
+        if 'image_reuse_allowed' in params:
+            if params['image_reuse_allowed'] not in ('0','1') or params.get('reuse_consent_source') != 'wall_preview_download_checkbox':
+                raise ValueError('Explicit download image permission required.')
+            payload['image_reuse_allowed'] = params['image_reuse_allowed'] == '1'
         payload['started_at']=timestamp(params.get('started_at'))
         timestamp(params.get('confirmed_at')) # server confirmation time remains authoritative
         for key,limit in (('product_id',80),('variant_id',80),('product_handle',255),('product_title',500)):
