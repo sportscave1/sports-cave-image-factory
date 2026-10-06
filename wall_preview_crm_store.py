@@ -16,6 +16,10 @@ LOG = logging.getLogger(__name__)
 
 def archive_needs_customer_folder(row):
     from wall_preview_identity import customer_folder_name
+    if (row.get('attribution') or {}).get('capture_mode') == 'save_event':
+        from wall_preview_identity import capture_folder
+        from wall_preview_api import DROPBOX_RELATIVE_ROOT
+        return row.get('customer_folder') != capture_folder(row, '/Sportscave Team Folder', DROPBOX_RELATIVE_ROOT)
     return bool(row.get('customer_email') and posixpath.basename(
         (row.get('customer_folder') or '').rstrip('/')) != customer_folder_name(row['customer_email']))
 
@@ -100,6 +104,9 @@ def confirm(payload, upload):
         fields = ('product_id','variant_id','product_handle','product_title','product_url','frame_label','size_label','measurement_unit')
         unchanged = previous and previous['archive_sha256'] == payload['image_sha256'] and all(
             str(previous.get(k) or '') == str(payload.get(k) or '') for k in fields)
+        if previous and (previous.get('attribution') or {}).get('capture_mode') == 'save_event' and not unchanged:
+            # A retry identifier may never replace a different deliberate capture.
+            raise ValueError('Save identifier reused with different image or product.')
         if unchanged:
             row = _download_permission(cur,_market(cur,previous,payload),payload)
             return _ensure_archive(cur,row,payload), True
@@ -132,7 +139,9 @@ def confirm(payload, upload):
             row = _ensure_archive(cur,row,payload,force=True)
         else:
             cur.execute("UPDATE public.wall_preview_archive_jobs SET state='done',image=NULL,finished_at=now() WHERE preview_id=%s",(preview_id,))
-        if not previous:
+        # A save capture is not a new visualizer open. Storefront funnel events
+        # continue to describe the real session independently of capture count.
+        if not previous and payload.get('attribution', {}).get('capture_mode') != 'save_event':
             event(cur,row,'WallPreviewStarted','started')
         event(cur,row,'WallPreviewConfirmed','confirmed:'+str(version),{'version':version})
         return row, False

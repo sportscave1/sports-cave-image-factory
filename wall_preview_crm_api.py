@@ -93,6 +93,10 @@ def save(request,data,content_type,cors):
         payload = {'client_preview_id':client,'session_id':session,'preview_id':params.get('preview_id'),
                    'image_sha256':hashlib.sha256(data).hexdigest(),'width':width,'height':height,'bytes':len(data),
                    'identity':ident,'attribution':attribution(params),'measurement_unit':unit}
+        if params.get('capture_mode') == 'save_event':
+            # The client UUID is now an interaction id, not a product/session gate.
+            # Existing clients retain their legacy overwrite contract during rollout.
+            payload['attribution']['capture_mode'] = 'save_event'
         if 'image_reuse_allowed' in params:
             if params['image_reuse_allowed'] not in ('0','1') or params.get('reuse_consent_source') != 'wall_preview_download_checkbox':
                 raise ValueError('Explicit download image permission required.')
@@ -109,6 +113,10 @@ def save(request,data,content_type,cors):
         payload['archive_image'] = data
         def upload(previous,preview_id):
             root = '/Sportscave Team Folder'
+            if payload['attribution'].get('capture_mode') == 'save_event':
+                from wall_preview_identity import capture_folder
+                folder = capture_folder(dict(payload, **ident), root, archive.DROPBOX_RELATIVE_ROOT)
+                return {'folder':folder,'path':f'{folder}/{client}.jpg','file_id':'','pending_archive':True}
             # Keep the last committed path until the worker safely relocates it.
             folder = (previous or {}).get('customer_folder') or f'{root}/{archive.DROPBOX_RELATIVE_ROOT}/' + (
                 identity.customer_folder_name(ident['customer_email']) if ident['customer_email'] else 'Anonymous')

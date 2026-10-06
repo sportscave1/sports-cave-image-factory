@@ -1647,7 +1647,7 @@ function setShareNote(text,isError){if(!shareNote) return;shareNote.textContent=
 function loggedInIdentity(){var email=String(root.getAttribute('data-customer-email')||'').trim().toLowerCase();var name=String(root.getAttribute('data-customer-name')||'').trim();var customerId=String(root.getAttribute('data-customer-id')||'').trim();if(!email&&!customerId) return null;return {email:email,name:name,shopifyCustomerId:customerId,source:'logged_in'};}
 var DOWNLOAD_IDENTITY_KEY='sc_wall_preview_download_identity_v1';
 function validIdentityEmail(value){return /^[^\s@\/\\]+@[^\s@\/\\]+\.[^\s@\/\\]+$/.test(String(value||'').trim());}
-function sessionDownloadIdentity(){try{var raw=window.sessionStorage.getItem(DOWNLOAD_IDENTITY_KEY);if(!raw) return null;var parsed=JSON.parse(raw);var email=String(parsed&&parsed.email||'').trim().toLowerCase();var name=clean(parsed&&parsed.name||'');if(!name||!validIdentityEmail(email)) return null;return {email:email,name:name,shopifyCustomerId:'',source:'guest'};}catch(error){return null;}}
+function sessionDownloadIdentity(){try{var raw=window.sessionStorage.getItem(DOWNLOAD_IDENTITY_KEY);if(!raw) return null;var parsed=JSON.parse(raw);var email=String(parsed&&parsed.email||'').trim().toLowerCase();var name=clean(parsed&&parsed.name||'');if(!validIdentityEmail(email)) return null;return {email:email,name:name,shopifyCustomerId:'',source:'guest'};}catch(error){return null;}}
 function rememberDownloadIdentity(identity){if(!identity||identity.source==='logged_in') return;try{window.sessionStorage.setItem(DOWNLOAD_IDENTITY_KEY,JSON.stringify({email:identity.email,name:identity.name}));}catch(error){}}
 function setDownloadError(value){if(downloadError) downloadError.textContent=value||'';}
 function openDownloadGate(){if(!downloadGate||!state.confirmed) return;var identity=loggedInIdentity()||sessionDownloadIdentity();if(downloadName) downloadName.value=identity&&identity.name?identity.name:'';if(downloadEmail) downloadEmail.value=identity&&identity.email?identity.email:'';if(downloadConsent) downloadConsent.checked=true;setDownloadError('');downloadGate.hidden=false;downloadGate.setAttribute('aria-hidden','false');window.setTimeout(function(){var target=(downloadName&&!downloadName.value)?downloadName:downloadEmail;if(target){try{target.focus();}catch(error){}}},30);}
@@ -2156,6 +2156,7 @@ try{var blob=await pending;return retainComposite?blob:!!(blob&&revision===asset
 }
 function archiveMetadata(identityOverride,featurePermission){
 var variant=currentVariant(),identity=identityOverride||loggedInIdentity();
+if(!identity||!validIdentityEmail(identity.email)) identity=sessionDownloadIdentity();
 var params=new URLSearchParams();
 params.set('client_preview_id',state.clientPreviewId);params.set('session_id',sessionId);
 params.set('finished_composite','1');
@@ -2190,7 +2191,9 @@ mode:'cors',
 credentials:'omit',
 signal:controller?controller.signal:undefined
 });
-if(!response.ok) throw new Error('Preview archive failed ('+response.status+')');
+if(!response.ok){var failure=new Error('Preview archive failed ('+response.status+')');
+if(response.status===429||response.status===503){var retrySeconds=Number(response.headers.get('Retry-After'));if(Number.isFinite(retrySeconds)&&retrySeconds>0) failure.retryAfterMs=Math.min(retrySeconds,900)*1000+1000;}
+throw failure;}
 
 var data=await response.json();
 if(!data||data.ok!==true||!data.preview_id) throw new Error('Preview was not persisted');
@@ -2207,12 +2210,17 @@ return data||{ok:true};
 if(timeoutId) window.clearTimeout(timeoutId);
 }
 }
-async function archiveWithRetry(blob,identity,featurePermission,metadata){var delays=[0,600,1800];var lastError=null;for(var i=0;i<delays.length;i+=1){if(delays[i]) await new Promise(function(resolve){window.setTimeout(resolve,delays[i]);});try{return await archivePreview(blob,15000,identity,featurePermission,metadata);}catch(error){lastError=error;}}throw lastError||new Error('Preview archive failed');}
+async function archiveWithRetry(blob,identity,featurePermission,metadata){var delays=[0,600,1800];var lastError=null;for(var i=0;i<delays.length;i+=1){var delay=Math.max(delays[i],lastError&&lastError.retryAfterMs||0);if(delay) await new Promise(function(resolve){window.setTimeout(resolve,delay);});try{return await archivePreview(blob,15000,identity,featurePermission,metadata);}catch(error){lastError=error;}}throw lastError||new Error('Preview archive failed');}
 function fireLocalPreviewEvent(name,detail){var variant=currentVariant();var payload=Object.assign({event:name,preview_id:state.previewId||'',client_preview_id:state.clientPreviewId||'',product_id:String(root.getAttribute('data-product-id')||''),product_handle:String(root.getAttribute('data-product-handle')||''),frame:frameName(state.frame),size:state.sizeInfo?state.sizeInfo.token:'',variant_id:variant&&variant.id?String(variant.id):''},detail||{});try{document.dispatchEvent(new CustomEvent('sports-cave:wall-preview',{detail:payload}));}catch(error){}try{window.dataLayer=window.dataLayer||[];window.dataLayer.push(Object.assign({event:name},payload));}catch(error){}}
 function emitPreviewEvent(name,extra){fireLocalPreviewEvent(name,extra);var aliases={WallPreviewDownloaded:'wall_preview_downloaded',WallPreviewShared:'wall_preview_shared',WallPreviewAddedToCart:'wall_preview_add_to_cart'};if(aliases[name]) fireLocalPreviewEvent(aliases[name],extra);if(!state.previewId||['WallPreviewDownloaded','WallPreviewShared','WallPreviewAddedToCart'].indexOf(name)<0) return;var endpoint=String(root.getAttribute('data-wall-inbox-url')||'').trim();if(!endpoint) return;try{fetch(endpoint+'/'+encodeURIComponent(state.previewId)+'/events',{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/json','X-Wall-Preview-Token':sessionId},body:JSON.stringify({event_name:name,event_id:makeId(),occurred_at:new Date().toISOString()}),mode:'cors',credentials:'omit',keepalive:true}).catch(function(){});}catch(error){}}
 function queuePreviewSave(blob,identity,permission,metadata){
-var snapshot=metadata||archiveMetadata(identity,permission);
-// Serialize retries and updates so an older placement can never overwrite a newer one.
+var snapshot=new URLSearchParams(metadata||archiveMetadata(identity,permission));
+// One existing preview UUID per deliberate capture, reused only by its network retries.
+// Each capture owns its durable row/job, so rapid saves cannot replace queued images.
+state.clientPreviewId=makeId('preview');snapshot.set('client_preview_id',state.clientPreviewId);
+snapshot.set('capture_mode','save_event');
+state.previewId='';state.shareUrl='';state.storageSaved=false;state.storageAccepted=false;state.archiveStatus='';
+// Serialize uploads; a failed capture never prevents the next capture from running.
 var job=saveTail.catch(function(){}).then(async function(){var image=await blob;if(!image) throw new Error('Preview image unavailable');return archiveWithRetry(image,identity,permission,snapshot);});
 saveTail=job;archivePromise=job;
 job.then(function(result){fireLocalPreviewEvent(result.archive_status==='archived'?'wall_preview_saved':'wall_preview_save_queued',{client_preview_id:snapshot.get('client_preview_id'),archive_status:result.archive_status||'accepted'});},function(){try{console.warn('[Sports Cave Wall Preview] save pending; retry on next Place or Download');}catch(error){}});
@@ -2273,14 +2281,12 @@ if(saveLabel) saveLabel.textContent='Downloaded ✓';if(saveButton){saveButton.s
 setShareNote('Downloaded — saving your Sports Cave copy…');
 
 archivePromise=queuePreviewSave(savedBlob,identity,allowFeature);
-var archive=await archivePromise;
-if(archive&&archive.ok!==false){
-// Backend acceptance is not a Dropbox receipt. Future actions can repair storage.
-// UGC permission is stored with this same preview, independently of analytics.
-setShareNote(archive.archive_status==='archived'?'Downloaded — Sports Cave copy saved.':'Downloaded to your device.');
-}else{
-setShareNote('Downloaded to your device.');
-}
+var downloadCapture=state.clientPreviewId;
+// Release the local Download action immediately; storage must not gate the next save.
+archivePromise.then(function(archive){
+if(state.clientPreviewId!==downloadCapture) return;
+setShareNote(archive&&archive.archive_status==='archived'?'Downloaded — Sports Cave copy saved.':'Downloaded to your device.');
+},function(){if(state.clientPreviewId===downloadCapture) setShareNote('Downloaded to your device.');});
 }catch(error){
 if(savedBlob){
 setShareNote('Downloaded to your device.');

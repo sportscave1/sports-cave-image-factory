@@ -28,7 +28,10 @@ def _upload(row, data, token, root):
     if root.rstrip('/') != '/Sportscave Team Folder' or not db.path_is_within_root(source,base):
         raise ArchiveDestinationError('Invalid archive destination.')
     folder = row['customer_folder']
-    if row.get('customer_email'):
+    if (row.get('attribution') or {}).get('capture_mode') == 'save_event':
+        from wall_preview_identity import capture_folder
+        folder = capture_folder(row,root,archive.DROPBOX_RELATIVE_ROOT)
+    elif row.get('customer_email'):
         folder = base+'/'+customer_folder_name(row['customer_email'])
     if not db.path_is_within_root(folder,base):
         raise ArchiveDestinationError('Invalid archive folder.')

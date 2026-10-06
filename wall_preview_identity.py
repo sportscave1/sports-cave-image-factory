@@ -1,6 +1,7 @@
 """Read-only customer matching for Wall Preview archives, never marketing signup."""
 
 import logging
+import hashlib
 import re
 
 import crm_shopify
@@ -22,6 +23,18 @@ def customer_folder_name(value):
     """Encode path-unsafe characters without merging distinct email identities."""
     value = normalize_email(value)
     return ''.join('%%%02X' % ord(char) if char in '/\\:*?"<>|%' else char for char in value)
+
+
+def capture_folder(row, root, relative_root):
+    """Private per-customer, per-product history; no rename of legacy files."""
+    import uuid
+    owner = customer_folder_name(row['customer_email']) if row.get('customer_email') else (
+        'Anonymous/' + str(uuid.UUID(str(row['session_id']))))
+    product = str(row.get('product_id') or row.get('product_handle') or row.get('product_url') or 'unknown')
+    slug = re.sub(r'[^a-z0-9-]+', '-', str(row.get('product_handle') or row.get('product_title') or 'artwork').lower()).strip('-')[:80] or 'artwork'
+    # The suffix prevents title/slug collisions between distinct products.
+    product_key = slug + '-' + hashlib.sha256(product.encode()).hexdigest()[:16]
+    return f'{root.rstrip("/")}/{relative_root}/{owner}/{product_key}/history'
 
 
 def resolve(email_value, name_value, source):

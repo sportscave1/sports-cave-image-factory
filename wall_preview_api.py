@@ -57,6 +57,7 @@ def _cors_headers(origin):
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Accept, X-Wall-Preview-Token",
         "Access-Control-Max-Age": "600",
+        "Access-Control-Expose-Headers": "Retry-After",
     }
     if origin in _allowed_origins():
         headers["Access-Control-Allow-Origin"] = origin
@@ -160,7 +161,7 @@ async def wall_preview_ingest(request):
     # Bound body buffers and expensive image/storage operations together.
     if not _INGEST_SLOTS.acquire(blocking=False):
         return JSONResponse({"ok": False, "error": "storage_busy"}, status_code=503,
-                            headers=_cors_headers(_origin(request)))
+                            headers={**_cors_headers(_origin(request)), 'Retry-After':'2'})
     try:
         return await _ingest(request)
     finally:
@@ -176,7 +177,9 @@ async def _ingest(request):
     if origin not in _allowed_origins():
         return JSONResponse({"ok": False, "error": "origin_not_allowed"}, status_code=403, headers=cors)
     if not _rate_allowed(_client_key(request)):
-        return JSONResponse({"ok": False, "error": "rate_limited"}, status_code=429, headers=cors)
+        LOGGER.warning('wall_preview_save_deferred error_type=RateLimit retry_after=%s', RATE_WINDOW_SECONDS)
+        return JSONResponse({"ok": False, "error": "rate_limited"}, status_code=429,
+                            headers={**cors, 'Retry-After':str(RATE_WINDOW_SECONDS)})
 
     content_type = str(request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     try:
