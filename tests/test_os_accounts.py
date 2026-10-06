@@ -263,6 +263,7 @@ class PasswordSecurityTests(unittest.TestCase):
             now=100,
             days=30,
             session_version=7,
+            remember=True,
         )
 
         valid, reason, payload = sc_auth.validate_user_auth_token(
@@ -274,10 +275,26 @@ class PasswordSecurityTests(unittest.TestCase):
         self.assertEqual(reason, "ok")
         self.assertEqual(payload["sub"], "user-1")
         self.assertEqual(payload["sv"], 7)
+        self.assertTrue(payload["remember"])
         self.assertEqual(
             sc_auth.validate_user_auth_token(token, password="master", now=100 + sc_auth.auth_cookie_max_age())[:2],
             (False, "expired"),
         )
+
+
+    def test_login_gate_is_removed_after_success_and_remembered_state_reaches_runtime_security(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        gate = source[
+            source.index("def render_login_gate()")
+            : source.index("\n\ndef render_admin_account_setup")
+        ]
+
+        self.assertIn("login_panel = st.empty()", gate)
+        self.assertGreaterEqual(gate.count("login_panel.empty()"), 2)
+        self.assertIn("_set_authenticated_user(user, remember=bool(remember))", gate)
+        self.assertIn("remember=bool(remember)", gate)
+        self.assertIn('credentials:"same-origin"', source)
+        self.assertIn("runtime_policy['rememberedSession']", source)
 
 
 class AccountAccessTests(unittest.TestCase):
