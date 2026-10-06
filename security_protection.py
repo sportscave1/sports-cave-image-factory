@@ -111,9 +111,9 @@ class ProtectionStore(Store):
     def register(self, token, payload, user, device=''):
         sid = session_key(token)
         with self.db() as conn:
-            created=conn.execute('INSERT INTO os_security_sessions (id,user_id,session_version,expires_at,device) VALUES (%s,%s,%s,to_timestamp(%s),%s) ON CONFLICT (id) DO NOTHING RETURNING id',
-                   (sid,user['id'],payload.get('sv',1),payload['exp'],str(device)[:200])).fetchone()
-            if created:
+            created=conn.execute('INSERT INTO os_security_sessions (id,user_id,session_version,expires_at,device,remembered) VALUES (%s,%s,%s,to_timestamp(%s),%s,%s) ON CONFLICT (id) DO UPDATE SET remembered=excluded.remembered RETURNING (xmax = 0) AS created',
+                   (sid,user['id'],payload.get('sv',1),payload['exp'],str(device)[:200],bool(payload.get('remember',False)))).fetchone()
+            if created and created.get('created'):
                 conn.execute('INSERT INTO os_security_audit (event,user_id,session_id) VALUES (%s,%s,%s)',('SESSION_CREATED',user['id'],sid))
         return sid
 
@@ -127,7 +127,7 @@ class ProtectionStore(Store):
             raise PermissionError('Session locked. Verify your password.')
         minutes = cached_policy()['autoLockMinutes']
         last = timestamp(row['last_activity_at'])
-        if minutes and time.time() - last >= minutes * 60:
+        if not row.get('remembered') and minutes and time.time() - last >= minutes * 60:
             self.q('UPDATE os_security_sessions SET locked_at=now() WHERE id=%s', (sid,))
             self.audit('AUTO_LOCK',user_id,session_id=sid)
             raise PermissionError('Session locked. Verify your password.')
