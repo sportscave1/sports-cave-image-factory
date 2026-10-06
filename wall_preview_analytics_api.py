@@ -27,13 +27,14 @@ async def ingest(request):
 
 
 def authorize(request):
-    import sc_auth,os_accounts,social_media
-    from security_session_api import identity
-    from security_protection import STORE,session_key
+    import os,sc_auth,os_accounts,social_media
     token=request.cookies.get(sc_auth.AUTH_COOKIE_NAME,'')
-    user,claims=identity(token)
+    valid,_,claims=sc_auth.validate_user_auth_token(token,extra_secret=os.getenv('SPORTS_CAVE_AUTH_SECRET','').strip())
+    if not valid:raise PermissionError('Access denied')
+    user=os_accounts.DEFAULT_STORE.get_user(claims.get('sub'))
+    if not os_accounts.account_is_active(user) or int(user.get('session_version') or 1)!=int(claims.get('sv') or 1):
+        raise PermissionError('Access denied')
     if not os_accounts.can_access_page(user,social_media.SOCIAL_MEDIA_ROUTE):raise PermissionError('Access denied')
-    STORE.validate_session(session_key(token),user['id'])
     return user
 
 async def read(request):

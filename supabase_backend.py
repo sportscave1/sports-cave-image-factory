@@ -22251,8 +22251,6 @@ def save_manual_order_line_edition(
     duplicate_confirmed=False,
 ):
     """Save a certificate-only value; database triggers preserve every revision."""
-    from security_protection import sensitive_admin
-    sensitive_admin(actor)
 
     source = _manual_edition_source_channel(source_channel)
     order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
@@ -22357,8 +22355,6 @@ def get_manual_order_line_edition(*, source_channel, external_order_id,
 
 def remove_manual_order_line_edition(*, manual_id, actor):
     """Remove only the active certificate override, retaining the DB audit trail."""
-    from security_protection import sensitive_admin
-    sensitive_admin(actor)
     actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
     if not actor_id:
         raise PermissionError("An authenticated administrator is required.")

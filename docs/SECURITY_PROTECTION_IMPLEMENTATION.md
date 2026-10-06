@@ -1,5 +1,10 @@
 # Security & Protection implementation — 5 October 2026
 
+> Historical record only. The OS protection implementation described below has
+> been removed locally. Do not use these deployment instructions. Its applied
+> migration remains in history; its tables are dormant. Current storefront-only
+> instructions are in `SHOPIFY_INSTALLATION.md`.
+
 ## Deployment state
 
 The additive security migration is applied to the production OS database and

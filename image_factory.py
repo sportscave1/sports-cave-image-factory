@@ -2489,8 +2489,7 @@ def rebuild_export_folders(
             continue
         destination = shopify_uploads_dir / str(entry["output_filename"])
         if source_path.resolve() != destination.resolve():
-            from protected_web_images import write_public_derivative
-            write_public_derivative(source_path,destination)
+            shutil.copy2(source_path, destination)
 
     # Social exports retain their established filenames and are likewise
     # idempotent: a retry replaces the matching file only.
@@ -2499,8 +2498,7 @@ def rebuild_export_folders(
             continue
         jpg_path = asset.get("jpg_path")
         if should_export_asset_to_socials(asset) and jpg_path and Path(jpg_path).exists():
-            from protected_web_images import write_public_derivative
-            write_public_derivative(jpg_path, socials_dir / Path(jpg_path).name)
+            shutil.copy2(jpg_path, socials_dir / Path(jpg_path).name)
 
     product_manifest_path.write_text(
         json.dumps(

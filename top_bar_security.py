@@ -32,8 +32,6 @@ def _signing_key(extra_secret: str = "") -> bytes:
         or os.getenv("SPORTS_CAVE_AUTH_SECRET")
         or ""
     ).strip()
-    if os.getenv("RENDER") and not secret:
-        raise RuntimeError("SPORTS_CAVE_AUTH_SECRET is required in production.")
     material = (
         f"sports-cave-top-bar-v{TOP_BAR_TOKEN_VERSION}|"
         f"{sc_auth.DEFAULT_APP_PASSWORD}|{secret}"
@@ -58,8 +56,6 @@ def create_top_bar_token(
     payload = {
         "v": TOP_BAR_TOKEN_VERSION,
         "sub": str(user.get("id") or "").strip(),
-        "sv": int(user.get('session_version') or 1),
-        "sid": str(user.get('_security_sid') or '')[:64],
         "display_name": str(user.get("display_name") or "").strip()[:160],
         "username": str(user.get("username") or "").strip()[:160],
         "role": str(user.get("role") or "").strip().casefold()[:40],
@@ -108,11 +104,9 @@ def validate_top_bar_token(token, *, now=None, extra_secret=""):
         payload = json.loads(_decode(payload_part).decode("utf-8"))
     except Exception:
         return False, "bad-payload", {}
-    if not isinstance(payload,dict) or payload.get("v") != TOP_BAR_TOKEN_VERSION:
+    if payload.get("v") != TOP_BAR_TOKEN_VERSION:
         return False, "bad-version", {}
-    try:expires_at=int(payload.get('exp') or 0)
-    except (ValueError,TypeError):return False,'bad-expiry',{}
-    if expires_at <= int(time.time() if now is None else now):
+    if int(payload.get("exp") or 0) <= int(time.time() if now is None else now):
         return False, "expired", {}
     if not str(payload.get("sub") or "").strip():
         return False, "bad-user", {}

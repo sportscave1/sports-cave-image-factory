@@ -1,11 +1,10 @@
 """Public configuration and script only; never exposes admin/session data."""
 from pathlib import Path
-from urllib.parse import urlparse
 
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, Response
 
-from security_protection import DEFAULTS, PUBLIC_KEYS, public_policy
+from image_protection import DEFAULTS, public_policy
 
 ALLOWED_ORIGINS = frozenset(('https://www.sportscaveshop.com','https://sportscaveshop.com'))
 SCRIPT = Path(__file__).with_name('storefront-protection.js').read_text(encoding='utf-8')
@@ -25,7 +24,7 @@ async def config(request):
         values=await run_in_threadpool(public_policy)
     except Exception:
         # Safe baseline is explicit; operators see storage failures in private UI.
-        values={key:DEFAULTS[key] for key in PUBLIC_KEYS}
+        values=dict(DEFAULTS)
         headers['Cache-Control']='no-store'
     return JSONResponse(values,headers=headers)
 

@@ -20,9 +20,6 @@ ANSWERS = dict.fromkeys(('artwork_upload', 'product_option', 'frame', 'size', 's
 
 
 class ManualCertificateControlsTests(unittest.TestCase):
-    def setUp(self):
-        guard=patch('security_protection.sensitive_admin',return_value=ACTOR)
-        guard.start();self.addCleanup(guard.stop)
     def test_normal_display_and_certificate_number_unchanged(self):
         row = orders_page._normalise_row({**ROW, 'edition_order_id': '52',
                                         'edition_number': 52, 'manual_edition_override': False})

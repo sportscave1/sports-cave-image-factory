@@ -19,8 +19,7 @@ from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
 from wall_preview_analytics_api import ROUTES as WALL_PREVIEW_ANALYTICS_ROUTES
 from storefront_protection_api import ROUTES as STOREFRONT_PROTECTION_ROUTES
-from security_session_api import ROUTES as SECURITY_SESSION_ROUTES
-from protection_headers import ProtectionHeaders
+from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
 
 
 routes = [
@@ -35,7 +34,7 @@ routes = [
         *WALL_PREVIEW_ANALYTICS_ROUTES,
         *WALL_PREVIEW_CRM_ROUTES,
         *STOREFRONT_PROTECTION_ROUTES,
-        *SECURITY_SESSION_ROUTES,
+        *AUTH_COOKIE_CLEANUP_ROUTES,
     )
 ]
 routes.extend(app_branding.public_branding_routes())
@@ -97,7 +96,7 @@ class _WallPreviewAccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 streamlit_app = App("app.py", routes=routes)
 app = ConstantTimeHealthMiddleware(
-    ProtectionHeaders(IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(streamlit_app)))
+    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(streamlit_app))
 )
 
 

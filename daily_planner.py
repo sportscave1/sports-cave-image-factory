@@ -56,9 +56,14 @@ def _json(payload, status_code=200):
 
 
 def _claims(request: Request):
-    from top_bar_api import _claims as live_claims
-    claims=live_claims(request)
-    return claims if claims.get('can_manage_daily_planner') else {}
+    authorization = str(request.headers.get("Authorization") or "").strip()
+    token = ""
+    if authorization.casefold().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    valid, _reason, claims = top_bar_security.validate_top_bar_token(token)
+    if not valid or not claims.get("can_manage_daily_planner"):
+        return {}
+    return claims
 
 
 def _user(claims):

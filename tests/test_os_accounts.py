@@ -281,21 +281,6 @@ class PasswordSecurityTests(unittest.TestCase):
 
 
 class AccountAccessTests(unittest.TestCase):
-    def setUp(self):
-        # UI fixtures predate durable sessions and seed authenticated state
-        # directly. Isolate their transport; real revocation/lock/reauth is
-        # exercised against PostgreSQL in test_security_protection_sql.
-        import security_protection
-        import security_session_api
-        for target,attribute,value in (
-            (security_session_api,'identity',({'id':'fixture-user'},{'exp':9999999999})),
-            (security_protection.STORE,'register','fixture-session'),
-            (security_protection.STORE,'validate_session',{}),
-            (security_protection.STORE,'require_reauth',None),
-            (security_protection,'cached_policy',security_protection.DEFAULTS),
-        ):
-            mocked=patch.object(target,attribute,return_value=value)
-            mocked.start();self.addCleanup(mocked.stop)
     def _create_admin(self, store, *, username="nathan", email="nathan@sportscave.test"):
         return store.create_user(
             username=username,
@@ -2633,8 +2618,8 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("if sports_cave_dashboard.can_manage_daily_planner(user):", dashboard_source)
         self.assertNotIn("render_daily_execution_panel(local_now, events, {}, show_denied=False)", dashboard_source)
         planner_source = (ROOT / "daily_planner.py").read_text(encoding="utf-8")
-        self.assertIn("from top_bar_api import _claims as live_claims", planner_source)
-        self.assertIn("claims.get('can_manage_daily_planner')", planner_source)
+        self.assertIn("validate_top_bar_token", planner_source)
+        self.assertIn('claims.get("can_manage_daily_planner")', planner_source)
         self.assertIn("_require_daily_execution_admin", (ROOT / "sports_cave_dashboard.py").read_text(encoding="utf-8"))
 
 

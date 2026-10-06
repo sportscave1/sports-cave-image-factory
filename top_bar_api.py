@@ -162,23 +162,6 @@ def _claims(request: Request):
     valid, _reason, claims = top_bar_security.validate_top_bar_token(token)
     if not valid:
         return {}
-    try:
-        user = os_accounts.DEFAULT_STORE.get_user(claims['sub'])
-        if not os_accounts.account_is_active(user) or int(user.get('session_version') or 1) != int(claims.get('sv') or 1):
-            return {}
-        if claims.get('sid'):
-            from security_protection import STORE
-            STORE.validate_session(claims['sid'],user['id'])
-        else:
-            return {}
-        # Permissions in an old signed snapshot are not current authorisation.
-        claims['role']=user.get('role')
-        claims['allowed_routes']=list(os_accounts.allowed_navigation_routes(user))
-        claims['can_view_activity']=os_accounts.can_view_activity_log(user)
-        claims['can_view_all_activity']=os_accounts.is_reporting_owner(user)
-        claims['can_manage_daily_planner']=os_accounts.is_admin(user)
-    except Exception:
-        return {}
     return claims
 
 

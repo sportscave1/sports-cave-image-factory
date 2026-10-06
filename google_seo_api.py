@@ -58,9 +58,6 @@ def _request_admin(request: Request):
             and _session_version(payload.get("sv"))
             == _session_version(user.get("session_version"))
         ):
-            from security_protection import STORE,session_key
-            STORE.register(token,payload,user,request.headers.get('user-agent',''))
-            STORE.validate_session(session_key(token),user['id'])
             return user
 
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(

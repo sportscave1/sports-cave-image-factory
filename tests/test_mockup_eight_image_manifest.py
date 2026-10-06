@@ -5,7 +5,6 @@ import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
-from PIL import Image
 
 import app
 import image_factory
@@ -48,11 +47,11 @@ class MockupEightImageManifestTests(unittest.TestCase):
         assets = []
         for index, spec in enumerate(image_factory.PRODUCT_IMAGE_SLOT_SPECS[:count], start=1):
             webp_path = root / f"distinct-source-{index}.webp"
-            Image.new('RGB',(64,48),(index*20,40,60)).save(webp_path,'WEBP')
+            webp_path.write_bytes(f"webp-{index}".encode("ascii"))
             jpg_path = None
             if include_jpg:
                 jpg_path = root / f"distinct-source-{index}.jpg"
-                Image.new('RGB',(64,48),(index*20,40,60)).save(jpg_path,'JPEG')
+                jpg_path.write_bytes(f"jpg-{index}".encode("ascii"))
             assets.append(
                 image_factory.build_asset_record(
                     key=spec["asset_key"],
@@ -216,7 +215,7 @@ class MockupEightImageManifestTests(unittest.TestCase):
             result = self.make_result(temp_dir)
             before = {row["slot_id"]: row["uploaded_image_reference"] for row in result["product_image_manifest"]}
             replacement = Path(temp_dir) / "office-replacement.webp"
-            Image.new('RGB',(64,48),'gold').save(replacement,'WEBP')
+            replacement.write_bytes(b"replacement")
             office = next(asset for asset in result["assets"] if asset["key"] == "lifestyle::02-office-prompt.txt")
             office["webp_path"] = replacement
             result["lifestyle_mockup_paths"]["02-office-prompt.txt"]["webp_path"] = str(replacement)
