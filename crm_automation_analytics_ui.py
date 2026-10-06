@@ -139,6 +139,7 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
         add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='primary')
     if refresh:
+        st.session_state.pop(slot+'-timing',None)
         try:
             counts,more=reconcile(shop,store,period)
             st.session_state[slot+'-results']=[{'Result':k,'Rows':v} for k,v in counts.items()]
@@ -151,9 +152,13 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         st.rerun(scope='fragment')
     if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True)
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
+    timing_signature=repr([(c['checkout_key'],c.get('next_due_at'),c.get('current_step'),c.get('sends')) for c in records])
+    timing=st.session_state.get(slot+'-timing')
+    if not timing or timing[0]!=timing_signature:
+        timing=(timing_signature,now());st.session_state[slot+'-timing']=timing
     listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
       'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
-      'status':recovery_status(c),'time_to_send':time_to_send(c),
+      'status':recovery_status(c),'time_to_send':time_to_send(c,at=timing[1]),
       'enrollment_progress':{k:enrollment_results.get(c['checkout_key'],{}).get(k) for k in ('state','result')}} for c in visible]
     component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
     event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)

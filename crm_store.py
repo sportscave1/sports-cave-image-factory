@@ -123,9 +123,9 @@ class Store:
          VALUES(%s,%s,%s,%s,%s,%s::jsonb,%s) ON CONFLICT(automation_id,trigger_key) DO NOTHING RETURNING *''',
          (automation['id'],customer_id,trigger_id,trigger_key,at,json.dumps(automation['steps']),at),True)
     def enqueue(self,key,customer_id,hashed,template,campaign_id=None,enrollment_id=None,step_index=None,test_recipient=None):
-        return self.q('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,enrollment_id,step_index,test_send,test_recipient)
-         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING *''',
-         (key,customer_id,hashed,template['id'],template['version'],campaign_id,enrollment_id,step_index,bool(test_recipient),test_recipient),True)
+        return self.q('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,enrollment_id,step_index,test_send,test_recipient,due_at)
+         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE((SELECT next_due_at FROM crm_automation_enrollments WHERE id=%s),now())) ON CONFLICT DO NOTHING RETURNING *''',
+         (key,customer_id,hashed,template['id'],template['version'],campaign_id,enrollment_id,step_index,bool(test_recipient),test_recipient,enrollment_id),True)
     def claim_send(self,allow_customer=True,allow_test=True):
         # A crash after submission is never automatically replayed outside provider protection.
         self.q("UPDATE crm_marketing_sends s SET status='UNCERTAIN',error_code='interrupted_submission',updated_at=now() WHERE status='SUBMITTING' AND lease_until<now() AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')")
@@ -134,7 +134,7 @@ class Store:
          LEFT JOIN crm_automations a ON a.id=e.automation_id
          WHERE (s.status='PENDING' OR (s.status='CLAIMED' AND s.lease_until<now())) AND s.due_at<=now()
          AND ((s.test_send AND %s) OR (NOT s.test_send AND %s))
-         AND (s.campaign_id IS NULL OR c.status='SENDING') AND (s.enrollment_id IS NULL OR (e.status='ACTIVE' AND a.status='ACTIVE'))
+         AND (s.campaign_id IS NULL OR c.status='SENDING') AND (s.enrollment_id IS NULL OR (e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND s.step_index=e.current_step))
          AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')
          ORDER BY s.due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1)
          UPDATE crm_marketing_sends s SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes',attempts=attempts+1

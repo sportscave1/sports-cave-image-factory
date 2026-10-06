@@ -343,7 +343,9 @@ def table(shop,store,user,script=None):
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
                         with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
-                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):analytics(shop,store,user,row['id'],name=row['name'])
+                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):
+                                st.session_state.pop('auto-checkouts-'+str(row['id'])+'-timing',None)
+                                analytics(shop,store,user,row['id'],name=row['name'])
                             if st.button('Open editor',icon=':material/edit:',use_container_width=True,key='auto_open_'+str(row['id'])):open_flow(row['id'])
                             if st.button('Duplicate',icon=':material/content_copy:',use_container_width=True,key='auto_duplicate_'+str(row['id'])):
                                 duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])

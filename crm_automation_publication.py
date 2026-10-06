@@ -27,7 +27,8 @@ def preflight(row,revision):
     if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
         raise ValueError('Automation is not publishable.')
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
-    flow=validate(row['config']['draft'])
+    from crm_automation_timing import single_delay
+    flow=validate(single_delay(row['config']['draft']))
     for step in flow['emails']:
         subject=step['document']['content']['subject'].strip()
         if not subject:raise ValueError('Add a subject before publishing.')
@@ -96,7 +97,8 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
           (template_id,'automation-email:'+template_id,name,version,json.dumps(content)))
         conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(template_id,version,json.dumps(content)))
     config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
-    config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
+    config['published']['timing_version']=flow.get('timing_version',1)
+    if flow.get('timing_version')!=2:config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
     if config.get('paused_at'):store._resume_due(conn,identity,config['paused_at'],now())
     config.pop('paused_at',None)
     if publication:config['publication']={**publication,'state':'LIVE','completed_at':now().isoformat()}

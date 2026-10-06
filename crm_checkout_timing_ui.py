@@ -1,5 +1,4 @@
 """Read-only checkout timing labels; never schedules or mutates an enrollment."""
-from datetime import timedelta
 from math import ceil
 from crm_logic import date, now
 from crm_checkout_identity import recovered, block_label
@@ -40,11 +39,8 @@ def time_to_send(row, at=None):
             steps = row.get('steps') or []
             if index + 1 >= len(steps):
                 return 'Sent'
-            # Mirror the existing worker's next-step clock, for display only.
-            sent = date(receipt.get('updated_at'))
-            if not sent:
-                return 'Awaiting schedule'
-            due = sent + timedelta(seconds=steps[index + 1]['delay_seconds'])
+            # Only the worker may persist the chained step's deadline.
+            return 'Awaiting schedule'
         elif status == 'BLOCKED':
             return block_label(receipt.get('error'))
         elif status == 'FAILED':
@@ -53,8 +49,6 @@ def time_to_send(row, at=None):
             return 'Awaiting confirmation'
         elif status in ('CLAIMED', 'SUBMITTING'):
             return 'Processing'
-        elif status == 'PENDING':
-            return 'Queued'
     if not due:
         return 'Awaiting schedule'
     minutes = ceil((due - at).total_seconds() / 60)

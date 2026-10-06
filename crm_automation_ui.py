@@ -112,15 +112,15 @@ def settings_control(editor,key):
         rules.append({'field':'market','condition':'is','value':'AU'})
     st.caption('Rules use AND. Consent and trigger exit checks are always required.')
     days=st.selectbox('Re-entry',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else 'After '+str(d)+' days',key=key+'reentry')
-    delay=st.number_input('Delay before email (minutes)',min_value=0,max_value=525600,value=step['delay_seconds']//60,step=1,key=key+'delay')
+    from crm_automation_timing import delay_controls
+    initial,unit=delay_controls(step['delay_seconds'])
+    amount_slot,unit_slot=st.columns([2,1])
+    with amount_slot:delay=st.number_input('Delay',min_value=0,max_value=525600,value=initial,step=1,key=key+'delay')
+    with unit_slot:units=st.selectbox('Delay unit',['Minutes','Hours','Days'],index=['Minutes','Hours','Days'].index(unit),key=key+'delay_unit')
     st.caption('Flow status · '+status(row)+' · fresh consent and suppressions checked before every email')
     desired=deepcopy(flow);desired.update(trigger=kind,rules=rules,reentry_days=days)
     store.preview_trigger=kind
-    if kind=='abandoned':
-        minutes=st.number_input('Qualify as abandoned after inactivity (minutes)',min_value=1,max_value=10080,value=flow.get('abandonment_seconds',3600)//60,key=key+'abandonment')
-        desired['abandonment_seconds']=int(minutes)*60
-        st.caption('Qualification timer starts after the last signed checkout update. Email delay starts after qualification.')
-    next(s for s in desired['emails'] if s['step_id']==store.step_id)['delay_seconds']=step['delay_seconds'] if int(delay)==step['delay_seconds']//60 else int(delay)*60
+    next(s for s in desired['emails'] if s['step_id']==store.step_id)['delay_seconds']=step['delay_seconds'] if (delay,units)==(initial,unit) else int(delay)*{'Minutes':60,'Hours':3600,'Days':86400}[units]
     if desired!=flow:
         from crm_automation_definition import validate
         try:validate(desired)

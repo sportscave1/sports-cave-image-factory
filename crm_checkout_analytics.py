@@ -155,6 +155,6 @@ def disabled_reason(checkout,row,at=None):
     if (checkout.get('analytics') or {}).get('email_state')=='invalid':return 'Invalid email'
     if not (checkout.get('analytics') or {}).get('email'):return 'Missing email'
     activity=date(checkout.get('activity_at'))
-    threshold=int(row['config'].get('published',{}).get('abandonment_seconds',3600))
+    threshold=0  # The published email delay is now the only wait.
     if not activity or activity+timedelta(seconds=threshold)>at:return 'Checkout still inside abandonment wait period'
     return None

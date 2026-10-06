@@ -24,10 +24,13 @@ class Engine:
         if not ok:return c,context,reason
         if enrollment:
             a=self.store.get('automations',enrollment['automation_id'])
+            if not a:return c,context,'automation_unavailable'
             kind=a['trigger_type'];trigger=enrollment['trigger_shopify_id']
             if a['status']!='ACTIVE':return c,context,'automation_paused'
             frozen=enrollment['steps'][0] if enrollment.get('steps') else {}
             if frozen.get('automation_version'):
+                current=enrollment['steps'][enrollment['current_step']] if enrollment['current_step']<len(enrollment['steps']) else None
+                if not current or not any(s.get('step_id')==current['step_id'] for s in a['steps']):return c,context,'automation_step_removed'
                 from crm_automation_definition import qualifies
                 kind=frozen['trigger']
                 from crm_automation_capabilities import require as require_trigger
@@ -304,6 +307,15 @@ class Engine:
                     self.store.enroll(automation,c['id'],trigger,c['id']+':'+trigger,self.clock())
         more=page['pageInfo'].get('hasNextPage')
         self.store.set_state(key,{'cursor':page['pageInfo'].get('endCursor') if more else None,'after_time':(self.clock()+timedelta(seconds=2 if more else 300)).isoformat()})
+    def advance_due(self):
+        due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND (e.retry_after IS NULL OR e.retry_after<=now()) ORDER BY e.next_due_at LIMIT 20")
+        for e in due:
+            self.hold_lease()
+            try:self.advance(e)
+            except Exception as exc:
+                self.store.q("UPDATE crm_automation_enrollments SET retry_after=now()+interval '5 minutes',stop_reason='verification_unavailable' WHERE id=%s",(e['id'],))
+                logging.getLogger(__name__).warning('checkout_advance_held enrollment_id=%s checkout_key=%s error_class=%s',e['id'],e.get('checkout_key'),type(exc).__name__)
+
     def tick(self,owner):
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
@@ -329,6 +341,12 @@ class Engine:
                     self.store.q("UPDATE crm_webhook_events SET status='DONE',processed_at=now() WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
                 except Exception:
                     self.store.q("UPDATE crm_webhook_events SET attempts=attempts+1,status=CASE WHEN attempts>=4 THEN 'FAILED' ELSE 'PENDING' END,error_code='source_unavailable' WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
+            # Due work runs before catalogue refreshes or source reconciliation.
+            # The queue and claims remain shared with the existing worker.
+            if self.config.enabled:
+                self.advance_due()
+            for _ in range(5):
+                if not self.store.lease(owner) or not self.send_one():break
             try:
                 from crm_checkout_analytics import sync_cache
                 sync_cache(self.shop,self.store,self.clock())
@@ -349,19 +367,10 @@ class Engine:
                 self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
                 campaigns=self.store.q("SELECT * FROM crm_campaigns WHERE audience_snapshot_id IS NULL AND (status='BUILDING' OR (status='SCHEDULED' AND scheduled_at<=now())) ORDER BY created_at LIMIT 1")
                 for campaign in campaigns:self.hold_lease();self.campaign_page(campaign)
-                due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() ORDER BY e.next_due_at LIMIT 20")
-                for e in due:
-                    self.hold_lease()
-                    try:self.advance(e)
-                    except Exception:
-                        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '5 minutes',stop_reason='verification_unavailable' WHERE id=%s",(e['id'],))
-                        logging.getLogger(__name__).warning('checkout_advance_held enrollment_id=%s checkout_key=%s',e['id'],e.get('checkout_key'))
             # Native reviewed campaigns consume the frozen delivery snapshot in
             # batches. Automation/legacy template tests retain their own path.
             from crm_campaign_dispatch import dispatch
             dispatch(self)
-            for _ in range(5):
-                if not self.store.lease(owner) or not self.send_one():break
             self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
               final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
               WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")

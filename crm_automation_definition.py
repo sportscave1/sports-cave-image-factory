@@ -22,12 +22,14 @@ def email_step(document=None, delay_seconds=0):
 
 def new_flow(trigger='welcome'):
     if trigger not in TRIGGERS: raise ValueError('Choose a supported trigger.')
-    return {'trigger': trigger, 'rules': [], 'reentry_days': 0, 'emails': [email_step()]}
+    return {'trigger': trigger, 'rules': [], 'reentry_days': 0, 'emails': [email_step()], 'timing_version': 2}
 
 
 def validate(flow):
-    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
+    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
         raise ValueError('Invalid automation definition.')
+    if flow.get('timing_version',1) not in (1,2) or (flow.get('timing_version')==2 and 'abandonment_seconds' in flow):
+        raise ValueError('Use the single Delay setting for this flow.')
     if 'review_request' in flow:
         from reviews_model import product_gid
         from crm_tracking import public_https

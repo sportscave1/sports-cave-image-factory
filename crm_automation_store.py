@@ -16,6 +16,9 @@ class AutomationStore(CampaignStore):
     def flow(self, identity):
         row=self.get('automations',str(uuid.UUID(str(identity))))
         if not row or not native(row) or row['config'].get('deleted_at'): raise ValueError('Automation is unavailable.')
+        from crm_automation_timing import single_delay
+        row=deepcopy(row)
+        row['config']['draft']=single_delay(row['config']['draft'])
         return row
 
     def create(self,user,trigger='welcome',name=None):
@@ -35,7 +38,8 @@ class AutomationStore(CampaignStore):
 
     def save_flow(self,user,identity,name,flow,revision):
         from crm_checkout_migration import migrate_flow
-        require(user,'crm_automations_manage');flow=migrate_flow(flow);validate(flow)
+        from crm_automation_timing import single_delay
+        require(user,'crm_automations_manage');flow=single_delay(migrate_flow(flow));validate(flow)
         if not isinstance(name,str) or not name.strip() or len(name)>150: raise ValueError('Use an automation name of 1–150 characters.')
         with self.db() as conn:
             old=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
