@@ -111,9 +111,9 @@ class ProtectionStore(Store):
     def register(self, token, payload, user, device=''):
         sid = session_key(token)
         with self.db() as conn:
-            created=conn.execute('INSERT INTO os_security_sessions (id,user_id,session_version,expires_at,device,remembered) VALUES (%s,%s,%s,to_timestamp(%s),%s,%s) ON CONFLICT (id) DO UPDATE SET remembered=excluded.remembered RETURNING (xmax = 0) AS created',
+            created=conn.execute('INSERT INTO os_security_sessions (id,user_id,session_version,expires_at,device,remembered) VALUES (%s,%s,%s,to_timestamp(%s),%s,%s) ON CONFLICT (id) DO NOTHING RETURNING id',
                    (sid,user['id'],payload.get('sv',1),payload['exp'],str(device)[:200],bool(payload.get('remember',False)))).fetchone()
-            if created and created.get('created'):
+            if created:
                 conn.execute('INSERT INTO os_security_audit (event,user_id,session_id) VALUES (%s,%s,%s)',('SESSION_CREATED',user['id'],sid))
         return sid
 
