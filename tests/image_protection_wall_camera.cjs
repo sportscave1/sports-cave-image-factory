@@ -18,7 +18,7 @@ const fixture=require('./wall_preview_completion_fixture.cjs');
  await page.locator('[data-sc-wall-open]').click();if(await page.locator('[data-sc-wall-camera]').isVisible())await page.locator('[data-sc-wall-camera]').click();
  await page.waitForFunction(()=>document.querySelector('[data-sc-wall-camera-video]').readyState>=2);
  assert.equal(await page.locator('[data-sc-wall-camera-video]').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),false);
- await page.locator('[data-sc-wall-camera-capture]').click();await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});
+ await page.locator('[data-sc-wall-camera-capture]').click();await page.locator('[data-sc-wall-quick-preview]').click();await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});
  assert.equal(await page.locator('[data-sc-wall-sticky-secure]').isEnabled(),true);
  assert.deepEqual(errors,[]);console.log('PASS protected mobile camera launch, video, shutter, artwork and Add to Cart eligibility; no runtime errors');
  }finally{await browser.close();}

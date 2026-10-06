@@ -1,4 +1,4 @@
-/* Sports Cave storefront-only deterrence v2026-10-06.2. OS screenshots cannot be blocked. */
+/* Sports Cave storefront-only deterrence v2026-10-06.3. OS screenshots cannot be blocked. */
 (() => {
   'use strict';
   if (!['sportscaveshop.com','www.sportscaveshop.com'].includes(location.hostname) ||
@@ -8,7 +8,7 @@
   const configUrl = script && (script.dataset.scProtectionConfig || new URL('/api/storefront-protection/config',script.src).href);
   const defaults = {enabled:true,disableRightClick:true,preventImageDragging:true,preventSelection:true,
     protectPrinting:true,blockSaveShortcuts:true,mobileTouchProtection:true,aggressiveCopyDeterrence:true,
-    showCopyrightMessage:true,visibleWatermark:false,protectProductImages:true,protectCollections:true,
+    showCopyrightMessage:false,visibleWatermark:false,protectProductImages:true,protectCollections:true,
     protectHomepage:true,protectWallPreview:true,screenshotDeterrence:true,wallPreviewWatermark:false,
     watermarkText:'Sports Cave',watermarkOpacity:0.25,watermarkPosition:'bottom-right'};
   let config = {...defaults,enabled:false}, selector = '', hovered = null;
@@ -19,18 +19,6 @@
   const editable = el => el instanceof Element && !!el.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
   const protectedTarget = el => config.enabled && el instanceof Element && !editable(el) && selector && !!el.closest(selector);
 
-  let toast, lastToast = 0;
-  function notify() {
-    if (!config.showCopyrightMessage || Date.now()-lastToast<5000) return;
-    lastToast=Date.now();
-    if (!toast) {
-      toast=document.createElement('div');toast.setAttribute('role','status');
-      toast.className='sc-protection-notice';
-      toast.textContent='© Sports Cave — Please use the official download where available. Screenshots and copying are not authorised.';
-      document.body.appendChild(toast);
-    }
-    toast.hidden=false;setTimeout(()=>{toast.hidden=true;},2000);
-  }
   function apply() {
     const scopeFlag=location.pathname==='/'?'protectHomepage':/^\/collections(\/|$)/.test(location.pathname)?'protectCollections':'protectProductImages';
     const scopes=[];
@@ -63,22 +51,23 @@
       }))).observe(document.body,{childList:true,subtree:true});
     }
   }
-  document.addEventListener('contextmenu',e=>{if(config.disableRightClick && protectedTarget(e.target)){e.preventDefault();notify();}});
-  document.addEventListener('dragstart',e=>{if(config.preventImageDragging && protectedTarget(e.target))e.preventDefault();});
+  document.addEventListener('contextmenu',e=>{if(config.disableRightClick && protectedTarget(e.target)){e.preventDefault();}},true);
+  document.addEventListener('dragstart',e=>{if(config.preventImageDragging && protectedTarget(e.target))e.preventDefault();},true);
   document.addEventListener('copy',e=>{
     const selection=window.getSelection();
-    if(config.aggressiveCopyDeterrence && !editable(e.target) && (protectedTarget(e.target)||protectedTarget(selection?.anchorNode?.parentElement))){e.preventDefault();notify();}
-  });
+    if(config.aggressiveCopyDeterrence && !editable(e.target) && (protectedTarget(e.target)||protectedTarget(selection?.anchorNode?.parentElement))){e.preventDefault();}
+  },true);
+  document.addEventListener('selectstart',e=>{if(config.preventSelection && protectedTarget(e.target))e.preventDefault();},true);
   document.addEventListener('pointerover',e=>{hovered=protectedTarget(e.target)?e.target:null;},{passive:true});
   document.addEventListener('pointerout',e=>{hovered=protectedTarget(e.relatedTarget)?e.relatedTarget:null;},{passive:true});
   document.addEventListener('keydown',e=>{
     if(editable(e.target))return;
     if(protectedTarget(e.target)||protectedTarget(hovered)||(config.enabled && config.protectWallPreview && document.querySelector('[data-sc-wall-overlay]:not([hidden])'))){
-      if(config.blockSaveShortcuts && (e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){e.preventDefault();notify();}
-      // Notification only: this does NOT intercept hardware/system screenshot APIs.
-      if(config.screenshotDeterrence && e.key==='PrintScreen')notify();
+      if(config.blockSaveShortcuts && (e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){e.preventDefault();}
+      // Only cancel an observable browser key default. OS screenshot tools remain outside web control.
+      if(config.screenshotDeterrence && e.key==='PrintScreen')e.preventDefault();
     }
-  });
+  },true);
   // One bounded config request per page, no polling, fail open during backend outages.
   if(configUrl){
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),3000);

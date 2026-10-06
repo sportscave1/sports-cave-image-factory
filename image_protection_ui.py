@@ -30,11 +30,11 @@ def render(st, user):
             st.markdown('**Protection scope**')
             for key, label in [('protectProductImages','Product, search and quick-view artwork'),('protectCollections','Collection artwork'),('protectHomepage','Homepage artwork'),('protectWallPreview','See It On Your Wall')]:
                 result[key] = st.checkbox(label,value=values[key])
-            result['screenshotDeterrence'] = st.checkbox('Screenshot deterrence',value=values['screenshotDeterrence'],help='Web browsers cannot completely block operating-system screenshots. Observable PrintScreen keys show a copyright notice only; camera and shopping remain uninterrupted.')
+            result['screenshotDeterrence'] = st.checkbox('Screenshot deterrence',value=values['screenshotDeterrence'],help='Web browsers cannot completely block operating-system screenshots. Only observable browser key defaults can be cancelled silently. This cannot prevent hardware screenshots or operating-system capture; camera and shopping remain uninterrupted.')
         with actions:
             st.markdown('**Artwork controls**')
             for key,label in [('disableRightClick','Disable image right-click'),('preventImageDragging','Disable image dragging'),('preventSelection','Disable artwork selection'),('aggressiveCopyDeterrence','Disable artwork copying'),('mobileTouchProtection','Block image long-press where practical'),('blockSaveShortcuts','Block common image-save shortcuts'),('protectPrinting','Print protection'),('showCopyrightMessage','Show copyright notice')]:
-                result[key]=st.checkbox(label,value=values[key])
+                result[key]=st.checkbox(label,value=values[key],help='Legacy preference retained for compatibility. Storefront protection is always silent, even when this is selected.' if key=='showCopyrightMessage' else None)
         with watermark:
             st.markdown('**Optional watermark**')
             result['visibleWatermark']=st.checkbox('Watermark storefront artwork',value=values['visibleWatermark'])
