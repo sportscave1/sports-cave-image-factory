@@ -126,7 +126,10 @@ def extract_review(message, body):
     return {'customer_first_name': first, 'product_name': product, 'review_text': review}
 
 
-def build_reply_prompts(message, body):
+def build_reply_prompts(message, body, *, thread_context=None, order_context=None):
     context = extract_review(message, body)
-    return [{'id': key, 'label': entry['label'], 'text': entry['template'].format(**context) if not context.get('error') else '',
+    prompts = [{'id': key, 'label': entry['label'], 'text': entry['template'].format(**context) if not context.get('error') else '',
              'error': context.get('error', '')} for key, entry in EMAIL_REPLY_PROMPTS.items()]
+    from support_email_return_prompt import build_return_prompt
+    prompts.append(build_return_prompt(message, body, thread_context=thread_context, order_context=order_context))
+    return prompts

@@ -1079,6 +1079,7 @@ class Workspace:
         threads = s["list_model"] if not s.get("error") else []
         conversation = []
         reply_prompts = []
+        prompt_source = None
         if not s.get("error"):
             for m in s.get("conversation", []):
                 key = reference_key(m)
@@ -1093,8 +1094,23 @@ class Workspace:
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
                 if body and key == s.get("active_message") and s.get("view") == "compose" and (s.get("draft") or {}).get("mode") == "reply":
                     from support_email_reply_prompts import build_reply_prompts
-                    reply_prompts = build_reply_prompts(m, {"html": content["html"], "review": body.get("review")})
+                    prompt_source = (m, {"html": content["html"], "review": body.get("review")})
                 conversation.append(row)
+        if prompt_source:
+            from support_email_reply_prompts import clean_text
+            # Only reuse already-rendered messages and an existing, unambiguous match.
+            # No extra body reads, order queries, or provider calls for the menu.
+            history = [{'sender_name': row['sender'].get('name', ''), 'own': row['own'],
+                        'message': clean_text(row['html'])} for row in conversation
+                       if row.get('html') and row['key'] != s.get('active_message')]
+            match = s.get('context', {}).get('match', {})
+            order = match.get('order') if match.get('state') == 'matched' else None
+            safe_order = {k: order[k] for k in ('order_name', 'customer_name', 'created_at', 'fulfillment_status')
+                          if k in order} if order else {}
+            if order:
+                safe_order['lines'] = [{k: line[k] for k in ('product_title', 'variant_title') if k in line}
+                                       for line in order.get('lines', [])]
+            reply_prompts = build_reply_prompts(*prompt_source, thread_context=history, order_context=safe_order)
         draft = s.get("draft")
         public_draft = None
         if draft:

@@ -15,6 +15,9 @@ assert.match(copy,/4000:6500/);assert.match(source,/closeReplyPrompts\(\);root.q
   const prompt={id:'five_star_review',text:'Exact complete prompt',error:''};const before=JSON.stringify(prompt);let copied;
   assert.deepEqual(await copyReplyPrompt(prompt,{writeText:async text=>copied=text}),{ok:true,message:'✓ Prompt copied — paste into ChatGPT'});
   assert.equal(copied,prompt.text);assert.equal(JSON.stringify(prompt),before);
+  const returnPrompt={id:'change_of_mind_return',label:'CHANGE OF MIND RETURN',text:'Return prompt with current customer context',error:''};
+  assert.equal((await copyReplyPrompt(returnPrompt,{writeText:async text=>copied=text})).ok,true);
+  assert.equal(copied,returnPrompt.text);
   assert.equal((await copyReplyPrompt(prompt,{writeText:async()=>{throw Error('denied');}})).ok,false);
   assert.equal((await copyReplyPrompt(prompt,undefined)).ok,false);
   let called=false;
