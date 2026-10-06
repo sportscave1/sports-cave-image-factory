@@ -811,6 +811,8 @@ def _prodigi_status_from_sheet(value):
 
 def prodigi_submission_blockers(row):
     blockers = []
+    if not _prodigi_clean(row.get("variant_title") or row.get("shopify_variant_title")):
+        blockers.append("Missing variant metadata; repair the order line before fulfilment")
     if not _prodigi_clean(row.get("shopify_order_id") or row.get("shopify_order_name")):
         blockers.append("Missing Shopify order line")
     if not _prodigi_clean(row.get("shopify_line_item_id")):
@@ -4253,6 +4255,10 @@ def prodigi_save_dispatch_row(
     manual_override=None,
     ensure_schema_first=True,
 ):
+    if status in {"Submitted", "Complete", "Submitted to Prodigi", "Fulfilled in Shopify"} and not _prodigi_clean(
+        base_row.get("variant_title") or base_row.get("shopify_variant_title")
+    ):
+        raise ValueError("Missing variant metadata; repair the order line before fulfilment")
     _, saved = prodigi_upsert_dispatch_row(
         [],
         base_row,
@@ -4541,6 +4547,8 @@ def prodigi_line_confirmation_defaults(row):
 
 def prodigi_dispatch_blockers(row, answers):
     blockers = []
+    if not _prodigi_clean(row.get("variant_title") or row.get("shopify_variant_title")):
+        blockers.append("Missing variant metadata; repair the order line before fulfilment")
     if not row.get("shopify_order_name"):
         blockers.append("Missing Shopify order")
     if not row.get("product_title"):

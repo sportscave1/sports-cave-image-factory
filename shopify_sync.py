@@ -3502,6 +3502,7 @@ def _address_summary(address):
 
 
 def normalize_order(node, store_domain):
+    from order_variant_metadata import variant_title as resolve_variant_title
     customer = node.get("customer") or {}
     shipping_address = node.get("shippingAddress") or {}
     shipping_lines = ((node.get("shippingLines") or {}).get("nodes") or [])
@@ -3546,7 +3547,8 @@ def normalize_order(node, store_domain):
                 "shopify_product_id": product.get("id") or "",
                 "product_title": product.get("title") or item.get("title") or "",
                 "product_handle": product.get("handle") or "",
-                "variant_title": item.get("variantTitle") or variant.get("title") or "",
+                "variant_title": resolve_variant_title(
+                    item.get("variantTitle") or variant.get("title"), custom_attributes),
                 "variant_id": variant.get("id") or "",
                 "shopify_variant_id": variant.get("id") or "",
                 "sku": item.get("sku") or variant.get("sku") or "",

@@ -14811,8 +14811,18 @@ def _upsert_order(cur, order):
             remote_updated_at=EXCLUDED.remote_updated_at,
             processed_at=EXCLUDED.processed_at,
             cancelled_at=EXCLUDED.cancelled_at,
-            raw_json=EXCLUDED.raw_json,
-            raw=EXCLUDED.raw,
+            raw_json=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+                THEN EXCLUDED.raw_json || jsonb_build_object(
+                    '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
+                    'shipping_method', shopify_orders.raw_json->'shipping_method',
+                    'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
+                ELSE EXCLUDED.raw_json END,
+            raw=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+                THEN EXCLUDED.raw || jsonb_build_object(
+                    '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
+                    'shipping_method', shopify_orders.raw_json->'shipping_method',
+                    'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
+                ELSE EXCLUDED.raw END,
             synced_at=now(),
             updated_at=now()
         """,
@@ -19119,6 +19129,7 @@ def _name_from_address(address):
 
 
 def normalize_rest_order(payload):
+    from order_variant_metadata import variant_title as resolve_variant_title
     customer = payload.get("customer") or {}
     shipping = payload.get("shipping_address") or {}
     billing = payload.get("billing_address") or {}
@@ -19151,7 +19162,8 @@ def normalize_rest_order(payload):
                 "variant_id": _shopify_gid("ProductVariant", variant_id) if variant_id else "",
                 "product_title": item.get("title") or item.get("name") or "",
                 "product_handle": "",
-                "variant_title": item.get("variant_title") or item.get("variant") or "",
+                "variant_title": resolve_variant_title(
+                    item.get("variant_title") or item.get("variant"), properties),
                 "sku": item.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
                 "custom_attributes": properties,
@@ -22239,6 +22251,8 @@ def save_manual_order_line_edition(
     duplicate_confirmed=False,
 ):
     """Save a certificate-only value; database triggers preserve every revision."""
+    from security_protection import sensitive_admin
+    sensitive_admin(actor)
 
     source = _manual_edition_source_channel(source_channel)
     order_id = canonical_shopify_gid_or_raw("Order", external_order_id)
@@ -22343,6 +22357,8 @@ def get_manual_order_line_edition(*, source_channel, external_order_id,
 
 def remove_manual_order_line_edition(*, manual_id, actor):
     """Remove only the active certificate override, retaining the DB audit trail."""
+    from security_protection import sensitive_admin
+    sensitive_admin(actor)
     actor_id = _coerce_uuid_or_none((actor or {}).get("id"))
     if not actor_id:
         raise PermissionError("An authenticated administrator is required.")
