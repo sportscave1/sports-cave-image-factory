@@ -121,6 +121,7 @@ def create_user_auth_token(
     now=None,
     days=DEFAULT_AUTH_DAYS,
     session_version=1,
+    remember=False,
 ):
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id:
@@ -131,6 +132,7 @@ def create_user_auth_token(
         "v": USER_TOKEN_VERSION,
         "sub": clean_user_id,
         "sv": _session_version(session_version),
+        "remember": bool(remember),
         "iat": issued_at,
         "exp": expires_at,
         "nonce": secrets.token_urlsafe(16),
@@ -221,6 +223,8 @@ def validate_user_auth_token(
     user_id = str(payload.get("sub") or "").strip()
     if not user_id:
         return False, "bad-user", {}
+    if "remember" in payload and type(payload["remember"]) is not bool:
+        return False, "bad-remember", {}
     current_time = int(time.time() if now is None else now)
     try:
         expires_at = int(payload["exp"])
