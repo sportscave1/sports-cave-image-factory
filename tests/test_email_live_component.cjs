@@ -35,7 +35,7 @@ const timers=new Map(),lifecycle={},parent={};let timerId=0;
 const timerContext={window:{parent,addEventListener(type,fn){lifecycle[type]=fn;}},liveTick(){},
   setInterval(fn){timers.set(++timerId,fn);return timerId;},clearInterval(id){timers.delete(id);}};
 vm.createContext(timerContext);
-vm.runInContext(source.slice(source.indexOf('// Only standalone'),source.indexOf('let sentTimer=')),timerContext);
+vm.runInContext(source.slice(source.indexOf('// Only standalone'),source.indexOf('let autosaveTimer=')),timerContext);
 assert.equal(timers.size,1);checks++;
 parent.SportsCaveTopBar={};[...timers.values()][0]();assert.equal(timers.size,0);checks++;
 lifecycle.pagehide();assert.equal(timers.size,0);checks++;

@@ -52,8 +52,8 @@ def render(st, user):
         except Exception:
             st.error('Settings could not be saved. No changes were confirmed.')
     with st.expander('Shopify installation & status',expanded=True):
-        st.caption('Install once before </body> in layout/theme.liquid. Future settings are controlled here. Use the code box copy button.')
-        st.code('<script src="'+policy.PUBLIC_ORIGIN+'/storefront-protection.js" defer></script>',language='html')
+        st.caption('Shopify CDN installation: the deployed snippet loads the dedicated JS/CSS assets. Future settings are controlled here. Reference integration before </body> in layout/theme.liquid:')
+        st.code("{% render 'sports-cave-image-protection' %}",language='liquid')
         st.link_button('Open Sports Cave DEV — Codex',DEV_PREVIEW)
         if st.button('Verify DEV installation'):
             from image_protection_status import verify_dev

@@ -8,6 +8,7 @@ import smtplib
 import ssl
 from threading import Lock
 import uuid
+import time
 
 from support_email_provider import MailboxError
 
@@ -56,6 +57,7 @@ class SMTPProvider:
 
     def submit(self, mime, *, mailbox, progress=None):
         cfg, conn, data_started = self.configuration, None, False
+        started=time.monotonic()
         if not cfg.configured or cfg.address.casefold() != mailbox.casefold():
             return {"status": "rejected", "notice": "SMTP is not configured for this mailbox."}
         try:
@@ -73,30 +75,41 @@ class SMTPProvider:
             options = [f"size={len(mime['bytes'])}"] if maximum else []
             code, _ = conn.mail(cfg.address, options=options)
             if code != 250:
-                return {"status": "rejected", "notice": "Mail server rejected the sender. Nothing was sent."}
+                return {"status": "rejected", "error_category":"PROVIDER_4XX" if code<500 else "PROVIDER_5XX",
+                        "retryable":400<=code<500,"notice": "Mail server rejected the sender. Nothing was sent."}
             # All recipients must be accepted before DATA; avoid partial-recipient sends/retries.
             refused = False
+            temporary = True
             for recipient in mime["recipients"]:
                 code, _ = conn.rcpt(recipient)
                 refused = refused or code not in (250, 251)
+                if code not in (250,251) and not 400<=code<500:temporary=False
             if refused:
                 conn.rset()
-                return {"status": "rejected", "notice": "A recipient was rejected. Nothing was sent; check the addresses."}
+                return {"status": "rejected", "retryable":temporary,
+                        "error_category":"PROVIDER_4XX" if temporary else "PROVIDER_5XX",
+                        "notice": "A recipient was rejected. Nothing was sent; check the addresses."}
             data_started = True
             report_progress(progress, 75, "Sending email…")
             code, _ = conn.data(mime["bytes"])
             if code == 250:
                 report_progress(progress, 100, "Sent")
                 return {"status": "accepted", "notice": "Mail server accepted the email."}
-            return {"status": "rejected", "notice": "Mail server rejected the message. Nothing was accepted."}
-        except smtplib.SMTPDataError:
-            return {"status": "rejected", "notice": "Mail server rejected the message. Nothing was accepted."}
+            return {"status": "rejected", "retryable":400<=code<500,
+                    "error_category":"PROVIDER_4XX" if code<500 else "PROVIDER_5XX",
+                    "notice": "Mail server rejected the message. Nothing was accepted."}
+        except smtplib.SMTPDataError as error:
+            return {"status": "rejected", "retryable":400<=error.smtp_code<500,
+                    "error_category":"PROVIDER_4XX" if 400<=error.smtp_code<500 else "PROVIDER_5XX", "notice": "Mail server rejected the message. Nothing was accepted."}
         except Exception as error:
             LOGGER.warning("Email SMTP operation failed (%s)", type(error).__name__)
+            category='AUTH' if isinstance(error,smtplib.SMTPAuthenticationError) else 'TIMEOUT' if isinstance(error,TimeoutError) else 'NETWORK' if isinstance(error,(OSError,smtplib.SMTPServerDisconnected)) else 'UNKNOWN'
             if data_started:
-                return {"status": "unknown", "notice": "Delivery status is uncertain. Do not resend; check Sent and the recipient first."}
-            return {"status": "rejected", "notice": "Could not send email. Check SMTP connection settings."}
+                return {"status": "unknown", "error_category":category,"notice": "Confirming original send. Do not resend."}
+            return {"status": "rejected", "retryable":category in {'TIMEOUT','NETWORK'},
+                    "error_category":category,"notice": "Could not send email. Check SMTP connection settings."}
         finally:
+            LOGGER.info('email_smtp_attempt message_id=%s duration_ms=%.1f data_started=%s',mime.get('message_id',''),(time.monotonic()-started)*1000,data_started)
             if conn is not None:
                 try:
                     conn.quit()
@@ -116,6 +129,13 @@ class SendRegistry:
         """Read-only recovery after an interrupted Streamlit run."""
         with self.lock:
             return dict(self.receipts.get((mailbox.casefold(), operation_id), {}))
+
+    def confirm_present(self, operation_id, mailbox):
+        """Positive Sent-folder Message-ID evidence, never inferred from absence."""
+        with self.lock:
+            row=self.receipts[(mailbox.casefold(),operation_id)]
+            row.update(status='accepted',notice='Sent',sent_at=datetime.now(timezone.utc).isoformat())
+            return dict(row)
 
     def submit(self, operation_id, mailbox, mime, provider, *, progress=None):
         operation_id = str(uuid.UUID(operation_id))

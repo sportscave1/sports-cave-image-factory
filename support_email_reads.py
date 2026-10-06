@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import logging
 import threading
 import time
+import random
+import uuid
 
 from support_email_provider import ImapProvider, MailboxError
 from support_email_snapshot import SnapshotStore
@@ -90,15 +92,38 @@ class ReadService:
         if not self.sync_lock.acquire(blocking=False):
             return
         try:
+            owner=str(uuid.uuid4());leased=False
+            if isinstance(self.store,SnapshotStore) and SNAPSHOT_DB.ready():
+                try:
+                    leased=self.store.claim('inbox-index:'+self.config.address,owner)
+                    if not leased:
+                        self.restore()
+                        return
+                except Exception as error:
+                    SNAPSHOT_DB.failed(error,'snapshot_lease')
             with self.lock:
                 forced, self.manual_refresh = self.manual_refresh, False
             with operation(background=True, force=forced):
                 self._sync()
         finally:
+            if locals().get('leased'):
+                try:self.store.release('inbox-index:'+self.config.address,owner)
+                except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_release')
             self.sync_lock.release()
+
+    def health_snapshot(self):
+        with self.lock:health=dict(self.health)
+        last=health.get('last_success_at')
+        if health['state']=='CONNECTED' and (not last or time.time()-last>180):
+            health.update(state='RECONNECTING',category='stale')
+        health['database_healthy']=SNAPSHOT_DB.ready() and health.get('database_verified',False)
+        health['authentication_valid']=bool(last and health.get('category')!='authentication' and time.time()-last<180)
+        health['worker_running']=bool(self.thread and self.thread.is_alive())
+        return health
 
     def _sync(self):
         started = self.clock()
+        run_id=str(uuid.uuid4())
         observed_at = time.time()  # Fence by read start, never late completion.
         with self.lock: epoch = self.epoch
         try:
@@ -116,6 +141,11 @@ class ReadService:
                     refreshed_at=datetime.fromtimestamp(delta['checked_at'],timezone.utc))
             else:
                 snap = self.provider.list_headers(50,'INBOX',previews=False)
+            # Same provider identity repeated in a response is still one message;
+            # different UIDs remain distinct even with identical sender/subject.
+            raw=snap['messages']
+            unique={(m['folder'],str(m['uidvalidity']),str(m['uid'])):m for m in raw}
+            snap=dict(snap,messages=list(unique.values()))
             value = dict(old,snapshot=snap,synced_at=time.time(),observed_at=observed_at)
             # Publish the useful list BEFORE optional folder discovery/database writes.
             with self.lock:
@@ -124,6 +154,8 @@ class ReadService:
                 self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0,
                     last_success_at=value['synced_at'],duration_ms=round((self.clock()-started)*1000,1),
                     conversations_processed=len(snap['messages']))
+                self.health.update(sync_run_id=run_id,messages_examined=len(raw),
+                    duplicates_skipped=len(raw)-len(unique))
             if not old.get('folders') or time.time()-old.get('folders_at',0)>300:
                 try:
                     value['folders'] = self.provider.discover_folders(counts=False)
@@ -131,11 +163,13 @@ class ReadService:
                 except Exception:
                     pass  # Folder discovery cannot discard a valid Inbox snapshot.
             if SNAPSHOT_DB.ready():
-                try:self.store.save_index(self.config,value)
+                try:
+                    self.store.save_index(self.config,value)
+                    with self.lock:self.health['database_verified']=True
                 except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_write')
             with self.lock:
                 if epoch == self.epoch:self.value = value
-            LOGGER.info('email_index_sync duration_ms=%.1f headers=%d', (self.clock()-started)*1000,len(snap['messages']))
+            LOGGER.info('email_index_sync sync_run_id=%s duration_ms=%.1f headers=%d', run_id,(self.clock()-started)*1000,len(snap['messages']))
         except Exception as error:
             code = getattr(error,'code','unknown')
             with self.lock:
@@ -144,8 +178,9 @@ class ReadService:
                     return
                 failures = min(7,self.health['attempts']+1)
                 delay = 900 if code in {'authentication','configuration','tls'} else min(300,15*2**(failures-1))
+                delay=max(float(getattr(error,'retry_after',0) or 0),delay+random.uniform(0,min(5,delay*.1)))
                 self.health.update(state='RECONNECTING',category=code,attempts=failures,retry_at=self.clock()+delay)
-            LOGGER.warning('email_index_sync category=%s retry_seconds=%d duration_ms=%.1f',code,delay,(self.clock()-started)*1000)
+            LOGGER.warning('email_index_sync sync_run_id=%s category=%s retry_seconds=%d duration_ms=%.1f',run_id,code,delay,(self.clock()-started)*1000)
 
     def run(self):
         while not self.stop.is_set():
@@ -161,7 +196,8 @@ class ReadService:
         try:
             cached = self.store.read_index(self.config)
             with self.lock:
-                if not self.value.get('snapshot') and cached.get('snapshot'):
+                self.health['database_verified']=True
+                if cached.get('snapshot') and cached.get('observed_at',0)>self.value.get('observed_at',-1):
                     self.value = cached
                     self.health['last_success_at'] = cached.get('synced_at')
         except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_read')

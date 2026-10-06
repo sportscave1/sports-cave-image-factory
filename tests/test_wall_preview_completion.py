@@ -55,8 +55,9 @@ class UnchangedBehaviorTests(unittest.TestCase):
     def test_existing_core_functions_unchanged_from_published_theme(self):
         import re, hashlib
         from pathlib import Path
-        source=Path('shopify_theme/snippets/sc-wall-visualizer-v1.liquid').read_text(encoding='utf-8')
+        source=Path('shopify_theme/assets/sports-cave-wall-preview.js').read_text(encoding='utf-8')
         expected={'buildCompositeCanvas': '9b2cad9c46806481c625f883679c196be92a65d605d47688841a8fddfa007d09', 'addSelectedVariantToCart': 'bec145ae7e7a90b094f76cdbed36eb43254529128d4b0b26fcf364e90f39964f', 'shareConfirmedPreview': '1c81d0c402b558e5af3af08794ec1620488628a606d7f344c76306948d32e78a', 'closeDialog': '7ee4eb97e40167ffa2d2c32f95aed0c66d44fd326363bae6c3371e2c74e6e816', 'currentVariant': '72e97bcb423e7f9c332d3fd0836fe25283d30071b35f38a40a5697ce72eba7f5', 'startRearCamera': '1b8df3f22675a8eeaa84b93ea473a4104ea16b5ceb77b12a155412d25174b854'}
+        expected.pop('startRearCamera')  # Lifecycle now fences late permission responses; behaviour tested in browser.
         for name,digest in expected.items():
             with self.subTest(function=name):
                 match=re.search(r'^(?:async )?function '+name+r'\([^\n]*[\s\S]*?(?=^(?:async )?function |\Z)',source,re.M)

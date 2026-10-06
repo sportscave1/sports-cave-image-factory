@@ -12,8 +12,9 @@ assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'failed',ret
 assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'appended'}}}),/pending|Retry|Check/);
 assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Check Sent copy/);
 assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Retry/);
-assert.match(sendStatus({send_result:{status:'unknown'}}),/⚠ Send status uncertain/);
-assert.match(sendStatus({send_result:{status:'unknown'}}),/Do not resend yet/);
+assert.match(sendStatus({send_result:{status:'unknown'}}),/Confirming original send/);
+assert.match(sendStatus({send_result:{status:'unknown'}}),/Do not resend/);
+assert.match(sendStatus({send_result:{status:'unknown'},uncertain_checks:6}),/Unable to confirm original send/);
 assert.match(sendStatus({send_result:{status:'rejected'}}),/✕ Not sent/);
 const processing=sendStatus({send_result:{status:'in_progress'},send_progress:{percent:100}});
 assert.doesNotMatch(processing,/✓ Sent|%|<progress/);assert.match(processing,/Validating email/);

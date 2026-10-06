@@ -5,6 +5,7 @@ Run: .venv/Scripts/python.exe -m streamlit run tests/fixtures/email_desktop_prev
 from pathlib import Path
 import sys
 import time
+import os
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -61,6 +62,10 @@ def preview():
         st.session_state.fixture_mailbox = DesktopMailbox()
         st.session_state.fixture_smtp = fixture_smtp()
         st.session_state.fixture_registry = smtp.SendRegistry()
+        if os.environ.get('EMAIL_TEST_POSTGRES')=='1':
+            from support_email_durable import DurableRegistry,MailStore
+            from tests.test_email_durable_delivery import Connection
+            st.session_state.fixture_registry=DurableRegistry(MailStore(connect=Connection))
         st.session_state.fixture_settings = default_settings()
     with (patch.object(provider.imaplib, "IMAP4_SSL", side_effect=AssertionError("Real IMAP forbidden")),
           patch.object(smtp.smtplib, "SMTP_SSL", side_effect=AssertionError("Real SMTP forbidden")),
@@ -73,7 +78,9 @@ def preview():
         state=st.session_state.setdefault("fixture_workspace",{})
         w=Workspace(state,fixture_user,CONFIG,smtp.SMTPConfiguration(password="fixture-only"),
                     imap=st.session_state.fixture_mailbox,smtp=st.session_state.fixture_smtp,registry=st.session_state.fixture_registry)
-        if not state.get("loaded"): w.load()
+        if not state.get("loaded"):
+            w.load()
+            w.restore_draft()
         event=get_component()(model=w.model(),key="fixture-email",default=None)
         if event and w.handle(event):
             if save.called:

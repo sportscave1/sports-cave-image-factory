@@ -21,7 +21,7 @@ def verify_dev():
             parser=Scripts();parser.feed(page.text)
             if not theme:
                 return f'Unable to verify DEV theme identity · Checked {checked}'
-            if PUBLIC_ORIGIN+'/storefront-protection.js' not in parser.sources:
+            if not any('/assets/sports-cave-image-protection.js' in src or src==PUBLIC_ORIGIN+'/storefront-protection.js' for src in parser.sources):
                 return f'Not detected on DEV · Checked {checked}'
             config=session.get(PUBLIC_ORIGIN+'/api/storefront-protection/config',timeout=(3,8))
             config.raise_for_status()

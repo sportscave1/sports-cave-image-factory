@@ -54,6 +54,29 @@ class InboxReliability(unittest.TestCase):
         self.assertEqual(len(self.reads.value['snapshot']['messages']),50)
         self.assertEqual(len([c for c in self.mail.calls if c[0]=='headers']),1)
 
+    def test_duplicate_provider_rows_are_idempotent_without_merging_distinct_messages(self):
+        from support_email_logic import build_threads
+        snapshot=self.mail.list_headers(50,'INBOX',previews=False)
+        original=snapshot['messages'][0]
+        duplicate=deepcopy(original)
+        self.assertEqual(sum(len(t['messages']) for t in build_threads([original,duplicate],CONFIG.address)),1)
+        separate=deepcopy(original);separate['uid']='9999';separate['message_id']='<separate@example.test>'
+        self.assertEqual(len(build_threads([original,separate],CONFIG.address)),2)
+        self.mail.list_headers=Mock(return_value=dict(snapshot,messages=[original,duplicate,separate]))
+        self.reads.sync()
+        self.assertEqual(len(self.reads.value['snapshot']['messages']),2)
+        self.assertEqual(self.reads.health['duplicates_skipped'],1)
+
+    def test_stale_connection_cannot_remain_green(self):
+        self.ready();self.reads.health['last_success_at']=time.time()-600
+        health=self.reads.health_snapshot()
+        self.assertEqual(health['state'],'RECONNECTING')
+        self.assertFalse(health['authentication_valid'])
+
+    def test_overlapping_index_sync_returns_without_second_provider_call(self):
+        with self.reads.sync_lock:self.reads.sync()
+        self.assertEqual(self.mail.calls,[])
+
     def test_snapshot_remains_during_disconnect_and_recovers(self):
         self.ready();self.w.load(defer_body=True)
         before=deepcopy(self.w.model());self.mail.fail=True

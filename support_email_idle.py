@@ -250,6 +250,7 @@ class IdleLifecycle:
     def __init__(self, app, factory=None):
         self.app, self.factory, self.watcher = app, factory, None
         self.inbox_reads = None
+        self.outbox = None
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'lifespan':
@@ -261,6 +262,8 @@ class IdleLifecycle:
                 await asyncio.to_thread(self.watcher.close)
             if message['type'] == 'lifespan.shutdown' and self.inbox_reads:
                 await asyncio.to_thread(self.inbox_reads.close)
+            if message['type'] == 'lifespan.shutdown' and self.outbox:
+                await asyncio.to_thread(self.outbox.close)
             return message
 
         async def lifecycle_send(message):
@@ -272,6 +275,10 @@ class IdleLifecycle:
                         from support_email_reads import service
                         self.inbox_reads = service(load_configuration())
                         self.inbox_reads.start()
+                        from support_email_durable import OutboxWorker
+                        from support_email_smtp import load_smtp_configuration
+                        self.outbox=OutboxWorker(load_configuration(),load_smtp_configuration())
+                        self.outbox.start()
                 except Exception as error:
                     # IDLE is optional; resource/thread initialization cannot prevent
                     # an otherwise healthy web server from serving polling/manual mail.

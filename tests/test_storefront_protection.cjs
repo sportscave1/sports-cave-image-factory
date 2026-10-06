@@ -2,9 +2,9 @@ const {chromium}=require('playwright');
 const fs=require('fs'),assert=require('assert');
 (async()=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});
- const source=fs.readFileSync('storefront-protection.js','utf8');
+ const source=fs.readFileSync('shopify_theme/assets/sports-cave-image-protection.js','utf8');
  let checks=0;
- const html=`<html><head></head><body>
+ const html=`<html><head><style>${fs.readFileSync("shopify_theme/assets/sports-cave-image-protection.css","utf8")}</style></head><body>
  <div class="product__media"><img id="art" alt="Artwork" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></div>
  <p id="text">Ordinary product description</p><input aria-label="email"><button id="cart">Add to Cart</button>
  <select aria-label="Size"><option>S</option><option>M</option></select><button id="next">Next image</button>

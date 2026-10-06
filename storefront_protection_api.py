@@ -10,6 +10,7 @@ from image_protection import DEFAULTS, public_policy
 
 ALLOWED_ORIGINS = frozenset(('https://www.sportscaveshop.com','https://sportscaveshop.com'))
 SCRIPT = Path(__file__).with_name('storefront-protection.js').read_text(encoding='utf-8')
+ASSETS = Path(__file__).parent / 'shopify_theme' / 'assets'
 
 
 async def config(request):
@@ -42,4 +43,12 @@ async def script(request):
     })
 
 
-ROUTES=(('/api/storefront-protection/config',config,('GET','OPTIONS')),('/storefront-protection.js',script,('GET',)))
+async def runtime(request):
+    return Response((ASSETS / 'sports-cave-image-protection.js').read_text(encoding='utf-8'),media_type='application/javascript',headers={'Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'})
+
+
+async def stylesheet(request):
+    return Response((ASSETS / 'sports-cave-image-protection.css').read_text(encoding='utf-8'),media_type='text/css',headers={'Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'})
+
+
+ROUTES=(('/api/storefront-protection/config',config,('GET','OPTIONS')),('/storefront-protection.js',script,('GET',)),('/storefront-protection-runtime.js',runtime,('GET',)),('/storefront-protection.css',stylesheet,('GET',)))

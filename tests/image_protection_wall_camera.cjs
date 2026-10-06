@@ -7,7 +7,7 @@ const fixture=require('./wall_preview_completion_fixture.cjs');
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',r=>{
   const u=r.request().url();
-  if(u.endsWith('/storefront-protection.js'))return r.fulfill({contentType:'application/javascript',body:fs.readFileSync('storefront-protection.js','utf8')});
+  if(u.endsWith('/storefront-protection.js'))return r.fulfill({contentType:'application/javascript',body:fs.readFileSync('shopify_theme/assets/sports-cave-image-protection.js','utf8')});
   if(u.endsWith('/api/storefront-protection/config'))return r.fulfill({contentType:'application/json',body:'{"enabled":true}'});
   if(u.endsWith('/products/test-art'))return r.fulfill({contentType:'text/html',body:fixture()+'<script src="/storefront-protection.js" defer></script>'});
   if(u.endsWith('/art.png'))return r.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="navy"/></svg>'});

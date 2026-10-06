@@ -14,7 +14,7 @@ DEFAULTS = dict(enabled=True, disableRightClick=True, preventImageDragging=True,
                 watermarkText='Sports Cave', watermarkOpacity=0.25,
                 watermarkPosition='bottom-right')
 PUBLIC_ORIGIN = 'https://sports-cave-image-factory.onrender.com'
-SCRIPT_VERSION = '2026-10-06.2'
+SCRIPT_VERSION = '2026-10-06.3'
 _cache = None
 _expires = 0.0
 _lock = threading.Lock()

@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('fs'),vm=require('vm');
-const source=fs.readFileSync('shopify_theme/snippets/sc-wall-visualizer-v1.liquid','utf8');
+const source=fs.readFileSync('shopify_theme/assets/sports-cave-wall-preview.js','utf8');
 const queue=source.slice(source.indexOf('function queuePreviewSave('),source.indexOf('function startPlacementPersistenceInBackground('));
 (async()=>{let calls=[],events=[],resolveOld;const old=new Promise(r=>resolveOld=r);let attempts=0;
 let sequence=0;const c={URLSearchParams,state:{},makeId:()=>`capture-${++sequence}`,saveTail:Promise.resolve(),archivePromise:null,console,fireLocalPreviewEvent(name){events.push(name);},archiveMetadata(){return new URLSearchParams('client_preview_id=fixture');},async archiveWithRetry(blob){calls.push(blob);if(blob==='failure')throw Error('mock outage');return {ok:true,archive_status:blob==='archived'?'archived':'queued'};}};vm.createContext(c);vm.runInContext(queue,c);

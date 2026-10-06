@@ -47,13 +47,18 @@ def formatted_date(value, user):
 class Workspace:
     def __init__(self, state, user, imap_config, smtp_config, *, imap=None, smtp=None, registry=None, progress=None):
         self.state, self.user, self.config, self.smtp_config = state, user, imap_config, smtp_config
+        production = imap is None
         if imap is None:
             imap = ImapProvider(imap_config)
             if type(imap).__module__ == 'support_email_provider':
                 from support_email_reads import AsyncInbox
                 imap = AsyncInbox(imap_config)
         self.imap, self.smtp = imap, smtp or SMTPProvider(smtp_config)
+        if registry is None and production:
+            from support_email_durable import REGISTRY
+            registry = REGISTRY
         self.registry = registry or SEND_REGISTRY
+        self.durable = getattr(self.registry, 'store', None)
         self.progress = progress
         for key, default in {"cache": {}, "processed": set(), "limit": 50, "query": "", "field": "TEXT",
                              "settings": default_settings(), "expanded": set(), "notice": "", "view": "mail",
@@ -80,6 +85,9 @@ class Workspace:
 
     def load(self, *, force=False, previews=True, defer_body=False):
         self.state.update(initial_load_pending=False, initial_load_attempted=True)
+        if self.durable and self.state.get('folder')==self.roles.get('drafts') and self.roles.get('drafts'):
+            try:self.state['local_drafts']=self.durable.list_drafts(self.config.address,self.user['id'])
+            except Exception:self.state['notice']='Saved drafts are temporarily unavailable; retry shortly.'
         if not force and (self.state.get("recovery_state") == "stopped" or
                           time.monotonic() < self.state.get("load_retry_at", 0)):
             if self.state.get("snapshot_view") != (self.state.get("folder"), self.state["query"], self.state["field"]):
@@ -585,6 +593,12 @@ class Workspace:
             if action == "load_initial_mailbox":
                 if self.state.pop("initial_load_pending", False):
                     self.load(defer_body=True)
+                    self.restore_draft()
+            elif action == 'autosave_draft':
+                self.autosave_draft()
+            elif action == 'mail_diagnostics':
+                if not os_accounts.is_admin(self.user):raise PermissionError('Admin required.')
+                self.state['mail_diagnostics'] = self.durable.diagnostics(self.config.address) if self.durable else {}
             elif action == 'sync_index':
                 for key in list(self.cache):
                     if key[0] == 'headers':self.cache.pop(key,None)
@@ -649,6 +663,7 @@ class Workspace:
             elif action == "compose":
                 if self.state.get("send_stage") in {"SENDING", "SAVING_SENT_COPY"}:
                     raise ComposeError("Wait for the current send to finish.")
+                self.autosave_draft()
                 mode = event.get("mode", "new")
                 if mode not in {"new", "reply", "reply_all", "forward"}:
                     raise ComposeError("Unknown compose action.")
@@ -666,6 +681,13 @@ class Workspace:
                     thread = self._thread()
                     self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
                 self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None, send_stage="")
+            elif action == 'open_local_draft':
+                if self.state.get('send_result',{}).get('status') in {'in_progress','unknown'}:
+                    raise ComposeError('Resolve the current send before opening another draft.')
+                draft_id=str(uuid.UUID(str(event.get('draft_id'))))
+                self.autosave_draft()
+                self.state.update(draft=None,send_result={},send_stage='',sent_result={})
+                self.restore_draft(draft_id)
             elif action in {"attach", "remove_attachment", "forward_attachment"}:
                 draft = self._editable_draft()
                 if action == "attach":
@@ -710,6 +732,7 @@ class Workspace:
                 draft = self._editable_draft()
                 if draft and draft.get("mailbox_ref"):
                     self._trash_draft(draft["mailbox_ref"])
+                if draft and self.durable:self.durable.discard(self.config.address,self.user['id'],draft['id'])
                 self.state.update(draft=None, draft_pending=None, view="mail", send_result={})
             elif action in {"close_composer", "close_panel", "resume_composer", "settings", "context"}:
                 if action == "context":
@@ -736,6 +759,8 @@ class Workspace:
                 self.state["notice"] = "Your signature preference was saved."
             else:
                 raise ComposeError("Unknown Email action.")
+            if self.durable and action in {'attach','remove_attachment','forward_attachment','close_composer','save_draft','compose','edit_draft'}:
+                self.autosave_draft()
         except (MailboxError, ComposeError, store.SupportStorageError) as error:
             if self.state.get("send_stage") == "VALIDATING":
                 self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
@@ -748,7 +773,10 @@ class Workspace:
         except Exception as error:
             LOGGER.warning("Email action failed (%s)", type(error).__name__)
             self.state["notice"] = "Could not complete this Email action. Refresh and try again."
+            if event.get('action') in {'send','advance_send'}:
+                self.state['notice']='The saved send is being checked. Do not resend.'
             if self.state.get("send_stage") == "VALIDATING":
+                self.state['notice']='Send preparation could not be confirmed. Keep this draft open; check the saved send before retrying.'
                 self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
         return True
 
@@ -867,6 +895,37 @@ class Workspace:
         self.state["send_stage"] = "SAVING_SENT_COPY" if percent == 100 else "SENDING"
         report_progress(self.progress, percent, label)
 
+    def autosave_draft(self):
+        draft=self.state.get('draft')
+        if not self.durable or not draft or self.state.get('send_result',{}).get('status') in {'accepted','unknown','in_progress'}:return
+        try:
+            self.durable.save_draft(self.config.address,self.user['id'],draft)
+            self.state['draft_save_status']='Saved'
+        except Exception:
+            self.state['draft_save_status']='Not saved — storage unavailable; keep this tab open'
+            raise
+
+    def restore_draft(self,draft_id=None):
+        if not self.durable or self.state.get('draft'):return
+        if not self.state.get('last_sent'):
+            row=self.durable.latest_sent(self.config.address,self.user['id'])
+            if row:
+                from support_email_durable import decode,receipt
+                from email.parser import BytesHeaderParser
+                mime=decode(row['payload'])
+                self.state['last_sent']={'operation_id':str(row['operation_id']), 'mime':mime,
+                    'result':receipt(row),'subject':str(BytesHeaderParser().parsebytes(mime['bytes']).get('Subject','')),
+                    'checks':0,'copy':{'status':row['copy_status'],'notice':'Saved locally; mailbox copy is synchronising.'}}
+                self._sent_preview(self.state['last_sent'])
+        draft=self.durable.restore_draft(self.config.address,self.user['id'],draft_id)
+        if not draft:return
+        self.state.update(draft=draft,view='compose',draft_save_status='Saved')
+        row=self.durable.get(self.config.address,draft['operation_id'])
+        if row:
+            from support_email_durable import decode,receipt
+            self.state.update(outgoing_mime=decode(row['payload']),send_result=receipt(row),
+                send_stage='SAVING_SENT_COPY' if row['status']=='accepted' else 'SENDING' if row['status'] in {'queued','in_progress'} else row['status'].upper())
+
     def send(self, operation_id):
         """An explicit Send click validates and freezes the exact outgoing MIME once."""
         old = self.state.get("send_result", {})
@@ -880,22 +939,32 @@ class Workspace:
             return
         if self.state.get("draft_pending"):
             raise ComposeError("Resolve the pending draft save before sending.")
-        if len(self.state.get("pending_sent", {})) >= 5:
+        if not self.durable and len(self.state.get("pending_sent", {})) >= 5:
             raise ComposeError("Save the pending Sent copies before sending more messages. No email was sent.")
         # handle() enforces Email access for every action. Optional support-workflow
         # metadata is not transport authorization: all permitted users share this
         # send path, even when that metadata is unavailable or marked for review.
         self.state["send_stage"] = "VALIDATING"
         mime = build_mime(draft, self.config.address, self.state["settings"]["sender_name"], self.state["settings"]["signatures"])
+        prepared=None
+        if self.durable:
+            self.autosave_draft()
+            prepared=self.registry.prepare(operation_id,self.config.address,mime,actor=self.user['id'],
+                folder=self.roles.get('sent',''),policy='verify' if self.state['settings']['sent_policy']=='server' else 'append')
+            from support_email_durable import decode
+            mime=decode(self.durable.get(self.config.address,operation_id)['payload'])
         self.state["outgoing_mime"] = mime
-        self.state.update(send_result={"status": "in_progress", "operation_id": operation_id, "notice": "Sending…"},
-                          send_stage="SENDING", send_progress={}, send_finalized=False)
+        self.state.update(send_result=prepared or {"status": "in_progress", "operation_id": operation_id, "notice": "Sending…"},
+                          send_stage='SAVING_SENT_COPY' if prepared and prepared['status']=='accepted' else "SENDING", send_progress={}, send_finalized=False, uncertain_checks=0)
 
     def recover_send(self):
         """Reconcile an interrupted run from metadata only; rendering cannot send mail."""
         result = self.state.get("send_result", {})
-        if result.get("status") == "in_progress":
-            receipt = self.registry.get(result.get("operation_id"), self.config.address)
+        if result.get("status") in {"in_progress", "unknown"}:
+            try:receipt = self.registry.get(result.get("operation_id"), self.config.address)
+            except Exception:
+                self.state['notice']='Saved send receipt is temporarily unavailable. Do not resend.'
+                return
             if receipt and receipt.get("status") != "in_progress":
                 self.state["send_result"] = receipt
                 self.state["send_stage"] = "SAVING_SENT_COPY" if receipt["status"] == "accepted" else receipt["status"].upper()
@@ -926,6 +995,14 @@ class Workspace:
             delivery["audited"] = True
             action = "email_reply_sent" if draft.get("mode") in {"reply", "reply_all"} else "email_forward_sent" if draft.get("mode") == "forward" else "email_sent"
             self.audit(action, result["message_id"])
+        if self.durable:
+            # Acceptance is already committed. IMAP copy work belongs to the
+            # persistent worker and must not delay the successful send response.
+            delivery['copy'] = {'status':'pending','notice':'Saved locally; mailbox copy is synchronising.'}
+            self._sent_preview(delivery)
+            s.update(send_stage='SENT',send_progress={},send_finalized=True,
+                     draft=None,draft_pending=None,view='mail')
+            return
         self.check_sent()
         if draft.get("mailbox_ref") and not delivery.get("draft_cleanup_attempted"):
             delivery["draft_cleanup_attempted"] = True
@@ -939,6 +1016,17 @@ class Workspace:
             LOGGER.warning("Email Sent view unavailable (%s)", type(error).__name__)
             self.state["notice"] = "Email sent. Sent-folder refresh is temporarily unavailable; refresh Sent to view it."
         s.update(send_stage="SENT", send_progress={}, send_finalized=True, draft=None, draft_pending=None, view="mail")
+
+    def _sent_preview(self,delivery):
+        """An accepted local record is readable even while IMAP is unavailable."""
+        from email import policy
+        from email.parser import BytesParser
+        message=BytesParser(policy=policy.default).parsebytes(delivery['mime']['bytes'])
+        body=message.get_body(preferencelist=('plain','html'))
+        if body:
+            text=body.get_content()
+            delivery['html']=sanitize_html(text) if body.get_content_type()=='text/html' else readable_html(text)
+        delivery['to']=str(message.get('To',''))
 
     def _show_sent(self, delivery):
         folder = self.roles.get("sent")
@@ -961,7 +1049,22 @@ class Workspace:
         delivery = self.state.get("pending_sent", {}).get(operation_id) or self.state.get("last_sent", {})
         # Uncertain transport outcomes can only be searched, never appended.
         if result.get("status") == "unknown" and not operation_id:
+            checks=self.state.get('uncertain_checks',0)
+            if automatic and checks>=6:return
+            self.state['uncertain_checks']=checks+1
+            if self.durable:
+                resolved=self.registry.reconcile(result['operation_id'],self.config.address,self.imap,self.roles.get('sent'))
+                if resolved.get('status')=='accepted':
+                    self.state.update(send_result=resolved,send_stage='SAVING_SENT_COPY')
+                    self._finish_send()
+                    return
+                self.state['sent_result']={'status':'unknown','notice':'Original send is not yet confirmed. Do not resend.'}
+                return
             self.state["sent_result"] = reconcile_sent(self.imap, self.state["outgoing_mime"], self.roles.get("sent"))
+            if not self.durable and self.state['sent_result'].get('status')=='present':
+                resolved=self.registry.confirm_present(result['operation_id'],self.config.address)
+                self.state.update(send_result=resolved,send_stage='SAVING_SENT_COPY')
+                self._finish_send()
             return
         if not delivery or (operation_id and operation_id != delivery["operation_id"]):
             return
@@ -1124,6 +1227,11 @@ class Workspace:
             s["signature_source"] = signature_source
         signatures = s["signature_model"]
         return {"mailbox": self.config.address, "configured": self.config.configured,
+            'local_drafts':s.get('local_drafts',[]) if s.get('folder')==self.roles.get('drafts') and not s.get('query') else [],
+            'durable_drafts':bool(self.durable),'draft_save_status':s.get('draft_save_status',''),
+            'uncertain_checks':s.get('uncertain_checks',0),
+            'admin_diagnostics':s.get('mail_diagnostics') if os_accounts.is_admin(user) else None,
+            'can_diagnose':os_accounts.is_admin(user),
             "inbox_status": s.get("inbox_status", {}),
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
             "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
@@ -1139,12 +1247,12 @@ class Workspace:
             "initial_load_pending": bool(s.get("initial_load_pending")),
             "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
             "live_pending": bool(s.get('live_pending')),
-            "sync_health": (dict(self.imap.reads.health) if hasattr(self.imap,'reads') else {}),
+            "sync_health": (self.imap.reads.health_snapshot() if hasattr(self.imap,'reads') else {}),
             "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
-            "last_sent": {k: s.get("last_sent", {}).get(k) for k in ("operation_id", "subject", "result", "copy", "checks", "draft_warning")},
+            "last_sent": {k: s.get("last_sent", {}).get(k) for k in ("operation_id", "subject", "result", "copy", "checks", "draft_warning", "html", "to")},
             "pending_sent": [{k: d.get(k) for k in ("operation_id", "subject", "copy", "checks", "draft_warning")}
                              for d in s.get("pending_sent", {}).values() if d["operation_id"] != s.get("last_sent", {}).get("operation_id")],
             "download": s.get("download"), "settings": {"sender_name": settings["sender_name"], "sent_policy": settings["sent_policy"],

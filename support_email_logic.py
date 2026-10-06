@@ -38,6 +38,7 @@ def participants(message, mailbox):
 
 
 def build_threads(messages, mailbox):
+    messages=list({(m['folder'],str(m['uidvalidity']),str(m['uid'])):m for m in messages}.values())
     parents, ancestry = {}, {}
 
     def root(key):

@@ -1,6 +1,7 @@
 """Read-only diagnostics for private Email storage; no mailbox contents queried."""
 TABLES = ('support_email_inbox_snapshot', 'customer_support_threads',
-          'customer_support_email_settings', 'customer_support_email_preferences')
+          'customer_support_email_settings', 'customer_support_email_preferences',
+          'support_email_drafts', 'support_email_outbox')
 
 
 def schema_issues(cur):
