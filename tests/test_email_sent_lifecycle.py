@@ -109,7 +109,7 @@ class SentLifecycleTests(unittest.TestCase):
         draft = self.compose(); op = draft['operation_id']
         with patch.object(self.imap, 'append_message', side_effect=MailboxError('Safe', code='append_rejected')):
             self.event('send', operation_id=op)
-        self.assertEqual(self.state['send_stage'], 'SENT')
+        self.assertEqual(self.state['send_stage'], 'CONFIRMING_SENT_COPY')
         self.assertEqual(self.state['send_result']['status'], 'accepted')
         self.assertTrue(self.w.model()['last_sent']['copy']['retryable'])
         self.assertIn(op, self.state['pending_sent'])
@@ -141,7 +141,7 @@ class SentLifecycleTests(unittest.TestCase):
             raise MailboxError('Connection lost after APPEND')
         with patch.object(self.imap, 'append_message', side_effect=interrupted) as mocked:
             self.event('send', operation_id=draft['operation_id'])
-            self.assertEqual(self.state['send_stage'], 'SENT')
+            self.assertEqual(self.state['send_stage'], 'CONFIRMING_SENT_COPY')
             self.assertFalse(self.state['sent_result'].get('retryable'))
             self.event('retry_sent_copy', operation_id=draft['operation_id'])
             self.assertEqual(self.state['sent_result']['status'], 'present')

@@ -32,6 +32,7 @@ class SMTPConfiguration:
     password: str = field(default="", repr=False)
     use_ssl: bool = True
     timeout: float = 12
+    data_timeout: float = 120
 
     @property
     def configured(self):
@@ -91,6 +92,11 @@ class SMTPProvider:
                         "notice": "A recipient was rejected. Nothing was sent; check the addresses."}
             data_started = True
             report_progress(progress, 75, "Sending email…")
+            # Submission can include provider spam/virus scanning after DATA. The
+            # short connection timeout must not abandon a still-processing send.
+            # This is a response deadline, not a retry of an ambiguous delivery.
+            if getattr(conn, 'sock', None) is not None:
+                conn.sock.settimeout(cfg.data_timeout)
             code, _ = conn.data(mime["bytes"])
             if code == 250:
                 report_progress(progress, 100, "Sent")
@@ -112,6 +118,8 @@ class SMTPProvider:
             LOGGER.info('email_smtp_attempt message_id=%s duration_ms=%.1f data_started=%s',mime.get('message_id',''),(time.monotonic()-started)*1000,data_started)
             if conn is not None:
                 try:
+                    if getattr(conn, 'sock', None) is not None:
+                        conn.sock.settimeout(cfg.timeout)
                     conn.quit()
                 except Exception:
                     try:

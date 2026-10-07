@@ -60,6 +60,7 @@ class SendUXTests(unittest.TestCase):
         result=smtp.SMTPProvider(v2.SMTP_CONFIG,connection_factory=Mock(return_value=conn)).submit(
             {'bytes':b'fixture','recipients':['test@example.test']},mailbox=MAILBOX,progress=lambda p,l:stages.append(p))
         self.assertEqual(result['status'],'accepted');self.assertEqual(stages,[45,60,75,100])
+        self.assertEqual([c.args[0] for c in conn.sock.settimeout.call_args_list], [120,12])
         result=smtp.SMTPProvider(v2.SMTP_CONFIG,connection_factory=Mock(return_value=conn)).submit(
             {'bytes':b'fixture','recipients':['test@example.test']},mailbox=MAILBOX,progress=Mock(side_effect=ValueError))
         self.assertEqual(result['status'],'accepted')

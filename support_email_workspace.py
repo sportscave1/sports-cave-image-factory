@@ -198,6 +198,12 @@ class Workspace:
             self._unavailable(entry["error"], code=entry.get("error_code", "temporary"), retry_after=entry.get("retry_after", 0))
             return
         snapshot = entry["data"]
+        target = self.state.get('sent_focus_header')
+        if (target and target['folder'] == self.state['folder']
+                and str(target['uidvalidity']) == str(snapshot['uidvalidity'])
+                and not any(m['message_id'] == target['message_id'] for m in snapshot['messages'])):
+            # Exact provider identity, never subject/time matching or a fake Sent row.
+            snapshot = dict(snapshot, messages=[*snapshot['messages'], target])
         # Two refreshes can share a wall-clock tick. Fresh snapshots must still
         # invalidate membership/flags and UIDVALIDITY-dependent caches.
         signature = (key, entry.get("revision", entry["refreshed_at"]))
@@ -222,6 +228,17 @@ class Workspace:
             self._select_thread(self._thread())
             self.state.update(view=view, context=context)
         selected_first = False
+        focus = self.state.get('sent_focus')
+        if focus and self.state['folder'] == self.roles.get('sent'):
+            thread = next((t for t in self.state['threads']
+                           if any(m['message_id'] == focus for m in t['messages'])), None)
+            if thread:
+                self._select_thread(thread)
+                message = next(m for m in thread['messages'] if m['message_id'] == focus)
+                self.state.update(active_message=reference_key(message), expanded={reference_key(message)})
+                self.state.pop('sent_focus', None)
+                self.state.pop('sent_focus_header', None)
+                selected_first = True
         if (not self.state.get("selected") and self.state["threads"]
                 and self.state["folder"] == self.roles.get("inbox")
                 and not self.state["query"] and self.state["view"] == "mail"):
@@ -929,6 +946,12 @@ class Workspace:
     def send(self, operation_id):
         """An explicit Send click validates and freezes the exact outgoing MIME once."""
         old = self.state.get("send_result", {})
+        draft = self.state.get('draft')
+        if (old.get('status') == 'rejected' and draft
+                and operation_id == old.get('operation_id') == draft['operation_id']):
+            # A new explicit click may retry only a definitively rejected attempt.
+            operation_id = draft['operation_id'] = str(uuid.uuid4())
+            self.state['send_result'] = old = {}
         if old.get("operation_id") == operation_id and old.get("status"):
             return
         draft = self.state.get("draft")
@@ -979,7 +1002,8 @@ class Workspace:
             result = self.registry.submit(operation_id, self.config.address, self.state["outgoing_mime"], self.smtp,
                                           progress=self._send_progress)
             self.state.update(send_result=result, send_progress={},
-                              send_stage="SAVING_SENT_COPY" if result["status"] == "accepted" else result["status"].upper())
+                              send_stage="SAVING_SENT_COPY" if result["status"] == "accepted" else
+                              "SENDING" if result['status'] == 'in_progress' else result["status"].upper())
             # Complete accepted delivery even if the browser disconnects now. No Streamlit
             # calls occur between SMTP acceptance and saving its mailbox copy.
         if result.get("status") == "accepted":
@@ -995,15 +1019,16 @@ class Workspace:
             delivery["audited"] = True
             action = "email_reply_sent" if draft.get("mode") in {"reply", "reply_all"} else "email_forward_sent" if draft.get("mode") == "forward" else "email_sent"
             self.audit(action, result["message_id"])
-        if self.durable:
-            # Acceptance is already committed. IMAP copy work belongs to the
-            # persistent worker and must not delay the successful send response.
-            delivery['copy'] = {'status':'pending','notice':'Saved locally; mailbox copy is synchronising.'}
-            self._sent_preview(delivery)
-            s.update(send_stage='SENT',send_progress={},send_finalized=True,
-                     draft=None,draft_pending=None,view='mail')
-            return
+        self._sent_preview(delivery)
         self.check_sent()
+        if delivery.get('copy', {}).get('status') not in {'present', 'appended'}:
+            s.update(send_stage='CONFIRMING_SENT_COPY', send_progress={})
+            return
+        self._complete_sent(delivery)
+
+    def _complete_sent(self, delivery):
+        """Only confirmed acceptance/copy completion may close the frozen draft."""
+        s, draft = self.state, self.state.get('draft') or {}
         if draft.get("mailbox_ref") and not delivery.get("draft_cleanup_attempted"):
             delivery["draft_cleanup_attempted"] = True
             try:
@@ -1033,16 +1058,19 @@ class Workspace:
         if not folder:
             return
         self.state.update(folder=folder, query="", field="TEXT", limit=50, selected=None,
-                          conversation=[], history_pending=False, view="mail", load_retry_at=0)
+                          conversation=[], history_pending=False, view="mail", load_retry_at=0,
+                          sent_focus=delivery['mime']['message_id'])
         self._mailbox_changed()
-        self.load()  # Reload real IMAP headers, including mail sent by other clients.
-        thread = next((t for t in self.state.get("threads", []) if any(
-            m["message_id"] == delivery["mime"]["message_id"] for m in t["messages"])), None)
-        if thread:
-            try:
-                self.open_thread(thread["thread_key"])
-            except MailboxError:
-                self.state["notice"] = "Sent. The message body is temporarily unavailable; reopen it in Sent."
+        try:
+            headers = self.imap.related_headers(folder, [delivery['mime']['message_id']])
+            exact = next((m for m in headers if m['message_id'] == delivery['mime']['message_id']), None)
+            if exact:
+                self.state['sent_focus_header'] = exact
+        except MailboxError:
+            pass  # Fresh headers/reconnect below retain the exact focus identifier.
+        # Invalidate the async provider cache as well as the controller cache.
+        # Keep the focus identifier through pending reads/reconnects.
+        self.load(force=True, previews=False)
 
     def check_sent(self, *, automatic=False, operation_id=None, retry=False):
         result = self.state.get("send_result", {})
@@ -1076,7 +1104,7 @@ class Workspace:
             delivery["checks"] = delivery.get("checks", 0) + 1
         self.state["sent_check_at"] = time.monotonic()
         # Legacy verify default now ensures a copy. Explicit confirmed server-saving is respected.
-        policy = "verify" if automatic or self.state["settings"]["sent_policy"] == "server" else "append"
+        policy = "verify" if self.state["settings"]["sent_policy"] == "server" else "append"
         if retry:
             policy = "append"
         previous = delivery.get("copy", {}).get("status")
@@ -1089,6 +1117,11 @@ class Workspace:
             pending[delivery["operation_id"]] = delivery
         if result.get("operation_id") == delivery["operation_id"]:
             self.state.update(sent_result=delivery["copy"], sent_checks=delivery.get("checks", 0))
+        if (result.get('operation_id') == delivery['operation_id']
+                and self.state.get('send_stage') == 'CONFIRMING_SENT_COPY'
+                and delivery['copy']['status'] in {'present', 'appended'}):
+            self._complete_sent(delivery)
+            return
         if (self.state.get("send_finalized") and delivery["copy"]["status"] in {"present", "appended"}
                 and (retry or previous not in {"present", "appended"}) and self.state["view"] != "compose"):
             self._show_sent(delivery)
@@ -1230,6 +1263,7 @@ class Workspace:
             'local_drafts':s.get('local_drafts',[]) if s.get('folder')==self.roles.get('drafts') and not s.get('query') else [],
             'durable_drafts':bool(self.durable),'draft_save_status':s.get('draft_save_status',''),
             'uncertain_checks':s.get('uncertain_checks',0),
+            'sent_view_pending':bool(s.get('sent_focus')),
             'admin_diagnostics':s.get('mail_diagnostics') if os_accounts.is_admin(user) else None,
             'can_diagnose':os_accounts.is_admin(user),
             "inbox_status": s.get("inbox_status", {}),

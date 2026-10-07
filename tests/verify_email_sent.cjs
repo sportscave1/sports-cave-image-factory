@@ -21,10 +21,15 @@ fs.mkdirSync(output,{recursive:true});
       // A second physical click and keyboard shortcut must not create another send.
       await mail.locator('[data-action="send"]').click();
       await mail.locator('#send-status').filter({hasText:'Sending email…'}).waitFor();
+      assert.equal(await mail.locator('[data-action="send"]').isDisabled(),true);
+      assert.equal(await mail.locator('.compose-footer progress').count(),0);
+      const progressBox=await mail.locator('#send-status').boundingBox();
+      const toolbarBox=await mail.locator('.topbar').boundingBox();
+      assert.ok(progressBox.y>=toolbarBox.y+toolbarBox.height-1 && progressBox.y<toolbarBox.y+toolbarBox.height+10);
       await mail.locator('body').press('Control+Enter');
-      assert.equal(await mail.locator('progress').count(),0);
+      assert.equal(await mail.locator('progress').count(),1);
       if(['rejected','unknown'].includes(scenario)){
-        await mail.locator('#send-status').filter({hasText:scenario==='rejected'?'Not sent':'Send status uncertain'}).waitFor();
+        await mail.locator('#send-status').filter({hasText:scenario==='rejected'?'Email not sent':'Confirming original send'}).waitFor();
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'0');
         assert.equal(await mail.locator('.sent-receipt').count(),0);
       }else{
@@ -32,7 +37,6 @@ fs.mkdirSync(output,{recursive:true});
         await mail.locator('.folder.selected[data-folder="INBOX.Sent Items"]').waitFor();
         assert.equal(await mail.locator('[aria-label="Compose mail"]').count(),0);
         if(scenario==='copy_failure'){
-          await mail.getByRole('button',{name:'Retry saving Sent copy',exact:true}).click();
           await mail.locator('.reading').filter({hasText:'This is a fabricated send verification.'}).waitFor();
           assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'2');
         }else{

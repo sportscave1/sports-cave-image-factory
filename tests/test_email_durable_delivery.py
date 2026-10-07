@@ -191,7 +191,7 @@ class DurableDelivery(unittest.TestCase):
         self.assertEqual(self.provider.submit.call_count,2)
         self.assertEqual(self.store.get(self.mailbox,self.op)['attempts'],2)
 
-    def test_workspace_persists_before_send_and_shows_local_acceptance_without_imap(self):
+    def test_workspace_preserves_draft_until_sent_folder_is_available(self):
         from dataclasses import replace
         from support_email_workspace import Workspace
         from support_email_smtp import SMTPConfiguration
@@ -205,7 +205,8 @@ class DurableDelivery(unittest.TestCase):
         self.assertEqual(self.store.get(self.mailbox,draft['operation_id'])['status'],'queued')
         with patch.object(w,'audit'):
             w.advance_send(draft['operation_id'])
-        self.assertEqual(w.state['send_stage'],'SENT')
+        self.assertEqual(w.state['send_stage'],'CONFIRMING_SENT_COPY')
+        self.assertIs(w.state['draft'],draft)
         self.assertIn('Stored reply',w.state['last_sent']['html'])
         self.imap.find_message_id.assert_not_called();self.imap.append_message.assert_not_called()
         restored=Workspace({},USER,config,SMTPConfiguration(),imap=self.imap,smtp=self.provider,registry=DurableRegistry(self.store))

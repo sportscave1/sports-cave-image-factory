@@ -14,6 +14,8 @@ import support_email_smtp as smtp
 import support_email_store as store
 from support_email_compose import default_settings
 from support_email_workspace import Workspace
+from support_email_durable import DurableRegistry, MailStore
+from tests.test_email_durable_delivery import Connection
 from support_email_page import get_component, email_shell_styles, rerun_email
 from tests.email_v2_fixtures import MailboxFixture, CONFIG, USER, WORKER
 
@@ -73,7 +75,7 @@ def preview():
     user=WORKER if st.query_params.get('account')=='staff' else USER
     state=st.session_state.setdefault('send_fixture',{})
     mailbox=st.session_state.setdefault('send_mailbox',SendMailbox(scenario))
-    registry=st.session_state.setdefault('send_registry',smtp.SendRegistry())
+    registry=st.session_state.setdefault('send_registry',DurableRegistry(MailStore(connect=Connection)))
     cfg=smtp.SMTPConfiguration(password='fixture-only')
     settings=default_settings()
     if scenario in {'server','delayed'}:settings['sent_policy']='server'

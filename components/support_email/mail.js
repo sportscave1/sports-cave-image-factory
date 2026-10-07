@@ -25,14 +25,29 @@
   }
   function sendStatus(m) {
     const status=m.send_result?.status;
-    if(m.send_stage==='SAVING_SENT_COPY') return '<div class="send-success">✓ Sent</div><div>Saving Sent copy…</div>';
-    if(status==='accepted') return '<div class="send-success">✓ Sent</div>';
+    if(m.sent_view_pending)return '<div>Opening sent email…</div>';
+    if(m.send_stage==='CONFIRMING_SENT_COPY'&&(m.last_sent?.checks||0)>=3) return '<div class="send-uncertain">Email sent. Sent-copy confirmation is taking longer than expected.</div><small>Your message will not be sent again. Check the Sent copy to continue.</small>';
+    if(['SAVING_SENT_COPY','CONFIRMING_SENT_COPY'].includes(m.send_stage)) return '<div class="send-success">Email sent — confirming Sent copy…</div>';
+    if(m.send_stage==='VALIDATION_FAILED') return `<div class="send-failed">${esc(m.notice||'Email was not sent. Review the draft and try again.')}</div>`;
+    if(status==='accepted') return '';
     if(status==='unknown') return (m.uncertain_checks||0)>=6
       ? '<div class="send-uncertain">Unable to confirm original send</div><small>Use Check Sent copy or ask the mailbox administrator to verify delivery. Do not resend.</small>'
       : '<div class="send-uncertain">Confirming original send…</div><small>Checking automatically. Do not resend.</small>';
-    if(status==='rejected') return '<div class="send-failed">✕ Not sent</div><small>Could not send this email.</small>';
-    if(status==='in_progress') return `<div>${m.send_stage==='SENDING'?'Sending email…':'Validating email…'}</div>`;
+    if(status==='rejected') return `<div class="send-failed">Email not sent. ${esc(m.send_result?.notice||'Check the details and try again.')}</div>`;
+    if(status==='in_progress') return '<div>Sending email…</div>';
     return '';
+  }
+  function sendFeedback(m) {
+    const content=sendStatus(m);
+    if(!content)return '';
+    const active=m.sent_view_pending||m.send_result?.status==='in_progress'||m.send_stage==='SAVING_SENT_COPY'||
+      (m.send_stage==='CONFIRMING_SENT_COPY'&&(m.last_sent?.checks||0)<3)||
+      (m.send_result?.status==='unknown'&&(m.uncertain_checks||0)<6);
+    const check=m.send_result?.status==='unknown'&&(m.uncertain_checks||0)>=6;
+    const copy=m.sent_result||{}, copyAction=m.send_stage==='CONFIRMING_SENT_COPY'&&(['failed','unknown'].includes(copy.status)||(m.last_sent?.checks||0)>=3)
+      ? `<button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(m.last_sent?.operation_id||'')}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`:'';
+    return content+copyAction+(check?'<button type="button" data-action="check_sent">Check Sent copy</button>':'')+
+      (active?'<progress aria-label="Email delivery progress"></progress>':'');
   }
   function sentReceipt(m){
     const sent=m.last_sent;
@@ -76,7 +91,7 @@
       return {ok:true,message:'✓ Prompt copied — paste into ChatGPT'};
     } catch (_) {return {ok:false,message:'Could not copy the prompt. Allow clipboard access and try again.'};}
   }
-  if (typeof module !== 'undefined') {module.exports={receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
+  if (typeof module !== 'undefined') {module.exports={receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -124,7 +139,7 @@
     clearTimeout(sentTimer);
     if(model.send_result?.status==='unknown'&&(model.uncertain_checks||0)<6&&!busy){sentTimer=setTimeout(()=>emit('auto_check_sent'),10000);return;}
     const sent=model.last_sent;
-    if(!sent?.operation_id||sent.copy?.status!=='pending'||sent.checks>=3||busy)return;
+    if(!sent?.operation_id||!['pending','unknown','failed','attempting'].includes(sent.copy?.status)||sent.checks>=3||busy)return;
     sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:sent.operation_id}),[6000,12000,24000][sent.checks||0]);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sentTimer));
@@ -166,7 +181,7 @@
       return;
     }
     const draft=snapshot();
-    if(action==='send'){model.send_result={status:'in_progress'};model.sent_result={};model.send_stage='VALIDATING';if($('send-status'))$('send-status').innerHTML=sendStatus(model);}
+    if(action==='send'){model.send_result={status:'in_progress'};model.sent_result={};model.send_stage='VALIDATING';if($('send-status'))$('send-status').innerHTML=sendFeedback(model);}
     clearTimeout(historyTimer);
     pending=crypto.randomUUID(); busy=true; pendingAction=action;
     if(selecting) optimistic(action,values);
@@ -255,7 +270,7 @@
     if (!model.draft) return messages();
     const draft={...model.draft,...(localDraft?.id===model.draft.id?localDraft:{})}, lock=locked(model), status=model.send_result?.status;
     const forwarded=draft.mode==='forward'?(model.messages||[]).flatMap(m=>m.attachments.map(a=>({...a,message_key:m.key}))):[];
-    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><div class="reply-heading"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${replyPromptControls(draft.mode)}<small id="draft-save-status" role="status">${esc(model.draft_save_status||'')}</small></div>${button('Close · Esc','close_composer','','','plain')}</div><div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true">${sendStatus(model)}</div>${['accepted','unknown'].includes(status)&&model.sent_result?.status!=='present'?button('Check Sent copy','check_sent'):status==='rejected'?button('Try again','retry_rejected'):''}<div class="row wrap">${status==='accepted'?button('Close','close_composer','','','primary'):button('Send','send','title="Ctrl+Enter"',lock||status==='rejected'||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
+    return `<section class="panel" aria-label="Compose mail"><div class="panel-head"><div class="reply-heading"><strong>${{new:'New mail',reply:'Reply',reply_all:'Reply all',forward:'Forward'}[draft.mode]||'Draft'}</strong>${replyPromptControls(draft.mode)}<small id="draft-save-status" role="status">${esc(model.draft_save_status||'')}</small></div>${button('Close · Esc','close_composer','','','plain')}</div><div class="compose-fields"><div class="compose-field"><label>From</label><span>${esc(model.settings.sender_name)} &lt;${esc(model.mailbox)}&gt;</span></div>${['to','cc','bcc','subject'].map(key=>`<div class="compose-field"><label for="draft-${key}">${key==='subject'?'Subject':key.toUpperCase()}</label><input id="draft-${key}" value="${esc(draft[key])}" ${lock?'disabled':''} autocomplete="off" maxlength="${key==='subject'?998:4000}" placeholder="${key==='to'?'name@example.com':''}"></div>`).join('')}</div>${formatBar()}<div class="compose-scroll"><div id="editor" class="editor" contenteditable="${!lock}" role="textbox" aria-label="Message body" aria-multiline="true">${draft.html}</div><div id="signature-preview" class="signature-preview" contenteditable="false" role="group" aria-label="Signature preview">${signaturePreview(draft.signature)}</div>${draft.quote_html?`<details><summary>Previous message</summary><label class="checkbox"><input id="include-quote" type="checkbox" ${draft.include_quote?'checked':''} ${lock?'disabled':''}>Include quoted message</label><div class="quote">${draft.quote_html}</div>${forwarded.length?'<p class="muted">Include original attachments:</p><div class="attachments">'+forwarded.map(a=>button('＋ '+esc(a.filename),'forward_attachment',`data-key="${esc(a.message_key)}" data-section="${esc(a.section)}"`,lock)).join('')+'</div>':''}</details>`:''}<div class="attachments">${draft.attachments.map(a=>`<span class="pill">⌁ ${esc(a.filename)} <small>${size(a.size)}</small>${button('×','remove_attachment',`data-attachment="${esc(a.id)}" title="Remove attachment"`,lock)}</span>`).join('')}</div></div><div class="compose-bottom"><div class="row wrap">${status==='accepted'?button('Close','close_composer','','','primary'):button('Send','send','title="Ctrl+Enter"',lock||!model.smtp_configured,'primary')}${button('Attach file','choose_file','',lock)}<input id="attachment" class="hidden-file" type="file" ${lock?'disabled':''}>${button('Save draft','save_draft','',!model.roles.drafts||['accepted','unknown','in_progress'].includes(status))}<span class="grow"></span><select id="signature" aria-label="Signature" ${lock?'disabled':''}>${signaturesOptions(draft.signature)}</select>${button('Discard','discard_draft','',lock,'plain')}</div>${!model.smtp_configured?'<small>SMTP needs configuration before sending.</small>':'<small>10 MB per file · 14 MB attachments total · 20 MB encoded message</small>'}${model.draft_pending?'<p class="muted">Draft save is pending. Save draft checks for its existing copy.</p>':''}</div></section>`;
   }
   function settings() {
     const s=model.settings;
@@ -322,8 +337,10 @@
     root.classList.remove('busy');
     scheduleSentCheck();
     scheduleSendStage();
-    if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div class="statusbar"></div><div class="delivery-receipt"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
-    root.querySelector('.delivery-receipt').innerHTML=(model.pending_sent||[]).map(last_sent=>sentReceipt({last_sent})).join('')+sentReceipt(model);
+    if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true"></div><div class="statusbar"></div><div class="delivery-receipt"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
+    $('send-status').innerHTML=sendFeedback(model);
+    if(model.send_result?.status==='rejected')submitted.delete(model.send_result.operation_id);
+    root.querySelector('.delivery-receipt').innerHTML=(model.pending_sent||[]).map(last_sent=>sentReceipt({last_sent})).join('')+(model.send_stage==='CONFIRMING_SENT_COPY'?'':sentReceipt(model));
     const toolbarKey=JSON.stringify([model.configured,model.query,model.field]);
     if(wasFrozen||toolbarKey!==toolbarStamp){
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
