@@ -118,9 +118,11 @@ class MailStore(SignalStore):
         return self.get(mailbox,operation)
 
     def claim(self,mailbox,operation):
+        # Cover SMTP connect/auth plus the DATA response deadline before a
+        # separate worker treats an interrupted submission as uncertain.
         with self.transaction() as cur:
             cur.execute("""UPDATE support_email_outbox SET status='in_progress',attempts=attempts+1,
-                updated_at=now(),due_at=now()+interval '2 minutes'
+                updated_at=now(),due_at=now()+interval '5 minutes'
                 WHERE mailbox=%s AND operation_id=%s AND status='queued' AND due_at<=now() RETURNING *""",(mailbox.lower(),operation))
             return dict(cur.fetchone() or {})
 

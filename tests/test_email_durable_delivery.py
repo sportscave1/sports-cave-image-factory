@@ -56,6 +56,14 @@ class DurableDelivery(unittest.TestCase):
         self.provider.submit.assert_called_once()
         self.assertEqual(self.store.get(self.mailbox,self.op)['attempts'],1)
 
+    def test_send_claim_covers_provider_data_deadline(self):
+        self.prepare()
+        row=self.store.claim(self.mailbox,self.op)
+        from datetime import datetime
+        start=datetime.fromisoformat(str(row['updated_at']).replace('Z','+00:00'))
+        due=datetime.fromisoformat(str(row['due_at']).replace('Z','+00:00'))
+        self.assertGreaterEqual((due-start).total_seconds(),300)
+
     def test_concurrent_registry_claims_send_once(self):
         self.prepare();errors=[]
         def send():
