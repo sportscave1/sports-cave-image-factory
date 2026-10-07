@@ -78,6 +78,9 @@ def reference_map(campaign_type, source=None):
     cards = cards if isinstance(cards, list) else []
     if campaign_type == 'Carousel':
         if cards or source.get('creative_format') in ('CAROUSEL','DYNAMIC_CAROUSEL') or source.get('carousel'):
+            expected = source.get('source_card_count')
+            if source.get('carousel_resolution_incomplete') or (expected is not None and len(cards) != expected - source.get('excluded_end_card_count', 0)):
+                raise ValueError('Complete source carousel images are required. Reload the winner from Meta Review.')
             if len(cards)<2 or any(not isinstance(c,dict) or c.get('position')!=i or not (c.get('image_url') or c.get('image_sha256')) or c.get('image_unavailable') for i,c in enumerate(cards,1)):
                 raise ValueError('Complete source carousel images are required. Reload the winner from Meta Review.')
         count = len(cards) if cards else 5  # Existing manual New Ads default only.
@@ -99,6 +102,10 @@ def reference_map(campaign_type, source=None):
                          'image_url': card.get('image_url') or card.get('picture') or '',
                          'headline': card.get('headline') or '', 'description': card.get('description') or '',
                          'source_id': card.get('source_id') or '',
+                         'image_hash': card.get('image_hash') or '',
+                         'source_creative_id': card.get('source_creative_id') or '',
+                         'source_attachment_id': card.get('source_attachment_id') or '',
+                         'destination_url': card.get('destination_url') or '', 'cta': card.get('cta') or '',
                          'scene': card.get('scene') or '', 'role': card.get('role') or '',
                          'evidence': 'metadata only; inspect attachment in ChatGPT'})
     else:

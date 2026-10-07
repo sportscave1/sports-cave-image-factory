@@ -118,6 +118,12 @@ def metrics_card(metrics, compact=False):
 
 
 def apply_resolved(ad, resolved):
+    from copy import deepcopy
+    resolved = deepcopy(resolved)
+    for card in resolved.get('cards', []):
+        card['source_ad_id'] = str(ad['ad_id'])
+    resolved['diagnostic'] = creative.diagnostic(resolved, campaign_id=ad.get('campaign_id', ''),
+        ad_id=ad['ad_id'], displayed_count=len(resolved.get('cards') or []))
     ad['winning_creative'] = resolved
     ad['creative_metadata'] = resolved['raw']
     ad['assets'] = analysis.creative_assets(resolved['raw'])
@@ -125,8 +131,9 @@ def apply_resolved(ad, resolved):
         ad['assets']['carousel'] = True
         ad['assets']['image'] = [{'value': c['image_url'], 'id': c['identity'], 'carousel': True}
                                  for c in resolved['cards'] if c['image_url']]
-        if resolved['shared_primary_text']:
-            ad['assets']['primary_text'] = [{'value': resolved['shared_primary_text'], 'id': 'shared'}]
+        texts = resolved.get('shared_primary_texts') or ([resolved['shared_primary_text']] if resolved.get('shared_primary_text') else [])
+        if texts:
+            ad['assets']['primary_text'] = [{'value': text, 'id': f'shared-{i}'} for i, text in enumerate(texts, 1)]
         if not ad['assets']['headline']:
             ad['assets']['headline'] = [{'value': c['headline'], 'id': c['identity']}
                                        for c in resolved['cards'] if c['headline']]
@@ -140,11 +147,17 @@ def resolve_selected(ad, config=None):
     if not str(identity or '').isdigit():
         return ad
     cache = st.session_state.setdefault('meta-review-live-cache', {})
-    entry = live.cached_read(cache, (live.scope(config), 'creative-v2', identity),
+    entry = live.cached_read(cache, (live.scope(config), 'creative-v3', identity),
                              lambda: creative.resolve(config, identity))
     if entry.get('error'):
-        ad['winning_creative'] = {**ad.get('winning_creative', {}), 'creative_format': 'UNKNOWN',
-                                  'creative_format_source': 'full_creative_read_unavailable', 'cards': []}
+        previous = ad.get('winning_creative', {})
+        incomplete = (previous.get('carousel_resolution_incomplete', False)
+                      or previous.get('creative_format') in (*creative.CAROUSEL_FORMATS, 'DYNAMIC', 'VIDEO')
+                      or bool(ad.get('assets', {}).get('carousel')))
+        ad['winning_creative'] = {**previous, 'creative_format': 'UNKNOWN',
+                                  'creative_format_source': 'full_creative_read_unavailable', 'cards': [],
+                                  'carousel_resolution_incomplete': incomplete,
+                                  'diagnostic': {**previous.get('diagnostic', {}), 'resolved_image_count': 0}}
         st.warning('Full winning creative could not be retrieved. Retry Refresh From Meta.')
     if entry.get('data') is not None and not entry.get('stale'):
         resolved = entry['data']
@@ -154,6 +167,18 @@ def resolve_selected(ad, config=None):
     return ad
 
 
+def render_creative_diagnostic(ad):
+    import os_accounts
+    if not os_accounts.is_admin(st.session_state.get('sports_cave_current_user')):
+        return
+    resolved = ad.get('winning_creative') or {}
+    with st.expander('Advanced Meta diagnostic', expanded=False):
+        st.json(creative.diagnostic(resolved, campaign_id=ad.get('campaign_id', ''), ad_id=ad['ad_id'],
+            displayed_count=len(resolved.get('cards') or []),
+            handoff_count=st.session_state.get('meta-review-handoff-count-'+creative.fingerprint([ad['ad_id'], resolved]), 0)))
+        st.caption('Displayed count is the complete navigable source. Handoff count is zero until APPLY succeeds in this session.')
+
+
 def ad_card(ad):
     ad = resolve_selected(ad)
     with st.container(border=True):
@@ -161,8 +186,7 @@ def ad_card(ad):
         st.caption(f"{ad.get('adset_name') or 'Ad set unavailable'} · {ad.get('effective_status') or ad.get('status') or 'Unknown'} · Ad {ad['ad_id']} · Creative {ad['assets']['creative_id']}")
         if ad.get('winning_creative', {}).get('creative_format') in creative.CAROUSEL_FORMATS:
             creative.render_cards(st, ad['winning_creative'])
-            if ad['winning_creative'].get('shared_primary_text'):
-                st.text(ad['winning_creative']['shared_primary_text'])
+            creative.render_shared_primary_text(st, ad['winning_creative'])
         else:
             st.caption(creative.label(ad.get('winning_creative') or {}))
             left, right = st.columns([1,2])
@@ -182,6 +206,7 @@ def ad_card(ad):
                 if ad['assets']['dynamic'] or ad['assets']['carousel']:
                     st.caption('Multiple original assets/cards. Ad-level results do not prove which served combination won.')
             st.caption(f"Ad {ad['ad_id']} · Creative {ad['assets'].get('creative_id') or 'Unavailable'} · Ad set {ad.get('adset_name') or ad.get('adset_id') or 'Unavailable'}")
+        render_creative_diagnostic(ad)
         with st.expander('Advanced metrics',expanded=False):
             st.dataframe(tables.advanced_rows(ad.get('benchmark_metrics',ad['metrics'])),hide_index=True)
 
@@ -259,7 +284,7 @@ def winner_board(ads, history, context, compact=False):
         except Exception as error: st.error(sync_service.safe_error(error))
     st.caption('Refresh Winning Ad preserves this ad’s reference. Best Components creates an untested mix. Neither action publishes.')
     for index, (label, mode, values) in enumerate((('Refresh Winning Ad','complete_ad',complete),('Build From Best Components','best_components',choices))):
-        if action_columns[index+1].button(label, disabled=len(values)!=3 or selected.get('winning_creative', {}).get('creative_format') in ('DYNAMIC', 'VIDEO'), type='primary' if mode=='complete_ad' else 'secondary'):
+        if action_columns[index+1].button(label, disabled=len(values)!=3 or (selected.get('winning_creative', {}).get('creative_format') in ('DYNAMIC', 'VIDEO') or selected.get('winning_creative', {}).get('carousel_resolution_incomplete', False)), type='primary' if mode=='complete_ad' else 'secondary'):
             try:
                 mapping = next((m for m in history['mapping'] if str(m['ad_id'])==str(selected['ad_id'])), {})
                 package = handoff.build_package(selected, values, {**context,'product_mapping':mapping}, mode)
@@ -292,6 +317,7 @@ def simple_winner(ads,history,context):
         if resolved.get('creative_format') in creative.CAROUSEL_FORMATS:
             with st.expander('Original winning carousel', expanded=True):
                 creative.render_cards(st, resolved, key_prefix='winner')
+                creative.render_shared_primary_text(st, resolved)
         st.caption('Selected Winner: '+str(selected.get('ad_name') or selected['ad_id']))
         for kind in ('image','primary_text','headline'):
             candidates=[c for c in analysis.component_candidates(ads,kind,history['assets']) if str(c['ad_id'])==str(selected['ad_id'])]
@@ -306,7 +332,8 @@ def simple_winner(ads,history,context):
     else: st.caption('Insufficient data. Select an ad explicitly to use it as a reference.')
     actor=str((st.session_state.get('sports_cave_current_user') or {}).get('id') or 'sports_cave_os')
     reference_key=scope+'-'+hashlib.sha256(json.dumps({'chosen':chosen,'complete':complete,'creative':(selected or {}).get('winning_creative'), 'mapping':history['mapping']},sort_keys=True,default=str).encode()).hexdigest()[:12]
-    unsupported = (selected or {}).get('winning_creative', {}).get('creative_format') in ('DYNAMIC', 'VIDEO')
+    resolved = (selected or {}).get('winning_creative', {})
+    unsupported = resolved.get('creative_format') in ('DYNAMIC', 'VIDEO') or resolved.get('carousel_resolution_incomplete', False)
     if unsupported: st.caption('This format has no supported fixed-card refresh mapping.')
     if st.button('APPLY TO CREATIVE REFRESH',type='primary',disabled=not selected or len(complete)!=3 or unsupported,key='va-apply-'+scope):
         try:
@@ -318,11 +345,14 @@ def simple_winner(ads,history,context):
             if not st.session_state.get('va-handoff-link-'+reference_key):
                 with st.spinner('Saving winning image and reference…'):
                     st.session_state['va-handoff-link-'+reference_key]=handoff.queue_link(package,actor)
+                    st.session_state['meta-review-handoff-count-'+creative.fingerprint([selected['ad_id'], resolved])] = len(package.get('carousel_cards') or [])
         except Exception as error: st.error(sync_service.safe_error(error))
     url=st.session_state.get('va-handoff-link-'+reference_key)
     if url:
         st.link_button('OPEN CREATIVE REFRESH',url,type='primary')
         st.caption('Opens a new tab with the saved winner. Meta Review stays open.')
+    if selected:
+        render_creative_diagnostic(selected)
     with st.expander('Advanced winner options',expanded=False):
         winner_board(ads,history,context,compact=False)
 

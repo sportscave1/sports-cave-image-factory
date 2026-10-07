@@ -130,6 +130,8 @@ def build_package(ad,selections,context,mode):
     import meta_review_creative as creative
     raw = (ad.get('raw') or {}).get('creative') or ad.get('creative_metadata') or {}
     resolved = deepcopy(ad.get('winning_creative') or creative.normalize(raw))
+    if resolved.get('carousel_resolution_incomplete'):
+        raise ValueError('Reload the complete ordered carousel before applying Creative Refresh.')
     if mode == 'best_components' and str(selections['image']['ad_id']) != str(ad['ad_id']):
         resolved = {**resolved, 'creative_format': 'UNKNOWN', 'cards': [],
                     'creative_format_source': 'mixed_ad_components'}
@@ -142,6 +144,8 @@ def build_package(ad,selections,context,mode):
     if package['carousel']:
         require_complete_carousel(package)
         for card in package['carousel_cards']: card['source_ad_id']=str(ad['ad_id'])
+        package['diagnostic'] = creative.diagnostic(package, ad_id=ad['ad_id'],
+            handoff_count=len(package['carousel_cards']))
         creative.log_resolution(package,str(ad['ad_id']),len(package['carousel_cards']))
     package['source_fingerprint'] = creative.fingerprint(package)
     package['campaign_type_resolution'] = resolve_campaign_type(package, ad)
@@ -154,6 +158,9 @@ def require_complete_carousel(package):
     cards=package.get('carousel_cards') or []
     if len(cards)<2 or [c.get('position') for c in cards]!=list(range(1,len(cards)+1)):
         raise ValueError('Reload the complete ordered carousel before applying Creative Refresh.')
+    expected = package.get('source_card_count')
+    if package.get('carousel_resolution_incomplete') or (expected is not None and len(cards) != expected - package.get('excluded_end_card_count', 0)):
+        raise ValueError('Source carousel card count changed. Reload the complete ordered carousel before refreshing.')
     missing=[str(c['position']) for c in cards if c.get('image_unavailable') or not c.get('image_url')]
     if missing: raise ValueError('Missing source carousel cards: '+', '.join(missing)+'. Reload from Meta before refreshing.')
 

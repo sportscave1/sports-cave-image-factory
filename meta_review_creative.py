@@ -20,32 +20,73 @@ def rows(value):
 CAROUSEL_FORMATS = ('CAROUSEL', 'DYNAMIC_CAROUSEL')
 
 
+def authored_card(item):
+    return any(obj(item).get(key) for key in ('id', 'image_hash', 'image_url', 'picture',
+               'name', 'title', 'link', 'url', 'media', 'target', 'video_id', 'image_label', 'video_label'))
+
+
+def inline_cards(raw):
+    children = rows(obj(obj(raw.get('object_story_spec')).get('link_data')).get('child_attachments'))
+    return children if sum(bool(authored_card(c)) for c in children) > 1 else []
+
+
+def story_complete(story):
+    """Never certify a partial nested edge, including a truncated subattachment."""
+    edge = obj(obj(story).get('attachments'))
+    edges = [edge] + [obj(obj(a).get('subattachments')) for a in rows(edge)]
+    return not any(obj(e.get('paging')).get('next') for e in edges)
+
+
 def source_cards(raw, story=None):
-    """Ordered authored structures only; never infer cards from an image pool."""
-    link=obj(obj(raw.get('object_story_spec')).get('link_data'))
-    children=rows(link.get('child_attachments'))
-    if children: return children,'object_story_spec.link_data.child_attachments'
-    attachments=rows(obj(story).get('attachments'))
-    groups=[a for a in attachments if rows(obj(a).get('subattachments'))]
-    if len(groups)==1: return rows(obj(groups[0]).get('subattachments')),'effective_object_story_id.attachments.subattachments'
-    if len(attachments)>1 and all(obj(a).get('type') in ('photo','image') for a in attachments):
-        return attachments,'effective_object_story_id.attachments'
-    feed=obj(raw.get('asset_feed_spec'))
-    groups=rows(feed.get('carousels'))
-    if len(groups)!=1: return [],'unconfirmed_ordered_structure'
-    def asset(label, collection):
-        name=obj(label).get('name')
-        matches=[a for a in rows(feed.get(collection)) if name and any(obj(l).get('name')==name for l in rows(obj(a).get('adlabels')))]
-        return obj(matches[0]) if len(matches)==1 else {}
-    cards=[]
+    """Inline authoring > complete story > uniquely labelled feed; no pool pairing."""
+    link = obj(obj(raw.get('object_story_spec')).get('link_data'))
+    children = inline_cards(raw)
+    if children:
+        return children, 'object_story_spec.link_data.child_attachments'
+    if obj(story).get('_incomplete') or not story_complete(story):
+        return [], 'story_pagination_incomplete'
+    attachments = rows(obj(story).get('attachments'))
+    groups = [a for a in attachments if rows(obj(a).get('subattachments'))]
+    if len(groups) == 1 and len(rows(obj(groups[0]).get('subattachments'))) > 1:
+        return rows(obj(groups[0]).get('subattachments')), 'effective_object_story_id.attachments.subattachments'
+    if len(groups) > 1:
+        return [], 'ambiguous_story_sequences'
+    if len(attachments) > 1 and all(obj(a).get('type') in ('photo', 'image') for a in attachments):
+        return attachments, 'effective_object_story_id.attachments'
+    feed = obj(raw.get('asset_feed_spec'))
+    groups = rows(feed.get('carousels'))
+    if len(groups) != 1:
+        return [], 'ambiguous_asset_feed_sequences' if groups else 'unconfirmed_ordered_structure'
+    cards = []
+    bindings = (('image_label', 'images', 'hash', 'image_hash'),
+                ('title_label', 'titles', 'text', 'name'),
+                ('description_label', 'descriptions', 'text', 'description'),
+                ('link_url_label', 'link_urls', 'website_url', 'link'),
+                ('video_label', 'videos', 'video_id', 'video_id'))
     for child in rows(obj(groups[0]).get('child_attachments')):
-        child=obj(child);image=asset(child.get('image_label'),'images')
-        cards.append({**child,'image_hash':image.get('hash'),'image_url':image.get('url'),
-            'name':asset(child.get('title_label'),'titles').get('text'),
-            'description':asset(child.get('description_label'),'descriptions').get('text'),
-            'link':asset(child.get('link_url_label'),'link_urls').get('website_url'),
-            'video_id':asset(child.get('video_label'),'videos').get('video_id')})
-    return cards,'asset_feed_spec.carousels.child_attachments'
+        card = dict(obj(child))
+        for label, collection, field, target in bindings:
+            if label not in card:
+                continue
+            name = obj(card[label]).get('name')
+            matches = [obj(a) for a in rows(feed.get(collection)) if name and
+                       any(obj(l).get('name') == name for l in rows(obj(a).get('adlabels')))]
+            if len(matches) != 1:
+                return [], 'ambiguous_asset_feed_labels'
+            asset = matches[0]
+            if label == 'image_label':
+                if not (asset.get('hash') or public_image(asset.get('url'))):
+                    return [], 'unresolved_asset_feed_labels'
+                card['image_url'] = asset.get('url')
+            elif not asset.get(field):
+                return [], 'unresolved_asset_feed_labels'
+            if label == 'video_label':
+                card['thumbnail_url'] = public_image(asset.get('thumbnail_url'))
+            card[target] = asset.get(field)
+        if card.get('video_id') and (card.get('image_hash') or card.get('image_url')):
+            return [], 'ambiguous_asset_feed_media'
+        cards.append(card)
+    return cards, 'asset_feed_spec.carousels.child_attachments'
 
 
 def public_image(value):
@@ -88,6 +129,7 @@ def normalize(raw, story=None, images=None):
     attachments = rows(obj(story.get('attachments')).get('data'))
     cards = []
     genuine = 0
+    excluded_end_cards = 0
     for original_position, item in enumerate(children, 1):
         item = obj(item)
         # The flag alone never strips the last authored product. For returned
@@ -95,9 +137,9 @@ def normalize(raw, story=None, images=None):
         # plus Meta's end-card setting; ambiguous attachments are retained.
         if (source.startswith('effective') and link.get('multi_share_end_card') is True
                 and original_position == len(children) and item.get('type') in ('profile', 'page')):
+            excluded_end_cards += 1
             continue
-        genuine += bool(any(item.get(key) for key in ('id', 'image_hash', 'image_url', 'picture',
-                                                      'name', 'title', 'link', 'url', 'media', 'target','image_label','video_label')))
+        genuine += bool(authored_card(item))
         media, target = obj(item.get('media')), obj(item.get('target'))
         cta = obj(item.get('call_to_action'))
         destination = item.get('link') or item.get('url') or target.get('url') or obj(cta.get('value')).get('link') or ''
@@ -120,7 +162,7 @@ def normalize(raw, story=None, images=None):
                       'link': destination,
                       'destination_url': destination,
                       'link_caption': item.get('caption') or '',
-                      'cta': cta.get('type') or '',
+                      'cta': cta.get('type') or '', 'call_to_action': cta,
                       'image_unavailable': not bool(best)})
     ie = canvas_evidence(raw) or canvas_evidence(story, 'story')
     fmt, reason = 'UNKNOWN', 'insufficient_creative_evidence'
@@ -139,6 +181,14 @@ def normalize(raw, story=None, images=None):
               and not obj(attachments[0]).get('subattachments'))):
         if public_image(raw.get('image_url')) or public_image(link.get('picture')) or link.get('image_hash') or raw.get('image_hash') or obj(spec.get('photo_data')).get('image_hash'):
             fmt, reason = 'SINGLE_IMAGE', 'creative.single_image_asset'
+    primary_texts = [obj(b).get('text') for b in rows(feed.get('bodies'))
+                     if isinstance(obj(b).get('text'), str) and obj(b)['text'].strip()]
+    message = link.get('message') or raw.get('body') or story.get('message') or ''
+    if message and message not in primary_texts:
+        primary_texts.insert(0, message)
+    incomplete = (source.startswith(('ambiguous_', 'unresolved_', 'story_pagination_'))
+                  or (fmt not in CAROUSEL_FORMATS and bool(children or rows(feed.get('carousels'))
+                      or 'CAROUSEL' in rows(feed.get('ad_formats')))))
     return {'creative_id': str(raw.get('id') or ''),
             'object_story_id': str(raw.get('object_story_id') or ''),
             'effective_object_story_id': str(raw.get('effective_object_story_id') or ''),
@@ -147,7 +197,10 @@ def normalize(raw, story=None, images=None):
             'creative_format_confidence': 'deterministic' if fmt != 'UNKNOWN' else 'unconfirmed',
             'cards': cards if fmt in CAROUSEL_FORMATS else [],
             'carousel_structure_source': source, 'source_card_count': len(children),
-            'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or (obj(rows(feed.get('bodies'))[0]).get('text') if len(rows(feed.get('bodies')))==1 else '') or '',
+            'excluded_end_card_count': excluded_end_cards,
+            'carousel_resolution_incomplete': incomplete,
+            'shared_primary_texts': primary_texts,
+            'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or (primary_texts[0] if primary_texts else '') or '',
             'shared_message': link.get('message') or story.get('message') or '',
             'shared_headline': link.get('name') or raw.get('title') or '',
             'shared_cta': obj(link.get('call_to_action')).get('type') or raw.get('call_to_action_type') or '',
@@ -167,7 +220,8 @@ def resolve(config, creative_id):
     story, warnings = {}, []
     link = obj(obj(raw.get('object_story_spec')).get('link_data'))
     story_id = raw.get('effective_object_story_id') or raw.get('object_story_id')
-    if story_id and not source_cards(raw)[0]:
+    story_pagination_complete = None
+    if story_id and not inline_cards(raw):
         try:
             story = reader.get(str(story_id), {'fields': 'id,message,attachments{type,title,description,url,target,media,subattachments.limit(100){type,title,description,url,target,media}}'})
             if not isinstance(story, dict) or not isinstance(obj(story.get('attachments')).get('data'), list):
@@ -175,34 +229,80 @@ def resolve(config, creative_id):
             # An incomplete edge cannot certify an authored card sequence.
             for edge in [obj(story.get('attachments')), *[obj(obj(a).get('subattachments')) for a in rows(obj(story.get('attachments')).get('data'))]]:
                 if obj(edge.get('paging')).get('next'):
+                    story_pagination_complete = False
                     raise ValueError('Story attachments are incomplete.')
+            story_pagination_complete = True
         except Exception:
-            story = {}
+            story = {**story, '_incomplete': True} if story_pagination_complete is False else {}
             warnings.append('Story attachments unavailable; format/card completeness could not be confirmed.')
-    hashes = {str(obj(c).get('image_hash')) for c in source_cards(raw,story)[0] if obj(c).get('image_hash') and not obj(c).get('image_url')}
+    hashes = {str(obj(c).get('image_hash')) for c in source_cards(raw,story)[0] if obj(c).get('image_hash') and not public_image(obj(c).get('image_url'))}
     if raw.get('image_hash') and not raw.get('image_url'):
         hashes.add(str(raw['image_hash']))
     images = {}
     if hashes:
         try:
             for row in reader.pages(config['ad_account_id'] + '/adimages', {'fields': 'hash,url,url_128', 'hashes': json.dumps(sorted(hashes))}):
-                images[str(row.get('hash'))] = row.get('url') or row.get('url_128')
+                if str(row.get('hash')) in hashes:
+                    images[str(row['hash'])] = public_image(row.get('url')) or public_image(row.get('url_128'))
         except Exception:
             warnings.append('Some source image hashes could not be resolved.')
     result = normalize(raw, story, images)
     if result['creative_format']=='DYNAMIC' and (rows(obj(raw.get('asset_feed_spec')).get('carousels')) or
             'CAROUSEL' in rows(obj(raw.get('asset_feed_spec')).get('ad_formats'))):
         warnings.append('Ordered carousel source is unavailable or ambiguous. The representative thumbnail is not the complete carousel.')
+    result['diagnostic'] = {
+        'object_story_spec_present': bool(obj(raw.get('object_story_spec'))),
+        'inline_child_attachment_count': len(rows(link.get('child_attachments'))),
+        'effective_object_story_id_present': bool(raw.get('effective_object_story_id')),
+        'story_attachment_count': len(rows(story.get('attachments'))),
+        'story_subattachment_count': sum(len(rows(obj(a).get('subattachments'))) for a in rows(story.get('attachments'))),
+        'story_pagination_complete': story_pagination_complete,
+        'asset_feed_spec_present': bool(obj(raw.get('asset_feed_spec'))),
+        'asset_feed_carousel_group_count': len(rows(obj(raw.get('asset_feed_spec')).get('carousels'))),
+        'asset_feed_carousel_child_count': sum(len(rows(obj(g).get('child_attachments'))) for g in rows(obj(raw.get('asset_feed_spec')).get('carousels'))),
+        'image_hash_count': len({c['image_hash'] for c in result['cards'] if c.get('image_hash')}),
+        'resolved_image_count': sum(bool(c.get('image_url')) for c in result['cards']),
+    }
     result['warnings'] = warnings
     result['raw'] = raw
     log_resolution(result)
     return result
 
 
+def diagnostic(value, *, campaign_id='', ad_id='', displayed_count=None, handoff_count=None):
+    """Allowlisted structural evidence only: no raw Graph data or credentials."""
+    keys = ('object_story_spec_present', 'inline_child_attachment_count',
+            'effective_object_story_id_present', 'story_attachment_count',
+            'story_subattachment_count', 'story_pagination_complete',
+            'asset_feed_spec_present', 'asset_feed_carousel_group_count',
+            'asset_feed_carousel_child_count', 'image_hash_count', 'resolved_image_count')
+    prior = obj(value.get('diagnostic'))
+    cards = value.get('cards') or value.get('carousel_cards') or []
+    return {**{k: prior.get(k) for k in keys},
+            'campaign_id': str(campaign_id or value.get('campaign_id') or prior.get('campaign_id') or ''),
+            'ad_id': str(ad_id or value.get('ad_id') or prior.get('ad_id') or ''),
+            'creative_id': str(value.get('creative_id') or ''),
+            'detected_format': value.get('creative_format', 'UNKNOWN'),
+            'format_source': value.get('creative_format_source', ''),
+            'source_card_count': value.get('source_card_count', 0),
+            'normalized_card_count': len(cards),
+            'resolved_card_count': sum(bool(c.get('image_url') or c.get('image_sha256')) and not c.get('image_unavailable', False) for c in cards),
+            'displayed_card_count': prior.get('displayed_card_count', 0) if displayed_count is None else displayed_count,
+            'handoff_card_count': prior.get('handoff_card_count', 0) if handoff_count is None else handoff_count}
+
+
 def log_resolution(value, ad_id='', handoff_count=0):
-    logging.getLogger(__name__).info('meta_creative creative_id=%s ad_id=%s detected_format=%s carousel_structure_source=%s source_card_count=%d normalized_card_count=%d resolved_card_count=%d fallback_card_count=0 handoff_card_count=%d',
-        value.get('creative_id',''),ad_id,value.get('creative_format','UNKNOWN'),value.get('carousel_structure_source',''),value.get('source_card_count',0),
-        len(value.get('cards') or value.get('carousel_cards') or []),sum(bool(c.get('image_url')) and not c.get('image_unavailable',False) for c in value.get('cards') or value.get('carousel_cards') or []),handoff_count)
+    logging.getLogger(__name__).info('meta_creative %s', json.dumps(
+        diagnostic(value, ad_id=ad_id, handoff_count=handoff_count), sort_keys=True))
+
+
+def render_shared_primary_text(st, value):
+    texts = value.get('shared_primary_texts') or ([value['shared_primary_text']] if value.get('shared_primary_text') else [])
+    if texts:
+        with st.expander('Shared Primary Text', expanded=False):
+            for index, text in enumerate(texts, 1):
+                st.caption(f'Primary Text {index}')
+                st.text(text)
 
 
 def label(value):
@@ -239,7 +339,7 @@ def render_cards(st, value, *, archived=False, key_prefix="source"):
         return
     missing=sum(c.get('image_unavailable',False) or not (c.get('image_url') or c.get('image_sha256')) for c in cards)
     if missing: st.warning(f'{missing} of {len(cards)} source cards could not be retrieved.')
-    if value.get('multi_share_optimized'): st.caption('Meta may reorder delivery; source creative order is retained.')
+    if value.get('multi_share_optimized'): st.caption('Meta may optimize carousel delivery order; the authored source order is shown here.')
     identity=key_prefix+'-'+fingerprint([value.get('creative_id'),[(c.get('identity'),c.get('position')) for c in cards]])[:12]
     key='meta-card-index-'+identity
     index=min(max(int(st.session_state.get(key,0)),0),len(cards)-1)
@@ -263,7 +363,7 @@ def render_cards(st, value, *, archived=False, key_prefix="source"):
             from ads_refresh_reference import render_winning_image_copy
             render_winning_image_copy(data,mime)
         elif card.get('image_url'):
-            st.image(card.get('thumbnail_url') or card['image_url'],width=320)
+            st.image(card['image_url'],width=320)
         else: st.caption(f"Card {card['position']} — image unavailable from Meta")
         if card.get('image_url'):
             st.link_button('Open full-resolution image',card.get('high_resolution_image_url') or card['image_url'])
