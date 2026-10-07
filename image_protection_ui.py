@@ -24,6 +24,7 @@ def render(st, user):
         st.caption('Last config update: unavailable')
     with st.form('website-image-protection'):
         result = dict(values)
+        result['showCopyrightMessage'] = False
         result['enabled'] = st.toggle('Enable Storefront Image Protection', value=values['enabled'])
         scope, actions, watermark = st.columns(3)
         with scope:
@@ -33,8 +34,8 @@ def render(st, user):
             result['screenshotDeterrence'] = st.checkbox('Screenshot deterrence',value=values['screenshotDeterrence'],help='Web browsers cannot completely block operating-system screenshots. Only observable browser key defaults can be cancelled silently. This cannot prevent hardware screenshots or operating-system capture; camera and shopping remain uninterrupted.')
         with actions:
             st.markdown('**Artwork controls**')
-            for key,label in [('disableRightClick','Disable image right-click'),('preventImageDragging','Disable image dragging'),('preventSelection','Disable artwork selection'),('aggressiveCopyDeterrence','Disable artwork copying'),('mobileTouchProtection','Block image long-press where practical'),('blockSaveShortcuts','Block common image-save shortcuts'),('protectPrinting','Print protection'),('showCopyrightMessage','Show copyright notice')]:
-                result[key]=st.checkbox(label,value=values[key],help='Legacy preference retained for compatibility. Storefront protection is always silent, even when this is selected.' if key=='showCopyrightMessage' else None)
+            for key,label in [('disableRightClick','Disable storefront right-click'),('preventImageDragging','Disable image dragging'),('preventSelection','Disable artwork selection'),('aggressiveCopyDeterrence','Disable artwork copying'),('mobileTouchProtection','Block image long-press where practical'),('blockSaveShortcuts','Block common image-save shortcuts'),('protectPrinting','Print protection')]:
+                result[key]=st.checkbox(label,value=values[key])
         with watermark:
             st.markdown('**Optional watermark**')
             result['visibleWatermark']=st.checkbox('Watermark storefront artwork',value=values['visibleWatermark'])

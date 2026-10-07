@@ -7,14 +7,14 @@ SETTING_KEY = 'storefront_image_protection'
 DEFAULTS = dict(enabled=True, disableRightClick=True, preventImageDragging=True,
                 preventSelection=True, aggressiveCopyDeterrence=True,
                 mobileTouchProtection=True, protectPrinting=True,
-                blockSaveShortcuts=True, showCopyrightMessage=True,
+                blockSaveShortcuts=True, showCopyrightMessage=False,
                 visibleWatermark=False, protectProductImages=True,
                 protectCollections=True, protectHomepage=True, protectWallPreview=True,
                 screenshotDeterrence=True, wallPreviewWatermark=False,
                 watermarkText='Sports Cave', watermarkOpacity=0.25,
                 watermarkPosition='bottom-right')
 PUBLIC_ORIGIN = 'https://sports-cave-image-factory.onrender.com'
-SCRIPT_VERSION = '2026-10-06.3'
+SCRIPT_VERSION = '2026-10-07.1'
 _cache = None
 _expires = 0.0
 _lock = threading.Lock()

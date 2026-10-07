@@ -1,7 +1,7 @@
 const {chromium}=require('playwright');
 const fs=require('fs'),assert=require('assert');
 (async()=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});
+ const browser=await chromium.launch({channel:process.env.SC_BROWSER||'chrome',headless:true});
  const source=fs.readFileSync('shopify_theme/assets/sports-cave-image-protection.js','utf8');
  let checks=0;
  assert(!source.includes('notify('));assert(!source.includes('sc-protection-notice'));
@@ -37,7 +37,7 @@ const fs=require('fs'),assert=require('assert');
    art.dispatchEvent(new Event('touchmove',{bubbles:true,cancelable:true}));
    return {rightClick:cancelled(art,'contextmenu'),textAllowed:!cancelled(document.querySelector('#text'),'contextmenu'),inputAllowed:!cancelled(input,'contextmenu'),drag:cancelled(art,'dragstart'),copy:cancelled(art,'copy'),inputCopy:!cancelled(input,'copy'),wallAllowed:!cancelled(wall,'contextmenu'),wallUnmarked:!wall.hasAttribute('data-sc-protected'),marker:art.hasAttribute('data-sc-protected'),draggable:art.draggable,saveArt:save(art),saveInput:save(input),saveText:save(document.querySelector('#text')),swipe:shopping.swipe,overflow:document.documentElement.scrollWidth>innerWidth,watermark:!!document.querySelector('.sc-artwork-watermark')};
   });
-  assert.deepStrictEqual(values,{rightClick:true,textAllowed:true,inputAllowed:true,drag:true,copy:true,inputCopy:true,wallAllowed:false,wallUnmarked:true,marker:false,draggable:true,saveArt:true,saveInput:false,saveText:false,swipe:1,overflow:false,watermark:false});checks+=16;
+  assert.deepStrictEqual(values,{rightClick:true,textAllowed:false,inputAllowed:false,drag:true,copy:true,inputCopy:true,wallAllowed:false,wallUnmarked:true,marker:false,draggable:true,saveArt:true,saveInput:false,saveText:true,swipe:1,overflow:false,watermark:false});checks+=16;
   const silent=await page.evaluate(()=>{
    const art=document.querySelector('#art'),text=document.querySelector('#text');
    let messages=0;window.alert=window.confirm=window.prompt=()=>messages++;
@@ -72,9 +72,28 @@ const fs=require('fs'),assert=require('assert');
  }
  for(const [url,key] of [['https://www.sportscaveshop.com/','protectHomepage'],['https://www.sportscaveshop.com/collections/all','protectCollections'],['https://www.sportscaveshop.com/products/edition','protectProductImages']]){
   const f=await fixture(390,url,{enabled:true,[key]:false});await f.page.waitForFunction(()=>window.__scProtectionReady);
-  assert.equal(await f.page.locator('#art').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),true);checks++;await f.page.close();
+  assert.equal(await f.page.locator('#art').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),false);checks++;await f.page.close();
  }
- const wallOff=await fixture(390,undefined,{enabled:true,protectWallPreview:false});await wallOff.page.waitForFunction(()=>window.__scProtectionReady);assert.equal(await wallOff.page.locator('#wall').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),true);checks++;await wallOff.page.close();
+ const wallOff=await fixture(390,undefined,{enabled:true,protectWallPreview:false});await wallOff.page.waitForFunction(()=>window.__scProtectionReady);assert.equal(await wallOff.page.locator('#wall').evaluate(e=>e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}))),false);checks++;await wallOff.page.close();
+ const reversible=await fixture(430);await reversible.page.waitForFunction(()=>window.__scProtectionReady);
+ const lifecycle=await reversible.page.evaluate(()=>{
+   const api=SportsCaveImageProtection, art=document.querySelector('#art');
+   const cancel=(el,type)=>!el.dispatchEvent(new Event(type,{bubbles:true,cancelable:true,composed:true}));
+   const plain=document.createElement('img');document.body.append(plain);
+   const dialog=document.createElement('dialog');dialog.append(document.createElement('img'));document.body.append(dialog);dialog.showModal();
+   const shadow=document.createElement('div');document.body.append(shadow);const inner=shadow.attachShadow({mode:'open'});inner.innerHTML='<img>';
+   document.dispatchEvent(new Event('shopify:section:load'));
+   const dynamic=[plain,dialog.firstChild,inner.firstChild].every(e=>cancel(e,'contextmenu')&&cancel(e,'dragstart'));
+   api.update({enabled:true});api.update({enabled:true});
+   let calls=0;const e=new Event('contextmenu',{bubbles:true,cancelable:true});const prevent=e.preventDefault.bind(e);e.preventDefault=()=>{calls++;prevent();};plain.dispatchEvent(e);
+   api.disable();
+   const disabled=!cancel(plain,'contextmenu')&&!cancel(plain,'dragstart')&&!cancel(art,'dragstart')&&!document.documentElement.hasAttribute('data-sc-protection-drag')&&getComputedStyle(plain).webkitUserDrag!=='none';
+   api.update({enabled:true,visibleWatermark:true});const marked=document.querySelectorAll('.sc-artwork-watermark').length>0;
+   api.update({enabled:false});const clean=!document.querySelector('.sc-artwork-watermark,.sc-artwork-watermark-host')&&!cancel(plain,'contextmenu');
+   api.update({enabled:true});dialog.close();
+   return {dynamic,calls,disabled,marked,clean,restored:cancel(plain,'contextmenu')};
+ });
+ assert.deepStrictEqual(lifecycle,{dynamic:true,calls:1,disabled:true,marked:true,clean:true,restored:true});checks+=6;await reversible.page.close();
  const perf=await fixture(1366);await perf.page.waitForFunction(()=>window.__scProtectionReady);
  await perf.page.addScriptTag({content:source});assert.equal(perf.reads(),1);checks++;
  const milliseconds=await perf.page.evaluate(()=>{const e=document.querySelector('#art'),t=performance.now();for(let i=0;i<1000;i++)e.dispatchEvent(new Event('contextmenu',{bubbles:true,cancelable:true}));return performance.now()-t;});

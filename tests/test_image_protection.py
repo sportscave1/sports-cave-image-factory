@@ -146,7 +146,7 @@ with patch.object(policy,'last_updated',return_value='2026-10-06'),patch.object(
     page=AppTest.from_string(screen).run()
     assert not page.exception
     assert page.title[0].value=='Image Protection'
-    assert len(page.checkbox)==15 and not page.checkbox[-1].value
+    assert len(page.checkbox)==14 and not page.checkbox[-1].value
     save.assert_not_called()
     page.button[0].click().run()
     assert not page.exception
